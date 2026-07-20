@@ -1,24 +1,19 @@
-//
-//  ContentView.swift
-//  PaintSoftware
-//
-//  Created by Julia Park on 2026-07-19.
-//
-
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var canvasManager = CanvasManager()
+    @State private var showingCanvasSizePicker = false
+    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            if canvasManager.canvasSize == nil {
+                CanvasSizePickerView(canvasManager: canvasManager)
+            } else {
+                DrawingView(canvasManager: canvasManager)
+            }
         }
-        .padding()
+        .statusBar(hidden: true)
     }
-}
-
-#Preview {
-    ContentView()
 }

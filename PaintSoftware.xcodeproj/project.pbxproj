@@ -16,6 +16,11 @@
 			path = PaintSoftware;
 			sourceTree = "<group>";
 		};
+		3FC5E395300DC72400401D35 /* PaintApp */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PaintApp;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -32,6 +37,7 @@
 		3FC5E34C300DBDA400401D35 = {
 			isa = PBXGroup;
 			children = (
+				3FC5E395300DC72400401D35 /* PaintApp */,
 				3FC5E357300DBDA400401D35 /* PaintSoftware */,
 				3FC5E356300DBDA400401D35 /* Products */,
 			);
@@ -62,6 +68,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				3FC5E357300DBDA400401D35 /* PaintSoftware */,
+				3FC5E395300DC72400401D35 /* PaintApp */,
 			);
 			name = PaintSoftware;
 			packageProductDependencies = (
