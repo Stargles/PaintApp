@@ -135,6 +135,42 @@ final class PaintSoftwareUITests: XCTestCase {
         return false
     }
 
+    /// The canvas is always rendered as a square (2048x2048 by default) scaled to fit and centered
+    /// within `canvas.host`'s own element frame. On this iPad simulator that frame is *not* square
+    /// (portrait-ish, taller than wide), so the canvas content is vertically letterboxed: there's a
+    /// margin above and below the actual square canvas that belongs to the view's own background,
+    /// not to any layer's content. A normalized probe point like (0.05, 0.05) can land in that
+    /// margin instead of on real canvas content — confirmed empirically (see BUGS.md's fill
+    /// containment / letterbox investigation): on a completely blank, freshly-created canvas with
+    /// nothing drawn or filled, (0.05,0.05) already reads solid black, and the margin only clears
+    /// past roughly dx/dy ~0.19 on this device's frame proportions. Returns the normalized bounding
+    /// box of the actual canvas content within `canvas`'s frame, so tests can build "definitely on
+    /// real content" probe points instead of guessing a magic constant that happens to work for one
+    /// specific frame size.
+    private func visibleCanvasBounds(_ canvas: XCUIElement) -> (minX: Double, maxX: Double, minY: Double, maxY: Double) {
+        let frame = canvas.frame
+        guard frame.width > 0, frame.height > 0 else { return (0, 1, 0, 1) }
+        if frame.width < frame.height {
+            let marginFrac = Double((frame.height - frame.width) / (2 * frame.height))
+            return (0, 1, marginFrac, 1 - marginFrac)
+        } else if frame.height < frame.width {
+            let marginFrac = Double((frame.width - frame.height) / (2 * frame.width))
+            return (marginFrac, 1 - marginFrac, 0, 1)
+        }
+        return (0, 1, 0, 1)
+    }
+
+    /// A point safely inside the visible (non-letterboxed) canvas content, inset a further 10% of
+    /// that visible region from the top-left corner — comfortably away from both the letterbox
+    /// margin and (for this test suite's shapes, all drawn no closer than 30% from any edge) any
+    /// drawn lineart, while still being far from the canvas center.
+    private func safeOutsideCornerPoint(_ canvas: XCUIElement) -> CGVector {
+        let bounds = visibleCanvasBounds(canvas)
+        let dx = bounds.minX + (bounds.maxX - bounds.minX) * 0.1
+        let dy = bounds.minY + (bounds.maxY - bounds.minY) * 0.1
+        return CGVector(dx: dx, dy: dy)
+    }
+
     // MARK: - Tests
 
     func testCreateCanvasReachesEditorWithoutFreezing() throws {
@@ -457,8 +493,6 @@ final class PaintSoftwareUITests: XCTestCase {
     /// layer regardless of which layer is active. Verifies both that the fill lands (proving it used
     /// the lineart layer's boundary, not the blank active layer's) and that it stays contained.
     func testFillToolMasksFromReferenceLayerAcrossLayers() throws {
-        throw XCTSkip("Fill leaks past reference-layer lineart with the new engine's placeholder brush — assigned to the renderer worker. See BUGS.md 'Fill containment regressed under the new stroke engine'.")
-
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
@@ -507,7 +541,13 @@ final class PaintSoftwareUITests: XCTestCase {
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should land on the blank active layer, bounded by the lineart layer set as its reference")
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.05, dy: 0.05)), "If the reference layer were ignored, the blank active layer has no walls and the fill would have flooded the whole canvas instead of stopping at the lineart square")
+
+        // A point clearly outside the square (but still on real canvas content, not the view's own
+        // letterbox margin — see `safeOutsideCornerPoint`'s doc comment) should stay untouched. If
+        // the reference layer were ignored, the blank active layer would have no walls and the fill
+        // would have flooded the whole canvas instead of stopping at the lineart square.
+        let outside = safeOutsideCornerPoint(canvas)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outside.dx, dy: outside.dy)), "If the reference layer were ignored, the blank active layer has no walls and the fill would have flooded the whole canvas instead of stopping at the lineart square")
     }
 
     // MARK: - Select & Move
