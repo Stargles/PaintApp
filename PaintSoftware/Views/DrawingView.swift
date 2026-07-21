@@ -3,79 +3,69 @@ import PencilKit
 
 struct DrawingView: View {
     @ObservedObject var canvasManager: CanvasManager
-    @State private var showingLayers = false
-    @State private var showingBrushSettings = false
-    @State private var showingColorPicker = false
-    
+    var onOpenGallery: () -> Void = {}
+
+    @State private var activePanel: ActivePanel = .none
+    @State private var isTimelineExpanded: Bool = true
+
     var body: some View {
-        GeometryReader { geometry in
+        HStack(spacing: 0) {
+            SideToolbar(canvasManager: canvasManager)
+                .frame(width: 64)
+                .cornerRadius(16)
+                .padding(.vertical, 12)
+                .padding(.leading, 12)
+
             ZStack {
-                // Main canvas area
                 CanvasView(canvasManager: canvasManager)
-                    .gesture(
-                        SimultaneousGesture(
-                            MagnificationGesture()
-                                .onChanged { value in
-                                    canvasManager.zoomScale = value
-                                }
-                                .onEnded { _ in
-                                    // Keep the final zoom scale
-                                },
-                            RotationGesture()
-                                .onChanged { angle in
-                                    canvasManager.rotationAngle = angle
-                                }
-                        )
-                    )
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                canvasManager.offset = value.translation
-                            }
-                    )
-                
-                // Top toolbar
-                VStack {
-                    TopToolbar(canvasManager: canvasManager, 
-                              showingLayers: $showingLayers,
-                              showingBrushSettings: $showingBrushSettings,
-                              showingColorPicker: $showingColorPicker)
-                        .padding()
-                    
+
+                VStack(spacing: 0) {
+                    TopToolbar(canvasManager: canvasManager, activePanel: $activePanel, onOpenGallery: onOpenGallery)
+
                     Spacer()
-                    
-                    // Animation timeline
-                    AnimationTimeline(canvasManager: canvasManager)
-                        .padding()
+
+                    AnimationTimeline(canvasManager: canvasManager, isExpanded: $isTimelineExpanded)
                 }
-                
-                // Side panel for layers (when shown)
-                if showingLayers {
+
+                if activePanel != .none {
                     HStack {
-                        LayerPanel(canvasManager: canvasManager)
-                            .frame(width: 300)
-                            .transition(.move(edge: .leading))
-                        
                         Spacer()
+                        panelView
+                            .frame(width: 300)
+                            .frame(maxHeight: 420)
+                            .background(Color.black.opacity(0.9))
+                            .cornerRadius(12)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
-                }
-                
-                // Brush settings panel (when shown)
-                if showingBrushSettings {
-                    BrushSettingsPanel(canvasManager: canvasManager)
-                        .frame(maxWidth: 300)
-                        .transition(.move(edge: .trailing))
-                        .offset(x: showingLayers ? 300 : 0)
-                }
-                
-                // Color picker (when shown)
-                if showingColorPicker {
-                    ColorPickerPanel(canvasManager: canvasManager)
-                        .frame(maxWidth: 300)
-                        .transition(.move(edge: .trailing))
-                        .offset(x: (showingBrushSettings ? 300 : 0) + (showingLayers ? 300 : 0))
+                    .padding(.top, 64)
+                    .padding(.trailing, 12)
+                    .frame(maxHeight: .infinity, alignment: .top)
                 }
             }
+        }
+        .background(Color.black)
+        .animation(.easeInOut(duration: 0.2), value: activePanel)
+    }
+
+    @ViewBuilder
+    private var panelView: some View {
+        switch activePanel {
+        case .none:
+            EmptyView()
+        case .actions:
+            ActionsMenu(canvasManager: canvasManager)
+        case .adjust:
+            StubToolPanel(title: "Adjust", systemImage: "slider.horizontal.3")
+        case .select:
+            StubToolPanel(title: "Select", systemImage: "lasso")
+        case .move:
+            StubToolPanel(title: "Move", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+        case .layers:
+            LayerPanel(canvasManager: canvasManager)
+        case .brush:
+            BrushSettingsPanel(canvasManager: canvasManager)
+        case .color:
+            ColorPickerPanel(canvasManager: canvasManager)
         }
     }
 }

@@ -2,85 +2,84 @@ import SwiftUI
 
 struct CanvasSizePickerView: View {
     @ObservedObject var canvasManager: CanvasManager
-    @State private var selectedPreset: String = "iPad Pro 12.9"
-    
-    let presets: [String: CGSize] = [
-        "iPad Pro 12.9": CGSize(width: 2732, height: 2048),
-        "iPad Pro 11": CGSize(width: 2388, height: 1668),
-        "iPad Air": CGSize(width: 2360, height: 1640),
-        "iPad Mini": CGSize(width: 2240, height: 1480),
-        "1080p": CGSize(width: 1920, height: 1080),
-        "4K": CGSize(width: 3840, height: 2160),
-        "Custom": CGSize(width: 2048, height: 2048)
-    ]
-    
-    @State private var customWidth: String = "2048"
-    @State private var customHeight: String = "2048"
-    
+    var onCreated: () -> Void
+
+    @State private var widthText: String = "2048"
+    @State private var heightText: String = "2048"
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case width, height
+    }
+
+    private let minDimension = 1
+    private let maxDimension = 8192
+
+    private var width: Int? { Int(widthText) }
+    private var height: Int? { Int(heightText) }
+
+    private var isValid: Bool {
+        guard let width, let height else { return false }
+        return (minDimension...maxDimension).contains(width) && (minDimension...maxDimension).contains(height)
+    }
+
     var body: some View {
         VStack(spacing: 30) {
             Text("Create New Canvas")
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .foregroundColor(.white)
-            
+
             VStack(spacing: 15) {
                 Text("Canvas Size")
                     .font(.headline)
                     .foregroundColor(.gray)
-                
-                Picker("Preset", selection: $selectedPreset) {
-                    ForEach(presets.keys.sorted(), id: \.self) { preset in
-                        Text(preset).tag(preset)
-                    }
-                }
-                .pickerStyle(.wheel)
-                .frame(height: 120)
-                .background(Color.gray.opacity(0.2))
-                .cornerRadius(10)
-                
-                if selectedPreset == "Custom" {
-                    HStack {
-                        TextField("Width", text: $customWidth)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .keyboardType(.numberPad)
-                        
-                        Text("x")
-                            .foregroundColor(.gray)
-                        
-                        TextField("Height", text: $customHeight)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .keyboardType(.numberPad)
-                    }
-                    .padding()
-                }
-                
-                if let size = presets[selectedPreset] {
-                    Text("\(Int(size.width)) x \(Int(size.height))")
-                        .font(.subheadline)
+
+                HStack(spacing: 12) {
+                    dimensionField("Width", text: $widthText, field: .width)
+                    Text("x")
                         .foregroundColor(.gray)
+                    dimensionField("Height", text: $heightText, field: .height)
+                }
+                .padding(.horizontal, 50)
+
+                if !isValid {
+                    Text("Enter values between \(minDimension) and \(maxDimension)")
+                        .font(.caption)
+                        .foregroundColor(.red)
                 }
             }
-            
-            Button(action: {
-                if selectedPreset == "Custom", let width = Int(customWidth), let height = Int(customHeight) {
-                    canvasManager.canvasSize = CGSize(width: width, height: height)
-                } else if let size = presets[selectedPreset] {
-                    canvasManager.canvasSize = size
-                }
-                canvasManager.addLayer()
-                canvasManager.addFrame()
-            }) {
+
+            Button(action: createCanvas) {
                 Text("Create Canvas")
                     .font(.headline)
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.blue)
+                    .background(isValid ? Color.blue : Color.blue.opacity(0.4))
                     .cornerRadius(10)
             }
+            .disabled(!isValid)
+            .accessibilityIdentifier("sizePicker.createButton")
             .padding(.horizontal, 50)
         }
         .padding()
+        .onAppear { focusedField = .width }
+    }
+
+    private func dimensionField(_ title: String, text: Binding<String>, field: Field) -> some View {
+        TextField(title, text: text)
+            .textFieldStyle(RoundedBorderTextFieldStyle())
+            .keyboardType(.numberPad)
+            .multilineTextAlignment(.center)
+            .focused($focusedField, equals: field)
+            .accessibilityIdentifier(field == .width ? "sizePicker.widthField" : "sizePicker.heightField")
+    }
+
+    private func createCanvas() {
+        guard let width, let height, isValid else { return }
+        canvasManager.canvasSize = CGSize(width: width, height: height)
+        canvasManager.addLayer()
+        onCreated()
     }
 }
