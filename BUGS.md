@@ -2,6 +2,97 @@
 
 Format: one section per bug, newest first. See [CLAUDE.md](CLAUDE.md) for the multi-session protocol.
 
+## Zoomed-in blur: fixed for raster content, but PencilKit ink can't be fixed this way — likely needs a custom drawing engine (2026-07-21)
+
+**Status:** Partially fixed and then deliberately stopped short of a much bigger change. Bitmap/
+raster canvas content (bucket fills, baked select/move pixels) now renders crisp/blocky when
+pinch-zoomed in, instead of blurring. Pen/pencil ink strokes — the user's actual primary drawing
+tool — do **not**, and empirically *can't* via this approach. The user's conclusion, combined with
+separate complaints about PencilKit (no pen stabilization, hard to build custom brushes), was that
+this justifies eventually replacing PencilKit with a custom drawing engine. That replacement was
+explicitly **not started** this session — this entry is just carrying the findings/approach forward.
+
+### What's fixed
+
+The whole canvas view stack is zoomed via a single `CGAffineTransform` scale applied to an ancestor
+`UIView` (`container`, see `Coordinator.applyTransform` in `CanvasView.swift`), not by re-rendering
+content at higher resolution. Every raster-backed `CALayer` under that transform was using Core
+Animation's default `magnificationFilter` (`.linear`), so zooming in bilinearly blurred fills,
+baked pixels, and object/photo layers.
+
+**Fix:** set `layer.magnificationFilter = .nearest` on the actual raster-backed views —
+`LayerHostView.imageView` / `.fillImageView` / `.bakedImageView` (`CanvasView.swift`). Verified with
+a real pixel-level test, not just eyeballing: rectangle-selected a region and filled it (a pure
+bitmap raster edge, no ink involved), pinch-zoomed ~15x via XCUITest, and sampled raw pixel values
+across the boundary. Before the fix: a smooth 12-step gradient (0→255 over ~12px — textbook
+bilinear interpolation). After: a hard 1px jump (0 straight to 255), and the upscaled crop showed a
+genuine staircase/blocky edge — confirmed nearest-neighbor is actually taking effect for this
+content, not just assumed from the API.
+
+Two other places got this filter at first and were **reverted** — worth knowing about since they're
+an easy mistake to reintroduce:
+
+- **`onionSkin`** (the translucent previous-frame reference overlay): this is meant to be a soft,
+  blended reference ghost, not pixel-accurate content. Because it's shown independent of the
+  current layer's own opacity (only gated by the Onion Skin toggle — see
+  `CanvasManager.isOnionSkinEnabled`/`onionSkinOpacity` — not by `LayerRow`'s per-layer opacity),
+  making it crisp produced a confusing symptom: the user reported "a transparent layer of
+  rasterization" that persisted even after setting the *current layer's* opacity to 0. Root cause
+  wasn't a new bug — onion skin was never tied to that opacity slider — it just became visually
+  obvious once it started rendering sharp instead of blending in blurry. Left on the default filter.
+- **`container.layer`** itself: inert. `container` is a plain view with `backgroundColor = .clear`
+  and no image content of its own — there's nothing on that specific layer for a magnification
+  filter to act on. (The actual scale transform lives on `container`, but the pixels being
+  magnified belong to its descendant layers, which is why the filter has to go on *them*, not it.)
+  Removed as dead code.
+
+### PencilKit ink can't be made pixel-crisp this way (confirmed, not just suspected)
+
+`PKCanvasView` (`TrackedCanvasView` in `CanvasView.swift`) renders ink strokes as vector paths
+internally, not as a fixed-resolution bitmap texture that Core Animation later magnifies — so
+there's no "magnified texture" for `magnificationFilter` to act on in the first place. Confirmed
+empirically, not assumed: drew a stroke, set `canvasView.layer.magnificationFilter = .nearest`,
+zoomed ~12x, sampled pixels across the stroke edge — still a smooth multi-pixel anti-aliased ramp,
+identical to the unfixed baseline, not blocky steps. PencilKit re-draws the vector path fresh at
+whatever the effective zoom is, which is normally a *feature* (crisp Apple Pencil input at any
+zoom) but means ink will never look like discrete square pixels through a CALayer-level trick.
+
+### Suggested approach for a future custom drawing engine (not vetted — a starting point, not a plan)
+
+If/when this is picked up:
+
+1. **Rendering model**: sample raw `UITouch` input (`.pencil` type, `.force`/`.altitudeAngle`/
+   `.azimuthAngle` for pressure/tilt) and draw directly onto a bitmap backing store
+   (`CGContext` or Metal) at canvas-native resolution, instead of vector paths. A bitmap-backed
+   `UIImageView`/`CALayer` already respects `magnificationFilter`, as proven by the fill/baked-image
+   fix above — pixel-crisp zoom falls out of this for free, and so would true pixel-art snapping if
+   that's ever wanted.
+2. **Pen stabilization**: with raw touch sampling instead of PencilKit's built-in prediction, this
+   becomes the app's own code to write (e.g. a moving-average or spring-follow lag between the raw
+   touch point and the rendered brush position — the standard Procreate/Photoshop-style technique)
+   rather than something to fight PencilKit for.
+3. **Custom brushes**: raw touch samples plus pressure/tilt/azimuth make stamp-based or
+   shader-based brush rendering straightforward, rather than being boxed into `PKInkingTool`'s fixed
+   pen/pencil/marker set.
+4. **Undo/redo**: `TrackedCanvasView.localUndoManager` currently piggybacks on PencilKit's own
+   `UndoManager` integration for free. A custom engine needs its own undo stack (e.g. an array of
+   stroke commands, or periodic raster snapshots) — probably the single biggest piece of "invisible"
+   work PencilKit is currently doing, and worth designing deliberately rather than as an afterthought.
+5. **Migration surface**: `Cel.drawing: PKDrawing` is the current stroke format used throughout
+   `CanvasManager`, persistence (`ProjectManifest`), thumbnails, and onion skin — swapping the
+   underlying stroke representation touches all of those, not just `CanvasView.swift`. Lower-risk
+   path is probably: design the new stroke/raster model to apply going forward, without also trying
+   to migrate existing saved `.paintproj` files' `PKDrawing` data in the same pass.
+
+This is a genuine rewrite (rendering, input handling, undo, and persistence all touch it) — worth
+scoping as its own planned piece of work, not a quick follow-up patch.
+
+### Files touched this session
+
+- `PaintSoftware/Views/CanvasView.swift` — added `magnificationFilter = .nearest` to
+  `imageView`/`fillImageView`/`bakedImageView` only; deliberately not on `onionSkin` or `canvasView`
+  (see above for why).
+
 ## Fill tool: gap-closing UI test disabled, root cause not fully closed out (2026-07-21)
 
 **Status:** `testFillToolBridgesOpenContourGapWhenGapClosingEnabled` in `PaintSoftwareUITests.swift`

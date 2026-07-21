@@ -43,6 +43,17 @@ final class LayerHostView: UIView {
         canvasView.isOpaque = false
         canvasView.translatesAutoresizingMaskIntoConstraints = false
 
+        // The whole layer stack is magnified via a CGAffineTransform scale on the container (see
+        // Coordinator.applyTransform), not by re-rasterizing at a higher resolution — Core Animation's
+        // default magnificationFilter (.linear) would bilinearly blur these raster layers' textures as
+        // the user zooms in. Nearest-neighbor keeps pixels crisp/blocky at high zoom instead. (Not set
+        // on canvasView: PencilKit manages its own ink rendering internally and doesn't appear to
+        // respect this property — its strokes stay vector-smooth regardless, which is fine since they
+        // aren't the raster-blur this is fixing.)
+        imageView.layer.magnificationFilter = .nearest
+        fillImageView.layer.magnificationFilter = .nearest
+        bakedImageView.layer.magnificationFilter = .nearest
+
         addSubview(imageView)
         addSubview(fillImageView)
         addSubview(bakedImageView)
@@ -104,6 +115,10 @@ struct CanvasView: UIViewRepresentable {
         onionSkin.contentMode = .scaleAspectFit
         onionSkin.isUserInteractionEnabled = false
         onionSkin.translatesAutoresizingMaskIntoConstraints = false
+        // Deliberately left on the default (bilinear) filter: onion skin is a translucent reference
+        // ghost of the previous frame, shown independent of the current layer's own opacity — nearest-
+        // neighbor made that ghost render as a sharp, distractingly pixelated overlay instead of the
+        // soft blended reference it's meant to be.
         container.addSubview(onionSkin)
 
         let transformOverlay = ObjectTransformOverlayView()
