@@ -1,5 +1,4 @@
 import SwiftUI
-import PencilKit
 import UIKit
 
 // MARK: - Selection
@@ -220,7 +219,7 @@ extension CanvasManager {
         let (rawPiece, _) = PixelOps.maskedPiece(image: fullImage, path: selection.path)
         guard let croppedPiece = PixelOps.crop(rawPiece, to: bounds) else { return }
 
-        let newCel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), drawing: PKDrawing())
+        let newCel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize))
         let newLayer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0, isVisible: true, cels: [newCel])
         let insertIndex = sourceLayerIndex + 1
         layers.insert(newLayer, at: insertIndex)
@@ -281,8 +280,8 @@ extension CanvasManager {
             let baseForComposite = piece.remainderPreview ?? targetCel.bakedImage
             let newBaked = PixelOps.compositeOver(base: baseForComposite, overlay: rendered)
             registerUndoableCelChange(layerIndex: piece.targetLayerIndex, celIndex: piece.targetCelIndex,
-                                       oldDrawing: targetCel.drawing, oldBaked: targetCel.bakedImage, oldFill: targetCel.fillImage,
-                                       newDrawing: PKDrawing(), newBaked: newBaked, newFill: nil,
+                                       oldRaster: targetCel.raster, oldBaked: targetCel.bakedImage, oldFill: targetCel.fillImage,
+                                       newRaster: .empty(size: canvasSize), newBaked: newBaked, newFill: nil,
                                        actionName: "Move")
         case .duplicate:
             let newBaked = PixelOps.compositeOver(base: targetCel.bakedImage, overlay: rendered)
@@ -304,8 +303,8 @@ extension CanvasManager {
         let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
         let newImage = PixelOps.fill(base: base, path: selection.path, color: PixelOps.uiColor(from: brushColor))
         registerUndoableCelChange(layerIndex: currentLayerIndex, celIndex: celIndex,
-                                   oldDrawing: cel.drawing, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
-                                   newDrawing: PKDrawing(), newBaked: newImage, newFill: nil, actionName: "Fill")
+                                   oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
+                                   newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Fill")
     }
 
     func clearSelectionPixels() {
@@ -319,37 +318,41 @@ extension CanvasManager {
         let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
         let newImage = PixelOps.clear(base: base, path: selection.path)
         registerUndoableCelChange(layerIndex: currentLayerIndex, celIndex: celIndex,
-                                   oldDrawing: cel.drawing, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
-                                   newDrawing: PKDrawing(), newBaked: newImage, newFill: nil, actionName: "Clear")
+                                   oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
+                                   newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Clear")
     }
 
     // MARK: Undo-integrated mutation helpers
 
-    /// Applies a cel's drawing/bakedImage/fillImage change and registers it as one undo step against
-    /// the same `UndoManager` PencilKit strokes already use, so the existing Undo/Redo buttons cover
-    /// it too. Every call site must state `oldFill`/`newFill` explicitly (rather than defaulting to
+    /// Applies a cel's raster/bakedImage/fillImage change and registers it as one undo step against
+    /// the same `UndoManager` live strokes already use, so the existing Undo/Redo buttons cover it
+    /// too. Every call site must state `oldFill`/`newFill` explicitly (rather than defaulting to
     /// "leave untouched") since silently leaving a stale fillImage in place is exactly the double-
     /// composite bug this parameter exists to prevent — see the callers' comments.
+    ///
+    /// `oldRaster`/`newRaster` are `RasterLayerTexture` instances captured by reference, not copied:
+    /// once a cel's `raster` field is reassigned away from `oldRaster` here, nothing keeps drawing
+    /// into that instance, so it's safe for undo/redo to swap it back in later without a snapshot.
     func registerUndoableCelChange(layerIndex: Int, celIndex: Int,
-                                    oldDrawing: PKDrawing, oldBaked: UIImage?, oldFill: UIImage?,
-                                    newDrawing: PKDrawing, newBaked: UIImage?, newFill: UIImage?,
+                                    oldRaster: RasterLayerTexture, oldBaked: UIImage?, oldFill: UIImage?,
+                                    newRaster: RasterLayerTexture, newBaked: UIImage?, newFill: UIImage?,
                                     actionName: String) {
-        applyCelChange(layerIndex: layerIndex, celIndex: celIndex, drawing: newDrawing, baked: newBaked, fill: newFill)
+        applyCelChange(layerIndex: layerIndex, celIndex: celIndex, raster: newRaster, baked: newBaked, fill: newFill)
         activeUndoManager?.setActionName(actionName)
         activeUndoManager?.registerUndo(withTarget: self) { target in
-            target.applyCelChange(layerIndex: layerIndex, celIndex: celIndex, drawing: oldDrawing, baked: oldBaked, fill: oldFill)
+            target.applyCelChange(layerIndex: layerIndex, celIndex: celIndex, raster: oldRaster, baked: oldBaked, fill: oldFill)
             target.activeUndoManager?.setActionName(actionName)
             target.activeUndoManager?.registerUndo(withTarget: target) { redoTarget in
-                redoTarget.applyCelChange(layerIndex: layerIndex, celIndex: celIndex, drawing: newDrawing, baked: newBaked, fill: newFill)
+                redoTarget.applyCelChange(layerIndex: layerIndex, celIndex: celIndex, raster: newRaster, baked: newBaked, fill: newFill)
             }
         }
         refreshUndoRedoState()
     }
 
-    private func applyCelChange(layerIndex: Int, celIndex: Int, drawing: PKDrawing, baked: UIImage?, fill: UIImage?) {
+    private func applyCelChange(layerIndex: Int, celIndex: Int, raster: RasterLayerTexture, baked: UIImage?, fill: UIImage?) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].fillImage = fill
-        layers[layerIndex].cels[celIndex].drawing = drawing
+        layers[layerIndex].cels[celIndex].raster = raster
         layers[layerIndex].cels[celIndex].bakedImage = baked
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
     }

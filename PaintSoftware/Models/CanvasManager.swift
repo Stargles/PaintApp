@@ -1,5 +1,4 @@
 import SwiftUI
-import PencilKit
 import Combine
 import UIKit
 
@@ -63,7 +62,7 @@ final class CanvasManager: ObservableObject {
     // MARK: - Layers
 
     func addLayer(name: String? = nil) {
-        let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), drawing: PKDrawing())
+        let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
         let layer = Layer(id: UUID(), name: name ?? "Layer \(layers.count + 1)", opacity: 1.0, isVisible: true, cels: [cel])
         layers.append(layer)
         currentLayerIndex = layers.count - 1
@@ -73,7 +72,7 @@ final class CanvasManager: ObservableObject {
     /// as a standalone object with its own position/scale/rotation that can be adjusted at any time
     /// via the on-canvas transform handles (see ObjectTransformOverlayView).
     func addObjectLayer(image: UIImage, name: String? = nil) {
-        let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), drawing: PKDrawing())
+        let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
         var layer = Layer(id: UUID(), name: name ?? "Image \(layers.count + 1)", opacity: 1.0, isVisible: true, isObjectLayer: true, objectImage: image, cels: [cel])
         layer.thumbnail = image
         layer.objectTransform = initialObjectTransform(for: image)
@@ -124,12 +123,9 @@ final class CanvasManager: ObservableObject {
 
     func flipCanvas(horizontal: Bool) {
         guard let canvasSize else { return }
-        let transform: CGAffineTransform = horizontal
-            ? CGAffineTransform(scaleX: -1, y: 1).concatenating(CGAffineTransform(translationX: canvasSize.width, y: 0))
-            : CGAffineTransform(scaleX: 1, y: -1).concatenating(CGAffineTransform(translationX: 0, y: canvasSize.height))
         for layerIndex in layers.indices {
             for celIndex in layers[layerIndex].cels.indices {
-                layers[layerIndex].cels[celIndex].drawing = layers[layerIndex].cels[celIndex].drawing.transformed(using: transform)
+                layers[layerIndex].cels[celIndex].raster = layers[layerIndex].cels[celIndex].raster.flipped(horizontal: horizontal)
                 if let fillImage = layers[layerIndex].cels[celIndex].fillImage {
                     layers[layerIndex].cels[celIndex].fillImage = Self.flippedImage(fillImage, canvasSize: canvasSize, horizontal: horizontal)
                 }
@@ -141,9 +137,9 @@ final class CanvasManager: ObservableObject {
         regenerateAllThumbnails()
     }
 
-    /// Mirrors a cel's raster content (fillImage or bakedImage) about the canvas center to match the
-    /// same-direction PKDrawing transform above, so a flipped canvas doesn't leave raster content
-    /// behind on the wrong side.
+    /// Mirrors a cel's raster content (fillImage or bakedImage) about the canvas center to match
+    /// `RasterLayerTexture.flipped(horizontal:)` above, so a flipped canvas doesn't leave raster
+    /// content behind on the wrong side.
     private static func flippedImage(_ image: UIImage, canvasSize: CGSize, horizontal: Bool) -> UIImage? {
         guard image.cgImage != nil else { return nil }
         let format = UIGraphicsImageRendererFormat()
@@ -179,7 +175,7 @@ final class CanvasManager: ObservableObject {
             length = min(length, nextStart - startFrame)
         }
         guard length > 0 else { return false }
-        let cel = Cel(id: UUID(), startFrame: startFrame, frameCount: length, drawing: PKDrawing())
+        let cel = Cel(id: UUID(), startFrame: startFrame, frameCount: length, raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
         layers[layerIndex].cels.append(cel)
         layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         sceneFrameCount = max(sceneFrameCount, startFrame + length)
@@ -199,7 +195,7 @@ final class CanvasManager: ObservableObject {
             length = min(length, nextStart - newStart)
         }
         guard length > 0 else { return }
-        let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, drawing: source.drawing, fillImage: source.fillImage, bakedImage: source.bakedImage)
+        let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: source.raster.makeCopy(), fillImage: source.fillImage, bakedImage: source.bakedImage)
         layers[layerIndex].cels.append(newCel)
         layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         sceneFrameCount = max(sceneFrameCount, newStart + length)
@@ -221,7 +217,7 @@ final class CanvasManager: ObservableObject {
 
     func clearCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        layers[layerIndex].cels[celIndex].drawing = PKDrawing()
+        layers[layerIndex].cels[celIndex].raster = .empty(size: canvasSize ?? CGSize(width: 1, height: 1))
         layers[layerIndex].cels[celIndex].fillImage = nil
         layers[layerIndex].cels[celIndex].bakedImage = nil
         regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
@@ -273,7 +269,7 @@ final class CanvasManager: ObservableObject {
         let cel = layers[layerIndex].cels[celIndex]
         guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return }
         layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
-        let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, drawing: cel.drawing, fillImage: cel.fillImage, bakedImage: cel.bakedImage)
+        let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage)
         layers[layerIndex].cels.append(secondHalf)
         layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
@@ -308,10 +304,13 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Drawing updates
 
-    func updateCelDrawing(layerIndex: Int, celIndex: Int, drawing: PKDrawing) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        layers[layerIndex].cels[celIndex].drawing = drawing
-    }
+    // Unlike PKCanvasView, the new engine's live strokes are stamped directly into the
+    // `RasterLayerTexture` instance already referenced by `Cel.raster` (a shared class, not a
+    // value type), so there's no separate "push the finished drawing back into the model" step
+    // needed mid-stroke the way `updateCelDrawing`/`canvasViewDrawingDidChange` used to do —
+    // `strokeEnded` below (called once per completed stroke) is the only hook the drawing surface
+    // needs, to trigger a thumbnail regen and force the `@Published layers` diff that in-place
+    // texture mutation alone wouldn't otherwise produce.
 
     func strokeEnded(layerIndex: Int, celIndex: Int) {
         regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
@@ -342,10 +341,10 @@ final class CanvasManager: ObservableObject {
         let cel = layers[layerIndex].cels[celIndex]
         let image: UIImage
         if cel.bakedImage != nil {
-            // PixelOps.rasterize folds fillImage/bakedImage/drawing into one image already.
+            // PixelOps.rasterize folds fillImage/bakedImage/raster into one image already.
             image = ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize), canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
         } else {
-            image = ThumbnailRenderer.render(cel.drawing, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
+            image = ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
         }
         layers[layerIndex].cels[celIndex].thumbnail = image
         if activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
@@ -472,18 +471,34 @@ struct Cel: Identifiable {
     let id: UUID
     var startFrame: Int
     var frameCount: Int
-    var drawing: PKDrawing
+    /// Live brush strokes, rasterized directly at canvas-native resolution (see
+    /// `RasterLayerTexture`'s doc comment for why this replaced `PKDrawing`). A class, not a value
+    /// type — call sites that need an independent copy (duplicating/splitting a cel) must call
+    /// `.makeCopy()` explicitly rather than relying on implicit value semantics.
+    var raster: RasterLayerTexture
     /// Rasterized bucket-fill output for this frame, composited underneath both `bakedImage` and
-    /// `drawing`'s strokes within the same layer. Nil until the fill tool is used on this cel.
+    /// `raster`'s strokes within the same layer. Nil until the fill tool is used on this cel.
     var fillImage: UIImage? = nil
     /// Flattened raster content "baked" into this cel by a pixel-level operation (select+move,
     /// duplicate, color fill, clear selection) — see SelectionModels.swift. Sits above `fillImage`
-    /// and underneath `drawing`'s live PencilKit strokes when rendered. Nil means the cel has never
-    /// had a raster operation applied and is pure vector strokes, same as before this feature existed.
+    /// and underneath `raster`'s live strokes when rendered. Nil means the cel has never had a
+    /// raster operation applied beyond its own strokes.
     var bakedImage: UIImage? = nil
     var thumbnail: UIImage? = nil
 
     var endFrame: Int { startFrame + frameCount }
+}
+
+/// The three layer kinds in the app's roadmap (see BUGS.md/README future-enhancements notes).
+/// Only `.raster` (ordinary brush-stroke drawing, what every layer is today) is implemented.
+/// `.vector` (vector brush strokes — liquify/move without resolution loss) and `.compositing`
+/// (a modifier layer applying color grading/transforms to the layer below) are future work; this
+/// case exists now, and `Layer.kind` defaults to `.raster` everywhere, purely so adding them later
+/// doesn't require another `Layer`/`Cel` data-model migration on top of this one.
+enum LayerKind: String, Codable, Equatable {
+    case raster
+    case vector
+    case compositing
 }
 
 struct Layer: Identifiable {
@@ -491,6 +506,7 @@ struct Layer: Identifiable {
     var name: String
     var opacity: Double
     var isVisible: Bool
+    var kind: LayerKind = .raster
     var isObjectLayer: Bool = false
     var objectImage: UIImage? = nil
     var objectTransform: LayerTransform = .identity
@@ -499,7 +515,7 @@ struct Layer: Identifiable {
 }
 
 /// Position/scale/rotation of an object layer's photo, in canvas point space (same coordinate
-/// system as everything drawn into a Cel's PKDrawing). One transform per layer for now; if/when
+/// system as everything drawn into a Cel's raster). One transform per layer for now; if/when
 /// these become animatable, this is what would move onto (or get keyframed alongside) each Cel.
 struct LayerTransform: Equatable {
     var position: CGPoint

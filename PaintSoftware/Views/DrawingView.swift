@@ -1,5 +1,4 @@
 import SwiftUI
-import PencilKit
 
 struct DrawingView: View {
     @ObservedObject var canvasManager: CanvasManager

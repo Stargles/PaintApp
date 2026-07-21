@@ -128,7 +128,11 @@ struct CelManifest: Codable {
     var id: UUID
     var startFrame: Int
     var frameCount: Int
-    var drawingFileName: String
+    /// PNG file holding this cel's live-stroke raster (`Cel.raster`, native canvas resolution) —
+    /// replaces the old PKDrawing-based `.drawing` file format. Not migrated: a project saved by
+    /// the previous PencilKit engine has no `rasterFileName` key and fails to decode gracefully
+    /// (skipped in the gallery list) rather than crash — see BUGS.md's engine-rewrite notes.
+    var rasterFileName: String
     var fillImageFileName: String?
     /// Raster content baked into this cel by a select/move/fill/clear operation (see
     /// `Cel.bakedImage`). A plain optional: Swift's synthesized `Codable` already decodes a missing

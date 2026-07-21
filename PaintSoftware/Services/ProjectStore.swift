@@ -1,5 +1,4 @@
 import Foundation
-import PencilKit
 import UIKit
 import SwiftUI
 
@@ -74,9 +73,7 @@ enum ProjectStore {
     static func save(_ canvasManager: CanvasManager, to url: URL) {
         let fm = FileManager.default
         try? fm.createDirectory(at: url, withIntermediateDirectories: true)
-        let celsDir = url.appendingPathComponent("cels", isDirectory: true)
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)
-        try? fm.createDirectory(at: celsDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
 
         var layerManifests: [LayerManifest] = []
@@ -92,9 +89,10 @@ enum ProjectStore {
 
             var celManifests: [CelManifest] = []
             for cel in layer.cels {
-                let fileName = "\(cel.id.uuidString).drawing"
-                let data = cel.drawing.dataRepresentation()
-                try? data.write(to: celsDir.appendingPathComponent(fileName))
+                let fileName = "\(cel.id.uuidString)_raster.png"
+                if let data = cel.raster.renderToUIImage().pngData() {
+                    try? data.write(to: imagesDir.appendingPathComponent(fileName))
+                }
 
                 var fillFileName: String?
                 if let fillImage = cel.fillImage, let fillData = fillImage.pngData() {
@@ -109,7 +107,7 @@ enum ProjectStore {
                 }
 
                 celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
-                                                 drawingFileName: fileName, fillImageFileName: fillFileName, bakedImageFileName: bakedFileName))
+                                                 rasterFileName: fileName, fillImageFileName: fillFileName, bakedImageFileName: bakedFileName))
             }
 
             let transformManifest = layer.isObjectLayer
@@ -136,7 +134,7 @@ enum ProjectStore {
                 } else if cel.bakedImage != nil {
                     thumbnailImage = ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize), canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
                 } else {
-                    thumbnailImage = ThumbnailRenderer.render(cel.drawing, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
+                    thumbnailImage = ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
                 }
             }
         }
@@ -176,8 +174,8 @@ enum ProjectStore {
         manager.canvasBackgroundColor = manifest.backgroundColor.color
         manager.isCanvasBackgroundVisible = manifest.isBackgroundVisible
 
-        let celsDir = url.appendingPathComponent("cels", isDirectory: true)
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)
+        let canvasSize = manager.canvasSize ?? CGSize(width: 1, height: 1)
 
         var layers: [Layer] = []
         for layerManifest in manifest.layers {
@@ -188,8 +186,9 @@ enum ProjectStore {
 
             var cels: [Cel] = []
             for celManifest in layerManifest.cels {
-                let drawingURL = celsDir.appendingPathComponent(celManifest.drawingFileName)
-                let drawing = (try? Data(contentsOf: drawingURL)).flatMap { try? PKDrawing(data: $0) } ?? PKDrawing()
+                let rasterURL = imagesDir.appendingPathComponent(celManifest.rasterFileName)
+                let raster = UIImage(contentsOfFile: rasterURL.path).map { RasterLayerTexture.load(from: $0, size: canvasSize) }
+                    ?? .empty(size: canvasSize)
                 var fillImage: UIImage?
                 if let fillFileName = celManifest.fillImageFileName {
                     fillImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fillFileName).path)
@@ -199,7 +198,7 @@ enum ProjectStore {
                     bakedImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(bakedFileName).path)
                 }
                 cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
-                                 drawing: drawing, fillImage: fillImage, bakedImage: bakedImage))
+                                 raster: raster, fillImage: fillImage, bakedImage: bakedImage))
             }
 
             let transform: LayerTransform

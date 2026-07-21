@@ -1,12 +1,11 @@
-import PencilKit
 import UIKit
 import SwiftUI
 
-/// Pixel-level image processing that backs the Select & Move tool. PencilKit's `PKDrawing` is
-/// vector strokes, but "select a region and move/resize/rotate/fill/clear it" is inherently a
-/// raster operation (this is how Procreate works — it's fully raster under the hood). These
-/// helpers are the bridge: whenever a selection-based edit touches a cel, its current content
-/// (baked image + live strokes) gets flattened into a plain `UIImage` — see `Cel.bakedImage`.
+/// Pixel-level image processing that backs the Select & Move tool. "Select a region and
+/// move/resize/rotate/fill/clear it" is inherently a raster operation (this is how Procreate works
+/// — it's fully raster under the hood), which the whole engine now is end to end. These helpers
+/// are the bridge: whenever a selection-based edit touches a cel, its current content (baked image
+/// + live strokes) gets flattened into a plain `UIImage` — see `Cel.bakedImage`.
 enum PixelOps {
     private static func transparentFormat(scale: CGFloat = 1) -> UIGraphicsImageRendererFormat {
         let format = UIGraphicsImageRendererFormat()
@@ -21,17 +20,12 @@ enum PixelOps {
         return UIColor(red: r, green: g, blue: b, alpha: a * CGFloat(opacity))
     }
 
-    /// Flattens a cel's fill-tool wash, baked raster content, and live PencilKit strokes into one
+    /// Flattens a cel's fill-tool wash, baked raster content, and live strokes into one
     /// canvas-sized image — the full stack a select/move/fill-selection/clear op should treat as
-    /// "the cel's pixels", not just the vector strokes.
+    /// "the cel's pixels".
     static func rasterize(cel: Cel, canvasSize: CGSize) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
-        // Rendered *before* opening our own UIGraphicsImageRenderer context below, not inside its
-        // closure: PKDrawing.image(from:scale:) does its own internal rendering, and nesting that
-        // inside another active bitmap context is asking for trouble (contexts stepping on each
-        // other) even though it isn't what caused the specific hang found during development —
-        // see CanvasView.Coordinator.reconcileLayers for that one.
-        let strokesImage = cel.drawing.image(from: bounds, scale: 1.0)
+        let strokesImage = cel.raster.renderToUIImage()
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { _ in
             cel.fillImage?.draw(in: bounds)

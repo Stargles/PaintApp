@@ -1,29 +1,243 @@
 import SwiftUI
-import PencilKit
 import UIKit
 
-/// A PKCanvasView with its own private undo stack, so switching which
-/// layer/frame is active doesn't corrupt PencilKit's undo history.
-final class TrackedCanvasView: PKCanvasView {
-    let localUndoManager = UndoManager()
-    var layerID: UUID?
+/// A single-touch stroke-capture gesture recognizer: claims exactly one touch as the "drawing"
+/// touch (mirroring the role `PKCanvasView.drawingGestureRecognizer` used to play) and fails
+/// immediately if a second touch arrives, so the container's two-finger pan/pinch/rotate
+/// recognizers — which dynamically wait for this recognizer to fail, see `Coordinator.
+/// gestureRecognizer(_:shouldRequireFailureOf:)` — can take over cleanly instead of racing a
+/// stray single-finger dot.
+final class StrokeGestureRecognizer: UIGestureRecognizer {
+    var requiresPencilOnly = true
+    var onBegin: ((UITouch) -> Void)?
+    var onMove: ((UITouch, UIEvent) -> Void)?
+    var onEnd: ((UITouch) -> Void)?
 
+    private var trackedTouch: UITouch?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        guard trackedTouch == nil, touches.count == 1, let touch = touches.first,
+              !requiresPencilOnly || touch.type == .pencil else {
+            state = .failed
+            return
+        }
+        trackedTouch = touch
+        state = .began
+        onBegin?(touch)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        guard let trackedTouch, touches.contains(trackedTouch) else { return }
+        state = .changed
+        onMove?(trackedTouch, event)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        guard let trackedTouch, touches.contains(trackedTouch) else { return }
+        state = .ended
+        onEnd?(trackedTouch)
+        self.trackedTouch = nil
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        guard let trackedTouch, touches.contains(trackedTouch) else { return }
+        state = .cancelled
+        onEnd?(trackedTouch)
+        self.trackedTouch = nil
+    }
+
+    override func reset() {
+        super.reset()
+        trackedTouch = nil
+    }
+}
+
+/// Placeholder drawing surface replacing PencilKit's `PKCanvasView`: captures raw touches via
+/// `StrokeGestureRecognizer` and stamps a plain round brush directly into the active cel's
+/// `RasterLayerTexture` (see that type's doc comment for why — pixel-crisp zoom, custom brush
+/// dynamics, and app-owned stabilization all need native-resolution raster strokes instead of
+/// PencilKit's vector ones). Deliberately minimal: this proves the raster pipeline end to end
+/// (fill/select-move/thumbnails/persistence/undo all keep working against `Cel.raster`) without
+/// yet implementing real brush shapes, pressure dynamics, grain, or stabilization — that's
+/// dedicated follow-up work, not part of this migration.
+///
+/// Known placeholder limitation: stamps composite into the raster individually with `.normal`
+/// blend, so overlapping stamps within one stroke build opacity up (a slow stroke reads darker/
+/// blotchier than a fast one at the same brush opacity). The real renderer (Worker A) fixes this
+/// the Procreate/Photoshop way — accumulate a stroke into its own buffer at full strength, then
+/// composite that buffer once at brush opacity on stroke-end — which is out of scope for the
+/// foundation.
+final class StrokeCanvasView: UIView {
+    let localUndoManager = UndoManager()
     override var undoManager: UndoManager? { localUndoManager }
+
+    var layerID: UUID?
+    var raster: RasterLayerTexture? {
+        didSet { refreshDisplay() }
+    }
+    var brushColor: UIColor = .black
+    var brushSize: CGFloat = 5
+    var brushOpacity: Double = 1
+    var isEraser: Bool = false
+    var pencilOnlyDrawing: Bool = true {
+        didSet { strokeRecognizer.requiresPencilOnly = pencilOnlyDrawing }
+    }
+
+    /// Called once per completed stroke (touch up) and once per undo/redo — hooks back into
+    /// `CanvasManager.strokeEnded` for thumbnail regen / undo-button refresh.
+    var onStrokeEnded: (() -> Void)?
+
+    let strokeRecognizer = StrokeGestureRecognizer()
+    private let imageView = UIImageView()
+    private var strokeBeforeSnapshot: (image: UIImage?, count: Int)?
+    /// The last position actually stamped, so `stampPath(to:)` can lay down evenly-spaced stamps
+    /// *between* input samples rather than one dot per sample — otherwise a fast (or sparsely
+    /// sampled) drag draws a dotted, gappy line, which among other things lets the bucket fill leak
+    /// straight through the gaps in a lineart wall.
+    private var lastStampPoint: CGPoint?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        imageView.contentMode = .scaleToFill
+        imageView.isUserInteractionEnabled = false
+        // Same fix already applied to fillImageView/bakedImageView (see LayerHostView): native-
+        // resolution raster content should zoom blocky, not bilinearly blurred.
+        imageView.layer.magnificationFilter = .nearest
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+
+        strokeRecognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
+        strokeRecognizer.onMove = { [weak self] touch, event in self?.handleMove(touch, event) }
+        strokeRecognizer.onEnd = { [weak self] touch in self?.handleEnd(touch) }
+        addGestureRecognizer(strokeRecognizer)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func refreshDisplay() {
+        imageView.image = raster?.renderToUIImage()
+    }
+
+    private func handleBegin(_ touch: UITouch) {
+        guard let raster else { return }
+        strokeBeforeSnapshot = (raster.renderToUIImage(), raster.strokeCount)
+        raster.beginStroke()
+        lastStampPoint = nil
+        stampPath(to: touch.location(in: self), pressure: pressure(of: touch))
+        refreshDisplay()
+    }
+
+    private func handleMove(_ touch: UITouch, _ event: UIEvent) {
+        guard raster != nil else { return }
+        // Coalesced touches carry the full-rate sample history since the last redraw, not just
+        // the latest point — matters for fast strokes so segments don't look faceted. Stamps go
+        // into the persistent raster individually, but the (O(canvas)) display refresh happens
+        // once for the whole batch, not per sample.
+        for sample in event.coalescedTouches(for: touch) ?? [touch] {
+            stampPath(to: sample.location(in: self), pressure: pressure(of: sample))
+        }
+        refreshDisplay()
+    }
+
+    private func handleEnd(_ touch: UITouch) {
+        guard let raster, let before = strokeBeforeSnapshot else { return }
+        // Stamp through to the exact lift point so the stroke actually reaches where the touch
+        // ended — without this, the last sub-spacing segment is dropped, which for a shape like a
+        // traced square leaves gaps right at the corners (its edge endpoints), and a bucket fill
+        // leaks straight through them.
+        stampPath(to: touch.location(in: self), pressure: pressure(of: touch))
+        raster.endStroke()
+        lastStampPoint = nil
+        refreshDisplay()
+        let after = (raster.renderToUIImage(), raster.strokeCount)
+        registerRasterUndo(raster: raster, from: before, to: after)
+        strokeBeforeSnapshot = nil
+        onStrokeEnded?()
+    }
+
+    /// Classic reversible-closure undo registration (same pattern as `CanvasManager.
+    /// registerFillUndo`/`SelectionModels.registerUndoableCelChange`): each undo re-registers the
+    /// opposite action, so redo — and further undo/redo cycling — keeps working. A whole-image
+    /// snapshot per stroke, not a dirty-rect crop; fine for a placeholder, but real bounded/cropped
+    /// undo storage (see BUGS.md's engine-rewrite notes) is real follow-up work, not done here.
+    private func registerRasterUndo(raster: RasterLayerTexture, from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
+        localUndoManager.registerUndo(withTarget: self) { target in
+            raster.reset(to: from.image, strokeCount: from.count)
+            target.refreshDisplay()
+            target.onStrokeEnded?()
+            target.registerRasterUndo(raster: raster, from: to, to: from)
+        }
+        localUndoManager.setActionName("Stroke")
+    }
+
+    private func pressure(of touch: UITouch) -> CGFloat {
+        touch.type == .pencil ? min(max(touch.force / max(touch.maximumPossibleForce, 1), 0), 1) : 1
+    }
+
+    /// Lays down stamps from `lastStampPoint` up to `point`, spaced a fraction of the brush diameter
+    /// apart, so consecutive input samples are joined into a continuous line instead of isolated
+    /// dots. Leftover distance shorter than one spacing step is carried forward (via keeping
+    /// `lastStampPoint` where it is) until enough accumulates.
+    private func stampPath(to point: CGPoint, pressure: CGFloat) {
+        guard raster != nil else { return }
+        guard let last = lastStampPoint else {
+            stampOne(at: point, pressure: pressure)
+            lastStampPoint = point
+            return
+        }
+        let dx = point.x - last.x, dy = point.y - last.y
+        let distance = hypot(dx, dy)
+        // 15% of diameter is a typical stamp spacing; the 1pt floor keeps thin brushes continuous.
+        let spacing = max(brushSize * 0.15, 1)
+        guard distance >= spacing else { return } // not far enough yet — accumulate on the next sample
+        let steps = Int(distance / spacing)
+        for i in 1...steps {
+            let t = (CGFloat(i) * spacing) / distance
+            stampOne(at: CGPoint(x: last.x + dx * t, y: last.y + dy * t), pressure: pressure)
+        }
+        let coveredT = (CGFloat(steps) * spacing) / distance
+        lastStampPoint = CGPoint(x: last.x + dx * coveredT, y: last.y + dy * coveredT)
+    }
+
+    private func stampOne(at point: CGPoint, pressure: CGFloat) {
+        guard let raster else { return }
+        if isEraser {
+            let radius = brushSize / 2
+            // .destinationOut: the stamp's alpha controls how much is removed, so a soft edge erases
+            // softly (a flat .clear would hard-cut the whole disc regardless of falloff).
+            raster.stampCircle(at: point, radius: radius, color: .black, alpha: 1, hardness: 0.6, blendMode: .destinationOut)
+        } else {
+            let sizeMultiplier = 0.3 + 0.7 * pressure
+            let radius = (brushSize * sizeMultiplier) / 2
+            let alpha = brushOpacity * (0.4 + 0.6 * pressure)
+            raster.stampCircle(at: point, radius: radius, color: brushColor, alpha: alpha, hardness: 0.6, blendMode: .normal)
+        }
+    }
 }
 
 /// One slot in the layer stack: an optional static image (for object/photo layers, positioned by its
 /// own position/scale/rotation via `objectTransform` rather than pinned to the host's edges — see
 /// `applyObjectTransform`), a raster fill layer (bucket-fill output for the current cel, pinned
-/// edge-to-edge), and a drawable PencilKit canvas on top — so fill color always sits visually behind
+/// edge-to-edge), and a drawable stroke canvas on top — so fill color always sits visually behind
 /// that layer's own ink strokes.
 final class LayerHostView: UIView {
     let imageView = UIImageView()
     let fillImageView = UIImageView()
     /// Raster content "baked" into this layer's active cel by a select/move/fill/clear operation
     /// (see `Cel.bakedImage`), or the transient "hole" preview while that cel's content is lifted
-    /// into a floating piece. Sits above `fillImageView`, below `canvasView`'s live strokes.
+    /// into a floating piece. Sits above `fillImageView`, below `strokeView`'s live strokes.
     let bakedImageView = UIImageView()
-    let canvasView = TrackedCanvasView()
+    let strokeView = StrokeCanvasView()
 
     init() {
         super.init(frame: .zero)
@@ -39,17 +253,15 @@ final class LayerHostView: UIView {
         bakedImageView.isHidden = true
         bakedImageView.translatesAutoresizingMaskIntoConstraints = false
 
-        canvasView.backgroundColor = .clear
-        canvasView.isOpaque = false
-        canvasView.translatesAutoresizingMaskIntoConstraints = false
+        strokeView.backgroundColor = .clear
+        strokeView.isOpaque = false
+        strokeView.translatesAutoresizingMaskIntoConstraints = false
 
         // The whole layer stack is magnified via a CGAffineTransform scale on the container (see
         // Coordinator.applyTransform), not by re-rasterizing at a higher resolution — Core Animation's
         // default magnificationFilter (.linear) would bilinearly blur these raster layers' textures as
-        // the user zooms in. Nearest-neighbor keeps pixels crisp/blocky at high zoom instead. (Not set
-        // on canvasView: PencilKit manages its own ink rendering internally and doesn't appear to
-        // respect this property — its strokes stay vector-smooth regardless, which is fine since they
-        // aren't the raster-blur this is fixing.)
+        // the user zooms in. Nearest-neighbor keeps pixels crisp/blocky at high zoom instead. strokeView
+        // sets this on its own internal image view (see StrokeCanvasView.init).
         imageView.layer.magnificationFilter = .nearest
         fillImageView.layer.magnificationFilter = .nearest
         bakedImageView.layer.magnificationFilter = .nearest
@@ -57,7 +269,7 @@ final class LayerHostView: UIView {
         addSubview(imageView)
         addSubview(fillImageView)
         addSubview(bakedImageView)
-        addSubview(canvasView)
+        addSubview(strokeView)
         NSLayoutConstraint.activate([
             // imageView is deliberately NOT pinned here: object layers position it directly via
             // bounds/transform/center in applyObjectTransform, which Auto Layout constraints would fight.
@@ -69,10 +281,10 @@ final class LayerHostView: UIView {
             bakedImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
             bakedImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
             bakedImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            canvasView.topAnchor.constraint(equalTo: topAnchor),
-            canvasView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            canvasView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            canvasView.trailingAnchor.constraint(equalTo: trailingAnchor)
+            strokeView.topAnchor.constraint(equalTo: topAnchor),
+            strokeView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            strokeView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            strokeView.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
     }
 
@@ -213,7 +425,7 @@ struct CanvasView: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, PKCanvasViewDelegate, UIGestureRecognizerDelegate {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var canvasManager: CanvasManager
 
         weak var hostView: CanvasHostView?
@@ -261,9 +473,8 @@ struct CanvasView: UIViewRepresentable {
         }
         private var lastActiveKey: ActiveKey?
 
-        /// Guards against reassigning PKCanvasView.tool on every SwiftUI re-render. Reassigning the
-        /// tool mid-stroke (canvasViewDrawingDidChange fires on every point of an in-progress stroke)
-        /// corrupts PencilKit's in-flight stroke capture, producing dropped/garbled strokes.
+        /// Guards against reassigning the stroke view's tool settings on every SwiftUI re-render
+        /// (this method runs on every re-render, including mid-stroke ones).
         private struct AppliedTool: Equatable {
             let tool: Tool
             let color: Color
@@ -297,11 +508,14 @@ struct CanvasView: UIViewRepresentable {
 
             for layer in canvasManager.layers where layerHosts[layer.id] == nil {
                 let host = LayerHostView()
-                host.canvasView.delegate = self
-                host.canvasView.layerID = layer.id
-                host.canvasView.isScrollEnabled = false
-                host.canvasView.panGestureRecognizer.isEnabled = false
-                host.canvasView.pinchGestureRecognizer?.isEnabled = false
+                host.strokeView.layerID = layer.id
+                host.strokeView.onStrokeEnded = { [weak self, weak host] in
+                    guard let self, let host, let layerID = host.strokeView.layerID,
+                          let layerIndex = self.canvasManager.layers.firstIndex(where: { $0.id == layerID }),
+                          let celIndex = self.canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: self.canvasManager.currentFrame) else { return }
+                    self.canvasManager.strokeEnded(layerIndex: layerIndex, celIndex: celIndex)
+                    self.canvasManager.refreshUndoRedoState()
+                }
 
                 host.translatesAutoresizingMaskIntoConstraints = false
                 container.addSubview(host)
@@ -324,12 +538,10 @@ struct CanvasView: UIViewRepresentable {
                 lastOrderedLayerIDs = orderedIDs
             }
 
-            let policy: PKCanvasViewDrawingPolicy = canvasManager.pencilOnlyDrawing ? .pencilOnly : .anyInput
-
             for (index, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
-                if host.canvasView.drawingPolicy != policy {
-                    host.canvasView.drawingPolicy = policy
+                if host.strokeView.pencilOnlyDrawing != canvasManager.pencilOnlyDrawing {
+                    host.strokeView.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
                 }
                 if host.isHidden != !layer.isVisible { host.isHidden = !layer.isVisible }
                 let targetAlpha = CGFloat(layer.opacity)
@@ -353,34 +565,27 @@ struct CanvasView: UIViewRepresentable {
                 // While this cel's content is floating (lifted into a Move piece), its live strokes
                 // are hidden — the "hole" is shown via bakedImageView's remainder preview instead —
                 // so the lifted content doesn't render twice (once floating, once still in place).
-                // Hiding the view, rather than reassigning canvasView.drawing to an empty PKDrawing,
-                // is deliberate: reassigning .drawing fires canvasViewDrawingDidChange, which writes
-                // the (now-empty) drawing back into the model's @Published `layers` — and because two
-                // separately-constructed empty PKDrawing values don't compare equal, that write never
-                // stabilizes, so every render re-triggers another one. An infinite render loop (SwiftUI
-                // and PencilKit's delegate callback re-triggering each other) was observed from exactly
-                // this pattern. Hiding the subview sidesteps PKDrawing entirely.
                 let isFloatingSource = isFloatingMoveSource(layerIndex: index, celIndex: celIdx)
-                if host.canvasView.isHidden != isFloatingSource {
-                    host.canvasView.isHidden = isFloatingSource
+                if host.strokeView.isHidden != isFloatingSource {
+                    host.strokeView.isHidden = isFloatingSource
                 }
                 if !isFloatingSource {
-                    let targetDrawing = celIdx.map { canvasManager.layers[index].cels[$0].drawing } ?? PKDrawing()
-                    if host.canvasView.drawing != targetDrawing {
-                        host.canvasView.drawing = targetDrawing
+                    let targetRaster = celIdx.map { canvasManager.layers[index].cels[$0].raster }
+                    if host.strokeView.raster !== targetRaster {
+                        host.strokeView.raster = targetRaster
                     }
                 }
                 let targetFillImage = celIdx.flatMap { canvasManager.layers[index].cels[$0].fillImage }
                 if host.fillImageView.image !== targetFillImage {
                     host.fillImageView.image = targetFillImage
                 }
-                // Disabling only canvasView.isUserInteractionEnabled isn't enough: each LayerHostView
+                // Disabling only strokeView.isUserInteractionEnabled isn't enough: each LayerHostView
                 // fully covers the container and stacks as a sibling, so an inactive host still
                 // swallows touches via UIView's default hitTest (which returns the host itself once
                 // its non-interactive subviews all reject the point), preventing the touch from ever
                 // reaching an active layer underneath. Disabling the host itself lets hit-testing
                 // fall through to the next layer down. The fill tool also disables it on the active
-                // layer: it works via a tap gesture on the container, not PencilKit stroke capture.
+                // layer: it works via a tap gesture on the container, not stroke capture.
                 // Object layers are never drawable — they're moved/scaled/rotated via the transform
                 // overlay instead, which lives above the whole layer stack (see updateTransformOverlay).
                 // Select/Move take over touch handling entirely while engaged (via SelectionOverlayView/
@@ -391,8 +596,8 @@ struct CanvasView: UIViewRepresentable {
                 if host.isUserInteractionEnabled != shouldInteract {
                     host.isUserInteractionEnabled = shouldInteract
                 }
-                if host.canvasView.isUserInteractionEnabled != shouldInteract {
-                    host.canvasView.isUserInteractionEnabled = shouldInteract
+                if host.strokeView.isUserInteractionEnabled != shouldInteract {
+                    host.strokeView.isUserInteractionEnabled = shouldInteract
                 }
             }
         }
@@ -471,12 +676,12 @@ struct CanvasView: UIViewRepresentable {
 
             let activeKey = ActiveKey(layerID: layer.id, frame: canvasManager.currentFrame)
             if activeKey != lastActiveKey {
-                host.canvasView.undoManager?.removeAllActions()
+                host.strokeView.undoManager?.removeAllActions()
                 lastActiveKey = activeKey
             }
-            canvasManager.activeUndoManager = host.canvasView.undoManager
-            let newCanUndo = host.canvasView.undoManager?.canUndo ?? false
-            let newCanRedo = host.canvasView.undoManager?.canRedo ?? false
+            canvasManager.activeUndoManager = host.strokeView.undoManager
+            let newCanUndo = host.strokeView.undoManager?.canUndo ?? false
+            let newCanRedo = host.strokeView.undoManager?.canRedo ?? false
             if canvasManager.canUndo != newCanUndo || canvasManager.canRedo != newCanRedo {
                 // Mutating @Published state synchronously here would be "publishing changes from
                 // within view updates" (this method runs inside CanvasView.updateUIView), which
@@ -493,29 +698,22 @@ struct CanvasView: UIViewRepresentable {
             // per-layer caching guard below and is kept in sync on every call.
             fillTapRecognizer?.isEnabled = (canvasManager.selectedTool == .fill)
 
-            // Only construct+assign a new tool when something tool-relevant actually changed.
-            // Reassigning PKCanvasView.tool mid-stroke (this method runs on every SwiftUI re-render,
-            // and a re-render happens on every point of an in-progress stroke) corrupts PencilKit's
-            // in-flight stroke capture, which is what caused strokes to drop or render as garbage.
+            // Only push new tool settings into the view when something tool-relevant actually
+            // changed, same caching reason as before (this method runs on every SwiftUI re-render).
             let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, size: canvasManager.brushSize, opacity: canvasManager.brushOpacity)
             guard lastAppliedTool[layer.id] != desired else { return }
             lastAppliedTool[layer.id] = desired
 
-            let color = canvasManager.brushColor.resolvedUIColor(opacity: canvasManager.brushOpacity)
-            switch canvasManager.selectedTool {
-            case .pen:
-                host.canvasView.tool = PKInkingTool(.pen, color: color, width: canvasManager.brushSize)
-            case .pencil:
-                host.canvasView.tool = PKInkingTool(.pencil, color: color, width: canvasManager.brushSize)
-            case .eraser:
-                host.canvasView.tool = PKEraserTool(.bitmap, width: canvasManager.brushSize)
-            case .fill:
-                break // Handled by fillTapRecognizer, not PencilKit — the canvas is non-interactive here.
-            }
+            host.strokeView.brushColor = canvasManager.brushColor.resolvedUIColor(opacity: 1)
+            host.strokeView.brushSize = canvasManager.brushSize
+            host.strokeView.brushOpacity = canvasManager.brushOpacity
+            host.strokeView.isEraser = (canvasManager.selectedTool == .eraser)
+            // .fill is handled by fillTapRecognizer, not the stroke view — the canvas is
+            // non-interactive there (see reconcileLayers' shouldInteract).
         }
 
         func updateOnionSkin() {
-            guard let onionSkinView, let canvasSize = canvasManager.canvasSize else { return }
+            guard let onionSkinView, canvasManager.canvasSize != nil else { return }
             guard canvasManager.isOnionSkinEnabled,
                   canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
                   let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame - 1) else {
@@ -523,8 +721,7 @@ struct CanvasView: UIViewRepresentable {
                 return
             }
 
-            let drawing = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].drawing
-            onionSkinView.image = drawing.image(from: CGRect(origin: .zero, size: canvasSize), scale: 1.0)
+            onionSkinView.image = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].raster.renderToUIImage()
             onionSkinView.alpha = CGFloat(canvasManager.onionSkinOpacity)
             onionSkinView.isHidden = false
         }
@@ -577,8 +774,8 @@ struct CanvasView: UIViewRepresentable {
 
             // Reassigning .transform/.center to identical values still forces a Core Animation
             // update pass; guard it so it never happens on renders unrelated to the canvas transform
-            // (e.g. every point of an in-progress stroke), which could otherwise perturb PencilKit's
-            // active touch tracking.
+            // (e.g. every point of an in-progress stroke), which could otherwise perturb the active
+            // stroke's touch tracking.
             if let last = lastAppliedTransform, last.scale == scale, last.rotation == rotation, last.offset == offset {
                 return
             }
@@ -625,8 +822,8 @@ struct CanvasView: UIViewRepresentable {
 
             // One-finger tap that drives the fill tool. Kept disabled except while the fill tool is
             // selected (toggled in updateActiveLayerAndTool) rather than gated only inside the handler,
-            // so it never competes for single-finger touches with PencilKit's own stroke capture while
-            // a drawing tool is active.
+            // so it never competes for single-finger touches with the active layer's own stroke
+            // capture while a drawing tool is active.
             let fillTap = UITapGestureRecognizer(target: self, action: #selector(handleFillTap(_:)))
             fillTap.delegate = self
             fillTap.cancelsTouchesInView = false
@@ -652,7 +849,7 @@ struct CanvasView: UIViewRepresentable {
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return false }
             let activeLayer = canvasManager.layers[canvasManager.currentLayerIndex]
             guard let activeHost = layerHosts[activeLayer.id] else { return false }
-            return otherGestureRecognizer === activeHost.canvasView.drawingGestureRecognizer
+            return otherGestureRecognizer === activeHost.strokeView.strokeRecognizer
         }
 
         // MARK: - Shared anchor-preserving pan/zoom/rotate
@@ -779,21 +976,5 @@ struct CanvasView: UIViewRepresentable {
             canvasManager.performFill(at: point)
         }
 
-        // MARK: - PKCanvasViewDelegate
-
-        func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-            guard let tracked = canvasView as? TrackedCanvasView, let layerID = tracked.layerID,
-                  let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == layerID }),
-                  let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: canvasManager.currentFrame) else { return }
-            canvasManager.updateCelDrawing(layerIndex: layerIndex, celIndex: celIndex, drawing: canvasView.drawing)
-        }
-
-        func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
-            guard let tracked = canvasView as? TrackedCanvasView, let layerID = tracked.layerID,
-                  let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == layerID }),
-                  let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: canvasManager.currentFrame) else { return }
-            canvasManager.strokeEnded(layerIndex: layerIndex, celIndex: celIndex)
-            canvasManager.refreshUndoRedoState()
-        }
     }
 }

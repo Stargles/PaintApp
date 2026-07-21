@@ -1,5 +1,4 @@
 import UIKit
-import PencilKit
 
 /// Rasterizes a reference layer's lineart, treats it as a set of "walls," and performs a bucket-style
 /// flood fill that:
@@ -81,7 +80,7 @@ enum FloodFillEngine {
                 objectImage.draw(in: rect)
             }
             cel.bakedImage?.draw(in: rect)
-            cel.drawing.image(from: rect, scale: 1.0).draw(in: rect)
+            cel.raster.renderToUIImage().draw(in: rect)
         }
     }
 

@@ -1,5 +1,4 @@
 import SwiftUI
-import PencilKit
 
 struct LayerPanel: View {
     @ObservedObject var canvasManager: CanvasManager
@@ -156,7 +155,7 @@ struct LayerRow: View {
     /// which layer a drawing gesture actually landed on.
     private var strokeCount: Int {
         guard let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) else { return 0 }
-        return canvasManager.layers[index].cels[celIdx].drawing.strokes.count
+        return canvasManager.layers[index].cels[celIdx].raster.strokeCount
     }
 
     /// Whether this layer's active cel has raster content baked into it by a select/move/fill/clear
