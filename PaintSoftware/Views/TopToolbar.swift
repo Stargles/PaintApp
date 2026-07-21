@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum ActivePanel: Equatable {
-    case none, actions, adjust, select, move, layers, brush, color
+    case none, actions, adjust, select, move, layers, brush, color, fill
 }
 
 struct TopToolbar: View {
@@ -19,12 +19,16 @@ struct TopToolbar: View {
 
             Spacer()
 
-            iconButton(system: "paintbrush.pointed", isActive: activePanel == .brush || canvasManager.selectedTool != .eraser) {
+            iconButton(system: "paintbrush.pointed", isActive: activePanel == .brush || canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil) {
                 selectBrushToolAndTogglePanel()
             }
             iconButton(system: "eraser", isActive: canvasManager.selectedTool == .eraser) {
                 canvasManager.selectedTool = .eraser
             }
+            iconButton(system: "drop.fill", isActive: activePanel == .fill || canvasManager.selectedTool == .fill) {
+                selectFillToolAndTogglePanel()
+            }
+            .accessibilityIdentifier("toolbar.fillButton")
             iconButton(system: "square.stack.3d.up", isActive: activePanel == .layers) { toggle(.layers) }
                 .accessibilityIdentifier("toolbar.layersButton")
 
@@ -66,10 +70,15 @@ struct TopToolbar: View {
     }
 
     private func selectBrushToolAndTogglePanel() {
-        if canvasManager.selectedTool == .eraser {
+        if canvasManager.selectedTool != .pen && canvasManager.selectedTool != .pencil {
             canvasManager.selectedTool = .pen
         }
         toggle(.brush)
+    }
+
+    private func selectFillToolAndTogglePanel() {
+        canvasManager.selectedTool = .fill
+        toggle(.fill)
     }
 
     private func iconButton(system: String, isActive: Bool, action: @escaping () -> Void) -> some View {

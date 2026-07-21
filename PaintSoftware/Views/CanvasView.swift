@@ -2,19 +2,6 @@ import SwiftUI
 import PencilKit
 import UIKit
 
-private extension Color {
-    /// Extracts explicit RGBA components and rebuilds a plain, non-dynamic UIColor, rather than
-    /// handing PKInkingTool a `UIColor(Color)` conversion resolved through whatever trait collection
-    /// happens to be current when this UIKit-side coordinator method runs (outside of a SwiftUI body
-    /// evaluation, so there's no guarantee it resolves against the same appearance the swatch preview
-    /// used) — this guarantees the ink color always matches exactly what was picked.
-    func resolvedUIColor(opacity: Double) -> UIColor {
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-        UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a)
-        return UIColor(red: r, green: g, blue: b, alpha: a * CGFloat(opacity))
-    }
-}
-
 /// A PKCanvasView with its own private undo stack, so switching which
 /// layer/frame is active doesn't corrupt PencilKit's undo history.
 final class TrackedCanvasView: PKCanvasView {
@@ -24,11 +11,14 @@ final class TrackedCanvasView: PKCanvasView {
     override var undoManager: UndoManager? { localUndoManager }
 }
 
-/// One slot in the layer stack: either a drawable PencilKit canvas, or (for an object/photo layer)
-/// an image positioned by its own position/scale/rotation rather than pinned to the host's edges —
-/// `imageView`'s frame is set directly from the layer's `objectTransform`, not via constraints.
+/// One slot in the layer stack: an optional static image (for object/photo layers, positioned by its
+/// own position/scale/rotation via `objectTransform` rather than pinned to the host's edges — see
+/// `applyObjectTransform`), a raster fill layer (bucket-fill output for the current cel, pinned
+/// edge-to-edge), and a drawable PencilKit canvas on top — so fill color always sits visually behind
+/// that layer's own ink strokes.
 final class LayerHostView: UIView {
     let imageView = UIImageView()
+    let fillImageView = UIImageView()
     let canvasView = TrackedCanvasView()
 
     init() {
@@ -36,13 +26,25 @@ final class LayerHostView: UIView {
         imageView.isUserInteractionEnabled = false
         imageView.isHidden = true
 
+        // The fill raster is always rendered at exactly canvasSize (see FloodFillEngine), matching this
+        // view's bounds 1:1, so a plain stretch-to-fill can't introduce any resampling blur at the edges.
+        fillImageView.contentMode = .scaleToFill
+        fillImageView.translatesAutoresizingMaskIntoConstraints = false
+
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         canvasView.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(imageView)
+        addSubview(fillImageView)
         addSubview(canvasView)
         NSLayoutConstraint.activate([
+            // imageView is deliberately NOT pinned here: object layers position it directly via
+            // bounds/transform/center in applyObjectTransform, which Auto Layout constraints would fight.
+            fillImageView.topAnchor.constraint(equalTo: topAnchor),
+            fillImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            fillImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            fillImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
             canvasView.topAnchor.constraint(equalTo: topAnchor),
             canvasView.bottomAnchor.constraint(equalTo: bottomAnchor),
             canvasView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -159,6 +161,7 @@ struct CanvasView: UIViewRepresentable {
         weak var panRecognizer: UIPanGestureRecognizer?
         weak var pinchRecognizer: UIPinchGestureRecognizer?
         weak var rotationRecognizer: UIRotationGestureRecognizer?
+        weak var fillTapRecognizer: UITapGestureRecognizer?
 
         private var fitScale: CGFloat = 1
         private var baseCenter: CGPoint?
@@ -277,15 +280,21 @@ struct CanvasView: UIViewRepresentable {
                 if host.canvasView.drawing != targetDrawing {
                     host.canvasView.drawing = targetDrawing
                 }
+                let targetFillImage = celIdx.flatMap { canvasManager.layers[index].cels[$0].fillImage }
+                if host.fillImageView.image !== targetFillImage {
+                    host.fillImageView.image = targetFillImage
+                }
                 // Disabling only canvasView.isUserInteractionEnabled isn't enough: each LayerHostView
                 // fully covers the container and stacks as a sibling, so an inactive host still
                 // swallows touches via UIView's default hitTest (which returns the host itself once
                 // its non-interactive subviews all reject the point), preventing the touch from ever
                 // reaching an active layer underneath. Disabling the host itself lets hit-testing
-                // fall through to the next layer down.
+                // fall through to the next layer down. The fill tool also disables it on the active
+                // layer: it works via a tap gesture on the container, not PencilKit stroke capture.
                 // Object layers are never drawable — they're moved/scaled/rotated via the transform
                 // overlay instead, which lives above the whole layer stack (see updateTransformOverlay).
-                let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil && !layer.isObjectLayer
+                let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil
+                    && !layer.isObjectLayer && canvasManager.selectedTool != .fill
                 if host.isUserInteractionEnabled != shouldInteract {
                     host.isUserInteractionEnabled = shouldInteract
                 }
@@ -356,6 +365,10 @@ struct CanvasView: UIViewRepresentable {
                 }
             }
 
+            // Not per-layer (there's only one global selected tool), so it lives outside the
+            // per-layer caching guard below and is kept in sync on every call.
+            fillTapRecognizer?.isEnabled = (canvasManager.selectedTool == .fill)
+
             // Only construct+assign a new tool when something tool-relevant actually changed.
             // Reassigning PKCanvasView.tool mid-stroke (this method runs on every SwiftUI re-render,
             // and a re-render happens on every point of an in-progress stroke) corrupts PencilKit's
@@ -372,6 +385,8 @@ struct CanvasView: UIViewRepresentable {
                 host.canvasView.tool = PKInkingTool(.pencil, color: color, width: canvasManager.brushSize)
             case .eraser:
                 host.canvasView.tool = PKEraserTool(.bitmap, width: canvasManager.brushSize)
+            case .fill:
+                break // Handled by fillTapRecognizer, not PencilKit — the canvas is non-interactive here.
             }
         }
 
@@ -483,6 +498,17 @@ struct CanvasView: UIViewRepresentable {
             view.addGestureRecognizer(threeFingerTap)
 
             twoFingerTap.require(toFail: threeFingerTap)
+
+            // One-finger tap that drives the fill tool. Kept disabled except while the fill tool is
+            // selected (toggled in updateActiveLayerAndTool) rather than gated only inside the handler,
+            // so it never competes for single-finger touches with PencilKit's own stroke capture while
+            // a drawing tool is active.
+            let fillTap = UITapGestureRecognizer(target: self, action: #selector(handleFillTap(_:)))
+            fillTap.delegate = self
+            fillTap.cancelsTouchesInView = false
+            fillTap.isEnabled = false
+            view.addGestureRecognizer(fillTap)
+            fillTapRecognizer = fillTap
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -618,6 +644,15 @@ struct CanvasView: UIViewRepresentable {
 
         @objc func handleThreeFingerTap() {
             canvasManager.redo()
+        }
+
+        @objc func handleFillTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended, let container = containerView else { return }
+            // container's bounds are exactly canvasSize (see hostBoundsDidChange), so location(in:)
+            // already yields canvas-pixel coordinates — the same top-left-origin space FloodFillEngine
+            // and the onion-skin/thumbnail renderers use.
+            let point = recognizer.location(in: container)
+            canvasManager.performFill(at: point)
         }
 
         // MARK: - PKCanvasViewDelegate

@@ -67,6 +67,55 @@ final class PaintSoftwareUITests: XCTestCase {
         start.press(forDuration: 0.2, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
+    /// A single straight-line PencilKit stroke between two normalized points on `element`.
+    private func drawLine(on element: XCUIElement, from: CGVector, to: CGVector) {
+        let start = element.coordinate(withNormalizedOffset: from)
+        let end = element.coordinate(withNormalizedOffset: to)
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    /// Rasterizes `element`'s own on-screen content (not the whole app screenshot) into a flat RGBA8
+    /// buffer, top-left origin, so individual pixels can be inspected by fraction-of-element position.
+    /// Goes through an explicit CGContext (rather than trusting the screenshot's native byte order) for
+    /// the same reason FloodFillEngine does: it removes any ambiguity about pixel format.
+    private func rgbaPixel(of element: XCUIElement, dx: Double, dy: Double) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
+        guard let cgImage = element.screenshot().image.cgImage else { return nil }
+        let width = cgImage.width
+        let height = cgImage.height
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var buffer = [UInt8](repeating: 0, count: height * bytesPerRow)
+        guard let context = CGContext(
+            data: &buffer, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: 1, y: -1)
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let x = min(max(Int(dx * Double(width)), 0), width - 1)
+        let y = min(max(Int(dy * Double(height)), 0), height - 1)
+        let offset = y * bytesPerRow + x * bytesPerPixel
+        return (buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3])
+    }
+
+    private func isWhitish(_ pixel: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)?) -> Bool {
+        guard let pixel else { return false }
+        return pixel.r > 240 && pixel.g > 240 && pixel.b > 240
+    }
+
+    /// The fill runs off-main-thread (see CanvasManager.performFill), so polls the given point on
+    /// `element` until it's no longer whitish (i.e. the fill landed) or `timeout` elapses.
+    @discardableResult
+    private func waitUntilFilled(_ element: XCUIElement, dx: Double, dy: Double, timeout: TimeInterval = 15) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !isWhitish(rgbaPixel(of: element, dx: dx, dy: dy)) { return true }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return false
+    }
+
     // MARK: - Tests
 
     func testCreateCanvasReachesEditorWithoutFreezing() throws {
@@ -286,5 +335,130 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["timeline.layerName.0"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["timeline.layerName.1"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["timeline.layerName.2"].exists, "Only 2 layers should remain in the timeline, staying in sync with the panel")
+    }
+
+    /// Draws a fully closed square in lineart, then taps the fill tool inside it and expects the
+    /// interior (previously white paper) to end up colored.
+    func testFillToolFillsClosedLineartRegion() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap() // Synthetic XCUITest touches are finger touches, not Apple Pencil.
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3)) // top
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7)) // right
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7)) // bottom
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3)) // left
+
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "Square's interior should still be blank paper before filling")
+
+        let fillButton = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap() // Selects the fill tool and opens its settings panel...
+        fillButton.tap() // ...then closes the panel again so it can't cover the canvas region we tap.
+
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Tapping inside the closed square with the fill tool should color its interior")
+    }
+
+    /// Leaves a deliberate gap in one edge of the lineart square (an "open contour"), maxes out the
+    /// gap-closing slider, and expects the fill to still stay contained rather than leaking out through
+    /// the gap into the rest of the canvas.
+    func testFillToolBridgesOpenContourGapWhenGapClosingEnabled() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // Same square as above, but the bottom edge is only drawn 60% of the way across, leaving an
+        // open contour in the lineart.
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3)) // top
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7)) // right
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.46, dy: 0.7)) // bottom, short of closing
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3)) // left
+
+        let fillButton = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap() // Opens the fill settings panel.
+
+        let gapSlider = app.sliders.firstMatch
+        XCTAssertTrue(gapSlider.waitForExistence(timeout: 5))
+        gapSlider.adjust(toNormalizedSliderPosition: 1.0) // Max out gap-closing distance.
+
+        fillButton.tap() // Close the panel so it can't cover the canvas.
+
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should still land inside the square despite the open contour")
+
+        // A point clearly outside the square should remain untouched — if gap-closing failed to bridge
+        // the opening, the fill would have leaked out and colored this too.
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.05, dy: 0.05)), "Fill must not leak out through the open contour onto the rest of the canvas")
+    }
+
+    /// The scenario from the fill tool's design brief: lineart on one layer, a separate blank layer
+    /// underneath it as the fill destination, with the fill tool's reference locked to the lineart
+    /// layer regardless of which layer is active. Verifies both that the fill lands (proving it used
+    /// the lineart layer's boundary, not the blank active layer's) and that it stays contained.
+    func testFillToolMasksFromReferenceLayerAcrossLayers() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap()
+
+        let layersButton = app.buttons["toolbar.layersButton"]
+        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
+        layersButton.tap()
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap() // "Layer 2" is added on top and becomes active; "Layer 1" (blank) stays underneath.
+
+        layersButton.tap() // Close the panel so it can't cover the canvas.
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // Draw lineart on the active top layer ("Layer 2").
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3))
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7))
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3))
+
+        // Switch the active (drawing/fill destination) layer back to the blank bottom layer.
+        layersButton.tap()
+        let bottomRow = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
+        bottomRow.tap()
+        layersButton.tap()
+
+        // Point the fill tool's reference at "Layer 2" (the lineart layer) explicitly, rather than the
+        // now-active blank bottom layer.
+        let fillButton = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap()
+
+        let referenceRow = app.buttons["fillPanel.reference.Layer 2"]
+        XCTAssertTrue(referenceRow.waitForExistence(timeout: 5))
+        referenceRow.tap()
+
+        fillButton.tap() // Close the panel.
+
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should land on the blank active layer, bounded by the lineart layer set as its reference")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.05, dy: 0.05)), "If the reference layer were ignored, the blank active layer has no walls and the fill would have flooded the whole canvas instead of stopping at the lineart square")
     }
 }
