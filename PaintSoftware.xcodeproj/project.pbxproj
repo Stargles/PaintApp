@@ -31,8 +31,6 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		3FC5E357300DBDA400401D35 /* PaintSoftware */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = PaintSoftware;
 			sourceTree = "<group>";
 		};
@@ -97,7 +95,6 @@
 			children = (
 				9A3A0221A22D3DDFCD4EEF94 /* PaintSoftwareUITests.swift */,
 			);
-			name = PaintSoftwareUITests;
 			path = PaintSoftwareUITests;
 			sourceTree = "<group>";
 		};

@@ -81,7 +81,7 @@ struct ActionsMenu: View {
         guard let item else { return }
         guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
         await MainActor.run {
-            canvasManager.addImageLayer(image: image)
+            canvasManager.addObjectLayer(image: image)
         }
     }
 }

@@ -24,18 +24,17 @@ final class TrackedCanvasView: PKCanvasView {
     override var undoManager: UndoManager? { localUndoManager }
 }
 
-/// One slot in the layer stack: an optional static image (for photo layers)
-/// underneath a drawable PencilKit canvas.
+/// One slot in the layer stack: either a drawable PencilKit canvas, or (for an object/photo layer)
+/// an image positioned by its own position/scale/rotation rather than pinned to the host's edges —
+/// `imageView`'s frame is set directly from the layer's `objectTransform`, not via constraints.
 final class LayerHostView: UIView {
     let imageView = UIImageView()
     let canvasView = TrackedCanvasView()
 
     init() {
         super.init(frame: .zero)
-        imageView.contentMode = .scaleAspectFill
-        imageView.clipsToBounds = true
+        imageView.isUserInteractionEnabled = false
         imageView.isHidden = true
-        imageView.translatesAutoresizingMaskIntoConstraints = false
 
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
@@ -44,10 +43,6 @@ final class LayerHostView: UIView {
         addSubview(imageView)
         addSubview(canvasView)
         NSLayoutConstraint.activate([
-            imageView.topAnchor.constraint(equalTo: topAnchor),
-            imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
             canvasView.topAnchor.constraint(equalTo: topAnchor),
             canvasView.bottomAnchor.constraint(equalTo: bottomAnchor),
             canvasView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -95,6 +90,11 @@ struct CanvasView: UIViewRepresentable {
         onionSkin.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(onionSkin)
 
+        let transformOverlay = ObjectTransformOverlayView()
+        transformOverlay.isHidden = true
+        transformOverlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(transformOverlay)
+
         NSLayoutConstraint.activate([
             paper.topAnchor.constraint(equalTo: container.topAnchor),
             paper.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -103,20 +103,30 @@ struct CanvasView: UIViewRepresentable {
             onionSkin.topAnchor.constraint(equalTo: container.topAnchor),
             onionSkin.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             onionSkin.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            onionSkin.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+            onionSkin.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            transformOverlay.topAnchor.constraint(equalTo: container.topAnchor),
+            transformOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            transformOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            transformOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor)
         ])
 
         context.coordinator.hostView = host
         context.coordinator.containerView = container
         context.coordinator.onionSkinView = onionSkin
         context.coordinator.paperView = paper
+        context.coordinator.transformOverlay = transformOverlay
         context.coordinator.setUpGestures(on: container)
+
+        transformOverlay.onTransformChange = { [weak coordinator = context.coordinator] transform in
+            coordinator?.objectTransformChanged(transform)
+        }
 
         host.onLayout = { [weak coordinator = context.coordinator] in
             coordinator?.hostBoundsDidChange()
         }
 
         context.coordinator.reconcileLayers()
+        context.coordinator.updateTransformOverlay()
         context.coordinator.hostBoundsDidChange()
 
         return host
@@ -127,6 +137,7 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.reconcileLayers()
         context.coordinator.updateActiveLayerAndTool()
         context.coordinator.updateOnionSkin()
+        context.coordinator.updateTransformOverlay()
         context.coordinator.hostBoundsDidChange()
     }
 
@@ -142,6 +153,7 @@ struct CanvasView: UIViewRepresentable {
         weak var containerView: UIView?
         weak var onionSkinView: UIImageView?
         weak var paperView: UIView?
+        weak var transformOverlay: ObjectTransformOverlayView?
         var layerHosts: [UUID: LayerHostView] = [:]
 
         weak var panRecognizer: UIPanGestureRecognizer?
@@ -251,8 +263,14 @@ struct CanvasView: UIViewRepresentable {
                 if host.isHidden != !layer.isVisible { host.isHidden = !layer.isVisible }
                 let targetAlpha = CGFloat(layer.opacity)
                 if host.alpha != targetAlpha { host.alpha = targetAlpha }
-                if host.imageView.image !== layer.backgroundImage { host.imageView.image = layer.backgroundImage }
-                if host.imageView.isHidden != !layer.isImageLayer { host.imageView.isHidden = !layer.isImageLayer }
+
+                if layer.isObjectLayer {
+                    if host.imageView.image !== layer.objectImage { host.imageView.image = layer.objectImage }
+                    host.imageView.isHidden = false
+                    applyObjectTransform(layer.objectTransform, imageSize: layer.objectImage?.size, to: host.imageView)
+                } else {
+                    host.imageView.isHidden = true
+                }
 
                 let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame)
                 let targetDrawing = celIdx.map { canvasManager.layers[index].cels[$0].drawing } ?? PKDrawing()
@@ -265,7 +283,9 @@ struct CanvasView: UIViewRepresentable {
                 // its non-interactive subviews all reject the point), preventing the touch from ever
                 // reaching an active layer underneath. Disabling the host itself lets hit-testing
                 // fall through to the next layer down.
-                let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil
+                // Object layers are never drawable — they're moved/scaled/rotated via the transform
+                // overlay instead, which lives above the whole layer stack (see updateTransformOverlay).
+                let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil && !layer.isObjectLayer
                 if host.isUserInteractionEnabled != shouldInteract {
                     host.isUserInteractionEnabled = shouldInteract
                 }
@@ -273,6 +293,42 @@ struct CanvasView: UIViewRepresentable {
                     host.canvasView.isUserInteractionEnabled = shouldInteract
                 }
             }
+        }
+
+        private func applyObjectTransform(_ transform: LayerTransform, imageSize: CGSize?, to imageView: UIImageView) {
+            guard let imageSize, imageSize.width > 0, imageSize.height > 0 else { return }
+            if imageView.bounds.size != imageSize {
+                imageView.bounds = CGRect(origin: .zero, size: imageSize)
+            }
+            let newTransform = CGAffineTransform.identity.rotated(by: transform.rotation).scaledBy(x: transform.scale, y: transform.scale)
+            if imageView.transform != newTransform {
+                imageView.transform = newTransform
+            }
+            if imageView.center != transform.position {
+                imageView.center = transform.position
+            }
+        }
+
+        // MARK: - Object transform overlay
+
+        func updateTransformOverlay() {
+            guard let overlay = transformOverlay, let container = containerView else { return }
+            guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else {
+                overlay.isHidden = true
+                return
+            }
+            let layer = canvasManager.layers[canvasManager.currentLayerIndex]
+            guard layer.isObjectLayer, layer.isVisible, let image = layer.objectImage else {
+                overlay.isHidden = true
+                return
+            }
+            overlay.update(transform: layer.objectTransform, imageSize: image.size)
+            container.bringSubviewToFront(overlay)
+        }
+
+        func objectTransformChanged(_ transform: LayerTransform) {
+            guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
+            canvasManager.updateObjectTransform(layerIndex: canvasManager.currentLayerIndex, transform: transform)
         }
 
         func updateActiveLayerAndTool() {

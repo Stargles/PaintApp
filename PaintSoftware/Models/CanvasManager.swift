@@ -53,12 +53,34 @@ final class CanvasManager: ObservableObject {
         currentLayerIndex = layers.count - 1
     }
 
-    func addImageLayer(image: UIImage, name: String? = nil) {
+    /// Inserts a photo as an "object layer": the image isn't rasterized onto the canvas, it's kept
+    /// as a standalone object with its own position/scale/rotation that can be adjusted at any time
+    /// via the on-canvas transform handles (see ObjectTransformOverlayView).
+    func addObjectLayer(image: UIImage, name: String? = nil) {
         let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), drawing: PKDrawing())
-        var layer = Layer(id: UUID(), name: name ?? "Image \(layers.count + 1)", opacity: 1.0, isVisible: true, isImageLayer: true, backgroundImage: image, cels: [cel])
+        var layer = Layer(id: UUID(), name: name ?? "Image \(layers.count + 1)", opacity: 1.0, isVisible: true, isObjectLayer: true, objectImage: image, cels: [cel])
         layer.thumbnail = image
+        layer.objectTransform = initialObjectTransform(for: image)
         layers.append(layer)
         currentLayerIndex = layers.count - 1
+    }
+
+    /// Centers the image and scales it to comfortably fit inside the canvas (rather than covering
+    /// it edge-to-edge), so a freshly-inserted photo starts fully visible with room to grab its
+    /// transform handles right away.
+    private func initialObjectTransform(for image: UIImage) -> LayerTransform {
+        guard let canvasSize, image.size.width > 0, image.size.height > 0 else { return .identity }
+        let fitScale = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height)
+        return LayerTransform(
+            position: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
+            scale: fitScale * 0.8,
+            rotation: 0
+        )
+    }
+
+    func updateObjectTransform(layerIndex: Int, transform: LayerTransform) {
+        guard layers.indices.contains(layerIndex) else { return }
+        layers[layerIndex].objectTransform = transform
     }
 
     func deleteLayer(at index: Int) {
@@ -255,6 +277,12 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               let canvasSize else { return }
+        // Object layers never have drawing content in their cel, so the normal render-the-drawing
+        // path would just produce a blank thumbnail — show the photo itself instead.
+        if layers[layerIndex].isObjectLayer {
+            layers[layerIndex].thumbnail = layers[layerIndex].objectImage
+            return
+        }
         let drawing = layers[layerIndex].cels[celIndex].drawing
         let image = ThumbnailRenderer.render(drawing, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
         layers[layerIndex].cels[celIndex].thumbnail = image
@@ -304,8 +332,20 @@ struct Layer: Identifiable {
     var name: String
     var opacity: Double
     var isVisible: Bool
-    var isImageLayer: Bool = false
-    var backgroundImage: UIImage? = nil
+    var isObjectLayer: Bool = false
+    var objectImage: UIImage? = nil
+    var objectTransform: LayerTransform = .identity
     var cels: [Cel]
     var thumbnail: UIImage? = nil
+}
+
+/// Position/scale/rotation of an object layer's photo, in canvas point space (same coordinate
+/// system as everything drawn into a Cel's PKDrawing). One transform per layer for now; if/when
+/// these become animatable, this is what would move onto (or get keyframed alongside) each Cel.
+struct LayerTransform: Equatable {
+    var position: CGPoint
+    var scale: CGFloat
+    var rotation: CGFloat // radians
+
+    static let identity = LayerTransform(position: .zero, scale: 1, rotation: 0)
 }

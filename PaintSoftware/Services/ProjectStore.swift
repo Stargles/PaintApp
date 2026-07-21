@@ -84,7 +84,7 @@ enum ProjectStore {
 
         for (index, layer) in canvasManager.layers.enumerated() {
             var imageFileName: String?
-            if layer.isImageLayer, let image = layer.backgroundImage, let data = image.pngData() {
+            if layer.isObjectLayer, let image = layer.objectImage, let data = image.pngData() {
                 let fileName = "\(layer.id.uuidString).png"
                 try? data.write(to: imagesDir.appendingPathComponent(fileName))
                 imageFileName = fileName
@@ -98,19 +98,27 @@ enum ProjectStore {
                 celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount, drawingFileName: fileName))
             }
 
+            let transformManifest = layer.isObjectLayer
+                ? ObjectTransformManifest(x: layer.objectTransform.position.x, y: layer.objectTransform.position.y,
+                                           scale: layer.objectTransform.scale, rotation: layer.objectTransform.rotation)
+                : nil
+
             layerManifests.append(LayerManifest(
                 id: layer.id,
                 name: layer.name,
                 opacity: layer.opacity,
                 isVisible: layer.isVisible,
-                isImageLayer: layer.isImageLayer,
-                backgroundImageFileName: imageFileName,
+                isObjectLayer: layer.isObjectLayer,
+                objectImageFileName: imageFileName,
+                objectTransform: transformManifest,
                 cels: celManifests
             ))
 
             if thumbnailImage == nil, layer.isVisible, let canvasSize = canvasManager.canvasSize,
                let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) {
-                thumbnailImage = ThumbnailRenderer.render(layer.cels[celIdx].drawing, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
+                thumbnailImage = layer.isObjectLayer
+                    ? layer.objectImage
+                    : ThumbnailRenderer.render(layer.cels[celIdx].drawing, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
             }
         }
 
@@ -154,9 +162,9 @@ enum ProjectStore {
 
         var layers: [Layer] = []
         for layerManifest in manifest.layers {
-            var backgroundImage: UIImage?
-            if let fileName = layerManifest.backgroundImageFileName {
-                backgroundImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fileName).path)
+            var objectImage: UIImage?
+            if let fileName = layerManifest.objectImageFileName {
+                objectImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fileName).path)
             }
 
             var cels: [Cel] = []
@@ -166,13 +174,26 @@ enum ProjectStore {
                 cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount, drawing: drawing))
             }
 
+            let transform: LayerTransform
+            if let m = layerManifest.objectTransform {
+                transform = LayerTransform(position: CGPoint(x: m.x, y: m.y), scale: m.scale, rotation: m.rotation)
+            } else if let objectImage, let canvasSize = manager.canvasSize, objectImage.size.width > 0 {
+                // Pre-object-layer project: reproduce the old full-bleed appearance as a starting
+                // transform (covering the canvas, centered, unrotated) that the user can adjust.
+                let coverScale = max(canvasSize.width / objectImage.size.width, canvasSize.height / objectImage.size.height)
+                transform = LayerTransform(position: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2), scale: coverScale, rotation: 0)
+            } else {
+                transform = .identity
+            }
+
             layers.append(Layer(
                 id: layerManifest.id,
                 name: layerManifest.name,
                 opacity: layerManifest.opacity,
                 isVisible: layerManifest.isVisible,
-                isImageLayer: layerManifest.isImageLayer,
-                backgroundImage: backgroundImage,
+                isObjectLayer: layerManifest.isObjectLayer,
+                objectImage: objectImage,
+                objectTransform: transform,
                 cels: cels
             ))
         }
