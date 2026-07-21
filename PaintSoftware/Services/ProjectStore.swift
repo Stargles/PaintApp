@@ -5,7 +5,7 @@ import SwiftUI
 
 private extension Color {
     var codable: CodableColor {
-        var r: CGFloat = 1, g: CGFloat = 1, b: CGFloat = 1, a: CGFloat = 1
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a)
         return CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
     }
