@@ -342,7 +342,19 @@ struct CanvasView: UIViewRepresentable {
                 lastActiveKey = activeKey
             }
             canvasManager.activeUndoManager = host.canvasView.undoManager
-            canvasManager.refreshUndoRedoState()
+            let newCanUndo = host.canvasView.undoManager?.canUndo ?? false
+            let newCanRedo = host.canvasView.undoManager?.canRedo ?? false
+            if canvasManager.canUndo != newCanUndo || canvasManager.canRedo != newCanRedo {
+                // Mutating @Published state synchronously here would be "publishing changes from
+                // within view updates" (this method runs inside CanvasView.updateUIView), which
+                // SwiftUI warns can cause undefined/re-entrant behavior. In practice that showed up
+                // as a hang right when the active layer's identity changed (e.g. right after
+                // deleting a layer), since removeAllActions() above flips canUndo/canRedo on the
+                // same pass. Defer the publish to the next run loop turn instead.
+                DispatchQueue.main.async { [weak self] in
+                    self?.canvasManager.refreshUndoRedoState()
+                }
+            }
 
             // Only construct+assign a new tool when something tool-relevant actually changed.
             // Reassigning PKCanvasView.tool mid-stroke (this method runs on every SwiftUI re-render,

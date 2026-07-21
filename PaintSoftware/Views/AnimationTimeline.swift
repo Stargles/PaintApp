@@ -168,6 +168,7 @@ struct AnimationTimeline: View {
                     .padding(.leading, 8)
                     .contentShape(Rectangle())
                     .onTapGesture { canvasManager.currentLayerIndex = index }
+                    .accessibilityIdentifier("timeline.layerName.\(index)")
             }
         }
         .frame(width: 90)

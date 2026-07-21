@@ -93,6 +93,7 @@ struct LayerRow: View {
     var body: some View {
         HStack {
             Button(action: {
+                guard canvasManager.layers.indices.contains(index) else { return }
                 canvasManager.layers[index].isVisible.toggle()
             }) {
                 Image(systemName: layer.isVisible ? "eye" : "eye.slash")
@@ -123,14 +124,18 @@ struct LayerRow: View {
             Spacer()
 
             Slider(value: Binding(
-                get: { canvasManager.layers[index].opacity },
-                set: { canvasManager.layers[index].opacity = $0 }
+                get: { canvasManager.layers.indices.contains(index) ? canvasManager.layers[index].opacity : layer.opacity },
+                set: { newValue in
+                    guard canvasManager.layers.indices.contains(index) else { return }
+                    canvasManager.layers[index].opacity = newValue
+                }
             ), in: 0...1)
             .frame(width: 70)
 
             if canvasManager.currentLayerIndex == index {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.blue)
+                    .accessibilityIdentifier("layerPanel.row.\(index).current")
             }
         }
         .padding(.vertical, 4)

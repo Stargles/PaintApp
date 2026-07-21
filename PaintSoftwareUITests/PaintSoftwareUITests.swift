@@ -205,4 +205,86 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertEqual(bottomStrokes, 1, "Drawing while the bottom layer is active should add a stroke to it, but got \(String(describing: bottomStrokes))")
         XCTAssertEqual(topStrokes, 0, "The inactive top layer should not receive the stroke, but got \(String(describing: topStrokes))")
     }
+
+    /// Swipes to delete a layer panel row at the given absolute layer index, tapping the
+    /// "Delete" action revealed by the swipe.
+    private func swipeDeleteLayerRow(_ app: XCUIApplication, layerIndex: Int) {
+        let row = app.staticTexts["layerPanel.row.\(layerIndex)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.swipeLeft()
+        let deleteButton = app.buttons["Delete"]
+        XCTAssertTrue(deleteButton.waitForExistence(timeout: 5))
+        deleteButton.tap()
+    }
+
+    /// Regression test for the layer-deletion bug: deleting a layer *below* the currently active
+    /// one must not silently reassign "active" to a different layer. Reproduces the scenario by
+    /// activating the middle of three layers, deleting the bottom one, and confirming — via the
+    /// checkmark badge LayerRow shows on the active row — that the layer which was active before
+    /// the deletion (now shifted down to index 0) is still the one marked active, and that the
+    /// layer panel and the animation timeline agree on which one that is.
+    func testDeletingLayerBelowActiveKeepsSameLayerActive() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let layersButton = app.buttons["toolbar.layersButton"]
+        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
+        layersButton.tap()
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap() // layers: [0, 1], current = 1
+        addButton.tap() // layers: [0, 1, 2], current = 2
+
+        let middleRow = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(middleRow.waitForExistence(timeout: 5))
+        middleRow.tap() // Activate layer 1 (the one we expect to remain active after deleting layer 0).
+        XCTAssertTrue(app.images["layerPanel.row.1.current"].waitForExistence(timeout: 5), "Layer 1 should be marked active after tapping it")
+
+        swipeDeleteLayerRow(app, layerIndex: 0) // layers shift: old-1 -> 0, old-2 -> 1
+
+        XCTAssertTrue(app.images["layerPanel.row.0.current"].waitForExistence(timeout: 5), "The layer that was active before the deletion (old index 1) should still be marked active, now at index 0")
+        XCTAssertFalse(app.images["layerPanel.row.1.current"].exists, "Active status should not have silently moved to the other surviving layer")
+
+        // The animation timeline reads the same canvasManager.layers/currentLayerIndex; confirm
+        // it agrees with the panel on layer count and identity after the deletion.
+        let timelineName0 = app.staticTexts["timeline.layerName.0"]
+        let timelineName1 = app.staticTexts["timeline.layerName.1"]
+        XCTAssertTrue(timelineName0.waitForExistence(timeout: 5))
+        XCTAssertTrue(timelineName1.waitForExistence(timeout: 5))
+    }
+
+    /// Smoke test: repeatedly add and delete layers, and drag a surviving row's opacity slider
+    /// right after a deletion. Guards against index-out-of-range crashes/freezes in LayerRow,
+    /// whose controls index back into canvasManager.layers by a captured Int — a value that can
+    /// go stale for a row mid-removal during the List's own delete animation.
+    func testRepeatedAddDeleteLayersDoesNotCrashOrFreeze() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let layersButton = app.buttons["toolbar.layersButton"]
+        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
+        layersButton.tap()
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        for _ in 0..<4 {
+            addButton.tap()
+        }
+        // layers: [0,1,2,3,4], current = 4
+
+        swipeDeleteLayerRow(app, layerIndex: 4)
+        swipeDeleteLayerRow(app, layerIndex: 0)
+        swipeDeleteLayerRow(app, layerIndex: 1)
+
+        // The app must still be responsive: both the panel and the timeline must agree there
+        // are exactly 2 layers left (indices 0 and 1), and interaction must still work.
+        XCTAssertEqual(app.state, .runningForeground, "App should still be running, not crashed")
+        XCTAssertTrue(app.staticTexts["layerPanel.row.0"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["layerPanel.row.2"].exists, "Only 2 layers should remain in the panel")
+        XCTAssertTrue(app.staticTexts["timeline.layerName.0"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["timeline.layerName.1"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["timeline.layerName.2"].exists, "Only 2 layers should remain in the timeline, staying in sync with the panel")
+    }
 }

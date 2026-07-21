@@ -86,7 +86,14 @@ final class CanvasManager: ObservableObject {
     func deleteLayer(at index: Int) {
         guard layers.count > 1, layers.indices.contains(index) else { return }
         layers.remove(at: index)
-        if currentLayerIndex >= layers.count {
+        // Deleting a layer *below* the active one shifts every later index down by one, so
+        // currentLayerIndex must shift with it to keep pointing at the same layer. Without this,
+        // "active" silently jumps to whatever layer happened to slide into the old index —
+        // subsequent strokes land on the wrong layer and the undo manager gets reassigned out
+        // from under an unrelated layer.
+        if index < currentLayerIndex {
+            currentLayerIndex -= 1
+        } else if currentLayerIndex >= layers.count {
             currentLayerIndex = layers.count - 1
         }
     }
