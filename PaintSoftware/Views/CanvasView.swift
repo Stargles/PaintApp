@@ -266,6 +266,9 @@ struct CanvasView: UIViewRepresentable {
                 // reaching an active layer underneath. Disabling the host itself lets hit-testing
                 // fall through to the next layer down.
                 let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil
+                if host.isUserInteractionEnabled != shouldInteract {
+                    host.isUserInteractionEnabled = shouldInteract
+                }
                 if host.canvasView.isUserInteractionEnabled != shouldInteract {
                     host.canvasView.isUserInteractionEnabled = shouldInteract
                 }
