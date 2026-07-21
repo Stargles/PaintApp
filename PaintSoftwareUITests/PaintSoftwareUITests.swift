@@ -591,4 +591,57 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), true, "Committing the move should bake the layer's content")
         XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 0, "The original stroke should be flattened into bakedImage, not left as a live PencilKit stroke")
     }
+
+    /// Save -> relaunch -> reload round trip, exercising the real `ProjectStore.save`/`load` path
+    /// (not just the manifest struct in isolation — this UI test target has no `@testable import`
+    /// access to call those directly, confirmed by a link failure when tried). Draws a stroke,
+    /// returns to the gallery (via the toolbar's gallery button — its SwiftUI `Image(systemName:)`
+    /// gets "square.grid.2x2" as its accessibility identifier automatically, since TopToolbar
+    /// doesn't set one explicitly), force-quits and relaunches the whole app (so this genuinely
+    /// re-reads from disk, not just in-memory state), reopens the one saved project from the
+    /// gallery, and asserts the stroke (and therefore the layer/cel raster data) survived.
+    ///
+    /// This also serves as a build-time-only regression check for the manifest schema additions
+    /// (`LayerManifest.kind`, `ProjectManifest.selectedBrush`/`customBrushes`): every save now
+    /// encodes those fields and every load decodes them, so a save/load cycle silently failing to
+    /// decode (e.g. a typo'd CodingKeys case) would make this test hang or fail outright rather
+    /// than passing. It cannot exercise a *non-default* brush or a *non-raster* `LayerKind`
+    /// end-to-end, because neither is selectable through the UI yet on this foundation snapshot
+    /// (no `canvasManager.selectedBrush` control, no vector-layer creation flow) — that half of
+    /// the schema was instead verified directly at the `Codable` level with a standalone script
+    /// (ProjectManifest/Brush have no UIKit dependency), not as a checked-in test.
+    func testSaveAndReloadPersistsStrokesAcrossAppRelaunch() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["sideToolbar.pencilOnlyToggle"].tap() // allow synthetic (non-Pencil) touches to draw
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Setup: the stroke should have landed before saving")
+        app.buttons["toolbar.layersButton"].tap() // close panel
+
+        // Back to gallery, which triggers ContentView.saveIfNeeded() -> ProjectStore.save.
+        let galleryButton = app.buttons["square.grid.2x2"]
+        XCTAssertTrue(galleryButton.waitForExistence(timeout: 5))
+        galleryButton.tap()
+
+        let projectTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(projectTile.waitForExistence(timeout: 5), "Setup: the saved project should show up in the gallery")
+
+        // Force-quit and relaunch the whole app so reopening the project genuinely re-reads the
+        // manifest + PNGs from disk (ProjectStore.load) instead of reusing in-memory CanvasManager
+        // state left over from the editor.
+        app.terminate()
+        app.launch()
+        let reopenedTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(reopenedTile.waitForExistence(timeout: 10), "Project should still be listed after relaunch")
+        reopenedTile.tap()
+
+        let frameLabel = app.staticTexts["timeline.frameLabel"]
+        XCTAssertTrue(frameLabel.waitForExistence(timeout: 10), "Reopening the project should land back in the editor")
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Stroke drawn before saving should survive a save -> relaunch -> load round trip")
+    }
 }

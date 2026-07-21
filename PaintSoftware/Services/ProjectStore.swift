@@ -69,6 +69,46 @@ enum ProjectStore {
         return try? JSONDecoder().decode(ProjectManifest.self, from: data)
     }
 
+    /// Copies any `.custom`-shaped brush's imported stamp texture from the shared
+    /// `BrushLibrary.customBrushesDirectory` into this project's own `brushes/` folder, so a saved
+    /// project is self-contained: its custom brushes still render correctly even if the global
+    /// library entry is later renamed/deleted, or the project is moved to another device. Best
+    /// effort — a brush with no matching source file (or a built-in shape) is silently skipped.
+    private static func copyCustomBrushTexturesIntoProject(_ brushes: [Brush], projectURL: URL) {
+        let customShaped = brushes.filter { $0.shape == .custom }
+        guard !customShaped.isEmpty else { return }
+        let fm = FileManager.default
+        let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
+        try? fm.createDirectory(at: brushesDir, withIntermediateDirectories: true)
+        for brush in customShaped {
+            guard let fileName = brush.customTextureFileName else { continue }
+            let source = BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName)
+            guard fm.fileExists(atPath: source.path) else { continue }
+            let destination = brushesDir.appendingPathComponent(fileName)
+            try? fm.removeItem(at: destination) // overwrite if re-saving
+            try? fm.copyItem(at: source, to: destination)
+        }
+    }
+
+    /// The inverse of the above, run on load: if a custom brush's texture file is missing from the
+    /// shared `BrushLibrary.customBrushesDirectory` (project moved to another device, or the
+    /// global entry was deleted since this project was last saved), restore it from this
+    /// project's own `brushes/` copy so the brush still renders correctly.
+    private static func restoreCustomBrushTexturesFromProject(_ brushes: [Brush], projectURL: URL) {
+        let customShaped = brushes.filter { $0.shape == .custom }
+        guard !customShaped.isEmpty else { return }
+        let fm = FileManager.default
+        let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
+        for brush in customShaped {
+            guard let fileName = brush.customTextureFileName else { continue }
+            let destination = BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName)
+            guard !fm.fileExists(atPath: destination.path) else { continue }
+            let source = brushesDir.appendingPathComponent(fileName)
+            guard fm.fileExists(atPath: source.path) else { continue }
+            try? fm.copyItem(at: source, to: destination)
+        }
+    }
+
     @MainActor
     static func save(_ canvasManager: CanvasManager, to url: URL) {
         let fm = FileManager.default
@@ -120,6 +160,7 @@ enum ProjectStore {
                 name: layer.name,
                 opacity: layer.opacity,
                 isVisible: layer.isVisible,
+                kind: layer.kind,
                 isObjectLayer: layer.isObjectLayer,
                 objectImageFileName: imageFileName,
                 objectTransform: transformManifest,
@@ -139,6 +180,15 @@ enum ProjectStore {
             }
         }
 
+        // TODO(brush-wiring): CanvasManager doesn't have `selectedBrush` on this base yet — Worker
+        // B is adding it (see CLAUDE.md worker brief). Once it lands, replace this default with
+        // the manager's actual selected brush (and whatever custom-brush list it ends up owning)
+        // so the user's brush choice persists too. Using a sensible default in the meantime keeps
+        // this compiling and the manifest schema stable regardless of when that property arrives.
+        let selectedBrush = BrushLibrary.softRound
+        let customBrushes: [Brush] = []
+        copyCustomBrushTexturesIntoProject([selectedBrush] + customBrushes, projectURL: url)
+
         let manifest = ProjectManifest(
             id: canvasManager.projectID,
             name: canvasManager.projectName,
@@ -149,7 +199,9 @@ enum ProjectStore {
             layers: layerManifests,
             modifiedAt: Date(),
             backgroundColor: canvasManager.canvasBackgroundColor.codable,
-            isBackgroundVisible: canvasManager.isCanvasBackgroundVisible
+            isBackgroundVisible: canvasManager.isCanvasBackgroundVisible,
+            selectedBrush: selectedBrush,
+            customBrushes: customBrushes
         )
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: url.appendingPathComponent("manifest.json"))
@@ -173,6 +225,16 @@ enum ProjectStore {
         manager.sceneFrameCount = manifest.sceneFrameCount
         manager.canvasBackgroundColor = manifest.backgroundColor.color
         manager.isCanvasBackgroundVisible = manifest.isBackgroundVisible
+
+        // Restore this project's own custom-brush texture copies into the shared library if a
+        // referenced file is missing there (project moved to another device, or the global entry
+        // was deleted) — see copyCustomBrushTexturesIntoProject's doc comment for the save side.
+        restoreCustomBrushTexturesFromProject([manifest.selectedBrush] + manifest.customBrushes, projectURL: url)
+        // TODO(brush-wiring): once Worker B adds `canvasManager.selectedBrush` (and whatever list
+        // of custom brushes it ends up owning), wire the decoded values in here, e.g.:
+        //   manager.selectedBrush = manifest.selectedBrush
+        // Nothing is lost in the meantime — the metadata round-trips correctly and the texture
+        // files are restored above — it's just not connected to the UI/tool state yet.
 
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)
         let canvasSize = manager.canvasSize ?? CGSize(width: 1, height: 1)
@@ -218,6 +280,7 @@ enum ProjectStore {
                 name: layerManifest.name,
                 opacity: layerManifest.opacity,
                 isVisible: layerManifest.isVisible,
+                kind: layerManifest.kind,
                 isObjectLayer: layerManifest.isObjectLayer,
                 objectImage: objectImage,
                 objectTransform: transform,
