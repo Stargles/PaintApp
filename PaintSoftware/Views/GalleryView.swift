@@ -9,34 +9,49 @@ struct GalleryView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 16) {
-                    Button(action: onCreateNew) {
-                        VStack(spacing: 8) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 32))
-                            Text("New Canvas")
-                                .font(.caption)
+            ZStack {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 16) {
+                        Button(action: onCreateNew) {
+                            VStack(spacing: 8) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 32))
+                                Text("New Canvas")
+                                    .font(.caption)
+                            }
+                            .frame(width: 160, height: 160)
+                            .background(Color.gray.opacity(0.2))
+                            .cornerRadius(12)
+                            .foregroundColor(.white)
                         }
-                        .frame(width: 160, height: 160)
-                        .background(Color.gray.opacity(0.2))
-                        .cornerRadius(12)
-                        .foregroundColor(.white)
-                    }
-                    .accessibilityIdentifier("gallery.newCanvasButton")
+                        .accessibilityIdentifier("gallery.newCanvasButton")
 
-                    ForEach(projects) { project in
-                        GalleryTileView(
-                            project: project,
-                            onOpen: { open(project) },
-                            onDelete: { projectPendingDeletion = project }
-                        )
+                        ForEach(projects) { project in
+                            GalleryTileView(
+                                project: project,
+                                onOpen: { open(project) },
+                                onDelete: { projectPendingDeletion = project }
+                            )
+                        }
                     }
+                    .padding()
                 }
-                .padding()
+                .background(Color.black.ignoresSafeArea())
+                .navigationTitle("Gallery")
+                
+                // Version display in top-left corner
+                VStack {
+                    HStack {
+                        Text(AppVersion.versionString)
+                            .font(.caption)
+                            .foregroundColor(.gray.opacity(0.6))
+                            .padding(.leading, 16)
+                            .padding(.top, 8)
+                        Spacer()
+                    }
+                    Spacer()
+                }
             }
-            .background(Color.black.ignoresSafeArea())
-            .navigationTitle("Gallery")
         }
         .preferredColorScheme(.dark)
         .onAppear { refresh() }
