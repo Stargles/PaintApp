@@ -102,8 +102,14 @@ enum ProjectStore {
                     try? fillData.write(to: imagesDir.appendingPathComponent(name))
                     fillFileName = name
                 }
+                var bakedFileName: String?
+                if let baked = cel.bakedImage, let bakedData = baked.pngData() {
+                    bakedFileName = "\(cel.id.uuidString)_baked.png"
+                    try? bakedData.write(to: imagesDir.appendingPathComponent(bakedFileName!))
+                }
 
-                celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount, drawingFileName: fileName, fillImageFileName: fillFileName))
+                celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
+                                                 drawingFileName: fileName, fillImageFileName: fillFileName, bakedImageFileName: bakedFileName))
             }
 
             let transformManifest = layer.isObjectLayer
@@ -124,9 +130,14 @@ enum ProjectStore {
 
             if thumbnailImage == nil, layer.isVisible, let canvasSize = canvasManager.canvasSize,
                let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) {
-                thumbnailImage = layer.isObjectLayer
-                    ? layer.objectImage
-                    : ThumbnailRenderer.render(layer.cels[celIdx].drawing, fillImage: layer.cels[celIdx].fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
+                let cel = layer.cels[celIdx]
+                if layer.isObjectLayer {
+                    thumbnailImage = layer.objectImage
+                } else if cel.bakedImage != nil {
+                    thumbnailImage = ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize), canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
+                } else {
+                    thumbnailImage = ThumbnailRenderer.render(cel.drawing, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
+                }
             }
         }
 
@@ -183,7 +194,12 @@ enum ProjectStore {
                 if let fillFileName = celManifest.fillImageFileName {
                     fillImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fillFileName).path)
                 }
-                cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount, drawing: drawing, fillImage: fillImage))
+                var bakedImage: UIImage?
+                if let bakedFileName = celManifest.bakedImageFileName {
+                    bakedImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(bakedFileName).path)
+                }
+                cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
+                                 drawing: drawing, fillImage: fillImage, bakedImage: bakedImage))
             }
 
             let transform: LayerTransform

@@ -130,4 +130,8 @@ struct CelManifest: Codable {
     var frameCount: Int
     var drawingFileName: String
     var fillImageFileName: String?
+    /// Raster content baked into this cel by a select/move/fill/clear operation (see
+    /// `Cel.bakedImage`). A plain optional: Swift's synthesized `Codable` already decodes a missing
+    /// key as `nil`, so projects saved before this feature existed still load fine.
+    var bakedImageFileName: String? = nil
 }

@@ -19,6 +19,10 @@ final class TrackedCanvasView: PKCanvasView {
 final class LayerHostView: UIView {
     let imageView = UIImageView()
     let fillImageView = UIImageView()
+    /// Raster content "baked" into this layer's active cel by a select/move/fill/clear operation
+    /// (see `Cel.bakedImage`), or the transient "hole" preview while that cel's content is lifted
+    /// into a floating piece. Sits above `fillImageView`, below `canvasView`'s live strokes.
+    let bakedImageView = UIImageView()
     let canvasView = TrackedCanvasView()
 
     init() {
@@ -31,12 +35,17 @@ final class LayerHostView: UIView {
         fillImageView.contentMode = .scaleToFill
         fillImageView.translatesAutoresizingMaskIntoConstraints = false
 
+        bakedImageView.isUserInteractionEnabled = false
+        bakedImageView.isHidden = true
+        bakedImageView.translatesAutoresizingMaskIntoConstraints = false
+
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         canvasView.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(imageView)
         addSubview(fillImageView)
+        addSubview(bakedImageView)
         addSubview(canvasView)
         NSLayoutConstraint.activate([
             // imageView is deliberately NOT pinned here: object layers position it directly via
@@ -45,6 +54,10 @@ final class LayerHostView: UIView {
             fillImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
             fillImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
             fillImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bakedImageView.topAnchor.constraint(equalTo: topAnchor),
+            bakedImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bakedImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bakedImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
             canvasView.topAnchor.constraint(equalTo: topAnchor),
             canvasView.bottomAnchor.constraint(equalTo: bottomAnchor),
             canvasView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -68,6 +81,7 @@ final class CanvasHostView: UIView {
 
 struct CanvasView: UIViewRepresentable {
     @ObservedObject var canvasManager: CanvasManager
+    var activePanel: ActivePanel = .none
 
     func makeUIView(context: Context) -> CanvasHostView {
         let host = CanvasHostView()
@@ -97,6 +111,14 @@ struct CanvasView: UIViewRepresentable {
         transformOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(transformOverlay)
 
+        let selectionOverlay = SelectionOverlayView()
+        selectionOverlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(selectionOverlay)
+
+        let floatingOverlay = FloatingPieceOverlayView()
+        floatingOverlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(floatingOverlay)
+
         NSLayoutConstraint.activate([
             paper.topAnchor.constraint(equalTo: container.topAnchor),
             paper.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -109,7 +131,15 @@ struct CanvasView: UIViewRepresentable {
             transformOverlay.topAnchor.constraint(equalTo: container.topAnchor),
             transformOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             transformOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            transformOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+            transformOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            selectionOverlay.topAnchor.constraint(equalTo: container.topAnchor),
+            selectionOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            selectionOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            selectionOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            floatingOverlay.topAnchor.constraint(equalTo: container.topAnchor),
+            floatingOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            floatingOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            floatingOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor)
         ])
 
         context.coordinator.hostView = host
@@ -117,29 +147,49 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.onionSkinView = onionSkin
         context.coordinator.paperView = paper
         context.coordinator.transformOverlay = transformOverlay
+        context.coordinator.selectionOverlay = selectionOverlay
+        context.coordinator.floatingOverlay = floatingOverlay
         context.coordinator.setUpGestures(on: container)
 
         transformOverlay.onTransformChange = { [weak coordinator = context.coordinator] transform in
             coordinator?.objectTransformChanged(transform)
+        }
+        selectionOverlay.onFinishPath = { [weak coordinator = context.coordinator] path in
+            coordinator?.canvasManager.finishSelection(path: path)
+        }
+        selectionOverlay.onAutomaticTap = { [weak coordinator = context.coordinator] point in
+            coordinator?.canvasManager.finishAutomaticSelection(at: point)
+        }
+        floatingOverlay.onTransformChange = { [weak coordinator = context.coordinator] transform in
+            coordinator?.canvasManager.updateFloatingTransform(transform)
+        }
+        floatingOverlay.onRequestCommit = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.commitFloatingPieceIfNeeded()
         }
 
         host.onLayout = { [weak coordinator = context.coordinator] in
             coordinator?.hostBoundsDidChange()
         }
 
+        context.coordinator.activePanel = activePanel
         context.coordinator.reconcileLayers()
         context.coordinator.updateTransformOverlay()
+        context.coordinator.updateSelectionOverlay()
+        context.coordinator.updateFloatingOverlay()
         context.coordinator.hostBoundsDidChange()
 
         return host
     }
 
     func updateUIView(_ uiView: CanvasHostView, context: Context) {
+        context.coordinator.activePanel = activePanel
         context.coordinator.updatePaper()
         context.coordinator.reconcileLayers()
         context.coordinator.updateActiveLayerAndTool()
         context.coordinator.updateOnionSkin()
         context.coordinator.updateTransformOverlay()
+        context.coordinator.updateSelectionOverlay()
+        context.coordinator.updateFloatingOverlay()
         context.coordinator.hostBoundsDidChange()
     }
 
@@ -156,6 +206,9 @@ struct CanvasView: UIViewRepresentable {
         weak var onionSkinView: UIImageView?
         weak var paperView: UIView?
         weak var transformOverlay: ObjectTransformOverlayView?
+        weak var selectionOverlay: SelectionOverlayView?
+        weak var floatingOverlay: FloatingPieceOverlayView?
+        var activePanel: ActivePanel = .none
         var layerHosts: [UUID: LayerHostView] = [:]
 
         weak var panRecognizer: UIPanGestureRecognizer?
@@ -276,9 +329,31 @@ struct CanvasView: UIViewRepresentable {
                 }
 
                 let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame)
-                let targetDrawing = celIdx.map { canvasManager.layers[index].cels[$0].drawing } ?? PKDrawing()
-                if host.canvasView.drawing != targetDrawing {
-                    host.canvasView.drawing = targetDrawing
+
+                let displayedBaked = bakedImageToDisplay(layerIndex: index, celIndex: celIdx)
+                if host.bakedImageView.image !== displayedBaked { host.bakedImageView.image = displayedBaked }
+                let bakedHidden = displayedBaked == nil
+                if host.bakedImageView.isHidden != bakedHidden { host.bakedImageView.isHidden = bakedHidden }
+
+                // While this cel's content is floating (lifted into a Move piece), its live strokes
+                // are hidden — the "hole" is shown via bakedImageView's remainder preview instead —
+                // so the lifted content doesn't render twice (once floating, once still in place).
+                // Hiding the view, rather than reassigning canvasView.drawing to an empty PKDrawing,
+                // is deliberate: reassigning .drawing fires canvasViewDrawingDidChange, which writes
+                // the (now-empty) drawing back into the model's @Published `layers` — and because two
+                // separately-constructed empty PKDrawing values don't compare equal, that write never
+                // stabilizes, so every render re-triggers another one. An infinite render loop (SwiftUI
+                // and PencilKit's delegate callback re-triggering each other) was observed from exactly
+                // this pattern. Hiding the subview sidesteps PKDrawing entirely.
+                let isFloatingSource = isFloatingMoveSource(layerIndex: index, celIndex: celIdx)
+                if host.canvasView.isHidden != isFloatingSource {
+                    host.canvasView.isHidden = isFloatingSource
+                }
+                if !isFloatingSource {
+                    let targetDrawing = celIdx.map { canvasManager.layers[index].cels[$0].drawing } ?? PKDrawing()
+                    if host.canvasView.drawing != targetDrawing {
+                        host.canvasView.drawing = targetDrawing
+                    }
                 }
                 let targetFillImage = celIdx.flatMap { canvasManager.layers[index].cels[$0].fillImage }
                 if host.fillImageView.image !== targetFillImage {
@@ -293,8 +368,11 @@ struct CanvasView: UIViewRepresentable {
                 // layer: it works via a tap gesture on the container, not PencilKit stroke capture.
                 // Object layers are never drawable — they're moved/scaled/rotated via the transform
                 // overlay instead, which lives above the whole layer stack (see updateTransformOverlay).
+                // Select/Move take over touch handling entirely while engaged (via SelectionOverlayView/
+                // FloatingPieceOverlayView, both above the whole layer stack), so drawing is disabled then too.
                 let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil
                     && !layer.isObjectLayer && canvasManager.selectedTool != .fill
+                    && activePanel != .select && canvasManager.floatingPiece == nil
                 if host.isUserInteractionEnabled != shouldInteract {
                     host.isUserInteractionEnabled = shouldInteract
                 }
@@ -338,6 +416,37 @@ struct CanvasView: UIViewRepresentable {
         func objectTransformChanged(_ transform: LayerTransform) {
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
             canvasManager.updateObjectTransform(layerIndex: canvasManager.currentLayerIndex, transform: transform)
+        }
+
+        /// What a layer's `bakedImageView` should show for its active cel: the real `bakedImage`,
+        /// or — while that exact cel's content is lifted into a Move (not Duplicate) piece — the
+        /// transient "hole" preview computed at lift time, which isn't written into the model until
+        /// the piece commits (see `CanvasManager.beginMove`/`commitFloatingPieceIfNeeded`).
+        private func bakedImageToDisplay(layerIndex: Int, celIndex: Int?) -> UIImage? {
+            guard let celIndex else { return nil }
+            if let piece = canvasManager.floatingPiece, piece.kind == .move,
+               piece.sourceLayerIndex == layerIndex, piece.sourceCelIndex == celIndex {
+                return piece.remainderPreview
+            }
+            return canvasManager.layers[layerIndex].cels[celIndex].bakedImage
+        }
+
+        private func isFloatingMoveSource(layerIndex: Int, celIndex: Int?) -> Bool {
+            guard let celIndex, let piece = canvasManager.floatingPiece, piece.kind == .move else { return false }
+            return piece.sourceLayerIndex == layerIndex && piece.sourceCelIndex == celIndex
+        }
+
+        // MARK: - Select & Move overlays
+
+        func updateSelectionOverlay() {
+            guard let overlay = selectionOverlay else { return }
+            overlay.mode = canvasManager.selectionMode
+            overlay.isCapturingGestures = (activePanel == .select) && (canvasManager.floatingPiece == nil)
+            overlay.updateSelection(canvasManager.selection)
+        }
+
+        func updateFloatingOverlay() {
+            floatingOverlay?.update(canvasManager.floatingPiece)
         }
 
         func updateActiveLayerAndTool() {

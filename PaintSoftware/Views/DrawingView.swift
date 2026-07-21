@@ -17,7 +17,7 @@ struct DrawingView: View {
                 .padding(.leading, 12)
 
             ZStack {
-                CanvasView(canvasManager: canvasManager)
+                CanvasView(canvasManager: canvasManager, activePanel: activePanel)
 
                 VStack(spacing: 0) {
                     TopToolbar(canvasManager: canvasManager, activePanel: $activePanel, onOpenGallery: onOpenGallery)
@@ -41,10 +41,23 @@ struct DrawingView: View {
                     .padding(.trailing, 12)
                     .frame(maxHeight: .infinity, alignment: .top)
                 }
+
+                // Move/Duplicate's transform controls live in a bottom bar (not the trailing panel)
+                // and are keyed off whether a piece is actually floating, not off which panel is open —
+                // tapping the canvas to commit, or Duplicate from the Select panel, both surface it.
+                if canvasManager.floatingPiece != nil {
+                    VStack {
+                        Spacer()
+                        MoveTransformBottomBar(canvasManager: canvasManager)
+                            .padding(.bottom, 100)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
         }
         .background(Color.black)
         .animation(.easeInOut(duration: 0.2), value: activePanel)
+        .animation(.easeInOut(duration: 0.2), value: canvasManager.floatingPiece != nil)
     }
 
     @ViewBuilder
@@ -57,9 +70,9 @@ struct DrawingView: View {
         case .adjust:
             StubToolPanel(title: "Adjust", systemImage: "slider.horizontal.3")
         case .select:
-            StubToolPanel(title: "Select", systemImage: "lasso")
+            SelectPanel(canvasManager: canvasManager)
         case .move:
-            StubToolPanel(title: "Move", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+            EmptyView() // Move's UI is the floating bottom bar, shown whenever a piece is active — see above.
         case .layers:
             LayerPanel(canvasManager: canvasManager)
         case .brush:

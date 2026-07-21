@@ -15,7 +15,9 @@ struct TopToolbar: View {
             iconButton(system: "wrench.and.screwdriver", isActive: activePanel == .actions) { toggle(.actions) }
             iconButton(system: "slider.horizontal.3", isActive: activePanel == .adjust) { toggle(.adjust) }
             iconButton(system: "lasso", isActive: activePanel == .select) { toggle(.select) }
-            iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: activePanel == .move) { toggle(.move) }
+                .accessibilityIdentifier("toolbar.selectButton")
+            iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil) { toggleMove() }
+                .accessibilityIdentifier("toolbar.moveButton")
 
             Spacer()
 
@@ -23,6 +25,7 @@ struct TopToolbar: View {
                 selectBrushToolAndTogglePanel()
             }
             iconButton(system: "eraser", isActive: canvasManager.selectedTool == .eraser) {
+                canvasManager.commitFloatingPieceIfNeeded()
                 canvasManager.selectedTool = .eraser
             }
             iconButton(system: "drop.fill", isActive: activePanel == .fill || canvasManager.selectedTool == .fill) {
@@ -66,7 +69,21 @@ struct TopToolbar: View {
     }
 
     private func toggle(_ panel: ActivePanel) {
+        // Switching to any other tool/panel commits an in-progress Move/Duplicate rather than
+        // silently discarding it — Undo is the way to back out of a completed move, matching
+        // Procreate (there's no separate "cancel transform").
+        canvasManager.commitFloatingPieceIfNeeded()
         activePanel = (activePanel == panel) ? .none : panel
+    }
+
+    /// Tapping Move toggles between lifting the current selection (or, if there is none, the whole
+    /// current layer) into a floating piece, and committing whatever's currently floating.
+    private func toggleMove() {
+        if canvasManager.floatingPiece != nil {
+            canvasManager.commitFloatingPieceIfNeeded()
+        } else {
+            canvasManager.beginMove()
+        }
     }
 
     private func selectBrushToolAndTogglePanel() {

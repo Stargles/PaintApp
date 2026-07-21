@@ -10,7 +10,16 @@ final class CanvasManager: ObservableObject {
     var projectURL: URL?
 
     @Published var layers: [Layer] = []
-    @Published var currentLayerIndex: Int = 0
+    @Published var currentLayerIndex: Int = 0 {
+        didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
+    }
+
+    // MARK: - Select & Move tool state (see SelectionModels.swift for the operations)
+    @Published var selectionMode: SelectionMode = .lasso
+    @Published var transformMode: TransformMode = .uniform
+    @Published var magicWandTolerance: Double = 0.15
+    @Published var selection: Selection?
+    @Published var floatingPiece: FloatingPiece?
 
     @Published var brushSize: CGFloat = 5.0
     @Published var brushOpacity: Double = 1.0
@@ -28,7 +37,9 @@ final class CanvasManager: ObservableObject {
 
     @Published var fps: Int = 24
     @Published var sceneFrameCount: Int = 12
-    @Published var currentFrame: Int = 0
+    @Published var currentFrame: Int = 0 {
+        didSet { if oldValue != currentFrame { handleActiveContextChanged() } }
+    }
     @Published var isOnionSkinEnabled: Bool = true
     @Published var onionSkinOpacity: Double = 0.3
     @Published var isLoopEnabled: Bool = true
@@ -122,13 +133,17 @@ final class CanvasManager: ObservableObject {
                 if let fillImage = layers[layerIndex].cels[celIndex].fillImage {
                     layers[layerIndex].cels[celIndex].fillImage = Self.flippedImage(fillImage, canvasSize: canvasSize, horizontal: horizontal)
                 }
+                if let bakedImage = layers[layerIndex].cels[celIndex].bakedImage {
+                    layers[layerIndex].cels[celIndex].bakedImage = Self.flippedImage(bakedImage, canvasSize: canvasSize, horizontal: horizontal)
+                }
             }
         }
         regenerateAllThumbnails()
     }
 
-    /// Mirrors a raster fill image about the canvas center to match the same-direction PKDrawing
-    /// transform above, so a flipped canvas doesn't leave fill color behind on the wrong side.
+    /// Mirrors a cel's raster content (fillImage or bakedImage) about the canvas center to match the
+    /// same-direction PKDrawing transform above, so a flipped canvas doesn't leave raster content
+    /// behind on the wrong side.
     private static func flippedImage(_ image: UIImage, canvasSize: CGSize, horizontal: Bool) -> UIImage? {
         guard image.cgImage != nil else { return nil }
         let format = UIGraphicsImageRendererFormat()
@@ -184,7 +199,7 @@ final class CanvasManager: ObservableObject {
             length = min(length, nextStart - newStart)
         }
         guard length > 0 else { return }
-        let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, drawing: source.drawing, fillImage: source.fillImage)
+        let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, drawing: source.drawing, fillImage: source.fillImage, bakedImage: source.bakedImage)
         layers[layerIndex].cels.append(newCel)
         layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         sceneFrameCount = max(sceneFrameCount, newStart + length)
@@ -208,6 +223,7 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].drawing = PKDrawing()
         layers[layerIndex].cels[celIndex].fillImage = nil
+        layers[layerIndex].cels[celIndex].bakedImage = nil
         regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
     }
 
@@ -257,7 +273,7 @@ final class CanvasManager: ObservableObject {
         let cel = layers[layerIndex].cels[celIndex]
         guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return }
         layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
-        let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, drawing: cel.drawing, fillImage: cel.fillImage)
+        let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, drawing: cel.drawing, fillImage: cel.fillImage, bakedImage: cel.bakedImage)
         layers[layerIndex].cels.append(secondHalf)
         layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
@@ -324,7 +340,13 @@ final class CanvasManager: ObservableObject {
             return
         }
         let cel = layers[layerIndex].cels[celIndex]
-        let image = ThumbnailRenderer.render(cel.drawing, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
+        let image: UIImage
+        if cel.bakedImage != nil {
+            // PixelOps.rasterize folds fillImage/bakedImage/drawing into one image already.
+            image = ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize), canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
+        } else {
+            image = ThumbnailRenderer.render(cel.drawing, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
+        }
         layers[layerIndex].cels[celIndex].thumbnail = image
         if activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
             layers[layerIndex].thumbnail = image
@@ -451,9 +473,14 @@ struct Cel: Identifiable {
     var startFrame: Int
     var frameCount: Int
     var drawing: PKDrawing
-    /// Rasterized bucket-fill output for this frame, composited underneath `drawing`'s strokes within
-    /// the same layer. Nil until the fill tool is used on this cel.
+    /// Rasterized bucket-fill output for this frame, composited underneath both `bakedImage` and
+    /// `drawing`'s strokes within the same layer. Nil until the fill tool is used on this cel.
     var fillImage: UIImage? = nil
+    /// Flattened raster content "baked" into this cel by a pixel-level operation (select+move,
+    /// duplicate, color fill, clear selection) — see SelectionModels.swift. Sits above `fillImage`
+    /// and underneath `drawing`'s live PencilKit strokes when rendered. Nil means the cel has never
+    /// had a raster operation applied and is pure vector strokes, same as before this feature existed.
+    var bakedImage: UIImage? = nil
     var thumbnail: UIImage? = nil
 
     var endFrame: Int { startFrame + frameCount }

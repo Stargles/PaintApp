@@ -73,13 +73,14 @@ enum FloodFillEngine {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
         return renderer.image { _ in
             let rect = CGRect(x: 0, y: 0, width: width, height: height)
-            // Only lineart (strokes) and, for photo/image layers, the inserted image count as walls —
-            // deliberately excludes the layer's own `fillImage` so re-tapping an already-filled, fully
-            // enclosed region floods the whole thing with the new color instead of stopping at the
-            // leftover edge of a previous fill.
-            if layer.isImageLayer, let backgroundImage = layer.backgroundImage {
-                backgroundImage.draw(in: rect)
+            // Lineart (strokes), select/move's baked raster content, and (for photo/image layers) the
+            // inserted image count as walls — deliberately excludes the layer's own `fillImage` so
+            // re-tapping an already-filled, fully enclosed region floods the whole thing with the new
+            // color instead of stopping at the leftover edge of a previous fill.
+            if layer.isObjectLayer, let objectImage = layer.objectImage {
+                objectImage.draw(in: rect)
             }
+            cel.bakedImage?.draw(in: rect)
             cel.drawing.image(from: rect, scale: 1.0).draw(in: rect)
         }
     }
