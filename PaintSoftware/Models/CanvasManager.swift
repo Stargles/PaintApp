@@ -18,6 +18,11 @@ final class CanvasManager: ObservableObject {
     @Published var selectedTool: Tool = .pen
     @Published var pencilOnlyDrawing: Bool = true
 
+    @Published var fillReferenceMode: FillReferenceMode = .activeLayer
+    @Published var fillGapClosingDistance: CGFloat = 8
+    @Published var fillExpand: CGFloat = 2
+    @Published var isFilling: Bool = false
+
     @Published var canvasBackgroundColor: Color = .white
     @Published var isCanvasBackgroundVisible: Bool = true
 
@@ -63,9 +68,13 @@ final class CanvasManager: ObservableObject {
 
     func deleteLayer(at index: Int) {
         guard layers.count > 1, layers.indices.contains(index) else { return }
+        let removedID = layers[index].id
         layers.remove(at: index)
         if currentLayerIndex >= layers.count {
             currentLayerIndex = layers.count - 1
+        }
+        if fillReferenceMode == .layer(removedID) {
+            fillReferenceMode = .activeLayer
         }
     }
 
@@ -81,9 +90,32 @@ final class CanvasManager: ObservableObject {
         for layerIndex in layers.indices {
             for celIndex in layers[layerIndex].cels.indices {
                 layers[layerIndex].cels[celIndex].drawing = layers[layerIndex].cels[celIndex].drawing.transformed(using: transform)
+                if let fillImage = layers[layerIndex].cels[celIndex].fillImage {
+                    layers[layerIndex].cels[celIndex].fillImage = Self.flippedImage(fillImage, canvasSize: canvasSize, horizontal: horizontal)
+                }
             }
         }
         regenerateAllThumbnails()
+    }
+
+    /// Mirrors a raster fill image about the canvas center to match the same-direction PKDrawing
+    /// transform above, so a flipped canvas doesn't leave fill color behind on the wrong side.
+    private static func flippedImage(_ image: UIImage, canvasSize: CGSize, horizontal: Bool) -> UIImage? {
+        guard image.cgImage != nil else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
+        return renderer.image { ctx in
+            if horizontal {
+                ctx.cgContext.translateBy(x: canvasSize.width, y: 0)
+                ctx.cgContext.scaleBy(x: -1, y: 1)
+            } else {
+                ctx.cgContext.translateBy(x: 0, y: canvasSize.height)
+                ctx.cgContext.scaleBy(x: 1, y: -1)
+            }
+            image.draw(in: CGRect(origin: .zero, size: canvasSize))
+        }
     }
 
     // MARK: - Cels / timeline
@@ -123,7 +155,7 @@ final class CanvasManager: ObservableObject {
             length = min(length, nextStart - newStart)
         }
         guard length > 0 else { return }
-        let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, drawing: source.drawing)
+        let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, drawing: source.drawing, fillImage: source.fillImage)
         layers[layerIndex].cels.append(newCel)
         layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         sceneFrameCount = max(sceneFrameCount, newStart + length)
@@ -146,6 +178,7 @@ final class CanvasManager: ObservableObject {
     func clearCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].drawing = PKDrawing()
+        layers[layerIndex].cels[celIndex].fillImage = nil
         regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
     }
 
@@ -195,7 +228,7 @@ final class CanvasManager: ObservableObject {
         let cel = layers[layerIndex].cels[celIndex]
         guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return }
         layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
-        let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, drawing: cel.drawing)
+        let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, drawing: cel.drawing, fillImage: cel.fillImage)
         layers[layerIndex].cels.append(secondHalf)
         layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
@@ -255,12 +288,91 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               let canvasSize else { return }
-        let drawing = layers[layerIndex].cels[celIndex].drawing
-        let image = ThumbnailRenderer.render(drawing, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
+        let cel = layers[layerIndex].cels[celIndex]
+        let image = ThumbnailRenderer.render(cel.drawing, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
         layers[layerIndex].cels[celIndex].thumbnail = image
         if activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
             layers[layerIndex].thumbnail = image
         }
+    }
+
+    // MARK: - Fill
+
+    /// Runs the smart flood fill seeded at `point` (canvas-pixel coordinates, top-left origin) into the
+    /// active layer's current cel, using whichever layer `fillReferenceMode` selects as the wall source.
+    /// The heavy pixel work runs off the main thread; `isFilling` guards against overlapping taps while
+    /// one is in flight.
+    func performFill(at point: CGPoint) {
+        guard !isFilling else { return }
+        guard let canvasSize else { return }
+        guard layers.indices.contains(currentLayerIndex) else { return }
+        let layerIndex = currentLayerIndex
+        guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return }
+
+        let referenceLayerIndex = resolvedReferenceLayerIndex(default: layerIndex)
+        guard layers.indices.contains(referenceLayerIndex),
+              let referenceCelIndex = activeCelIndex(inLayer: referenceLayerIndex, atFrame: currentFrame) else { return }
+
+        let referenceLayer = layers[referenceLayerIndex]
+        let referenceCel = referenceLayer.cels[referenceCelIndex]
+        let existingFill = layers[layerIndex].cels[celIndex].fillImage
+        let fillColor = brushColor.resolvedUIColor(opacity: brushOpacity)
+        let gapClosing = fillGapClosingDistance
+        let expand = fillExpand
+        // Only push fill color under the reference layer's antialiased edges when that layer actually
+        // renders on top of (or within, for the self-mask case) the destination — otherwise the overlap
+        // would be a visible halo with nothing above it to hide the seam.
+        let applyExpand = referenceLayerIndex >= layerIndex
+        let undoManager = activeUndoManager
+
+        isFilling = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = FloodFillEngine.fill(
+                referenceLayer: referenceLayer,
+                referenceCel: referenceCel,
+                existingFill: existingFill,
+                canvasSize: canvasSize,
+                seed: point,
+                fillColor: fillColor,
+                gapClosingRadius: gapClosing,
+                expandRadius: expand,
+                applyExpand: applyExpand
+            )
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isFilling = false
+                guard let result else { return }
+                self.setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: result)
+                if let undoManager {
+                    self.registerFillUndo(layerIndex: layerIndex, celIndex: celIndex, from: existingFill, to: result, undoManager: undoManager)
+                    self.refreshUndoRedoState()
+                }
+            }
+        }
+    }
+
+    private func resolvedReferenceLayerIndex(default defaultIndex: Int) -> Int {
+        switch fillReferenceMode {
+        case .activeLayer: return defaultIndex
+        case .layer(let id): return layers.firstIndex(where: { $0.id == id }) ?? defaultIndex
+        }
+    }
+
+    private func setFillImage(layerIndex: Int, celIndex: Int, image: UIImage?) {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        layers[layerIndex].cels[celIndex].fillImage = image
+        scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
+    }
+
+    /// Classic reversible-closure undo registration: each undo re-registers the opposite action on the
+    /// same UndoManager, so redo (and further undo/redo cycling) keeps working.
+    private func registerFillUndo(layerIndex: Int, celIndex: Int, from oldImage: UIImage?, to newImage: UIImage?, undoManager: UndoManager) {
+        undoManager.registerUndo(withTarget: self) { target in
+            target.setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: oldImage)
+            target.registerFillUndo(layerIndex: layerIndex, celIndex: celIndex, from: newImage, to: oldImage, undoManager: undoManager)
+            target.refreshUndoRedoState()
+        }
+        undoManager.setActionName("Fill")
     }
 
     // MARK: - Undo / redo
@@ -287,6 +399,16 @@ enum Tool: Hashable {
     case pen
     case pencil
     case eraser
+    case fill
+}
+
+/// Which layer's rasterized content the fill tool treats as walls. `.activeLayer` (the default) makes
+/// the fill tool behave like an ordinary same-layer bucket fill; `.layer(id)` locks it to a specific
+/// layer (e.g. a lineart layer) regardless of which layer is currently selected for drawing, so a
+/// separate fill layer underneath can be flooded using someone else's ink as the boundary.
+enum FillReferenceMode: Hashable {
+    case activeLayer
+    case layer(UUID)
 }
 
 struct Cel: Identifiable {
@@ -294,6 +416,9 @@ struct Cel: Identifiable {
     var startFrame: Int
     var frameCount: Int
     var drawing: PKDrawing
+    /// Rasterized bucket-fill output for this frame, composited underneath `drawing`'s strokes within
+    /// the same layer. Nil until the fill tool is used on this cel.
+    var fillImage: UIImage? = nil
     var thumbnail: UIImage? = nil
 
     var endFrame: Int { startFrame + frameCount }

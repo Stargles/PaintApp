@@ -67,4 +67,5 @@ struct CelManifest: Codable {
     var startFrame: Int
     var frameCount: Int
     var drawingFileName: String
+    var fillImageFileName: String?
 }

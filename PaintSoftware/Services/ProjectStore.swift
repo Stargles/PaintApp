@@ -95,7 +95,15 @@ enum ProjectStore {
                 let fileName = "\(cel.id.uuidString).drawing"
                 let data = cel.drawing.dataRepresentation()
                 try? data.write(to: celsDir.appendingPathComponent(fileName))
-                celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount, drawingFileName: fileName))
+
+                var fillFileName: String?
+                if let fillImage = cel.fillImage, let fillData = fillImage.pngData() {
+                    let name = "\(cel.id.uuidString)-fill.png"
+                    try? fillData.write(to: imagesDir.appendingPathComponent(name))
+                    fillFileName = name
+                }
+
+                celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount, drawingFileName: fileName, fillImageFileName: fillFileName))
             }
 
             layerManifests.append(LayerManifest(
@@ -110,7 +118,7 @@ enum ProjectStore {
 
             if thumbnailImage == nil, layer.isVisible, let canvasSize = canvasManager.canvasSize,
                let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) {
-                thumbnailImage = ThumbnailRenderer.render(layer.cels[celIdx].drawing, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
+                thumbnailImage = ThumbnailRenderer.render(layer.cels[celIdx].drawing, fillImage: layer.cels[celIdx].fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
             }
         }
 
@@ -163,7 +171,11 @@ enum ProjectStore {
             for celManifest in layerManifest.cels {
                 let drawingURL = celsDir.appendingPathComponent(celManifest.drawingFileName)
                 let drawing = (try? Data(contentsOf: drawingURL)).flatMap { try? PKDrawing(data: $0) } ?? PKDrawing()
-                cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount, drawing: drawing))
+                var fillImage: UIImage?
+                if let fillFileName = celManifest.fillImageFileName {
+                    fillImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fillFileName).path)
+                }
+                cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount, drawing: drawing, fillImage: fillImage))
             }
 
             layers.append(Layer(

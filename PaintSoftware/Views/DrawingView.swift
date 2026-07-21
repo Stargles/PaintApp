@@ -66,6 +66,8 @@ struct DrawingView: View {
             BrushSettingsPanel(canvasManager: canvasManager)
         case .color:
             ColorPickerPanel(canvasManager: canvasManager)
+        case .fill:
+            FillSettingsPanel(canvasManager: canvasManager)
         }
     }
 }
