@@ -1,4 +1,5 @@
 import SwiftUI
+import PencilKit
 
 struct LayerPanel: View {
     @ObservedObject var canvasManager: CanvasManager
@@ -17,6 +18,7 @@ struct LayerPanel: View {
                     Image(systemName: "plus")
                         .foregroundColor(.white)
                 }
+                .accessibilityIdentifier("layerPanel.addButton")
             }
             .padding()
 
@@ -115,6 +117,8 @@ struct LayerRow: View {
             Text(layer.name)
                 .foregroundColor(.white)
                 .lineLimit(1)
+                .accessibilityIdentifier("layerPanel.row.\(index)")
+                .accessibilityValue("\(strokeCount)")
 
             Spacer()
 
@@ -134,5 +138,12 @@ struct LayerRow: View {
         .onTapGesture {
             canvasManager.currentLayerIndex = index
         }
+    }
+
+    /// Stroke count of this layer's cel at the current frame, exposed for UI tests to verify
+    /// which layer a drawing gesture actually landed on.
+    private var strokeCount: Int {
+        guard let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) else { return 0 }
+        return canvasManager.layers[index].cels[celIdx].drawing.strokes.count
     }
 }

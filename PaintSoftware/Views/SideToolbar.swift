@@ -38,6 +38,7 @@ struct SideToolbar: View {
                         .cornerRadius(6)
                 }
                 .accessibilityLabel(canvasManager.pencilOnlyDrawing ? "Apple Pencil only: on" : "Apple Pencil only: off")
+                .accessibilityIdentifier("sideToolbar.pencilOnlyToggle")
             }
 
             Spacer()

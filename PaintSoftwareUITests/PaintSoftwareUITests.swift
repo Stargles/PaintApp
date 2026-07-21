@@ -46,6 +46,14 @@ final class PaintSoftwareUITests: XCTestCase {
         return (start, length)
     }
 
+    /// Reads a layer panel row's accessibilityValue, which is the stroke count of that
+    /// layer's cel at the current frame (see LayerRow.strokeCount).
+    private func readLayerStrokeCount(_ app: XCUIApplication, layerIndex: Int) -> Int? {
+        let row = app.staticTexts["layerPanel.row.\(layerIndex)"]
+        guard row.waitForExistence(timeout: 5), let value = row.value as? String else { return nil }
+        return Int(value)
+    }
+
     // MARK: - Tests
 
     func testCreateCanvasReachesEditorWithoutFreezing() throws {
@@ -146,5 +154,46 @@ final class PaintSoftwareUITests: XCTestCase {
         }
         XCTAssertEqual(after.start, 3, "Dragging the left edge right by 3 frames should move the start frame to 3, but got \(after.start)")
         XCTAssertEqual(after.length, 9, "expected length 9, got \(after.length)")
+    }
+
+    /// Regression test: with two layers, activating the bottom (non-topmost) layer and drawing
+    /// on the canvas must land the stroke on that layer, not get silently swallowed by the
+    /// topmost layer's (inactive but still touch-absorbing) host view.
+    func testDrawingOnBottomLayerWhenActiveLandsStrokeOnThatLayer() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        // Synthetic XCUITest touches arrive as finger touches, not Apple Pencil, so pencil-only
+        // drawing must be off for PKCanvasView to accept them.
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap()
+
+        let layersButton = app.buttons["toolbar.layersButton"]
+        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
+        layersButton.tap()
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap() // Now two layers; the new one (index 1) is topmost and active by default.
+
+        let bottomRow = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
+        bottomRow.tap() // Activate the bottom layer while the top layer stays topmost on screen.
+
+        layersButton.tap() // Close the panel so it can't cover any part of the canvas.
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.4))
+        let end = start.withOffset(CGVector(dx: 80, dy: 0))
+        start.press(forDuration: 0.1, thenDragTo: end)
+
+        layersButton.tap() // Reopen the panel to read back stroke counts.
+
+        let bottomStrokes = readLayerStrokeCount(app, layerIndex: 0)
+        let topStrokes = readLayerStrokeCount(app, layerIndex: 1)
+        XCTAssertEqual(bottomStrokes, 1, "Drawing while the bottom layer is active should add a stroke to it, but got \(String(describing: bottomStrokes))")
+        XCTAssertEqual(topStrokes, 0, "The inactive top layer should not receive the stroke, but got \(String(describing: topStrokes))")
     }
 }

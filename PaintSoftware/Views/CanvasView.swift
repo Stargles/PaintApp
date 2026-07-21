@@ -76,6 +76,8 @@ struct CanvasView: UIViewRepresentable {
         let host = CanvasHostView()
         host.backgroundColor = .black
         host.clipsToBounds = true
+        host.isAccessibilityElement = true
+        host.accessibilityIdentifier = "canvas.host"
 
         let container = UIView()
         container.backgroundColor = .clear
@@ -257,6 +259,12 @@ struct CanvasView: UIViewRepresentable {
                 if host.canvasView.drawing != targetDrawing {
                     host.canvasView.drawing = targetDrawing
                 }
+                // Disabling only canvasView.isUserInteractionEnabled isn't enough: each LayerHostView
+                // fully covers the container and stacks as a sibling, so an inactive host still
+                // swallows touches via UIView's default hitTest (which returns the host itself once
+                // its non-interactive subviews all reject the point), preventing the touch from ever
+                // reaching an active layer underneath. Disabling the host itself lets hit-testing
+                // fall through to the next layer down.
                 let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil
                 if host.canvasView.isUserInteractionEnabled != shouldInteract {
                     host.canvasView.isUserInteractionEnabled = shouldInteract

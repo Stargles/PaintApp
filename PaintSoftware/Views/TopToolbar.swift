@@ -26,6 +26,7 @@ struct TopToolbar: View {
                 canvasManager.selectedTool = .eraser
             }
             iconButton(system: "square.stack.3d.up", isActive: activePanel == .layers) { toggle(.layers) }
+                .accessibilityIdentifier("toolbar.layersButton")
 
             Button(action: { toggle(.color) }) {
                 Circle()
