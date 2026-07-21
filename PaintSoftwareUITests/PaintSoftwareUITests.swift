@@ -54,6 +54,25 @@ final class PaintSoftwareUITests: XCTestCase {
         return Int(value)
     }
 
+    /// Whether a layer's active cel has raster content baked into it by a select/move/fill/clear
+    /// operation (see LayerRow.hasBakedImage) — the Select & Move tool's operations write here
+    /// instead of adding PencilKit strokes, so this is how tests verify they landed.
+    private func readHasBakedImage(_ app: XCUIApplication, layerIndex: Int) -> Bool? {
+        let marker = app.otherElements["layerPanel.row.\(layerIndex).hasBaked"]
+        guard marker.waitForExistence(timeout: 5), let value = marker.value as? String else { return nil }
+        return value == "1"
+    }
+
+    /// Drags a straight line on the canvas between two normalized offsets of `canvas.host` — used to
+    /// draw a rectangle selection (Select tool, Rectangle mode) or to draw a stroke.
+    private func dragOnCanvas(_ app: XCUIApplication, from: CGVector, to: CGVector) {
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let start = canvas.coordinate(withNormalizedOffset: from)
+        let end = canvas.coordinate(withNormalizedOffset: to)
+        start.press(forDuration: 0.15, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
+    }
+
     /// Drags the element with the given accessibility identifier by `totalDelta` points in one
     /// motion. XCUITest's synthetic drags can undershoot their intended distance by a
     /// timing-dependent amount (a harness quirk — verified by direct instrumentation that the
@@ -204,5 +223,87 @@ final class PaintSoftwareUITests: XCTestCase {
         let topStrokes = readLayerStrokeCount(app, layerIndex: 1)
         XCTAssertEqual(bottomStrokes, 1, "Drawing while the bottom layer is active should add a stroke to it, but got \(String(describing: bottomStrokes))")
         XCTAssertEqual(topStrokes, 0, "The inactive top layer should not receive the stroke, but got \(String(describing: topStrokes))")
+    }
+
+    // MARK: - Select & Move
+
+    /// Rectangle-select a region, then Fill it — the fill should land as baked raster content on
+    /// the active layer (Cel.bakedImage), not a PencilKit stroke.
+    func testRectangleSelectThenFillBakesPixels() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "A fresh layer shouldn't have baked content yet")
+        app.buttons["toolbar.layersButton"].tap() // close panel so it can't cover the canvas
+
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangleMode = app.buttons["Rectangle"]
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
+        rectangleMode.tap()
+
+        dragOnCanvas(app, from: CGVector(dx: 0.35, dy: 0.35), to: CGVector(dx: 0.6, dy: 0.6))
+
+        let fillButton = app.buttons["selectPanel.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap()
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), true, "Filling the selection should bake pixels into the active layer")
+    }
+
+    /// Rectangle-select, Duplicate: a new layer should appear immediately (holding the floating
+    /// piece), and the Move bottom bar's Done button should commit it into that new layer as baked
+    /// content, without touching the source layer.
+    func testDuplicateSelectionCreatesNewLayerAndCommits() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangleMode = app.buttons["Rectangle"]
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
+        rectangleMode.tap()
+
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.55, dy: 0.55))
+
+        let duplicateButton = app.buttons["selectPanel.duplicateButton"]
+        XCTAssertTrue(duplicateButton.waitForExistence(timeout: 5))
+        duplicateButton.tap()
+
+        let doneButton = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(doneButton.waitForExistence(timeout: 5), "Duplicate should immediately float the copy, showing the Move bottom bar")
+        doneButton.tap()
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5), "Duplicate should have inserted a second layer")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), true, "Committing should bake the duplicated piece into the new layer")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "Duplicate must not modify the source layer")
+    }
+
+    /// With no active selection, Move lifts the whole current layer; committing bakes it back
+    /// (flattening any prior stroke into Cel.bakedImage and clearing the live PencilKit drawing).
+    func testMoveWithNoSelectionLiftsWholeLayerAndCommits() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["sideToolbar.pencilOnlyToggle"].tap() // allow synthetic (non-Pencil) touches to draw
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Setup: the stroke should have landed as one PencilKit stroke")
+        app.buttons["toolbar.layersButton"].tap() // close panel so it can't cover the canvas
+
+        app.buttons["toolbar.moveButton"].tap()
+        let doneButton = app.buttons["moveBar.doneButton"]
+        // Rendering the whole cel's live PKDrawing to a full-resolution raster image (to lift it
+        // into a floating piece — see CanvasManager.beginMove/PixelOps.rasterize) can be very slow
+        // specifically in the Simulator's software PencilKit rendering path, so this one wait is
+        // deliberately generous — diagnosing whether this is "slow but correct" vs. a real hang.
+        XCTAssertTrue(doneButton.waitForExistence(timeout: 240), "Move with no selection should float the whole layer")
+        doneButton.tap()
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), true, "Committing the move should bake the layer's content")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 0, "The original stroke should be flattened into bakedImage, not left as a live PencilKit stroke")
     }
 }

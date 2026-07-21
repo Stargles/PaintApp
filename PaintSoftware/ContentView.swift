@@ -51,6 +51,9 @@ struct ContentView: View {
 
     private func saveIfNeeded() {
         guard screen == .editor, canvasManager.canvasSize != nil else { return }
+        // A move/duplicate mid-transform is UI-only state (see SelectionModels.swift) — bake it in
+        // before saving so backgrounding the app never loses or corrupts it.
+        canvasManager.commitFloatingPieceIfNeeded()
         let url = canvasManager.projectURL ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName)
         canvasManager.projectURL = url
         ProjectStore.save(canvasManager, to: url)

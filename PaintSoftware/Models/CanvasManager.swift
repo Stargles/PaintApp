@@ -10,7 +10,16 @@ final class CanvasManager: ObservableObject {
     var projectURL: URL?
 
     @Published var layers: [Layer] = []
-    @Published var currentLayerIndex: Int = 0
+    @Published var currentLayerIndex: Int = 0 {
+        didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
+    }
+
+    // MARK: - Select & Move tool state (see SelectionModels.swift for the operations)
+    @Published var selectionMode: SelectionMode = .lasso
+    @Published var transformMode: TransformMode = .uniform
+    @Published var magicWandTolerance: Double = 0.15
+    @Published var selection: Selection?
+    @Published var floatingPiece: FloatingPiece?
 
     @Published var brushSize: CGFloat = 5.0
     @Published var brushOpacity: Double = 1.0
@@ -23,7 +32,9 @@ final class CanvasManager: ObservableObject {
 
     @Published var fps: Int = 24
     @Published var sceneFrameCount: Int = 12
-    @Published var currentFrame: Int = 0
+    @Published var currentFrame: Int = 0 {
+        didSet { if oldValue != currentFrame { handleActiveContextChanged() } }
+    }
     @Published var isOnionSkinEnabled: Bool = true
     @Published var onionSkinOpacity: Double = 0.3
     @Published var isLoopEnabled: Bool = true
@@ -255,8 +266,13 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               let canvasSize else { return }
-        let drawing = layers[layerIndex].cels[celIndex].drawing
-        let image = ThumbnailRenderer.render(drawing, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
+        let cel = layers[layerIndex].cels[celIndex]
+        let image: UIImage
+        if cel.bakedImage != nil {
+            image = ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize), canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
+        } else {
+            image = ThumbnailRenderer.render(cel.drawing, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
+        }
         layers[layerIndex].cels[celIndex].thumbnail = image
         if activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
             layers[layerIndex].thumbnail = image
@@ -294,6 +310,11 @@ struct Cel: Identifiable {
     var startFrame: Int
     var frameCount: Int
     var drawing: PKDrawing
+    /// Flattened raster content "baked" into this cel by a pixel-level operation (select+move,
+    /// duplicate, color fill, clear selection) — see SelectionModels.swift. Sits underneath
+    /// `drawing`'s live PencilKit strokes when rendered. Nil means the cel has never had a raster
+    /// operation applied and is pure vector strokes, same as before this feature existed.
+    var bakedImage: UIImage? = nil
     var thumbnail: UIImage? = nil
 
     var endFrame: Int { startFrame + frameCount }

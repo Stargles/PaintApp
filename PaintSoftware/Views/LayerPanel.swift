@@ -120,6 +120,13 @@ struct LayerRow: View {
                 .accessibilityIdentifier("layerPanel.row.\(index)")
                 .accessibilityValue("\(strokeCount)")
 
+            // Separate marker (rather than folding into the row's own accessibilityValue above) so
+            // existing tests parsing that value as a plain stroke-count Int keep working unchanged.
+            Color.clear
+                .frame(width: 0, height: 0)
+                .accessibilityIdentifier("layerPanel.row.\(index).hasBaked")
+                .accessibilityValue(hasBakedImage ? "1" : "0")
+
             Spacer()
 
             Slider(value: Binding(
@@ -145,5 +152,12 @@ struct LayerRow: View {
     private var strokeCount: Int {
         guard let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) else { return 0 }
         return canvasManager.layers[index].cels[celIdx].drawing.strokes.count
+    }
+
+    /// Whether this layer's active cel has raster content baked into it by a select/move/fill/clear
+    /// operation (see `Cel.bakedImage`), exposed for UI tests to verify those operations landed.
+    private var hasBakedImage: Bool {
+        guard let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) else { return false }
+        return canvasManager.layers[index].cels[celIdx].bakedImage != nil
     }
 }

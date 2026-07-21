@@ -95,7 +95,15 @@ enum ProjectStore {
                 let fileName = "\(cel.id.uuidString).drawing"
                 let data = cel.drawing.dataRepresentation()
                 try? data.write(to: celsDir.appendingPathComponent(fileName))
-                celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount, drawingFileName: fileName))
+
+                var bakedFileName: String?
+                if let baked = cel.bakedImage, let bakedData = baked.pngData() {
+                    bakedFileName = "\(cel.id.uuidString)_baked.png"
+                    try? bakedData.write(to: imagesDir.appendingPathComponent(bakedFileName!))
+                }
+
+                celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
+                                                 drawingFileName: fileName, bakedImageFileName: bakedFileName))
             }
 
             layerManifests.append(LayerManifest(
@@ -110,7 +118,10 @@ enum ProjectStore {
 
             if thumbnailImage == nil, layer.isVisible, let canvasSize = canvasManager.canvasSize,
                let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) {
-                thumbnailImage = ThumbnailRenderer.render(layer.cels[celIdx].drawing, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
+                let cel = layer.cels[celIdx]
+                thumbnailImage = cel.bakedImage != nil
+                    ? ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize), canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
+                    : ThumbnailRenderer.render(cel.drawing, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
             }
         }
 
@@ -163,7 +174,12 @@ enum ProjectStore {
             for celManifest in layerManifest.cels {
                 let drawingURL = celsDir.appendingPathComponent(celManifest.drawingFileName)
                 let drawing = (try? Data(contentsOf: drawingURL)).flatMap { try? PKDrawing(data: $0) } ?? PKDrawing()
-                cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount, drawing: drawing))
+                var bakedImage: UIImage?
+                if let bakedFileName = celManifest.bakedImageFileName {
+                    bakedImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(bakedFileName).path)
+                }
+                cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
+                                 drawing: drawing, bakedImage: bakedImage))
             }
 
             layers.append(Layer(
