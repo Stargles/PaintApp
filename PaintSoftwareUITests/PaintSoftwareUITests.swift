@@ -758,4 +758,51 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertLessThan(pixel.r, 80, "Stroke drawn after setting hex to 00FF00 should have low red, got \(pixel)")
         XCTAssertLessThan(pixel.b, 80, "Stroke drawn after setting hex to 00FF00 should have low blue, got \(pixel)")
     }
+
+    // MARK: - Vector layers
+
+    /// Reads a layer row's ".vector" marker, formatted "isVector,vectorStrokeCount" (see LayerRow).
+    private func readVectorMarker(_ app: XCUIApplication, layerIndex: Int) -> (isVector: Bool, strokes: Int)? {
+        let marker = app.otherElements["layerPanel.row.\(layerIndex).vector"]
+        guard marker.waitForExistence(timeout: 5), let value = marker.value as? String else { return nil }
+        let parts = value.split(separator: ",")
+        guard parts.count == 2, let v = Int(parts[0]), let n = Int(parts[1]) else { return nil }
+        return (v == 1, n)
+    }
+
+    /// Creates a vector layer via the layer panel's add menu, draws a stroke on it, and verifies the
+    /// stroke was recorded as *vector* geometry (not a raster stamp) and that it rendered to pixels.
+    func testVectorLayerRecordsStrokeAsGeometryAndRenders() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["sideToolbar.pencilOnlyToggle"].tap() // allow synthetic (finger) touches to draw
+
+        app.buttons["toolbar.layersButton"].tap()
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.2) // long-press opens the kind menu (a plain tap adds a raster layer)
+        let vectorItem = app.buttons["Vector Layer"]
+        XCTAssertTrue(vectorItem.waitForExistence(timeout: 5), "The add menu should offer a Vector Layer option")
+        vectorItem.tap()
+
+        // The new vector layer is on top (array index 1) and active.
+        let marker = readVectorMarker(app, layerIndex: 1)
+        XCTAssertEqual(marker?.isVector, true, "The newly added layer should be a vector layer")
+        XCTAssertEqual(marker?.strokes, 0, "A fresh vector layer has no strokes yet")
+        app.buttons["toolbar.layersButton"].tap() // close panel
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+
+        // The stroke should be stored as one vector stroke (geometry), and the raster tier untouched.
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 1, "The stroke should be recorded as one vector stroke")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 0, "A vector-layer stroke must not land in the raster tier")
+        app.buttons["toolbar.layersButton"].tap()
+
+        // And it must actually render to pixels (black stroke on the mid-canvas line).
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "The vector stroke should be visible on the canvas")
+    }
 }

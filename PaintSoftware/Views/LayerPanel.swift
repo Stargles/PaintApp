@@ -144,6 +144,13 @@ struct LayerRow: View {
                 .accessibilityIdentifier("layerPanel.row.\(index).hasBaked")
                 .accessibilityValue(hasBakedImage ? "1" : "0")
 
+            // Marker exposing the layer's kind + its vector stroke count, for tests to verify a
+            // vector layer was created and that a stroke landed as vector geometry (not raster).
+            Color.clear
+                .frame(width: 0, height: 0)
+                .accessibilityIdentifier("layerPanel.row.\(index).vector")
+                .accessibilityValue("\(layer.kind == .vector ? 1 : 0),\(vectorStrokeCount)")
+
             Spacer()
 
             Slider(value: Binding(
@@ -180,5 +187,11 @@ struct LayerRow: View {
     private var hasBakedImage: Bool {
         guard let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) else { return false }
         return canvasManager.layers[index].cels[celIdx].bakedImage != nil
+    }
+
+    /// Number of vector strokes in this layer's active cel (0 for raster layers), for UI tests.
+    private var vectorStrokeCount: Int {
+        guard let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) else { return 0 }
+        return canvasManager.layers[index].cels[celIdx].vector?.strokes.count ?? 0
     }
 }
