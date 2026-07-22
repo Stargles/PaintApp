@@ -13,7 +13,8 @@ struct SideToolbar: View {
                         get: { Double(canvasManager.brushSize) },
                         set: { canvasManager.brushSize = CGFloat($0) }
                     ),
-                    range: 1...50
+                    range: 1...50,
+                    accessibilityIdentifier: "sideToolbar.brushSizeSlider"
                 )
                 .frame(height: 160)
 
@@ -26,7 +27,7 @@ struct SideToolbar: View {
                         .cornerRadius(6)
                 }
 
-                VerticalSlider(value: $canvasManager.brushOpacity, range: 0...1)
+                VerticalSlider(value: $canvasManager.brushOpacity, range: 0...1, accessibilityIdentifier: "sideToolbar.brushOpacitySlider")
                     .frame(height: 160)
 
                 Button(action: { canvasManager.pencilOnlyDrawing.toggle() }) {
@@ -71,6 +72,11 @@ struct SideToolbar: View {
 private struct VerticalSlider: View {
     @Binding var value: Double
     let range: ClosedRange<Double>
+    // Identifies this specific slider for UI tests. Without this, `app.sliders.firstMatch`
+    // (or any lookup that doesn't disambiguate) silently grabs whichever of SideToolbar's two
+    // sliders happens to come first in the accessibility tree — a known pre-existing bug that
+    // masked a real slider-value bug elsewhere (see BUGS.md, "Fill tool" section).
+    var accessibilityIdentifier: String? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -78,6 +84,7 @@ private struct VerticalSlider: View {
                 .frame(width: geo.size.height)
                 .rotationEffect(.degrees(-90))
                 .frame(width: geo.size.width, height: geo.size.height)
+                .accessibilityIdentifier(accessibilityIdentifier ?? "")
         }
     }
 }

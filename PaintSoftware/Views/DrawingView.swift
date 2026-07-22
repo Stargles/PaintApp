@@ -6,6 +6,9 @@ struct DrawingView: View {
 
     @State private var activePanel: ActivePanel = .none
     @State private var isTimelineExpanded: Bool = true
+    // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
+    // discreet corner button. Lives entirely in its own view; this is just the overlay + state.
+    @State private var isPerfHUDVisible: Bool = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -52,6 +55,13 @@ struct DrawingView: View {
                     }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+
+                // Discreet, default-off FPS/frame-time HUD (see PerfHUD.swift) — tucked below the
+                // top toolbar on the leading side, clear of the toolbar's own icons, the trailing
+                // panel, and the bottom timeline/transform bar.
+                PerfHUDOverlay(canvasManager: canvasManager, isVisible: $isPerfHUDVisible)
+                    .padding(.top, 64)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .background(Color.black)
