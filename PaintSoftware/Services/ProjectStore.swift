@@ -180,13 +180,11 @@ enum ProjectStore {
             }
         }
 
-        // TODO(brush-wiring): CanvasManager doesn't have `selectedBrush` on this base yet — Worker
-        // B is adding it (see CLAUDE.md worker brief). Once it lands, replace this default with
-        // the manager's actual selected brush (and whatever custom-brush list it ends up owning)
-        // so the user's brush choice persists too. Using a sensible default in the meantime keeps
-        // this compiling and the manifest schema stable regardless of when that property arrives.
-        let selectedBrush = BrushLibrary.softRound
-        let customBrushes: [Brush] = []
+        // Persist the user's actual brush choice + imported custom brushes (Worker B's brush engine
+        // owns these on CanvasManager) so they survive a save/reload, and copy any custom-brush
+        // stamp textures into the project package for self-containment.
+        let selectedBrush = canvasManager.selectedBrush
+        let customBrushes = canvasManager.customBrushes
         copyCustomBrushTexturesIntoProject([selectedBrush] + customBrushes, projectURL: url)
 
         let manifest = ProjectManifest(
@@ -230,11 +228,8 @@ enum ProjectStore {
         // referenced file is missing there (project moved to another device, or the global entry
         // was deleted) — see copyCustomBrushTexturesIntoProject's doc comment for the save side.
         restoreCustomBrushTexturesFromProject([manifest.selectedBrush] + manifest.customBrushes, projectURL: url)
-        // TODO(brush-wiring): once Worker B adds `canvasManager.selectedBrush` (and whatever list
-        // of custom brushes it ends up owning), wire the decoded values in here, e.g.:
-        //   manager.selectedBrush = manifest.selectedBrush
-        // Nothing is lost in the meantime — the metadata round-trips correctly and the texture
-        // files are restored above — it's just not connected to the UI/tool state yet.
+        manager.customBrushes = manifest.customBrushes
+        manager.selectBrush(manifest.selectedBrush)
 
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)
         let canvasSize = manager.canvasSize ?? CGSize(width: 1, height: 1)

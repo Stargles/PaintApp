@@ -2,31 +2,35 @@
 
 Format: one section per bug, newest first. See [CLAUDE.md](CLAUDE.md) for the multi-session protocol.
 
-## Fill containment regressed under the new stroke engine (2026-07-21)
+## Fill containment "regression" under the new stroke engine — RESOLVED, was a test bug (2026-07-21)
 
-**Status:** Known, tracked, assigned to a worker task — deliberately *not* fixed in the engine
-foundation commit. `testFillToolMasksFromReferenceLayerAcrossLayers` is `XCTSkip`-ped (same
-convention as the gap-closing test below) pending that work.
+**Status:** RESOLVED. The fill tool was never actually broken. `testFillToolMasksFromReferenceLayerAcrossLayers`
+is re-enabled and passing.
 
-**What happens:** with PencilKit replaced by the new raster stroke engine (`RasterLayerTexture` +
-`StrokeCanvasView`), a bucket fill bounded by a *reference layer's* traced-square lineart leaks out
-to the canvas corner instead of staying contained. 13 of 14 UI tests pass — drawing, same-layer
-fill landing, select/move/baked pixels, undo, and the timeline are all fine; only cross-layer fill
-*containment* regressed.
+**Root cause (found by the renderer worker via an instrumented run + a grid dump of the filled
+canvas):** the test's "leaked outside" probe point `(dx:0.05, dy:0.05)` lands in `canvas.host`'s
+**letterbox margin**, not on the canvas paper. `canvas.host`'s frame isn't square (~758×1190 on this
+iPad sim), so the 2048×2048 canvas is letterboxed/centered inside it and the top-left corner is solid
+black even on a blank canvas — so the assertion failed for a reason unrelated to fill. A grid dump of
+the actual filled region showed clean, correct containment matching the traced square exactly; the
+fill engine was fine all along. This is exactly the letterbox theory Session 9/10 suspected but
+couldn't confirm. **Fix:** `PaintSoftwareUITests.swift` gained `visibleCanvasBounds(_:)` /
+`safeOutsideCornerPoint(_:)` helpers that compute the real (non-letterboxed) canvas rect at runtime
+and probe a point provably inside it, and the `XCTSkip` was removed.
 
-**Investigation so far (foundation session):** the placeholder brush in `StrokeCanvasView` stamps
-discrete round dots. Two continuity fixes were already applied and kept (they're correct regardless):
-(1) `stampPath` interpolates evenly-spaced stamps *between* input samples, and (2) `handleEnd`
-stamps through to the exact lift point so an edge reaches its endpoint/corner. Neither closed the
-leak, so the remaining cause is deeper than sample sparsity — candidate leads for the worker:
-the ~5pt wall may be too thin for the flood fill's wall/expand model at this brush size; a possible
-vertical-orientation mismatch between `RasterLayerTexture.renderToUIImage()` and what
-`FloodFillEngine` expects (the traced square is symmetric, so a flip wouldn't show up in *this*
-test — worth checking with an asymmetric shape); or the reference-layer raster read
-(`FloodFillEngine.rasterizeReferenceComposite`, now `cel.raster.renderToUIImage()`) not matching
-the old `PKDrawing.image(from:scale:)` coverage. This is expected to be largely resolved by the
-renderer worker's real stroke rasterization (continuous, per-stroke-accumulated strokes) — verify
-by re-enabling the test (delete the `throw XCTSkip(...)` at the top of its body).
+**Note:** the two stroke-continuity improvements made while chasing this (interpolated `stampPath`
+between samples, and `handleEnd` stamping through to the lift point) were correct regardless and were
+kept — a stamp brush should draw continuous lines that reach the lift point.
+
+### Still open: a latent orientation bug in FloodFillEngine (found, not yet fixed)
+
+While root-causing the above, the renderer worker found via a standalone offscreen harness that
+`FloodFillEngine.alphaMask`/`composite` apply an unnecessary vertical flip — correct for XCUITest
+screenshot byte order but wrong for `UIGraphicsImageRenderer`/`RasterLayerTexture.renderToUIImage()`
+output. It is **self-canceling for vertically-symmetric shapes** (like the traced square every
+current fill test uses), so no test catches it and normal filling of symmetric regions looks fine —
+but it could misbehave on an asymmetric lineart region. Left unfixed; verify with an asymmetric-shape
+fill test before trusting fills near the canvas edges.
 
 ## Zoomed-in blur: fixed for raster content, but PencilKit ink can't be fixed this way — likely needs a custom drawing engine (2026-07-21)
 
