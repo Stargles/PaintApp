@@ -26,6 +26,43 @@ final class CanvasManager: ObservableObject {
     @Published var selectedTool: Tool = .pen
     @Published var pencilOnlyDrawing: Bool = true
 
+    /// The full brush preset currently active (shape, hardness, spacing, stabilization, dynamics,
+    /// scatter/rotation jitter, grain, blend mode) — everything `StrokeCanvasView.stampOne` reads
+    /// beyond the live `brushSize`/`brushOpacity` above, which stay separate published properties
+    /// (rather than folded into this) because `SideToolbar`'s sliders already bind directly to them
+    /// and can move independently of whichever preset is selected, same as Procreate letting you
+    /// nudge a brush's size without that becoming a new saved preset.
+    @Published var selectedBrush: Brush = BrushLibrary.softRound
+    /// User-imported custom brushes (see `BrushSettingsPanel`'s import flow), in the order added.
+    /// In-memory only here — persisting these across app launches is handled by `ProjectStore`/
+    /// `ProjectManifest`.
+    @Published var customBrushes: [Brush] = []
+
+    /// Every brush offered in the picker: the 5 built-in presets followed by user imports.
+    var availableBrushes: [Brush] { BrushLibrary.defaults + customBrushes }
+
+    /// Selects a brush preset (built-in or custom) as the active brush. Also re-baselines the live
+    /// `brushSize`/`brushOpacity` from the brush's own defaults — matching Procreate's behavior of
+    /// resetting size/opacity when you switch brushes — and keeps `selectedTool` on a paint tool
+    /// (`.pencil` for the Pencil preset, `.pen` for every other shape) so `TopToolbar`'s existing
+    /// pen/pencil/eraser/fill highlight logic keeps working unchanged. Leaves `selectedTool` alone
+    /// while the eraser or fill tool is active, so picking a brush from the panel while erasing
+    /// doesn't silently switch back to painting.
+    func selectBrush(_ brush: Brush) {
+        selectedBrush = brush
+        brushSize = brush.size
+        brushOpacity = brush.opacity
+        if selectedTool != .eraser && selectedTool != .fill {
+            selectedTool = (brush.shape == .pencil) ? .pencil : .pen
+        }
+    }
+
+    /// Adds a freshly-imported custom brush to the in-memory list and makes it the active brush.
+    func addCustomBrush(_ brush: Brush) {
+        customBrushes.append(brush)
+        selectBrush(brush)
+    }
+
     @Published var fillReferenceMode: FillReferenceMode = .activeLayer
     @Published var fillGapClosingDistance: CGFloat = 8
     @Published var fillExpand: CGFloat = 2
