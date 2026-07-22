@@ -3,6 +3,16 @@ import SwiftUI
 struct FillSettingsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
 
+    /// The vivid blue for the setting the fill tool's sideways drag currently adjusts, and the lighter
+    /// blue for the others — so it's obvious at a glance which slider the drag is wired to. Changing any
+    /// slider re-points the selection at it (see `CanvasManager.setFillSetting`).
+    private static let selectedTint = Color(red: 0.20, green: 0.55, blue: 1.0)
+    private static let unselectedTint = Color(red: 0.60, green: 0.78, blue: 1.0)
+
+    private func tint(_ axis: CanvasManager.FillAxis) -> Color {
+        canvasManager.fillSelectedAxis == axis ? Self.selectedTint : Self.unselectedTint
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -11,12 +21,21 @@ struct FillSettingsPanel: View {
                     .foregroundColor(.white)
                     .padding([.horizontal, .top])
 
+                Text("The highlighted slider is the one the fill tool's sideways drag adjusts. Move any slider to switch the drag to it.")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .padding(.horizontal)
+
                 VStack(alignment: .leading) {
                     Text("Gap Closing: \(Int(canvasManager.fillGapClosingDistance)) px")
                         .foregroundColor(.white)
-                    Slider(value: $canvasManager.fillGapClosingDistance, in: 0...40)
+                    Slider(value: Binding(
+                        get: { canvasManager.fillGapClosingDistance },
+                        set: { canvasManager.setFillSetting(.gapClosing, $0) }
+                    ), in: CanvasManager.fillGapRange)
+                        .tint(tint(.gapClosing))
                         .accessibilityIdentifier("fillPanel.gapClosingSlider")
-                    Text("Bridges small breaks in a boundary so the fill doesn't leak out (vertical drag).")
+                    Text("Bridges small breaks in a boundary so the fill doesn't leak out.")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
@@ -25,9 +44,13 @@ struct FillSettingsPanel: View {
                 VStack(alignment: .leading) {
                     Text("Threshold: \(Int(canvasManager.fillThreshold * 100))%")
                         .foregroundColor(.white)
-                    Slider(value: $canvasManager.fillThreshold, in: 0...1)
+                    Slider(value: Binding(
+                        get: { canvasManager.fillThreshold },
+                        set: { canvasManager.setFillSetting(.threshold, $0) }
+                    ), in: CanvasManager.fillThresholdRange)
+                        .tint(tint(.threshold))
                         .accessibilityIdentifier("fillPanel.thresholdSlider")
-                    Text("How different two colours must be to count as a wall — higher spreads across softer borders (horizontal drag).")
+                    Text("How different two colours must be to count as a wall — higher spreads across softer borders.")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
@@ -36,7 +59,11 @@ struct FillSettingsPanel: View {
                 VStack(alignment: .leading) {
                     Text("Edge Overlap: \(Int(canvasManager.fillExpand)) px")
                         .foregroundColor(.white)
-                    Slider(value: $canvasManager.fillExpand, in: 0...6)
+                    Slider(value: Binding(
+                        get: { canvasManager.fillExpand },
+                        set: { canvasManager.setFillSetting(.edgeOverlap, $0) }
+                    ), in: CanvasManager.fillExpandRange)
+                        .tint(tint(.edgeOverlap))
                         .accessibilityIdentifier("fillPanel.edgeOverlapSlider")
                     Text("Extends the fill slightly under the boundary to remove antialiasing gaps.")
                         .font(.caption)

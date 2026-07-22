@@ -552,12 +552,13 @@ struct CanvasView: UIViewRepresentable {
         weak var fillTapRecognizer: UILongPressGestureRecognizer?
 
         // Interactive-fill drag state, captured at press-down: the finger's start point in fixed
-        // screen (host) space, and the gap-closing / edge-overlap settings at that moment. The drag's
-        // vertical travel adjusts gap-closing (up = higher) and horizontal travel adjusts edge overlap
-        // (right = higher), each relative to these baselines.
+        // screen (host) space, and all three fill settings at that moment. The drag is horizontal-only —
+        // its rightward travel raises whichever single setting is currently selected (canvasManager
+        // .fillSelectedAxis, default gap-closing), relative to these baselines; the others hold.
         private var fillDragStartHost: CGPoint?
         private var fillDragStartGap: CGFloat = 0
         private var fillDragStartThreshold: CGFloat = 0
+        private var fillDragStartEdge: CGFloat = 0
 
         /// Finger travel (in screen points) that sweeps a fill setting across its whole slider range.
         /// Deliberately generous so fine adjustments are easy; the value is clamped in CanvasManager.
@@ -1025,10 +1026,11 @@ struct CanvasView: UIViewRepresentable {
         /// Captures the touch centroid and container center at the start of whichever of
         /// pan/pinch/rotation begins first, so all three can share one anchor for this touch sequence.
         private func beginAnchorIfNeeded(at location: CGPoint) {
-            // A two-finger pan/zoom/rotate is starting; if a single-finger fill press was mid-flight
+            // A two-finger pan/zoom/rotate is starting; if a single-finger fill press was mid-drag
             // (its first touch having already begun a fill), abandon that fill without committing so the
-            // transform takes over cleanly. No-op when no fill is active.
-            canvasManager.cancelInteractiveFill()
+            // transform takes over cleanly. An already-lifted, still-adjustable fill is left intact so the
+            // user can pan/zoom to inspect it and keep adjusting. No-op when no fill drag is active.
+            canvasManager.cancelInteractiveFillDrag()
             guard gestureAnchorCenter0 == nil, let container = containerView else { return }
             gestureAnchorHost0 = location
             gestureAnchorCenter0 = container.center
@@ -1153,22 +1155,39 @@ struct CanvasView: UIViewRepresentable {
                 fillDragStartHost = recognizer.location(in: host)
                 fillDragStartGap = canvasManager.fillGapClosingDistance
                 fillDragStartThreshold = canvasManager.fillThreshold
-                canvasManager.beginInteractiveFill(at: recognizer.location(in: container))
+                fillDragStartEdge = canvasManager.fillExpand
+                let canvasPoint = recognizer.location(in: container)
+                // Pressing back down inside a still-adjustable fill resumes dragging it; anywhere else
+                // starts a fresh fill (which commits the previous adjustable one first).
+                if canvasManager.isPointInPendingFill(at: canvasPoint) {
+                    canvasManager.resumeInteractiveFillDrag()
+                } else {
+                    canvasManager.beginInteractiveFill(at: canvasPoint)
+                }
             case .changed:
                 guard let start = fillDragStartHost else { return }
-                let current = recognizer.location(in: host)
-                let gapPerPoint = (CanvasManager.fillGapRange.upperBound - CanvasManager.fillGapRange.lowerBound) / Self.fillDragSweepPoints
-                let thresholdPerPoint = (CanvasManager.fillThresholdRange.upperBound - CanvasManager.fillThresholdRange.lowerBound) / Self.fillDragSweepPoints
-                // Up (negative dy in screen space) raises gap-closing; right (positive dx) raises the wall
-                // threshold. Edge overlap is not on the drag — it has its own slider.
-                let gap = fillDragStartGap - (current.y - start.y) * gapPerPoint
-                let threshold = fillDragStartThreshold + (current.x - start.x) * thresholdPerPoint
-                canvasManager.updateInteractiveFill(gapClosing: gap, threshold: threshold, edgeOverlap: canvasManager.fillExpand)
+                let dx = recognizer.location(in: host).x - start.x
+                // Horizontal-only: rightward travel raises the single selected setting across its range;
+                // the other two hold at their press-down baselines.
+                func perPoint(_ range: ClosedRange<CGFloat>) -> CGFloat {
+                    (range.upperBound - range.lowerBound) / Self.fillDragSweepPoints
+                }
+                switch canvasManager.fillSelectedAxis {
+                case .gapClosing:
+                    let gap = fillDragStartGap + dx * perPoint(CanvasManager.fillGapRange)
+                    canvasManager.updateInteractiveFill(gapClosing: gap, threshold: fillDragStartThreshold, edgeOverlap: fillDragStartEdge)
+                case .threshold:
+                    let threshold = fillDragStartThreshold + dx * perPoint(CanvasManager.fillThresholdRange)
+                    canvasManager.updateInteractiveFill(gapClosing: fillDragStartGap, threshold: threshold, edgeOverlap: fillDragStartEdge)
+                case .edgeOverlap:
+                    let edge = fillDragStartEdge + dx * perPoint(CanvasManager.fillExpandRange)
+                    canvasManager.updateInteractiveFill(gapClosing: fillDragStartGap, threshold: fillDragStartThreshold, edgeOverlap: edge)
+                }
             case .ended:
                 canvasManager.endInteractiveFill()
                 fillDragStartHost = nil
             case .cancelled, .failed:
-                canvasManager.cancelInteractiveFill()
+                canvasManager.cancelInteractiveFillDrag()
                 fillDragStartHost = nil
             default:
                 break
