@@ -212,6 +212,7 @@ enum ProjectStore {
             name: canvasManager.projectName,
             canvasWidth: Double(canvasManager.canvasSize?.width ?? 0),
             canvasHeight: Double(canvasManager.canvasSize?.height ?? 0),
+            canvasPadding: Double(canvasManager.canvasPadding),
             fps: canvasManager.fps,
             sceneFrameCount: canvasManager.sceneFrameCount,
             layers: layerManifests,
@@ -239,6 +240,9 @@ enum ProjectStore {
         manager.projectName = manifest.name
         manager.projectURL = url
         manager.canvasSize = CGSize(width: manifest.canvasWidth, height: manifest.canvasHeight)
+        // No resize on load: the buffers were saved at the full padded canvasSize; padding only drives
+        // the paper inset that reveals the grey margin.
+        manager.canvasPadding = CGFloat(manifest.canvasPadding)
         manager.fps = manifest.fps
         manager.sceneFrameCount = manifest.sceneFrameCount
         manager.canvasBackgroundColor = manifest.backgroundColor.color

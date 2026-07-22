@@ -150,6 +150,24 @@ final class RasterLayerTexture {
         return RasterLayerTexture(size: size, image: flippedImage, strokeCount: strokeCount)
     }
 
+    /// A new instance sized to `newSize` with this texture's pixels re-placed at `offset` (canvas
+    /// point space), used by the canvas-padding resize (see `CanvasManager.setCanvasPadding`): growing
+    /// the padding shifts existing content by a positive offset so it stays centred; shrinking uses a
+    /// negative offset, cropping whatever falls outside the new bounds. A blank texture (no backing
+    /// bitmap yet) stays blank and free — no bitmap is allocated. Infrequent whole-canvas op, so it
+    /// renders through `UIGraphicsImageRenderer` rather than the incremental stamp path.
+    func resized(to newSize: CGSize, offset: CGPoint) -> RasterLayerTexture {
+        guard context != nil else { return RasterLayerTexture(size: newSize, strokeCount: strokeCount) }
+        let current = renderToUIImage()
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = 1
+        let placed = UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
+            current.draw(in: CGRect(origin: offset, size: size))
+        }
+        return RasterLayerTexture(size: newSize, image: placed, strokeCount: strokeCount)
+    }
+
     // MARK: - Stroke lifecycle (called by the drawing surface, e.g. StrokeCanvasView)
 
     func beginStroke() {

@@ -425,6 +425,15 @@ struct CanvasView: UIViewRepresentable {
         container.backgroundColor = .clear
         host.addSubview(container)
 
+        // Light-grey backing for the drawable padding margin: fills the whole (padded) container and
+        // sits behind the white paper, so wherever the paper is inset by `canvasPadding` the grey shows
+        // through as the margin. At padding 0 the paper covers it edge-to-edge and it's never seen.
+        let paddingBackdrop = UIView()
+        paddingBackdrop.backgroundColor = UIColor(white: 0.85, alpha: 1)
+        paddingBackdrop.isUserInteractionEnabled = false
+        paddingBackdrop.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(paddingBackdrop)
+
         let paper = UIView()
         paper.backgroundColor = .white
         paper.isUserInteractionEnabled = false
@@ -454,11 +463,21 @@ struct CanvasView: UIViewRepresentable {
         floatingOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(floatingOverlay)
 
+        // Paper is inset from the container by `canvasPadding` on each side (the artwork rect); the
+        // coordinator updates these constants in `updatePaper()`. Positive top/leading, negative
+        // bottom/trailing so a larger padding shrinks the white paper inward, revealing the grey margin.
+        let paperTop = paper.topAnchor.constraint(equalTo: container.topAnchor)
+        let paperBottom = paper.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        let paperLeading = paper.leadingAnchor.constraint(equalTo: container.leadingAnchor)
+        let paperTrailing = paper.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+        context.coordinator.paperInsetConstraints = (top: paperTop, bottom: paperBottom, leading: paperLeading, trailing: paperTrailing)
+
         NSLayoutConstraint.activate([
-            paper.topAnchor.constraint(equalTo: container.topAnchor),
-            paper.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            paper.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            paper.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            paddingBackdrop.topAnchor.constraint(equalTo: container.topAnchor),
+            paddingBackdrop.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            paddingBackdrop.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            paddingBackdrop.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            paperTop, paperBottom, paperLeading, paperTrailing,
             onionSkin.topAnchor.constraint(equalTo: container.topAnchor),
             onionSkin.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             onionSkin.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -540,6 +559,9 @@ struct CanvasView: UIViewRepresentable {
         weak var containerView: UIView?
         weak var onionSkinView: UIImageView?
         weak var paperView: UIView?
+        /// The four constraints pinning the white paper to the container, whose constants are the
+        /// `canvasPadding` inset on each side (see `updatePaper`).
+        var paperInsetConstraints: (top: NSLayoutConstraint, bottom: NSLayoutConstraint, leading: NSLayoutConstraint, trailing: NSLayoutConstraint)?
         weak var transformOverlay: ObjectTransformOverlayView?
         weak var selectionOverlay: SelectionOverlayView?
         weak var floatingOverlay: FloatingPieceOverlayView?
@@ -616,6 +638,14 @@ struct CanvasView: UIViewRepresentable {
             guard let paperView else { return }
             paperView.backgroundColor = UIColor(canvasManager.canvasBackgroundColor)
             paperView.isHidden = !canvasManager.isCanvasBackgroundVisible
+            // Inset the paper to the artwork rect; the grey backdrop shows through the resulting margin.
+            if let c = paperInsetConstraints {
+                let p = canvasManager.canvasPadding
+                if c.top.constant != p { c.top.constant = p }
+                if c.leading.constant != p { c.leading.constant = p }
+                if c.bottom.constant != -p { c.bottom.constant = -p }
+                if c.trailing.constant != -p { c.trailing.constant = -p }
+            }
         }
 
         func reconcileLayers() {

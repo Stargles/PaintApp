@@ -69,6 +69,17 @@ final class VectorCanvas {
         VectorCanvas(size: size, strokes: strokes, images: images, transform: transform)
     }
 
+    /// A new canvas sized to `newSize` with all content shifted by `offset` (canvas point space),
+    /// used by the canvas-padding resize (see `CanvasManager.setCanvasPadding`). Lossless: because
+    /// `render()` applies the overall `transform` *after* drawing local content, appending a
+    /// translation to `transform` shifts the whole rendered result by `offset` with no resampling —
+    /// the stored strokes/images (in local space) are untouched. `size` is immutable, so this returns
+    /// a fresh instance.
+    func resized(to newSize: CGSize, offset: CGPoint) -> VectorCanvas {
+        let shifted = transform.concatenating(CGAffineTransform(translationX: offset.x, y: offset.y))
+        return VectorCanvas(size: newSize, strokes: strokes, images: images, transform: shifted)
+    }
+
     private func invalidate() {
         version += 1
         cachedImage = nil

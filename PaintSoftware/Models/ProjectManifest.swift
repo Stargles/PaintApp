@@ -5,6 +5,10 @@ struct ProjectManifest: Codable {
     var name: String
     var canvasWidth: Double
     var canvasHeight: Double
+    /// Light-grey drawable margin around the artwork (see `CanvasManager.canvasPadding`). Folded into
+    /// canvasWidth/Height (the buffers are saved at the full padded size), so this only needs restoring
+    /// so the paper inset is drawn correctly — no resize happens on load.
+    var canvasPadding: Double
     var fps: Int
     var sceneFrameCount: Int
     var layers: [LayerManifest]
@@ -21,7 +25,7 @@ struct ProjectManifest: Codable {
     var selectedBrush: Brush
     var customBrushes: [Brush]
 
-    init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, fps: Int, sceneFrameCount: Int,
+    init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int, sceneFrameCount: Int,
          layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
          selectedBrush: Brush = BrushLibrary.softRound, customBrushes: [Brush] = []) {
@@ -29,6 +33,7 @@ struct ProjectManifest: Codable {
         self.name = name
         self.canvasWidth = canvasWidth
         self.canvasHeight = canvasHeight
+        self.canvasPadding = canvasPadding
         self.fps = fps
         self.sceneFrameCount = sceneFrameCount
         self.layers = layers
@@ -48,6 +53,7 @@ struct ProjectManifest: Codable {
         name = try container.decode(String.self, forKey: .name)
         canvasWidth = try container.decode(Double.self, forKey: .canvasWidth)
         canvasHeight = try container.decode(Double.self, forKey: .canvasHeight)
+        canvasPadding = try container.decodeIfPresent(Double.self, forKey: .canvasPadding) ?? 0
         fps = try container.decode(Int.self, forKey: .fps)
         sceneFrameCount = try container.decode(Int.self, forKey: .sceneFrameCount)
         layers = try container.decode([LayerManifest].self, forKey: .layers)

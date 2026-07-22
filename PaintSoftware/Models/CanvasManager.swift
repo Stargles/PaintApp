@@ -3,7 +3,21 @@ import Combine
 import UIKit
 
 final class CanvasManager: ObservableObject {
+    /// The full working canvas size, *including* any padding margin — everything downstream (buffers,
+    /// container bounds, fill, thumbnails, fit-to-screen, persistence) keys off this. The artwork rect
+    /// is derived as this inset by `canvasPadding` on every side (see `canvasPadding`).
     @Published var canvasSize: CGSize?
+
+    /// Light-grey drawable margin (in canvas pixels) around the artwork on every side, adjustable from
+    /// the Actions menu (default 0). It's folded into `canvasSize` — the margin is real, drawable
+    /// canvas, not a visual-only border — so the artwork rect is `canvasSize` inset by this amount:
+    /// origin `(padding, padding)`, size `canvasSize - 2*padding`. Changed only via `setCanvasPadding`,
+    /// which resizes every buffer to keep existing content centred.
+    @Published var canvasPadding: CGFloat = 0
+
+    /// Clamp range for `canvasPadding`; the Actions-menu slider mirrors it.
+    static let canvasPaddingRange: ClosedRange<CGFloat> = 0...512
+
     @Published var projectName: String = "Untitled"
     var projectID: UUID = UUID()
     var projectURL: URL?
@@ -222,6 +236,53 @@ final class CanvasManager: ObservableObject {
 
     func moveLayer(from source: IndexSet, to destination: Int) {
         layers.move(fromOffsets: source, toOffset: destination)
+    }
+
+    /// Sets the light-grey drawable margin around the artwork, resizing every layer/cel buffer so the
+    /// existing artwork stays centred (a uniform translate — no resampling of vector content, and
+    /// raster/baked/fill content is re-placed at the offset). Growing the margin shifts content by a
+    /// positive offset; shrinking crops whatever falls outside the new bounds. Not undoable — buffer
+    /// dimensions change, so the active layer's stroke-undo stack is cleared (inactive layers' stacks
+    /// clear on next activation, see `updateActiveLayerAndTool`).
+    func setCanvasPadding(_ newPadding: CGFloat) {
+        guard let oldSize = canvasSize else { return }
+        let clamped = min(max(newPadding, Self.canvasPaddingRange.lowerBound), Self.canvasPaddingRange.upperBound)
+        let delta = clamped - canvasPadding
+        guard delta != 0 else { return }
+
+        // Selection/floating-piece buffers are canvas-sized; bake/clear them before the size changes.
+        commitFloatingPieceIfNeeded()
+        selection = nil
+
+        let offset = CGPoint(x: delta, y: delta)
+        let newSize = CGSize(width: oldSize.width + 2 * delta, height: oldSize.height + 2 * delta)
+
+        for layerIndex in layers.indices {
+            if layers[layerIndex].isObjectLayer {
+                layers[layerIndex].objectTransform.position.x += offset.x
+                layers[layerIndex].objectTransform.position.y += offset.y
+            }
+            for celIndex in layers[layerIndex].cels.indices {
+                layers[layerIndex].cels[celIndex].raster =
+                    layers[layerIndex].cels[celIndex].raster.resized(to: newSize, offset: offset)
+                if let fill = layers[layerIndex].cels[celIndex].fillImage {
+                    layers[layerIndex].cels[celIndex].fillImage = PixelOps.resizedCanvasImage(fill, to: newSize, offset: offset)
+                }
+                if let baked = layers[layerIndex].cels[celIndex].bakedImage {
+                    layers[layerIndex].cels[celIndex].bakedImage = PixelOps.resizedCanvasImage(baked, to: newSize, offset: offset)
+                }
+                if let vector = layers[layerIndex].cels[celIndex].vector {
+                    layers[layerIndex].cels[celIndex].vector = vector.resized(to: newSize, offset: offset)
+                }
+            }
+        }
+
+        canvasSize = newSize
+        canvasPadding = clamped
+
+        activeUndoManager?.removeAllActions()
+        refreshUndoRedoState()
+        regenerateAllThumbnails()
     }
 
     func flipCanvas(horizontal: Bool) {

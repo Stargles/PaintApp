@@ -85,6 +85,17 @@ enum PixelOps {
         }
     }
 
+    /// A `newSize` copy of a canvas-sized image with its pixels re-placed at `offset` (canvas point
+    /// space), used by the canvas-padding resize (see `CanvasManager.setCanvasPadding`) for a cel's
+    /// `fillImage`/`bakedImage`. A positive offset (growing padding) keeps content centred; a negative
+    /// one (shrinking) crops whatever falls outside the new bounds.
+    static func resizedCanvasImage(_ image: UIImage, to newSize: CGSize, offset: CGPoint) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(bounds: CGRect(origin: .zero, size: newSize), format: transparentFormat())
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: offset, size: image.size))
+        }
+    }
+
     /// Draws `overlay` on top of `base` (or on transparent if `base` is nil), both canvas-sized.
     static func compositeOver(base: UIImage?, overlay: UIImage) -> UIImage {
         let bounds = CGRect(origin: .zero, size: overlay.size)
