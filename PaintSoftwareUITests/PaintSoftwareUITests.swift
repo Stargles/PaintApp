@@ -108,8 +108,10 @@ final class PaintSoftwareUITests: XCTestCase {
             data: &buffer, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow,
             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
-        context.translateBy(x: 0, y: CGFloat(height))
-        context.scaleBy(x: 1, y: -1)
+        // No flip: drawing the screenshot's (top-down) cgImage into a default bitmap context lands its
+        // top row at buffer row 0, so buffer[dy] reads the pixel that's visually at dy. (The old
+        // translate/scale(-1) here silently read the vertical mirror — undetectable on the centred /
+        // color-only probes every earlier test used, but wrong for off-center position checks.)
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
         let x = min(max(Int(dx * Double(width)), 0), width - 1)
@@ -577,12 +579,6 @@ final class PaintSoftwareUITests: XCTestCase {
         insideProbe: (dx: Double, dy: Double),
         outsideProbe: (dx: Double, dy: Double)
     ) throws {
-        // Disabled pending a fix. These reproduce a confirmed defect: with off-center reference content
-        // the fill lands at the vertically-mirrored canvas position of the tap instead of at the tap
-        // (a centered shape hides it because it's symmetric under a vertical flip). See BUGS.md,
-        // "Fill tool: off-center reference content fills vertically mirrored".
-        throw XCTSkip("Disabled pending fix — see BUGS.md (fill off-center vertical mirror)")
-
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
@@ -603,17 +599,15 @@ final class PaintSoftwareUITests: XCTestCase {
 
         let fillButton = app.buttons["toolbar.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
-        fillButton.tap() // Selects the fill tool and opens its settings panel...
-        fillButton.tap() // ...then closes the panel again so it can't cover the canvas region we tap.
+        fillButton.tap() // First tap selects the fill tool; its menu stays closed.
 
         canvas.coordinate(withNormalizedOffset: CGVector(dx: insideProbe.dx, dy: insideProbe.dy)).tap()
 
         XCTAssertTrue(waitUntilFilled(canvas, dx: insideProbe.dx, dy: insideProbe.dy), "Tapping inside the off-center square should color its interior")
 
         // The discriminator: a point in the opposite quadrant, far outside the drawn square. If the fill
-        // read the reference layer from a mirrored mask, the seed landed in open space and the fill
-        // leaked out of the (mirrored-away) walls to flood here.
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outsideProbe.dx, dy: outsideProbe.dy)), "Fill of an off-center square must stay contained — leaking here means the reference layer was rasterized mirrored")
+        // read the reference mirrored, the seed landed in open space and the fill leaked out here.
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outsideProbe.dx, dy: outsideProbe.dy)), "Fill of an off-center square must stay contained — leaking here means the reference was rasterized mirrored")
     }
 
     /// Task 2: pressing the fill tool on the canvas and dragging **up** raises the gap-closing setting in
@@ -628,14 +622,14 @@ final class PaintSoftwareUITests: XCTestCase {
                                        what: "Dragging up during a fill should raise gap-closing")
     }
 
-    /// Task 2 companion: dragging **right** raises the edge-overlap setting live, mirrored by the left
-    /// rail's edge-overlap slider (which replaces brush Opacity in fill mode).
-    func testInteractiveFillDragRightRaisesEdgeOverlap() throws {
-        try runInteractiveFillDragTest(sliderID: "sideToolbar.edgeOverlapSlider",
+    /// Task 2 companion: dragging **right** raises the wall-threshold setting live, mirrored by the left
+    /// rail's threshold slider.
+    func testInteractiveFillDragRightRaisesThreshold() throws {
+        try runInteractiveFillDragTest(sliderID: "sideToolbar.thresholdSlider",
                                        from: CGVector(dx: 0.15, dy: 0.5),
                                        to: CGVector(dx: 0.5, dy: 0.5),
                                        expectRaised: true,
-                                       what: "Dragging right during a fill should raise edge overlap")
+                                       what: "Dragging right during a fill should raise the wall threshold")
     }
 
     /// Shared body: selects the fill tool (a single tap, which also switches the left rail's two sliders
@@ -727,8 +721,8 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(addButton.waitForNonExistence(timeout: 3), "Tapping off an open menu should dismiss it")
     }
 
-    /// Task 3: the left rail's two sliders are Size / Opacity for the brush and swap to Gap Closing /
-    /// Edge Overlap when the fill tool is active.
+    /// Task 3: the left rail's sliders are Size / Opacity for the brush and swap to Gap Closing /
+    /// Threshold / Edge Overlap when the fill tool is active.
     func testLeftRailSlidersSwapWithTool() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -742,8 +736,10 @@ final class PaintSoftwareUITests: XCTestCase {
         app.buttons["toolbar.fillButton"].tap() // select fill
 
         XCTAssertTrue(app.sliders["sideToolbar.gapClosingSlider"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.sliders["sideToolbar.thresholdSlider"].exists)
         XCTAssertTrue(app.sliders["sideToolbar.edgeOverlapSlider"].exists)
         XCTAssertTrue(app.staticTexts["Gap Closing"].exists)
+        XCTAssertTrue(app.staticTexts["Threshold"].exists)
         XCTAssertTrue(app.staticTexts["Edge Overlap"].exists)
         XCTAssertFalse(app.sliders["sideToolbar.brushSizeSlider"].exists)
     }

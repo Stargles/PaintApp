@@ -16,34 +16,21 @@ Format: one section per bug, newest first. See [CLAUDE.md](CLAUDE.md) for the mu
 
 ---
 
-## Fill tool: off-center reference content fills vertically mirrored (CONFIRMED) (2026-07-22)
+## Fill tool: off-center fill vertically mirrored — FIXED (2026-07-22)
 
-**Status:** confirmed reproducible, not yet fixed (deprioritized). This is the same
-long-suspected FloodFillEngine vertical-flip, now pinned down with a repro.
+**Status:** fixed and verified (visually in the simulator + two re-enabled XCUITests,
+`testFillToolFillsOffCenterSquareTopLeftWithoutMirroring` / `...BottomRightWithoutMirroring`).
 
-**Symptom:** filling a region whose reference content is *off-center* colors the region's
-**vertically-mirrored** canvas position instead of the tapped region. It is self-canceling for
-vertically-symmetric shapes (the centered traced square every earlier fill test used), which is why
-it went uncaught for so long. Normal-looking centered fills are unaffected.
+The long-latent vertical flip was two mismatched CoreGraphics orientation conversions in the GPU
+fill's CPU glue (`CanvasManager`): `compositeReferenceRGBA` was extracting the reference bytes through
+a `translateBy/scaleBy(-1)` flip, and `imageFromRGBA` was re-introducing one via `CGContext.makeImage()`.
+Drawing a top-down `cgImage` into a *default* bitmap context already lands row 0 at the top, so both
+now skip the flip (reference via a plain `draw`, output via a `CGDataProvider`-backed `CGImage`).
+Centered shapes hid it for months because they're symmetric under a vertical flip.
 
-**Repro (grid diagnostic, 2026-07-22):** draw a closed square in the top-left quadrant (host-normalized
-x≈0.24–0.44, y≈0.24–0.44), select fill, tap the interior (≈0.34,0.34). The interior stays blank; a
-*contained* square fills at the vertical mirror instead (host y≈0.6–0.7). The fill is contained (not a
-leak) and correctly shaped — only vertically flipped in canvas space. Two XCUITests reproduce it and
-are currently `throw XCTSkip`-disabled:
-`testFillToolFillsOffCenterSquareTopLeftWithoutMirroring` and
-`...BottomRightWithoutMirroring` (shared body `runOffCenterFillContainmentTest`).
-
-**Where to look:** the 2026-07-22 fill-engine rewrite replaced `FloodFillEngine.alphaMask` (the old
-suspected culprit) with `FillSession.rasterizeWallMask`, which draws all wall sources via
-`UIGraphicsPushContext` + a manual `translateBy/scaleBy(-1)` flip + `UIImage.draw(in:)`. The
-`composite` output path (unchanged from the original) also applies a flip when drawing the existing
-fill. The mirror is an inconsistency between the mask-rasterization flip and the composite/seed
-orientation — the rewrite did **not** fix or worsen the underlying flip (the same symptom predates it;
-see the pre-rewrite note this section replaces). Fix by making `rasterizeWallMask` produce the same
-top-down row order the seed and `composite` assume, then re-enable the two skipped tests. The engine's
-correctness tests for *centered* shapes (`testFillToolFillsClosedLineartRegion`,
-`testFillToolMasksFromReferenceLayerAcrossLayers`) must keep passing.
+Note: the XCUITest probe helper `rgbaPixel` had the *same* latent flip (harmless on the centered /
+colour-only checks every earlier test used); it was corrected at the same time, so position-sensitive
+fill assertions now read the true on-screen pixel.
 
 ## Fill tool: gap-closing UI test disabled, root cause not fully closed out (2026-07-21)
 

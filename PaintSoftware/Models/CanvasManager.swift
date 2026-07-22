@@ -114,6 +114,10 @@ final class CanvasManager: ObservableObject {
     }
 
     @Published var fillGapClosingDistance: CGFloat = 8
+    /// Colour-distance threshold (0..1) above which a boundary counts as a wall. Higher = the fill
+    /// spreads across bigger colour differences (fewer walls); lower = subtle borders stop it. Driven by
+    /// the fill tool's horizontal drag.
+    @Published var fillThreshold: CGFloat = 0.15
     @Published var fillExpand: CGFloat = 2
     @Published var isFilling: Bool = false
 
@@ -456,42 +460,39 @@ final class CanvasManager: ObservableObject {
     /// clamps to these and (in `CanvasView`) maps a full sweep of each onto a fixed amount of finger
     /// travel.
     static let fillGapRange: ClosedRange<CGFloat> = 0...40
+    static let fillThresholdRange: ClosedRange<CGFloat> = 0...1
     static let fillExpandRange: ClosedRange<CGFloat> = 0...6
 
-    /// Serial queue that owns every flood-fill computation for the active gesture. Keeping it serial
-    /// means the cached `FillSession` (the reference layer is rasterized into walls exactly once, in
-    /// `beginInteractiveFill`) and the render bookkeeping below are only ever touched from one thread,
-    /// and lets `drainFillWork` coalesce a burst of drag updates down to a single render of the latest
-    /// parameters instead of recomputing for every touch-moved event.
+    /// Serial queue that owns every fill computation for the active gesture. Keeping it serial means the
+    /// GPU session (the reference is composited + uploaded exactly once, in `beginInteractiveFill`) and
+    /// the render bookkeeping below are only ever touched from one thread, and lets `drainFillWork`
+    /// coalesce a burst of drag updates down to a single render of the latest parameters.
     private let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
 
-    /// Guarded by `fillLock`: the most recently requested (integer-quantized) parameters, whether a drain
-    /// worker is already scheduled, and the parameters last actually rendered. Written from the main
-    /// thread on each drag update, read/updated on `fillQueue`.
+    /// The three quantized fill parameters, coalesced across a burst of touch-moves.
+    private struct FillKey: Equatable { var gap: Int; var threshold: Int; var edge: Int }
     private let fillLock = NSLock()
-    private var fillPendingGap = 0
-    private var fillPendingExpand = 0
+    private var fillPending = FillKey(gap: 0, threshold: 0, edge: 0)
+    private var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min)
     private var fillWorkerScheduled = false
-    private var fillRenderedGap = Int.min
-    private var fillRenderedExpand = Int.min
 
-    /// Gesture context. `fillSession` is only ever touched on `fillQueue`; the rest is set on the main
-    /// thread in `beginInteractiveFill` before any `fillQueue` work is dispatched, then only read after.
-    private var fillSession: FillSession?
+    /// Gesture context. `fillSession`/`fillSeedColor` are only touched on `fillQueue`; the rest is set on
+    /// the main thread in `beginInteractiveFill` before any `fillQueue` work runs, then only read after.
+    private var fillSession: MetalFillSession?
+    private var fillSeedColor: SIMD4<Float> = .zero
     private var fillGestureActive = false      // main-thread only
-    private var fillGestureSeed: CGPoint = .zero
-    private var fillGestureColor: UIColor = .black
-    private var fillGestureApplyExpand = false
+    private var fillGestureSeed: (x: Int, y: Int) = (0, 0)
+    private var fillGestureColor: SIMD4<Float> = .zero   // premultiplied 0..1
     private var fillGestureLayerIndex = 0
     private var fillGestureCelIndex = 0
-    private var fillGestureBaseFill: UIImage?  // fill raster before this gesture: undo base + composite base
+    private var fillGestureBaseBaked: UIImage?  // layer's baked pixels before this gesture (undo/composite base)
     private weak var fillGestureUndoManager: UndoManager?
 
-    /// Begins an interactive fill at `point` (canvas-pixel coords, top-left origin): gathers every layer
-    /// marked as a fill reference into a wall set, rasterizes it once into a reusable `FillSession`, and
-    /// paints an initial fill with the current gap-closing / edge-overlap settings. A plain tap is just
-    /// this immediately followed by `endInteractiveFill`; a press-and-drag streams `updateInteractiveFill`
-    /// calls in between.
+    /// Begins an interactive fill at `point` (canvas-pixel coords, top-left origin): composites every
+    /// fill-reference layer into a reference image once, uploads it to a GPU `MetalFillSession`, samples
+    /// the tapped colour, and paints an initial fill. A plain tap is just this immediately followed by
+    /// `endInteractiveFill`; a press-and-drag streams `updateInteractiveFill` calls in between. The fill
+    /// preview lives in `fillImage` and is baked into the layer's pixels (`bakedImage`) on commit.
     func beginInteractiveFill(at point: CGPoint) {
         guard !fillGestureActive else { return }
         guard let canvasSize else { return }
@@ -500,43 +501,51 @@ final class CanvasManager: ObservableObject {
         guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return }
 
         let references = fillReferenceSources()
+        let width = Int(canvasSize.width.rounded())
+        let height = Int(canvasSize.height.rounded())
+        let seedX = min(max(Int(point.x.rounded(.down)), 0), width - 1)
+        let seedY = min(max(Int(point.y.rounded(.down)), 0), height - 1)
 
         fillGestureActive = true
-        fillGestureSeed = point
-        fillGestureColor = brushColor.resolvedUIColor(opacity: brushOpacity)
-        // Only push fill color under a reference's antialiased edges when at least one reference layer
-        // renders on top of (or within, for the self-mask case) the destination — otherwise the overlap
-        // would be a visible halo with nothing above it to hide the seam.
-        fillGestureApplyExpand = layers.indices.contains { $0 >= layerIndex && layers[$0].isFillReference }
+        fillGestureSeed = (seedX, seedY)
+        fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: brushOpacity))
         fillGestureLayerIndex = layerIndex
         fillGestureCelIndex = celIndex
-        fillGestureBaseFill = layers[layerIndex].cels[celIndex].fillImage
+        fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
         fillGestureUndoManager = activeUndoManager
 
         fillLock.lock()
-        fillPendingGap = Int(fillGapClosingDistance.rounded())
-        fillPendingExpand = Int(fillExpand.rounded())
-        fillRenderedGap = Int.min
-        fillRenderedExpand = Int.min
+        fillPending = currentFillKey()
+        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min)
         fillWorkerScheduled = true // claimed here so early drag updates don't spawn a second worker
         fillLock.unlock()
 
         fillQueue.async { [weak self] in
             guard let self else { return }
-            self.fillSession = FillSession(references: references, canvasSize: canvasSize)
+            if let refBytes = Self.compositeReferenceRGBA(references: references, width: width, height: height) {
+                let session = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width, height: height)
+                self.fillSession = session
+                self.fillSeedColor = session?.seedColor(atX: seedX, y: seedY) ?? .zero
+            }
             self.drainFillWork()
         }
+    }
+
+    private func currentFillKey() -> FillKey {
+        FillKey(gap: Int(fillGapClosingDistance.rounded()),
+                threshold: Int((fillThreshold * 1000).rounded()),
+                edge: Int(fillExpand.rounded()))
     }
 
     /// The layers whose content bounds the fill, bottom-to-top: every layer marked `isFillReference`, at
     /// its active cel for the current frame. Empty when nothing is a reference (the fill then floods the
     /// whole canvas).
-    private func fillReferenceSources() -> [FillReferenceSource] {
+    private func fillReferenceSources() -> [(layer: Layer, cel: Cel)] {
         layers.indices.compactMap { i in
             let layer = layers[i]
             guard layer.isFillReference,
                   let celIdx = activeCelIndex(inLayer: i, atFrame: currentFrame) else { return nil }
-            return FillReferenceSource(layer: layer, cel: layer.cels[celIdx])
+            return (layer, layer.cels[celIdx])
         }
     }
 
@@ -558,21 +567,21 @@ final class CanvasManager: ObservableObject {
         layers[layerIndex].isFillReference = nowVisible
     }
 
-    /// Updates the in-progress fill's gap-closing (`gapClosing`) and edge-overlap (`expand`) values —
-    /// clamped to the slider ranges — and re-fills from the cached session. Also writes them back to the
-    /// published settings so the Fill panel's two sliders mirror the drag live. Cheap to call on every
-    /// touch-move: writing the same integer-quantized values as last time schedules no work, and a burst
-    /// coalesces to a single trailing render.
-    func updateInteractiveFill(gapClosing: CGFloat, expand: CGFloat) {
+    /// Updates the in-progress fill's gap-closing (vertical drag), wall threshold (horizontal drag) and
+    /// edge-overlap settings — clamped to the slider ranges — and re-fills from the cached GPU session.
+    /// Also writes them back to the published settings so the fill sliders mirror the drag live. Cheap to
+    /// call on every touch-move: identical quantized values schedule no work, and a burst coalesces.
+    func updateInteractiveFill(gapClosing: CGFloat, threshold: CGFloat, edgeOverlap: CGFloat) {
         guard fillGestureActive else { return }
         let clampedGap = min(max(gapClosing, Self.fillGapRange.lowerBound), Self.fillGapRange.upperBound)
-        let clampedExpand = min(max(expand, Self.fillExpandRange.lowerBound), Self.fillExpandRange.upperBound)
+        let clampedThreshold = min(max(threshold, Self.fillThresholdRange.lowerBound), Self.fillThresholdRange.upperBound)
+        let clampedEdge = min(max(edgeOverlap, Self.fillExpandRange.lowerBound), Self.fillExpandRange.upperBound)
         if fillGapClosingDistance != clampedGap { fillGapClosingDistance = clampedGap }
-        if fillExpand != clampedExpand { fillExpand = clampedExpand }
+        if fillThreshold != clampedThreshold { fillThreshold = clampedThreshold }
+        if fillExpand != clampedEdge { fillExpand = clampedEdge }
 
         fillLock.lock()
-        fillPendingGap = Int(clampedGap.rounded())
-        fillPendingExpand = Int(clampedExpand.rounded())
+        fillPending = currentFillKey()
         let alreadyScheduled = fillWorkerScheduled
         fillWorkerScheduled = true
         fillLock.unlock()
@@ -581,8 +590,8 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Commits the interactive fill: flushes any last-requested parameters, then registers a single undo
-    /// step spanning the whole gesture (baseline → final) so a press-drag is one "Fill", not one per tick.
+    /// Commits the interactive fill: flushes any last-requested parameters, then bakes the preview into
+    /// the layer's pixels as a single "Fill" undo step, so re-filling that region later recolours it.
     func endInteractiveFill() {
         guard fillGestureActive else { return }
         fillQueue.async { [weak self] in
@@ -593,12 +602,12 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Abandons the interactive fill without committing, restoring the pre-gesture fill raster. Used when
-    /// a two-finger pan/zoom/rotate or an undo/redo tap takes over the touch sequence mid-fill.
+    /// Abandons the interactive fill without committing, discarding the preview. Used when a two-finger
+    /// pan/zoom/rotate or an undo/redo tap takes over the touch sequence mid-fill.
     func cancelInteractiveFill() {
         guard fillGestureActive else { return }
         fillGestureActive = false // stops any in-flight render from applying (its main hop checks this)
-        setFillImage(layerIndex: fillGestureLayerIndex, celIndex: fillGestureCelIndex, image: fillGestureBaseFill)
+        setFillPreview(layerIndex: fillGestureLayerIndex, celIndex: fillGestureCelIndex, image: nil)
         fillQueue.async { [weak self] in self?.fillSession = nil }
     }
 
@@ -606,51 +615,115 @@ final class CanvasManager: ObservableObject {
         guard fillGestureActive else { return }
         fillGestureActive = false
         let layerIndex = fillGestureLayerIndex, celIndex = fillGestureCelIndex
-        let base = fillGestureBaseFill
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        let final = layers[layerIndex].cels[celIndex].fillImage
-        if final !== base, let undoManager = fillGestureUndoManager {
-            registerFillUndo(layerIndex: layerIndex, celIndex: celIndex, from: base, to: final, undoManager: undoManager)
-            refreshUndoRedoState()
-        }
+        let cel = layers[layerIndex].cels[celIndex]
+        guard let preview = cel.fillImage else { return }  // nothing was previewed
+        // Bake the preview into the layer's flattened raster (bakedImage) and clear the transient
+        // preview, so the fill is now real layer pixels — a later fill over it recolours it. One undo
+        // step covers the whole gesture; the raster (live strokes) is untouched.
+        let newBaked = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: preview)
+        registerUndoableCelChange(layerIndex: layerIndex, celIndex: celIndex,
+                                  oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,
+                                  newRaster: cel.raster, newBaked: newBaked, newFill: nil, actionName: "Fill")
+        fillGestureBaseBaked = nil
     }
 
-    /// Runs on `fillQueue`. Recomputes the fill for the latest requested parameters and pushes the result
-    /// to the active cel, looping until pending == last-rendered so a burst of drag updates collapses to a
-    /// single trailing render. A nil result (seed sealed shut) shows the untouched baseline rather than
-    /// clearing the fill.
+    /// Runs on `fillQueue`. Recomputes the fill for the latest requested parameters and pushes the painted
+    /// preview to the active cel, looping until pending == last-rendered so a burst of drag updates
+    /// collapses to a single trailing render.
     private func drainFillWork() {
         while true {
             fillLock.lock()
-            let gap = fillPendingGap, expand = fillPendingExpand
-            if gap == fillRenderedGap && expand == fillRenderedExpand {
+            let key = fillPending
+            if key == fillRendered {
                 fillWorkerScheduled = false
                 fillLock.unlock()
                 return
             }
-            fillRenderedGap = gap
-            fillRenderedExpand = expand
+            fillRendered = key
             fillLock.unlock()
 
             guard let session = fillSession else {
                 fillLock.lock(); fillWorkerScheduled = false; fillLock.unlock()
                 return
             }
-            let base = fillGestureBaseFill
-            let image = session.fill(
-                seed: fillGestureSeed,
-                fillColor: fillGestureColor,
-                existingFill: base,
-                gapClosingRadius: CGFloat(gap),
-                expandRadius: CGFloat(expand),
-                applyExpand: fillGestureApplyExpand
-            )
+            let bytes = session.fill(seedX: fillGestureSeed.x, seedY: fillGestureSeed.y,
+                                     seedColor: fillSeedColor,
+                                     threshold: Float(Double(key.threshold) / 1000.0),
+                                     gapRadius: Float(key.gap), edgeOverlap: Float(key.edge),
+                                     fillColor: fillGestureColor)
+            let image = bytes.flatMap { Self.imageFromRGBA($0, width: session.width, height: session.height) }
             let layerIndex = fillGestureLayerIndex, celIndex = fillGestureCelIndex
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.fillGestureActive else { return }
-                self.setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: image ?? base)
+                self.setFillPreview(layerIndex: layerIndex, celIndex: celIndex, image: image)
             }
         }
+    }
+
+    private func setFillPreview(layerIndex: Int, celIndex: Int, image: UIImage?) {
+        setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: image)
+    }
+
+    // MARK: - Fill helpers
+
+    /// Premultiplied RGBA components (0..1) of a UIColor, resolved against a fixed light trait so
+    /// dynamic colours don't silently return black (the getRed-on-dynamic-colour pitfall).
+    private static func premultipliedComponents(_ color: UIColor) -> SIMD4<Float> {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return SIMD4<Float>(Float(r * a), Float(g * a), Float(b * a), Float(a))
+    }
+
+    /// Composites the fill-reference layers (bottom-to-top) into a top-left-origin, premultiplied-last
+    /// RGBA byte buffer the GPU reads its walls from. Excludes each layer's own transient fill preview
+    /// (`fillImage`) but includes committed fills (now baked into `bakedImage`), so recolouring works.
+    private static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], width: Int, height: Int) -> [UInt8]? {
+        guard width > 0, height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
+        let composited = renderer.image { _ in
+            let rect = CGRect(x: 0, y: 0, width: width, height: height)
+            for source in references {
+                if source.layer.isObjectLayer, let objectImage = source.layer.objectImage {
+                    objectImage.draw(in: rect)
+                }
+                source.cel.bakedImage?.draw(in: rect)
+                source.cel.raster.renderToUIImage().draw(in: rect)
+                source.cel.vector?.render().draw(in: rect)
+            }
+        }
+        guard let cg = composited.cgImage else { return nil }
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let bytesPerRow = width * 4
+        let ok: Bool = bytes.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.interpolationQuality = .none
+            // No flip: drawing a top-down UIImage's cgImage into a default bitmap context already lands
+            // its top row at buffer row 0. (The old engine's translate/scale(-1) here was the long-latent
+            // vertical-mirror bug — invisible on the centred shapes every earlier test used.)
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return ok ? bytes : nil
+    }
+
+    /// Wraps a top-left-origin premultiplied-last RGBA byte buffer into a UIImage for the fill preview.
+    /// Built via a `CGDataProvider`, which is canonically top-down (data row 0 is the top) — matching the
+    /// top-down reference the GPU fills against, so the painted region displays where it was tapped.
+    private static func imageFromRGBA(_ bytes: [UInt8], width: Int, height: Int) -> UIImage? {
+        guard width > 0, height > 0, bytes.count >= width * height * 4 else { return nil }
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cg = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                               bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                               bitmapInfo: bitmapInfo, provider: provider, decode: nil,
+                               shouldInterpolate: false, intent: .defaultIntent) else { return nil }
+        return UIImage(cgImage: cg, scale: 1, orientation: .up)
     }
 
 
@@ -658,17 +731,6 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].fillImage = image
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
-    }
-
-    /// Classic reversible-closure undo registration: each undo re-registers the opposite action on the
-    /// same UndoManager, so redo (and further undo/redo cycling) keeps working.
-    private func registerFillUndo(layerIndex: Int, celIndex: Int, from oldImage: UIImage?, to newImage: UIImage?, undoManager: UndoManager) {
-        undoManager.registerUndo(withTarget: self) { target in
-            target.setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: oldImage)
-            target.registerFillUndo(layerIndex: layerIndex, celIndex: celIndex, from: newImage, to: oldImage, undoManager: undoManager)
-            target.refreshUndoRedoState()
-        }
-        undoManager.setActionName("Fill")
     }
 
     // MARK: - Undo / redo

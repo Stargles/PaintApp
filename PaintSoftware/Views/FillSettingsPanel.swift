@@ -16,7 +16,18 @@ struct FillSettingsPanel: View {
                         .foregroundColor(.white)
                     Slider(value: $canvasManager.fillGapClosingDistance, in: 0...40)
                         .accessibilityIdentifier("fillPanel.gapClosingSlider")
-                    Text("Bridges small breaks in open lineart so the fill doesn't leak out.")
+                    Text("Bridges small breaks in a boundary so the fill doesn't leak out (vertical drag).")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                .padding(.horizontal)
+
+                VStack(alignment: .leading) {
+                    Text("Threshold: \(Int(canvasManager.fillThreshold * 100))%")
+                        .foregroundColor(.white)
+                    Slider(value: $canvasManager.fillThreshold, in: 0...1)
+                        .accessibilityIdentifier("fillPanel.thresholdSlider")
+                    Text("How different two colours must be to count as a wall — higher spreads across softer borders (horizontal drag).")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
@@ -27,7 +38,7 @@ struct FillSettingsPanel: View {
                         .foregroundColor(.white)
                     Slider(value: $canvasManager.fillExpand, in: 0...6)
                         .accessibilityIdentifier("fillPanel.edgeOverlapSlider")
-                    Text("Extends the fill slightly under the lineart to remove antialiasing gaps.")
+                    Text("Extends the fill slightly under the boundary to remove antialiasing gaps.")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }

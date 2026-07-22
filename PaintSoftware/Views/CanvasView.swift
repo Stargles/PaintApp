@@ -371,9 +371,12 @@ final class LayerHostView: UIView {
         fillImageView.layer.magnificationFilter = .nearest
         bakedImageView.layer.magnificationFilter = .nearest
 
+        // `fillImageView` now shows the *live* fill-tool preview (committed fills are baked into
+        // `bakedImage`), so it sits ABOVE `bakedImageView` — a recolour preview has to draw over the
+        // existing baked content it's replacing — and below `strokeView`'s live ink.
         addSubview(imageView)
-        addSubview(fillImageView)
         addSubview(bakedImageView)
+        addSubview(fillImageView)
         addSubview(strokeView)
         NSLayoutConstraint.activate([
             // imageView is deliberately NOT pinned here: object layers position it directly via
@@ -554,7 +557,7 @@ struct CanvasView: UIViewRepresentable {
         // (right = higher), each relative to these baselines.
         private var fillDragStartHost: CGPoint?
         private var fillDragStartGap: CGFloat = 0
-        private var fillDragStartExpand: CGFloat = 0
+        private var fillDragStartThreshold: CGFloat = 0
 
         /// Finger travel (in screen points) that sweeps a fill setting across its whole slider range.
         /// Deliberately generous so fine adjustments are easy; the value is clamped in CanvasManager.
@@ -1144,22 +1147,23 @@ struct CanvasView: UIViewRepresentable {
             switch recognizer.state {
             case .began:
                 // container's bounds are exactly canvasSize (see hostBoundsDidChange), so location(in:)
-                // there yields canvas-pixel coordinates — the same top-left-origin space FloodFillEngine
-                // and the onion-skin/thumbnail renderers use. The drag delta, in contrast, is measured in
+                // there yields canvas-pixel coordinates — the top-left-origin space the fill engine and
+                // the onion-skin/thumbnail renderers use. The drag delta, in contrast, is measured in
                 // fixed screen (host) space so the feel is independent of the canvas's current zoom.
                 fillDragStartHost = recognizer.location(in: host)
                 fillDragStartGap = canvasManager.fillGapClosingDistance
-                fillDragStartExpand = canvasManager.fillExpand
+                fillDragStartThreshold = canvasManager.fillThreshold
                 canvasManager.beginInteractiveFill(at: recognizer.location(in: container))
             case .changed:
                 guard let start = fillDragStartHost else { return }
                 let current = recognizer.location(in: host)
                 let gapPerPoint = (CanvasManager.fillGapRange.upperBound - CanvasManager.fillGapRange.lowerBound) / Self.fillDragSweepPoints
-                let expandPerPoint = (CanvasManager.fillExpandRange.upperBound - CanvasManager.fillExpandRange.lowerBound) / Self.fillDragSweepPoints
-                // Up (negative dy in screen space) raises gap-closing; right (positive dx) raises overlap.
+                let thresholdPerPoint = (CanvasManager.fillThresholdRange.upperBound - CanvasManager.fillThresholdRange.lowerBound) / Self.fillDragSweepPoints
+                // Up (negative dy in screen space) raises gap-closing; right (positive dx) raises the wall
+                // threshold. Edge overlap is not on the drag — it has its own slider.
                 let gap = fillDragStartGap - (current.y - start.y) * gapPerPoint
-                let expand = fillDragStartExpand + (current.x - start.x) * expandPerPoint
-                canvasManager.updateInteractiveFill(gapClosing: gap, expand: expand)
+                let threshold = fillDragStartThreshold + (current.x - start.x) * thresholdPerPoint
+                canvasManager.updateInteractiveFill(gapClosing: gap, threshold: threshold, edgeOverlap: canvasManager.fillExpand)
             case .ended:
                 canvasManager.endInteractiveFill()
                 fillDragStartHost = nil

@@ -3,22 +3,37 @@ import SwiftUI
 struct SideToolbar: View {
     @ObservedObject var canvasManager: CanvasManager
 
-    /// When the fill tool is active the two sliders control the fill settings instead of the brush's,
-    /// so the whole left rail doubles as quick access to gap-closing / edge-overlap (mirrored live while
-    /// dragging a fill). Any other tool shows the brush size / opacity sliders.
+    /// When the fill tool is active the left rail's sliders control the fill settings instead of the
+    /// brush's, so it doubles as quick access to gap-closing / threshold / edge-overlap (mirrored live
+    /// while dragging a fill). Any other tool shows the brush size / opacity sliders.
     private var isFillMode: Bool { canvasManager.selectedTool == .fill }
+
+    /// Fill mode has three sliders instead of two, so they're a little shorter to fit the rail.
+    private var sliderHeight: CGFloat { isFillMode ? 120 : 150 }
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 16) {
+            VStack(spacing: 14) {
                 if isFillMode {
                     labeledSlider(
                         title: "Gap Closing",
                         value: Binding(get: { Double(canvasManager.fillGapClosingDistance) }, set: { canvasManager.fillGapClosingDistance = CGFloat($0) }),
                         range: Double(CanvasManager.fillGapRange.lowerBound)...Double(CanvasManager.fillGapRange.upperBound),
                         identifier: "sideToolbar.gapClosingSlider"
+                    )
+                    labeledSlider(
+                        title: "Threshold",
+                        value: Binding(get: { Double(canvasManager.fillThreshold) }, set: { canvasManager.fillThreshold = CGFloat($0) }),
+                        range: Double(CanvasManager.fillThresholdRange.lowerBound)...Double(CanvasManager.fillThresholdRange.upperBound),
+                        identifier: "sideToolbar.thresholdSlider"
+                    )
+                    labeledSlider(
+                        title: "Edge Overlap",
+                        value: Binding(get: { Double(canvasManager.fillExpand) }, set: { canvasManager.fillExpand = CGFloat($0) }),
+                        range: Double(CanvasManager.fillExpandRange.lowerBound)...Double(CanvasManager.fillExpandRange.upperBound),
+                        identifier: "sideToolbar.edgeOverlapSlider"
                     )
                 } else {
                     labeledSlider(
@@ -27,25 +42,14 @@ struct SideToolbar: View {
                         range: 1...50,
                         identifier: "sideToolbar.brushSizeSlider"
                     )
-                }
-
-                Button(action: resetSettings) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.footnote)
-                        .foregroundColor(.white)
-                        .frame(width: 30, height: 30)
-                        .background(Color.white.opacity(0.15))
-                        .cornerRadius(6)
-                }
-
-                if isFillMode {
-                    labeledSlider(
-                        title: "Edge Overlap",
-                        value: Binding(get: { Double(canvasManager.fillExpand) }, set: { canvasManager.fillExpand = CGFloat($0) }),
-                        range: Double(CanvasManager.fillExpandRange.lowerBound)...Double(CanvasManager.fillExpandRange.upperBound),
-                        identifier: "sideToolbar.edgeOverlapSlider"
-                    )
-                } else {
+                    Button(action: resetSettings) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.footnote)
+                            .foregroundColor(.white)
+                            .frame(width: 30, height: 30)
+                            .background(Color.white.opacity(0.15))
+                            .cornerRadius(6)
+                    }
                     labeledSlider(
                         title: "Opacity",
                         value: $canvasManager.brushOpacity,
@@ -92,7 +96,7 @@ struct SideToolbar: View {
     private func labeledSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>, identifier: String) -> some View {
         VStack(spacing: 4) {
             VerticalSlider(value: value, range: range, accessibilityIdentifier: identifier)
-                .frame(height: 150)
+                .frame(height: sliderHeight)
             Text(title)
                 .font(.system(size: 9, weight: .medium))
                 .foregroundColor(.white.opacity(0.7))
