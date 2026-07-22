@@ -33,24 +33,10 @@ struct FillSettingsPanel: View {
                 }
                 .padding(.horizontal)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Reference Layer")
-                        .foregroundColor(.white)
-                    Text("Which layer's lines the fill uses as its boundary.")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-
-                    referenceRow(title: "Active Layer", isSelected: canvasManager.fillReferenceMode == .activeLayer) {
-                        canvasManager.fillReferenceMode = .activeLayer
-                    }
-
-                    ForEach(Array(canvasManager.layers.enumerated().reversed()), id: \.element.id) { _, layer in
-                        referenceRow(title: layer.name, isSelected: canvasManager.fillReferenceMode == .layer(layer.id)) {
-                            canvasManager.fillReferenceMode = .layer(layer.id)
-                        }
-                    }
-                }
-                .padding(.horizontal)
+                Text("Set which layers bound the fill in the Layers panel — each layer's Edit menu has a Fill Reference switch.")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .padding(.horizontal)
 
                 if canvasManager.isFilling {
                     HStack {
@@ -65,24 +51,5 @@ struct FillSettingsPanel: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black.opacity(0.9))
-    }
-
-    private func referenceRow(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                Spacer()
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .foregroundColor(.blue)
-                }
-            }
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .accessibilityIdentifier("fillPanel.reference.\(title)")
-        .buttonStyle(.plain)
     }
 }

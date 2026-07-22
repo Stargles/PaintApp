@@ -1,8 +1,12 @@
 import SwiftUI
 
+/// Wraps a layer id so it can drive `.sheet(item:)` (UUID isn't `Identifiable` on its own).
+private struct EditingLayerRef: Identifiable { let id: UUID }
+
 struct LayerPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     @State private var showBackgroundColorPicker = false
+    @State private var editingLayer: EditingLayerRef?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,8 +46,25 @@ struct LayerPanel: View {
                 ForEach(Array(canvasManager.layers.enumerated().reversed()), id: \.element.id) { index, layer in
                     LayerRow(layer: layer, index: index, canvasManager: canvasManager)
                         .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                if let idx = canvasManager.layers.firstIndex(where: { $0.id == layer.id }) {
+                                    canvasManager.deleteLayer(at: idx)
+                                }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .accessibilityIdentifier("layerPanel.row.\(index).delete")
+
+                            Button {
+                                editingLayer = EditingLayerRef(id: layer.id)
+                            } label: {
+                                Label("Edit", systemImage: "slider.horizontal.3")
+                            }
+                            .tint(.blue)
+                            .accessibilityIdentifier("layerPanel.row.\(index).edit")
+                        }
                 }
-                .onDelete(perform: deleteLayer)
 
                 backgroundRow
                     .listRowBackground(Color.clear)
@@ -52,6 +73,9 @@ struct LayerPanel: View {
             .scrollContentBackground(.hidden)
         }
         .background(Color.black.opacity(0.9))
+        .sheet(item: $editingLayer) { ref in
+            LayerEditMenu(canvasManager: canvasManager, layerID: ref.id)
+        }
     }
 
     /// The canvas itself, shown as a fixed row pinned below every real layer: it can't be deleted,
@@ -86,18 +110,45 @@ struct LayerPanel: View {
         .padding(.vertical, 4)
     }
 
-    private func deleteLayer(at offsets: IndexSet) {
-        // Map each display offset (list is shown reversed, top layer first) to a stable layer id
-        // *before* deleting anything — recomputing indices against `canvasManager.layers` after each
-        // deletion would use indices that no longer match the shrunk array once more than one offset
-        // is deleted in the same gesture.
-        let displayOrder = Array(canvasManager.layers.reversed())
-        let idsToDelete = offsets.compactMap { displayOrder.indices.contains($0) ? displayOrder[$0].id : nil }
-        for id in idsToDelete {
-            if let index = canvasManager.layers.firstIndex(where: { $0.id == id }) {
-                canvasManager.deleteLayer(at: index)
+}
+
+/// The per-layer Edit menu, opened from the layer row's swipe action. For now it holds the Fill
+/// Reference switch (whether the layer's content bounds the fill tool); more per-layer settings can
+/// join it here later.
+private struct LayerEditMenu: View {
+    @ObservedObject var canvasManager: CanvasManager
+    let layerID: UUID
+    @Environment(\.dismiss) private var dismiss
+
+    private var layerIndex: Int? { canvasManager.layers.firstIndex(where: { $0.id == layerID }) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let index = layerIndex {
+                    Section {
+                        Toggle("Fill Reference", isOn: Binding(
+                            get: { canvasManager.layers.indices.contains(index) ? canvasManager.layers[index].isFillReference : false },
+                            set: { canvasManager.setFillReference(layerIndex: index, isReference: $0) }
+                        ))
+                        .accessibilityIdentifier("layerEdit.fillReferenceToggle")
+                    } footer: {
+                        Text("When on, this layer's lines bound the fill tool. Hidden layers are excluded by default; turn this on to keep using a hidden layer as a boundary.")
+                    }
+                } else {
+                    Text("Layer no longer exists.")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle(layerIndex.flatMap { canvasManager.layers.indices.contains($0) ? canvasManager.layers[$0].name : nil } ?? "Layer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
             }
         }
+        .presentationDetents([.medium])
     }
 }
 
@@ -109,8 +160,7 @@ struct LayerRow: View {
     var body: some View {
         HStack {
             Button(action: {
-                guard canvasManager.layers.indices.contains(index) else { return }
-                canvasManager.layers[index].isVisible.toggle()
+                canvasManager.toggleLayerVisibility(layerIndex: index)
             }) {
                 Image(systemName: layer.isVisible ? "eye" : "eye.slash")
                     .foregroundColor(layer.isVisible ? .white : .gray)
@@ -131,11 +181,20 @@ struct LayerRow: View {
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.2), lineWidth: 1))
             .opacity(layer.opacity)
 
-            Text(layer.name)
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .accessibilityIdentifier("layerPanel.row.\(index)")
-                .accessibilityValue("\(strokeCount)")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(layer.name)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("layerPanel.row.\(index)")
+                    .accessibilityValue("\(strokeCount)")
+
+                // Per-layer fill-reference state, shown as a quiet subtitle. Set via the row's Edit swipe.
+                Text(layer.isFillReference ? "Fill Reference" : "Fill Excluded")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .accessibilityIdentifier("layerPanel.row.\(index).fillRef")
+                    .accessibilityValue(layer.isFillReference ? "1" : "0")
+            }
 
             // Separate marker (rather than folding into the row's own accessibilityValue above) so
             // existing tests parsing that value as a plain stroke-count Int keep working unchanged.

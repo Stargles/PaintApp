@@ -2,221 +2,181 @@
 
 Format: one section per bug, newest first. See [CLAUDE.md](CLAUDE.md) for the multi-session protocol.
 
-## Fill containment "regression" under the new stroke engine — RESOLVED, was a test bug (2026-07-21)
+> **Housekeeping (2026-07-22):** two previously-tracked issues were removed as resolved and
+> verified against the full test suite (29 tests, 0 failures, 1 intentional skip):
+> - *Fill containment "regression"* — was a test bug (probe point in the canvas letterbox margin).
+>   `testFillToolMasksFromReferenceLayerAcrossLayers` is re-enabled and passing. The one genuine
+>   finding from that investigation (the FloodFillEngine vertical flip) is retained below.
+> - *Zoomed-in blur / "PencilKit ink can't be fixed this way"* — the raster-content blur fix shipped
+>   (`magnificationFilter = .nearest`), and the larger conclusion (replace PencilKit) was **done**:
+>   Session 11 replaced PencilKit with the custom `RasterLayerTexture`/`StrokeCanvasView` engine, so
+>   there is no PencilKit ink left to blur. The engine-rewrite follow-ups it proposed (Metal GPU
+>   renderer, per-stroke opacity-accumulation buffer, dirty-rect bounded undo) are tracked in
+>   [SESSION_LOG.md](SESSION_LOG.md) Session 13's "not done" list, not here.
 
-**Status:** RESOLVED. The fill tool was never actually broken. `testFillToolMasksFromReferenceLayerAcrossLayers`
-is re-enabled and passing.
+---
 
-**Root cause (found by the renderer worker via an instrumented run + a grid dump of the filled
-canvas):** the test's "leaked outside" probe point `(dx:0.05, dy:0.05)` lands in `canvas.host`'s
-**letterbox margin**, not on the canvas paper. `canvas.host`'s frame isn't square (~758×1190 on this
-iPad sim), so the 2048×2048 canvas is letterboxed/centered inside it and the top-left corner is solid
-black even on a blank canvas — so the assertion failed for a reason unrelated to fill. A grid dump of
-the actual filled region showed clean, correct containment matching the traced square exactly; the
-fill engine was fine all along. This is exactly the letterbox theory Session 9/10 suspected but
-couldn't confirm. **Fix:** `PaintSoftwareUITests.swift` gained `visibleCanvasBounds(_:)` /
-`safeOutsideCornerPoint(_:)` helpers that compute the real (non-letterboxed) canvas rect at runtime
-and probe a point provably inside it, and the `XCTSkip` was removed.
+## Fill tool: off-center reference content fills vertically mirrored (CONFIRMED) (2026-07-22)
 
-**Note:** the two stroke-continuity improvements made while chasing this (interpolated `stampPath`
-between samples, and `handleEnd` stamping through to the lift point) were correct regardless and were
-kept — a stamp brush should draw continuous lines that reach the lift point.
+**Status:** confirmed reproducible, not yet fixed (deprioritized). This is the same
+long-suspected FloodFillEngine vertical-flip, now pinned down with a repro.
 
-### Still open: a latent orientation bug in FloodFillEngine (found, not yet fixed)
+**Symptom:** filling a region whose reference content is *off-center* colors the region's
+**vertically-mirrored** canvas position instead of the tapped region. It is self-canceling for
+vertically-symmetric shapes (the centered traced square every earlier fill test used), which is why
+it went uncaught for so long. Normal-looking centered fills are unaffected.
 
-While root-causing the above, the renderer worker found via a standalone offscreen harness that
-`FloodFillEngine.alphaMask`/`composite` apply an unnecessary vertical flip — correct for XCUITest
-screenshot byte order but wrong for `UIGraphicsImageRenderer`/`RasterLayerTexture.renderToUIImage()`
-output. It is **self-canceling for vertically-symmetric shapes** (like the traced square every
-current fill test uses), so no test catches it and normal filling of symmetric regions looks fine —
-but it could misbehave on an asymmetric lineart region. Left unfixed; verify with an asymmetric-shape
-fill test before trusting fills near the canvas edges.
+**Repro (grid diagnostic, 2026-07-22):** draw a closed square in the top-left quadrant (host-normalized
+x≈0.24–0.44, y≈0.24–0.44), select fill, tap the interior (≈0.34,0.34). The interior stays blank; a
+*contained* square fills at the vertical mirror instead (host y≈0.6–0.7). The fill is contained (not a
+leak) and correctly shaped — only vertically flipped in canvas space. Two XCUITests reproduce it and
+are currently `throw XCTSkip`-disabled:
+`testFillToolFillsOffCenterSquareTopLeftWithoutMirroring` and
+`...BottomRightWithoutMirroring` (shared body `runOffCenterFillContainmentTest`).
 
-## Zoomed-in blur: fixed for raster content, but PencilKit ink can't be fixed this way — likely needs a custom drawing engine (2026-07-21)
-
-**Status:** Partially fixed and then deliberately stopped short of a much bigger change. Bitmap/
-raster canvas content (bucket fills, baked select/move pixels) now renders crisp/blocky when
-pinch-zoomed in, instead of blurring. Pen/pencil ink strokes — the user's actual primary drawing
-tool — do **not**, and empirically *can't* via this approach. The user's conclusion, combined with
-separate complaints about PencilKit (no pen stabilization, hard to build custom brushes), was that
-this justifies eventually replacing PencilKit with a custom drawing engine. That replacement was
-explicitly **not started** this session — this entry is just carrying the findings/approach forward.
-
-### What's fixed
-
-The whole canvas view stack is zoomed via a single `CGAffineTransform` scale applied to an ancestor
-`UIView` (`container`, see `Coordinator.applyTransform` in `CanvasView.swift`), not by re-rendering
-content at higher resolution. Every raster-backed `CALayer` under that transform was using Core
-Animation's default `magnificationFilter` (`.linear`), so zooming in bilinearly blurred fills,
-baked pixels, and object/photo layers.
-
-**Fix:** set `layer.magnificationFilter = .nearest` on the actual raster-backed views —
-`LayerHostView.imageView` / `.fillImageView` / `.bakedImageView` (`CanvasView.swift`). Verified with
-a real pixel-level test, not just eyeballing: rectangle-selected a region and filled it (a pure
-bitmap raster edge, no ink involved), pinch-zoomed ~15x via XCUITest, and sampled raw pixel values
-across the boundary. Before the fix: a smooth 12-step gradient (0→255 over ~12px — textbook
-bilinear interpolation). After: a hard 1px jump (0 straight to 255), and the upscaled crop showed a
-genuine staircase/blocky edge — confirmed nearest-neighbor is actually taking effect for this
-content, not just assumed from the API.
-
-Two other places got this filter at first and were **reverted** — worth knowing about since they're
-an easy mistake to reintroduce:
-
-- **`onionSkin`** (the translucent previous-frame reference overlay): this is meant to be a soft,
-  blended reference ghost, not pixel-accurate content. Because it's shown independent of the
-  current layer's own opacity (only gated by the Onion Skin toggle — see
-  `CanvasManager.isOnionSkinEnabled`/`onionSkinOpacity` — not by `LayerRow`'s per-layer opacity),
-  making it crisp produced a confusing symptom: the user reported "a transparent layer of
-  rasterization" that persisted even after setting the *current layer's* opacity to 0. Root cause
-  wasn't a new bug — onion skin was never tied to that opacity slider — it just became visually
-  obvious once it started rendering sharp instead of blending in blurry. Left on the default filter.
-- **`container.layer`** itself: inert. `container` is a plain view with `backgroundColor = .clear`
-  and no image content of its own — there's nothing on that specific layer for a magnification
-  filter to act on. (The actual scale transform lives on `container`, but the pixels being
-  magnified belong to its descendant layers, which is why the filter has to go on *them*, not it.)
-  Removed as dead code.
-
-### PencilKit ink can't be made pixel-crisp this way (confirmed, not just suspected)
-
-`PKCanvasView` (`TrackedCanvasView` in `CanvasView.swift`) renders ink strokes as vector paths
-internally, not as a fixed-resolution bitmap texture that Core Animation later magnifies — so
-there's no "magnified texture" for `magnificationFilter` to act on in the first place. Confirmed
-empirically, not assumed: drew a stroke, set `canvasView.layer.magnificationFilter = .nearest`,
-zoomed ~12x, sampled pixels across the stroke edge — still a smooth multi-pixel anti-aliased ramp,
-identical to the unfixed baseline, not blocky steps. PencilKit re-draws the vector path fresh at
-whatever the effective zoom is, which is normally a *feature* (crisp Apple Pencil input at any
-zoom) but means ink will never look like discrete square pixels through a CALayer-level trick.
-
-### Suggested approach for a future custom drawing engine (not vetted — a starting point, not a plan)
-
-If/when this is picked up:
-
-1. **Rendering model**: sample raw `UITouch` input (`.pencil` type, `.force`/`.altitudeAngle`/
-   `.azimuthAngle` for pressure/tilt) and draw directly onto a bitmap backing store
-   (`CGContext` or Metal) at canvas-native resolution, instead of vector paths. A bitmap-backed
-   `UIImageView`/`CALayer` already respects `magnificationFilter`, as proven by the fill/baked-image
-   fix above — pixel-crisp zoom falls out of this for free, and so would true pixel-art snapping if
-   that's ever wanted.
-2. **Pen stabilization**: with raw touch sampling instead of PencilKit's built-in prediction, this
-   becomes the app's own code to write (e.g. a moving-average or spring-follow lag between the raw
-   touch point and the rendered brush position — the standard Procreate/Photoshop-style technique)
-   rather than something to fight PencilKit for.
-3. **Custom brushes**: raw touch samples plus pressure/tilt/azimuth make stamp-based or
-   shader-based brush rendering straightforward, rather than being boxed into `PKInkingTool`'s fixed
-   pen/pencil/marker set.
-4. **Undo/redo**: `TrackedCanvasView.localUndoManager` currently piggybacks on PencilKit's own
-   `UndoManager` integration for free. A custom engine needs its own undo stack (e.g. an array of
-   stroke commands, or periodic raster snapshots) — probably the single biggest piece of "invisible"
-   work PencilKit is currently doing, and worth designing deliberately rather than as an afterthought.
-5. **Migration surface**: `Cel.drawing: PKDrawing` is the current stroke format used throughout
-   `CanvasManager`, persistence (`ProjectManifest`), thumbnails, and onion skin — swapping the
-   underlying stroke representation touches all of those, not just `CanvasView.swift`. Lower-risk
-   path is probably: design the new stroke/raster model to apply going forward, without also trying
-   to migrate existing saved `.paintproj` files' `PKDrawing` data in the same pass.
-
-This is a genuine rewrite (rendering, input handling, undo, and persistence all touch it) — worth
-scoping as its own planned piece of work, not a quick follow-up patch.
-
-### Files touched this session
-
-- `PaintSoftware/Views/CanvasView.swift` — added `magnificationFilter = .nearest` to
-  `imageView`/`fillImageView`/`bakedImageView` only; deliberately not on `onionSkin` or `canvasView`
-  (see above for why).
+**Where to look:** the 2026-07-22 fill-engine rewrite replaced `FloodFillEngine.alphaMask` (the old
+suspected culprit) with `FillSession.rasterizeWallMask`, which draws all wall sources via
+`UIGraphicsPushContext` + a manual `translateBy/scaleBy(-1)` flip + `UIImage.draw(in:)`. The
+`composite` output path (unchanged from the original) also applies a flip when drawing the existing
+fill. The mirror is an inconsistency between the mask-rasterization flip and the composite/seed
+orientation — the rewrite did **not** fix or worsen the underlying flip (the same symptom predates it;
+see the pre-rewrite note this section replaces). Fix by making `rasterizeWallMask` produce the same
+top-down row order the seed and `composite` assume, then re-enable the two skipped tests. The engine's
+correctness tests for *centered* shapes (`testFillToolFillsClosedLineartRegion`,
+`testFillToolMasksFromReferenceLayerAcrossLayers`) must keep passing.
 
 ## Fill tool: gap-closing UI test disabled, root cause not fully closed out (2026-07-21)
 
 **Status:** `testFillToolBridgesOpenContourGapWhenGapClosingEnabled` in `PaintSoftwareUITests.swift`
-is disabled via `throw XCTSkip(...)` at the top of the test body. The fill tool itself is not known
-to be broken for real usage — this is about pinning down whether the *test* is still wrong, or
-whether there's a genuine (probably narrow) leak bug left in the gap-closing path.
+is still disabled via `throw XCTSkip(...)` at the top of the test body (confirmed still skipped in
+the 2026-07-22 run). The fill tool itself is not known to be broken for real usage — this is about
+pinning down whether the *test* is still wrong, or whether there's a genuine (probably narrow) leak
+bug left in the gap-closing path.
 
-### Context
+**Note (2026-07-22):** the *sibling* test this originally shared a theory with
+(`testFillToolMasksFromReferenceLayerAcrossLayers`) was since root-caused to a letterbox-probe test
+bug and re-enabled — so the "why does the passing sibling use the same probe point?" contradiction
+below is resolved for that test, and the real canvas-bounds helpers (`visibleCanvasBounds(_:)` /
+`safeOutsideCornerPoint(_:)`) now exist. Re-running this test with those helpers for its "outside"
+probe point is the obvious next step that hasn't been done yet.
 
-This test was added by the `fill-tool` branch, whose own session never had simulator/touch access
-to actually run it (see SESSION_LOG.md Session 7). When branches were merged into `main` and the
-full UI test suite was finally run for the first time (Session 9), this test failed. Investigating
-it turned up two real, confirmed bugs, both now fixed — but the test still fails after fixing both,
-for a reason that wasn't nailed down before time ran out.
+### Confirmed and fixed (while chasing this)
 
-### Confirmed and fixed
-
-1. **The original gap was unbridgeable at any slider setting.** The test drew a lineart square
-   with one edge left "60% closed", i.e. a gap sized as a *fraction* of the shape. On the default
-   2048pt canvas that's a ~328pt-wide opening. `FillSettingsPanel`'s gap-closing slider maxes out
-   at a 40pt radius, and morphological closing (dilate-then-erode, see
-   `FloodFillEngine.morphologicalClose`) can only bridge a gap up to ~2× its radius (~80pt) — so the
-   original gap was about 4× too wide to ever close, regardless of slider position. Verified this
-   is exactly what the algorithm predicts by porting `dilate`/`erode`/`morphologicalClose` (pure
-   `Bool` array code, no UIKit dependency) into a standalone script and testing gap sizes from 20pt
-   to 328pt at radius 40 — leaks starts exactly where the 2×radius model says it should. **Fix:**
-   shrunk the intended gap to ~30pt (comfortably under the 80pt ceiling).
-
-2. **`app.sliders.firstMatch` was grabbing the wrong slider.** The Fill panel's "Gap Closing"
-   slider is not the first `Slider` in the accessibility tree — the persistent `SideToolbar`'s
-   brush-size/opacity sliders (rendered on the left edge of the screen) come first. The test was
-   silently adjusting one of *those* instead, so `fillGapClosingDistance` stayed frozen at its
-   default (8px) no matter what the test did. Confirmed via a temporary diagnostic that read the
-   panel's own "Gap Closing: N px" label back after calling `.adjust(toNormalizedSliderPosition:)`.
-   **Fix:** added `.accessibilityIdentifier("fillPanel.gapClosingSlider")` (and
-   `"fillPanel.edgeOverlapSlider"` for the other one, same file) in `FillSettingsPanel.swift`, and
-   the test now looks it up by that identifier. Confirmed the slider now genuinely reaches ~38-39px
-   after `.adjust(toNormalizedSliderPosition: 1.0)`.
-
-3. **Incidental: overshooting a synthetic drag too close to the physical screen edge drops the
-   next stroke.** While iterating on the gap geometry, drawing the "short of closing" edge as a
-   drag from the gap boundary *past* the opposite corner (to counteract XCUITest's documented drag
-   undershoot — see `performDrag`'s doc comment) worked fine when overshooting to `dx: 0.72`, but
-   consistently caused the *next* `drawLine` call (the left edge) to never register at all when
-   overshooting all the way to `dx: 0.9` (confirmed visually via `canvas.screenshot()` — the left
-   edge was simply missing from the drawn lineart). Very likely colliding with an iOS edge-swipe
-   system gesture near the physical screen edge. **Fix:** kept the overshoot modest (`dx: 0.72`).
+1. **The original gap was unbridgeable at any slider setting.** The test drew a lineart square with
+   one edge left "60% closed" (~328pt on a 2048pt canvas); the gap-closing slider maxes at a 40pt
+   radius, and morphological closing can only bridge ~2×radius (~80pt), so the gap was ~4× too wide.
+   **Fix:** shrunk the intended gap to ~30pt.
+2. **`app.sliders.firstMatch` grabbed the wrong slider** (SideToolbar's brush sliders come first in
+   the tree). **Fix:** added `accessibilityIdentifier("fillPanel.gapClosingSlider")` /
+   `"fillPanel.edgeOverlapSlider"` and the test now looks them up by identifier.
+3. **Overshooting a synthetic drag too near the physical screen edge drops the next stroke** (likely
+   colliding with an iOS edge-swipe gesture). **Fix:** kept the overshoot modest (`dx: 0.72`).
 
 ### Not yet resolved
 
-After fixing all three of the above, the test *still* fails at the final assertion:
+After all three fixes the test still fails at the final assertion (`isWhitish` at `dx:0.05,dy:0.05`
+reads pure black while a screenshot shows the fill cleanly contained). Suggested next steps:
+1. Re-point the "outside" probe at a spot provably inside the visible canvas band using the new
+   `visibleCanvasBounds`/`safeOutsideCornerPoint` helpers, then re-run.
+2. If it still fails, write a unit target that calls `FloodFillEngine.fill` directly on synthetic
+   `Layer`/`Cel` wall data (no UI/touch synthesis) to isolate any real leak — the core
+   `dilate`/`erode`/`morphologicalClose` math was already verified correct in isolation.
 
-```swift
-XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.05, dy: 0.05)), "Fill must not leak out...")
-```
+To re-enable once understood, delete the `throw XCTSkip("Disabled pending investigation — see
+BUGS.md")` line at the top of the test body.
 
-`rgbaPixel(of: canvas, dx: 0.05, dy: 0.05)` reads pure black (`(0, 0, 0, 255)`) — but a manual
-`canvas.screenshot()` taken moments earlier (after the same fill, same wait) visually shows the
-fill cleanly contained inside the square, with white paper all around it. These two observations
-contradict each other and weren't reconciled before the investigation was cut short.
+---
 
-One real lead: `canvas.host`'s own on-screen frame was measured at `(76, 0, 744, 1160)` — a tall
-rectangle — while the actual 2048×2048 canvas content is letterboxed/centered inside it at roughly
-0.363 scale, occupying only the vertical band from about 18% to 82% of that frame's height. A
-`dy: 0.05` probe point would land in the top letterbox margin (always black, regardless of any
-fill), which would make the assertion fail for a reason that has nothing to do with fill leakage.
+## Feature audit — newly found issues (2026-07-22)
 
-**The confusing part:** `testFillToolMasksFromReferenceLayerAcrossLayers`, a *passing* test, uses
-this exact same check (`rgbaPixel(of: canvas, dx: 0.05, dy: 0.05)`) and it works there. If the
-letterbox theory were the whole story, that test should fail too. This contradiction is exactly
-where the investigation stopped.
+Recorded during a full feature pass; **not yet fixed** (logged only, per request). Roughly ordered
+most- to least-impactful. None are crashes; the app builds clean and the whole test suite is green.
 
-### Suggested next steps
+### Correctness / behavior
 
-1. Re-add temporary diagnostics (a `print` of `canvas.frame` and the raw `rgbaPixel` result,
-   right next to the assertion) to both this test and the passing sibling test, run both, and
-   directly compare — this session did this for each test *separately*, not side by side in the
-   same run, and didn't fully cross-check timing.
-2. Try changing the "outside" probe point to something provably inside the visible canvas band
-   (e.g. `dy: 0.25` instead of `0.05`) and see if the test then passes. If it does, the original
-   test's assertion point was simply wrong from the day it was written (an authoring bug, separate
-   from the leak investigation), and the gap-closing feature may already work correctly.
-3. If (2) doesn't fix it, there's likely a real, narrower leak bug left in the fill path worth
-   root-causing directly — possibly by writing a proper unit test target that calls
-   `FloodFillEngine.fill` directly with synthetic `Layer`/`Cel` wall data (no UI, no touch
-   synthesis), since the core `dilate`/`erode`/`morphologicalClose` math was already verified
-   correct in isolation (see point 1 above) and is unlikely to be the culprit.
+1. **Selections are keyed by layer/cel *index*, not by stable ID.** `Selection`,
+   `FloatingPiece.sourceLayerIndex/targetLayerIndex`, and their guards in `SelectionModels.swift`
+   store raw `Int` indices. `deleteLayer`/`moveLayer` shift indices without clearing/patching the
+   active selection, and `handleActiveContextChanged` only fires on `currentLayerIndex`/`currentFrame`
+   `didSet`. Repro: with a selection active on the current layer, swipe-delete *that same* layer from
+   the Layers panel — `currentLayerIndex` stays numerically the same but now points at a *different*
+   layer, no context-change fires, and the stale selection's guards (`currentLayerIndex ==
+   selection.layerIndex`) still pass, so a subsequent Fill/Clear/Move operates on the wrong layer's
+   pixels. `FillReferenceMode` already does this the right way (stores a `UUID`); selections should
+   too.
 
-### Files touched by the fixes already applied
+2. **`flipCanvas` doesn't flip object (photo) layers.** `CanvasManager.flipCanvas` iterates each
+   cel's `raster`/`fillImage`/`bakedImage` only. Object layers hold their image in
+   `Layer.objectImage`/`objectTransform`, not in a cel, so Flip Horizontal/Vertical leaves inserted
+   photos unmirrored and un-repositioned while everything else flips around them.
 
-- `PaintSoftware/Views/FillSettingsPanel.swift` — added the two accessibility identifiers.
-- `PaintSoftwareUITests/PaintSoftwareUITests.swift` — reworked the gap geometry/overshoot in
-  `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, added the identifier-based slider
-  lookup, added the `XCTSkip`.
+3. **RasterLayerTexture is mutated off the main thread during a fill.** `performFill` dispatches to a
+   global queue, and `FloodFillEngine.rasterizeReferenceComposite` then calls the reference cel's
+   `raster.renderToUIImage()` on that background thread. `RasterLayerTexture` is a non-thread-safe
+   class (mutable `CGContext` + `cachedImage`, mutated by `stampCircle` on the main thread). `isFilling`
+   guards overlapping *fills* but not a concurrent stroke on the reference layer — a narrow data race.
 
-To re-enable the test once the remaining issue is understood, delete the
-`throw XCTSkip("Disabled pending investigation — see BUGS.md")` line at the top of the test body.
+4. **Deleting a layer's only cel leaves it permanently blank/undrawable.** The timeline block menu's
+   "Delete" calls `deleteCel` with no "last cel" guard. A layer with zero cels has no active cel, so
+   `activeCelIndex` returns nil everywhere → the layer can't be drawn on and its thumbnail goes stale.
+   Recoverable only by tapping the empty gap in its timeline row (which creates a new cel), which isn't
+   discoverable. No confirmation prompt either.
+
+5. **Gallery/project thumbnail is a single layer, not the composited stack.** `ProjectStore.save`
+   picks the first visible layer's active cel as the thumbnail, so a multi-layer drawing shows only
+   its bottom-most visible layer in the gallery tile.
+
+6. **`AppVersion.current` is a stale hardcoded git hash** (`"c8125aa"`, shown in the gallery corner).
+   It's a manually-updated constant, so it no longer matches HEAD and will keep drifting.
+
+### UX papercuts
+
+7. **Pencil-only drawing is ON by default** (`pencilOnlyDrawing = true`). On a device/simulator with
+   no Apple Pencil, the canvas silently ignores finger drawing until the user finds the SideToolbar
+   toggle — easy to read as "drawing is broken."
+
+8. **Picking a black/white/gray swatch discards hue.** In `ColorPickerPanel`, selecting a grayscale
+   color sets `hue = 0`; raising saturation/brightness afterward snaps to red rather than preserving
+   the previously-chosen hue (most pickers retain it).
+
+9. **Switching brush presets resets live size/opacity.** `selectBrush` re-baselines `brushSize`/
+   `brushOpacity` from the preset, so re-tapping the current brush in the panel throws away a size the
+   user just dialed in via the SideToolbar. (Partly intentional per its doc comment, but the
+   re-tap-same-brush case is surprising.)
+
+### Non-functional / missing (as-designed stubs, listed for completeness)
+
+- Distort/Warp transform modes render/gesture identically to Uniform (`TransformMode.isImplemented`
+  is false for them) but still appear in the Move bottom-bar picker.
+- Adjust panel, and ActionsMenu's Cut/Copy/Paste/Drawing Guide, are "Coming soon" stubs; timeline
+  block menu's "Select Multiple" is permanently disabled.
+- No UI to change `fps` (fixed at 24) or edit scene length directly; `fps` only shows as a label.
+- Square/custom brushes are approximated as a tiled grid of round dabs (scalloped edges, seam
+  build-up), and per-stamp `.normal` compositing makes slow strokes read darker than fast ones — both
+  documented placeholder limitations of the foundation engine, pending the real renderer.
+
+## Refactoring / cleanup opportunities (2026-07-22)
+
+- **Two remaining `Color` → components call sites bypass the semantic-color fix.**
+  `ProjectStore.swift`'s `Color.codable` (line ~8) and `PixelOps.uiColor(from:)` (line ~19) still call
+  `UIColor(color).getRed(...)` directly — the exact pattern `ColorConversion.swift` was written to
+  replace (resolve against a fixed trait collection first). Route both through
+  `Color.rgbaComponents`/`resolvedUIColor`. (`PixelOps.uiColor` was flagged out-of-scope in Session
+  12 and is still live; it backs the Select→Fill action, where `brushColor` could be a semantic
+  color.) The `getRed` calls in `FloodFillEngine`/`RasterLayerTexture` take an already-resolved
+  `UIColor` and are fine.
+- **`CanvasManager.moveLayer(from:to:)` is dead code** — no caller (the Layers panel has no
+  `.onMove`), so layers can't currently be reordered at all. Either wire it up (and then make it
+  adjust `currentLayerIndex`, which it doesn't) or remove it.
+- **Duplicated transform-overlay code.** `ObjectTransformOverlayView` and `FloatingPieceOverlayView`
+  each define their own private `HandleView` and near-identical `project(_:)` / rotate-handle /
+  anchor-preserving-resize logic. Worth extracting a shared base or helper.
+- **Duplicated canvas-flip geometry.** `CanvasManager.flippedImage` and `RasterLayerTexture.flipped`
+  implement the same mirror-about-center draw twice.
+- **README is stale post-rewrite.** It still documents PencilKit (Step 4 "add PencilKit.framework"),
+  pen/pencil-only brushes, and an old file tree (no `Engine/`, `Services/`, Gallery, Select/Move/Fill).
+  Update to reflect the custom raster engine, brush library, and current features.
+- **`ContentView.saveIfNeeded` only fires on scene-phase change and Return-to-Gallery.** Opening or
+  creating a project replaces `canvasManager` without an explicit save of the outgoing one; it's safe
+  today only because those paths are reached from the gallery (which already saved), but it's fragile
+  — a direct project→project transition would silently drop unsaved work.

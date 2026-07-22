@@ -3,22 +3,33 @@ import SwiftUI
 struct SideToolbar: View {
     @ObservedObject var canvasManager: CanvasManager
 
+    /// When the fill tool is active the two sliders control the fill settings instead of the brush's,
+    /// so the whole left rail doubles as quick access to gap-closing / edge-overlap (mirrored live while
+    /// dragging a fill). Any other tool shows the brush size / opacity sliders.
+    private var isFillMode: Bool { canvasManager.selectedTool == .fill }
+
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
 
             VStack(spacing: 16) {
-                VerticalSlider(
-                    value: Binding(
-                        get: { Double(canvasManager.brushSize) },
-                        set: { canvasManager.brushSize = CGFloat($0) }
-                    ),
-                    range: 1...50,
-                    accessibilityIdentifier: "sideToolbar.brushSizeSlider"
-                )
-                .frame(height: 160)
+                if isFillMode {
+                    labeledSlider(
+                        title: "Gap Closing",
+                        value: Binding(get: { Double(canvasManager.fillGapClosingDistance) }, set: { canvasManager.fillGapClosingDistance = CGFloat($0) }),
+                        range: Double(CanvasManager.fillGapRange.lowerBound)...Double(CanvasManager.fillGapRange.upperBound),
+                        identifier: "sideToolbar.gapClosingSlider"
+                    )
+                } else {
+                    labeledSlider(
+                        title: "Size",
+                        value: Binding(get: { Double(canvasManager.brushSize) }, set: { canvasManager.brushSize = CGFloat($0) }),
+                        range: 1...50,
+                        identifier: "sideToolbar.brushSizeSlider"
+                    )
+                }
 
-                Button(action: resetBrushSettings) {
+                Button(action: resetSettings) {
                     Image(systemName: "arrow.counterclockwise")
                         .font(.footnote)
                         .foregroundColor(.white)
@@ -27,8 +38,21 @@ struct SideToolbar: View {
                         .cornerRadius(6)
                 }
 
-                VerticalSlider(value: $canvasManager.brushOpacity, range: 0...1, accessibilityIdentifier: "sideToolbar.brushOpacitySlider")
-                    .frame(height: 160)
+                if isFillMode {
+                    labeledSlider(
+                        title: "Edge Overlap",
+                        value: Binding(get: { Double(canvasManager.fillExpand) }, set: { canvasManager.fillExpand = CGFloat($0) }),
+                        range: Double(CanvasManager.fillExpandRange.lowerBound)...Double(CanvasManager.fillExpandRange.upperBound),
+                        identifier: "sideToolbar.edgeOverlapSlider"
+                    )
+                } else {
+                    labeledSlider(
+                        title: "Opacity",
+                        value: $canvasManager.brushOpacity,
+                        range: 0...1,
+                        identifier: "sideToolbar.brushOpacitySlider"
+                    )
+                }
 
                 Button(action: { canvasManager.pencilOnlyDrawing.toggle() }) {
                     Image(systemName: canvasManager.pencilOnlyDrawing ? "pencil.tip" : "pencil.tip.crop.circle")
@@ -63,9 +87,30 @@ struct SideToolbar: View {
         .background(Color.black.opacity(0.85))
     }
 
-    private func resetBrushSettings() {
-        canvasManager.brushSize = 5
-        canvasManager.brushOpacity = 1.0
+    /// A vertical slider with a small caption beneath it. The caption is what makes the rail readable
+    /// once its two sliders change meaning between brush and fill modes.
+    private func labeledSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>, identifier: String) -> some View {
+        VStack(spacing: 4) {
+            VerticalSlider(value: value, range: range, accessibilityIdentifier: identifier)
+                .frame(height: 150)
+            Text(title)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(.white.opacity(0.7))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.7)
+                .frame(width: 56)
+        }
+    }
+
+    private func resetSettings() {
+        if isFillMode {
+            canvasManager.fillGapClosingDistance = 8
+            canvasManager.fillExpand = 2
+        } else {
+            canvasManager.brushSize = 5
+            canvasManager.brushOpacity = 1.0
+        }
     }
 }
 
@@ -73,7 +118,7 @@ private struct VerticalSlider: View {
     @Binding var value: Double
     let range: ClosedRange<Double>
     // Identifies this specific slider for UI tests. Without this, `app.sliders.firstMatch`
-    // (or any lookup that doesn't disambiguate) silently grabs whichever of SideToolbar's two
+    // (or any lookup that doesn't disambiguate) silently grabs whichever of the rail's two
     // sliders happens to come first in the accessibility tree — a known pre-existing bug that
     // masked a real slider-value bug elsewhere (see BUGS.md, "Fill tool" section).
     var accessibilityIdentifier: String? = nil

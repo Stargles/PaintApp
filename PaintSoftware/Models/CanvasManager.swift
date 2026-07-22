@@ -113,7 +113,6 @@ final class CanvasManager: ObservableObject {
         selectBrush(brush)
     }
 
-    @Published var fillReferenceMode: FillReferenceMode = .activeLayer
     @Published var fillGapClosingDistance: CGFloat = 8
     @Published var fillExpand: CGFloat = 2
     @Published var isFilling: Bool = false
@@ -199,7 +198,6 @@ final class CanvasManager: ObservableObject {
 
     func deleteLayer(at index: Int) {
         guard layers.count > 1, layers.indices.contains(index) else { return }
-        let removedID = layers[index].id
         layers.remove(at: index)
         // Deleting a layer *below* the active one shifts every later index down by one, so
         // currentLayerIndex must shift with it to keep pointing at the same layer. Without this,
@@ -210,9 +208,6 @@ final class CanvasManager: ObservableObject {
             currentLayerIndex -= 1
         } else if currentLayerIndex >= layers.count {
             currentLayerIndex = layers.count - 1
-        }
-        if fillReferenceMode == .layer(removedID) {
-            fillReferenceMode = .activeLayer
         }
     }
 
@@ -455,67 +450,209 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    // MARK: - Fill
+    // MARK: - Fill (interactive: press to apply, drag to adjust gap-closing / edge-overlap)
 
-    /// Runs the smart flood fill seeded at `point` (canvas-pixel coordinates, top-left origin) into the
-    /// active layer's current cel, using whichever layer `fillReferenceMode` selects as the wall source.
-    /// The heavy pixel work runs off the main thread; `isFilling` guards against overlapping taps while
-    /// one is in flight.
-    func performFill(at point: CGPoint) {
-        guard !isFilling else { return }
+    /// Slider ranges for the two fill settings, mirrored from `FillSettingsPanel`. The interactive drag
+    /// clamps to these and (in `CanvasView`) maps a full sweep of each onto a fixed amount of finger
+    /// travel.
+    static let fillGapRange: ClosedRange<CGFloat> = 0...40
+    static let fillExpandRange: ClosedRange<CGFloat> = 0...6
+
+    /// Serial queue that owns every flood-fill computation for the active gesture. Keeping it serial
+    /// means the cached `FillSession` (the reference layer is rasterized into walls exactly once, in
+    /// `beginInteractiveFill`) and the render bookkeeping below are only ever touched from one thread,
+    /// and lets `drainFillWork` coalesce a burst of drag updates down to a single render of the latest
+    /// parameters instead of recomputing for every touch-moved event.
+    private let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
+
+    /// Guarded by `fillLock`: the most recently requested (integer-quantized) parameters, whether a drain
+    /// worker is already scheduled, and the parameters last actually rendered. Written from the main
+    /// thread on each drag update, read/updated on `fillQueue`.
+    private let fillLock = NSLock()
+    private var fillPendingGap = 0
+    private var fillPendingExpand = 0
+    private var fillWorkerScheduled = false
+    private var fillRenderedGap = Int.min
+    private var fillRenderedExpand = Int.min
+
+    /// Gesture context. `fillSession` is only ever touched on `fillQueue`; the rest is set on the main
+    /// thread in `beginInteractiveFill` before any `fillQueue` work is dispatched, then only read after.
+    private var fillSession: FillSession?
+    private var fillGestureActive = false      // main-thread only
+    private var fillGestureSeed: CGPoint = .zero
+    private var fillGestureColor: UIColor = .black
+    private var fillGestureApplyExpand = false
+    private var fillGestureLayerIndex = 0
+    private var fillGestureCelIndex = 0
+    private var fillGestureBaseFill: UIImage?  // fill raster before this gesture: undo base + composite base
+    private weak var fillGestureUndoManager: UndoManager?
+
+    /// Begins an interactive fill at `point` (canvas-pixel coords, top-left origin): gathers every layer
+    /// marked as a fill reference into a wall set, rasterizes it once into a reusable `FillSession`, and
+    /// paints an initial fill with the current gap-closing / edge-overlap settings. A plain tap is just
+    /// this immediately followed by `endInteractiveFill`; a press-and-drag streams `updateInteractiveFill`
+    /// calls in between.
+    func beginInteractiveFill(at point: CGPoint) {
+        guard !fillGestureActive else { return }
         guard let canvasSize else { return }
         guard layers.indices.contains(currentLayerIndex) else { return }
         let layerIndex = currentLayerIndex
         guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return }
 
-        let referenceLayerIndex = resolvedReferenceLayerIndex(default: layerIndex)
-        guard layers.indices.contains(referenceLayerIndex),
-              let referenceCelIndex = activeCelIndex(inLayer: referenceLayerIndex, atFrame: currentFrame) else { return }
+        let references = fillReferenceSources()
 
-        let referenceLayer = layers[referenceLayerIndex]
-        let referenceCel = referenceLayer.cels[referenceCelIndex]
-        let existingFill = layers[layerIndex].cels[celIndex].fillImage
-        let fillColor = brushColor.resolvedUIColor(opacity: brushOpacity)
-        let gapClosing = fillGapClosingDistance
-        let expand = fillExpand
-        // Only push fill color under the reference layer's antialiased edges when that layer actually
+        fillGestureActive = true
+        fillGestureSeed = point
+        fillGestureColor = brushColor.resolvedUIColor(opacity: brushOpacity)
+        // Only push fill color under a reference's antialiased edges when at least one reference layer
         // renders on top of (or within, for the self-mask case) the destination — otherwise the overlap
         // would be a visible halo with nothing above it to hide the seam.
-        let applyExpand = referenceLayerIndex >= layerIndex
-        let undoManager = activeUndoManager
+        fillGestureApplyExpand = layers.indices.contains { $0 >= layerIndex && layers[$0].isFillReference }
+        fillGestureLayerIndex = layerIndex
+        fillGestureCelIndex = celIndex
+        fillGestureBaseFill = layers[layerIndex].cels[celIndex].fillImage
+        fillGestureUndoManager = activeUndoManager
 
-        isFilling = true
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = FloodFillEngine.fill(
-                referenceLayer: referenceLayer,
-                referenceCel: referenceCel,
-                existingFill: existingFill,
-                canvasSize: canvasSize,
-                seed: point,
-                fillColor: fillColor,
-                gapClosingRadius: gapClosing,
-                expandRadius: expand,
-                applyExpand: applyExpand
+        fillLock.lock()
+        fillPendingGap = Int(fillGapClosingDistance.rounded())
+        fillPendingExpand = Int(fillExpand.rounded())
+        fillRenderedGap = Int.min
+        fillRenderedExpand = Int.min
+        fillWorkerScheduled = true // claimed here so early drag updates don't spawn a second worker
+        fillLock.unlock()
+
+        fillQueue.async { [weak self] in
+            guard let self else { return }
+            self.fillSession = FillSession(references: references, canvasSize: canvasSize)
+            self.drainFillWork()
+        }
+    }
+
+    /// The layers whose content bounds the fill, bottom-to-top: every layer marked `isFillReference`, at
+    /// its active cel for the current frame. Empty when nothing is a reference (the fill then floods the
+    /// whole canvas).
+    private func fillReferenceSources() -> [FillReferenceSource] {
+        layers.indices.compactMap { i in
+            let layer = layers[i]
+            guard layer.isFillReference,
+                  let celIdx = activeCelIndex(inLayer: i, atFrame: currentFrame) else { return nil }
+            return FillReferenceSource(layer: layer, cel: layer.cels[celIdx])
+        }
+    }
+
+    /// Toggles whether a layer contributes to the fill tool's boundary (its Edit-menu "Fill Reference"
+    /// switch). Independent of visibility, so a hidden layer can still be turned back on as a reference.
+    func setFillReference(layerIndex: Int, isReference: Bool) {
+        guard layers.indices.contains(layerIndex) else { return }
+        if layers[layerIndex].isFillReference != isReference {
+            layers[layerIndex].isFillReference = isReference
+        }
+    }
+
+    /// Flips a layer's visibility and, by default, its fill-reference state with it — a hidden layer is
+    /// fill-excluded and a shown one is a fill reference (overridable afterward from the Edit menu).
+    func toggleLayerVisibility(layerIndex: Int) {
+        guard layers.indices.contains(layerIndex) else { return }
+        let nowVisible = !layers[layerIndex].isVisible
+        layers[layerIndex].isVisible = nowVisible
+        layers[layerIndex].isFillReference = nowVisible
+    }
+
+    /// Updates the in-progress fill's gap-closing (`gapClosing`) and edge-overlap (`expand`) values —
+    /// clamped to the slider ranges — and re-fills from the cached session. Also writes them back to the
+    /// published settings so the Fill panel's two sliders mirror the drag live. Cheap to call on every
+    /// touch-move: writing the same integer-quantized values as last time schedules no work, and a burst
+    /// coalesces to a single trailing render.
+    func updateInteractiveFill(gapClosing: CGFloat, expand: CGFloat) {
+        guard fillGestureActive else { return }
+        let clampedGap = min(max(gapClosing, Self.fillGapRange.lowerBound), Self.fillGapRange.upperBound)
+        let clampedExpand = min(max(expand, Self.fillExpandRange.lowerBound), Self.fillExpandRange.upperBound)
+        if fillGapClosingDistance != clampedGap { fillGapClosingDistance = clampedGap }
+        if fillExpand != clampedExpand { fillExpand = clampedExpand }
+
+        fillLock.lock()
+        fillPendingGap = Int(clampedGap.rounded())
+        fillPendingExpand = Int(clampedExpand.rounded())
+        let alreadyScheduled = fillWorkerScheduled
+        fillWorkerScheduled = true
+        fillLock.unlock()
+        if !alreadyScheduled {
+            fillQueue.async { [weak self] in self?.drainFillWork() }
+        }
+    }
+
+    /// Commits the interactive fill: flushes any last-requested parameters, then registers a single undo
+    /// step spanning the whole gesture (baseline → final) so a press-drag is one "Fill", not one per tick.
+    func endInteractiveFill() {
+        guard fillGestureActive else { return }
+        fillQueue.async { [weak self] in
+            guard let self else { return }
+            self.drainFillWork()   // render anything still pending from the last drag events
+            self.fillSession = nil // safe here: on fillQueue, after the drain, no more compute will run
+            DispatchQueue.main.async { [weak self] in self?.finishInteractiveFill() }
+        }
+    }
+
+    /// Abandons the interactive fill without committing, restoring the pre-gesture fill raster. Used when
+    /// a two-finger pan/zoom/rotate or an undo/redo tap takes over the touch sequence mid-fill.
+    func cancelInteractiveFill() {
+        guard fillGestureActive else { return }
+        fillGestureActive = false // stops any in-flight render from applying (its main hop checks this)
+        setFillImage(layerIndex: fillGestureLayerIndex, celIndex: fillGestureCelIndex, image: fillGestureBaseFill)
+        fillQueue.async { [weak self] in self?.fillSession = nil }
+    }
+
+    private func finishInteractiveFill() {
+        guard fillGestureActive else { return }
+        fillGestureActive = false
+        let layerIndex = fillGestureLayerIndex, celIndex = fillGestureCelIndex
+        let base = fillGestureBaseFill
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        let final = layers[layerIndex].cels[celIndex].fillImage
+        if final !== base, let undoManager = fillGestureUndoManager {
+            registerFillUndo(layerIndex: layerIndex, celIndex: celIndex, from: base, to: final, undoManager: undoManager)
+            refreshUndoRedoState()
+        }
+    }
+
+    /// Runs on `fillQueue`. Recomputes the fill for the latest requested parameters and pushes the result
+    /// to the active cel, looping until pending == last-rendered so a burst of drag updates collapses to a
+    /// single trailing render. A nil result (seed sealed shut) shows the untouched baseline rather than
+    /// clearing the fill.
+    private func drainFillWork() {
+        while true {
+            fillLock.lock()
+            let gap = fillPendingGap, expand = fillPendingExpand
+            if gap == fillRenderedGap && expand == fillRenderedExpand {
+                fillWorkerScheduled = false
+                fillLock.unlock()
+                return
+            }
+            fillRenderedGap = gap
+            fillRenderedExpand = expand
+            fillLock.unlock()
+
+            guard let session = fillSession else {
+                fillLock.lock(); fillWorkerScheduled = false; fillLock.unlock()
+                return
+            }
+            let base = fillGestureBaseFill
+            let image = session.fill(
+                seed: fillGestureSeed,
+                fillColor: fillGestureColor,
+                existingFill: base,
+                gapClosingRadius: CGFloat(gap),
+                expandRadius: CGFloat(expand),
+                applyExpand: fillGestureApplyExpand
             )
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isFilling = false
-                guard let result else { return }
-                self.setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: result)
-                if let undoManager {
-                    self.registerFillUndo(layerIndex: layerIndex, celIndex: celIndex, from: existingFill, to: result, undoManager: undoManager)
-                    self.refreshUndoRedoState()
-                }
+            let layerIndex = fillGestureLayerIndex, celIndex = fillGestureCelIndex
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.fillGestureActive else { return }
+                self.setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: image ?? base)
             }
         }
     }
 
-    private func resolvedReferenceLayerIndex(default defaultIndex: Int) -> Int {
-        switch fillReferenceMode {
-        case .activeLayer: return defaultIndex
-        case .layer(let id): return layers.firstIndex(where: { $0.id == id }) ?? defaultIndex
-        }
-    }
 
     private func setFillImage(layerIndex: Int, celIndex: Int, image: UIImage?) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
@@ -559,15 +696,6 @@ enum Tool: Hashable {
     case pencil
     case eraser
     case fill
-}
-
-/// Which layer's rasterized content the fill tool treats as walls. `.activeLayer` (the default) makes
-/// the fill tool behave like an ordinary same-layer bucket fill; `.layer(id)` locks it to a specific
-/// layer (e.g. a lineart layer) regardless of which layer is currently selected for drawing, so a
-/// separate fill layer underneath can be flooded using someone else's ink as the boundary.
-enum FillReferenceMode: Hashable {
-    case activeLayer
-    case layer(UUID)
 }
 
 struct Cel: Identifiable {
@@ -614,6 +742,11 @@ struct Layer: Identifiable {
     var name: String
     var opacity: Double
     var isVisible: Bool
+    /// Whether this layer's content contributes to the fill tool's boundary walls. The fill uses the
+    /// union of all layers with this set (see `CanvasManager.fillReferenceSources`). Defaults to true;
+    /// hiding a layer clears it (hidden layers are fill-excluded by default) and it can be toggled back
+    /// on independently from the layer's Edit menu. See [[feedback-vector-layer-extensibility]].
+    var isFillReference: Bool = true
     var kind: LayerKind = .raster
     var isObjectLayer: Bool = false
     var objectImage: UIImage? = nil

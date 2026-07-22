@@ -546,7 +546,19 @@ struct CanvasView: UIViewRepresentable {
         weak var panRecognizer: UIPanGestureRecognizer?
         weak var pinchRecognizer: UIPinchGestureRecognizer?
         weak var rotationRecognizer: UIRotationGestureRecognizer?
-        weak var fillTapRecognizer: UITapGestureRecognizer?
+        weak var fillTapRecognizer: UILongPressGestureRecognizer?
+
+        // Interactive-fill drag state, captured at press-down: the finger's start point in fixed
+        // screen (host) space, and the gap-closing / edge-overlap settings at that moment. The drag's
+        // vertical travel adjusts gap-closing (up = higher) and horizontal travel adjusts edge overlap
+        // (right = higher), each relative to these baselines.
+        private var fillDragStartHost: CGPoint?
+        private var fillDragStartGap: CGFloat = 0
+        private var fillDragStartExpand: CGFloat = 0
+
+        /// Finger travel (in screen points) that sweeps a fill setting across its whole slider range.
+        /// Deliberately generous so fine adjustments are easy; the value is clamped in CanvasManager.
+        private static let fillDragSweepPoints: CGFloat = 320
 
         private var fitScale: CGFloat = 1
         private var baseCenter: CGPoint?
@@ -961,19 +973,31 @@ struct CanvasView: UIViewRepresentable {
 
             twoFingerTap.require(toFail: threeFingerTap)
 
-            // One-finger tap that drives the fill tool. Kept disabled except while the fill tool is
-            // selected (toggled in updateActiveLayerAndTool) rather than gated only inside the handler,
-            // so it never competes for single-finger touches with the active layer's own stroke
-            // capture while a drawing tool is active.
-            let fillTap = UITapGestureRecognizer(target: self, action: #selector(handleFillTap(_:)))
-            fillTap.delegate = self
-            fillTap.cancelsTouchesInView = false
-            fillTap.isEnabled = false
-            view.addGestureRecognizer(fillTap)
-            fillTapRecognizer = fillTap
+            // One-finger press-drag that drives the fill tool: press applies the fill, then dragging
+            // adjusts gap-closing (vertical) and edge overlap (horizontal) live. `minimumPressDuration = 0`
+            // makes a plain tap register immediately (press + lift with no drag == a one-shot fill).
+            // Kept disabled except while the fill tool is selected (toggled in updateActiveLayerAndTool)
+            // rather than gated only inside the handler, so it never competes for single-finger touches
+            // with the active layer's own stroke capture while a drawing tool is active.
+            let fillPress = UILongPressGestureRecognizer(target: self, action: #selector(handleFillPress(_:)))
+            fillPress.minimumPressDuration = 0
+            fillPress.numberOfTouchesRequired = 1
+            fillPress.delegate = self
+            fillPress.cancelsTouchesInView = false
+            fillPress.isEnabled = false
+            view.addGestureRecognizer(fillPress)
+            fillTapRecognizer = fillPress
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            // The fill press is allowed to coexist with every other recognizer: as a zero-duration long
+            // press it recognizes on the first touch, and if it were mutually exclusive with the
+            // two-finger pan/zoom/rotate and undo/redo taps it would block them (a fill already begun
+            // would prevent them from ever recognizing). Instead those handlers explicitly cancel the
+            // in-progress fill when they take over — see the cancelInteractiveFill() calls below.
+            if gestureRecognizer === fillTapRecognizer || otherGestureRecognizer === fillTapRecognizer {
+                return true
+            }
             let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
             return transformRecognizers.contains(where: { $0 === gestureRecognizer }) &&
                    transformRecognizers.contains(where: { $0 === otherGestureRecognizer })
@@ -998,6 +1022,10 @@ struct CanvasView: UIViewRepresentable {
         /// Captures the touch centroid and container center at the start of whichever of
         /// pan/pinch/rotation begins first, so all three can share one anchor for this touch sequence.
         private func beginAnchorIfNeeded(at location: CGPoint) {
+            // A two-finger pan/zoom/rotate is starting; if a single-finger fill press was mid-flight
+            // (its first touch having already begun a fill), abandon that fill without committing so the
+            // transform takes over cleanly. No-op when no fill is active.
+            canvasManager.cancelInteractiveFill()
             guard gestureAnchorCenter0 == nil, let container = containerView else { return }
             gestureAnchorHost0 = location
             gestureAnchorCenter0 = container.center
@@ -1101,20 +1129,46 @@ struct CanvasView: UIViewRepresentable {
         }
 
         @objc func handleTwoFingerTap() {
+            // A two-finger tap means undo, not fill — drop any fill the first touch may have started.
+            canvasManager.cancelInteractiveFill()
             canvasManager.undo()
         }
 
         @objc func handleThreeFingerTap() {
+            canvasManager.cancelInteractiveFill()
             canvasManager.redo()
         }
 
-        @objc func handleFillTap(_ recognizer: UITapGestureRecognizer) {
-            guard recognizer.state == .ended, let container = containerView else { return }
-            // container's bounds are exactly canvasSize (see hostBoundsDidChange), so location(in:)
-            // already yields canvas-pixel coordinates — the same top-left-origin space FloodFillEngine
-            // and the onion-skin/thumbnail renderers use.
-            let point = recognizer.location(in: container)
-            canvasManager.performFill(at: point)
+        @objc func handleFillPress(_ recognizer: UILongPressGestureRecognizer) {
+            guard let container = containerView, let host = hostView else { return }
+            switch recognizer.state {
+            case .began:
+                // container's bounds are exactly canvasSize (see hostBoundsDidChange), so location(in:)
+                // there yields canvas-pixel coordinates — the same top-left-origin space FloodFillEngine
+                // and the onion-skin/thumbnail renderers use. The drag delta, in contrast, is measured in
+                // fixed screen (host) space so the feel is independent of the canvas's current zoom.
+                fillDragStartHost = recognizer.location(in: host)
+                fillDragStartGap = canvasManager.fillGapClosingDistance
+                fillDragStartExpand = canvasManager.fillExpand
+                canvasManager.beginInteractiveFill(at: recognizer.location(in: container))
+            case .changed:
+                guard let start = fillDragStartHost else { return }
+                let current = recognizer.location(in: host)
+                let gapPerPoint = (CanvasManager.fillGapRange.upperBound - CanvasManager.fillGapRange.lowerBound) / Self.fillDragSweepPoints
+                let expandPerPoint = (CanvasManager.fillExpandRange.upperBound - CanvasManager.fillExpandRange.lowerBound) / Self.fillDragSweepPoints
+                // Up (negative dy in screen space) raises gap-closing; right (positive dx) raises overlap.
+                let gap = fillDragStartGap - (current.y - start.y) * gapPerPoint
+                let expand = fillDragStartExpand + (current.x - start.x) * expandPerPoint
+                canvasManager.updateInteractiveFill(gapClosing: gap, expand: expand)
+            case .ended:
+                canvasManager.endInteractiveFill()
+                fillDragStartHost = nil
+            case .cancelled, .failed:
+                canvasManager.cancelInteractiveFill()
+                fillDragStartHost = nil
+            default:
+                break
+            }
         }
 
     }

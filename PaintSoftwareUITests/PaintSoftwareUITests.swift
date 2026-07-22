@@ -123,7 +123,7 @@ final class PaintSoftwareUITests: XCTestCase {
         return pixel.r > 240 && pixel.g > 240 && pixel.b > 240
     }
 
-    /// The fill runs off-main-thread (see CanvasManager.performFill), so polls the given point on
+    /// The fill runs off-main-thread (see CanvasManager.beginInteractiveFill), so polls the given point on
     /// `element` until it's no longer whitish (i.e. the fill landed) or `timeout` elapses.
     @discardableResult
     private func waitUntilFilled(_ element: XCUIElement, dx: Double, dy: Double, timeout: TimeInterval = 15) -> Bool {
@@ -414,8 +414,7 @@ final class PaintSoftwareUITests: XCTestCase {
 
         let fillButton = app.buttons["toolbar.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
-        fillButton.tap() // Selects the fill tool and opens its settings panel...
-        fillButton.tap() // ...then closes the panel again so it can't cover the canvas region we tap.
+        fillButton.tap() // First tap just selects the fill tool; its menu stays closed (no canvas overlay).
 
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
@@ -489,9 +488,10 @@ final class PaintSoftwareUITests: XCTestCase {
     }
 
     /// The scenario from the fill tool's design brief: lineart on one layer, a separate blank layer
-    /// underneath it as the fill destination, with the fill tool's reference locked to the lineart
-    /// layer regardless of which layer is active. Verifies both that the fill lands (proving it used
-    /// the lineart layer's boundary, not the blank active layer's) and that it stays contained.
+    /// underneath it as the fill destination. With the reworked reference model every visible layer is a
+    /// fill reference by default, so the fill on the blank active layer is bounded by the *union* of all
+    /// layers' walls — i.e. the lineart on the layer above. Verifies both that the fill lands (proving it
+    /// used the other layer's boundary, not the blank active layer's) and that it stays contained.
     func testFillToolMasksFromReferenceLayerAcrossLayers() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -526,28 +526,257 @@ final class PaintSoftwareUITests: XCTestCase {
         bottomRow.tap()
         layersButton.tap()
 
-        // Point the fill tool's reference at "Layer 2" (the lineart layer) explicitly, rather than the
-        // now-active blank bottom layer.
+        // Select the fill tool (a single tap selects it without opening its menu) and fill the interior.
+        // No reference needs picking: both layers are fill references by default, so the lineart above
+        // bounds the fill on the blank layer below.
         let fillButton = app.buttons["toolbar.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         fillButton.tap()
 
-        let referenceRow = app.buttons["fillPanel.reference.Layer 2"]
-        XCTAssertTrue(referenceRow.waitForExistence(timeout: 5))
-        referenceRow.tap()
-
-        fillButton.tap() // Close the panel.
-
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should land on the blank active layer, bounded by the lineart layer set as its reference")
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should land on the blank active layer, bounded by the lineart on the layer above (a default fill reference)")
 
         // A point clearly outside the square (but still on real canvas content, not the view's own
-        // letterbox margin — see `safeOutsideCornerPoint`'s doc comment) should stay untouched. If
-        // the reference layer were ignored, the blank active layer would have no walls and the fill
-        // would have flooded the whole canvas instead of stopping at the lineart square.
+        // letterbox margin — see `safeOutsideCornerPoint`'s doc comment) should stay untouched. If the
+        // other layer weren't used as a reference, the blank active layer would have no walls and the
+        // fill would have flooded the whole canvas instead of stopping at the lineart square.
         let outside = safeOutsideCornerPoint(canvas)
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outside.dx, dy: outside.dy)), "If the reference layer were ignored, the blank active layer has no walls and the fill would have flooded the whole canvas instead of stopping at the lineart square")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outside.dx, dy: outside.dy)), "If the other layer weren't a fill reference, the blank active layer has no walls and the fill would have flooded the whole canvas instead of stopping at the lineart square")
+    }
+
+    /// Draws a fully closed square in the **top-left** quadrant — deliberately far from the canvas
+    /// center — fills its interior, and checks both that the interior colors and that a point in the
+    /// opposite (bottom-right) quadrant stays blank. The pre-existing fill tests all draw a square
+    /// centered on the canvas, which is symmetric under both a horizontal and a vertical flip, so a
+    /// rasterizer that mirrors the reference layer would still pass them: the wall mask lands in the
+    /// same place either way. An off-center square is not flip-symmetric, so if the fill reads the
+    /// reference from a mirrored mask, the seed tapped inside the drawn square lands in open space in
+    /// the mirrored mask and the fill leaks across the canvas instead of staying contained.
+    func testFillToolFillsOffCenterSquareTopLeftWithoutMirroring() throws {
+        try runOffCenterFillContainmentTest(squareRect: (minX: 0.24, maxX: 0.44, minY: 0.24, maxY: 0.44),
+                                            insideProbe: (dx: 0.34, dy: 0.34),
+                                            outsideProbe: (dx: 0.72, dy: 0.72))
+    }
+
+    /// The mirror image of the test above: a closed square in the **bottom-right** quadrant, with the
+    /// containment probe in the top-left. Catches a mirror bug in the opposite direction (and along the
+    /// other axis) from the top-left case.
+    func testFillToolFillsOffCenterSquareBottomRightWithoutMirroring() throws {
+        try runOffCenterFillContainmentTest(squareRect: (minX: 0.56, maxX: 0.76, minY: 0.56, maxY: 0.76),
+                                            insideProbe: (dx: 0.66, dy: 0.66),
+                                            outsideProbe: (dx: 0.28, dy: 0.28))
+    }
+
+    /// Shared body for the off-center containment tests: draws a closed square at `squareRect` (all
+    /// coordinates normalized within `canvas.host`, chosen to sit inside the visible, non-letterboxed
+    /// canvas region), fills at `insideProbe`, and asserts the interior fills while `outsideProbe`
+    /// (a point well outside the square, still on real canvas content) stays blank.
+    private func runOffCenterFillContainmentTest(
+        squareRect: (minX: Double, maxX: Double, minY: Double, maxY: Double),
+        insideProbe: (dx: Double, dy: Double),
+        outsideProbe: (dx: Double, dy: Double)
+    ) throws {
+        // Disabled pending a fix. These reproduce a confirmed defect: with off-center reference content
+        // the fill lands at the vertically-mirrored canvas position of the tap instead of at the tap
+        // (a centered shape hides it because it's symmetric under a vertical flip). See BUGS.md,
+        // "Fill tool: off-center reference content fills vertically mirrored".
+        throw XCTSkip("Disabled pending fix — see BUGS.md (fill off-center vertical mirror)")
+
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap() // Synthetic XCUITest touches are finger touches, not Apple Pencil.
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        let x0 = squareRect.minX, x1 = squareRect.maxX, y0 = squareRect.minY, y1 = squareRect.maxY
+        drawLine(on: canvas, from: CGVector(dx: x0, dy: y0), to: CGVector(dx: x1, dy: y0)) // top
+        drawLine(on: canvas, from: CGVector(dx: x1, dy: y0), to: CGVector(dx: x1, dy: y1)) // right
+        drawLine(on: canvas, from: CGVector(dx: x1, dy: y1), to: CGVector(dx: x0, dy: y1)) // bottom
+        drawLine(on: canvas, from: CGVector(dx: x0, dy: y1), to: CGVector(dx: x0, dy: y0)) // left
+
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: insideProbe.dx, dy: insideProbe.dy)), "Square's interior should still be blank paper before filling")
+
+        let fillButton = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap() // Selects the fill tool and opens its settings panel...
+        fillButton.tap() // ...then closes the panel again so it can't cover the canvas region we tap.
+
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: insideProbe.dx, dy: insideProbe.dy)).tap()
+
+        XCTAssertTrue(waitUntilFilled(canvas, dx: insideProbe.dx, dy: insideProbe.dy), "Tapping inside the off-center square should color its interior")
+
+        // The discriminator: a point in the opposite quadrant, far outside the drawn square. If the fill
+        // read the reference layer from a mirrored mask, the seed landed in open space and the fill
+        // leaked out of the (mirrored-away) walls to flood here.
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outsideProbe.dx, dy: outsideProbe.dy)), "Fill of an off-center square must stay contained — leaking here means the reference layer was rasterized mirrored")
+    }
+
+    /// Task 2: pressing the fill tool on the canvas and dragging **up** raises the gap-closing setting in
+    /// real time, and the left rail's gap-closing slider (which replaces brush Size in fill mode) mirrors
+    /// it. The slider value is an observable proxy for the live setting — the two are bound to the same
+    /// `@Published` property, so a change to one is a change to the other.
+    func testInteractiveFillDragUpRaisesGapClosing() throws {
+        try runInteractiveFillDragTest(sliderID: "sideToolbar.gapClosingSlider",
+                                       from: CGVector(dx: 0.3, dy: 0.75),
+                                       to: CGVector(dx: 0.3, dy: 0.25),
+                                       expectRaised: true,
+                                       what: "Dragging up during a fill should raise gap-closing")
+    }
+
+    /// Task 2 companion: dragging **right** raises the edge-overlap setting live, mirrored by the left
+    /// rail's edge-overlap slider (which replaces brush Opacity in fill mode).
+    func testInteractiveFillDragRightRaisesEdgeOverlap() throws {
+        try runInteractiveFillDragTest(sliderID: "sideToolbar.edgeOverlapSlider",
+                                       from: CGVector(dx: 0.15, dy: 0.5),
+                                       to: CGVector(dx: 0.5, dy: 0.5),
+                                       expectRaised: true,
+                                       what: "Dragging right during a fill should raise edge overlap")
+    }
+
+    /// Shared body: selects the fill tool (a single tap, which also switches the left rail's two sliders
+    /// to gap-closing / edge-overlap), reads `sliderID`'s value, then press-drags on the canvas from
+    /// `from` to `to` and checks the slider moved in the expected direction — proving the drag adjusts the
+    /// setting live.
+    private func runInteractiveFillDragTest(
+        sliderID: String,
+        from: CGVector,
+        to: CGVector,
+        expectRaised: Bool,
+        what: String
+    ) throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        let fillButton = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap() // Selects the fill tool; the left rail's sliders become gap-closing / edge-overlap.
+
+        let slider = app.sliders[sliderID]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        let before = sliderNumericValue(slider)
+
+        // Press on the canvas and drag. Both endpoints sit on the left/center of the canvas, clear of the
+        // 300pt trailing settings panel, so the drag lands on the fill gesture rather than the panel.
+        let start = canvas.coordinate(withNormalizedOffset: from)
+        let end = canvas.coordinate(withNormalizedOffset: to)
+        start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+
+        let after = sliderNumericValue(slider)
+        if expectRaised {
+            XCTAssertGreaterThan(after, before, "\(what) (slider \(before) -> \(after))")
+        } else {
+            XCTAssertLessThan(after, before, "\(what) (slider \(before) -> \(after))")
+        }
+    }
+
+    /// These sliders surface their raw value to accessibility (e.g. "8", "40", "2", "6") rather than a
+    /// percentage; parse whichever form appears so tests can compare positions on the same slider.
+    private func sliderNumericValue(_ slider: XCUIElement) -> Double {
+        guard let text = slider.value as? String,
+              let value = Double(text.replacingOccurrences(of: "%", with: "")) else { return -1 }
+        return value
+    }
+
+    // MARK: - Task 3: tool menus, left-rail labels, per-layer fill reference
+
+    /// Task 3: the fill tool's settings menu only opens on the *second* tap of its icon; the first tap
+    /// just selects the tool (so switching tools never pops a menu over the canvas).
+    func testFillMenuOpensOnlyOnSecondTap() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let fillButton = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+
+        fillButton.tap() // First tap: select only.
+        let menuSlider = app.sliders["fillPanel.gapClosingSlider"] // lives only in the dropdown menu
+        XCTAssertFalse(menuSlider.waitForExistence(timeout: 1.5), "First tap should select the fill tool without opening its menu")
+
+        fillButton.tap() // Second tap: open the menu.
+        XCTAssertTrue(menuSlider.waitForExistence(timeout: 5), "Second tap on the already-selected fill tool should open its menu")
+    }
+
+    /// Task 3: tapping the canvas (anywhere off the toolbar and the open menu) dismisses an open menu.
+    func testTappingCanvasDismissesOpenMenu() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let layersButton = app.buttons["toolbar.layersButton"]
+        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
+        layersButton.tap()
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5), "Layers menu should open")
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.6)).tap() // off the menu
+
+        XCTAssertTrue(addButton.waitForNonExistence(timeout: 3), "Tapping off an open menu should dismiss it")
+    }
+
+    /// Task 3: the left rail's two sliders are Size / Opacity for the brush and swap to Gap Closing /
+    /// Edge Overlap when the fill tool is active.
+    func testLeftRailSlidersSwapWithTool() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        // Default tool is the brush.
+        XCTAssertTrue(app.sliders["sideToolbar.brushSizeSlider"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Size"].exists)
+        XCTAssertTrue(app.staticTexts["Opacity"].exists)
+        XCTAssertFalse(app.sliders["sideToolbar.gapClosingSlider"].exists)
+
+        app.buttons["toolbar.fillButton"].tap() // select fill
+
+        XCTAssertTrue(app.sliders["sideToolbar.gapClosingSlider"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.sliders["sideToolbar.edgeOverlapSlider"].exists)
+        XCTAssertTrue(app.staticTexts["Gap Closing"].exists)
+        XCTAssertTrue(app.staticTexts["Edge Overlap"].exists)
+        XCTAssertFalse(app.sliders["sideToolbar.brushSizeSlider"].exists)
+    }
+
+    /// Task 3: a layer shows "Fill Reference" / "Fill Excluded" under its name, and the row's swipe Edit
+    /// menu toggles that state.
+    func testLayerFillReferenceToggleFromEditMenu() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let layersButton = app.buttons["toolbar.layersButton"]
+        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
+        layersButton.tap()
+
+        // A visible layer defaults to being a fill reference.
+        let subtitle = app.staticTexts["layerPanel.row.0.fillRef"]
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 5))
+        XCTAssertEqual(subtitle.value as? String, "1", "A visible layer should default to Fill Reference")
+
+        // Swipe the row to reveal Edit, open the edit menu, turn Fill Reference off.
+        app.staticTexts["layerPanel.row.0"].swipeLeft()
+        let editButton = app.buttons["layerPanel.row.0.edit"]
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        editButton.tap()
+
+        let toggle = app.switches["layerEdit.fillReferenceToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        // Tap the trailing edge, where the switch control sits — tapping the element's center can land on
+        // the row label and not flip it.
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        app.buttons["Done"].tap()
+
+        XCTAssertEqual(subtitle.value as? String, "0", "Turning the switch off should mark the layer Fill Excluded")
     }
 
     // MARK: - Select & Move
@@ -567,7 +796,9 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
 
-        dragOnCanvas(app, from: CGVector(dx: 0.35, dy: 0.35), to: CGVector(dx: 0.6, dy: 0.6))
+        // Draw the selection in the lower-right of the canvas, clear of the Select menu's dropdown
+        // (which drops down under its leading toolbar icon, covering the upper-left).
+        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.52), to: CGVector(dx: 0.78, dy: 0.74))
 
         let fillButton = app.buttons["selectPanel.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
@@ -589,7 +820,8 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
 
-        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.55, dy: 0.55))
+        // Draw in the lower-right, clear of the Select menu's leading-side dropdown (see the fill test).
+        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.52), to: CGVector(dx: 0.78, dy: 0.74))
 
         let duplicateButton = app.buttons["selectPanel.duplicateButton"]
         XCTAssertTrue(duplicateButton.waitForExistence(timeout: 5))

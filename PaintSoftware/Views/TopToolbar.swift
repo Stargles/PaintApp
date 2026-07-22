@@ -27,6 +27,7 @@ struct TopToolbar: View {
             iconButton(system: "eraser", isActive: canvasManager.selectedTool == .eraser) {
                 canvasManager.commitFloatingPieceIfNeeded()
                 canvasManager.selectedTool = .eraser
+                activePanel = .none
             }
             iconButton(system: "drop.fill", isActive: activePanel == .fill || canvasManager.selectedTool == .fill) {
                 selectFillToolAndTogglePanel()
@@ -93,16 +94,28 @@ struct TopToolbar: View {
         }
     }
 
+    /// Brush and fill are two-stage: the first tap only *selects* the tool (closing any open menu); once
+    /// it's already the active tool, a further tap toggles its settings menu. Matches Procreate, and keeps
+    /// the menu from popping up (and covering the canvas) the moment you switch tools.
     private func selectBrushToolAndTogglePanel() {
-        if canvasManager.selectedTool != .pen && canvasManager.selectedTool != .pencil {
+        let brushActive = canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil
+        if brushActive {
+            toggle(.brush)
+        } else {
+            canvasManager.commitFloatingPieceIfNeeded()
             canvasManager.selectedTool = .pen
+            activePanel = .none
         }
-        toggle(.brush)
     }
 
     private func selectFillToolAndTogglePanel() {
-        canvasManager.selectedTool = .fill
-        toggle(.fill)
+        if canvasManager.selectedTool == .fill {
+            toggle(.fill)
+        } else {
+            canvasManager.commitFloatingPieceIfNeeded()
+            canvasManager.selectedTool = .fill
+            activePanel = .none
+        }
     }
 
     private func iconButton(system: String, isActive: Bool, action: @escaping () -> Void) -> some View {

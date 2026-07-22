@@ -21,6 +21,18 @@ struct DrawingView: View {
             ZStack {
                 CanvasView(canvasManager: canvasManager, activePanel: activePanel)
 
+                // Transparent catcher: tapping anywhere off the toolbar and the open menu dismisses the
+                // menu. Sits above the canvas but below the toolbar/panel (added later in this ZStack),
+                // so those still receive their own taps. Present for transient settings menus only — the
+                // Select panel is exempt because using it *is* interacting with the canvas (drawing a
+                // selection), which a catcher would swallow.
+                if activePanel != .none && activePanel != .select {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { activePanel = .none }
+                }
+
                 VStack(spacing: 0) {
                     TopToolbar(canvasManager: canvasManager, activePanel: $activePanel, onOpenGallery: onOpenGallery)
 
@@ -29,19 +41,21 @@ struct DrawingView: View {
                     AnimationTimeline(canvasManager: canvasManager, isExpanded: $isTimelineExpanded)
                 }
 
+                // Tool menus drop down directly under the toolbar, aligned to the side their icon sits on
+                // (leading tools on the left, brush/fill/layers/color on the right) rather than sliding in
+                // as a full-height rail from the screen edge.
                 if activePanel != .none {
-                    HStack {
-                        Spacer()
-                        panelView
-                            .frame(width: 300)
-                            .frame(maxHeight: 420)
-                            .background(Color.black.opacity(0.9))
-                            .cornerRadius(12)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
-                    .padding(.top, 64)
-                    .padding(.trailing, 12)
-                    .frame(maxHeight: .infinity, alignment: .top)
+                    panelView
+                        .frame(width: 300)
+                        .frame(maxHeight: 420)
+                        .background(Color.black.opacity(0.95))
+                        .cornerRadius(12)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+                        .padding(.top, 60)
+                        .padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: panelAlignment)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
                 // Move/Duplicate's transform controls live in a bottom bar (not the trailing panel)
@@ -67,6 +81,17 @@ struct DrawingView: View {
         .background(Color.black)
         .animation(.easeInOut(duration: 0.2), value: activePanel)
         .animation(.easeInOut(duration: 0.2), value: canvasManager.floatingPiece != nil)
+    }
+
+    /// Which side of the toolbar the open menu's icon lives on, so the dropdown lands under it. The
+    /// gallery/actions/adjust/select icons are leading; brush/fill/layers/color are trailing.
+    private var panelAlignment: Alignment {
+        switch activePanel {
+        case .actions, .adjust, .select:
+            return .topLeading
+        default:
+            return .topTrailing
+        }
     }
 
     @ViewBuilder
