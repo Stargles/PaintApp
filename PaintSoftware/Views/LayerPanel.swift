@@ -13,9 +13,26 @@ struct LayerPanel: View {
 
                 Spacer()
 
-                Button(action: { canvasManager.addLayer() }) {
+                Menu {
+                    Button {
+                        canvasManager.addLayer()
+                    } label: {
+                        Label("Raster Layer", systemImage: "square.on.square")
+                    }
+                    .accessibilityIdentifier("layerPanel.addRasterButton")
+                    Button {
+                        canvasManager.addVectorLayer()
+                    } label: {
+                        Label("Vector Layer", systemImage: "scribble.variable")
+                    }
+                    .accessibilityIdentifier("layerPanel.addVectorButton")
+                } label: {
                     Image(systemName: "plus")
                         .foregroundColor(.white)
+                } primaryAction: {
+                    // Plain tap keeps the original behavior (add a raster layer); long-press/menu
+                    // arrow opens the kind picker. Keeps the existing "layerPanel.addButton" tests valid.
+                    canvasManager.addLayer()
                 }
                 .accessibilityIdentifier("layerPanel.addButton")
             }

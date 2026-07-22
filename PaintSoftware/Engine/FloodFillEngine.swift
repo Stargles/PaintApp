@@ -81,6 +81,10 @@ enum FloodFillEngine {
             }
             cel.bakedImage?.draw(in: rect)
             cel.raster.renderToUIImage().draw(in: rect)
+            // Vector layers keep their strokes/images in `vector`; include them so a vector layer can
+            // be filled, and can serve as the wall reference for a fill on another layer (and vice
+            // versa) — the reference layer's kind is transparent to the flood fill this way.
+            cel.vector?.render().draw(in: rect)
         }
     }
 

@@ -146,8 +146,28 @@ enum ProjectStore {
                     try? bakedData.write(to: imagesDir.appendingPathComponent(bakedFileName!))
                 }
 
+                // Vector content: write the placed images' PNGs, then a JSON of the strokes + image
+                // refs + overall transform (see VectorCanvasData).
+                var vectorFileName: String?
+                if let vector = cel.vector, !vector.isEmpty {
+                    var imageFileNames: [UUID: String] = [:]
+                    for element in vector.images {
+                        let name = element.fileName ?? "\(cel.id.uuidString)_vec_\(element.id.uuidString).png"
+                        if let data = element.image.pngData() {
+                            try? data.write(to: imagesDir.appendingPathComponent(name))
+                            imageFileNames[element.id] = name
+                        }
+                    }
+                    let payload = VectorCanvasData(from: vector, imageFileNames: imageFileNames)
+                    if let data = try? JSONEncoder().encode(payload) {
+                        vectorFileName = "\(cel.id.uuidString)_vector.json"
+                        try? data.write(to: imagesDir.appendingPathComponent(vectorFileName!))
+                    }
+                }
+
                 celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
-                                                 rasterFileName: fileName, fillImageFileName: fillFileName, bakedImageFileName: bakedFileName))
+                                                 rasterFileName: fileName, fillImageFileName: fillFileName, bakedImageFileName: bakedFileName,
+                                                 vectorFileName: vectorFileName))
             }
 
             let transformManifest = layer.isObjectLayer
@@ -254,8 +274,27 @@ enum ProjectStore {
                 if let bakedFileName = celManifest.bakedImageFileName {
                     bakedImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(bakedFileName).path)
                 }
+
+                // Vector content: decode the JSON (strokes + image refs + transform) and reload each
+                // placed image's PNG. A `.vector` layer with no saved payload (never drawn) still gets
+                // an empty VectorCanvas so it stays a working vector layer.
+                var vector: VectorCanvas?
+                if let vectorFileName = celManifest.vectorFileName,
+                   let data = try? Data(contentsOf: imagesDir.appendingPathComponent(vectorFileName)),
+                   let payload = try? JSONDecoder().decode(VectorCanvasData.self, from: data) {
+                    let images: [VectorImageElement] = payload.images.compactMap { ref in
+                        guard let img = UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path) else { return nil }
+                        return VectorImageElement(image: img,
+                                                  transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y), scale: ref.scale, rotation: ref.rotation),
+                                                  fileName: ref.fileName)
+                    }
+                    vector = VectorCanvas(size: canvasSize, strokes: payload.strokes, images: images, transform: payload.affineTransform)
+                } else if layerManifest.kind == .vector {
+                    vector = .empty(size: canvasSize)
+                }
+
                 cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
-                                 raster: raster, fillImage: fillImage, bakedImage: bakedImage))
+                                 raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector))
             }
 
             let transform: LayerTransform

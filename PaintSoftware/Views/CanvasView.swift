@@ -114,6 +114,17 @@ final class StrokeCanvasView: UIView {
     /// than smoothing in from wherever an earlier, unrelated stroke left the trailing point.
     private var stabilizer = StrokeStabilizer(stabilization: 0.2)
 
+    /// When non-nil, this is a vector layer: strokes are recorded as geometry into this
+    /// `VectorCanvas` (movable/scalable without resolution loss) rather than stamped permanently
+    /// into `raster`. Set by the coordinator for `.vector` layers; nil for raster layers.
+    var vectorCanvas: VectorCanvas? {
+        didSet { refreshDisplay() }
+    }
+    /// Live-preview raster for the in-progress vector stroke (nil except mid-stroke).
+    private var vectorScratch: RasterLayerTexture?
+    private var currentVectorSamples: [VectorSample] = []
+    private var vectorStrokesBeforeSnapshot: [VectorStroke]?
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         imageView.contentMode = .scaleToFill
@@ -139,22 +150,36 @@ final class StrokeCanvasView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func refreshDisplay() {
+        if let vectorCanvas {
+            let base = vectorCanvas.render()
+            guard let scratch = vectorScratch else { imageView.image = base; return }
+            // Mid vector stroke: composite the live scratch preview over the committed content.
+            let bounds = CGRect(origin: .zero, size: vectorCanvas.size)
+            let format = UIGraphicsImageRendererFormat(); format.opaque = false; format.scale = 1
+            imageView.image = UIGraphicsImageRenderer(size: vectorCanvas.size, format: format).image { _ in
+                base.draw(in: bounds)
+                scratch.renderToUIImage().draw(in: bounds)
+            }
+            return
+        }
         imageView.image = raster?.renderToUIImage()
     }
 
     private func handleBegin(_ touch: UITouch) {
+        if vectorCanvas != nil { beginVectorStroke(touch); return }
         guard let raster else { return }
         strokeBeforeSnapshot = (raster.renderToUIImage(), raster.strokeCount)
         raster.beginStroke()
         lastStampPoint = nil
         let input = StrokeInput(touch: touch, in: self)
         stabilizer.reset(to: input.position)
-        stampPath(to: input.position, pressure: input.pressure)
+        stampPath(to: input.position, pressure: input.pressure, into: raster)
         refreshDisplay()
     }
 
     private func handleMove(_ touch: UITouch, _ event: UIEvent) {
-        guard raster != nil else { return }
+        if vectorCanvas != nil { moveVectorStroke(touch, event); return }
+        guard let raster else { return }
         // Coalesced touches carry the full-rate sample history since the last redraw, not just
         // the latest point — matters for fast strokes so segments don't look faceted. Stamps go
         // into the persistent raster individually, but the (O(canvas)) display refresh happens
@@ -162,12 +187,13 @@ final class StrokeCanvasView: UIView {
         for sample in event.coalescedTouches(for: touch) ?? [touch] {
             let input = StrokeInput(touch: sample, in: self)
             let smoothed = stabilizer.update(rawPoint: input.position)
-            stampPath(to: smoothed, pressure: input.pressure)
+            stampPath(to: smoothed, pressure: input.pressure, into: raster)
         }
         refreshDisplay()
     }
 
     private func handleEnd(_ touch: UITouch) {
+        if vectorCanvas != nil { endVectorStroke(touch); return }
         guard let raster, let before = strokeBeforeSnapshot else { return }
         // Stamp through to the exact *raw* lift point, bypassing the stabilizer, so the stroke
         // still actually reaches where the touch ended even when stabilization is smoothing/lagging
@@ -176,7 +202,7 @@ final class StrokeCanvasView: UIView {
         // shape like a traced square leaves gaps right at the corners (its edge endpoints), and a
         // bucket fill leaks straight through them.
         let input = StrokeInput(touch: touch, in: self)
-        stampPath(to: input.position, pressure: input.pressure)
+        stampPath(to: input.position, pressure: input.pressure, into: raster)
         raster.endStroke()
         lastStampPoint = nil
         refreshDisplay()
@@ -201,14 +227,14 @@ final class StrokeCanvasView: UIView {
         localUndoManager.setActionName("Stroke")
     }
 
-    /// Lays down stamps from `lastStampPoint` up to `point`, spaced a fraction of the brush diameter
-    /// apart (`brush.spacingFraction`), so consecutive input samples are joined into a continuous
-    /// line instead of isolated dots. Leftover distance shorter than one spacing step is carried
-    /// forward (via keeping `lastStampPoint` where it is) until enough accumulates.
-    private func stampPath(to point: CGPoint, pressure: CGFloat) {
-        guard raster != nil else { return }
+    /// Lays down stamps from `lastStampPoint` up to `point` into `target`, spaced a fraction of the
+    /// brush diameter apart (`brush.spacingFraction`), so consecutive input samples are joined into a
+    /// continuous line instead of isolated dots. `target` is the cel's raster for a raster layer, or
+    /// the live-preview scratch raster for an in-progress vector stroke. Delegates each dab to the
+    /// shared `BrushStamper` so live drawing and vector re-rendering are pixel-identical.
+    private func stampPath(to point: CGPoint, pressure: CGFloat, into target: RasterLayerTexture) {
         guard let last = lastStampPoint else {
-            stampOne(at: point, pressure: pressure)
+            BrushStamper.stampDab(into: target, at: point, pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
             lastStampPoint = point
             return
         }
@@ -220,106 +246,83 @@ final class StrokeCanvasView: UIView {
         let steps = Int(distance / spacing)
         for i in 1...steps {
             let t = (CGFloat(i) * spacing) / distance
-            stampOne(at: CGPoint(x: last.x + dx * t, y: last.y + dy * t), pressure: pressure)
+            BrushStamper.stampDab(into: target, at: CGPoint(x: last.x + dx * t, y: last.y + dy * t), pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
         }
         let coveredT = (CGFloat(steps) * spacing) / distance
         lastStampPoint = CGPoint(x: last.x + dx * coveredT, y: last.y + dy * coveredT)
     }
 
-    /// Stamps one dab at `point`, honoring the active brush's shape, hardness, pressure dynamics
-    /// (size and opacity), scatter, rotation jitter, and grain. The eraser path is left exactly as
-    /// it was before brush support existed (fixed size/hardness, no brush shape/dynamics) — an
-    /// eraser conceptually erases with a plain round tool regardless of which paint brush happens to
-    /// be selected, matching how Procreate's eraser works independently of the current brush.
-    private func stampOne(at point: CGPoint, pressure: CGFloat) {
-        guard let raster else { return }
+    // MARK: - Vector-layer drawing
+
+    /// On a vector layer, a stroke is recorded as geometry (`VectorStroke` samples) instead of being
+    /// stamped permanently into a raster. During the stroke a scratch raster gives live feedback;
+    /// on lift the samples become a `VectorStroke` added to the cel's `VectorCanvas` (or, for the
+    /// eraser, split existing strokes), and the display switches back to the canvas's own render.
+    private func beginVectorStroke(_ touch: UITouch) {
+        guard let vectorCanvas else { return }
+        vectorStrokesBeforeSnapshot = vectorCanvas.strokes
+        vectorScratch = RasterLayerTexture.empty(size: vectorCanvas.size)
+        currentVectorSamples = []
+        lastStampPoint = nil
+        let input = StrokeInput(touch: touch, in: self)
+        stabilizer.reset(to: input.position)
+        recordVectorSample(at: input.position, pressure: input.pressure)
+        refreshDisplay()
+    }
+
+    private func moveVectorStroke(_ touch: UITouch, _ event: UIEvent) {
+        guard vectorScratch != nil else { return }
+        for sample in event.coalescedTouches(for: touch) ?? [touch] {
+            let input = StrokeInput(touch: sample, in: self)
+            // The eraser isn't smoothed (it should cut exactly where the finger passes).
+            let point = isEraser ? input.position : stabilizer.update(rawPoint: input.position)
+            recordVectorSample(at: point, pressure: input.pressure)
+        }
+        refreshDisplay()
+    }
+
+    private func endVectorStroke(_ touch: UITouch) {
+        guard let vectorCanvas, vectorScratch != nil else { return }
+        let input = StrokeInput(touch: touch, in: self)
+        recordVectorSample(at: input.position, pressure: input.pressure)
+        let before = vectorStrokesBeforeSnapshot ?? vectorCanvas.strokes
+
         if isEraser {
-            let radius = brushSize / 2
-            // .destinationOut: the stamp's alpha controls how much is removed, so a soft edge erases
-            // softly (a flat .clear would hard-cut the whole disc regardless of falloff).
-            raster.stampCircle(at: point, radius: radius, color: .black, alpha: 1, hardness: 0.6, blendMode: .destinationOut)
-            return
+            vectorCanvas.erase(alongPath: currentVectorSamples.map { $0.point }, radius: brushSize / 2)
+        } else if !currentVectorSamples.isEmpty {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+            brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+            let stroke = VectorStroke(brush: brush, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
+                                      size: brushSize, opacity: brushOpacity, samples: currentVectorSamples)
+            vectorCanvas.addStroke(stroke)
         }
 
-        let pressureValue = Double(max(0, min(pressure, 1)))
-        let sizeFraction = brush.dynamics.sizeFraction(forPressure: pressureValue)
-        let opacityFraction = brush.dynamics.opacityFraction(forPressure: pressureValue)
-        let diameter = max(brushSize * CGFloat(sizeFraction), 0.5)
-        let radius = diameter / 2
-        let alpha = CGFloat(brushOpacity) * CGFloat(brush.flow) * CGFloat(opacityFraction)
-        guard alpha > 0, radius > 0 else { return }
+        vectorScratch = nil
+        currentVectorSamples = []
+        lastStampPoint = nil
+        refreshDisplay()
+        registerVectorUndo(canvas: vectorCanvas, from: before, to: vectorCanvas.strokes)
+        vectorStrokesBeforeSnapshot = nil
+        onStrokeEnded?()
+    }
 
-        let stampPoint = applyScatter(to: point, radius: radius)
-        let hardness = CGFloat(brush.hardness)
-        let blendMode = brush.blendMode.cgBlendMode
-
-        switch brush.shape {
-        case .softRound, .hardRound, .pen:
-            raster.stampCircle(at: stampPoint, radius: radius, color: brushColor, alpha: alpha, hardness: hardness, blendMode: blendMode)
-        case .pencil:
-            let grainMultiplier = brush.grain.isEnabled ? grainAlphaMultiplier(at: stampPoint, grain: brush.grain) : 1
-            raster.stampCircle(at: stampPoint, radius: radius, color: brushColor, alpha: alpha * grainMultiplier, hardness: hardness, blendMode: blendMode)
-        case .square, .custom:
-            // RasterLayerTexture only exposes a circular stamp primitive (see its doc comment: a
-            // real quad/textured-image primitive is Worker A's follow-up, out of scope for this
-            // file) — approximate both square and custom-texture brushes the same way, as a tiled
-            // grid of small round dabs. See stampApproximateSquare's doc comment for the tradeoffs.
-            let rotation: CGFloat = brush.rotationJitter > 0
-                ? CGFloat.random(in: -CGFloat.pi...CGFloat.pi) * CGFloat(brush.rotationJitter)
-                : 0
-            stampApproximateSquare(at: stampPoint, diameter: diameter, rotation: rotation, color: brushColor, alpha: alpha, hardness: hardness, blendMode: blendMode)
+    private func recordVectorSample(at point: CGPoint, pressure: CGFloat) {
+        currentVectorSamples.append(VectorSample(x: point.x, y: point.y, pressure: pressure))
+        // Live preview into the scratch raster (skipped for the eraser, whose result shows on lift).
+        if let scratch = vectorScratch, !isEraser {
+            stampPath(to: point, pressure: pressure, into: scratch)
         }
     }
 
-    /// Randomly offsets a stamp's position by up to `scatter * diameter`, in a random direction —
-    /// `Brush.scatter` is 0 for every built-in preset, so this is a no-op unless a user (or a future
-    /// preset) turns it on.
-    private func applyScatter(to point: CGPoint, radius: CGFloat) -> CGPoint {
-        guard brush.scatter > 0 else { return point }
-        let maxOffset = radius * 2 * CGFloat(brush.scatter)
-        let angle = CGFloat.random(in: 0..<(2 * .pi))
-        let distance = CGFloat.random(in: 0...maxOffset)
-        return CGPoint(x: point.x + cos(angle) * distance, y: point.y + sin(angle) * distance)
-    }
-
-    /// Per-stamp opacity multiplier for the Pencil brush's "tooth", from `BrushGrain.noiseValue` (a
-    /// procedural stand-in for a scanned paper texture — see that function's doc comment). At
-    /// `grain.depth == 0` this is always 1 (no modulation); at `depth == 1` it's the raw 0...1 noise
-    /// value, so lighter grain "valleys" let noticeably less ink through per stamp.
-    private func grainAlphaMultiplier(at point: CGPoint, grain: BrushGrain) -> CGFloat {
-        let noise = BrushGrain.noiseValue(atX: Double(point.x), y: Double(point.y), scale: grain.scale, rotation: grain.rotation)
-        let depth = CGFloat(max(0, min(grain.depth, 1)))
-        return (1 - depth) + depth * CGFloat(noise)
-    }
-
-    /// Approximates a square (or custom-texture, pending real texture support) stamp as a small grid
-    /// of overlapping round dabs tiled across the stamp's footprint, optionally rotated as a whole
-    /// (for `rotationJitter`). `RasterLayerTexture` only exposes a circular stamp primitive — adding
-    /// a real single-pass rect/textured-quad primitive there is Worker A's file, out of scope here —
-    /// so this is a pragmatic approximation, not a true square stamp: edges come out scalloped
-    /// rather than crisp, and overlapping dabs can build up opacity at their seams (the same already-
-    /// documented limitation as this view's per-stamp compositing generally, see this file's top doc
-    /// comment). Good enough to prove square/custom brushes exist and behave brush-like; a real
-    /// quad/textured stamp primitive in `RasterLayerTexture` is real follow-up work, not done here.
-    private func stampApproximateSquare(at center: CGPoint, diameter: CGFloat, rotation: CGFloat, color: UIColor, alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
-        guard let raster, diameter > 0 else { return }
-        let half = diameter / 2
-        let dabDiameter = max(diameter * 0.42, 1)
-        let dabRadius = dabDiameter / 2
-        let step = max(dabDiameter * 0.65, 1)
-        let cosR = cos(rotation), sinR = sin(rotation)
-
-        var y = -half
-        while y <= half {
-            var x = -half
-            while x <= half {
-                let rx = x * cosR - y * sinR
-                let ry = x * sinR + y * cosR
-                raster.stampCircle(at: CGPoint(x: center.x + rx, y: center.y + ry), radius: dabRadius, color: color, alpha: alpha, hardness: hardness, blendMode: blendMode)
-                x += step
-            }
-            y += step
+    private func registerVectorUndo(canvas: VectorCanvas, from: [VectorStroke], to: [VectorStroke]) {
+        localUndoManager.registerUndo(withTarget: self) { target in
+            canvas.strokes = from
+            canvas.bumpVersion()
+            target.refreshDisplay()
+            target.onStrokeEnded?()
+            target.registerVectorUndo(canvas: canvas, from: to, to: from)
         }
+        localUndoManager.setActionName(isEraser ? "Erase" : "Stroke")
     }
 }
 
@@ -672,6 +675,12 @@ struct CanvasView: UIViewRepresentable {
                     let targetRaster = celIdx.map { canvasManager.layers[index].cels[$0].raster }
                     if host.strokeView.raster !== targetRaster {
                         host.strokeView.raster = targetRaster
+                    }
+                    // Vector layers route drawing into their VectorCanvas instead of the raster (nil
+                    // for raster layers, so the stroke view stays in raster mode there).
+                    let targetVector = celIdx.flatMap { canvasManager.layers[index].cels[$0].vector }
+                    if host.strokeView.vectorCanvas !== targetVector {
+                        host.strokeView.vectorCanvas = targetVector
                     }
                 }
                 let targetFillImage = celIdx.flatMap { canvasManager.layers[index].cels[$0].fillImage }

@@ -26,11 +26,16 @@ enum PixelOps {
     static func rasterize(cel: Cel, canvasSize: CGSize) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let strokesImage = cel.raster.renderToUIImage()
+        // A vector cel's live strokes/images live in `vector` (rendered to a native-res image),
+        // not in `raster` — include it so fill, select/move, and cross-layer fill references treat
+        // a vector layer's content as pixels just like a raster layer's.
+        let vectorImage = cel.vector?.render()
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { _ in
             cel.fillImage?.draw(in: bounds)
             cel.bakedImage?.draw(in: bounds)
             strokesImage.draw(in: bounds)
+            vectorImage?.draw(in: bounds)
         }
     }
 

@@ -105,6 +105,18 @@ final class CanvasManager: ObservableObject {
         currentLayerIndex = layers.count - 1
     }
 
+    /// Adds a `.vector` layer: brush strokes drawn here are stored as geometry (see `VectorCanvas`)
+    /// so they can be moved/rotated/scaled without resolution loss, and it can also host imported
+    /// images/shapes. Its cel still keeps an (empty) `raster` so every cel-lifecycle path that
+    /// assumes a non-optional raster keeps working — the live strokes just live in `vector` instead.
+    func addVectorLayer(name: String? = nil) {
+        let size = canvasSize ?? CGSize(width: 1, height: 1)
+        let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: size), vector: .empty(size: size))
+        let layer = Layer(id: UUID(), name: name ?? "Vector \(layers.count + 1)", opacity: 1.0, isVisible: true, kind: .vector, cels: [cel])
+        layers.append(layer)
+        currentLayerIndex = layers.count - 1
+    }
+
     /// Inserts a photo as an "object layer": the image isn't rasterized onto the canvas, it's kept
     /// as a standalone object with its own position/scale/rotation that can be adjusted at any time
     /// via the on-canvas transform handles (see ObjectTransformOverlayView).
@@ -232,7 +244,7 @@ final class CanvasManager: ObservableObject {
             length = min(length, nextStart - newStart)
         }
         guard length > 0 else { return }
-        let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: source.raster.makeCopy(), fillImage: source.fillImage, bakedImage: source.bakedImage)
+        let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: source.raster.makeCopy(), fillImage: source.fillImage, bakedImage: source.bakedImage, vector: source.vector?.makeCopy())
         layers[layerIndex].cels.append(newCel)
         layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         sceneFrameCount = max(sceneFrameCount, newStart + length)
@@ -254,9 +266,13 @@ final class CanvasManager: ObservableObject {
 
     func clearCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        layers[layerIndex].cels[celIndex].raster = .empty(size: canvasSize ?? CGSize(width: 1, height: 1))
+        let size = canvasSize ?? CGSize(width: 1, height: 1)
+        layers[layerIndex].cels[celIndex].raster = .empty(size: size)
         layers[layerIndex].cels[celIndex].fillImage = nil
         layers[layerIndex].cels[celIndex].bakedImage = nil
+        if layers[layerIndex].cels[celIndex].vector != nil {
+            layers[layerIndex].cels[celIndex].vector = .empty(size: size)
+        }
         regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
     }
 
@@ -306,7 +322,7 @@ final class CanvasManager: ObservableObject {
         let cel = layers[layerIndex].cels[celIndex]
         guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return }
         layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
-        let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage)
+        let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy())
         layers[layerIndex].cels.append(secondHalf)
         layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
@@ -377,8 +393,8 @@ final class CanvasManager: ObservableObject {
         }
         let cel = layers[layerIndex].cels[celIndex]
         let image: UIImage
-        if cel.bakedImage != nil {
-            // PixelOps.rasterize folds fillImage/bakedImage/raster into one image already.
+        if cel.bakedImage != nil || cel.vector != nil {
+            // PixelOps.rasterize folds fillImage/bakedImage/raster/vector into one image already.
             image = ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize), canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
         } else {
             image = ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
@@ -521,17 +537,22 @@ struct Cel: Identifiable {
     /// and underneath `raster`'s live strokes when rendered. Nil means the cel has never had a
     /// raster operation applied beyond its own strokes.
     var bakedImage: UIImage? = nil
+    /// Vector content for `.vector` layers (strokes/images stored as geometry, re-rasterized at
+    /// canvas-native resolution — see `VectorCanvas`). Nil on `.raster` layers, whose live strokes
+    /// live in `raster` instead. A vector layer still uses `fillImage`/`bakedImage` the same way a
+    /// raster one does; only the live-stroke tier differs.
+    var vector: VectorCanvas? = nil
     var thumbnail: UIImage? = nil
 
     var endFrame: Int { startFrame + frameCount }
 }
 
 /// The three layer kinds in the app's roadmap (see BUGS.md/README future-enhancements notes).
-/// Only `.raster` (ordinary brush-stroke drawing, what every layer is today) is implemented.
-/// `.vector` (vector brush strokes — liquify/move without resolution loss) and `.compositing`
-/// (a modifier layer applying color grading/transforms to the layer below) are future work; this
-/// case exists now, and `Layer.kind` defaults to `.raster` everywhere, purely so adding them later
-/// doesn't require another `Layer`/`Cel` data-model migration on top of this one.
+/// `.raster` (ordinary brush-stroke drawing) and `.vector` (brush strokes/images stored as
+/// resolution-independent geometry — move/rotate/scale without quality loss, re-rasterized on
+/// demand) are implemented. `.compositing` (a modifier layer applying color grading/transforms to
+/// the layer below) is future work; the case exists so adding it needs no further data-model
+/// migration.
 enum LayerKind: String, Codable, Equatable {
     case raster
     case vector

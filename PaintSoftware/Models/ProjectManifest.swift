@@ -163,4 +163,8 @@ struct CelManifest: Codable {
     /// `Cel.bakedImage`). A plain optional: Swift's synthesized `Codable` already decodes a missing
     /// key as `nil`, so projects saved before this feature existed still load fine.
     var bakedImageFileName: String? = nil
+    /// JSON file holding this cel's vector content (`Cel.vector` → `VectorCanvasData`: strokes,
+    /// image element refs, and the overall transform) for `.vector` layers. Optional/decodeIfPresent-
+    /// friendly so raster-only projects (and pre-vector saves) load unchanged.
+    var vectorFileName: String? = nil
 }
