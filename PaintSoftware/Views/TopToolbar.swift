@@ -41,6 +41,7 @@ struct TopToolbar: View {
                     .frame(width: 34, height: 34)
                     .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
             }
+            .accessibilityIdentifier("toolbar.colorButton")
 
             Rectangle()
                 .fill(Color.white.opacity(0.25))

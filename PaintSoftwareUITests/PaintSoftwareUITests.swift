@@ -684,4 +684,78 @@ final class PaintSoftwareUITests: XCTestCase {
         app.buttons["toolbar.layersButton"].tap()
         XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Stroke drawn before saving should survive a save -> relaunch -> load round trip")
     }
+
+    // MARK: - Color picker
+
+    /// Drags the element with the given accessibility identifier's own drag gesture from one
+    /// normalized offset to another in one motion — used for the color panel's custom SV
+    /// square/hue bar, which are plain SwiftUI views (not native sliders), so
+    /// `adjust(toNormalizedSliderPosition:)` doesn't apply to them.
+    private func dragWithinElement(_ element: XCUIElement, from: CGVector, to: CGVector) {
+        let start = element.coordinate(withNormalizedOffset: from)
+        let end = element.coordinate(withNormalizedOffset: to)
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    /// Exercises all three color controls (hue bar, SV square, hex field) and confirms each one
+    /// actually lands on `canvasManager.brushColor`: after dragging the hue bar and SV square to a
+    /// known corner (full saturation/brightness at a chosen hue), reads the hex field back to
+    /// confirm it reactively shows the resulting color, then types a different hex value in
+    /// directly and draws a stroke, pixel-sampling it to confirm the *drawn* color matches what was
+    /// typed — the strongest possible check that brushColor actually changed and reached the canvas,
+    /// not just some intermediate SwiftUI state.
+    func testColorPanelControlsChangeBrushColorAndPaintedStroke() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
+        colorButton.tap()
+
+        // Hue bar: drag to the far left (hue 0 == red).
+        let hueSlider = app.otherElements["colorPanel.hueSlider"]
+        XCTAssertTrue(hueSlider.waitForExistence(timeout: 5))
+        dragWithinElement(hueSlider, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.0, dy: 0.5))
+
+        // SV square: drag to the top-right corner (saturation 1, brightness 1) so the result is
+        // pure, fully-saturated red rather than some in-between shade.
+        let svSquare = app.otherElements["colorPanel.svSquare"]
+        XCTAssertTrue(svSquare.waitForExistence(timeout: 5))
+        dragWithinElement(svSquare, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 1.0, dy: 0.0))
+
+        // The hex field should reactively reflect that as pure red, confirming the hue bar/SV
+        // square drags actually updated brushColor (not just their own local indicator).
+        let hexField = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hexField.waitForExistence(timeout: 5))
+        let hexAfterDrag = hexField.value as? String
+        XCTAssertEqual(hexAfterDrag?.uppercased(), "FF0000", "Dragging hue to red and SV to full saturation/brightness should show FF0000 in the hex field, got \(String(describing: hexAfterDrag))")
+
+        // Now drive the color from the hex field directly, to a distinct color (pure green).
+        hexField.tap()
+        // Clear the field's existing text ("FF0000") with backspaces before typing the new value —
+        // XCUIElement has no built-in "select all and replace", so this deletes character-by-character.
+        if let currentValue = hexField.value as? String {
+            hexField.typeText(String(repeating: "\u{8}", count: currentValue.count))
+        }
+        hexField.typeText("00FF00")
+        app.keyboards.buttons["Return"].tap()
+
+        colorButton.tap() // Close the panel so it can't cover the canvas.
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap() // Synthetic XCUITest touches are finger touches, not Apple Pencil.
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+
+        guard let pixel = rgbaPixel(of: canvas, dx: 0.5, dy: 0.5) else {
+            XCTFail("Could not sample the drawn stroke's pixel color")
+            return
+        }
+        XCTAssertGreaterThan(pixel.g, 200, "Stroke drawn after setting hex to 00FF00 should be green-dominant, got \(pixel)")
+        XCTAssertLessThan(pixel.r, 80, "Stroke drawn after setting hex to 00FF00 should have low red, got \(pixel)")
+        XCTAssertLessThan(pixel.b, 80, "Stroke drawn after setting hex to 00FF00 should have low blue, got \(pixel)")
+    }
 }
