@@ -95,6 +95,27 @@ final class VectorCanvas {
         invalidate()
     }
 
+    /// The overall transform expressed as a `LayerTransform` (position/uniform-scale/rotation) about
+    /// the canvas center, for driving the on-canvas transform overlay (which speaks `LayerTransform`,
+    /// same as object layers). Assumes `transform` is a translate·rotate·uniform-scale (which is all
+    /// the overlay can produce), so it decomposes cleanly.
+    func layerTransform(canvasCenter: CGPoint) -> LayerTransform {
+        let scale = hypot(transform.a, transform.b)
+        return LayerTransform(position: canvasCenter.applying(transform),
+                              scale: scale == 0 ? 1 : scale,
+                              rotation: atan2(transform.b, transform.a))
+    }
+
+    /// Inverse of `layerTransform(canvasCenter:)`: builds the affine that maps content drawn at the
+    /// canvas origin so its center lands at `t.position`, rotated/scaled about that center.
+    static func affine(from t: LayerTransform, canvasCenter: CGPoint) -> CGAffineTransform {
+        CGAffineTransform.identity
+            .translatedBy(x: t.position.x, y: t.position.y)
+            .rotated(by: t.rotation)
+            .scaledBy(x: t.scale, y: t.scale)
+            .translatedBy(x: -canvasCenter.x, y: -canvasCenter.y)
+    }
+
     /// Splits/erases vector strokes along an eraser path: any stroke sample within `radius` of any
     /// eraser point is cut, and each surviving contiguous run of samples becomes its own stroke — so
     /// erasing through the middle of a stroke leaves two strokes, exactly like a vector eraser (not a

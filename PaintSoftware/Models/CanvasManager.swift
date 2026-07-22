@@ -13,6 +13,56 @@ final class CanvasManager: ObservableObject {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }
 
+    /// True while the whole active *vector* layer is being moved/rotated/scaled via the on-canvas
+    /// transform box (the vector-layer analogue of the raster Move tool's floating piece — but it
+    /// transforms the layer's vector geometry losslessly instead of baking pixels). Only meaningful
+    /// when the active layer is a vector layer.
+    @Published var isVectorTransforming: Bool = false
+
+    /// Whether the active layer is a vector layer with a live vector canvas on the current frame.
+    var activeLayerIsVector: Bool {
+        guard layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].kind == .vector,
+              let celIdx = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return false }
+        return layers[currentLayerIndex].cels[celIdx].vector != nil
+    }
+
+    /// Imports an image onto the active vector layer as a movable element (centered, scaled to fit),
+    /// participating in the layer's overall transform. Returns false if the active layer isn't a
+    /// vector layer (caller falls back to inserting an object layer). Shapes and video slot in here
+    /// the same way in future.
+    @discardableResult
+    func addImageToActiveVectorLayer(_ image: UIImage) -> Bool {
+        guard let canvasSize, layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].kind == .vector,
+              let celIdx = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              let vector = layers[currentLayerIndex].cels[celIdx].vector,
+              image.size.width > 0, image.size.height > 0 else { return false }
+        let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
+        let element = VectorImageElement(image: image,
+                                         transform: LayerTransform(position: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2), scale: fit, rotation: 0))
+        vector.addImage(element)
+        scheduleThumbnailRegen(layerIndex: currentLayerIndex, celIndex: celIdx)
+        // VectorCanvas is a reference type; nudge SwiftUI so the canvas view reconciles + re-renders.
+        objectWillChange.send()
+        return true
+    }
+
+    /// Applies an overall move/rotate/scale to the active vector layer's content, losslessly (the
+    /// geometry is re-rasterized at the new transform, no resolution loss). Driven by the transform
+    /// overlay while `isVectorTransforming` is on.
+    func setVectorTransform(_ transform: LayerTransform, layerIndex: Int) {
+        guard let canvasSize, layers.indices.contains(layerIndex),
+              let celIdx = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame),
+              let vector = layers[layerIndex].cels[celIdx].vector else { return }
+        let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+        vector.setTransform(VectorCanvas.affine(from: transform, canvasCenter: center))
+        // VectorCanvas is a reference type, so mutating it doesn't trip the @Published layers
+        // republish; the coordinator refreshes the canvas view directly (see objectTransformChanged),
+        // and this debounced regen updates the layer-panel thumbnail.
+        scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIdx)
+    }
+
     // MARK: - Select & Move tool state (see SelectionModels.swift for the operations)
     @Published var selectionMode: SelectionMode = .lasso
     @Published var transformMode: TransformMode = .uniform

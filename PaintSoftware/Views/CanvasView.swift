@@ -120,6 +120,9 @@ final class StrokeCanvasView: UIView {
     var vectorCanvas: VectorCanvas? {
         didSet { refreshDisplay() }
     }
+    /// The `VectorCanvas.version` last shown, so the coordinator can detect in-place vector edits
+    /// (transform, image add — which don't change the canvas's object identity) and refresh.
+    private(set) var displayedVectorVersion: Int = -1
     /// Live-preview raster for the in-progress vector stroke (nil except mid-stroke).
     private var vectorScratch: RasterLayerTexture?
     private var currentVectorSamples: [VectorSample] = []
@@ -151,6 +154,7 @@ final class StrokeCanvasView: UIView {
 
     func refreshDisplay() {
         if let vectorCanvas {
+            displayedVectorVersion = vectorCanvas.version
             let base = vectorCanvas.render()
             guard let scratch = vectorScratch else { imageView.image = base; return }
             // Mid vector stroke: composite the live scratch preview over the committed content.
@@ -681,6 +685,10 @@ struct CanvasView: UIViewRepresentable {
                     let targetVector = celIdx.flatMap { canvasManager.layers[index].cels[$0].vector }
                     if host.strokeView.vectorCanvas !== targetVector {
                         host.strokeView.vectorCanvas = targetVector
+                    } else if let v = targetVector, host.strokeView.displayedVectorVersion != v.version {
+                        // Same VectorCanvas instance, but its content changed in place (transform,
+                        // image import, undo) — re-render.
+                        host.strokeView.refreshDisplay()
                     }
                 }
                 let targetFillImage = celIdx.flatMap { canvasManager.layers[index].cels[$0].fillImage }
@@ -701,6 +709,7 @@ struct CanvasView: UIViewRepresentable {
                 let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil
                     && !layer.isObjectLayer && canvasManager.selectedTool != .fill
                     && activePanel != .select && canvasManager.floatingPiece == nil
+                    && !(canvasManager.isVectorTransforming && layer.kind == .vector)
                 if host.isUserInteractionEnabled != shouldInteract {
                     host.isUserInteractionEnabled = shouldInteract
                 }
@@ -733,6 +742,19 @@ struct CanvasView: UIViewRepresentable {
                 return
             }
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
+
+            // Vector layer being transformed: box the whole (canvas-sized) content, driven by the
+            // VectorCanvas's current overall transform.
+            if layer.kind == .vector, layer.isVisible, canvasManager.isVectorTransforming,
+               let canvasSize = canvasManager.canvasSize,
+               let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame),
+               let vector = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].vector {
+                let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+                overlay.update(transform: vector.layerTransform(canvasCenter: center), imageSize: canvasSize)
+                container.bringSubviewToFront(overlay)
+                return
+            }
+
             guard layer.isObjectLayer, layer.isVisible, let image = layer.objectImage else {
                 overlay.isHidden = true
                 return
@@ -743,7 +765,17 @@ struct CanvasView: UIViewRepresentable {
 
         func objectTransformChanged(_ transform: LayerTransform) {
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
-            canvasManager.updateObjectTransform(layerIndex: canvasManager.currentLayerIndex, transform: transform)
+            let index = canvasManager.currentLayerIndex
+            // Route to the vector-layer transform when that mode is active; otherwise the object path.
+            if canvasManager.isVectorTransforming, canvasManager.layers[index].kind == .vector {
+                canvasManager.setVectorTransform(transform, layerIndex: index)
+                // VectorCanvas is a reference type mutated in place, so refresh its host directly
+                // (the @Published layers array didn't change identity).
+                let layerID = canvasManager.layers[index].id
+                layerHosts[layerID]?.strokeView.refreshDisplay()
+                return
+            }
+            canvasManager.updateObjectTransform(layerIndex: index, transform: transform)
         }
 
         /// What a layer's `bakedImageView` should show for its active cel: the real `bakedImage`,

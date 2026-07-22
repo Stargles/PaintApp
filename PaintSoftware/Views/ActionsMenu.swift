@@ -15,7 +15,7 @@ struct ActionsMenu: View {
                 .padding(.bottom, 4)
 
             PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                row(icon: "photo.on.rectangle", title: "Insert Photo")
+                row(icon: "photo.on.rectangle", title: canvasManager.activeLayerIsVector ? "Insert Photo (onto vector layer)" : "Insert Photo")
             }
             .onChange(of: photoPickerItem) { _, newItem in
                 Task { await insertPhoto(newItem) }
@@ -81,7 +81,11 @@ struct ActionsMenu: View {
         guard let item else { return }
         guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
         await MainActor.run {
-            canvasManager.addObjectLayer(image: image)
+            // Onto a vector layer, the photo becomes a movable vector element; otherwise it inserts
+            // as its own object layer (the existing behavior).
+            if !canvasManager.addImageToActiveVectorLayer(image) {
+                canvasManager.addObjectLayer(image: image)
+            }
         }
     }
 }

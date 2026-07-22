@@ -142,6 +142,8 @@ extension CanvasManager {
         if let sel = selection, !(sel.layerIndex == currentLayerIndex && activeCel == sel.celIndex) {
             selection = nil
         }
+        // Leaving the layer/frame ends any in-progress vector-layer transform.
+        if isVectorTransforming { isVectorTransforming = false }
     }
 
     // MARK: Making a selection

@@ -16,7 +16,7 @@ struct TopToolbar: View {
             iconButton(system: "slider.horizontal.3", isActive: activePanel == .adjust) { toggle(.adjust) }
             iconButton(system: "lasso", isActive: activePanel == .select) { toggle(.select) }
                 .accessibilityIdentifier("toolbar.selectButton")
-            iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil) { toggleMove() }
+            iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.isVectorTransforming) { toggleMove() }
                 .accessibilityIdentifier("toolbar.moveButton")
 
             Spacer()
@@ -80,6 +80,12 @@ struct TopToolbar: View {
     /// Tapping Move toggles between lifting the current selection (or, if there is none, the whole
     /// current layer) into a floating piece, and committing whatever's currently floating.
     private func toggleMove() {
+        // On a vector layer, Move transforms the whole layer's geometry losslessly via the on-canvas
+        // box (no raster floating piece) — toggle that mode instead of lifting pixels.
+        if canvasManager.activeLayerIsVector {
+            canvasManager.isVectorTransforming.toggle()
+            return
+        }
         if canvasManager.floatingPiece != nil {
             canvasManager.commitFloatingPieceIfNeeded()
         } else {
