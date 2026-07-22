@@ -610,34 +610,40 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outsideProbe.dx, dy: outsideProbe.dy)), "Fill of an off-center square must stay contained — leaking here means the reference was rasterized mirrored")
     }
 
-    /// Task 2: pressing the fill tool on the canvas and dragging **up** raises the gap-closing setting in
-    /// real time, and the left rail's gap-closing slider (which replaces brush Size in fill mode) mirrors
-    /// it. The slider value is an observable proxy for the live setting — the two are bound to the same
-    /// `@Published` property, so a change to one is a change to the other.
-    func testInteractiveFillDragUpRaisesGapClosing() throws {
+    /// The fill tool's drag is horizontal-only and adjusts whichever setting is *selected* (default
+    /// gap-closing). Pressing on the canvas and dragging **right** raises that setting in real time, and
+    /// the left rail's gap-closing slider (which replaces brush Size in fill mode) mirrors it. The slider
+    /// value is an observable proxy for the live setting — both are bound to the same `@Published`
+    /// property, so a change to one is a change to the other.
+    func testInteractiveFillDragRightRaisesSelectedGapClosingByDefault() throws {
         try runInteractiveFillDragTest(sliderID: "sideToolbar.gapClosingSlider",
-                                       from: CGVector(dx: 0.3, dy: 0.75),
-                                       to: CGVector(dx: 0.3, dy: 0.25),
-                                       expectRaised: true,
-                                       what: "Dragging up during a fill should raise gap-closing")
-    }
-
-    /// Task 2 companion: dragging **right** raises the wall-threshold setting live, mirrored by the left
-    /// rail's threshold slider.
-    func testInteractiveFillDragRightRaisesThreshold() throws {
-        try runInteractiveFillDragTest(sliderID: "sideToolbar.thresholdSlider",
                                        from: CGVector(dx: 0.15, dy: 0.5),
                                        to: CGVector(dx: 0.5, dy: 0.5),
                                        expectRaised: true,
-                                       what: "Dragging right during a fill should raise the wall threshold")
+                                       what: "Dragging right during a fill should raise the selected setting (gap-closing by default)")
     }
 
-    /// Shared body: selects the fill tool (a single tap, which also switches the left rail's two sliders
-    /// to gap-closing / edge-overlap), reads `sliderID`'s value, then press-drags on the canvas from
-    /// `from` to `to` and checks the slider moved in the expected direction — proving the drag adjusts the
-    /// setting live.
+    /// Companion: once the Threshold slider is the selected axis (moving it selects it), the same
+    /// rightward drag raises Threshold instead of gap-closing. The axis is selected via the Fill panel's
+    /// horizontal Threshold slider (reliable to `adjust`, unlike the rotated left-rail sliders).
+    func testInteractiveFillDragRightRaisesThresholdWhenSelected() throws {
+        try runInteractiveFillDragTest(sliderID: "sideToolbar.thresholdSlider",
+                                       selectAxisPanelSliderID: "fillPanel.thresholdSlider",
+                                       from: CGVector(dx: 0.15, dy: 0.5),
+                                       to: CGVector(dx: 0.5, dy: 0.5),
+                                       expectRaised: true,
+                                       what: "With Threshold selected, dragging right during a fill should raise the wall threshold")
+    }
+
+    /// Shared body: selects the fill tool (a single tap, which also switches the left rail's sliders to
+    /// gap-closing / threshold / edge-overlap); optionally opens the panel and nudges
+    /// `selectAxisPanelSliderID` so that setting becomes the drag axis, then closes the panel again;
+    /// reads `sliderID`'s value (left-rail sliders are reliable to *read*), then press-drags horizontally
+    /// on the canvas from `from` to `to` and checks the slider moved in the expected direction — proving
+    /// the drag adjusts the selected setting live.
     private func runInteractiveFillDragTest(
         sliderID: String,
+        selectAxisPanelSliderID: String? = nil,
         from: CGVector,
         to: CGVector,
         expectRaised: Bool,
@@ -655,14 +661,25 @@ final class PaintSoftwareUITests: XCTestCase {
 
         let fillButton = app.buttons["toolbar.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
-        fillButton.tap() // Selects the fill tool; the left rail's sliders become gap-closing / edge-overlap.
+        fillButton.tap() // Selects the fill tool; the left rail's sliders become gap-closing / threshold / edge-overlap.
+
+        if let selectAxisPanelSliderID {
+            // Moving a slider selects its setting as the drag axis. Do it on the panel's horizontal slider
+            // (reliable) and nudge it low so the following drag has headroom, then close the panel so the
+            // canvas drag isn't intercepted by it.
+            fillButton.tap() // Open the Fill panel.
+            let axisSlider = app.sliders[selectAxisPanelSliderID]
+            XCTAssertTrue(axisSlider.waitForExistence(timeout: 5))
+            axisSlider.adjust(toNormalizedSliderPosition: 0.1)
+            fillButton.tap() // Close the Fill panel.
+        }
 
         let slider = app.sliders[sliderID]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         let before = sliderNumericValue(slider)
 
-        // Press on the canvas and drag. Both endpoints sit on the left/center of the canvas, clear of the
-        // 300pt trailing settings panel, so the drag lands on the fill gesture rather than the panel.
+        // Press on the canvas and drag horizontally. Both endpoints sit on the left/center of the canvas,
+        // clear of the 300pt trailing settings panel, so the drag lands on the fill gesture not the panel.
         let start = canvas.coordinate(withNormalizedOffset: from)
         let end = canvas.coordinate(withNormalizedOffset: to)
         start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
@@ -681,6 +698,131 @@ final class PaintSoftwareUITests: XCTestCase {
         guard let text = slider.value as? String,
               let value = Double(text.replacingOccurrences(of: "%", with: "")) else { return -1 }
         return value
+    }
+
+    // MARK: - Post-fill configuration state (adjust settings after lifting, before committing)
+
+    /// The core of the post-fill config state: after a fill is applied and the finger lifts, the fill is
+    /// still *adjustable* (uncommitted). Moving a settings slider must re-run that same fill live, not do
+    /// nothing (the "it commits instead" bug). Uses Threshold because its effect is unmistakable at the
+    /// canvas scale: a black square fills contained at threshold 0 (the black border is a wall), but at
+    /// max threshold the border is no longer a wall, so the *same* fill floods out across the canvas.
+    func testAdjustingThresholdAfterFillReappliesToUncommittedFill() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // A closed square boundary to contain the fill.
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3)) // top
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7)) // right
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7)) // bottom
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3)) // left
+
+        let fillButton = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap() // Select the fill tool (panel stays closed on this first tap).
+
+        // Apply the fill and lift — with the default threshold (0.15) the dark border is a wall, so the
+        // fill stays contained. Lifting leaves it in the adjustable (uncommitted) state.
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the square's interior")
+
+        let outside = safeOutsideCornerPoint(canvas)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outside.dx, dy: outside.dy)),
+                      "The fill must stay inside the square — outside should still be blank paper")
+
+        // Open the fill panel (second tap of the already-selected tool) and, WITHOUT re-tapping the
+        // canvas, raise threshold to the max on the panel's horizontal slider (reliable to adjust). If the
+        // fill is still adjustable (correct), this re-runs it and it floods out because the border stops
+        // counting as a wall; if it committed on lift (the bug), the slider change does nothing.
+        fillButton.tap() // Opens the Fill settings panel.
+        let thresholdSlider = app.sliders["fillPanel.thresholdSlider"]
+        XCTAssertTrue(thresholdSlider.waitForExistence(timeout: 5))
+        thresholdSlider.adjust(toNormalizedSliderPosition: 1.0)
+        XCTAssertGreaterThan(sliderNumericValue(thresholdSlider), 0.95,
+                             "Sanity: the threshold slider should have actually moved to (near) its max")
+
+        XCTAssertTrue(waitUntilFilled(canvas, dx: outside.dx, dy: outside.dy),
+                      "Raising threshold after lifting must re-apply to the still-uncommitted fill: the border stops being a wall so the same fill floods outside. It staying blank means the slider committed/froze the fill instead of adjusting it.")
+    }
+
+    /// The Edge Overlap scenario from the change request. With all three settings at 0, a fill bounded by
+    /// a *soft* (anti-aliased) brush stroke stops at the outermost feathered pixel, leaving the boundary
+    /// fringe unfilled. Raising Edge Overlap afterward — without re-tapping — must re-run the still
+    /// uncommitted fill and grow it *under* that soft edge, so the fringe pixel right at the stroke fills
+    /// in (measurably darker, toward the fill colour). If the slider had committed/frozen the fill, the
+    /// fringe wouldn't change at all.
+    ///
+    /// (The default fill colour is black like the stroke, so the effect isn't a white gap turning colour
+    /// but the anti-aliased boundary pixel going from a partial value to fully filled — verified by
+    /// probing the exact fringe pixel at the top edge.)
+    func testRaisingEdgeOverlapAfterFillGrowsFillUnderSoftEdge() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // Default brush is Soft Round (feathered edges) — exactly what leaves an unfilled fringe.
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3)) // top
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7)) // right
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7)) // bottom
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3)) // left
+
+        let fillButton = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap() // select fill tool (panel stays closed)
+
+        // All three fill settings to 0, on the panel's horizontal sliders (reliable to adjust). Threshold 0
+        // makes even the faintest feather count as a wall, so the fill stops right at the fringe.
+        fillButton.tap() // open panel
+        for id in ["fillPanel.gapClosingSlider", "fillPanel.thresholdSlider", "fillPanel.edgeOverlapSlider"] {
+            let s = app.sliders[id]
+            XCTAssertTrue(s.waitForExistence(timeout: 5))
+            s.adjust(toNormalizedSliderPosition: 0.0)
+        }
+        fillButton.tap() // close panel so the canvas tap fills
+
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the square's interior")
+
+        // The anti-aliased fringe pixel at the top edge (dx 0.5 crosses the top stroke drawn at dy 0.3).
+        func brightness(_ dx: Double, _ dy: Double) -> Int {
+            guard let p = rgbaPixel(of: canvas, dx: dx, dy: dy) else { return -1 }
+            return Int(p.r) + Int(p.g) + Int(p.b)
+        }
+        let fringeBefore = brightness(0.5, 0.300)
+        XCTAssertGreaterThan(fringeBefore, 0,
+                             "Sanity: at edge-overlap 0 the boundary fringe should be only partially filled, not already solid")
+
+        // Raise Edge Overlap to max, without re-tapping the canvas.
+        fillButton.tap() // open panel
+        let edgeSlider = app.sliders["fillPanel.edgeOverlapSlider"]
+        XCTAssertTrue(edgeSlider.waitForExistence(timeout: 5))
+        edgeSlider.adjust(toNormalizedSliderPosition: 1.0)
+        XCTAssertGreaterThan(sliderNumericValue(edgeSlider), 4.0,
+                             "Sanity: the edge-overlap slider should have moved toward its max (6)")
+
+        // Poll: the fringe pixel should darken as the still-uncommitted fill grows under the soft edge.
+        let deadline = Date().addingTimeInterval(10)
+        var fringeAfter = fringeBefore
+        while Date() < deadline {
+            fringeAfter = brightness(0.5, 0.300)
+            if fringeAfter < fringeBefore { break }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        XCTAssertLessThan(fringeAfter, fringeBefore,
+                          "Raising edge overlap after lifting must re-apply to the uncommitted fill and grow it under the soft edge, darkening the boundary fringe (before \(fringeBefore) -> after \(fringeAfter)). No change means the slider committed/froze the fill.")
     }
 
     // MARK: - Task 3: tool menus, left-rail labels, per-layer fill reference

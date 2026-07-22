@@ -17,21 +17,25 @@ struct SideToolbar: View {
 
             VStack(spacing: 14) {
                 if isFillMode {
+                    // These route through setFillSetting (not a direct property write) for the same reason
+                    // the Fill panel's sliders do: it selects that setting as the fill tool's drag axis and,
+                    // if a fill is still adjustable (post-lift), re-applies it live so the change is visible
+                    // without re-tapping.
                     labeledSlider(
                         title: "Gap Closing",
-                        value: Binding(get: { Double(canvasManager.fillGapClosingDistance) }, set: { canvasManager.fillGapClosingDistance = CGFloat($0) }),
+                        value: Binding(get: { Double(canvasManager.fillGapClosingDistance) }, set: { canvasManager.setFillSetting(.gapClosing, CGFloat($0)) }),
                         range: Double(CanvasManager.fillGapRange.lowerBound)...Double(CanvasManager.fillGapRange.upperBound),
                         identifier: "sideToolbar.gapClosingSlider"
                     )
                     labeledSlider(
                         title: "Threshold",
-                        value: Binding(get: { Double(canvasManager.fillThreshold) }, set: { canvasManager.fillThreshold = CGFloat($0) }),
+                        value: Binding(get: { Double(canvasManager.fillThreshold) }, set: { canvasManager.setFillSetting(.threshold, CGFloat($0)) }),
                         range: Double(CanvasManager.fillThresholdRange.lowerBound)...Double(CanvasManager.fillThresholdRange.upperBound),
                         identifier: "sideToolbar.thresholdSlider"
                     )
                     labeledSlider(
                         title: "Edge Overlap",
-                        value: Binding(get: { Double(canvasManager.fillExpand) }, set: { canvasManager.fillExpand = CGFloat($0) }),
+                        value: Binding(get: { Double(canvasManager.fillExpand) }, set: { canvasManager.setFillSetting(.edgeOverlap, CGFloat($0)) }),
                         range: Double(CanvasManager.fillExpandRange.lowerBound)...Double(CanvasManager.fillExpandRange.upperBound),
                         identifier: "sideToolbar.edgeOverlapSlider"
                     )
