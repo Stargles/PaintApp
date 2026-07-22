@@ -758,4 +758,60 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertLessThan(pixel.r, 80, "Stroke drawn after setting hex to 00FF00 should have low red, got \(pixel)")
         XCTAssertLessThan(pixel.b, 80, "Stroke drawn after setting hex to 00FF00 should have low blue, got \(pixel)")
     }
+
+    /// Exercises the custom palette builder end to end: sets a known color (blue) via the hex field
+    /// on the Color tab, switches to the Palettes tab and taps "add current color" to append it to
+    /// the seeded "Spectrum" preset, taps a different existing swatch to move the picker off blue,
+    /// then taps the newly-added swatch and — back on the Color tab — confirms the hex field snapped
+    /// back to blue. That round-trip proves both "add current color" and swatch selection actually
+    /// drive the picker. Launches with `-resetPalettes` so Spectrum (20 swatches, indices 0–19) is
+    /// present and the appended swatch lands at a known index (20).
+    func testPaletteBuilderAddAndSelectSwatch() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("-resetPalettes")
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
+        colorButton.tap()
+
+        // Set a known color (pure blue) via the hex field on the Color tab.
+        let hexField = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hexField.waitForExistence(timeout: 5))
+        setHexField(app, hexField, to: "0000FF")
+
+        // Switch to the Palettes tab and append the current color. The seeded "Spectrum" preset has
+        // 20 colors, so the new swatch lands at index 20.
+        app.buttons["colorPanel.tab.palettes"].tap()
+
+        let addButton = app.buttons["colorPanel.addSwatchButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+
+        let addedSwatch = app.otherElements["colorPanel.swatch.20"]
+        XCTAssertTrue(addedSwatch.waitForExistence(timeout: 5), "Adding the current color should append a swatch at index 20 of the Spectrum preset")
+
+        // Move the picker to a different color by tapping an existing preset swatch (Spectrum[0] is
+        // black), so re-selecting the added swatch is a real change.
+        app.otherElements["colorPanel.swatch.0"].tap()
+
+        // Tap the saved swatch; the picker should snap back to the stored blue.
+        addedSwatch.tap()
+
+        // Confirm on the Color tab that the hex field reflects the restored blue.
+        app.buttons["colorPanel.tab.color"].tap()
+        let hexAfterSelect = hexField.value as? String
+        XCTAssertEqual(hexAfterSelect?.uppercased(), "0000FF", "Tapping the saved swatch should reload it into the picker, got \(String(describing: hexAfterSelect))")
+    }
+
+    /// Clears the hex field and types a new value, submitting with Return. Factored out because the
+    /// clear-then-type dance (XCUIElement has no select-all-and-replace) is easy to get subtly wrong.
+    private func setHexField(_ app: XCUIApplication, _ hexField: XCUIElement, to value: String) {
+        hexField.tap()
+        if let currentValue = hexField.value as? String {
+            hexField.typeText(String(repeating: "\u{8}", count: currentValue.count))
+        }
+        hexField.typeText(value)
+        app.keyboards.buttons["Return"].tap()
+    }
 }
