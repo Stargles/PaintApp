@@ -598,6 +598,7 @@ final class CanvasManager: ObservableObject {
         fillGestureCelIndex = celIndex
         fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
         fillGestureUndoManager = activeUndoManager
+        refreshUndoRedoState() // the fill is undoable from the moment it starts, even on a blank canvas
 
         fillLock.lock()
         fillPending = currentFillKey()
@@ -735,17 +736,21 @@ final class CanvasManager: ObservableObject {
         fillLastRegionRGBA = nil
         fillQueue.async { [weak self] in self?.fillSession = nil }
         let layerIndex = fillGestureLayerIndex, celIndex = fillGestureCelIndex
-        defer { fillGestureBaseBaked = nil }
+        let undoManager = fillGestureUndoManager
+        defer { fillGestureBaseBaked = nil; fillGestureUndoManager = nil; refreshUndoRedoState() }
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
         guard let preview = cel.fillImage else { return }  // nothing was previewed
         // Bake the preview into the layer's flattened raster (bakedImage) and clear the transient
         // preview, so the fill is now real layer pixels. One undo step covers the whole gesture; the
-        // raster (live strokes) is untouched.
+        // raster (live strokes) is untouched. Register on the undo manager captured when the fill began,
+        // not the current active one — the fill may be committed later, after the active layer changed
+        // (e.g. draw on another layer, or navigate cels), and its step must land on its own layer's stack.
         let newBaked = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: preview)
         registerUndoableCelChange(layerIndex: layerIndex, celIndex: celIndex,
                                   oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,
-                                  newRaster: cel.raster, newBaked: newBaked, newFill: nil, actionName: "Fill")
+                                  newRaster: cel.raster, newBaked: newBaked, newFill: nil,
+                                  actionName: "Fill", undoManager: undoManager)
     }
 
     /// Abandons the interactive fill without committing, discarding the preview. Used when an undo/redo
@@ -755,8 +760,10 @@ final class CanvasManager: ObservableObject {
         fillGestureActive = false // stops any in-flight render from applying (its main hop checks this)
         fillFingerDown = false
         fillLastRegionRGBA = nil
+        fillGestureUndoManager = nil
         setFillPreview(layerIndex: fillGestureLayerIndex, celIndex: fillGestureCelIndex, image: nil)
         fillQueue.async { [weak self] in self?.fillSession = nil }
+        refreshUndoRedoState()
     }
 
     /// Discards the fill only if a finger is actively dragging it; an already-lifted adjustable fill
@@ -878,18 +885,35 @@ final class CanvasManager: ObservableObject {
     // MARK: - Undo / redo
 
     func undo() {
+        finalizeFillForHistoryAction()
         activeUndoManager?.undo()
         refreshUndoRedoState()
     }
 
     func redo() {
+        finalizeFillForHistoryAction()
         activeUndoManager?.redo()
         refreshUndoRedoState()
     }
 
+    /// An undo/redo can't operate on the interactive fill's private, off-stack state, so it's resolved
+    /// first: a fill still under the finger (a multi-finger undo/redo gesture is taking over) is
+    /// discarded; a lifted, still-adjustable fill is committed so it becomes a real "Fill" step the
+    /// following `undo()` reverts (and `redo()` can restore) — instead of the undo silently hitting the
+    /// previous action while the fill lingers.
+    private func finalizeFillForHistoryAction() {
+        if fillFingerDown {
+            cancelInteractiveFill()
+        } else if fillGestureActive {
+            commitInteractiveFill()
+        }
+    }
+
     func refreshUndoRedoState() {
-        let newCanUndo = activeUndoManager?.canUndo ?? false
-        let newCanRedo = activeUndoManager?.canRedo ?? false
+        // A lifted-but-not-yet-committed fill is itself an undoable action (undo finalizes then reverts
+        // it), so the Undo affordance must be live even when the committed stack is empty.
+        let newCanUndo = fillGestureActive || (activeUndoManager?.canUndo ?? false)
+        let newCanRedo = !fillGestureActive && (activeUndoManager?.canRedo ?? false)
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }
     }

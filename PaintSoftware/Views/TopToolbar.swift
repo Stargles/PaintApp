@@ -24,6 +24,7 @@ struct TopToolbar: View {
             iconButton(system: "paintbrush.pointed", isActive: activePanel == .brush || canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil) {
                 selectBrushToolAndTogglePanel()
             }
+            .accessibilityIdentifier("toolbar.brushButton")
             iconButton(system: "eraser", isActive: canvasManager.selectedTool == .eraser) {
                 canvasManager.commitFloatingPieceIfNeeded()
                 canvasManager.selectedTool = .eraser
@@ -55,6 +56,7 @@ struct TopToolbar: View {
                     .frame(width: 40, height: 40)
             }
             .disabled(!canvasManager.canUndo)
+            .accessibilityIdentifier("toolbar.undoButton")
 
             Button(action: canvasManager.redo) {
                 Image(systemName: "arrow.uturn.forward")
@@ -63,6 +65,7 @@ struct TopToolbar: View {
                     .frame(width: 40, height: 40)
             }
             .disabled(!canvasManager.canRedo)
+            .accessibilityIdentifier("toolbar.redoButton")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)

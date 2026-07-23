@@ -825,6 +825,169 @@ final class PaintSoftwareUITests: XCTestCase {
                           "Raising edge overlap after lifting must re-apply to the uncommitted fill and grow it under the soft edge, darkening the boundary fringe (before \(fringeBefore) -> after \(fringeAfter)). No change means the slider committed/froze the fill.")
     }
 
+    // MARK: - Fill undo / redo
+
+    /// Polls the given point until it reads (or stops reading) whitish, since fill/undo re-render off the
+    /// main thread. Returns whether the target state was reached before `timeout`.
+    @discardableResult
+    private func waitUntilBlank(_ element: XCUIElement, dx: Double, dy: Double, timeout: TimeInterval = 10) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if isWhitish(rgbaPixel(of: element, dx: dx, dy: dy)) { return true }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return false
+    }
+
+    /// Undoing right after a fill must remove exactly the fill — not the strokes underneath it, and not
+    /// nothing. (The fill is applied but, in the post-lift adjustable state, isn't yet a committed undo
+    /// step; undo has to finalize + revert it.)
+    func testUndoRemovesFillKeepingUnderlyingStrokes() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3)) // top
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7)) // right
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7)) // bottom
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3)) // left
+
+        app.buttons["toolbar.fillButton"].tap()
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the interior")
+
+        let undo = app.buttons["toolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.isEnabled, "Undo should be available immediately after a fill")
+        undo.tap()
+
+        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5), "Undo should remove the fill from the interior")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.3, dy: 0.5)),
+                       "Undoing the fill must NOT also remove the square's strokes (the left edge should still be drawn)")
+    }
+
+    /// Undo then redo restores the fill.
+    func testRedoRestoresUndoneFill() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5)); pencilToggle.tap()
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3))
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7))
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3))
+
+        app.buttons["toolbar.fillButton"].tap()
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the interior")
+
+        app.buttons["toolbar.undoButton"].tap()
+        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5), "Undo should remove the fill")
+
+        let redo = app.buttons["toolbar.redoButton"]
+        XCTAssertTrue(redo.isEnabled, "Redo should be available after undoing a fill")
+        redo.tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Redo should restore the fill")
+    }
+
+    /// On a blank canvas a fill has no earlier action behind it, so this isolates that the fill itself is
+    /// undoable: the Undo button must be enabled after the fill and must clear it. (Regression: the fill
+    /// used to leave the button disabled because a not-yet-committed fill wasn't on the undo stack.)
+    func testUndoEnabledAndClearsFillOnBlankCanvas() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5)); pencilToggle.tap()
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        let center = CGVector(dx: 0.5, dy: 0.5)
+        app.buttons["toolbar.fillButton"].tap()
+        canvas.coordinate(withNormalizedOffset: center).tap() // no walls → floods the canvas
+        XCTAssertTrue(waitUntilFilled(canvas, dx: center.dx, dy: center.dy), "Fill should flood the blank canvas")
+
+        let undo = app.buttons["toolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.isEnabled, "Undo must be enabled after a fill even on a blank canvas — the fill is an undoable action")
+        undo.tap()
+        XCTAssertTrue(waitUntilBlank(canvas, dx: center.dx, dy: center.dy), "Undo should clear the flood fill")
+    }
+
+    /// Undo/redo must keep working across repeated cycles, not just the first round-trip. (Regression:
+    /// the cel-change undo registration didn't re-register on redo, so the second undo did nothing.)
+    func testFillUndoRedoCyclesRepeatedly() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5)); pencilToggle.tap()
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        let center = CGVector(dx: 0.5, dy: 0.5)
+        app.buttons["toolbar.fillButton"].tap()
+        canvas.coordinate(withNormalizedOffset: center).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: center.dx, dy: center.dy), "Fill should flood the canvas")
+
+        let undo = app.buttons["toolbar.undoButton"]
+        let redo = app.buttons["toolbar.redoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+
+        for cycle in 1...2 {
+            XCTAssertTrue(undo.isEnabled, "Undo should be available at the start of cycle \(cycle)")
+            undo.tap()
+            XCTAssertTrue(waitUntilBlank(canvas, dx: center.dx, dy: center.dy), "Undo should clear the fill (cycle \(cycle))")
+            XCTAssertTrue(redo.isEnabled, "Redo should be available after undo (cycle \(cycle))")
+            redo.tap()
+            XCTAssertTrue(waitUntilFilled(canvas, dx: center.dx, dy: center.dy), "Redo should restore the fill (cycle \(cycle))")
+        }
+    }
+
+    /// Drawing a stroke over a still-adjustable fill commits the fill first, so the undo order is
+    /// intuitive: the stroke (drawn last) undoes first, and the fill under it only undoes on the next
+    /// undo. (Regression: the fill used to commit *after* the stroke registered, so undo pulled the fill
+    /// out from under the stroke.)
+    func testDrawingOverFillCommitsFillAndStrokeUndoesFirst() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5)); pencilToggle.tap()
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3))
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7))
+        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3))
+
+        app.buttons["toolbar.fillButton"].tap()
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the interior")
+
+        // Switch to the brush and draw a separate stroke on blank paper away from the square. Beginning
+        // the stroke commits the fill; ending it registers the stroke on top.
+        app.buttons["toolbar.brushButton"].tap()
+        let p = safeOutsideCornerPoint(canvas)
+        drawLine(on: canvas, from: p, to: CGVector(dx: p.dx + 0.12, dy: p.dy))
+
+        let undo = app.buttons["toolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        undo.tap()
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                       "First undo should remove the stroke drawn last, leaving the fill in place")
+        undo.tap()
+        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5),
+                      "Second undo should then remove the fill")
+    }
+
     // MARK: - Task 3: tool menus, left-rail labels, per-layer fill reference
 
     /// Task 3: the fill tool's settings menu only opens on the *second* tap of its icon; the first tap

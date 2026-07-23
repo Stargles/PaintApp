@@ -100,6 +100,11 @@ final class StrokeCanvasView: UIView {
     /// `CanvasManager.strokeEnded` for thumbnail regen / undo-button refresh.
     var onStrokeEnded: (() -> Void)?
 
+    /// Called at the very start of a stroke (before any pixels change), so a still-adjustable fill can
+    /// be committed *before* this stroke registers its own undo step — keeping undo order intuitive
+    /// (the stroke, drawn last, undoes first; the fill under it undoes after).
+    var onStrokeBegan: (() -> Void)?
+
     let strokeRecognizer = StrokeGestureRecognizer()
     private let imageView = UIImageView()
     private var strokeBeforeSnapshot: (image: UIImage?, count: Int)?
@@ -170,6 +175,7 @@ final class StrokeCanvasView: UIView {
     }
 
     private func handleBegin(_ touch: UITouch) {
+        onStrokeBegan?() // commit any still-adjustable fill before this stroke's own undo step registers
         if vectorCanvas != nil { beginVectorStroke(touch); return }
         guard let raster else { return }
         strokeBeforeSnapshot = (raster.renderToUIImage(), raster.strokeCount)
@@ -661,6 +667,11 @@ struct CanvasView: UIViewRepresentable {
             for layer in canvasManager.layers where layerHosts[layer.id] == nil {
                 let host = LayerHostView()
                 host.strokeView.layerID = layer.id
+                host.strokeView.onStrokeBegan = { [weak self] in
+                    // Finalize a still-adjustable fill before this stroke changes any pixels, so the fill
+                    // is the older undo step and this stroke undoes first. Self-guards when no fill is live.
+                    self?.canvasManager.commitInteractiveFill()
+                }
                 host.strokeView.onStrokeEnded = { [weak self, weak host] in
                     guard let self, let host, let layerID = host.strokeView.layerID,
                           let layerIndex = self.canvasManager.layers.firstIndex(where: { $0.id == layerID }),
@@ -1164,13 +1175,13 @@ struct CanvasView: UIViewRepresentable {
         }
 
         @objc func handleTwoFingerTap() {
-            // A two-finger tap means undo, not fill — drop any fill the first touch may have started.
-            canvasManager.cancelInteractiveFill()
+            // A two-finger tap means undo. undo() itself resolves any in-flight fill first (a fill still
+            // under the finger is dropped; a lifted, adjustable one is committed so undo reverts it),
+            // so it does exactly one thing rather than both discarding a fill and undoing the prior step.
             canvasManager.undo()
         }
 
         @objc func handleThreeFingerTap() {
-            canvasManager.cancelInteractiveFill()
             canvasManager.redo()
         }
 

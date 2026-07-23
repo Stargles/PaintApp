@@ -132,6 +132,11 @@ extension CanvasManager {
     /// the active cel actually changed; an active selection tied to a now-inactive cel is cleared.
     /// Same-cel frame ticks (scrubbing within one cel's frame range) intentionally leave both alone.
     func handleActiveContextChanged() {
+        // A still-adjustable fill can't follow the user to another cel — finalize it here so it lands as
+        // a committed "Fill" step on its own layer's undo stack before the context moves on. (Runs before
+        // activeUndoManager is repointed at the new layer, and commit uses the fill's captured manager
+        // anyway, so the step is registered on the right stack.) commitInteractiveFill self-guards.
+        commitInteractiveFill()
         let activeCel = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
         if let piece = floatingPiece {
             let stillTargeted = piece.targetLayerIndex == currentLayerIndex && activeCel == piece.targetCelIndex
@@ -338,17 +343,33 @@ extension CanvasManager {
     func registerUndoableCelChange(layerIndex: Int, celIndex: Int,
                                     oldRaster: RasterLayerTexture, oldBaked: UIImage?, oldFill: UIImage?,
                                     newRaster: RasterLayerTexture, newBaked: UIImage?, newFill: UIImage?,
-                                    actionName: String) {
+                                    actionName: String, undoManager: UndoManager? = nil) {
         applyCelChange(layerIndex: layerIndex, celIndex: celIndex, raster: newRaster, baked: newBaked, fill: newFill)
-        activeUndoManager?.setActionName(actionName)
-        activeUndoManager?.registerUndo(withTarget: self) { target in
-            target.applyCelChange(layerIndex: layerIndex, celIndex: celIndex, raster: oldRaster, baked: oldBaked, fill: oldFill)
-            target.activeUndoManager?.setActionName(actionName)
-            target.activeUndoManager?.registerUndo(withTarget: target) { redoTarget in
-                redoTarget.applyCelChange(layerIndex: layerIndex, celIndex: celIndex, raster: newRaster, baked: newBaked, fill: newFill)
-            }
-        }
+        registerCelReversal(layerIndex: layerIndex, celIndex: celIndex,
+                            undoRaster: oldRaster, undoBaked: oldBaked, undoFill: oldFill,
+                            redoRaster: newRaster, redoBaked: newBaked, redoFill: newFill,
+                            actionName: actionName, undoManager: undoManager)
         refreshUndoRedoState()
+    }
+
+    /// Registers an undo that reverts to the `undo*` state and, when fired, re-registers the opposite
+    /// (restore the `redo*` state) — so undo/redo can cycle indefinitely rather than dying after the
+    /// first redo. `undoManager` pins the stack: pass the manager the change belongs to when it may be
+    /// committed after the active layer has changed (fills), else nil to use whichever is active now.
+    private func registerCelReversal(layerIndex: Int, celIndex: Int,
+                                     undoRaster: RasterLayerTexture, undoBaked: UIImage?, undoFill: UIImage?,
+                                     redoRaster: RasterLayerTexture, redoBaked: UIImage?, redoFill: UIImage?,
+                                     actionName: String, undoManager: UndoManager?) {
+        let manager = undoManager ?? activeUndoManager
+        manager?.setActionName(actionName)
+        manager?.registerUndo(withTarget: self) { target in
+            target.applyCelChange(layerIndex: layerIndex, celIndex: celIndex, raster: undoRaster, baked: undoBaked, fill: undoFill)
+            target.registerCelReversal(layerIndex: layerIndex, celIndex: celIndex,
+                                       undoRaster: redoRaster, undoBaked: redoBaked, undoFill: redoFill,
+                                       redoRaster: undoRaster, redoBaked: undoBaked, redoFill: undoFill,
+                                       actionName: actionName, undoManager: undoManager)
+            target.refreshUndoRedoState()
+        }
     }
 
     private func applyCelChange(layerIndex: Int, celIndex: Int, raster: RasterLayerTexture, baked: UIImage?, fill: UIImage?) {
