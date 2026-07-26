@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Combine
 
 /// A single-touch stroke-capture gesture recognizer: claims exactly one touch as the "drawing"
 /// touch (mirroring the role `PKCanvasView.drawingGestureRecognizer` used to play) and fails
@@ -12,11 +13,17 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     var onBegin: ((UITouch) -> Void)?
     var onMove: ((UITouch, UIEvent) -> Void)?
     var onEnd: ((UITouch) -> Void)?
+    /// Fires for every touch that lands here, *before* the pencil-only gate below is even checked —
+    /// used to dismiss an open top-bar dropdown the instant the canvas is touched at all. A finger tap
+    /// while pencil-only mode is on fails that gate and never actually draws, but should still close
+    /// whatever menu was open, same as a real stroke does (see `CanvasManager.interactionBegan`).
+    var onAnyTouchBegan: (() -> Void)?
 
     private var trackedTouch: UITouch?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
+        onAnyTouchBegan?()
         guard trackedTouch == nil, touches.count == 1, let touch = touches.first,
               !requiresPencilOnly || touch.type == .pencil else {
             state = .failed
@@ -95,6 +102,13 @@ final class StrokeCanvasView: UIView {
     var pencilOnlyDrawing: Bool = true {
         didSet { strokeRecognizer.requiresPencilOnly = pencilOnlyDrawing }
     }
+    /// When non-nil (an active selection exists and `CanvasManager.allowsPaintingOutsideSelection` is
+    /// false), a completed stroke is clipped to this path — pixels painted/erased outside it are
+    /// discarded, reverting to whatever was there before the stroke — instead of the usual "stamp
+    /// wherever the touch goes." Set by `CanvasView.Coordinator.updateActiveLayerAndTool` every render
+    /// pass; nil means no restriction. Only enforced at stroke-end (see `handleEnd`), not per-dab, so a
+    /// stroke can still be seen crossing the boundary mid-drag before snapping back on lift.
+    var selectionClipPath: CGPath?
 
     /// Called once per completed stroke (touch up) and once per undo/redo — hooks back into
     /// `CanvasManager.strokeEnded` for thumbnail regen / undo-button refresh.
@@ -213,6 +227,13 @@ final class StrokeCanvasView: UIView {
         // bucket fill leaks straight through them.
         let input = StrokeInput(touch: touch, in: self)
         stampPath(to: input.position, pressure: input.pressure, into: raster)
+        if let clipPath = selectionClipPath {
+            // Discard whatever this stroke painted/erased outside the selection, reverting those
+            // pixels to their pre-stroke state, before the stroke's own undo snapshot is captured —
+            // so undo/redo only ever sees the already-clipped result.
+            let clipped = PixelOps.maskedComposite(base: before.image, overlay: raster.renderToUIImage(), insidePath: clipPath)
+            raster.reset(to: clipped, strokeCount: raster.strokeCount)
+        }
         raster.endStroke()
         lastStampPoint = nil
         refreshDisplay()
@@ -296,6 +317,15 @@ final class StrokeCanvasView: UIView {
         let input = StrokeInput(touch: touch, in: self)
         recordVectorSample(at: input.position, pressure: input.pressure)
         let before = vectorStrokesBeforeSnapshot ?? vectorCanvas.strokes
+
+        // Best-effort selection clip for vector strokes: drop samples outside the selection so the
+        // committed geometry never places ink there. Unlike the raster path this can't crisply clip a
+        // stroke that dips outside and back in (the renderer just connects the remaining samples), but
+        // it keeps the "deny outside" contract for the common case of a stroke drawn entirely inside
+        // or entirely outside the selection.
+        if let clipPath = selectionClipPath {
+            currentVectorSamples = currentVectorSamples.filter { clipPath.contains($0.point) }
+        }
 
         if isEraser {
             vectorCanvas.erase(alongPath: currentVectorSamples.map { $0.point }, radius: brushSize / 2)
@@ -672,6 +702,12 @@ struct CanvasView: UIViewRepresentable {
                     // is the older undo step and this stroke undoes first. Self-guards when no fill is live.
                     self?.canvasManager.commitInteractiveFill()
                 }
+                host.strokeView.strokeRecognizer.onAnyTouchBegan = { [weak self] in
+                    // Touching the canvas at all — even a finger tap that the pencil-only gate below
+                    // rejects — dismisses whatever top-bar dropdown is open (see CanvasManager.
+                    // interactionBegan), so continuing to draw both closes the menu and keeps drawing.
+                    self?.canvasManager.interactionBegan.send()
+                }
                 host.strokeView.onStrokeEnded = { [weak self, weak host] in
                     guard let self, let host, let layerID = host.strokeView.layerID,
                           let layerIndex = self.canvasManager.layers.firstIndex(where: { $0.id == layerID }),
@@ -856,10 +892,17 @@ struct CanvasView: UIViewRepresentable {
         // MARK: - Select & Move overlays
 
         func updateSelectionOverlay() {
-            guard let overlay = selectionOverlay else { return }
+            guard let overlay = selectionOverlay, let container = containerView else { return }
             overlay.mode = canvasManager.selectionMode
             overlay.isCapturingGestures = (activePanel == .select) && (canvasManager.floatingPiece == nil)
-            overlay.updateSelection(canvasManager.selection)
+            overlay.updateSelection(canvasManager.selection, allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection)
+            // Layer hosts are added to `container` after this overlay (see CanvasView.makeUIView), so
+            // without this the marching ants/hatch render *underneath* every layer's own content —
+            // bring it back to front whenever it has something to show or is actively capturing a new
+            // lasso/rectangle drag, same pattern updateTransformOverlay uses for its own overlay.
+            if overlay.isCapturingGestures || canvasManager.selection != nil {
+                container.bringSubviewToFront(overlay)
+            }
         }
 
         func updateFloatingOverlay() {
@@ -892,20 +935,44 @@ struct CanvasView: UIViewRepresentable {
             }
 
             // Not per-layer (there's only one global selected tool), so it lives outside the
-            // per-layer caching guard below and is kept in sync on every call.
+            // per-layer caching guard below and is kept in sync on every call. Also suspended while
+            // Select is engaged or a piece is floating — same conditions `shouldInteract` already
+            // gates the stroke view on above — so the fill tool's one-finger press can't fire
+            // underneath (and race) the Selection/Move overlays' own gestures on the same touch.
             fillTapRecognizer?.isEnabled = (canvasManager.selectedTool == .fill)
+                && activePanel != .select && canvasManager.floatingPiece == nil
+
+            // Same reasoning as fillTapRecognizer above: kept in sync on every call, outside the
+            // AppliedTool caching guard below, since toggling "paint outside selection" or making/
+            // clearing a selection doesn't otherwise touch any of that struct's fields. Only applies
+            // to the exact layer/cel the selection belongs to (selection is always cleared when the
+            // active layer/cel moves away from it — see handleActiveContextChanged).
+            let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame)
+            if let selection = canvasManager.selection, !canvasManager.allowsPaintingOutsideSelection,
+               selection.layerIndex == canvasManager.currentLayerIndex, selection.celIndex == celIdx {
+                host.strokeView.selectionClipPath = selection.path
+            } else {
+                host.strokeView.selectionClipPath = nil
+            }
+
+            // Eraser gets its own brush/size/opacity, entirely separate from the paint brush's, so
+            // switching tools never clobbers either one's settings (see CanvasManager's eraser state).
+            let isEraser = canvasManager.selectedTool == .eraser
+            let activeSize = isEraser ? canvasManager.eraserSize : canvasManager.brushSize
+            let activeOpacity = isEraser ? canvasManager.eraserOpacity : canvasManager.brushOpacity
+            let activeBrush = isEraser ? canvasManager.selectedEraserBrush : canvasManager.selectedBrush
 
             // Only push new tool settings into the view when something tool-relevant actually
             // changed, same caching reason as before (this method runs on every SwiftUI re-render).
-            let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, size: canvasManager.brushSize, opacity: canvasManager.brushOpacity, brush: canvasManager.selectedBrush)
+            let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, size: activeSize, opacity: activeOpacity, brush: activeBrush)
             guard lastAppliedTool[layer.id] != desired else { return }
             lastAppliedTool[layer.id] = desired
 
             host.strokeView.brushColor = canvasManager.brushColor.resolvedUIColor(opacity: 1)
-            host.strokeView.brushSize = canvasManager.brushSize
-            host.strokeView.brushOpacity = canvasManager.brushOpacity
-            host.strokeView.brush = canvasManager.selectedBrush
-            host.strokeView.isEraser = (canvasManager.selectedTool == .eraser)
+            host.strokeView.brushSize = activeSize
+            host.strokeView.brushOpacity = activeOpacity
+            host.strokeView.brush = activeBrush
+            host.strokeView.isEraser = isEraser
             // .fill is handled by fillTapRecognizer, not the stroke view — the canvas is
             // non-interactive there (see reconcileLayers' shouldInteract).
         }
@@ -1189,6 +1256,9 @@ struct CanvasView: UIViewRepresentable {
             guard let container = containerView, let host = hostView else { return }
             switch recognizer.state {
             case .began:
+                // Continuing to fill dismisses whatever top-bar dropdown is open instead of the first
+                // touch being silently swallowed (see CanvasManager.interactionBegan).
+                canvasManager.interactionBegan.send()
                 // container's bounds are exactly canvasSize (see hostBoundsDidChange), so location(in:)
                 // there yields canvas-pixel coordinates — the top-left-origin space the fill engine and
                 // the onion-skin/thumbnail renderers use. The drag delta, in contrast, is measured in

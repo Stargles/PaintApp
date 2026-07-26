@@ -83,6 +83,12 @@ final class CanvasManager: ObservableObject {
     @Published var magicWandTolerance: Double = 0.15
     @Published var selection: Selection?
     @Published var floatingPiece: FloatingPiece?
+    /// Whether painting/erasing/filling is allowed to touch pixels outside the active selection.
+    /// Defaults to false (deny) — matching Procreate-style selections, where drawing outside the
+    /// marching ants is blocked until you deselect. Shown as a toggle in the Select bottom bar; only
+    /// meaningful while `selection` is non-nil (see `StrokeCanvasView.selectionClipPath` and the fill
+    /// pipeline's own clip in `drainFillWork`).
+    @Published var allowsPaintingOutsideSelection: Bool = false
 
     @Published var brushSize: CGFloat = 5.0
     @Published var brushOpacity: Double = 1.0
@@ -127,6 +133,34 @@ final class CanvasManager: ObservableObject {
         selectBrush(brush)
     }
 
+    // MARK: - Eraser (functions exactly like the brush tool — same shape/dynamics/spacing/grain —
+    // but `BrushStamper` composites its stamps with `.destinationOut` instead of painting `brushColor`,
+    // i.e. it "paints" with 0 opacity. Kept as entirely separate published state from the paint
+    // brush's, so adjusting the eraser's shape/size/opacity never disturbs whatever brush you paint
+    // with, and switching tools never clobbers either one's settings.)
+
+    /// The eraser's own brush preset (shape/hardness/spacing/dynamics/scatter/grain) — everything
+    /// `BrushStamper` needs to shape an erase stamp exactly like a paint stamp. Defaults to Hard Round,
+    /// the crisp/predictable shape most paint apps default their eraser to.
+    @Published var selectedEraserBrush: Brush = BrushLibrary.hardRound
+    /// Live-adjustable eraser diameter, separate from `brushSize` for the reason above. Defaults larger
+    /// than the paint brush's default — erasers are typically used broader than the pen/pencil.
+    @Published var eraserSize: CGFloat = 20
+    @Published var eraserOpacity: Double = 1.0
+
+    /// Every shape offered in the eraser's picker — the same built-in shapes as the brush picker
+    /// (custom imported textures are a paint-brush-only feature for now, not offered here).
+    var availableEraserBrushes: [Brush] { BrushLibrary.defaults }
+
+    /// Eraser analogue of `selectBrush`: re-baselines `eraserSize`/`eraserOpacity` from the chosen
+    /// preset. Never touches `selectedTool` — picking an eraser shape only makes sense while already
+    /// erasing, unlike `selectBrush` which also has to *switch into* a paint tool from the picker.
+    func selectEraserBrush(_ brush: Brush) {
+        selectedEraserBrush = brush
+        eraserSize = brush.size
+        eraserOpacity = brush.opacity
+    }
+
     /// Which fill setting the fill tool's sideways (horizontal) drag adjusts, and which slider is shown
     /// highlighted in the Fill panel. Defaults to gap-closing; changing any panel slider re-points it at
     /// that setting (see `setFillSetting`).
@@ -155,6 +189,13 @@ final class CanvasManager: ObservableObject {
     @Published var canUndo: Bool = false
     @Published var canRedo: Bool = false
     weak var activeUndoManager: UndoManager?
+
+    /// Fires whenever a real drawing/fill interaction begins on the canvas (a stroke or a fill press
+    /// touching down) — `DrawingView` uses this to auto-dismiss whatever top-bar dropdown is open, so
+    /// opening a tool's settings menu never blocks you from just continuing to draw: the first touch
+    /// both closes the menu and performs the stroke/fill, instead of the touch being swallowed and
+    /// requiring a separate dismiss tap first.
+    let interactionBegan = PassthroughSubject<Void, Never>()
 
     private let thumbnailRegenSubject = PassthroughSubject<(Int, Int), Never>()
     private var cancellables = Set<AnyCancellable>()
@@ -802,7 +843,8 @@ final class CanvasManager: ObservableObject {
             let regionW = session.width, regionH = session.height
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.fillGestureActive else { return }
-                self.setFillPreview(layerIndex: layerIndex, celIndex: celIndex, image: image)
+                let clipped = self.clippedForSelection(image, layerIndex: layerIndex, celIndex: celIndex)
+                self.setFillPreview(layerIndex: layerIndex, celIndex: celIndex, image: clipped)
                 self.fillLastRegionRGBA = bytes
                 self.fillLastRegionW = regionW
                 self.fillLastRegionH = regionH
@@ -812,6 +854,18 @@ final class CanvasManager: ObservableObject {
 
     private func setFillPreview(layerIndex: Int, celIndex: Int, image: UIImage?) {
         setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: image)
+    }
+
+    /// Clips a fill preview to the active selection's path when the fill lands on the exact layer/cel
+    /// the selection belongs to and outside interaction is denied — the flood-fill tool analogue of
+    /// `StrokeCanvasView.selectionClipPath`, so a bucket fill can't paint outside the marching ants
+    /// any more than a brush stroke can. Runs on the main thread (called from the `fillQueue` render's
+    /// `DispatchQueue.main.async` hop), same as every other read of `selection`/
+    /// `allowsPaintingOutsideSelection` here.
+    private func clippedForSelection(_ image: UIImage?, layerIndex: Int, celIndex: Int) -> UIImage? {
+        guard let image, let selection, !allowsPaintingOutsideSelection,
+              selection.layerIndex == layerIndex, selection.celIndex == celIndex else { return image }
+        return PixelOps.maskedComposite(base: nil, overlay: image, insidePath: selection.path)
     }
 
     // MARK: - Fill helpers

@@ -5,8 +5,10 @@ struct SideToolbar: View {
 
     /// When the fill tool is active the left rail's sliders control the fill settings instead of the
     /// brush's, so it doubles as quick access to gap-closing / threshold / edge-overlap (mirrored live
-    /// while dragging a fill). Any other tool shows the brush size / opacity sliders.
+    /// while dragging a fill). Any other tool shows size / opacity sliders (the eraser's own separate
+    /// state while erasing, otherwise the paint brush's).
     private var isFillMode: Bool { canvasManager.selectedTool == .fill }
+    private var isEraserMode: Bool { canvasManager.selectedTool == .eraser }
 
     /// Fill mode has three sliders instead of two, so they're a little shorter to fit the rail.
     private var sliderHeight: CGFloat { isFillMode ? 120 : 150 }
@@ -38,6 +40,27 @@ struct SideToolbar: View {
                         value: Binding(get: { Double(canvasManager.fillExpand) }, set: { canvasManager.setFillSetting(.edgeOverlap, CGFloat($0)) }),
                         range: Double(CanvasManager.fillExpandRange.lowerBound)...Double(CanvasManager.fillExpandRange.upperBound),
                         identifier: "sideToolbar.edgeOverlapSlider"
+                    )
+                } else if isEraserMode {
+                    labeledSlider(
+                        title: "Size",
+                        value: Binding(get: { Double(canvasManager.eraserSize) }, set: { canvasManager.eraserSize = CGFloat($0) }),
+                        range: 1...50,
+                        identifier: "sideToolbar.eraserSizeSlider"
+                    )
+                    Button(action: resetSettings) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.footnote)
+                            .foregroundColor(.white)
+                            .frame(width: 30, height: 30)
+                            .background(Color.white.opacity(0.15))
+                            .cornerRadius(6)
+                    }
+                    labeledSlider(
+                        title: "Opacity",
+                        value: $canvasManager.eraserOpacity,
+                        range: 0...1,
+                        identifier: "sideToolbar.eraserOpacitySlider"
                     )
                 } else {
                     labeledSlider(
@@ -82,12 +105,14 @@ struct SideToolbar: View {
                         .foregroundColor(canvasManager.canUndo ? .white : .white.opacity(0.3))
                 }
                 .disabled(!canvasManager.canUndo)
+                .accessibilityIdentifier("sideToolbar.undoButton")
 
                 Button(action: canvasManager.redo) {
                     Image(systemName: "arrow.uturn.forward")
                         .foregroundColor(canvasManager.canRedo ? .white : .white.opacity(0.3))
                 }
                 .disabled(!canvasManager.canRedo)
+                .accessibilityIdentifier("sideToolbar.redoButton")
             }
             .padding(.bottom, 16)
         }
@@ -115,6 +140,9 @@ struct SideToolbar: View {
         if isFillMode {
             canvasManager.fillGapClosingDistance = 8
             canvasManager.fillExpand = 2
+        } else if isEraserMode {
+            canvasManager.eraserSize = 20
+            canvasManager.eraserOpacity = 1.0
         } else {
             canvasManager.brushSize = 5
             canvasManager.brushOpacity = 1.0

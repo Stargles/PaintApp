@@ -21,18 +21,6 @@ struct DrawingView: View {
             ZStack {
                 CanvasView(canvasManager: canvasManager, activePanel: activePanel)
 
-                // Transparent catcher: tapping anywhere off the toolbar and the open menu dismisses the
-                // menu. Sits above the canvas but below the toolbar/panel (added later in this ZStack),
-                // so those still receive their own taps. Present for transient settings menus only — the
-                // Select panel is exempt because using it *is* interacting with the canvas (drawing a
-                // selection), which a catcher would swallow.
-                if activePanel != .none && activePanel != .select {
-                    Color.black.opacity(0.001)
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture { activePanel = .none }
-                }
-
                 VStack(spacing: 0) {
                     TopToolbar(canvasManager: canvasManager, activePanel: $activePanel, onOpenGallery: onOpenGallery)
 
@@ -70,6 +58,17 @@ struct DrawingView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
+                // The Select tool's menu docks at the bottom (Procreate reference) instead of dropping
+                // down from the top toolbar, so it never covers the upper canvas while lassoing.
+                if activePanel == .select {
+                    VStack {
+                        Spacer()
+                        SelectPanel(canvasManager: canvasManager)
+                            .padding(.bottom, 100)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
                 // Discreet, default-off FPS/frame-time HUD (see PerfHUD.swift) — tucked below the
                 // top toolbar on the leading side, clear of the toolbar's own icons, the trailing
                 // panel, and the bottom timeline/transform bar.
@@ -81,13 +80,18 @@ struct DrawingView: View {
         .background(Color.black)
         .animation(.easeInOut(duration: 0.2), value: activePanel)
         .animation(.easeInOut(duration: 0.2), value: canvasManager.floatingPiece != nil)
+        // Continuing to draw or fill dismisses whatever top-bar dropdown is open instead of the first
+        // touch being swallowed by a tap-to-dismiss catcher — see CanvasManager.interactionBegan.
+        .onReceive(canvasManager.interactionBegan) {
+            if activePanel != .none { activePanel = .none }
+        }
     }
 
     /// Which side of the toolbar the open menu's icon lives on, so the dropdown lands under it. The
-    /// gallery/actions/adjust/select icons are leading; brush/fill/layers/color are trailing.
+    /// gallery/actions/adjust icons are leading; brush/fill/layers/color are trailing.
     private var panelAlignment: Alignment {
         switch activePanel {
-        case .actions, .adjust, .select:
+        case .actions, .adjust:
             return .topLeading
         default:
             return .topTrailing
@@ -104,13 +108,15 @@ struct DrawingView: View {
         case .adjust:
             StubToolPanel(title: "Adjust", systemImage: "slider.horizontal.3")
         case .select:
-            SelectPanel(canvasManager: canvasManager)
+            EmptyView() // Select's UI is the bottom bar, shown whenever the tool is engaged — see above.
         case .move:
             EmptyView() // Move's UI is the floating bottom bar, shown whenever a piece is active — see above.
         case .layers:
             LayerPanel(canvasManager: canvasManager)
         case .brush:
             BrushSettingsPanel(canvasManager: canvasManager)
+        case .eraser:
+            EraserSettingsPanel(canvasManager: canvasManager)
         case .color:
             ColorPickerPanel(canvasManager: canvasManager)
         case .fill:

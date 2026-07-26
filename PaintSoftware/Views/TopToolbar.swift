@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum ActivePanel: Equatable {
-    case none, actions, adjust, select, move, layers, brush, color, fill
+    case none, actions, adjust, select, move, layers, brush, color, fill, eraser
 }
 
 struct TopToolbar: View {
@@ -21,16 +21,15 @@ struct TopToolbar: View {
 
             Spacer()
 
-            iconButton(system: "paintbrush.pointed", isActive: activePanel == .brush || canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil) {
+            iconButton(system: "paintbrush.pointed", isActive: !isToolHighlightSuppressed && (activePanel == .brush || canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil)) {
                 selectBrushToolAndTogglePanel()
             }
             .accessibilityIdentifier("toolbar.brushButton")
-            iconButton(system: "eraser", isActive: canvasManager.selectedTool == .eraser) {
-                canvasManager.commitFloatingPieceIfNeeded()
-                canvasManager.selectedTool = .eraser
-                activePanel = .none
+            iconButton(system: "eraser", isActive: !isToolHighlightSuppressed && (activePanel == .eraser || canvasManager.selectedTool == .eraser)) {
+                selectEraserToolAndTogglePanel()
             }
-            iconButton(system: "drop.fill", isActive: activePanel == .fill || canvasManager.selectedTool == .fill) {
+            .accessibilityIdentifier("toolbar.eraserButton")
+            iconButton(system: "drop.fill", isActive: !isToolHighlightSuppressed && (activePanel == .fill || canvasManager.selectedTool == .fill)) {
                 selectFillToolAndTogglePanel()
             }
             .accessibilityIdentifier("toolbar.fillButton")
@@ -44,33 +43,24 @@ struct TopToolbar: View {
                     .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
             }
             .accessibilityIdentifier("toolbar.colorButton")
-
-            Rectangle()
-                .fill(Color.white.opacity(0.25))
-                .frame(width: 1, height: 24)
-
-            Button(action: canvasManager.undo) {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.title3)
-                    .foregroundColor(canvasManager.canUndo ? .white : .white.opacity(0.3))
-                    .frame(width: 40, height: 40)
-            }
-            .disabled(!canvasManager.canUndo)
-            .accessibilityIdentifier("toolbar.undoButton")
-
-            Button(action: canvasManager.redo) {
-                Image(systemName: "arrow.uturn.forward")
-                    .font(.title3)
-                    .foregroundColor(canvasManager.canRedo ? .white : .white.opacity(0.3))
-                    .frame(width: 40, height: 40)
-            }
-            .disabled(!canvasManager.canRedo)
-            .accessibilityIdentifier("toolbar.redoButton")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .background(Color.black)
+    }
+
+    /// Brush/eraser/fill are mutually exclusive with Select and Move: only one of these "which tool is
+    /// active" indicators should ever read as engaged. Select and Move are each driven by their own
+    /// independent state (`activePanel == .select`, and floating-piece/vector-transform respectively)
+    /// rather than `selectedTool`, so without this, switching to Select while a paint tool was active
+    /// left that paint tool's icon highlighted too — both showing selected at once. Layers is
+    /// deliberately not part of this: it's a utility panel, not a tool, so it highlights independent
+    /// of whichever tool is current. Select immediately followed by Move is the one intentional
+    /// exception to "only one tool active" (Move then transforms the current selection), so this only
+    /// suppresses the *paint* tools, never Select/Move's own highlighting.
+    private var isToolHighlightSuppressed: Bool {
+        activePanel == .select || canvasManager.floatingPiece != nil || canvasManager.isVectorTransforming
     }
 
     private func toggle(_ panel: ActivePanel) {
@@ -97,11 +87,19 @@ struct TopToolbar: View {
         }
     }
 
-    /// Brush and fill are two-stage: the first tap only *selects* the tool (closing any open menu); once
-    /// it's already the active tool, a further tap toggles its settings menu. Matches Procreate, and keeps
-    /// the menu from popping up (and covering the canvas) the moment you switch tools.
+    /// Brush, eraser, and fill are two-stage: the first tap only *selects* the tool (closing any open
+    /// menu); once it's already the active tool, a further tap toggles its settings menu. Matches
+    /// Procreate, and keeps the menu from popping up (and covering the canvas) the moment you switch
+    /// tools.
+    ///
+    /// Gated on `!isToolHighlightSuppressed`, the same flag the highlight itself uses: while Select or
+    /// Move is engaged, `selectedTool` is still whatever paint tool was active *before* Select/Move
+    /// took over (entering Select never touches it), so a raw `selectedTool == .pen` check would read
+    /// "already active" and merely toggle that tool's settings panel open — leaving `activePanel` on a
+    /// settings panel instead of `.none` and never actually resuming plain drawing. Coming from Select/
+    /// Move must always take the "first tap" branch, exactly like coming from a different paint tool.
     private func selectBrushToolAndTogglePanel() {
-        let brushActive = canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil
+        let brushActive = !isToolHighlightSuppressed && (canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil)
         if brushActive {
             toggle(.brush)
         } else {
@@ -111,8 +109,20 @@ struct TopToolbar: View {
         }
     }
 
+    private func selectEraserToolAndTogglePanel() {
+        let eraserActive = !isToolHighlightSuppressed && canvasManager.selectedTool == .eraser
+        if eraserActive {
+            toggle(.eraser)
+        } else {
+            canvasManager.commitFloatingPieceIfNeeded()
+            canvasManager.selectedTool = .eraser
+            activePanel = .none
+        }
+    }
+
     private func selectFillToolAndTogglePanel() {
-        if canvasManager.selectedTool == .fill {
+        let fillActive = !isToolHighlightSuppressed && canvasManager.selectedTool == .fill
+        if fillActive {
             toggle(.fill)
         } else {
             canvasManager.commitFloatingPieceIfNeeded()
@@ -130,5 +140,8 @@ struct TopToolbar: View {
                 .background(isActive ? Color.white.opacity(0.2) : Color.clear)
                 .cornerRadius(8)
         }
+        // Exposes the same highlight state UI tests can't read off `.foregroundColor` directly —
+        // also lets VoiceOver announce which tool is current.
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
     }
 }

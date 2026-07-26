@@ -862,7 +862,7 @@ final class PaintSoftwareUITests: XCTestCase {
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the interior")
 
-        let undo = app.buttons["toolbar.undoButton"]
+        let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         XCTAssertTrue(undo.isEnabled, "Undo should be available immediately after a fill")
         undo.tap()
@@ -890,10 +890,10 @@ final class PaintSoftwareUITests: XCTestCase {
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the interior")
 
-        app.buttons["toolbar.undoButton"].tap()
+        app.buttons["sideToolbar.undoButton"].tap()
         XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5), "Undo should remove the fill")
 
-        let redo = app.buttons["toolbar.redoButton"]
+        let redo = app.buttons["sideToolbar.redoButton"]
         XCTAssertTrue(redo.isEnabled, "Redo should be available after undoing a fill")
         redo.tap()
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Redo should restore the fill")
@@ -915,7 +915,7 @@ final class PaintSoftwareUITests: XCTestCase {
         canvas.coordinate(withNormalizedOffset: center).tap() // no walls → floods the canvas
         XCTAssertTrue(waitUntilFilled(canvas, dx: center.dx, dy: center.dy), "Fill should flood the blank canvas")
 
-        let undo = app.buttons["toolbar.undoButton"]
+        let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         XCTAssertTrue(undo.isEnabled, "Undo must be enabled after a fill even on a blank canvas — the fill is an undoable action")
         undo.tap()
@@ -937,8 +937,8 @@ final class PaintSoftwareUITests: XCTestCase {
         canvas.coordinate(withNormalizedOffset: center).tap()
         XCTAssertTrue(waitUntilFilled(canvas, dx: center.dx, dy: center.dy), "Fill should flood the canvas")
 
-        let undo = app.buttons["toolbar.undoButton"]
-        let redo = app.buttons["toolbar.redoButton"]
+        let undo = app.buttons["sideToolbar.undoButton"]
+        let redo = app.buttons["sideToolbar.redoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
 
         for cycle in 1...2 {
@@ -978,7 +978,7 @@ final class PaintSoftwareUITests: XCTestCase {
         let p = safeOutsideCornerPoint(canvas)
         drawLine(on: canvas, from: p, to: CGVector(dx: p.dx + 0.12, dy: p.dy))
 
-        let undo = app.buttons["toolbar.undoButton"]
+        let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         undo.tap()
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
@@ -1093,13 +1093,13 @@ final class PaintSoftwareUITests: XCTestCase {
         app.buttons["toolbar.layersButton"].tap() // close panel so it can't cover the canvas
 
         app.buttons["toolbar.selectButton"].tap()
-        let rectangleMode = app.buttons["Rectangle"]
+        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
 
-        // Draw the selection in the lower-right of the canvas, clear of the Select menu's dropdown
-        // (which drops down under its leading toolbar icon, covering the upper-left).
-        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.52), to: CGVector(dx: 0.78, dy: 0.74))
+        // Draw the selection in the upper portion of the canvas, clear of the Select menu's bar
+        // (which docks at the bottom, covering the lower portion of the screen).
+        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.25), to: CGVector(dx: 0.78, dy: 0.42))
 
         let fillButton = app.buttons["selectPanel.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
@@ -1117,12 +1117,13 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(launchIntoEditor(app))
 
         app.buttons["toolbar.selectButton"].tap()
-        let rectangleMode = app.buttons["Rectangle"]
+        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
 
-        // Draw in the lower-right, clear of the Select menu's leading-side dropdown (see the fill test).
-        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.52), to: CGVector(dx: 0.78, dy: 0.74))
+        // Draw in the upper portion of the canvas, clear of the Select menu's bottom-docked bar (see
+        // the fill test).
+        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.25), to: CGVector(dx: 0.78, dy: 0.42))
 
         let duplicateButton = app.buttons["selectPanel.duplicateButton"]
         XCTAssertTrue(duplicateButton.waitForExistence(timeout: 5))
@@ -1136,6 +1137,50 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5), "Duplicate should have inserted a second layer")
         XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), true, "Committing should bake the duplicated piece into the new layer")
         XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "Duplicate must not modify the source layer")
+    }
+
+    /// A brush stroke that crosses outside the active selection is clipped to it by default ("Paint
+    /// Outside Selection" starts denied) — the paint outside the marching ants is discarded, reverting
+    /// to blank paper — and flipping that toggle on lets the same stroke shape paint past the boundary.
+    func testDenyOutsideSelectionClipsStrokeUntilToggledOn() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["sideToolbar.pencilOnlyToggle"].tap() // allow synthetic (non-Pencil) touches to draw
+
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
+        rectangleMode.tap()
+
+        // A rectangle selection in the upper-left quadrant; the probe points below straddle its right
+        // edge (dx: 0.55) so one lands inside and one lands clearly outside.
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.2), to: CGVector(dx: 0.55, dy: 0.35))
+
+        let allowToggle = app.buttons["selectPanel.allowOutsideToggle"]
+        XCTAssertTrue(allowToggle.waitForExistence(timeout: 5))
+
+        // Switch to the brush tool — exercises the Select-exit fix (TopToolbar's two-stage tap helpers):
+        // this must land on plain drawing (activePanel == .none), not pop the brush settings panel open.
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertFalse(app.buttons["selectPanel.mode.rectangle"].exists, "Selecting the brush tool should fully exit Select, not just unhighlight its icon")
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        // A horizontal stroke starting inside the selection (dx 0.4) and ending well outside it (dx 0.75).
+        dragOnCanvas(app, from: CGVector(dx: 0.4, dy: 0.275), to: CGVector(dx: 0.75, dy: 0.275))
+
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.45, dy: 0.275)), "Paint inside the selection should land normally")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.65, dy: 0.275)), "Paint outside the selection should be discarded while outside interaction is denied")
+
+        // Flip the toggle on and repeat the same stroke — this time it should reach past the boundary.
+        app.buttons["toolbar.selectButton"].tap()
+        XCTAssertTrue(allowToggle.waitForExistence(timeout: 5))
+        allowToggle.tap()
+
+        app.buttons["toolbar.brushButton"].tap()
+        dragOnCanvas(app, from: CGVector(dx: 0.4, dy: 0.275), to: CGVector(dx: 0.75, dy: 0.275))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.65, dy: 0.275)), "With outside interaction allowed, the same stroke should now paint past the selection boundary")
     }
 
     /// With no active selection, Move lifts the whole current layer; committing bakes it back
@@ -1393,5 +1438,98 @@ final class PaintSoftwareUITests: XCTestCase {
         }
         hexField.typeText(value)
         app.keyboards.buttons["Return"].tap()
+    }
+
+    // MARK: - Top-bar dropdown UX (continuing to draw dismisses the menu; tool mutual exclusivity; eraser panel)
+
+    /// Task: opening a tool's settings dropdown must not block drawing — continuing to draw should
+    /// both dismiss the menu and land the stroke in one motion, instead of the first touch being
+    /// silently swallowed and requiring a separate tap to close the menu first.
+    func testDrawingWhileBrushMenuOpenDismissesMenuAndDraws() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap() // Synthetic XCUITest touches are finger touches, not Apple Pencil.
+
+        // Brush is the default tool, so a single tap opens its settings menu directly.
+        let brushButton = app.buttons["toolbar.brushButton"]
+        XCTAssertTrue(brushButton.waitForExistence(timeout: 5))
+        brushButton.tap()
+        let sizeSlider = app.sliders["brushPanel.sizeSlider"]
+        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "Brush menu should be open")
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let p = safeOutsideCornerPoint(canvas)
+        drawLine(on: canvas, from: p, to: CGVector(dx: p.dx + 0.12, dy: p.dy))
+
+        XCTAssertTrue(sizeSlider.waitForNonExistence(timeout: 3), "Continuing to draw should dismiss the open brush menu")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: p.dx + 0.06, dy: p.dy)), "The stroke should have actually been drawn, not swallowed by the menu")
+    }
+
+    /// Task: brush/eraser/fill/select highlighting must be mutually exclusive — switching to Select
+    /// must turn off whichever paint tool's icon was previously highlighted, not show both at once.
+    func testSelectingSelectToolStopsHighlightingBrush() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let brushButton = app.buttons["toolbar.brushButton"]
+        let selectButton = app.buttons["toolbar.selectButton"]
+        XCTAssertTrue(brushButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(selectButton.waitForExistence(timeout: 5))
+
+        // Brush is the default tool.
+        XCTAssertTrue(brushButton.isSelected, "Brush should read as the active tool by default")
+        XCTAssertFalse(selectButton.isSelected)
+
+        selectButton.tap()
+        XCTAssertTrue(selectButton.isSelected, "Select should now read as active")
+        XCTAssertFalse(brushButton.isSelected, "Brush must stop reading as active once Select is engaged — only one tool highlighted at a time")
+
+        // Switching back to Brush should restore exclusivity the other way.
+        brushButton.tap()
+        XCTAssertTrue(brushButton.isSelected)
+        XCTAssertFalse(selectButton.isSelected)
+    }
+
+    /// Task: the eraser gets its own settings dropdown (shape/size/opacity/dynamics), functioning like
+    /// the brush tool but erasing instead of painting. Also exercises the drawing-dismisses-menu fix
+    /// for the eraser specifically: opening its menu then dragging over existing ink should both close
+    /// the menu and actually erase.
+    func testEraserHasOwnPanelAndErasesStroke() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
+        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
+        pencilToggle.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let p = safeOutsideCornerPoint(canvas)
+        let q = CGVector(dx: p.dx + 0.12, dy: p.dy)
+        drawLine(on: canvas, from: p, to: q)
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: p.dx + 0.06, dy: p.dy)), "Sanity: the stroke should be drawn before erasing it")
+
+        let eraserButton = app.buttons["toolbar.eraserButton"]
+        XCTAssertTrue(eraserButton.waitForExistence(timeout: 5))
+        eraserButton.tap() // First tap: select the eraser tool only.
+        XCTAssertTrue(eraserButton.isSelected)
+        XCTAssertFalse(brushIsSelected(app), "Brush must stop reading as active once the eraser is selected")
+
+        eraserButton.tap() // Second tap: open its settings menu.
+        let sizeSlider = app.sliders["eraserPanel.sizeSlider"]
+        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "Eraser menu should be open, mirroring the brush's")
+        sizeSlider.adjust(toNormalizedSliderPosition: 1.0) // Widen it so the drag below fully covers the stroke.
+
+        drawLine(on: canvas, from: p, to: q) // Drag back over the same stroke to erase it.
+        XCTAssertTrue(sizeSlider.waitForNonExistence(timeout: 3), "Continuing to erase should dismiss the open eraser menu")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: p.dx + 0.06, dy: p.dy)), "Erasing over the stroke should restore blank paper")
+    }
+
+    private func brushIsSelected(_ app: XCUIApplication) -> Bool {
+        app.buttons["toolbar.brushButton"].isSelected
     }
 }

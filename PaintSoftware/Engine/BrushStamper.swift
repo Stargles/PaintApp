@@ -45,14 +45,14 @@ enum BrushStamper {
 
     /// Stamps one dab, honoring the brush's shape/hardness/pressure dynamics/scatter/grain. Ported
     /// verbatim from `StrokeCanvasView.stampOne` so live and replayed strokes match exactly.
+    ///
+    /// The eraser reuses this exact pipeline rather than a special-cased hard circle: it "paints"
+    /// with the same shape/dynamics/spacing/grain as any other brush, just composited with
+    /// `.destinationOut` instead of the brush's own blend mode — i.e. painting with 0 opacity as the
+    /// color, so its stamp punches a hole instead of adding color. `color` is irrelevant under
+    /// `.destinationOut` (only the stamp's alpha coverage matters), so it's ignored for an eraser dab.
     static func stampDab(into raster: RasterLayerTexture, at point: CGPoint, pressure: CGFloat,
                          brush: Brush, color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool) {
-        if isEraser {
-            let radius = brushSize / 2
-            raster.stampCircle(at: point, radius: radius, color: .black, alpha: 1, hardness: 0.6, blendMode: .destinationOut)
-            return
-        }
-
         let pressureValue = Double(max(0, min(pressure, 1)))
         let sizeFraction = brush.dynamics.sizeFraction(forPressure: pressureValue)
         let opacityFraction = brush.dynamics.opacityFraction(forPressure: pressureValue)
@@ -63,7 +63,7 @@ enum BrushStamper {
 
         let stampPoint = applyScatter(to: point, radius: radius, scatter: brush.scatter)
         let hardness = CGFloat(brush.hardness)
-        let blendMode = brush.blendMode.cgBlendMode
+        let blendMode = isEraser ? CGBlendMode.destinationOut : brush.blendMode.cgBlendMode
 
         switch brush.shape {
         case .softRound, .hardRound, .pen:
