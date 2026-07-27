@@ -24,11 +24,14 @@ struct ProjectManifest: Codable {
     /// renamed/deleted, or the project is moved to another device.
     var selectedBrush: Brush
     var customBrushes: [Brush]
+    var folders: [FolderManifest] = []
+    var viewPresets: [ViewPresetManifest] = []
 
     init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int, sceneFrameCount: Int,
          layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
-         selectedBrush: Brush = BrushLibrary.softRound, customBrushes: [Brush] = []) {
+         selectedBrush: Brush = BrushLibrary.softRound, customBrushes: [Brush] = [],
+         folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = []) {
         self.id = id
         self.name = name
         self.canvasWidth = canvasWidth
@@ -42,6 +45,8 @@ struct ProjectManifest: Codable {
         self.isBackgroundVisible = isBackgroundVisible
         self.selectedBrush = selectedBrush
         self.customBrushes = customBrushes
+        self.folders = folders
+        self.viewPresets = viewPresets
     }
 
     // Custom decoding so projects saved before backgroundColor/isBackgroundVisible (or, more
@@ -63,6 +68,14 @@ struct ProjectManifest: Codable {
         isBackgroundVisible = try container.decodeIfPresent(Bool.self, forKey: .isBackgroundVisible) ?? true
         selectedBrush = try container.decodeIfPresent(Brush.self, forKey: .selectedBrush) ?? BrushLibrary.softRound
         customBrushes = try container.decodeIfPresent([Brush].self, forKey: .customBrushes) ?? []
+        folders = try container.decodeIfPresent([FolderManifest].self, forKey: .folders) ?? []
+        viewPresets = try container.decodeIfPresent([ViewPresetManifest].self, forKey: .viewPresets) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, canvasWidth, canvasHeight, canvasPadding, fps, sceneFrameCount, layers,
+             modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
+             folders, viewPresets
     }
 }
 
@@ -71,6 +84,20 @@ struct CodableColor: Codable {
     var green: Double
     var blue: Double
     var alpha: Double
+}
+
+struct FolderManifest: Codable {
+    var id: UUID
+    var name: String
+    var isExpanded: Bool
+    var isVisible: Bool
+}
+
+struct ViewPresetManifest: Codable {
+    var id: UUID
+    var name: String
+    /// UUID string -> isVisible, because JSON dictionaries require String keys.
+    var layerVisibility: [String: Bool]
 }
 
 struct LayerManifest: Codable {
@@ -86,10 +113,13 @@ struct LayerManifest: Codable {
     var isObjectLayer: Bool
     var objectImageFileName: String?
     var objectTransform: ObjectTransformManifest?
+    /// The folder this layer belongs to, if any. Stored as a UUID string for forward compat.
+    var parentFolderID: String? = nil
     var cels: [CelManifest]
 
     init(id: UUID, name: String, opacity: Double, isVisible: Bool, kind: LayerKind = .raster, isObjectLayer: Bool,
-         objectImageFileName: String?, objectTransform: ObjectTransformManifest?, cels: [CelManifest]) {
+         objectImageFileName: String?, objectTransform: ObjectTransformManifest?,
+         parentFolderID: String? = nil, cels: [CelManifest]) {
         self.id = id
         self.name = name
         self.opacity = opacity
@@ -98,6 +128,7 @@ struct LayerManifest: Codable {
         self.isObjectLayer = isObjectLayer
         self.objectImageFileName = objectImageFileName
         self.objectTransform = objectTransform
+        self.parentFolderID = parentFolderID
         self.cels = cels
     }
 
@@ -115,6 +146,7 @@ struct LayerManifest: Codable {
         isVisible = try container.decode(Bool.self, forKey: .isVisible)
         kind = try container.decodeIfPresent(LayerKind.self, forKey: .kind) ?? .raster
         cels = try container.decode([CelManifest].self, forKey: .cels)
+        parentFolderID = try container.decodeIfPresent(String.self, forKey: .parentFolderID)
 
         if let modernIsObjectLayer = try container.decodeIfPresent(Bool.self, forKey: .isObjectLayer) {
             isObjectLayer = modernIsObjectLayer
@@ -139,11 +171,13 @@ struct LayerManifest: Codable {
         try container.encode(isObjectLayer, forKey: .isObjectLayer)
         try container.encodeIfPresent(objectImageFileName, forKey: .objectImageFileName)
         try container.encodeIfPresent(objectTransform, forKey: .objectTransform)
+        try container.encodeIfPresent(parentFolderID, forKey: .parentFolderID)
         try container.encode(cels, forKey: .cels)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, opacity, isVisible, kind, isObjectLayer, objectImageFileName, objectTransform, cels
+        case id, name, opacity, isVisible, kind, isObjectLayer, objectImageFileName, objectTransform,
+             parentFolderID, cels
         case isImageLayer, backgroundImageFileName // legacy, decode-only
     }
 }

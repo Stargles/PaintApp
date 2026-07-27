@@ -1271,9 +1271,18 @@ struct CanvasView: UIViewRepresentable {
                 fillDragStartThreshold = canvasManager.fillThreshold
                 fillDragStartEdge = canvasManager.fillExpand
                 let canvasPoint = recognizer.location(in: container)
-                // Pressing back down inside a still-adjustable fill resumes dragging it; anywhere else
-                // starts a fresh fill (which commits the previous adjustable one first).
-                if canvasManager.isPointInPendingFill(at: canvasPoint) {
+                // When the fill is in adjustable state (finger lifted, preview live), only respond
+                // to touches inside the pending fill region — that's the user re-tapping to resume
+                // drag-adjusting. Touches outside are ignored so the first finger of a two-finger
+                // pan doesn't accidentally commit the fill via beginInteractiveFill.
+                if canvasManager.isFillInAdjustableState {
+                    guard canvasManager.isPointInPendingFill(at: canvasPoint) else {
+                        // Leave the adjustable fill intact for later commit and return without
+                        // starting a new fill — this touch is likely the start of a pan/zoom.
+                        return
+                    }
+                    canvasManager.resumeInteractiveFillDrag()
+                } else if canvasManager.isPointInPendingFill(at: canvasPoint) {
                     canvasManager.resumeInteractiveFillDrag()
                 } else {
                     canvasManager.beginInteractiveFill(at: canvasPoint)

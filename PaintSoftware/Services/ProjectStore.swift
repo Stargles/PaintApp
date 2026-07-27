@@ -173,7 +173,7 @@ enum ProjectStore {
                                            scale: layer.objectTransform.scale, rotation: layer.objectTransform.rotation)
                 : nil
 
-            layerManifests.append(LayerManifest(
+                layerManifests.append(LayerManifest(
                 id: layer.id,
                 name: layer.name,
                 opacity: layer.opacity,
@@ -182,6 +182,7 @@ enum ProjectStore {
                 isObjectLayer: layer.isObjectLayer,
                 objectImageFileName: imageFileName,
                 objectTransform: transformManifest,
+                parentFolderID: layer.parentFolderID?.uuidString,
                 cels: celManifests
             ))
         }
@@ -201,6 +202,15 @@ enum ProjectStore {
         let customBrushes = canvasManager.customBrushes
         copyCustomBrushTexturesIntoProject([selectedBrush] + customBrushes, projectURL: url)
 
+        let folderManifests = canvasManager.folders.map { folder in
+            FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded, isVisible: folder.isVisible)
+        }
+        let viewPresetManifests = canvasManager.viewPresets.map { preset in
+            var vis: [String: Bool] = [:]
+            for (key, value) in preset.layerVisibility { vis[key.uuidString] = value }
+            return ViewPresetManifest(id: preset.id, name: preset.name, layerVisibility: vis)
+        }
+
         let manifest = ProjectManifest(
             id: canvasManager.projectID,
             name: canvasManager.projectName,
@@ -214,7 +224,9 @@ enum ProjectStore {
             backgroundColor: canvasManager.canvasBackgroundColor.codable,
             isBackgroundVisible: canvasManager.isCanvasBackgroundVisible,
             selectedBrush: selectedBrush,
-            customBrushes: customBrushes
+            customBrushes: customBrushes,
+            folders: folderManifests,
+            viewPresets: viewPresetManifests
         )
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: url.appendingPathComponent("manifest.json"))
@@ -248,6 +260,20 @@ enum ProjectStore {
         restoreCustomBrushTexturesFromProject([manifest.selectedBrush] + manifest.customBrushes, projectURL: url)
         manager.customBrushes = manifest.customBrushes
         manager.selectBrush(manifest.selectedBrush)
+
+        // Restore folders.
+        manager.folders = manifest.folders.map { f in
+            LayerFolder(id: f.id, name: f.name, isExpanded: f.isExpanded, isVisible: f.isVisible)
+        }
+
+        // Restore view presets.
+        manager.viewPresets = manifest.viewPresets.map { vp in
+            var vis: [UUID: Bool] = [:]
+            for (key, value) in vp.layerVisibility {
+                if let uuid = UUID(uuidString: key) { vis[uuid] = value }
+            }
+            return ViewPreset(id: vp.id, name: vp.name, layerVisibility: vis)
+        }
 
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)
         let canvasSize = manager.canvasSize ?? CGSize(width: 1, height: 1)
@@ -307,6 +333,7 @@ enum ProjectStore {
                 transform = .identity
             }
 
+            let parentID = layerManifest.parentFolderID.flatMap { UUID(uuidString: $0) }
             layers.append(Layer(
                 id: layerManifest.id,
                 name: layerManifest.name,
@@ -316,6 +343,7 @@ enum ProjectStore {
                 isObjectLayer: layerManifest.isObjectLayer,
                 objectImage: objectImage,
                 objectTransform: transform,
+                parentFolderID: parentID,
                 cels: cels
             ))
         }

@@ -23,6 +23,10 @@ final class CanvasManager: ObservableObject {
     var projectURL: URL?
 
     @Published var layers: [Layer] = []
+    @Published var folders: [LayerFolder] = []
+    @Published var viewPresets: [ViewPreset] = []
+    /// -1 means no view preset is active (all layers visible in their natural state).
+    @Published var activeViewPresetIndex: Int = -1
     @Published var currentLayerIndex: Int = 0 {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }
@@ -649,6 +653,9 @@ final class CanvasManager: ObservableObject {
     private var fillGestureActive = false
     /// True only while a finger is actively pressing/dragging the fill; false in the adjustable state.
     private var fillFingerDown = false         // main-thread only
+    /// True when a fill exists and the finger is NOT pressing (adjustable state). The coordinator checks
+    /// this in the fill-press handler so that a two-finger pan's first touch doesn't commit the fill.
+    var isFillInAdjustableState: Bool { fillGestureActive && !fillFingerDown }
     /// Last painted region (premultiplied RGBA) + its dimensions, kept so a re-tap can be hit-tested
     /// against the pixels the current fill already covers (`isPointInPendingFill`). Main-thread only.
     private var fillLastRegionRGBA: [UInt8]?
@@ -739,11 +746,110 @@ final class CanvasManager: ObservableObject {
 
     /// Flips a layer's visibility and, by default, its fill-reference state with it — a hidden layer is
     /// fill-excluded and a shown one is a fill reference (overridable afterward from the Edit menu).
+    /// When a view preset is active, the change is saved into that preset automatically.
     func toggleLayerVisibility(layerIndex: Int) {
         guard layers.indices.contains(layerIndex) else { return }
         let nowVisible = !layers[layerIndex].isVisible
         layers[layerIndex].isVisible = nowVisible
         layers[layerIndex].isFillReference = nowVisible
+        saveVisibilityToActiveView()
+    }
+
+    /// Toggles a folder's own visibility and propagates it to every child layer.
+    /// When a view preset is active, each child change is saved into it.
+    func toggleFolderVisibility(_ folderID: UUID) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        let nowVisible = !folders[idx].isVisible
+        folders[idx].isVisible = nowVisible
+        for li in layers.indices where layers[li].parentFolderID == folderID {
+            layers[li].isVisible = nowVisible
+            layers[li].isFillReference = nowVisible
+        }
+        saveVisibilityToActiveView()
+    }
+
+    /// Toggles whether a folder's child layers are shown in the layer panel.
+    func toggleFolderExpanded(_ folderID: UUID) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        folders[idx].isExpanded.toggle()
+    }
+
+    // MARK: - Reorder
+
+    /// Moves a layer from one index to another within the `layers` array. Clamps both indices
+    /// to valid ranges. The display updates automatically via @Published.
+    func moveLayer(from sourceIndex: Int, to destinationIndex: Int) {
+        guard layers.indices.contains(sourceIndex),
+              layers.indices.contains(destinationIndex),
+              sourceIndex != destinationIndex else { return }
+        let layer = layers.remove(at: sourceIndex)
+        let adjustedDest = destinationIndex > sourceIndex ? destinationIndex - 1 : destinationIndex
+        layers.insert(layer, at: adjustedDest)
+        if currentLayerIndex == sourceIndex {
+            currentLayerIndex = adjustedDest
+        } else if sourceIndex < currentLayerIndex && adjustedDest >= currentLayerIndex {
+            currentLayerIndex -= 1
+        } else if sourceIndex > currentLayerIndex && adjustedDest <= currentLayerIndex {
+            currentLayerIndex += 1
+        }
+    }
+
+    /// Moves a layer into (or out of) a folder.
+    func setLayerParent(_ layerID: UUID, folderID: UUID?) {
+        guard let idx = layers.firstIndex(where: { $0.id == layerID }) else { return }
+        layers[idx].parentFolderID = folderID
+    }
+
+    // MARK: - Views
+
+    /// Adds a new view preset capturing the current visibility state of all layers.
+    func addViewPreset() {
+        var vis: [UUID: Bool] = [:]
+        for layer in layers { vis[layer.id] = layer.isVisible }
+        let preset = ViewPreset(id: UUID(), name: "View \(viewPresets.count + 1)", layerVisibility: vis)
+        viewPresets.append(preset)
+        activeViewPresetIndex = viewPresets.count - 1
+    }
+
+    /// Cycles to the next view preset. After the last preset, returns to "no view" mode
+    /// where all layers are visible.
+    func cycleViewPreset() {
+        if viewPresets.isEmpty {
+            addViewPreset()
+            return
+        }
+        let nextIndex = activeViewPresetIndex + 1
+        if nextIndex >= viewPresets.count {
+            activeViewPresetIndex = -1
+            for idx in layers.indices { layers[idx].isVisible = true }
+        } else {
+            activeViewPresetIndex = nextIndex
+            applyViewPreset(viewPresets[nextIndex])
+        }
+    }
+
+    /// Applies a view preset's visibility snapshot to all layers.
+    private func applyViewPreset(_ preset: ViewPreset) {
+        for idx in layers.indices {
+            if let vis = preset.layerVisibility[layers[idx].id] {
+                layers[idx].isVisible = vis
+                layers[idx].isFillReference = vis
+            }
+        }
+    }
+
+    /// Saves the current visibility state of every layer into the active view preset (if any).
+    private func saveVisibilityToActiveView() {
+        guard viewPresets.indices.contains(activeViewPresetIndex) else { return }
+        for layer in layers {
+            viewPresets[activeViewPresetIndex].layerVisibility[layer.id] = layer.isVisible
+        }
+    }
+
+    /// Name of the active view for display purposes, or "All" when no view is active.
+    var activeViewName: String {
+        guard viewPresets.indices.contains(activeViewPresetIndex) else { return "All" }
+        return viewPresets[activeViewPresetIndex].name
     }
 
     /// Updates the in-progress fill's gap-closing (vertical drag), wall threshold (horizontal drag) and
@@ -1033,6 +1139,21 @@ enum Tool: Hashable {
     case fill
 }
 
+struct LayerFolder: Identifiable {
+    let id: UUID
+    var name: String
+    var isExpanded: Bool = true
+    var isVisible: Bool = true
+}
+
+/// A snapshot of which layers are visible, associated with a named view.
+/// When a view preset is active, toggling layer visibility auto-saves to it.
+struct ViewPreset: Identifiable {
+    let id: UUID
+    var name: String
+    var layerVisibility: [UUID: Bool] // layerID -> isVisible
+}
+
 struct Cel: Identifiable {
     let id: UUID
     var startFrame: Int
@@ -1086,6 +1207,10 @@ struct Layer: Identifiable {
     var isObjectLayer: Bool = false
     var objectImage: UIImage? = nil
     var objectTransform: LayerTransform = .identity
+    /// If set, this layer belongs to the folder with this ID. Layer ordering in the `layers` array
+    /// determines the stacking order within each folder. A folder's visibility/expand state lives on
+    /// the corresponding `LayerFolder` in `CanvasManager.folders`.
+    var parentFolderID: UUID? = nil
     var cels: [Cel]
     var thumbnail: UIImage? = nil
 }
