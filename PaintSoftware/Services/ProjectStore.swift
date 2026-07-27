@@ -203,7 +203,8 @@ enum ProjectStore {
         copyCustomBrushTexturesIntoProject([selectedBrush] + customBrushes, projectURL: url)
 
         let folderManifests = canvasManager.folders.map { folder in
-            FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded, isVisible: folder.isVisible)
+            FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded,
+                           isVisible: folder.isVisible, parentFolderID: folder.parentFolderID)
         }
         let viewPresetManifests = canvasManager.viewPresets.map { preset in
             var vis: [String: Bool] = [:]
@@ -265,7 +266,8 @@ enum ProjectStore {
 
         // Restore folders.
         manager.folders = manifest.folders.map { f in
-            LayerFolder(id: f.id, name: f.name, isExpanded: f.isExpanded, isVisible: f.isVisible)
+            LayerFolder(id: f.id, name: f.name, isExpanded: f.isExpanded, isVisible: f.isVisible,
+                        parentFolderID: f.parentFolderID)
         }
 
         // Restore view presets.

@@ -776,7 +776,12 @@ final class CanvasManager: ObservableObject {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
         let nowVisible = !folders[idx].isVisible
         folders[idx].isVisible = nowVisible
-        for li in layers.indices where layers[li].parentFolderID == folderID {
+        // Reaches subfolders too, so hiding an outer folder hides everything under it.
+        let subtree = folderSubtree(folderID)
+        for fi in folders.indices where subtree.contains(folders[fi].id) {
+            folders[fi].isVisible = nowVisible
+        }
+        for li in descendantLayerIndices(ofFolder: folderID) {
             layers[li].isVisible = nowVisible
             layers[li].isFillReference = nowVisible
         }
@@ -792,136 +797,331 @@ final class CanvasManager: ObservableObject {
     /// Creates an empty folder. It shows up at the top of the layer stack (see `layerStackRows`)
     /// until layers are dragged into it.
     @discardableResult
-    func addFolder(name: String? = nil) -> UUID {
-        let folder = LayerFolder(id: UUID(), name: name ?? "Folder \(folders.count + 1)")
+    func addFolder(name: String? = nil, parentFolderID: UUID? = nil) -> UUID {
+        let folder = LayerFolder(id: UUID(), name: name ?? "Folder \(folders.count + 1)", parentFolderID: parentFolderID)
         folders.append(folder)
         return folder.id
     }
 
-    /// Removes a folder. Its layers survive as top-level rows in the same stacking positions.
+    /// Removes a folder, keeping everything that was inside it. Its layers and subfolders move up
+    /// into whatever contained the folder, in the same stacking positions.
     func deleteFolder(_ folderID: UUID) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        let grandparent = folders[idx].parentFolderID
         folders.remove(at: idx)
         for li in layers.indices where layers[li].parentFolderID == folderID {
-            layers[li].parentFolderID = nil
+            layers[li].parentFolderID = grandparent
+        }
+        for fi in folders.indices where folders[fi].parentFolderID == folderID {
+            folders[fi].parentFolderID = grandparent
         }
         for vi in viewPresets.indices {
             viewPresets[vi].folderVisibility.removeValue(forKey: folderID)
         }
     }
 
-    // MARK: - Stack rows
-
-    /// The layer stack as it is presented, top-to-bottom, in both the layer panel and the animation
-    /// timeline: a folder header above its children, an empty folder on its own. Collapsed folders
-    /// hide their children. Folders that hold no layers yet sit at the very top (newest first) so a
-    /// just-created one is visible and can be dragged into.
-    var layerStackRows: [LayerStackRow] {
-        var rows: [LayerStackRow] = []
-        let occupied = Set(layers.compactMap(\.parentFolderID))
-        for folder in folders.reversed() where !occupied.contains(folder.id) {
-            rows.append(.folder(id: folder.id))
-        }
-        var emitted = Set<UUID>()
-        for index in layers.indices.reversed() {
-            let layer = layers[index]
-            // A stale parentFolderID (folder deleted out from under it) falls through to top level.
-            if let fid = layer.parentFolderID, let folder = folders.first(where: { $0.id == fid }) {
-                if emitted.insert(fid).inserted {
-                    rows.append(.folder(id: fid))
-                }
-                if folder.isExpanded {
-                    rows.append(.layer(id: layer.id, index: index))
-                }
-            } else {
-                rows.append(.layer(id: layer.id, index: index))
-            }
-        }
-        return rows
+    /// Renames a folder. Used by the layer options popover.
+    func renameFolder(_ folderID: UUID, to name: String) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        folders[idx].name = name
     }
 
-    /// Every layer belonging to `folderID`, bottom-to-top by `layers` index.
+    // MARK: - Stack rows
+
+    /// The layer stack as presented, top-to-bottom, in the layer panel and the animation timeline:
+    /// a folder header above its contents, `depth` counting how many folders a row sits inside.
+    /// Collapsed folders hide their contents.
+    ///
+    /// Ordering comes from `layers` (bottom-to-top render order) plus one invariant that every
+    /// mutation below maintains: **a folder's layers occupy a contiguous span of `layers`**. That
+    /// makes a folder's position in the stack simply the span its contents occupy, so folders need
+    /// no ordering field of their own. A folder holding no layers yet has no span, so it renders at
+    /// the top of whatever contains it, ordered among its empty siblings by `folders` (later
+    /// entries render higher, so a just-added folder lands on top).
+    var layerStackRows: [LayerStackRow] {
+        rows(inContainer: nil, depth: 0)
+    }
+
+    private func rows(inContainer container: UUID?, depth: Int) -> [LayerStackRow] {
+        // Everything directly inside this container, tagged with the topmost `layers` index it
+        // occupies so folders and loose layers can be ranked against each other top-to-bottom.
+        var ranked: [(top: Int, tieBreak: Int, folder: LayerFolder?, layerIndex: Int)] = []
+
+        for index in layers.indices where resolvedContainer(ofLayer: index) == container {
+            ranked.append((top: index, tieBreak: 0, folder: nil, layerIndex: index))
+        }
+        for (order, folder) in folders.enumerated() where resolvedContainer(ofFolder: folder.id) == container {
+            // An empty folder has no span, so it sorts above everything else in its container.
+            let top = descendantLayerIndices(ofFolder: folder.id).max() ?? Int.max
+            ranked.append((top: top, tieBreak: order, folder: folder, layerIndex: -1))
+        }
+        ranked.sort { ($0.top, $0.tieBreak) > ($1.top, $1.tieBreak) }
+
+        var result: [LayerStackRow] = []
+        for entry in ranked {
+            if let folder = entry.folder {
+                result.append(.folder(id: folder.id, depth: depth))
+                if folder.isExpanded {
+                    result.append(contentsOf: rows(inContainer: folder.id, depth: depth + 1))
+                }
+            } else {
+                result.append(.layer(id: layers[entry.layerIndex].id, index: entry.layerIndex, depth: depth))
+            }
+        }
+        return result
+    }
+
+    /// A layer's folder, or nil if it has none — or if the folder it names no longer exists, in
+    /// which case the layer shows up at the top level rather than vanishing from the stack.
+    private func resolvedContainer(ofLayer index: Int) -> UUID? {
+        guard let parent = layers[index].parentFolderID, folders.contains(where: { $0.id == parent }) else { return nil }
+        return parent
+    }
+
+    /// Same for a nested folder's own parent, additionally breaking any parent cycle by treating a
+    /// folder that contains itself (directly or transitively) as top-level.
+    private func resolvedContainer(ofFolder folderID: UUID) -> UUID? {
+        guard let parent = folders.first(where: { $0.id == folderID })?.parentFolderID,
+              folders.contains(where: { $0.id == parent }),
+              !isFolder(parent, descendantOf: folderID) else { return nil }
+        return parent
+    }
+
+    /// Every folder inside `folderID`, at any depth, including `folderID` itself. Cycle-safe.
+    func folderSubtree(_ folderID: UUID) -> Set<UUID> {
+        var seen: Set<UUID> = [folderID]
+        var frontier = [folderID]
+        while let current = frontier.popLast() {
+            for folder in folders where folder.parentFolderID == current && seen.insert(folder.id).inserted {
+                frontier.append(folder.id)
+            }
+        }
+        return seen
+    }
+
+    func isFolder(_ folderID: UUID, descendantOf ancestorID: UUID) -> Bool {
+        folderID != ancestorID && folderSubtree(ancestorID).contains(folderID)
+    }
+
+    /// `layers` indices held by a folder at any depth, ascending. Contiguous by the invariant above.
+    func descendantLayerIndices(ofFolder folderID: UUID) -> [Int] {
+        let subtree = folderSubtree(folderID)
+        return layers.indices.filter { index in
+            guard let parent = layers[index].parentFolderID else { return false }
+            return subtree.contains(parent)
+        }
+    }
+
+    /// The span of `layers` a folder covers, or nil when it holds no layers yet.
+    func descendantSpan(ofFolder folderID: UUID) -> ClosedRange<Int>? {
+        let indices = descendantLayerIndices(ofFolder: folderID)
+        guard let low = indices.min(), let high = indices.max() else { return nil }
+        return low...high
+    }
+
+    /// Layers directly inside `folderID` (not in one of its subfolders), bottom-to-top.
     func layerIndices(inFolder folderID: UUID) -> [Int] {
         layers.indices.filter { layers[$0].parentFolderID == folderID }
     }
 
     // MARK: - Reorder
 
-    /// What a dragged layer came to rest on top of. The layer panel resolves a drop into one of
-    /// these rather than into a raw array index, because the visible row order (top-to-bottom, with
-    /// folder headers interleaved and collapsed children hidden) doesn't map 1:1 onto `layers`.
+    /// What a dragged row came to rest on top of. Drops resolve into one of these rather than into
+    /// a raw array index, because the visible row order (top-to-bottom, folder headers interleaved,
+    /// collapsed contents hidden) doesn't map 1:1 onto `layers`.
     enum StackAnchor: Equatable {
         /// Directly above this layer.
         case layer(UUID)
-        /// Above every layer in this folder (the folder's header sits below the dragged row).
+        /// Above everything in this folder.
         case folder(UUID)
         /// Nothing below it — the bottom of the stack.
         case bottom
     }
 
-    /// Re-stacks `layerID` so it sits directly above `anchor`, reparented to `parentFolderID`.
-    /// The active layer keeps pointing at the same layer regardless of how indices shift.
-    func restackLayer(_ layerID: UUID, above anchor: StackAnchor, parentFolderID: UUID?) {
-        guard let from = layers.firstIndex(where: { $0.id == layerID }) else { return }
+    /// Runs `body`, then re-points `currentLayerIndex` at whichever index the active layer moved to,
+    /// so reordering never silently changes which layer is being drawn on.
+    private func withPreservedActiveLayer(_ body: () -> Void) {
         let activeID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
-
-        var moved = layers.remove(at: from)
-        moved.parentFolderID = parentFolderID
-
-        let insertAt: Int
-        switch anchor {
-        case .bottom:
-            insertAt = 0
-        case .layer(let anchorID):
-            // `layers` is bottom-to-top, so "directly above the anchor" is one past its index.
-            insertAt = layers.firstIndex(where: { $0.id == anchorID }).map { $0 + 1 } ?? layers.count
-        case .folder(let folderID):
-            // Clear the whole folder: land just past its topmost remaining child. An empty folder
-            // renders at the top of the stack, so above it means the top of the array.
-            insertAt = layers.lastIndex(where: { $0.parentFolderID == folderID }).map { $0 + 1 } ?? layers.count
-        }
-        layers.insert(moved, at: min(max(insertAt, 0), layers.count))
-
-        if let activeID, let newActive = layers.firstIndex(where: { $0.id == activeID }) {
-            currentLayerIndex = newActive
+        body()
+        if let activeID, let moved = layers.firstIndex(where: { $0.id == activeID }), moved != currentLayerIndex {
+            currentLayerIndex = moved
         }
     }
 
-    /// Moves a whole folder — header and every layer inside it, keeping their relative order — so
-    /// the group comes to rest directly above `anchor`.
-    func restackFolder(_ folderID: UUID, above anchor: StackAnchor) {
-        let activeID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
-
-        let group = layers.filter { $0.parentFolderID == folderID }
-        layers.removeAll { $0.parentFolderID == folderID }
-
-        if group.isEmpty {
-            // An empty folder has no foothold in `layers` at all — `layerStackRows` reads its
-            // position off `folders` (walked in reverse, so later entries render higher).
-            guard let from = folders.firstIndex(where: { $0.id == folderID }) else { return }
-            let moved = folders.remove(at: from)
-            if case .folder(let otherID) = anchor, let below = folders.firstIndex(where: { $0.id == otherID }) {
-                folders.insert(moved, at: below + 1)
-            } else {
-                folders.append(moved)
-            }
-            return
+    /// Where a new child of an empty folder belongs: the top of the nearest ancestor that does have
+    /// a span, since that's where the empty folder itself renders.
+    private func emptyFolderInsertionIndex(_ folderID: UUID) -> Int {
+        var current = folders.first(where: { $0.id == folderID })?.parentFolderID
+        var guardCount = 0
+        while let parent = current, guardCount < folders.count + 1 {
+            if let span = descendantSpan(ofFolder: parent) { return span.upperBound + 1 }
+            current = folders.first(where: { $0.id == parent })?.parentFolderID
+            guardCount += 1
         }
+        return layers.count
+    }
 
-        let insertAt: Int
+    private func insertionIndex(above anchor: StackAnchor) -> Int {
         switch anchor {
         case .bottom:
-            insertAt = 0
+            return 0
         case .layer(let anchorID):
-            insertAt = layers.firstIndex(where: { $0.id == anchorID }).map { $0 + 1 } ?? layers.count
-        case .folder(let otherID):
-            insertAt = layers.lastIndex(where: { $0.parentFolderID == otherID }).map { $0 + 1 } ?? layers.count
+            // `layers` is bottom-to-top, so "directly above the anchor" is one past its index.
+            return layers.firstIndex(where: { $0.id == anchorID }).map { $0 + 1 } ?? layers.count
+        case .folder(let folderID):
+            return descendantSpan(ofFolder: folderID).map { $0.upperBound + 1 } ?? emptyFolderInsertionIndex(folderID)
         }
-        layers.insert(contentsOf: group, at: min(max(insertAt, 0), layers.count))
+    }
 
-        if let activeID, let newActive = layers.firstIndex(where: { $0.id == activeID }) {
-            currentLayerIndex = newActive
+    /// Pulls an insertion point into the range `container` allows, so a drop can never interleave
+    /// one folder's layers with something that isn't in it (the contiguity invariant).
+    private func clampInsertion(_ index: Int, into container: UUID?) -> Int {
+        guard let container else {
+            // Top level: nothing may land strictly inside a top-level folder's block. Nested
+            // folders' spans are subsets of theirs, so checking the top level is enough.
+            for folder in folders where resolvedContainer(ofFolder: folder.id) == nil {
+                guard let span = descendantSpan(ofFolder: folder.id),
+                      index > span.lowerBound, index <= span.upperBound else { continue }
+                return (index - span.lowerBound) <= (span.upperBound + 1 - index) ? span.lowerBound : span.upperBound + 1
+            }
+            return min(max(index, 0), layers.count)
         }
+        guard let span = descendantSpan(ofFolder: container) else { return emptyFolderInsertionIndex(container) }
+        return min(max(index, span.lowerBound), span.upperBound + 1)
+    }
+
+    /// Re-stacks `layerID` so it sits directly above `anchor`, inside `parentFolderID`.
+    func restackLayer(_ layerID: UUID, above anchor: StackAnchor, parentFolderID: UUID?) {
+        guard let from = layers.firstIndex(where: { $0.id == layerID }) else { return }
+        withPreservedActiveLayer {
+            var moved = layers.remove(at: from)
+            moved.parentFolderID = parentFolderID
+            let target = clampInsertion(insertionIndex(above: anchor), into: parentFolderID)
+            layers.insert(moved, at: min(max(target, 0), layers.count))
+        }
+    }
+
+    /// Moves a whole folder — its subfolders and every layer inside them, relative order intact —
+    /// so the group comes to rest directly above `anchor`, inside `parentFolderID`.
+    func restackFolder(_ folderID: UUID, above anchor: StackAnchor, parentFolderID: UUID?) {
+        guard let folderIndex = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        // A folder can't be dropped into itself or into anything it contains.
+        let subtree = folderSubtree(folderID)
+        if let parentFolderID, subtree.contains(parentFolderID) { return }
+        switch anchor {
+        case .folder(let anchorID) where subtree.contains(anchorID):
+            return
+        case .layer(let anchorID) where descendantLayerIndices(ofFolder: folderID).contains(where: { layers[$0].id == anchorID }):
+            return
+        default:
+            break
+        }
+
+        withPreservedActiveLayer {
+            let indices = descendantLayerIndices(ofFolder: folderID)
+            let block = indices.map { layers[$0] }
+            for index in indices.reversed() { layers.remove(at: index) }
+            folders[folderIndex].parentFolderID = parentFolderID
+
+            guard !block.isEmpty else {
+                // No footprint in `layers`, so order among empty siblings comes from `folders`.
+                let moved = folders.remove(at: folderIndex)
+                var insertAt = folders.count
+                if case .folder(let otherID) = anchor, let below = folders.firstIndex(where: { $0.id == otherID }) {
+                    insertAt = below + 1
+                }
+                folders.insert(moved, at: min(max(insertAt, 0), folders.count))
+                return
+            }
+            let target = clampInsertion(insertionIndex(above: anchor), into: parentFolderID)
+            layers.insert(contentsOf: block, at: min(max(target, 0), layers.count))
+        }
+    }
+
+    /// Dropping one layer squarely onto another wraps the pair in a new folder, keeping whichever
+    /// was higher in the stack on top. Returns the new folder's id.
+    @discardableResult
+    func groupLayers(_ draggedID: UUID, with targetID: UUID, name: String? = nil) -> UUID? {
+        guard draggedID != targetID,
+              let draggedIndex = layers.firstIndex(where: { $0.id == draggedID }),
+              let targetIndex = layers.firstIndex(where: { $0.id == targetID }) else { return nil }
+
+        let folder = LayerFolder(id: UUID(), name: name ?? "Folder \(folders.count + 1)",
+                                 parentFolderID: layers[targetIndex].parentFolderID)
+        folders.append(folder)
+
+        let draggedWasAbove = draggedIndex > targetIndex
+        withPreservedActiveLayer {
+            let moved = layers.remove(at: draggedIndex)
+            let anchor = layers.firstIndex(where: { $0.id == targetID }) ?? min(targetIndex, layers.count)
+            layers.insert(moved, at: draggedWasAbove ? anchor + 1 : anchor)
+            for index in layers.indices where layers[index].id == draggedID || layers[index].id == targetID {
+                layers[index].parentFolderID = folder.id
+            }
+        }
+        return folder.id
+    }
+
+    /// Flattens two layers into one at the current frame — the pinch-together gesture in the layer
+    /// panel. The lower of the two survives (keeping its name and folder); the upper is removed and
+    /// its pixels are baked down with both layers' opacities applied. Not undoable: the merged
+    /// result replaces both layers' per-layer stroke stacks, the same way `setCanvasPadding` works.
+    @discardableResult
+    func mergeLayers(_ firstID: UUID, _ secondID: UUID) -> Bool {
+        guard let canvasSize, firstID != secondID,
+              let firstIndex = layers.firstIndex(where: { $0.id == firstID }),
+              let secondIndex = layers.firstIndex(where: { $0.id == secondID }) else { return false }
+
+        let bottomIndex = min(firstIndex, secondIndex)
+        let topIndex = max(firstIndex, secondIndex)
+        guard let bottomCel = activeCelIndex(inLayer: bottomIndex, atFrame: currentFrame),
+              let topCel = activeCelIndex(inLayer: topIndex, atFrame: currentFrame) else { return false }
+
+        let flattened = PixelOps.flatten(
+            bottom: PixelOps.rasterize(cel: layers[bottomIndex].cels[bottomCel], canvasSize: canvasSize),
+            bottomOpacity: layers[bottomIndex].isVisible ? layers[bottomIndex].opacity : 0,
+            top: PixelOps.rasterize(cel: layers[topIndex].cels[topCel], canvasSize: canvasSize),
+            topOpacity: layers[topIndex].isVisible ? layers[topIndex].opacity : 0,
+            canvasSize: canvasSize
+        )
+
+        let survivorID = layers[bottomIndex].id
+        layers[bottomIndex].cels[bottomCel].raster = .empty(size: canvasSize)
+        layers[bottomIndex].cels[bottomCel].fillImage = nil
+        layers[bottomIndex].cels[bottomCel].bakedImage = flattened
+        if layers[bottomIndex].cels[bottomCel].vector != nil {
+            layers[bottomIndex].cels[bottomCel].vector = .empty(size: canvasSize)
+        }
+        layers[bottomIndex].opacity = 1
+        layers[bottomIndex].isVisible = true
+
+        deleteLayer(at: topIndex)
+        if let survivor = layers.firstIndex(where: { $0.id == survivorID }) {
+            currentLayerIndex = survivor
+            if let cel = activeCelIndex(inLayer: survivor, atFrame: currentFrame) {
+                scheduleThumbnailRegen(layerIndex: survivor, celIndex: cel)
+            }
+        }
+        return true
+    }
+
+    /// Copies a layer — content, cels, folder, and settings — in place above the original.
+    func duplicateLayer(at index: Int) {
+        guard layers.indices.contains(index) else { return }
+        let source = layers[index]
+        let cels = source.cels.map { cel in
+            Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
+                raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage,
+                vector: cel.vector?.makeCopy(), thumbnail: cel.thumbnail)
+        }
+        var copy = Layer(id: UUID(), name: source.name + " copy", opacity: source.opacity,
+                         isVisible: source.isVisible, isFillReference: source.isFillReference,
+                         kind: source.kind, isObjectLayer: source.isObjectLayer,
+                         objectImage: source.objectImage, objectTransform: source.objectTransform,
+                         parentFolderID: source.parentFolderID, cels: cels)
+        copy.thumbnail = source.thumbnail
+        layers.insert(copy, at: index + 1)
+        currentLayerIndex = index + 1
     }
 
     // MARK: - Views
@@ -1346,6 +1546,9 @@ struct LayerFolder: Identifiable {
     var name: String
     var isExpanded: Bool = true
     var isVisible: Bool = true
+    /// Set when this folder is nested inside another. Ordering among siblings is derived from the
+    /// layers each folder holds — see `CanvasManager.layerStackRows`.
+    var parentFolderID: UUID? = nil
 }
 
 /// A snapshot of which layers are visible, associated with a named view.
@@ -1359,27 +1562,37 @@ struct ViewPreset: Identifiable {
 
 /// One row of the layer stack as presented top-to-bottom in the layer panel and the animation
 /// timeline. See `CanvasManager.layerStackRows`. `index` is the row's position in
-/// `CanvasManager.layers` (bottom-to-top), so it is only valid for the snapshot it came from.
+/// `CanvasManager.layers` (bottom-to-top), so it is only valid for the snapshot it came from;
+/// `depth` is how many folders the row sits inside, which drives its indentation.
 enum LayerStackRow: Identifiable, Equatable {
-    case folder(id: UUID)
-    case layer(id: UUID, index: Int)
+    case folder(id: UUID, depth: Int)
+    case layer(id: UUID, index: Int, depth: Int)
 
     var id: UUID {
         switch self {
-        case .folder(let id):      return id
-        case .layer(let id, _):    return id
+        case .folder(let id, _):      return id
+        case .layer(let id, _, _):    return id
+        }
+    }
+
+    var depth: Int {
+        switch self {
+        case .folder(_, let depth):      return depth
+        case .layer(_, _, let depth):    return depth
         }
     }
 
     var layerIndex: Int? {
-        if case .layer(_, let index) = self { return index }
+        if case .layer(_, let index, _) = self { return index }
         return nil
     }
 
     var folderID: UUID? {
-        if case .folder(let id) = self { return id }
+        if case .folder(let id, _) = self { return id }
         return nil
     }
+
+    var isFolder: Bool { folderID != nil }
 }
 
 struct Cel: Identifiable {

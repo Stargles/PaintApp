@@ -1,26 +1,30 @@
 import SwiftUI
 
-/// Wraps a layer id so it can drive `.sheet(item:)` (UUID isn't `Identifiable` on its own).
-private struct EditingLayerRef: Identifiable { let id: UUID }
-
 struct LayerPanel: View {
     @ObservedObject var canvasManager: CanvasManager
-    @State private var showBackgroundColorPicker = false
-    @State private var editingLayer: EditingLayerRef?
-    @State private var showViewSelector = false
+    /// The layer whose options popover is open. Owned by `DrawingView` so the popover can be drawn
+    /// beside the panel rather than clipped inside it.
+    @Binding var optionsLayerID: UUID?
 
-    /// Folder headers + layers, top-to-bottom. Owned by `CanvasManager` so the animation timeline
-    /// renders the exact same stack (see `CanvasManager.layerStackRows`).
-    private var rows: [LayerStackRow] { canvasManager.layerStackRows }
+    @State private var showBackgroundColorPicker = false
+    @State private var showViewSelector = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            list
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            LayerStackListView(canvasManager: canvasManager) { layerID in
+                optionsLayerID = layerID
+            }
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            backgroundRow
         }
-        .background(Color.black.opacity(0.9))
-        .sheet(item: $editingLayer) { ref in
-            LayerEditMenu(canvasManager: canvasManager, layerID: ref.id)
+        // The options menu belongs to one layer — selecting a different one dismisses it rather
+        // than leaving a stale menu pointed at the layer you just navigated away from.
+        .onChange(of: canvasManager.currentLayerIndex) { _, index in
+            guard let openID = optionsLayerID else { return }
+            let stillSelected = canvasManager.layers.indices.contains(index) && canvasManager.layers[index].id == openID
+            if !stillSelected { optionsLayerID = nil }
         }
     }
 
@@ -50,7 +54,7 @@ struct LayerPanel: View {
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
                 .background(Color.white.opacity(0.15))
                 .cornerRadius(6)
             }
@@ -80,134 +84,26 @@ struct LayerPanel: View {
                 .accessibilityIdentifier("layerPanel.addFolderButton")
             } label: {
                 Image(systemName: "plus")
+                    .font(.title3)
                     .foregroundColor(.white)
+                    .padding(.horizontal, 6)
             } primaryAction: {
                 canvasManager.addLayer()
             }
             .accessibilityIdentifier("layerPanel.addButton")
         }
-        .padding()
-    }
-
-    // MARK: - List
-
-    private var list: some View {
-        List {
-            // Rows reorder by press-and-hold + drag straight from the list — no edit mode, so the
-            // eye/opacity controls stay live while the stack is rearrangeable.
-            ForEach(rows) { row in
-                switch row {
-                case .folder(let folderID):
-                    if let folder = canvasManager.folders.first(where: { $0.id == folderID }) {
-                        FolderRow(folder: folder, canvasManager: canvasManager)
-                            .listRowBackground(Color.clear)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    canvasManager.deleteFolder(folderID)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                                .accessibilityIdentifier("layerPanel.folder.\(folder.name).delete")
-                            }
-                    }
-
-                // Bounds-checked: a row can outlive its layer for a frame during the List's own
-                // delete animation, and indexing straight into `layers` there would trap.
-                case .layer(_, let layerIndex) where canvasManager.layers.indices.contains(layerIndex):
-                    LayerRow(layer: canvasManager.layers[layerIndex], arrayIndex: layerIndex, canvasManager: canvasManager)
-                        .listRowBackground(Color.clear)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                canvasManager.deleteLayer(at: layerIndex)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .accessibilityIdentifier("layerPanel.row.\(layerIndex).delete")
-
-                            Button {
-                                editingLayer = EditingLayerRef(id: canvasManager.layers[layerIndex].id)
-                            } label: {
-                                Label("Edit", systemImage: "slider.horizontal.3")
-                            }
-                            .tint(.blue)
-                            .accessibilityIdentifier("layerPanel.row.\(layerIndex).edit")
-                        }
-
-                default:
-                    EmptyView()
-                }
-            }
-            .onMove(perform: moveRows)
-
-            backgroundRow
-                .listRowBackground(Color.clear)
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .animation(.interactiveSpring(), value: rows)
-    }
-
-    /// Resolves a drag-and-drop within the presented row order back onto the `layers` array.
-    ///
-    /// The two orders don't line up: rows run top-to-bottom with folder headers interleaved and
-    /// collapsed folders hiding their children, while `layers` runs bottom-to-top and holds every
-    /// layer. So rather than translating indices, this replays the move on the row list and then
-    /// reads off the two things that actually determine the outcome — the row that ended up
-    /// directly above the dragged one (which folder it now belongs to) and the row directly below
-    /// it (what it now sits on top of).
-    ///
-    /// Folder headers are draggable too, and take their contents with them. Nothing in the list is
-    /// pinned, so there's no band where a drag silently does nothing.
-    private func moveRows(from source: IndexSet, to destination: Int) {
-        let rows = self.rows
-        guard let sourceIndex = source.first, rows.indices.contains(sourceIndex) else { return }
-        let moved = rows[sourceIndex]
-
-        var reordered = rows
-        reordered.move(fromOffsets: source, toOffset: destination)
-        guard let newIndex = reordered.firstIndex(where: { $0.id == moved.id }) else { return }
-
-        switch moved {
-        case .layer(let movedID, _):
-            var parentFolderID: UUID?
-            if newIndex > 0 {
-                switch reordered[newIndex - 1] {
-                case .folder(let folderID):
-                    parentFolderID = folderID
-                case .layer(let aboveID, _):
-                    parentFolderID = canvasManager.layers.first(where: { $0.id == aboveID })?.parentFolderID
-                }
-            }
-            let below = reordered.indices.contains(newIndex + 1) ? reordered[newIndex + 1] : nil
-            canvasManager.restackLayer(movedID, above: anchor(below: below), parentFolderID: parentFolderID)
-
-        case .folder(let folderID):
-            // Only the header moved in `reordered`; its children are still sitting at their old
-            // positions, so skip past them when looking for what the folder now rests on.
-            let childIDs = Set(canvasManager.layerIndices(inFolder: folderID).map { canvasManager.layers[$0].id })
-            let below = reordered[(newIndex + 1)...].first { row in
-                if case .layer(let id, _) = row { return !childIDs.contains(id) }
-                return true
-            }
-            canvasManager.restackFolder(folderID, above: anchor(below: below))
-        }
-    }
-
-    private func anchor(below row: LayerStackRow?) -> CanvasManager.StackAnchor {
-        switch row {
-        case .layer(let id, _):  return .layer(id)
-        case .folder(let id):    return .folder(id)
-        case nil:                return .bottom
-        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Background Row
 
     private var backgroundRow: some View {
-        HStack {
+        HStack(spacing: 8) {
             Button(action: { canvasManager.isCanvasBackgroundVisible.toggle() }) {
                 Image(systemName: canvasManager.isCanvasBackgroundVisible ? "eye" : "eye.slash")
                     .foregroundColor(canvasManager.isCanvasBackgroundVisible ? .white : .gray)
+                    .frame(width: 30)
             }
             .buttonStyle(.plain)
 
@@ -230,7 +126,131 @@ struct LayerPanel: View {
 
             Spacer()
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Layer Options
+
+/// The per-layer menu, opened by tapping an already-selected layer. Shown beside the layer panel
+/// (see `DrawingView`) rather than as a sheet, so the stack stays visible while it's open.
+struct LayerOptionsPanel: View {
+    @ObservedObject var canvasManager: CanvasManager
+    let layerID: UUID
+    var onClose: () -> Void
+
+    @State private var draftName: String = ""
+    @State private var isRenaming = false
+
+    private var layerIndex: Int? { canvasManager.layers.firstIndex { $0.id == layerID } }
+
+    /// The layer directly beneath this one in the stack, if any — the merge-down target.
+    private var mergeTargetIndex: Int? {
+        guard let index = layerIndex, index > 0 else { return nil }
+        return index - 1
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let index = layerIndex, canvasManager.layers.indices.contains(index) {
+                header(for: index)
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
+                Toggle(isOn: Binding(
+                    get: { canvasManager.layers.indices.contains(index) ? canvasManager.layers[index].isFillReference : false },
+                    set: { canvasManager.setFillReference(layerIndex: index, isReference: $0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Fill Reference").foregroundColor(.white)
+                        Text("Bounds the fill tool")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+                .tint(.blue)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .accessibilityIdentifier("layerOptions.fillReferenceToggle")
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
+                action("Rename", systemImage: "pencil", identifier: "layerOptions.rename") {
+                    draftName = canvasManager.layers[index].name
+                    isRenaming = true
+                }
+                action("Duplicate", systemImage: "plus.square.on.square", identifier: "layerOptions.duplicate") {
+                    canvasManager.duplicateLayer(at: index)
+                    onClose()
+                }
+                if let target = mergeTargetIndex {
+                    action("Merge Down", systemImage: "arrow.triangle.merge", identifier: "layerOptions.mergeDown") {
+                        canvasManager.mergeLayers(canvasManager.layers[index].id, canvasManager.layers[target].id)
+                        onClose()
+                    }
+                }
+                action("Delete", systemImage: "trash", identifier: "layerOptions.delete", role: .destructive) {
+                    canvasManager.deleteLayer(at: index)
+                    onClose()
+                }
+            } else {
+                Text("Layer no longer exists.")
+                    .foregroundColor(.gray)
+                    .padding()
+            }
+        }
+        .frame(width: 240)
+        .background(Color.black.opacity(0.82))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 1))
+        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+        .alert("Rename Layer", isPresented: $isRenaming) {
+            TextField("Name", text: $draftName)
+                .accessibilityIdentifier("layerOptions.nameField")
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                guard let index = layerIndex, canvasManager.layers.indices.contains(index) else { return }
+                let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { canvasManager.layers[index].name = trimmed }
+            }
+        }
+    }
+
+    private func header(for index: Int) -> some View {
+        HStack {
+            Text(canvasManager.layers[index].name)
+                .font(.headline)
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .accessibilityIdentifier("layerOptions.title")
+            Spacer()
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            .accessibilityIdentifier("layerOptions.close")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private func action(_ title: String, systemImage: String, identifier: String,
+                        role: ButtonRole? = nil, perform: @escaping () -> Void) -> some View {
+        Button(role: role, action: perform) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .frame(width: 20)
+                Text(title)
+                Spacer()
+            }
+            .foregroundColor(role == .destructive ? .red : .white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
     }
 }
 
@@ -322,211 +342,5 @@ struct ViewSelectorMenu: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier(identifier)
         .accessibilityValue(isActive ? "1" : "0")
-    }
-}
-
-// MARK: - Folder Row
-
-struct FolderRow: View {
-    let folder: LayerFolder
-    @ObservedObject var canvasManager: CanvasManager
-
-    var body: some View {
-        HStack {
-            Button(action: {
-                canvasManager.toggleFolderExpanded(folder.id)
-            }) {
-                Image(systemName: folder.isExpanded ? "chevron.down" : "chevron.right")
-                    .foregroundColor(.white)
-                    .font(.caption)
-            }
-            .buttonStyle(.plain)
-
-            Button(action: {
-                canvasManager.toggleFolderVisibility(folder.id)
-            }) {
-                Image(systemName: folder.isVisible ? "eye" : "eye.slash")
-                    .foregroundColor(folder.isVisible ? .white : .gray)
-            }
-            .buttonStyle(.plain)
-
-            Image(systemName: "folder")
-                .foregroundColor(.yellow)
-                .frame(width: 44, height: 44)
-
-            Text(folder.name)
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .accessibilityIdentifier("layerPanel.folder.\(folder.name)")
-
-            Spacer()
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
-}
-
-// MARK: - Layer Row
-
-struct LayerRow: View {
-    let layer: Layer
-    let arrayIndex: Int
-    @ObservedObject var canvasManager: CanvasManager
-
-    /// Indentation level for folder children (currently just 1 level).
-    private var indentLevel: Int { layer.parentFolderID != nil ? 1 : 0 }
-
-    var body: some View {
-        HStack(spacing: indentLevel > 0 ? 16 : 0) {
-            // Indent spacer
-            if indentLevel > 0 {
-                Color.clear.frame(width: 20)
-            }
-
-            Button(action: {
-                canvasManager.toggleLayerVisibility(layerIndex: arrayIndex)
-            }) {
-                Image(systemName: layer.isVisible ? "eye" : "eye.slash")
-                    .foregroundColor(layer.isVisible ? .white : .gray)
-            }
-            .buttonStyle(.plain)
-
-            Group {
-                if let thumbnail = layer.thumbnail {
-                    Image(uiImage: thumbnail)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Color.white
-                }
-            }
-            .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.2), lineWidth: 1))
-            .opacity(layer.opacity)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(layer.name)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("layerPanel.row.\(arrayIndex)")
-                    .accessibilityValue("\(strokeCount)")
-
-                Text(layer.isFillReference ? "Fill Reference" : "Fill Excluded")
-                    .font(.caption2)
-                    .foregroundColor(.gray)
-                    .accessibilityIdentifier("layerPanel.row.\(arrayIndex).fillRef")
-                    .accessibilityValue(layer.isFillReference ? "1" : "0")
-            }
-
-            // Accessibility markers (preserved from original)
-            Color.clear
-                .frame(width: 0, height: 0)
-                .accessibilityIdentifier("layerPanel.row.\(arrayIndex).hasBaked")
-                .accessibilityValue(hasBakedImage ? "1" : "0")
-
-            Color.clear
-                .frame(width: 0, height: 0)
-                .accessibilityIdentifier("layerPanel.row.\(arrayIndex).vector")
-                .accessibilityValue("\(layer.kind == .vector ? 1 : 0),\(vectorStrokeCount)")
-
-            // Which folder this row belongs to (empty when top-level), so reorder/reparent
-            // behaviour is directly assertable rather than inferred from indentation.
-            Color.clear
-                .frame(width: 0, height: 0)
-                .accessibilityIdentifier("layerPanel.row.\(arrayIndex).folder")
-                .accessibilityValue(canvasManager.folders.first(where: { $0.id == layer.parentFolderID })?.name ?? "")
-
-            Spacer()
-
-            Slider(value: Binding(
-                get: { canvasManager.layers.indices.contains(arrayIndex) ? canvasManager.layers[arrayIndex].opacity : layer.opacity },
-                set: { newValue in
-                    guard canvasManager.layers.indices.contains(arrayIndex) else { return }
-                    canvasManager.layers[arrayIndex].opacity = newValue
-                }
-            ), in: 0...1)
-            .frame(width: 70)
-
-            if canvasManager.currentLayerIndex == arrayIndex {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.blue)
-                    .accessibilityIdentifier("layerPanel.row.\(arrayIndex).current")
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            canvasManager.currentLayerIndex = arrayIndex
-        }
-    }
-
-    private var strokeCount: Int {
-        guard let celIdx = canvasManager.activeCelIndex(inLayer: arrayIndex, atFrame: canvasManager.currentFrame) else { return 0 }
-        return canvasManager.layers[arrayIndex].cels[celIdx].raster.strokeCount
-    }
-
-    private var hasBakedImage: Bool {
-        guard let celIdx = canvasManager.activeCelIndex(inLayer: arrayIndex, atFrame: canvasManager.currentFrame) else { return false }
-        return canvasManager.layers[arrayIndex].cels[celIdx].bakedImage != nil
-    }
-
-    private var vectorStrokeCount: Int {
-        guard let celIdx = canvasManager.activeCelIndex(inLayer: arrayIndex, atFrame: canvasManager.currentFrame) else { return 0 }
-        return canvasManager.layers[arrayIndex].cels[celIdx].vector?.strokes.count ?? 0
-    }
-}
-
-// MARK: - Layer Edit Menu
-
-private struct LayerEditMenu: View {
-    @ObservedObject var canvasManager: CanvasManager
-    let layerID: UUID
-    @Environment(\.dismiss) private var dismiss
-
-    private var layerIndex: Int? { canvasManager.layers.firstIndex(where: { $0.id == layerID }) }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                if let index = layerIndex {
-                    Section {
-                        Toggle("Fill Reference", isOn: Binding(
-                            get: { canvasManager.layers.indices.contains(index) ? canvasManager.layers[index].isFillReference : false },
-                            set: { canvasManager.setFillReference(layerIndex: index, isReference: $0) }
-                        ))
-                        .accessibilityIdentifier("layerEdit.fillReferenceToggle")
-
-                        // Folder assignment
-                        Picker("Folder", selection: Binding(
-                            get: { canvasManager.layers.indices.contains(index) ? (canvasManager.layers[index].parentFolderID ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!) : UUID(uuidString: "00000000-0000-0000-0000-000000000000")! },
-                            set: { newVal in
-                                guard canvasManager.layers.indices.contains(index) else { return }
-                                let zero = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-                                canvasManager.layers[index].parentFolderID = newVal == zero ? nil : newVal
-                            }
-                        )) {
-                            Text("None").tag(UUID(uuidString: "00000000-0000-0000-0000-000000000000")!)
-                            ForEach(canvasManager.folders) { folder in
-                                Text(folder.name).tag(folder.id)
-                            }
-                        }
-                    } footer: {
-                        Text("When on, this layer's lines bound the fill tool. Hidden layers are excluded by default; turn this on to keep using a hidden layer as a boundary.")
-                    }
-                } else {
-                    Text("Layer no longer exists.")
-                        .foregroundColor(.secondary)
-                }
-            }
-            .navigationTitle(layerIndex.flatMap { canvasManager.layers.indices.contains($0) ? canvasManager.layers[$0].name : nil } ?? "Layer")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium])
     }
 }

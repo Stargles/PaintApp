@@ -309,9 +309,7 @@ final class PaintSoftwareUITests: XCTestCase {
     /// Swipes to delete a layer panel row at the given absolute layer index, tapping the
     /// "Delete" action revealed by the swipe.
     private func swipeDeleteLayerRow(_ app: XCUIApplication, layerIndex: Int) {
-        let row = app.staticTexts["layerPanel.row.\(layerIndex)"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
-        row.swipeLeft()
+        revealSwipeActions(app, layerIndex: layerIndex)
         let deleteButton = app.buttons["Delete"]
         XCTAssertTrue(deleteButton.waitForExistence(timeout: 5))
         deleteButton.tap()
@@ -1005,39 +1003,6 @@ final class PaintSoftwareUITests: XCTestCase {
 
     /// Task 3: a layer shows "Fill Reference" / "Fill Excluded" under its name, and the row's swipe Edit
     /// menu toggles that state.
-    func testLayerFillReferenceToggleFromEditMenu() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-
-        let layersButton = app.buttons["toolbar.layersButton"]
-        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
-        layersButton.tap()
-
-        // A visible layer defaults to being a fill reference.
-        let subtitle = app.staticTexts["layerPanel.row.0.fillRef"]
-        XCTAssertTrue(subtitle.waitForExistence(timeout: 5))
-        XCTAssertEqual(subtitle.value as? String, "1", "A visible layer should default to Fill Reference")
-
-        // Swipe the row to reveal Edit, open the edit menu, turn Fill Reference off.
-        app.staticTexts["layerPanel.row.0"].swipeLeft()
-        let editButton = app.buttons["layerPanel.row.0.edit"]
-        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
-        editButton.tap()
-
-        let toggle = app.switches["layerEdit.fillReferenceToggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-        // Tap the trailing edge, where the switch control sits — tapping the element's center can land on
-        // the row label and not flip it.
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-        app.buttons["Done"].tap()
-
-        XCTAssertEqual(subtitle.value as? String, "0", "Turning the switch off should mark the layer Fill Excluded")
-    }
-
-    // MARK: - Select & Move
-
-    /// Rectangle-select a region, then Fill it — the fill should land as baked raster content on
-    /// the active layer (Cel.bakedImage), not a PencilKit stroke.
     func testRectangleSelectThenFillBakesPixels() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -1510,78 +1475,6 @@ final class PaintSoftwareUITests: XCTestCase {
                       "The same folder should appear as a row in the animation timeline")
     }
 
-    /// Reordering must work by press-and-hold + drag alone, with no Edit mode to enter, and the
-    /// row must actually stay where it was dropped rather than snapping back to its old slot.
-    func testLongPressDragReordersLayersAndDropSticks() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        openLayerPanel(app)
-
-        XCTAssertFalse(app.buttons["layerPanel.editButton"].exists,
-                       "Reordering should need no Edit button")
-
-        let addButton = app.buttons["layerPanel.addButton"]
-        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap()
-        addButton.tap()
-        // layers bottom-to-top: [Layer 1, Layer 2, Layer 3]; displayed top-to-bottom: 3, 2, 1.
-
-        let topRow = app.staticTexts["layerPanel.row.2"]
-        let bottomRow = app.staticTexts["layerPanel.row.0"]
-        XCTAssertTrue(topRow.waitForExistence(timeout: 5))
-        XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
-        XCTAssertEqual(topRow.label, "Layer 3")
-        XCTAssertEqual(bottomRow.label, "Layer 1")
-
-        // Drag the topmost row past the bottom one so it becomes the bottom of the stack.
-        let dropPoint = bottomRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .withOffset(CGVector(dx: 0, dy: 24))
-        dragLayerRow(app, from: topRow, to: dropPoint)
-
-        let newBottom = app.staticTexts["layerPanel.row.0"]
-        XCTAssertTrue(newBottom.waitForExistence(timeout: 5))
-        XCTAssertEqual(newBottom.label, "Layer 3",
-                       "The dragged layer should stay at the position it was dropped in, not revert to its old index")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Layer 2",
-                       "The layers it was dragged past should have shifted up by one")
-    }
-
-    /// Dropping a layer directly beneath a folder header puts it in that folder, and the folder's
-    /// content then shows up as a summary band on its timeline row.
-    func testDraggingLayerUnderFolderHeaderPutsItInTheFolder() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        openLayerPanel(app)
-
-        let addButton = app.buttons["layerPanel.addButton"]
-        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap() // layers: [Layer 1, Layer 2]
-        addFolderFromAddMenu(app)
-
-        // Rows top-to-bottom: [Folder 1, Layer 2, Layer 1] — the empty folder sits at the top.
-        let folderRow = app.staticTexts["layerPanel.folder.Folder 1"]
-        XCTAssertTrue(folderRow.waitForExistence(timeout: 5))
-
-        let bottomLayer = app.staticTexts["layerPanel.row.0"]
-        XCTAssertTrue(bottomLayer.waitForExistence(timeout: 5))
-        XCTAssertEqual(bottomLayer.label, "Layer 1")
-
-        // Drop onto the band of the row directly under the header (rows are ~82pt apart, so the
-        // header's own band means "above the folder", not "into it").
-        let dropPoint = app.staticTexts["layerPanel.row.1"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        dragLayerRow(app, from: bottomLayer, to: dropPoint)
-
-        let rowLabels = (0..<2).map { app.staticTexts["layerPanel.row.\($0)"].label }
-        let rowFolders = (0..<2).map { app.otherElements["layerPanel.row.\($0).folder"].value as? String ?? "?" }
-        XCTAssertTrue(rowFolders.contains("Folder 1"),
-                      "Dropping a layer under the folder header should put it in the folder. Rows: \(rowLabels), folders: \(rowFolders)")
-
-        let folderTrack = app.otherElements["timeline.folderTrack.Folder 1"]
-        XCTAssertTrue(folderTrack.waitForExistence(timeout: 5))
-        XCTAssertNotEqual(folderTrack.value as? String, "empty",
-                          "Once a layer is in the folder, the folder's timeline row should show a span covering its cels")
-    }
-
     /// The views control is a dropdown, not a cycling button: it lists the saved views, adds new
     /// ones from its own "+", and each saved view swipes left to reveal a delete button.
     func testViewSelectorDropdownAddsSelectsAndDeletesViews() throws {
@@ -1612,4 +1505,233 @@ final class PaintSoftwareUITests: XCTestCase {
                        "Deleting the active view should fall back to 'All'")
     }
 
+    // MARK: - Layer stack: nesting, drag, merge, options
+
+    private func layerCell(_ app: XCUIApplication, layerIndex: Int) -> XCUIElement {
+        app.tables["layerPanel.list"].cells.containing(.staticText, identifier: "layerPanel.row.\(layerIndex)").element
+    }
+
+    private func folderCell(_ app: XCUIApplication, named name: String) -> XCUIElement {
+        app.tables["layerPanel.list"].cells.containing(.staticText, identifier: "layerPanel.folder.\(name)").element
+    }
+
+    /// Which folder a layer row reports belonging to ("" when top level).
+    private func rowFolder(_ app: XCUIApplication, layerIndex: Int) -> String {
+        app.otherElements["layerPanel.row.\(layerIndex).folder"].value as? String ?? "?"
+    }
+
+    /// Drags a row leftward to expose its swipe actions. A plain `swipeLeft()` is a fast flick that
+    /// the table sometimes misses, so this drags deliberately instead.
+    private func revealSwipeActions(_ app: XCUIApplication, layerIndex: Int) {
+        let row = app.staticTexts["layerPanel.row.\(layerIndex)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let cell = layerCell(app, layerIndex: layerIndex)
+        XCTAssertTrue(cell.waitForExistence(timeout: 5))
+        let start = cell.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+        start.press(forDuration: 0.05,
+                    thenDragTo: start.withOffset(CGVector(dx: -200, dy: 0)),
+                    withVelocity: .slow, thenHoldForDuration: 0.3)
+    }
+
+    /// Press and hold past the 0.5s lift, then drag. `dropDY` picks the band of the destination row:
+    /// 0.5 lands *on* it (into a folder / group with a layer), 0.95 lands below it.
+    private func dragRow(_ source: XCUIElement, onto target: XCUIElement, dropDY: CGFloat) {
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.9,
+                   thenDragTo: target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: dropDY)),
+                   withVelocity: .slow, thenHoldForDuration: 0.6)
+    }
+
+    /// Reordering must work by press-and-hold + drag alone, with no Edit mode to enter, and the row
+    /// must stay where it was dropped rather than snapping back to its old slot.
+    func testLongPressDragReordersLayersAndDropSticks() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        XCTAssertFalse(app.buttons["layerPanel.editButton"].exists, "Reordering should need no Edit button")
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+        addButton.tap()
+        // layers bottom-to-top: [Layer 1, Layer 2, Layer 3]; displayed top-to-bottom: 3, 2, 1.
+
+        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Layer 3")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 1")
+
+        // Drag the topmost row below the bottom one so it becomes the bottom of the stack.
+        dragRow(layerCell(app, layerIndex: 2), onto: layerCell(app, layerIndex: 0), dropDY: 0.95)
+
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 3",
+                       "The dragged layer should stay where it was dropped, not revert to its old index")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Layer 2",
+                       "The layers it was dragged past should have shifted up by one")
+    }
+
+    /// Dropping one layer squarely onto another wraps the pair in a new folder, keeping the order
+    /// they were already in.
+    func testDroppingLayerOntoLayerCreatesFolderWithBoth() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap() // layers: [Layer 1, Layer 2]
+
+        dragRow(layerCell(app, layerIndex: 1), onto: layerCell(app, layerIndex: 0), dropDY: 0.5)
+
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5),
+                      "Dropping a layer onto another should create a folder holding both")
+        XCTAssertEqual(rowFolder(app, layerIndex: 0), "Folder 1")
+        XCTAssertEqual(rowFolder(app, layerIndex: 1), "Folder 1")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Layer 2",
+                       "The dragged layer was above the target and should still be above it")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 1")
+    }
+
+    /// Dropping onto a folder header moves the layer inside it — the interaction that used to be
+    /// fiddly enough to feel broken.
+    func testDroppingLayerOntoFolderMovesItInside() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap() // layers: [Layer 1, Layer 2]
+        addFolderFromAddMenu(app)
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
+        XCTAssertEqual(rowFolder(app, layerIndex: 0), "", "Sanity: the layer starts outside the folder")
+
+        dragRow(layerCell(app, layerIndex: 0), onto: folderCell(app, named: "Folder 1"), dropDY: 0.5)
+
+        XCTAssertEqual(rowFolder(app, layerIndex: 1), "Folder 1",
+                       "Dropping onto the folder header should put the layer in the folder")
+        // Its timeline row should now report a span rather than reading as empty.
+        let folderTrack = app.otherElements["timeline.folderTrack.Folder 1"]
+        XCTAssertTrue(folderTrack.waitForExistence(timeout: 5))
+        XCTAssertNotEqual(folderTrack.value as? String, "empty")
+    }
+
+    /// Folders nest: dropping one folder onto another puts it inside, and the contained rows
+    /// indent a level deeper.
+    func testDroppingFolderOntoFolderNestsIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addFolderFromAddMenu(app) // Folder 1
+        addFolderFromAddMenu(app) // Folder 2
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 2"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 2"].value as? String, "0",
+                       "Sanity: both folders start at the top level")
+
+        dragRow(folderCell(app, named: "Folder 2"), onto: folderCell(app, named: "Folder 1"), dropDY: 0.5)
+
+        XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 2"].value as? String, "1",
+                       "A folder dropped onto another should nest one level inside it")
+        XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 1"].value as? String, "0")
+    }
+
+    /// Swiping a layer row reveals Delete and Duplicate — and no Edit, which moved to the options
+    /// menu.
+    func testSwipeRevealsDeleteAndDuplicateButNotEdit() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        revealSwipeActions(app, layerIndex: 0)
+        XCTAssertTrue(app.buttons["Delete"].waitForExistence(timeout: 5))
+        let duplicate = app.buttons["Duplicate"]
+        XCTAssertTrue(duplicate.exists, "Swipe actions should offer Duplicate")
+        XCTAssertFalse(app.buttons["layerPanel.row.0.edit"].exists, "Edit should no longer be a swipe action")
+
+        duplicate.tap()
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5),
+                      "Duplicating should add a second layer")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Layer 1 copy")
+    }
+
+    /// Tapping a layer selects it; tapping the selected one again opens its options menu, which is
+    /// where Fill Reference lives now that the Edit sheet is gone.
+    func testTappingSelectedLayerOpensOptionsAndTogglesFillReference() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let row = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.otherElements["layerOptions.fillReferenceToggle"].exists,
+                       "The options menu should not be showing before the second tap")
+
+        row.tap() // select
+        row.tap() // open options
+
+        let toggle = app.switches["layerOptions.fillReferenceToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "A second tap on the selected layer should open its options")
+
+        let fillRef = app.staticTexts["layerPanel.row.0.fillRef"]
+        XCTAssertEqual(fillRef.value as? String, "1", "Layers start as fill references")
+        // Hit the switch itself — tapping a SwiftUI Toggle's label doesn't flip it.
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        XCTAssertEqual(fillRef.value as? String, "0", "Toggling in the options menu should update the row")
+    }
+
+    /// Merge Down flattens a layer into the one below it, leaving a single layer behind. Same model
+    /// call the two-finger pinch gesture makes.
+    func testMergeDownFlattensTwoLayersIntoOne() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let point = safeOutsideCornerPoint(canvas)
+        drawLine(on: canvas, from: point, to: CGVector(dx: point.dx + 0.12, dy: point.dy))
+
+        openLayerPanel(app)
+        app.buttons["layerPanel.addButton"].tap() // layers: [Layer 1 (drawn on), Layer 2]
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
+
+        let top = app.staticTexts["layerPanel.row.1"]
+        top.tap()
+        top.tap()
+        let mergeDown = app.buttons["layerOptions.mergeDown"]
+        XCTAssertTrue(mergeDown.waitForExistence(timeout: 5))
+        mergeDown.tap()
+
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForNonExistence(timeout: 5),
+                      "Merging should leave exactly one layer")
+        XCTAssertTrue(app.staticTexts["layerPanel.row.0"].waitForExistence(timeout: 5))
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), true,
+                       "The surviving layer should hold the flattened pixels of both")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: point.dx + 0.06, dy: point.dy)),
+                       "The merged artwork should still be on the canvas")
+    }
+
+    /// The timeline's name column reorders too: press and hold a name, then drag it.
+    func testTimelineNameColumnReordersOnPressAndHold() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        app.buttons["layerPanel.addButton"].tap() // layers: [Layer 1, Layer 2]
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
+        app.buttons["toolbar.layersButton"].tap() // close the panel so it can't cover the timeline
+
+        let topName = app.staticTexts["timeline.layerName.1"]
+        XCTAssertTrue(topName.waitForExistence(timeout: 5))
+        XCTAssertEqual(topName.label, "Layer 2")
+
+        // One row down is rowHeight (34) + the 2pt gap between rows.
+        let start = topName.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.9, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 40)),
+                    withVelocity: .slow, thenHoldForDuration: 0.5)
+
+        XCTAssertEqual(app.staticTexts["timeline.layerName.0"].label, "Layer 2",
+                       "Dragging a timeline name down should restack that layer")
+    }
 }

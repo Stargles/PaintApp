@@ -17,6 +17,10 @@ struct AnimationTimeline: View {
     @State private var menuLayerIndex: Int?
     @State private var menuCelIndex: Int?
 
+    // Press-and-hold reorder state for the pinned name column.
+    @State private var draggingRowID: UUID?
+    @State private var dragOffsetRows: Int = 0
+
     var body: some View {
         VStack(spacing: 0) {
             if isExpanded {
@@ -156,54 +160,111 @@ struct AnimationTimeline: View {
 
     // MARK: - Layer names (pinned, non-scrolling column)
 
-    /// Mirrors the layer panel's row order exactly — same folder headers, same collapse state — so
-    /// the names line up with the track rows `TimelineTrackView` lays out from the same source.
+    /// Mirrors the layer panel's row order exactly — same folder headers, same nesting, same
+    /// collapse state — so the names line up with the track rows `TimelineTrackView` lays out from
+    /// the same source. Rows reorder here too: press and hold one, then drag it up or down.
     private var layerNameColumn: some View {
         VStack(alignment: .leading, spacing: 2) {
             Color.clear.frame(height: rulerHeight)
             ForEach(canvasManager.layerStackRows) { row in
-                switch row {
-                case .folder(let folderID):
-                    if let folder = canvasManager.folders.first(where: { $0.id == folderID }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: folder.isExpanded ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 9))
-                                .foregroundColor(.gray)
-                            Image(systemName: "folder.fill")
-                                .font(.system(size: 9))
-                                .foregroundColor(.yellow)
-                            Text(folder.name)
-                                .font(.caption)
-                                .foregroundColor(folder.isVisible ? .white : .gray)
-                                .lineLimit(1)
-                                .accessibilityIdentifier("timeline.folderName.\(folder.name)")
-                        }
-                        .frame(height: rowHeight, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 6)
-                        .contentShape(Rectangle())
-                        .onTapGesture { canvasManager.toggleFolderExpanded(folderID) }
-                    }
-
-                case .layer(_, let index) where canvasManager.layers.indices.contains(index):
-                    Text(canvasManager.layers[index].name)
-                        .font(.caption)
-                        .foregroundColor(index == canvasManager.currentLayerIndex ? .blue : .white)
-                        .lineLimit(1)
-                        .frame(height: rowHeight, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, canvasManager.layers[index].parentFolderID != nil ? 18 : 8)
-                        .contentShape(Rectangle())
-                        .onTapGesture { canvasManager.currentLayerIndex = index }
-                        .accessibilityIdentifier("timeline.layerName.\(index)")
-
-                default:
-                    EmptyView()
-                }
+                nameRow(row)
+                    .frame(height: rowHeight, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .opacity(draggingRowID == row.id ? 0.4 : 1)
+                    .gesture(reorderGesture(for: row))
             }
         }
-        .frame(width: 90)
+        .frame(width: 110)
         .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func nameRow(_ row: LayerStackRow) -> some View {
+        switch row {
+        case .folder(let folderID, let depth):
+            if let folder = canvasManager.folders.first(where: { $0.id == folderID }) {
+                HStack(spacing: 3) {
+                    Image(systemName: folder.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9))
+                        .foregroundColor(.gray)
+                        .onTapGesture { canvasManager.toggleFolderExpanded(folderID) }
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.yellow)
+                    Text(folder.name)
+                        .font(.caption)
+                        .foregroundColor(folder.isVisible ? .white : .gray)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("timeline.folderName.\(folder.name)")
+                }
+                .padding(.leading, 6 + CGFloat(depth) * 10)
+            }
+
+        case .layer(_, let index, let depth) where canvasManager.layers.indices.contains(index):
+            Text(canvasManager.layers[index].name)
+                .font(.caption)
+                .foregroundColor(index == canvasManager.currentLayerIndex ? .blue : .white)
+                .lineLimit(1)
+                .padding(.leading, 8 + CGFloat(depth) * 10)
+                .accessibilityIdentifier("timeline.layerName.\(index)")
+
+        default:
+            EmptyView()
+        }
+    }
+
+    /// Press and hold for half a second, then drag: the same reorder gesture the layer panel uses,
+    /// resolved here by counting how many fixed-height rows the finger travelled.
+    private func reorderGesture(for row: LayerStackRow) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.5)
+            .onEnded { _ in draggingRowID = row.id }
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .onChanged { value in
+                guard case .second(_, let drag?) = value, draggingRowID == row.id else { return }
+                dragOffsetRows = Int((drag.translation.height / (rowHeight + 2)).rounded())
+            }
+            .onEnded { _ in
+                defer { draggingRowID = nil; dragOffsetRows = 0 }
+                guard draggingRowID == row.id, dragOffsetRows != 0 else { return }
+                commitReorder(of: row, byRows: dragOffsetRows)
+            }
+    }
+
+    /// Applies a drag of `delta` rows (positive = downward on screen = lower in the stack) by
+    /// resolving what the moved row would come to rest between, then handing that to the same
+    /// restack calls the layer panel uses.
+    private func commitReorder(of row: LayerStackRow, byRows delta: Int) {
+        let rows = canvasManager.layerStackRows
+        guard let from = rows.firstIndex(where: { $0.id == row.id }) else { return }
+        var reordered = rows
+        let moved = reordered.remove(at: from)
+        let target = min(max(from + delta, 0), reordered.count)
+        reordered.insert(moved, at: target)
+        guard let newIndex = reordered.firstIndex(where: { $0.id == moved.id }) else { return }
+
+        var parentFolderID: UUID?
+        if newIndex > 0 {
+            let above = reordered[newIndex - 1]
+            parentFolderID = above.isFolder ? above.id : canvasManager.layers.first { $0.id == above.id }?.parentFolderID
+        }
+
+        func anchor(_ below: LayerStackRow?) -> CanvasManager.StackAnchor {
+            guard let below else { return .bottom }
+            return below.isFolder ? .folder(below.id) : .layer(below.id)
+        }
+
+        if moved.isFolder {
+            var contents = canvasManager.folderSubtree(moved.id)
+            for index in canvasManager.descendantLayerIndices(ofFolder: moved.id) {
+                contents.insert(canvasManager.layers[index].id)
+            }
+            let below = reordered[(newIndex + 1)...].first { !contents.contains($0.id) }
+            canvasManager.restackFolder(moved.id, above: anchor(below), parentFolderID: parentFolderID)
+        } else {
+            let below = reordered.indices.contains(newIndex + 1) ? reordered[newIndex + 1] : nil
+            canvasManager.restackLayer(moved.id, above: anchor(below), parentFolderID: parentFolderID)
+        }
     }
 
     // MARK: - Playback
