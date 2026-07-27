@@ -146,10 +146,11 @@ extension CanvasManager {
     /// a now-inactive cel is cleared. Same-cel frame ticks (scrubbing within one cel's frame
     /// range) intentionally leave both alone.
     func handleActiveContextChanged() {
-        // A still-adjustable fill can't follow the user to another cel — finalize it here so it lands
-        // as a committed "Fill" step on the global history before the context moves on.
-        // commitInteractiveFill self-guards.
+        // A still-adjustable fill or shape can't follow the user to another cel — finalize both here
+        // so they land as committed steps on the global history before the context moves on. Both
+        // commit calls self-guard when nothing is pending.
         commitInteractiveFill()
+        commitInteractiveShape()
         let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
         let activeCel = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
         let activeCelID = activeCel.map { layers[currentLayerIndex].cels[$0].id }
