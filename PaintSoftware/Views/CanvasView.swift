@@ -648,13 +648,9 @@ struct CanvasView: UIViewRepresentable {
         private var shapeDetectionActive = false
         /// The stroke view that started the current detection stroke (needed to revert on shape found).
         private weak var shapeDetectionHost: LayerHostView?
-        /// Minimum movement threshold (canvas points) — if the finger moves more than this after
-        /// the initial down, cancel shape detection (it's a real stroke, not a hold-for-shape).
-        private static let shapeMovementThreshold: CGFloat = 40
         /// Minimum distance the finger must travel before we start the hold timer (prevents triggering
         /// on a tap-and-hold that never actually drew anything).
         private static let shapeMinTravel: CGFloat = 30
-        private var shapeDetectionOrigin: CGPoint?
 
         // Interactive-fill drag state, captured at press-down: the finger's start point in fixed
         // screen (host) space, and all three fill settings at that moment. The drag is horizontal-only —
@@ -1088,10 +1084,11 @@ struct CanvasView: UIViewRepresentable {
             guard canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil else { return }
             guard !canvasManager.shapeGestureActive else { return }
             shapeDetectionPoints.removeAll()
-            shapeDetectionOrigin = nil
             shapeDetectionHost = host
             shapeDetectionActive = true
             shapeHoldTimer?.invalidate()
+            // The timer is reset on every move — it fires 0.8s *after the finger stops moving*,
+            // not 0.8s after stroke start. This way "draw then hold" triggers detection.
             shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
                 Task { @MainActor in
                     self?.fireShapeDetection()
@@ -1102,13 +1099,12 @@ struct CanvasView: UIViewRepresentable {
         private func handleStrokeMoved(_ point: CGPoint, host: LayerHostView?) {
             guard shapeDetectionActive else { return }
             guard let host, host === shapeDetectionHost else { return }
-            if shapeDetectionOrigin == nil { shapeDetectionOrigin = point }
             shapeDetectionPoints.append(point)
-            // Cancel if the finger has moved too far — it's a real freehand stroke, not a hold.
-            if let origin = shapeDetectionOrigin {
-                let dist = hypot(point.x - origin.x, point.y - origin.y)
-                if dist > Self.shapeMovementThreshold {
-                    cancelShapeDetection()
+            // Restart the hold timer on every move. Detection fires 0.8s after the last move.
+            shapeHoldTimer?.invalidate()
+            shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
+                Task { @MainActor in
+                    self?.fireShapeDetection()
                 }
             }
         }
@@ -1118,7 +1114,6 @@ struct CanvasView: UIViewRepresentable {
             shapeHoldTimer = nil
             shapeDetectionActive = false
             shapeDetectionPoints.removeAll()
-            shapeDetectionOrigin = nil
             shapeDetectionHost = nil
         }
 
@@ -1128,7 +1123,6 @@ struct CanvasView: UIViewRepresentable {
             shapeDetectionActive = false
             let points = shapeDetectionPoints
             shapeDetectionPoints.removeAll()
-            shapeDetectionOrigin = nil
             guard points.count >= 3,
                   let host = shapeDetectionHost,
                   let layerID = host.strokeView.layerID,
