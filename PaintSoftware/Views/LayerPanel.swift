@@ -29,6 +29,7 @@ struct LayerPanel: View {
     @State private var dragStartLayerIndex: Int?
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging = false
+    @State private var dragActivationTime: Date?
 
     /// Flattened items for display, bottom-to-top. Folders appear at the position of their
     /// topmost child. Collapsed folders hide their children.
@@ -153,8 +154,8 @@ struct LayerPanel: View {
                             .tint(.blue)
                             .accessibilityIdentifier("layerPanel.row.\(li).edit")
                         }
-                        // Long-press + drag to reorder
-                        .gesture(dragGesture(for: li))
+                        // Long-press + drag to reorder (simultaneous so swipeActions still work)
+                        .simultaneousGesture(dragGesture(for: li))
 
                 case .background:
                     backgroundRow
@@ -169,31 +170,33 @@ struct LayerPanel: View {
 
     // MARK: - Drag Gesture
 
+    private let dragHoldDuration: TimeInterval = 0.5
+
     private func dragGesture(for layerIndex: Int) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.5)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-            .onChanged { value in
-                switch value {
-                case .second(true, let drag):
-                    if let drag, !isDragging {
-                        isDragging = true
-                        dragStartLayerIndex = layerIndex
-                        dragOffset = 0
-                    }
-                    if isDragging, let drag {
-                        dragOffset = drag.translation.height
-                    }
-                default:
-                    break
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { drag in
+                let now = Date()
+                if dragActivationTime == nil {
+                    dragActivationTime = now
+                }
+                guard now.timeIntervalSince(dragActivationTime!) >= dragHoldDuration else { return }
+                if !isDragging {
+                    isDragging = true
+                    dragStartLayerIndex = layerIndex
+                    dragOffset = 0
+                }
+                if isDragging {
+                    dragOffset = drag.translation.height
                 }
             }
-            .onEnded { value in
+            .onEnded { drag in
+                dragActivationTime = nil
                 defer { isDragging = false; dragOffset = 0; dragStartLayerIndex = nil }
-                guard case .second(true, let drag) = value, let drag else { return }
+                guard isDragging, let startIdx = dragStartLayerIndex else { return }
                 let rowH: CGFloat = 60
                 let rowsMoved = Int(round(drag.translation.height / rowH))
-                guard rowsMoved != 0, let startIdx = dragStartLayerIndex else { return }
-                let targetIdx = startIdx - rowsMoved // display up = negative drag = higher array index
+                guard rowsMoved != 0 else { return }
+                let targetIdx = startIdx - rowsMoved
                 canvasManager.moveLayer(from: startIdx, to: min(max(targetIdx, 0), canvasManager.layers.count - 1))
             }
     }
