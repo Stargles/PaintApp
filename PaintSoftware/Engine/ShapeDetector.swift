@@ -21,17 +21,15 @@ enum ShapeDetector {
     /// Minimum fraction of points on the bounding-box edges for a rectangle (0..1).
     private static let rectEdgeDensityMin: CGFloat = 0.72
 
-    /// Maximum aspect ratio (longest÷shortest) of a rectangle's bounding box. A box thinner than
-    /// this is almost certainly a line, so we reject it. 4× is still generous (a 2:1 rectangle
-    /// passes) but a wavy line drawn as a stroke of length 200pt with 30pt wiggle (200÷30 ≈ 6.7)
-    /// correctly fails.
-    private static let rectAspectRatioMax: CGFloat = 4
+    /// Maximum aspect ratio (longest÷shortest) of a rectangle's bounding box. 3× means a 2:1
+    /// rectangle passes but the tight box of a wavy line (100pt×35pt → 2.9) passes only if edge
+    /// density and all-four-sides checks also pass, which they typically won't for a wavy line.
+    private static let rectAspectRatioMax: CGFloat = 3
 
-    /// Maximum normalized variance (radius variance ÷ mean radius²) for an oval. Higher = more
-    /// tolerant of freehand imperfection. 0.12 lets a moderately shaky circle still qualify
-    /// while rejecting rectangles, whose variance is much higher (corners are √2× farther from
-    /// the centre than edge midpoints → variance ≈ 0.17+).
-    private static let ovalDistanceVarianceThreshold: CGFloat = 0.12
+    /// Maximum normalized variance for an oval (0.20 = ±20% radial deviation tolerated). This is
+    /// about 2.5× more lenient than the original 0.08 — freehand circles have higher variance than
+    /// perfect ones, and the angular-coverage gate already filters out false positives (arcs).
+    private static let ovalDistanceVarianceThreshold: CGFloat = 0.20
 
     /// Minimum angular coverage (radians) around the centroid for an oval. ~4π/3 ≈ 4.19 rad is
     /// 240° — rules out arcs and crescents that happen to have low radius variance.
@@ -104,8 +102,8 @@ enum ShapeDetector {
         let deviationScore = diag > 0 ? max(0, 1 - (maxDeviation / (diag * 0.3))) : 1
 
         let score = straightness * 0.6 + deviationScore * 0.4
-        let isLinear = straightness > 0.92                 // almost no backtracking
-            && (diag == 0 || maxDeviation / diag < 0.25)   // tiny wiggle
+        let isLinear = straightness > 0.85                 // almost no significant backtracking
+            && (diag == 0 || maxDeviation / diag < 0.30)   // moderate wiggle OK
         return (score, isLinear)
     }
 
@@ -148,9 +146,9 @@ enum ShapeDetector {
         let edgeDensity = CGFloat(nearCount) / CGFloat(points.count)
 
         // Rectangles should have points on roughly all four sides (else it's probably an oval
-        // whose curve merely crosses near the cardinal axes). Require each edge to have at
-        // least 5% of the points.
-        let minPerEdge = max(CGFloat(points.count) * 0.05, 2)
+        // whose curve merely crosses near the cardinal axes, or a line whose corner points
+        // happen to count toward every edge). Require at least 15% of the points per edge.
+        let minPerEdge = max(CGFloat(points.count) * 0.15, 2)
         let fullCoverage = perEdge.allSatisfy { $0 >= minPerEdge }
         let valid = edgeDensity >= rectEdgeDensityMin && fullCoverage
 

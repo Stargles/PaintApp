@@ -616,16 +616,44 @@ struct CanvasView: UIViewRepresentable {
         shapeOverlay.onEdgeDragged = { [weak coordinator = context.coordinator] point, edge in
             guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
             let r = shape.boundingRect
-            var minX = r.minX, minY = r.minY, maxX = r.maxX, maxY = r.maxY
-            switch edge {
-            case .top:    minY = point.y
-            case .bottom: maxY = point.y
-            case .left:   minX = point.x
-            case .right:  maxX = point.x
+            if shape.kind == .oval {
+                // Oval axis-handle drag: the dragged handle defines a new rotation angle and
+                // axis length. The perpendicular axis keeps its length — only stretch/rotate
+                // in the handle's direction.
+                let cx = r.midX, cy = r.midY
+                let W = r.width / 2, H = r.height / 2
+                var newW = W, newH = H, newRot = shape.rotation
+                switch edge {
+                case .top:
+                    let dx = point.x - cx, dy = cy - point.y
+                    newH = hypot(dx, dy); newRot = atan2(dx, dy)
+                case .bottom:
+                    let dx = cx - point.x, dy = point.y - cy
+                    newH = hypot(dx, dy); newRot = atan2(dx, dy)
+                case .left:
+                    let dx = cx - point.x, dy = cy - point.y
+                    newW = hypot(dx, dy); newRot = atan2(dy, dx)
+                case .right:
+                    let dx = point.x - cx, dy = point.y - cy
+                    newW = hypot(dx, dy); newRot = atan2(dy, dx)
+                }
+                let start = CGPoint(x: cx - newW, y: cy - newH)
+                let end = CGPoint(x: cx + newW, y: cy + newH)
+                coordinator.canvasManager.updateInteractiveShape(
+                    startPoint: start, endPoint: end, rotation: newRot)
+            } else {
+                // Rectangle edge drag: move one side of the bounding rect.
+                var minX = r.minX, minY = r.minY, maxX = r.maxX, maxY = r.maxY
+                switch edge {
+                case .top:    minY = point.y
+                case .bottom: maxY = point.y
+                case .left:   minX = point.x
+                case .right:  maxX = point.x
+                }
+                let start = CGPoint(x: min(minX, maxX), y: min(minY, maxY))
+                let end = CGPoint(x: max(minX, maxX), y: max(minY, maxY))
+                coordinator.canvasManager.updateInteractiveShape(startPoint: start, endPoint: end)
             }
-            let start = CGPoint(x: min(minX, maxX), y: min(minY, maxY))
-            let end = CGPoint(x: max(minX, maxX), y: max(minY, maxY))
-            coordinator.canvasManager.updateInteractiveShape(startPoint: start, endPoint: end)
             coordinator.updateShapeOverlay()
         }
         shapeOverlay.onTapOutside = { [weak coordinator = context.coordinator] in
@@ -799,10 +827,18 @@ struct CanvasView: UIViewRepresentable {
                 }
                 host.strokeView.onStrokeMoved = { [weak self, weak host] point in
                     guard let self else { return }
-                    // While a shape is being followed (finger still down after detection fires),
-                    // move the shape's endpoint rather than accumulate detection points.
                     if self.canvasManager.shapeGestureActive && !self.canvasManager.isShapeInAdjustableState {
-                        self.canvasManager.updateInteractiveShape(endPoint: point)
+                        // Shape following: rects & ovals expand symmetrically from their centre;
+                        // lines simply move the endpoint to the finger position.
+                        if let shape = self.canvasManager.activeShape, shape.kind != .line {
+                            let cx = (shape.startPoint.x + shape.endPoint.x) / 2
+                            let cy = (shape.startPoint.y + shape.endPoint.y) / 2
+                            self.canvasManager.updateInteractiveShape(
+                                startPoint: CGPoint(x: 2 * cx - point.x, y: 2 * cy - point.y),
+                                endPoint: point)
+                        } else {
+                            self.canvasManager.updateInteractiveShape(endPoint: point)
+                        }
                         self.updateShapeOverlay()
                     } else {
                         self.handleStrokeMoved(point, host: host)
@@ -1155,9 +1191,9 @@ struct CanvasView: UIViewRepresentable {
             shapeDetectionPoints.removeAll()
             shapeDetectionHost = host
             shapeDetectionActive = true
+            shapeLastPoint = nil
             shapeHoldTimer?.invalidate()
-            // The timer is reset on every move — it fires 0.8s *after the finger stops moving*,
-            // not 0.8s after stroke start. This way "draw then hold" triggers detection.
+            // The timer resets on meaningful moves — fires 0.8s after the finger stops.
             shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
                 Task { @MainActor in
                     self?.fireShapeDetection()
@@ -1165,11 +1201,22 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
+        /// Last position at which the hold timer was (re)started. Used to filter out sub-pixel
+        /// micro-moves that Apple Pencil generates even when held still, which would otherwise
+        /// prevent the timer from ever completing.
+        private var shapeLastPoint: CGPoint?
+
         private func handleStrokeMoved(_ point: CGPoint, host: LayerHostView?) {
             guard shapeDetectionActive else { return }
             guard let host, host === shapeDetectionHost else { return }
             shapeDetectionPoints.append(point)
-            // Restart the hold timer on every move. Detection fires 0.8s after the last move.
+            // Only restart the timer if the finger / pencil moved more than 2pt — Apple Pencil
+            // generates continual micro-moves that would otherwise never let the timer fire.
+            if let last = shapeLastPoint {
+                let dx = point.x - last.x, dy = point.y - last.y
+                guard hypot(dx, dy) > 2 else { return }
+            }
+            shapeLastPoint = point
             shapeHoldTimer?.invalidate()
             shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
                 Task { @MainActor in
@@ -1371,16 +1418,17 @@ struct CanvasView: UIViewRepresentable {
         /// Captures the touch centroid and container center at the start of whichever of
         /// pan/pinch/rotation begins first, so all three can share one anchor for this touch sequence.
         private func beginAnchorIfNeeded(at location: CGPoint) {
-            // A two-finger pan/zoom/rotate is starting; if a single-finger fill press was mid-drag
-            // (its first touch having already begun a fill), abandon that fill without committing so the
-            // transform takes over cleanly. An already-lifted, still-adjustable fill is left intact so the
-            // user can pan/zoom to inspect it and keep adjusting. No-op when no fill drag is active.
             canvasManager.cancelInteractiveFillDrag()
-            // Two fingers down while a shape is adjustable: commit it (pan/zoom = done editing),
-            // then engage constraint snap for any *new* shape that might start.
             if canvasManager.isShapeInAdjustableState {
-                canvasManager.commitInteractiveShape()
+                // Two-finger snap: engage constraint (rect→square, oval→circle, line→snapped angle)
+                // rather than committing. The snap releases when all two-finger gestures end.
+                shapeOverlay?.isConstrained = true
+                canvasManager.updateInteractiveShape(
+                    endPoint: canvasManager.activeShape?.endPoint ?? .zero,
+                    rotation: nil, isConstrained: true)
                 updateShapeOverlay()
+                // Don't set gesture anchors — the pan/zoom is not engaged, only the snap.
+                return
             }
             guard gestureAnchorCenter0 == nil, let container = containerView else { return }
             gestureAnchorHost0 = location
@@ -1437,10 +1485,18 @@ struct CanvasView: UIViewRepresentable {
                 beginAnchorIfNeeded(at: recognizer.location(in: host))
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
-                // Once a finger lifts, pan (which requires exactly 2 touches) ends immediately
-                // while pinch/rotation are still tracking the one remaining finger and would
-                // otherwise report a jumped centroid. Freeze here and let the final commit use
-                // whatever was last valid, instead of chasing that jump.
+                // If the snap was engaged and the user is now actually panning, commit the
+                // shape (pan = done editing) and initialise the gesture anchor so the pan
+                // tracks smoothly from here.
+                if canvasManager.isShapeInAdjustableState && shapeOverlay?.isConstrained == true {
+                    canvasManager.commitInteractiveShape()
+                    shapeOverlay?.isConstrained = false
+                    updateShapeOverlay()
+                    if gestureAnchorCenter0 == nil, let container = containerView {
+                        gestureAnchorHost0 = recognizer.location(in: host)
+                        gestureAnchorCenter0 = container.center
+                    }
+                }
                 guard recognizer.numberOfTouches >= 2 else { return }
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .ended, .cancelled:
@@ -1459,6 +1515,15 @@ struct CanvasView: UIViewRepresentable {
                 liveScale = recognizer.scale
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
+                if canvasManager.isShapeInAdjustableState && shapeOverlay?.isConstrained == true {
+                    canvasManager.commitInteractiveShape()
+                    shapeOverlay?.isConstrained = false
+                    updateShapeOverlay()
+                    if gestureAnchorCenter0 == nil, let container = containerView {
+                        gestureAnchorHost0 = recognizer.location(in: host)
+                        gestureAnchorCenter0 = container.center
+                    }
+                }
                 guard recognizer.numberOfTouches >= 2 else { return }
                 liveScale = recognizer.scale
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
@@ -1478,6 +1543,15 @@ struct CanvasView: UIViewRepresentable {
                 liveRotation = recognizer.rotation
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
+                if canvasManager.isShapeInAdjustableState && shapeOverlay?.isConstrained == true {
+                    canvasManager.commitInteractiveShape()
+                    shapeOverlay?.isConstrained = false
+                    updateShapeOverlay()
+                    if gestureAnchorCenter0 == nil, let container = containerView {
+                        gestureAnchorHost0 = recognizer.location(in: host)
+                        gestureAnchorCenter0 = container.center
+                    }
+                }
                 guard recognizer.numberOfTouches >= 2 else { return }
                 liveRotation = recognizer.rotation
                 updateLiveOffset(currentLocation: recognizer.location(in: host))

@@ -137,6 +137,7 @@ final class ShapeOverlayView: UIView {
     private func clearHandles() {
         handles.forEach { $0.layer.removeFromSuperlayer() }
         handles.removeAll()
+        activeHandle = nil
     }
 
     private func rebuildHandles(for shape: VectorShapeElement) {
@@ -215,7 +216,7 @@ final class ShapeOverlayView: UIView {
     // MARK: - Hit testing
 
     private func handleKind(at point: CGPoint) -> HandleKind? {
-        let expand: CGFloat = 10
+        let expand: CGFloat = 22
         for info in handles {
             if info.layer.frame.insetBy(dx: -expand, dy: -expand).contains(point) {
                 return info.kind
@@ -266,5 +267,40 @@ final class ShapeOverlayView: UIView {
         case .edgeRight, .axisRight: return .right
         default: return .top
         }
+    }
+
+    // MARK: - Two-finger snap detection
+
+    /// Override touch methods so a second finger held on the screen (not a tap) immediately
+    /// engages the constraint snap while the shape is in the adjustable state. The pan gesture
+    /// (max 1 touch) continues to track the first finger for handle dragging. All fingers must
+    /// lift before the constraint releases (iOS gesture system only fires .began/.changed for
+    /// transform recognizers once the fingers move, not on mere contact).
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        guard isUserInteractionEnabled else { return }
+        let count = (event?.allTouches ?? touches).filter { $0.phase != .ended && $0.phase != .cancelled }.count
+        isConstrained = count >= 2
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesMoved(touches, with: event)
+        guard isUserInteractionEnabled else { return }
+        let count = (event?.allTouches ?? touches).filter { $0.phase != .ended && $0.phase != .cancelled }.count
+        isConstrained = count >= 2
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        guard isUserInteractionEnabled else { return }
+        let count = (event?.allTouches ?? touches).filter { $0.phase != .ended && $0.phase != .cancelled }.count
+        isConstrained = count >= 2
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        guard isUserInteractionEnabled else { return }
+        let count = (event?.allTouches ?? touches).filter { $0.phase != .ended && $0.phase != .cancelled }.count
+        isConstrained = count >= 2
     }
 }
