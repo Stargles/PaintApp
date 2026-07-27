@@ -445,7 +445,15 @@ struct LayerRow: View {
                     guard canvasManager.layers.indices.contains(arrayIndex) else { return }
                     canvasManager.layers[arrayIndex].opacity = newValue
                 }
-            ), in: 0...1)
+            ), in: 0...1, onEditingChanged: { editing in
+                // One undo step per whole drag, not per intermediate value — see
+                // `CanvasManager.beginStructureGesture`'s doc comment.
+                if editing {
+                    canvasManager.beginStructureGesture()
+                } else {
+                    canvasManager.commitStructureGesture(name: "Opacity")
+                }
+            })
             .frame(width: 70)
 
             if canvasManager.currentLayerIndex == arrayIndex {
@@ -501,9 +509,8 @@ private struct LayerEditMenu: View {
                         Picker("Folder", selection: Binding(
                             get: { canvasManager.layers.indices.contains(index) ? (canvasManager.layers[index].parentFolderID ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!) : UUID(uuidString: "00000000-0000-0000-0000-000000000000")! },
                             set: { newVal in
-                                guard canvasManager.layers.indices.contains(index) else { return }
                                 let zero = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-                                canvasManager.layers[index].parentFolderID = newVal == zero ? nil : newVal
+                                canvasManager.setParentFolder(layerIndex: index, folderID: newVal == zero ? nil : newVal)
                             }
                         )) {
                             Text("None").tag(UUID(uuidString: "00000000-0000-0000-0000-000000000000")!)

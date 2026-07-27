@@ -477,6 +477,14 @@ private final class TimelineRowView: UIView {
         switch gr.state {
         case .began:
             activeZone = pendingZone
+            // One undo step per whole drag, not per `.changed` event — see `CanvasManager.
+            // beginStructureGesture`'s doc comment. `.gap`/nil aren't drags that move anything.
+            switch activeZone {
+            case .leftHandle, .rightHandle, .body:
+                coordinator.canvasManager.beginStructureGesture()
+            case .gap, .none:
+                break
+            }
         case .changed:
             guard let zone = activeZone else { return }
             let frameDelta = Int((gr.translation(in: self).x / pixelsPerFrame).rounded())
@@ -491,6 +499,14 @@ private final class TimelineRowView: UIView {
                 break
             }
         case .ended, .cancelled, .failed:
+            switch activeZone {
+            case .leftHandle, .rightHandle:
+                coordinator.canvasManager.commitStructureGesture(name: "Resize Frame")
+            case .body:
+                coordinator.canvasManager.commitStructureGesture(name: "Move Frame")
+            case .gap, .none:
+                break
+            }
             activeZone = nil
             pendingZone = nil
         default:

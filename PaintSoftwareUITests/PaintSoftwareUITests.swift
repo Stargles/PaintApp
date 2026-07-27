@@ -1612,4 +1612,167 @@ final class PaintSoftwareUITests: XCTestCase {
                        "Deleting the active view should fall back to 'All'")
     }
 
+    // MARK: - Global undo/redo
+
+    /// The core regression this feature addresses: undo used to be scoped to whichever layer's
+    /// private UndoManager was "active," and switching the active layer cleared that layer's
+    /// history. With a single global stack, undo must keep walking back through every action in
+    /// the order it happened, even after the active layer has changed since.
+    func testUndoWalksBackAcrossLayersRegardlessOfActiveLayer() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let layersButton = app.buttons["toolbar.layersButton"]
+        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
+        layersButton.tap()
+
+        layersButton.tap() // close so drawing isn't blocked by the panel
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        var start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.3))
+        var end = start.withOffset(CGVector(dx: 80, dy: 0))
+        start.press(forDuration: 0.1, thenDragTo: end) // stroke on layer 0
+
+        layersButton.tap() // reopen
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap() // layer 1 added and made active
+
+        layersButton.tap() // close to draw again
+        start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6))
+        end = start.withOffset(CGVector(dx: 80, dy: 0))
+        start.press(forDuration: 0.1, thenDragTo: end) // stroke on layer 1 (now active)
+
+        layersButton.tap() // reopen to verify + switch active layer back
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Layer 0 should have its own stroke")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "Layer 1 should have its own stroke")
+
+        // Switch the active layer back to layer 0 — under the old per-layer design this would
+        // have repointed (and cleared) whatever stack "undo" operates on.
+        let bottomRow = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
+        bottomRow.tap()
+        XCTAssertTrue(app.images["layerPanel.row.0.current"].waitForExistence(timeout: 5), "Layer 0 should now be active")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.isEnabled)
+        undo.tap()
+
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 0,
+                       "The first undo (with layer 0 active) should still undo the most recent action — layer 1's stroke — not silently no-op or hit layer 0's history")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+                       "Layer 0's stroke should be untouched by the first undo")
+
+        undo.tap()
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 0,
+                       "The second undo should reach back further and undo layer 0's stroke too")
+    }
+
+    /// Deleting a layer must be undoable, restoring both its existence and its content — the
+    /// operation had no undo registration at all before this feature.
+    func testDeletingLayerIsUndoableAndRestoresContent() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let layersButton = app.buttons["toolbar.layersButton"]
+        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
+        layersButton.tap()
+
+        layersButton.tap() // close to draw
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.3))
+        let end = start.withOffset(CGVector(dx: 80, dy: 0))
+        start.press(forDuration: 0.1, thenDragTo: end) // stroke on layer 0
+
+        layersButton.tap() // reopen
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1)
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap() // layer 1 added, becomes active; layer 0 keeps its stroke
+
+        swipeDeleteLayerRow(app, layerIndex: 0)
+        XCTAssertTrue(app.staticTexts["layerPanel.row.0"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["layerPanel.row.1"].exists, "Only the surviving layer should remain")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.isEnabled, "Deleting a layer should be undoable")
+        undo.tap()
+
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5), "Undo should restore the deleted layer")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+                       "The restored layer's stroke content should come back intact, not blank")
+    }
+
+    /// Drag-reordering layers must be undoable, restoring the original stacking order.
+    func testReorderingLayersIsUndoable() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+        addButton.tap()
+        // layers bottom-to-top: [Layer 1, Layer 2, Layer 3]; displayed top-to-bottom: 3, 2, 1.
+
+        let topRow = app.staticTexts["layerPanel.row.2"]
+        let bottomRow = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(topRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
+        XCTAssertEqual(bottomRow.label, "Layer 1")
+
+        let dropPoint = bottomRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .withOffset(CGVector(dx: 0, dy: 24))
+        dragLayerRow(app, from: topRow, to: dropPoint)
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 3", "Sanity-check the drag actually landed")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.isEnabled, "Reordering layers should be undoable")
+        undo.tap()
+
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 1", "Undo should restore the original bottom-to-top order")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Layer 3", "Undo should restore the original top layer too")
+    }
+
+    /// A cel resize drag must register as ONE undo step for the whole gesture, not one per
+    /// intermediate frame position it passes through — otherwise a single undo would only
+    /// partially reverse the drag instead of fully restoring the cel's original bounds.
+    func testCelResizeDragUndoesInOneStep() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        guard let before = readCel(app, layerIndex: 0, celIndex: 0) else {
+            XCTFail("Could not read initial cel state")
+            return
+        }
+        XCTAssertEqual(before.start, 0)
+        XCTAssertEqual(before.length, 12)
+
+        performDrag(app, identifier: "timeline.cel.0.0.rightHandle", totalDelta: -150)
+
+        guard let afterDrag = readCel(app, layerIndex: 0, celIndex: 0) else {
+            XCTFail("Could not read cel state after drag")
+            return
+        }
+        XCTAssertLessThan(afterDrag.length, before.length, "Sanity-check the drag actually shrank the cel")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.isEnabled, "The resize should be undoable")
+        undo.tap()
+
+        guard let afterUndo = readCel(app, layerIndex: 0, celIndex: 0) else {
+            XCTFail("Could not read cel state after undo")
+            return
+        }
+        XCTAssertEqual(afterUndo.start, before.start, "One undo should fully restore the cel's original start")
+        XCTAssertEqual(afterUndo.length, before.length,
+                       "One undo should fully restore the cel's original length in a single step, not just partially reverse one frame of the drag")
+    }
+
 }

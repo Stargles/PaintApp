@@ -146,10 +146,9 @@ extension CanvasManager {
     /// a now-inactive cel is cleared. Same-cel frame ticks (scrubbing within one cel's frame
     /// range) intentionally leave both alone.
     func handleActiveContextChanged() {
-        // A still-adjustable fill can't follow the user to another cel — finalize it here so it lands as
-        // a committed "Fill" step on its own layer's undo stack before the context moves on. (Runs before
-        // activeUndoManager is repointed at the new layer, and commit uses the fill's captured manager
-        // anyway, so the step is registered on the right stack.) commitInteractiveFill self-guards.
+        // A still-adjustable fill can't follow the user to another cel — finalize it here so it lands
+        // as a committed "Fill" step on the global history before the context moves on.
+        // commitInteractiveFill self-guards.
         commitInteractiveFill()
         let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
         let activeCel = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
@@ -307,7 +306,7 @@ extension CanvasManager {
             // must be cleared here, or it would render a second time underneath.
             let baseForComposite = piece.remainderPreview ?? targetCel.bakedImage
             let newBaked = PixelOps.compositeOver(base: baseForComposite, overlay: rendered)
-            registerUndoableCelChange(layerIndex: targetLayerIndex, celIndex: targetCelIndex,
+            registerUndoableCelChange(layerID: layers[targetLayerIndex].id, celID: targetCel.id,
                                        oldRaster: targetCel.raster, oldBaked: targetCel.bakedImage, oldFill: targetCel.fillImage,
                                        newRaster: .empty(size: canvasSize), newBaked: newBaked, newFill: nil,
                                        actionName: "Move")
@@ -335,22 +334,12 @@ extension CanvasManager {
             let element = VectorFillElement(path: selection.path, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
             vectorCanvas.addFill(element)
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
-            let manager = activeUndoManager
-            let li = currentLayerIndex, ci = celIndex
-            manager?.setActionName("Fill")
-            manager?.registerUndo(withTarget: self) { target in
-                vectorCanvas.fills = fillsBefore
-                vectorCanvas.bumpVersion()
-                target.scheduleThumbnailRegen(layerIndex: li, celIndex: ci)
-                target.registerVectorFillRedo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                              layerIndex: li, celIndex: ci, actionName: "Fill", undoManager: manager)
-                target.refreshUndoRedoState()
-            }
-            refreshUndoRedoState()
+            registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
+                                   layerID: layers[currentLayerIndex].id, celID: cel.id, actionName: "Fill")
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.fill(base: base, path: selection.path, color: PixelOps.uiColor(from: brushColor))
-            registerUndoableCelChange(layerIndex: currentLayerIndex, celIndex: celIndex,
+            registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
                                        oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
                                        newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Fill")
         }
@@ -375,22 +364,12 @@ extension CanvasManager {
             vectorCanvas.fills = newFills
             vectorCanvas.bumpVersion()
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
-            let manager = activeUndoManager
-            let li = currentLayerIndex, ci = celIndex
-            manager?.setActionName("Clear")
-            manager?.registerUndo(withTarget: self) { target in
-                vectorCanvas.fills = fillsBefore
-                vectorCanvas.bumpVersion()
-                target.scheduleThumbnailRegen(layerIndex: li, celIndex: ci)
-                target.registerVectorFillRedo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                              layerIndex: li, celIndex: ci, actionName: "Clear", undoManager: manager)
-                target.refreshUndoRedoState()
-            }
-            refreshUndoRedoState()
+            registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
+                                   layerID: layers[currentLayerIndex].id, celID: cel.id, actionName: "Clear")
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.clear(base: base, path: selection.path)
-            registerUndoableCelChange(layerIndex: currentLayerIndex, celIndex: celIndex,
+            registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
                                        oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
                                        newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Clear")
         }
@@ -407,49 +386,47 @@ extension CanvasManager {
 
     // MARK: Undo-integrated mutation helpers
 
-    /// Applies a cel's raster/bakedImage/fillImage change and registers it as one undo step against
-    /// the same `UndoManager` live strokes already use, so the existing Undo/Redo buttons cover it
-    /// too. Every call site must state `oldFill`/`newFill` explicitly (rather than defaulting to
-    /// "leave untouched") since silently leaving a stale fillImage in place is exactly the double-
-    /// composite bug this parameter exists to prevent — see the callers' comments.
+    /// Applies a cel's raster/bakedImage/fillImage change and registers it as one step on the
+    /// global `history`, so the existing Undo/Redo buttons cover it too. Every call site must
+    /// state `oldFill`/`newFill` explicitly (rather than defaulting to "leave untouched") since
+    /// silently leaving a stale fillImage in place is exactly the double-composite bug this
+    /// parameter exists to prevent — see the callers' comments.
     ///
-    /// `oldRaster`/`newRaster` are `RasterLayerTexture` instances captured by reference, not copied:
-    /// once a cel's `raster` field is reassigned away from `oldRaster` here, nothing keeps drawing
-    /// into that instance, so it's safe for undo/redo to swap it back in later without a snapshot.
-    func registerUndoableCelChange(layerIndex: Int, celIndex: Int,
+    /// `oldRaster`/`newRaster` are `RasterLayerTexture` instances captured by reference, not
+    /// copied: once a cel's `raster` field is reassigned away from `oldRaster` here, nothing keeps
+    /// drawing into that instance, so it's safe for undo/redo to swap it back in later without a
+    /// snapshot. `layerID`/`celID` (rather than indices) are what the undo/redo closures resolve
+    /// against — other edits may shift array positions between now and whenever undo/redo fires.
+    func registerUndoableCelChange(layerID: UUID, celID: UUID,
                                     oldRaster: RasterLayerTexture, oldBaked: UIImage?, oldFill: UIImage?,
                                     newRaster: RasterLayerTexture, newBaked: UIImage?, newFill: UIImage?,
-                                    actionName: String, undoManager: UndoManager? = nil) {
-        applyCelChange(layerIndex: layerIndex, celIndex: celIndex, raster: newRaster, baked: newBaked, fill: newFill)
-        registerCelReversal(layerIndex: layerIndex, celIndex: celIndex,
+                                    actionName: String) {
+        applyCelChange(layerID: layerID, celID: celID, raster: newRaster, baked: newBaked, fill: newFill)
+        registerCelReversal(layerID: layerID, celID: celID,
                             undoRaster: oldRaster, undoBaked: oldBaked, undoFill: oldFill,
                             redoRaster: newRaster, redoBaked: newBaked, redoFill: newFill,
-                            actionName: actionName, undoManager: undoManager)
-        refreshUndoRedoState()
+                            actionName: actionName)
     }
 
-    /// Registers an undo that reverts to the `undo*` state and, when fired, re-registers the opposite
-    /// (restore the `redo*` state) — so undo/redo can cycle indefinitely rather than dying after the
-    /// first redo. `undoManager` pins the stack: pass the manager the change belongs to when it may be
-    /// committed after the active layer has changed (fills), else nil to use whichever is active now.
-    private func registerCelReversal(layerIndex: Int, celIndex: Int,
+    /// Registers one step on the global `history` that reverts to the `undo*` state, or (on redo)
+    /// restores the `redo*` state — `UndoHistory` moves the same action between its two stacks, so
+    /// unlike the old per-layer `UndoManager` idiom this doesn't need to re-register itself.
+    private func registerCelReversal(layerID: UUID, celID: UUID,
                                      undoRaster: RasterLayerTexture, undoBaked: UIImage?, undoFill: UIImage?,
                                      redoRaster: RasterLayerTexture, redoBaked: UIImage?, redoFill: UIImage?,
-                                     actionName: String, undoManager: UndoManager?) {
-        let manager = undoManager ?? activeUndoManager
-        manager?.setActionName(actionName)
-        manager?.registerUndo(withTarget: self) { target in
-            target.applyCelChange(layerIndex: layerIndex, celIndex: celIndex, raster: undoRaster, baked: undoBaked, fill: undoFill)
-            target.registerCelReversal(layerIndex: layerIndex, celIndex: celIndex,
-                                       undoRaster: redoRaster, undoBaked: redoBaked, undoFill: redoFill,
-                                       redoRaster: undoRaster, redoBaked: undoBaked, redoFill: undoFill,
-                                       actionName: actionName, undoManager: undoManager)
-            target.refreshUndoRedoState()
-        }
+                                     actionName: String) {
+        let cost = Self.approximateImageCost(undoBaked) + Self.approximateImageCost(redoBaked)
+                 + Self.approximateImageCost(undoFill) + Self.approximateImageCost(redoFill)
+        recordUndo(name: actionName, cost: cost, undo: { [weak self] in
+            self?.applyCelChange(layerID: layerID, celID: celID, raster: undoRaster, baked: undoBaked, fill: undoFill)
+        }, redo: { [weak self] in
+            self?.applyCelChange(layerID: layerID, celID: celID, raster: redoRaster, baked: redoBaked, fill: redoFill)
+        })
     }
 
-    private func applyCelChange(layerIndex: Int, celIndex: Int, raster: RasterLayerTexture, baked: UIImage?, fill: UIImage?) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+    private func applyCelChange(layerID: UUID, celID: UUID, raster: RasterLayerTexture, baked: UIImage?, fill: UIImage?) {
+        guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
+              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
         layers[layerIndex].cels[celIndex].fillImage = fill
         layers[layerIndex].cels[celIndex].raster = raster
         layers[layerIndex].cels[celIndex].bakedImage = baked
@@ -457,27 +434,28 @@ extension CanvasManager {
     }
 
     /// Same idea as `registerUndoableCelChange`, but for Duplicate: the undoable unit is the whole
-    /// new layer's existence, not just one cel's content.
+    /// new layer's existence, not just one cel's content. The undo side removes it by ID (safe even
+    /// if other layers have since shifted its index); the redo side re-inserts at the position it
+    /// was originally created at, which is safe because `history`'s redo stack only ever holds this
+    /// action while nothing else has been recorded in between (any new edit clears it).
     private func registerUndoableLayerInsertion(layerIndex: Int, finalBaked: UIImage, actionName: String) {
         guard layers.indices.contains(layerIndex) else { return }
         layers[layerIndex].cels[0].bakedImage = finalBaked
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: 0)
         let insertedLayer = layers[layerIndex]
+        let insertedLayerID = insertedLayer.id
 
-        activeUndoManager?.setActionName(actionName)
-        activeUndoManager?.registerUndo(withTarget: self) { target in
-            guard target.layers.indices.contains(layerIndex) else { return }
-            target.layers.remove(at: layerIndex)
-            if target.currentLayerIndex >= target.layers.count {
-                target.currentLayerIndex = max(0, target.layers.count - 1)
+        recordUndo(name: actionName, cost: Self.approximateImageCost(finalBaked), undo: { [weak self] in
+            guard let self, let idx = self.layers.firstIndex(where: { $0.id == insertedLayerID }) else { return }
+            self.layers.remove(at: idx)
+            if self.currentLayerIndex >= self.layers.count {
+                self.currentLayerIndex = max(0, self.layers.count - 1)
             }
-            target.activeUndoManager?.setActionName(actionName)
-            target.activeUndoManager?.registerUndo(withTarget: target) { redoTarget in
-                let insertAt = min(layerIndex, redoTarget.layers.count)
-                redoTarget.layers.insert(insertedLayer, at: insertAt)
-                redoTarget.currentLayerIndex = insertAt
-            }
-        }
-        refreshUndoRedoState()
+        }, redo: { [weak self] in
+            guard let self else { return }
+            let insertAt = min(layerIndex, self.layers.count)
+            self.layers.insert(insertedLayer, at: insertAt)
+            self.currentLayerIndex = insertAt
+        })
     }
 }
