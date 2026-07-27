@@ -1654,6 +1654,8 @@ final class PaintSoftwareUITests: XCTestCase {
         bottomRow.tap()
         XCTAssertTrue(app.images["layerPanel.row.0.current"].waitForExistence(timeout: 5), "Layer 0 should now be active")
 
+        // Three actions sit on the global stack in this order: stroke on layer 0, adding layer 1
+        // (itself now undoable — a "layer change" this overhaul covers), stroke on layer 1.
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         XCTAssertTrue(undo.isEnabled)
@@ -1665,8 +1667,14 @@ final class PaintSoftwareUITests: XCTestCase {
                        "Layer 0's stroke should be untouched by the first undo")
 
         undo.tap()
+        XCTAssertFalse(app.staticTexts["layerPanel.row.1"].exists,
+                       "The second undo should reach back to adding layer 1 and remove it entirely")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+                       "Layer 0's stroke should still be untouched by the second undo")
+
+        undo.tap()
         XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 0,
-                       "The second undo should reach back further and undo layer 0's stroke too")
+                       "The third undo should reach back further still and undo layer 0's stroke")
     }
 
     /// Deleting a layer must be undoable, restoring both its existence and its content — the
