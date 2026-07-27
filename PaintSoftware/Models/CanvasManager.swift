@@ -825,19 +825,8 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Moves a layer into (or out of, for `nil`) a folder from the Edit-menu picker, without
-    /// changing its stacking position — see `restackLayer` for drag-driven moves that also
-    /// reorder.
-    func setParentFolder(layerIndex: Int, folderID: UUID?) {
-        guard layers.indices.contains(layerIndex) else { return }
-        guard layers[layerIndex].parentFolderID != folderID else { return }
-        withStructureUndo(name: "Move to Folder") {
-            layers[layerIndex].parentFolderID = folderID
-        }
-    }
-
     /// Flips a layer's visibility and, by default, its fill-reference state with it — a hidden layer is
-    /// fill-excluded and a shown one is a fill reference (overridable afterward from the Edit menu).
+    /// fill-excluded and a shown one is a fill reference (overridable afterward from the layer options).
     /// When a view preset is active, the change is saved into that preset automatically.
     func toggleLayerVisibility(layerIndex: Int) {
         guard layers.indices.contains(layerIndex) else { return }
@@ -911,7 +900,9 @@ final class CanvasManager: ObservableObject {
     /// Renames a folder. Used by the layer options popover.
     func renameFolder(_ folderID: UUID, to name: String) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
-        folders[idx].name = name
+        withStructureUndo(name: "Rename Folder") {
+            folders[idx].name = name
+        }
     }
 
     // MARK: - Stack rows
@@ -1140,15 +1131,16 @@ final class CanvasManager: ObservableObject {
 
         let folder = LayerFolder(id: UUID(), name: name ?? "Folder \(folders.count + 1)",
                                  parentFolderID: layers[targetIndex].parentFolderID)
-        folders.append(folder)
-
         let draggedWasAbove = draggedIndex > targetIndex
-        withPreservedActiveLayer {
-            let moved = layers.remove(at: draggedIndex)
-            let anchor = layers.firstIndex(where: { $0.id == targetID }) ?? min(targetIndex, layers.count)
-            layers.insert(moved, at: draggedWasAbove ? anchor + 1 : anchor)
-            for index in layers.indices where layers[index].id == draggedID || layers[index].id == targetID {
-                layers[index].parentFolderID = folder.id
+        withStructureUndo(name: "Group Layers") {
+            folders.append(folder)
+            withPreservedActiveLayer {
+                let moved = layers.remove(at: draggedIndex)
+                let anchor = layers.firstIndex(where: { $0.id == targetID }) ?? min(targetIndex, layers.count)
+                layers.insert(moved, at: draggedWasAbove ? anchor + 1 : anchor)
+                for index in layers.indices where layers[index].id == draggedID || layers[index].id == targetID {
+                    layers[index].parentFolderID = folder.id
+                }
             }
         }
         return folder.id
@@ -1178,20 +1170,24 @@ final class CanvasManager: ObservableObject {
         )
 
         let survivorID = layers[bottomIndex].id
-        layers[bottomIndex].cels[bottomCel].raster = .empty(size: canvasSize)
-        layers[bottomIndex].cels[bottomCel].fillImage = nil
-        layers[bottomIndex].cels[bottomCel].bakedImage = flattened
-        if layers[bottomIndex].cels[bottomCel].vector != nil {
-            layers[bottomIndex].cels[bottomCel].vector = .empty(size: canvasSize)
-        }
-        layers[bottomIndex].opacity = 1
-        layers[bottomIndex].isVisible = true
+        // Merging is destructive (the top layer's pixels are flattened away), so the whole thing has
+        // to be one undo step — the nested deleteLayer coalesces into this scope.
+        withStructureUndo(name: "Merge Layers") {
+            layers[bottomIndex].cels[bottomCel].raster = .empty(size: canvasSize)
+            layers[bottomIndex].cels[bottomCel].fillImage = nil
+            layers[bottomIndex].cels[bottomCel].bakedImage = flattened
+            if layers[bottomIndex].cels[bottomCel].vector != nil {
+                layers[bottomIndex].cels[bottomCel].vector = .empty(size: canvasSize)
+            }
+            layers[bottomIndex].opacity = 1
+            layers[bottomIndex].isVisible = true
 
-        deleteLayer(at: topIndex)
-        if let survivor = layers.firstIndex(where: { $0.id == survivorID }) {
-            currentLayerIndex = survivor
-            if let cel = activeCelIndex(inLayer: survivor, atFrame: currentFrame) {
-                scheduleThumbnailRegen(layerIndex: survivor, celIndex: cel)
+            deleteLayer(at: topIndex)
+            if let survivor = layers.firstIndex(where: { $0.id == survivorID }) {
+                currentLayerIndex = survivor
+                if let cel = activeCelIndex(inLayer: survivor, atFrame: currentFrame) {
+                    scheduleThumbnailRegen(layerIndex: survivor, celIndex: cel)
+                }
             }
         }
         return true
@@ -1212,8 +1208,10 @@ final class CanvasManager: ObservableObject {
                          objectImage: source.objectImage, objectTransform: source.objectTransform,
                          parentFolderID: source.parentFolderID, cels: cels)
         copy.thumbnail = source.thumbnail
-        layers.insert(copy, at: index + 1)
-        currentLayerIndex = index + 1
+        withStructureUndo(name: "Duplicate Layer") {
+            layers.insert(copy, at: index + 1)
+            currentLayerIndex = index + 1
+        }
     }
 
     // MARK: - Views
@@ -1851,14 +1849,26 @@ final class CanvasManager: ObservableObject {
         })
     }
 
-    /// Snapshots current structure before a mutation and registers one undo step named `name`
-    /// comparing that snapshot against whatever `layers`/`folders`/etc. look like when this
-    /// returns — i.e. call this AFTER the mutating body, wrapping it as:
-    /// `let before = beginStructureUndo(); <mutate>; commit(name: "...")`. Kept private; the
-    /// public surface is the two call shapes below (`withStructureUndo` for discrete edits,
-    /// `beginStructureGesture`/`commitStructureGesture` for continuous drags).
+    /// Nesting depth of `withStructureUndo`, so composite edits record exactly one step.
+    private var structureUndoDepth = 0
+
+    /// Snapshots structure, runs `body`, and records the difference as one undo step named `name`.
+    /// This is the call shape for discrete edits; continuous drags use
+    /// `beginStructureGesture`/`commitStructureGesture` instead.
+    ///
+    /// Nests safely: composite operations build on the primitives (merging calls `deleteLayer`,
+    /// which is itself wrapped), and a drag bracketed by `beginStructureGesture` may call several
+    /// of them. Only the outermost scope captures and records, so one user action is always exactly
+    /// one undo step — without this, merging would record a bare "Delete Layer" that reverses half
+    /// the operation and leaves the survivor flattened.
     private func withStructureUndo(name: String, _ body: () -> Void) {
+        guard structureUndoDepth == 0, gestureSnapshot == nil else {
+            body() // an enclosing scope is already recording this
+            return
+        }
         let before = captureStructure()
+        structureUndoDepth += 1
+        defer { structureUndoDepth -= 1 }
         body()
         recordStructureChange(name: name, from: before, to: captureStructure())
     }
