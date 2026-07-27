@@ -160,7 +160,13 @@ XCODE_ARGS=(
 )
 
 if [ -n "$TEST_FILTER" ]; then
-    XCODE_ARGS+=(-only-testing:"PaintSoftwareUITests/$TEST_FILTER")
+    # Accept either "TestMethodName" (auto-resolved) or "Target/Class/Method" (full identifier)
+    if [[ "$TEST_FILTER" == */* ]]; then
+        XCODE_ARGS+=(-only-testing:"$TEST_FILTER")
+    else
+        XCODE_ARGS+=(-only-testing:"PaintSoftwareUITests/PaintSoftwareUITests/$TEST_FILTER")
+        XCODE_ARGS+=(-only-testing:"PaintSoftwareUITests/BrushEngineLogicTests/$TEST_FILTER")
+    fi
     log "Filter: $TEST_FILTER"
 fi
 
