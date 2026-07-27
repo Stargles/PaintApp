@@ -97,6 +97,30 @@ The script auto-reclaims simulator locks older than 2 hours (stale/crashed sessi
 | `~/PaintApp-worktrees/<session-id>/` | Per-session worktree |
 | `~/PaintApp-derived/<session-id>/` | Per-session DerivedData |
 | `/tmp/paintapp-sim-locks/<uuid>/` | Simulator claim locks (atomic mkdir) |
+| `/tmp/paintapp-screenshots/` | Simulator screenshots |
+
+### Taking screenshots
+
+The AI can screenshot the simulator on the Mac to see what the app looks like in real time. This uses `xcrun simctl io` under the hood.
+
+**Fetch a screenshot (recommended — saves locally for the Read tool):**
+```powershell
+.\deploy\mac\screenshot_fetch.ps1 <session-id>
+```
+This SSHs to the Mac, screenshots the session's locked simulator, SCPs the PNG back to Windows, and prints the local path. Use the Read tool on the returned path to view the image.
+
+**Mac-only (if SSHing directly):**
+```bash
+ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/screenshot.sh <session-id>"
+```
+Returns the remote path (`/tmp/paintapp-screenshots/...`). Then SCP it back:
+```powershell
+scp juliapark@100.70.148.78:<remote-path> <local-path>
+```
+
+**Requirements:**
+- The session must have an active simulator lock (i.e., tests must have been run or simulator claimed)
+- The simulator must be booted (it stays booted after `parallel_test.sh` runs)
 
 ### Available iPad simulators on the Mac
 
