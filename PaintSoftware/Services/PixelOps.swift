@@ -248,7 +248,7 @@ enum PixelOps {
     /// stitching those edges into closed loops. Enclosed unselected regions ("holes") fall out of
     /// this naturally as their own loop with opposite winding, so a nonzero-winding fill/clip
     /// correctly punches a hole for them.
-    private static func contourPath(selected: [Bool], width: Int, height: Int) -> CGPath? {
+    static func contourPath(selected: [Bool], width: Int, height: Int) -> CGPath? {
         func isSelected(_ x: Int, _ y: Int) -> Bool {
             guard x >= 0, x < width, y >= 0, y < height else { return false }
             return selected[y * width + x]
@@ -301,5 +301,16 @@ enum PixelOps {
             }
         }
         return result.isEmpty ? points : result
+    }
+
+    // MARK: - Fill mask to vector path
+
+    /// Converts a premultiplied-last RGBA byte buffer (e.g. the output of `MetalFillSession.fill`)
+    /// into a closed `CGPath` by thresholding the alpha channel to produce a boolean mask and then
+    /// tracing its contour. Used to create `VectorFillElement` geometry from the GPU flood fill.
+    static func pathFromAlphaMask(bytes: [UInt8], width: Int, height: Int) -> CGPath? {
+        guard width > 0, height > 0, bytes.count >= width * height * 4 else { return nil }
+        let mask = (0..<(width * height)).map { bytes[$0 * 4 + 3] > 0 }
+        return contourPath(selected: mask, width: width, height: height)
     }
 }

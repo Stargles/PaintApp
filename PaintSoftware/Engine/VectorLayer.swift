@@ -25,6 +25,35 @@ struct VectorStroke: Identifiable, Codable {
     var uiColor: UIColor { UIColor(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha) }
 }
 
+/// A filled region stored as a vector path on a vector layer: the flood-fill tool's output when
+/// used on a `.vector` layer, instead of rasterizing into `Cel.bakedImage`. The path is a closed
+/// (possibly multi-loop, with holes) contour extracted from the GPU fill mask, stored as archived
+/// `UIBezierPath` data for `Codable` conformance.
+struct VectorFillElement: Identifiable, Codable {
+    var id: UUID = UUID()
+    /// Archiver data for the fill path (supports multi-subpath via UIBezierPath's NSSecureCoding).
+    var pathData: Data
+    var color: CodableColor
+    /// Additional opacity multiplier on top of the color's own alpha (matches `VectorStroke.opacity`).
+    var opacity: Double
+
+    init(path: CGPath, color: CodableColor, opacity: Double = 1.0) {
+        let bezier = UIBezierPath(cgPath: path)
+        self.pathData = (try? NSKeyedArchiver.archivedData(withRootObject: bezier, requiringSecureCoding: true)) ?? Data()
+        self.color = color
+        self.opacity = opacity
+    }
+
+    var cgPath: CGPath? {
+        guard let bezier = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIBezierPath.self, from: pathData) else { return nil }
+        return bezier.cgPath
+    }
+
+    var uiColor: UIColor {
+        UIColor(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
+    }
+}
+
 /// An imported image placed on a vector layer, movable/scalable/rotatable via its own transform
 /// (position/scale/rotation in canvas space) — the same idea as the existing object layer, but as
 /// one of possibly many elements on a vector layer rather than a whole dedicated layer. `image` is
@@ -46,6 +75,7 @@ struct VectorImageElement: Identifiable {
 final class VectorCanvas {
     let size: CGSize
     var strokes: [VectorStroke]
+    var fills: [VectorFillElement]
     var images: [VectorImageElement]
     /// Move/rotate/scale of the entire layer's content, applied at render time so it stays crisp at
     /// any transform (no resolution loss). Identity until the layer is transformed.
@@ -54,19 +84,20 @@ final class VectorCanvas {
     private(set) var version: Int = 0
     private var cachedImage: UIImage?
 
-    init(size: CGSize, strokes: [VectorStroke] = [], images: [VectorImageElement] = [], transform: CGAffineTransform = .identity) {
+    init(size: CGSize, strokes: [VectorStroke] = [], fills: [VectorFillElement] = [], images: [VectorImageElement] = [], transform: CGAffineTransform = .identity) {
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
         self.strokes = strokes
+        self.fills = fills
         self.images = images
         self.transform = transform
     }
 
     static func empty(size: CGSize) -> VectorCanvas { VectorCanvas(size: size) }
 
-    var isEmpty: Bool { strokes.isEmpty && images.isEmpty }
+    var isEmpty: Bool { strokes.isEmpty && fills.isEmpty && images.isEmpty }
 
     func makeCopy() -> VectorCanvas {
-        VectorCanvas(size: size, strokes: strokes, images: images, transform: transform)
+        VectorCanvas(size: size, strokes: strokes, fills: fills, images: images, transform: transform)
     }
 
     /// A new canvas sized to `newSize` with all content shifted by `offset` (canvas point space),
@@ -77,7 +108,7 @@ final class VectorCanvas {
     /// a fresh instance.
     func resized(to newSize: CGSize, offset: CGPoint) -> VectorCanvas {
         let shifted = transform.concatenating(CGAffineTransform(translationX: offset.x, y: offset.y))
-        return VectorCanvas(size: newSize, strokes: strokes, images: images, transform: shifted)
+        return VectorCanvas(size: newSize, strokes: strokes, fills: fills, images: images, transform: shifted)
     }
 
     private func invalidate() {
@@ -98,6 +129,11 @@ final class VectorCanvas {
 
     func addImage(_ element: VectorImageElement) {
         images.append(element)
+        invalidate()
+    }
+
+    func addFill(_ element: VectorFillElement) {
+        fills.append(element)
         invalidate()
     }
 
@@ -194,6 +230,15 @@ final class VectorCanvas {
 
         // 1. Content in local (untransformed) space.
         let content = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            // Fills (flat color regions) — drawn first, underneath images and strokes.
+            for fill in fills {
+                guard let path = fill.cgPath else { continue }
+                ctx.cgContext.setFillColor(fill.uiColor.cgColor)
+                ctx.cgContext.setAlpha(fill.opacity)
+                ctx.cgContext.addPath(path)
+                ctx.cgContext.fillPath()
+            }
+            ctx.cgContext.setAlpha(1.0)
             for element in images {
                 ctx.cgContext.saveGState()
                 let t = element.transform
@@ -243,12 +288,14 @@ struct VectorCanvasData: Codable {
         var rotation: Double
     }
     var strokes: [VectorStroke]
+    var fills: [VectorFillElement]
     var images: [ImageRef]
     /// Overall transform as [a, b, c, d, tx, ty]; missing/short → identity.
     var transform: [Double]
 
     init(from canvas: VectorCanvas, imageFileNames: [UUID: String]) {
         strokes = canvas.strokes
+        fills = canvas.fills
         images = canvas.images.compactMap { el in
             guard let name = el.fileName ?? imageFileNames[el.id] else { return nil }
             return ImageRef(fileName: name, x: el.transform.position.x, y: el.transform.position.y,

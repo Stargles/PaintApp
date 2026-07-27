@@ -674,6 +674,7 @@ final class CanvasManager: ObservableObject {
     private var fillLastRegionH = 0
     private var fillGestureSeed: (x: Int, y: Int) = (0, 0)
     private var fillGestureColor: SIMD4<Float> = .zero   // premultiplied 0..1
+    private var fillGestureFillColor: CodableColor = .init(red: 0, green: 0, blue: 0, alpha: 1)
     private var fillGestureLayerIndex = 0
     private var fillGestureCelIndex = 0
     private var fillGestureBaseBaked: UIImage?  // layer's baked pixels before this gesture (undo/composite base)
@@ -705,6 +706,9 @@ final class CanvasManager: ObservableObject {
         fillLastRegionRGBA = nil
         fillGestureSeed = (seedX, seedY)
         fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: brushOpacity))
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+        brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
+        fillGestureFillColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
         fillGestureLayerIndex = layerIndex
         fillGestureCelIndex = celIndex
         fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
@@ -936,31 +940,75 @@ final class CanvasManager: ObservableObject {
         fillQueue.async { [weak self] in self?.drainFillWork() } // render anything still pending; keep session
     }
 
-    /// Bakes the current adjustable fill into the layer's pixels as a single "Fill" undo step (so
-    /// re-filling that region later recolours it) and tears the session down. Triggered when the config
-    /// state ends: a paint/erase action on the canvas, or a new fill starting elsewhere.
+    /// Bakes the current adjustable fill into the layer as a single "Fill" undo step and tears the
+    /// session down. On a **vector layer** the fill becomes a `VectorFillElement` (a closed path on
+    /// the `VectorCanvas`); on a **raster layer** it is composited into `bakedImage` as before.
     func commitInteractiveFill() {
         guard fillGestureActive else { return }
         fillGestureActive = false
         fillFingerDown = false
+        // Capture the mask bytes before clearing — needed for the vector-path extraction below.
+        let regionBytes = fillLastRegionRGBA
+        let regionW = fillLastRegionW, regionH = fillLastRegionH
         fillLastRegionRGBA = nil
         fillQueue.async { [weak self] in self?.fillSession = nil }
         let layerIndex = fillGestureLayerIndex, celIndex = fillGestureCelIndex
         let undoManager = fillGestureUndoManager
+        let fillColor = fillGestureFillColor
         defer { fillGestureBaseBaked = nil; fillGestureUndoManager = nil; refreshUndoRedoState() }
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
         guard let preview = cel.fillImage else { return }  // nothing was previewed
-        // Bake the preview into the layer's flattened raster (bakedImage) and clear the transient
-        // preview, so the fill is now real layer pixels. One undo step covers the whole gesture; the
-        // raster (live strokes) is untouched. Register on the undo manager captured when the fill began,
-        // not the current active one — the fill may be committed later, after the active layer changed
-        // (e.g. draw on another layer, or navigate cels), and its step must land on its own layer's stack.
-        let newBaked = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: preview)
-        registerUndoableCelChange(layerIndex: layerIndex, celIndex: celIndex,
-                                  oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,
-                                  newRaster: cel.raster, newBaked: newBaked, newFill: nil,
-                                  actionName: "Fill", undoManager: undoManager)
+        let isVector = layers[layerIndex].kind == .vector
+
+        if isVector, let vectorCanvas = cel.vector,
+           let bytes = regionBytes, regionW > 0, regionH > 0,
+           let path = PixelOps.pathFromAlphaMask(bytes: bytes, width: regionW, height: regionH) {
+            // --- Vector path: store as a VectorFillElement on the canvas ---
+            let fillsBefore = vectorCanvas.fills
+            let element = VectorFillElement(path: path, color: fillColor)
+            vectorCanvas.addFill(element)
+            // Clear the transient raster fill preview so it isn't drawn a second time.
+            setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: nil)
+            // Register undo that removes the fill element (mirror of the stroke undo pattern).
+            let manager = undoManager
+            manager?.setActionName("Fill")
+            manager?.registerUndo(withTarget: self) { target in
+                vectorCanvas.fills = fillsBefore
+                vectorCanvas.bumpVersion()
+                target.scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
+                target.registerVectorFillRedo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
+                                              layerIndex: layerIndex, celIndex: celIndex, actionName: "Fill", undoManager: manager)
+                target.refreshUndoRedoState()
+            }
+            refreshUndoRedoState()
+        } else {
+            // --- Raster path (original behaviour): bake into bakedImage ---
+            let newBaked = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: preview)
+            registerUndoableCelChange(layerIndex: layerIndex, celIndex: celIndex,
+                                      oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,
+                                      newRaster: cel.raster, newBaked: newBaked, newFill: nil,
+                                      actionName: "Fill", undoManager: undoManager)
+        }
+    }
+
+    /// Re-registers the opposite undo step so redo can restore vector fills (mirrors
+    /// `registerCelReversal` for raster undo). Called from the undo handler created in
+    /// `commitInteractiveFill` when the layer is vector.
+    private func registerVectorFillRedo(vectorCanvas: VectorCanvas,
+                                        oldFills: [VectorFillElement], newFills: [VectorFillElement],
+                                        layerIndex: Int, celIndex: Int,
+                                        actionName: String, undoManager: UndoManager?) {
+        let manager = undoManager ?? activeUndoManager
+        manager?.setActionName(actionName)
+        manager?.registerUndo(withTarget: self) { target in
+            vectorCanvas.fills = newFills
+            vectorCanvas.bumpVersion()
+            target.scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
+            target.registerVectorFillRedo(vectorCanvas: vectorCanvas, oldFills: newFills, newFills: oldFills,
+                                          layerIndex: layerIndex, celIndex: celIndex, actionName: actionName, undoManager: undoManager)
+            target.refreshUndoRedoState()
+        }
     }
 
     /// Abandons the interactive fill without committing, discarding the preview. Used when an undo/redo

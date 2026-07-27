@@ -312,7 +312,7 @@ enum ProjectStore {
                                                   transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y), scale: ref.scale, rotation: ref.rotation),
                                                   fileName: ref.fileName)
                     }
-                    vector = VectorCanvas(size: canvasSize, strokes: payload.strokes, images: images, transform: payload.affineTransform)
+                    vector = VectorCanvas(size: canvasSize, strokes: payload.strokes, fills: payload.fills, images: images, transform: payload.affineTransform)
                 } else if layerManifest.kind == .vector {
                     vector = .empty(size: canvasSize)
                 }
