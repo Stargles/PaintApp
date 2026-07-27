@@ -71,6 +71,7 @@ struct TimelineTrackView: UIViewRepresentable {
 
         private let rulerView = TimelineRulerView()
         private var rowViews: [TimelineRowView] = []
+        private var folderRowViews: [TimelineFolderRowView] = []
         private let playheadView = TimelinePlayheadView()
 
         init(canvasManager: CanvasManager) {
@@ -96,7 +97,10 @@ struct TimelineTrackView: UIViewRepresentable {
             let sceneFrameCount = max(canvasManager.sceneFrameCount, 1)
             let totalWidth = max(CGFloat(sceneFrameCount) * pixelsPerFrame, scrollView.bounds.width)
             let layers = canvasManager.layers
-            let totalHeight = rulerHeight + CGFloat(max(layers.count, 1)) * (rowHeight + 2) + 8
+            // Same row order the layer panel and the pinned name column use — folder headers
+            // included, collapsed folders' children omitted.
+            let stackRows = canvasManager.layerStackRows
+            let totalHeight = rulerHeight + CGFloat(max(stackRows.count, 1)) * (rowHeight + 2) + 8
 
             contentView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
             if scrollView.contentSize != contentView.frame.size {
@@ -115,27 +119,60 @@ struct TimelineTrackView: UIViewRepresentable {
             rulerView.pixelsPerFrame = pixelsPerFrame
             rulerView.setNeedsDisplay()
 
-            // Topmost layer listed first, matching layers.enumerated().reversed() elsewhere.
-            let orderedLayerIndices = Array(layers.indices.reversed())
-            while rowViews.count < orderedLayerIndices.count {
+            // Split the presented rows into the two kinds of track, each drawn from its own pool.
+            let layerEntries = stackRows.enumerated().compactMap { position, row in
+                row.layerIndex.map { (position: position, layerIndex: $0) }
+            }
+            let folderEntries = stackRows.enumerated().compactMap { position, row in
+                row.folderID.map { (position: position, folderID: $0) }
+            }
+
+            while rowViews.count < layerEntries.count {
                 let row = TimelineRowView()
                 row.coordinator = self
                 contentView.addSubview(row)
                 scrollView.panGestureRecognizer.require(toFail: row.panRecognizer)
                 rowViews.append(row)
             }
-            while rowViews.count > orderedLayerIndices.count {
+            while rowViews.count > layerEntries.count {
                 rowViews.removeLast().removeFromSuperview()
             }
 
-            for (rowPosition, layerIndex) in orderedLayerIndices.enumerated() {
-                let row = rowViews[rowPosition]
-                let y = rulerHeight + CGFloat(rowPosition) * (rowHeight + 2) + 4
-                row.frame = CGRect(x: 0, y: y, width: totalWidth, height: rowHeight)
-                row.layerIndex = layerIndex
+            func rowY(_ position: Int) -> CGFloat {
+                rulerHeight + CGFloat(position) * (rowHeight + 2) + 4
+            }
+
+            for (slot, entry) in layerEntries.enumerated() {
+                let row = rowViews[slot]
+                row.frame = CGRect(x: 0, y: rowY(entry.position), width: totalWidth, height: rowHeight)
+                row.layerIndex = entry.layerIndex
                 row.pixelsPerFrame = pixelsPerFrame
-                row.isCurrentLayer = (layerIndex == canvasManager.currentLayerIndex)
-                row.update(cels: layers[layerIndex].cels, sceneFrameCount: sceneFrameCount)
+                row.isCurrentLayer = (entry.layerIndex == canvasManager.currentLayerIndex)
+                row.update(cels: layers[entry.layerIndex].cels, sceneFrameCount: sceneFrameCount)
+            }
+
+            while folderRowViews.count < folderEntries.count {
+                let row = TimelineFolderRowView()
+                contentView.addSubview(row)
+                folderRowViews.append(row)
+            }
+            while folderRowViews.count > folderEntries.count {
+                folderRowViews.removeLast().removeFromSuperview()
+            }
+
+            for (slot, entry) in folderEntries.enumerated() {
+                let row = folderRowViews[slot]
+                row.frame = CGRect(x: 0, y: rowY(entry.position), width: totalWidth, height: rowHeight)
+                let childIndices = canvasManager.layerIndices(inFolder: entry.folderID)
+                let cels = childIndices.flatMap { layers[$0].cels }
+                let span: ClosedRange<Int>? = cels.isEmpty
+                    ? nil
+                    : (cels.map(\.startFrame).min() ?? 0)...(cels.map(\.endFrame).max() ?? 0)
+                let folder = canvasManager.folders.first(where: { $0.id == entry.folderID })
+                row.update(span: span,
+                           pixelsPerFrame: pixelsPerFrame,
+                           isVisible: folder?.isVisible ?? true,
+                           identifier: "timeline.folderTrack.\(folder?.name ?? entry.folderID.uuidString)")
             }
 
             if playheadView.superview == nil {
@@ -236,6 +273,46 @@ private final class TimelineRulerView: UIView {
             let text = "\(frame + 1)" as NSString
             text.draw(at: CGPoint(x: x, y: 2), withAttributes: attrs)
         }
+    }
+}
+
+/// A folder's summary track: one band spanning the frames covered by any cel in the folder, so a
+/// collapsed folder still shows where its content lives. Non-interactive — cels are edited on the
+/// child layers' own rows.
+private final class TimelineFolderRowView: UIView {
+    private let band = UIView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+
+        band.backgroundColor = UIColor.systemYellow.withAlphaComponent(0.22)
+        band.layer.cornerRadius = 4
+        band.layer.borderWidth = 1
+        band.layer.borderColor = UIColor.systemYellow.withAlphaComponent(0.5).cgColor
+        addSubview(band)
+
+        isAccessibilityElement = true
+        accessibilityTraits = .none
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(span: ClosedRange<Int>?, pixelsPerFrame: CGFloat, isVisible: Bool, identifier: String) {
+        accessibilityIdentifier = identifier
+        guard let span, span.upperBound > span.lowerBound else {
+            band.isHidden = true
+            accessibilityValue = "empty"
+            return
+        }
+        band.isHidden = false
+        band.alpha = isVisible ? 1 : 0.4
+        band.frame = CGRect(x: CGFloat(span.lowerBound) * pixelsPerFrame,
+                            y: 0,
+                            width: CGFloat(span.upperBound - span.lowerBound) * pixelsPerFrame,
+                            height: bounds.height).insetBy(dx: 2, dy: 7)
+        accessibilityValue = "\(span.lowerBound),\(span.upperBound - span.lowerBound)"
     }
 }
 

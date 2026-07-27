@@ -208,7 +208,9 @@ enum ProjectStore {
         let viewPresetManifests = canvasManager.viewPresets.map { preset in
             var vis: [String: Bool] = [:]
             for (key, value) in preset.layerVisibility { vis[key.uuidString] = value }
-            return ViewPresetManifest(id: preset.id, name: preset.name, layerVisibility: vis)
+            var folderVis: [String: Bool] = [:]
+            for (key, value) in preset.folderVisibility { folderVis[key.uuidString] = value }
+            return ViewPresetManifest(id: preset.id, name: preset.name, layerVisibility: vis, folderVisibility: folderVis)
         }
 
         let manifest = ProjectManifest(
@@ -272,7 +274,11 @@ enum ProjectStore {
             for (key, value) in vp.layerVisibility {
                 if let uuid = UUID(uuidString: key) { vis[uuid] = value }
             }
-            return ViewPreset(id: vp.id, name: vp.name, layerVisibility: vis)
+            var folderVis: [UUID: Bool] = [:]
+            for (key, value) in vp.folderVisibility {
+                if let uuid = UUID(uuidString: key) { folderVis[uuid] = value }
+            }
+            return ViewPreset(id: vp.id, name: vp.name, layerVisibility: vis, folderVisibility: folderVis)
         }
 
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)

@@ -55,7 +55,7 @@ struct AnimationTimeline: View {
     }
 
     private var contentHeight: CGFloat {
-        rulerHeight + CGFloat(max(canvasManager.layers.count, 1)) * (rowHeight + 2) + 8
+        rulerHeight + CGFloat(max(canvasManager.layerStackRows.count, 1)) * (rowHeight + 2) + 8
     }
 
     // MARK: - Collapsed
@@ -156,20 +156,50 @@ struct AnimationTimeline: View {
 
     // MARK: - Layer names (pinned, non-scrolling column)
 
+    /// Mirrors the layer panel's row order exactly — same folder headers, same collapse state — so
+    /// the names line up with the track rows `TimelineTrackView` lays out from the same source.
     private var layerNameColumn: some View {
         VStack(alignment: .leading, spacing: 2) {
             Color.clear.frame(height: rulerHeight)
-            ForEach(Array(canvasManager.layers.enumerated().reversed()), id: \.element.id) { index, layer in
-                Text(layer.name)
-                    .font(.caption)
-                    .foregroundColor(index == canvasManager.currentLayerIndex ? .blue : .white)
-                    .lineLimit(1)
-                    .frame(height: rowHeight, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 8)
-                    .contentShape(Rectangle())
-                    .onTapGesture { canvasManager.currentLayerIndex = index }
-                    .accessibilityIdentifier("timeline.layerName.\(index)")
+            ForEach(canvasManager.layerStackRows) { row in
+                switch row {
+                case .folder(let folderID):
+                    if let folder = canvasManager.folders.first(where: { $0.id == folderID }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: folder.isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 9))
+                                .foregroundColor(.gray)
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 9))
+                                .foregroundColor(.yellow)
+                            Text(folder.name)
+                                .font(.caption)
+                                .foregroundColor(folder.isVisible ? .white : .gray)
+                                .lineLimit(1)
+                                .accessibilityIdentifier("timeline.folderName.\(folder.name)")
+                        }
+                        .frame(height: rowHeight, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 6)
+                        .contentShape(Rectangle())
+                        .onTapGesture { canvasManager.toggleFolderExpanded(folderID) }
+                    }
+
+                case .layer(_, let index) where canvasManager.layers.indices.contains(index):
+                    Text(canvasManager.layers[index].name)
+                        .font(.caption)
+                        .foregroundColor(index == canvasManager.currentLayerIndex ? .blue : .white)
+                        .lineLimit(1)
+                        .frame(height: rowHeight, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, canvasManager.layers[index].parentFolderID != nil ? 18 : 8)
+                        .contentShape(Rectangle())
+                        .onTapGesture { canvasManager.currentLayerIndex = index }
+                        .accessibilityIdentifier("timeline.layerName.\(index)")
+
+                default:
+                    EmptyView()
+                }
             }
         }
         .frame(width: 90)

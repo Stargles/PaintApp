@@ -3,53 +3,15 @@ import SwiftUI
 /// Wraps a layer id so it can drive `.sheet(item:)` (UUID isn't `Identifiable` on its own).
 private struct EditingLayerRef: Identifiable { let id: UUID }
 
-/// Flattened display item combining folders, layers, and the background row.
-private enum LayerDisplayItem: Identifiable {
-    case folder(Int, LayerFolder)              // folders array index + folder
-    case layer(Int, Layer)                     // layers array index + layer
-    case background
-
-    var id: String {
-        switch self {
-        case .folder(_, let f):  return "f-\(f.id.uuidString)"
-        case .layer(_, let l):   return "l-\(l.id.uuidString)"
-        case .background:        return "bg"
-        }
-    }
-
-    var layerIndex: Int? {
-        if case .layer(let i, _) = self { i } else { nil }
-    }
-}
-
 struct LayerPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     @State private var showBackgroundColorPicker = false
     @State private var editingLayer: EditingLayerRef?
-    @State private var isEditingList = false
+    @State private var showViewSelector = false
 
-    /// Flattened items for display, bottom-to-top. Folders appear at the position of their
-    /// topmost child. Collapsed folders hide their children.
-    private var displayItems: [LayerDisplayItem] {
-        var items: [LayerDisplayItem] = []
-        var seenFolders = Set<UUID>()
-        for (arrayIdx, layer) in canvasManager.layers.enumerated().reversed() {
-            if let fid = layer.parentFolderID,
-               let fi = canvasManager.folders.firstIndex(where: { $0.id == fid }) {
-                if !seenFolders.contains(fid) {
-                    seenFolders.insert(fid)
-                    items.append(.folder(fi, canvasManager.folders[fi]))
-                }
-                if canvasManager.folders[fi].isExpanded {
-                    items.append(.layer(arrayIdx, layer))
-                }
-            } else {
-                items.append(.layer(arrayIdx, layer))
-            }
-        }
-        items.append(.background)
-        return items
-    }
+    /// Folder headers + layers, top-to-bottom. Owned by `CanvasManager` so the animation timeline
+    /// renders the exact same stack (see `CanvasManager.layerStackRows`).
+    private var rows: [LayerStackRow] { canvasManager.layerStackRows }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -72,27 +34,19 @@ struct LayerPanel: View {
 
             Spacer()
 
-            // Edit/Done toggle for reorder mode
-            Button(isEditingList ? "Done" : "Edit") {
-                withAnimation { isEditingList.toggle() }
-            }
-            .foregroundColor(.white)
-            .font(.caption2)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.white.opacity(0.15))
-            .cornerRadius(6)
-            .accessibilityIdentifier("layerPanel.editButton")
-
-            // View preset cycling
+            // View selector: a dropdown listing every saved view, with its own add button and
+            // swipe-to-delete (see ViewSelectorMenu).
             Button {
-                canvasManager.cycleViewPreset()
+                showViewSelector = true
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "square.3.layers.3d")
                         .font(.caption)
                     Text(canvasManager.activeViewName)
                         .font(.caption2)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, 8)
@@ -101,6 +55,9 @@ struct LayerPanel: View {
                 .cornerRadius(6)
             }
             .accessibilityIdentifier("layerPanel.viewsButton")
+            .popover(isPresented: $showViewSelector) {
+                ViewSelectorMenu(canvasManager: canvasManager, isPresented: $showViewSelector)
+            }
 
             Menu {
                 Button {
@@ -116,7 +73,7 @@ struct LayerPanel: View {
                 }
                 .accessibilityIdentifier("layerPanel.addVectorButton")
                 Button {
-                    canvasManager.folders.append(LayerFolder(id: UUID(), name: "Folder \(canvasManager.folders.count + 1)"))
+                    canvasManager.addFolder()
                 } label: {
                     Label("Folder", systemImage: "folder")
                 }
@@ -136,60 +93,111 @@ struct LayerPanel: View {
 
     private var list: some View {
         List {
-            ForEach(displayItems) { item in
-                switch item {
-                case .folder(let fi, let folder):
-                    FolderRow(folder: folder, folderIndex: fi, canvasManager: canvasManager)
-                        .listRowBackground(Color.clear)
-                        .moveDisabled(true)
+            // Rows reorder by press-and-hold + drag straight from the list — no edit mode, so the
+            // eye/opacity controls stay live while the stack is rearrangeable.
+            ForEach(rows) { row in
+                switch row {
+                case .folder(let folderID):
+                    if let folder = canvasManager.folders.first(where: { $0.id == folderID }) {
+                        FolderRow(folder: folder, canvasManager: canvasManager)
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    canvasManager.deleteFolder(folderID)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                .accessibilityIdentifier("layerPanel.folder.\(folder.name).delete")
+                            }
+                    }
 
-                case .layer(let li, let layer):
-                    LayerRow(layer: layer, arrayIndex: li, canvasManager: canvasManager)
+                // Bounds-checked: a row can outlive its layer for a frame during the List's own
+                // delete animation, and indexing straight into `layers` there would trap.
+                case .layer(_, let layerIndex) where canvasManager.layers.indices.contains(layerIndex):
+                    LayerRow(layer: canvasManager.layers[layerIndex], arrayIndex: layerIndex, canvasManager: canvasManager)
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                canvasManager.deleteLayer(at: li)
+                                canvasManager.deleteLayer(at: layerIndex)
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
-                            .accessibilityIdentifier("layerPanel.row.\(li).delete")
+                            .accessibilityIdentifier("layerPanel.row.\(layerIndex).delete")
 
                             Button {
-                                editingLayer = EditingLayerRef(id: layer.id)
+                                editingLayer = EditingLayerRef(id: canvasManager.layers[layerIndex].id)
                             } label: {
                                 Label("Edit", systemImage: "slider.horizontal.3")
                             }
                             .tint(.blue)
-                            .accessibilityIdentifier("layerPanel.row.\(li).edit")
+                            .accessibilityIdentifier("layerPanel.row.\(layerIndex).edit")
                         }
-                        .moveDisabled(false)
 
-                case .background:
-                    backgroundRow
-                        .listRowBackground(Color.clear)
-                        .moveDisabled(true)
+                default:
+                    EmptyView()
                 }
             }
-            .onMove(perform: moveLayer)
+            .onMove(perform: moveRows)
+
+            backgroundRow
+                .listRowBackground(Color.clear)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .environment(\.editMode, .constant(isEditingList ? .active : .inactive))
-        .animation(.interactiveSpring(), value: displayItems.map(\.id))
+        .animation(.interactiveSpring(), value: rows)
     }
-    
-    private func moveLayer(from source: IndexSet, to destination: Int) {
-        let layerIndices = source.compactMap { displayItems[$0].layerIndex }
-        guard !layerIndices.isEmpty else { return }
-        // Map destination in displayItems to layers array index.
-        let destLayers: Int
-        if destination >= displayItems.count {
-            destLayers = canvasManager.layers.count - 1
-        } else {
-            destLayers = displayItems[destination].layerIndex ?? (canvasManager.layers.count - 1)
+
+    /// Resolves a drag-and-drop within the presented row order back onto the `layers` array.
+    ///
+    /// The two orders don't line up: rows run top-to-bottom with folder headers interleaved and
+    /// collapsed folders hiding their children, while `layers` runs bottom-to-top and holds every
+    /// layer. So rather than translating indices, this replays the move on the row list and then
+    /// reads off the two things that actually determine the outcome — the row that ended up
+    /// directly above the dragged one (which folder it now belongs to) and the row directly below
+    /// it (what it now sits on top of).
+    ///
+    /// Folder headers are draggable too, and take their contents with them. Nothing in the list is
+    /// pinned, so there's no band where a drag silently does nothing.
+    private func moveRows(from source: IndexSet, to destination: Int) {
+        let rows = self.rows
+        guard let sourceIndex = source.first, rows.indices.contains(sourceIndex) else { return }
+        let moved = rows[sourceIndex]
+
+        var reordered = rows
+        reordered.move(fromOffsets: source, toOffset: destination)
+        guard let newIndex = reordered.firstIndex(where: { $0.id == moved.id }) else { return }
+
+        switch moved {
+        case .layer(let movedID, _):
+            var parentFolderID: UUID?
+            if newIndex > 0 {
+                switch reordered[newIndex - 1] {
+                case .folder(let folderID):
+                    parentFolderID = folderID
+                case .layer(let aboveID, _):
+                    parentFolderID = canvasManager.layers.first(where: { $0.id == aboveID })?.parentFolderID
+                }
+            }
+            let below = reordered.indices.contains(newIndex + 1) ? reordered[newIndex + 1] : nil
+            canvasManager.restackLayer(movedID, above: anchor(below: below), parentFolderID: parentFolderID)
+
+        case .folder(let folderID):
+            // Only the header moved in `reordered`; its children are still sitting at their old
+            // positions, so skip past them when looking for what the folder now rests on.
+            let childIDs = Set(canvasManager.layerIndices(inFolder: folderID).map { canvasManager.layers[$0].id })
+            let below = reordered[(newIndex + 1)...].first { row in
+                if case .layer(let id, _) = row { return !childIDs.contains(id) }
+                return true
+            }
+            canvasManager.restackFolder(folderID, above: anchor(below: below))
         }
-        for src in layerIndices {
-            canvasManager.moveLayer(from: src, to: destLayers)
+    }
+
+    private func anchor(below row: LayerStackRow?) -> CanvasManager.StackAnchor {
+        switch row {
+        case .layer(let id, _):  return .layer(id)
+        case .folder(let id):    return .folder(id)
+        case nil:                return .bottom
         }
     }
 
@@ -226,11 +234,101 @@ struct LayerPanel: View {
     }
 }
 
+// MARK: - View Selector
+
+/// Dropdown list of saved views. Picking one applies its visibility snapshot; the "+" captures the
+/// current visibility as a new view; each saved view swipes left to reveal a delete button, the
+/// same interaction the layer rows use.
+struct ViewSelectorMenu: View {
+    @ObservedObject var canvasManager: CanvasManager
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Views")
+                    .font(.headline)
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Button {
+                    canvasManager.addViewPreset()
+                } label: {
+                    Image(systemName: "plus")
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.15))
+                        .cornerRadius(6)
+                }
+                .accessibilityIdentifier("viewMenu.addButton")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Rectangle().fill(Color.white.opacity(0.15)).frame(height: 1)
+
+            List {
+                row(name: "All",
+                    isActive: !canvasManager.viewPresets.indices.contains(canvasManager.activeViewPresetIndex),
+                    identifier: "viewMenu.row.all") {
+                    canvasManager.selectViewPreset(at: -1)
+                    isPresented = false
+                }
+                .listRowBackground(Color.clear)
+
+                ForEach(Array(canvasManager.viewPresets.enumerated()), id: \.element.id) { index, preset in
+                    row(name: preset.name,
+                        isActive: index == canvasManager.activeViewPresetIndex,
+                        identifier: "viewMenu.row.\(index)") {
+                        canvasManager.selectViewPreset(at: index)
+                        isPresented = false
+                    }
+                    .listRowBackground(Color.clear)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            canvasManager.deleteViewPreset(at: index)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .accessibilityIdentifier("viewMenu.row.\(index).delete")
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+        }
+        .background(Color.black.opacity(0.95))
+        .frame(width: 260, height: 300)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    private func row(name: String, isActive: Bool, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(name)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Spacer()
+                if isActive {
+                    Image(systemName: "checkmark")
+                        .foregroundColor(.blue)
+                }
+            }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
+        .accessibilityValue(isActive ? "1" : "0")
+    }
+}
+
 // MARK: - Folder Row
 
 struct FolderRow: View {
     let folder: LayerFolder
-    let folderIndex: Int
     @ObservedObject var canvasManager: CanvasManager
 
     var body: some View {
@@ -259,6 +357,7 @@ struct FolderRow: View {
             Text(folder.name)
                 .foregroundColor(.white)
                 .lineLimit(1)
+                .accessibilityIdentifier("layerPanel.folder.\(folder.name)")
 
             Spacer()
         }
@@ -330,6 +429,13 @@ struct LayerRow: View {
                 .frame(width: 0, height: 0)
                 .accessibilityIdentifier("layerPanel.row.\(arrayIndex).vector")
                 .accessibilityValue("\(layer.kind == .vector ? 1 : 0),\(vectorStrokeCount)")
+
+            // Which folder this row belongs to (empty when top-level), so reorder/reparent
+            // behaviour is directly assertable rather than inferred from indentation.
+            Color.clear
+                .frame(width: 0, height: 0)
+                .accessibilityIdentifier("layerPanel.row.\(arrayIndex).folder")
+                .accessibilityValue(canvasManager.folders.first(where: { $0.id == layer.parentFolderID })?.name ?? "")
 
             Spacer()
 
