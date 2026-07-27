@@ -4,8 +4,19 @@ Format: one section per bug, newest first. See [CLAUDE.md](CLAUDE.md) for the mu
 
 ## REGRESSION: strokes intermittently fail to register after the pencil-only-drawing default fix (2026-07-26)
 
-**Status:** confirmed, unresolved, not yet fixed (logged only, per request — do not fix without
-discussion first).
+**Status:** fixed (Session 25).
+
+Root cause: `StrokeGestureRecognizer.requiresPencilOnly` defaulted to `true` while
+`StrokeCanvasView.pencilOnlyDrawing` defaulted to `false`. `didSet` doesn't fire during `init`, so
+the change-gate in `reconcileLayers()` (`false != false`) never assigned through, leaving the
+recognizer stuck at `true` — silently rejecting all finger touches on new layers. One-line fix:
+default `requiresPencilOnly` to `false`. Full suite green (50 tests, 0 failures, 1 skip).
+
+---
+
+## Housekeeping (2026-07-26): 8 items fixed from the 2026-07-22 feature audit
+
+**Verified** by full UI suite pass (Session 25: 50 tests, 0 failures, 1 skip).
 
 The 2026-07-26 housekeeping pass below flipped `pencilOnlyDrawing`'s default to `false` (so finger
 drawing works out of the box) and, on the assumption that the new default made it unnecessary,
