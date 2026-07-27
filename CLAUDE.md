@@ -4,8 +4,16 @@ Multiple AI sessions may be working on this repo at the same time, each in its o
 
 ## Starting work
 
-- Run `git fetch && git status` before assuming the working tree matches what you remember.
-- If another session is (or might be) active in this same directory, use a git worktree instead of sharing it (`EnterWorktree` tool if available, otherwise `git worktree add`).
+**You must always work in a git worktree. Never make changes directly on `main`.**
+
+1. Pick a unique session ID (e.g. `session-<short-hash>` or a descriptive name like `fix-toolbar-crash`).
+2. Create a worktree on a dedicated branch:
+   ```bash
+   git fetch origin
+   git worktree add ../PaintApp-<session-id> -b session/<session-id> origin/main
+   ```
+3. All your work happens inside that worktree directory. Reference files with their full worktree path.
+4. `git fetch && git status` in the worktree before assuming the tree matches what you remember.
 
 ## Ending a session / handing off
 
@@ -20,6 +28,12 @@ Multiple AI sessions may be working on this repo at the same time, each in its o
   ```
 
   Keep it minimal — a phrase, not a paragraph. Increment N from the last entry in the log.
+- After committing, you can remove your local worktree:
+  ```bash
+  cd /path/to/PaintApp  # back to main
+  git worktree remove ../PaintApp-<session-id>
+  git branch -d session/<session-id>
+  ```
 
 ## Remote testing via Tailscale
 
@@ -43,20 +57,20 @@ ssh juliapark@100.70.148.78 "command"
 
 Each session gets its own isolated worktree + DerivedData + simulator on the Mac, so multiple sessions can test concurrently without conflicts.
 
-**Session ID:** Pick a short unique ID for your session (e.g. the opencode worktree name, or `session-N` from the session log). Sanitised to `[a-zA-Z0-9_-]`.
+**Session ID:** Use the same session ID you created your local worktree with (e.g. `session-<short-hash>` or `fix-toolbar-crash`). Sanitised to `[a-zA-Z0-9_-]`.
 
 **Push first, then test:**
 ```bash
-# 1. Push your branch to origin
-git push origin <branch>
+# 1. Push your branch to origin (from inside your local worktree)
+git push origin session/<session-id>
 
 # 2. Run tests on the Mac (parallel-safe)
-ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/parallel_test.sh <session-id> <branch>"
+ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/parallel_test.sh <session-id> session/<session-id>"
 ```
 
 **Run a single test:**
 ```bash
-ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/parallel_test.sh <session-id> <branch> testCreateCanvasReachesEditorWithoutFreezing"
+ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/parallel_test.sh <session-id> session/<session-id> testCreateCanvasReachesEditorWithoutFreezing"
 ```
 
 **Check what's running:**
