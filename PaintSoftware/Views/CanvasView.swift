@@ -1093,7 +1093,9 @@ struct CanvasView: UIViewRepresentable {
             shapeDetectionActive = true
             shapeHoldTimer?.invalidate()
             shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
-                self?.fireShapeDetection()
+                Task { @MainActor in
+                    self?.fireShapeDetection()
+                }
             }
         }
 
@@ -1139,9 +1141,8 @@ struct CanvasView: UIViewRepresentable {
             guard let shape = ShapeDetector.detect(from: points) else { return }
 
             // Revert the partial stroke that was painted during the hold period.
+            // strokeBeforeSnapshot becomes nil, so the subsequent handleEnd bails out early.
             host.strokeView.revertStrokeToSnapshot()
-            // Cancel the recognizer so the finger-lift doesn't re-stroke.
-            host.strokeView.strokeRecognizer.cancel()
 
             canvasManager.beginInteractiveShape(kind: shape.kind, startPoint: shape.startPoint, endPoint: shape.endPoint)
             shapeOverlay?.shape = canvasManager.activeShape

@@ -21,6 +21,12 @@ enum ShapeDetector {
         var endPoint: CGPoint
     }
 
+    /// Convenience: detect from raw CGPoints (pressure-agnostic, used by the hold-to-detect gesture).
+    static func detect(from points: [CGPoint]) -> Detection? {
+        let samples = points.map { VectorSample(x: $0.x, y: $0.y, pressure: 0.5) }
+        return detect(from: samples)
+    }
+
     /// Analyses the given samples and returns the most likely shape, or `nil` if nothing is
     /// confidently detected. `startPoint` and `endPoint` are the two anchors of the detected shape
     /// (line endpoints, rect opposing corners, oval axis endpoints).
