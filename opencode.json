@@ -1,0 +1,129 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-sonnet-4-20250514",
+  "agent": {
+    "orchestrator": {
+      "mode": "primary",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "description": "Decomposes prompts into parallelizable tasks, assigns workers, merges results",
+      "permission": {
+        "task": {
+          "*": "allow"
+        },
+        "bash": {
+          "*": "ask",
+          "git *": "allow",
+          "gh *": "allow"
+        },
+        "edit": "allow",
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "todowrite": "allow"
+      }
+    },
+    "worker-feature": {
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "description": "Implements features and new functionality in the codebase",
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "deny",
+          "git *": "allow"
+        },
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "todowrite": "allow"
+      }
+    },
+    "worker-ui": {
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "description": "Implements UI/UX changes and interface modifications",
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "deny",
+          "git *": "allow"
+        },
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "todowrite": "allow"
+      }
+    },
+    "worker-bugfix": {
+      "mode": "subagent",
+      "model": "opencode/big-pickle",
+      "description": "Investigates and fixes bugs in the codebase",
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "deny",
+          "git *": "allow"
+        },
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "todowrite": "allow"
+      }
+    },
+    "worker-research": {
+      "mode": "subagent",
+      "model": "opencode/big-pickle",
+      "description": "Explores codebase and provides analysis without making changes",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "todowrite": "allow"
+      }
+    },
+    "worker-test": {
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "description": "Writes and runs tests for the codebase",
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "deny",
+          "git *": "allow",
+          "xcodebuild *": "allow"
+        },
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "todowrite": "allow"
+      }
+    },
+    "worker-integration": {
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "description": "Merges changes from multiple workers and commits to main",
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "allow"
+        },
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "todowrite": "allow"
+      }
+    }
+  },
+  "command": {
+    "deploy": {
+      "description": "Build and install the app on the iPad via the Mac",
+      "template": "Run the deploy script on the Mac to build and install PaintSoftware on the iPad. Execute: ssh juliapark@100.70.148.78 'bash ~/PaintApp/deploy/deploy.sh'"
+    },
+    "resign": {
+      "description": "Force an immediate re-sign and reinstall on the iPad",
+      "template": "Run the resign script on the Mac to re-sign and reinstall PaintSoftware. Execute: ssh juliapark@100.70.148.78 'bash ~/PaintApp/deploy/resign.sh'"
+    }
+  }
+}

@@ -20,3 +20,93 @@ Multiple AI sessions may be working on this repo at the same time, each in its o
   ```
 
   Keep it minimal — a phrase, not a paragraph. Increment N from the last entry in the log.
+
+## Remote testing via Tailscale
+
+This Windows machine has no Xcode. Tests must run on the MacBook over Tailscale.
+
+### Prerequisites
+
+- Tailscale running on both machines (same tailnet)
+- Mac SSH enabled: System Settings → General → Sharing → Remote Login → ON
+- SSH key: `~/.ssh/id_ed25519.pub` on Windows must be in `~/.ssh/authorized_keys` on the Mac
+- Mac username: **`juliapark`** (not `kevinpark0807`)
+- Wake-on-LAN: run `sudo pmset -a womp 1` on the Mac if you need to wake it from sleep remotely
+
+### Connection
+
+```bash
+ssh juliapark@100.70.148.78 "command"
+```
+
+### Sync and test
+
+The repo is cloned at `~/PaintApp` on the Mac. Before running tests:
+
+```bash
+# Pull latest code
+ssh juliapark@100.70.148.78 "cd ~/PaintApp && git pull origin main"
+
+# Run full UI test suite on iPad simulator
+ssh juliapark@100.70.148.78 "cd ~/PaintApp && xcodebuild test \
+  -project PaintSoftware.xcodeproj \
+  -scheme PaintSoftware \
+  -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=latest' \
+  2>&1 | tail -80"
+
+# Run a single test
+ssh juliapark@100.70.148.78 "cd ~/PaintApp && xcodebuild test \
+  -project PaintSoftware.xcodeproj \
+  -scheme PaintSoftware \
+  -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=latest' \
+  -only-testing:PaintSoftwareUITests/testCreateCanvasReachesEditorWithoutFreezing \
+  2>&1 | tail -80"
+```
+
+### Available iPad simulators on the Mac
+
+| Name | UUID |
+|------|------|
+| iPad Pro 13-inch (M5) | C90F0965-6F87-4FB7-BD97-941E03968E99 |
+| iPad Pro 11-inch (M5) | 2AE27426-4D30-465F-9B93-A759CAEA8456 |
+| iPad Air 13-inch (M4) | 2728EC30-A6B1-49FF-BFE8-7A71945F631C |
+| iPad Air 11-inch (M4) | 37AB7750-D487-46A6-88CA-381462F31107 |
+| iPad (A16) | BE6580AC-B13E-4E3B-BA09-45E8EDD43B9B |
+| iPad mini (A17 Pro) | A3A42701-53F0-4DE7-93D0-F092605D3354 |
+
+### Notes
+
+- `ssh` commands timeout after 120s by default; UI tests take several minutes — use the `timeout` parameter (e.g. `timeout: 600000` for 10 min).
+- If the Mac is asleep, ping it first (`ping 100.70.148.78`). If it doesn't respond and `womp` is enabled, try `tailscale ping --timeout 10s 100.70.148.78` (may send a MagicPacket). Otherwise ask the user to wake it.
+- Xcode is at `/Applications/Xcode.app`. `xcodebuild` and `xcrun` are on PATH.
+- Metal shader compilation requires the Metal Toolchain component (`xcodebuild -downloadComponent MetalToolchain`, one-time).
+
+### Deploying to iPad
+
+Build, sign, and install the app on the physical iPad remotely via Tailscale:
+
+```bash
+ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/deploy.sh"
+```
+
+Script does: git pull → unlock keychain → xcodebuild → devicectl install.
+Config lives at `~/.config/paintapp/.env` (never commit this).
+LaunchAgent `com.paintapp.resign` auto-resigns every 6 days (518400s) to bypass the 7-day free-account expiry.
+
+### Auto-Resign (7-day bypass)
+
+- LaunchAgent: `~/Library/LaunchAgents/com.paintapp.resign.plist`
+- Schedule: every 6 days + on login
+- Log: `~/.config/paintapp/resign.log`
+- Status: `launchctl list | grep paintapp`
+- Reload: `launchctl unload ~/Library/LaunchAgents/com.paintapp.resign.plist && launchctl load ~/Library/LaunchAgents/com.paintapp.resign.plist`
+
+### Auto-Resign (7-day bypass)
+
+- LaunchDaemon: `/Library/LaunchDaemons/com.paintapp.resign.plist`
+- Schedule: daily at 3:05 AM (runs as root, survives logout)
+- Logic: script checks timestamp file; only resigns every 5 days
+- Wake: `pmset schedule wakeorpoweron` fires before each resign
+- Log: `~/.config/paintapp/resign.log`
+- Status: `sudo launchctl list | grep paintapp`
+- Reload: `sudo launchctl unload /Library/LaunchDaemons/com.paintapp.resign.plist && sudo launchctl load /Library/LaunchDaemons/com.paintapp.resign.plist`

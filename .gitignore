@@ -91,3 +91,13 @@ iOSInjectionProject/
 
 # macOS
 .DS_Store
+
+# OpenCode agent configurations
+.opencode/
+
+# Deploy secrets (on Mac, not in repo)
+deploy/.env
+deploy/com.paintapp.resign.plist
+
+# Windows convenience script (contains SSH details)
+deploy.bat
