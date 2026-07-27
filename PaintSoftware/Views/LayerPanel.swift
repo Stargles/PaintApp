@@ -26,9 +26,7 @@ struct LayerPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     @State private var showBackgroundColorPicker = false
     @State private var editingLayer: EditingLayerRef?
-    @State private var dragStartLayerIndex: Int?
-    @State private var dragOffset: CGFloat = 0
-    @State private var isDragging = false
+    @State private var isEditingList = false
 
     /// Flattened items for display, bottom-to-top. Folders appear at the position of their
     /// topmost child. Collapsed folders hide their children.
@@ -73,6 +71,18 @@ struct LayerPanel: View {
                 .foregroundColor(.white)
 
             Spacer()
+
+            // Edit/Done toggle for reorder mode
+            Button(isEditingList ? "Done" : "Edit") {
+                withAnimation { isEditingList.toggle() }
+            }
+            .foregroundColor(.white)
+            .font(.caption2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.15))
+            .cornerRadius(6)
+            .accessibilityIdentifier("layerPanel.editButton")
 
             // View preset cycling
             Button {
@@ -131,11 +141,10 @@ struct LayerPanel: View {
                 case .folder(let fi, let folder):
                     FolderRow(folder: folder, folderIndex: fi, canvasManager: canvasManager)
                         .listRowBackground(Color.clear)
+                        .moveDisabled(true)
 
                 case .layer(let li, let layer):
-                    LayerRow(layer: layer, arrayIndex: li, canvasManager: canvasManager,
-                             isDragging: isDragging && dragStartLayerIndex == li,
-                             dragOffset: isDragging && dragStartLayerIndex == li ? dragOffset : 0)
+                    LayerRow(layer: layer, arrayIndex: li, canvasManager: canvasManager)
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
@@ -153,49 +162,35 @@ struct LayerPanel: View {
                             .tint(.blue)
                             .accessibilityIdentifier("layerPanel.row.\(li).edit")
                         }
-                        // Long-press + drag to reorder
-                        .gesture(dragGesture(for: li))
+                        .moveDisabled(false)
 
                 case .background:
                     backgroundRow
                         .listRowBackground(Color.clear)
+                        .moveDisabled(true)
                 }
             }
+            .onMove(perform: moveLayer)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .environment(\.editMode, .constant(isEditingList ? .active : .inactive))
         .animation(.interactiveSpring(), value: displayItems.map(\.id))
     }
-
-    // MARK: - Drag Gesture
-
-    private func dragGesture(for layerIndex: Int) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.5)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-            .onChanged { value in
-                switch value {
-                case .second(true, let drag):
-                    if let drag, !isDragging {
-                        isDragging = true
-                        dragStartLayerIndex = layerIndex
-                        dragOffset = 0
-                    }
-                    if isDragging, let drag {
-                        dragOffset = drag.translation.height
-                    }
-                default:
-                    break
-                }
-            }
-            .onEnded { value in
-                defer { isDragging = false; dragOffset = 0; dragStartLayerIndex = nil }
-                guard case .second(true, let drag) = value, let drag else { return }
-                let rowH: CGFloat = 60
-                let rowsMoved = Int(round(drag.translation.height / rowH))
-                guard rowsMoved != 0, let startIdx = dragStartLayerIndex else { return }
-                let targetIdx = startIdx - rowsMoved // display up = negative drag = higher array index
-                canvasManager.moveLayer(from: startIdx, to: min(max(targetIdx, 0), canvasManager.layers.count - 1))
-            }
+    
+    private func moveLayer(from source: IndexSet, to destination: Int) {
+        let layerIndices = source.compactMap { displayItems[$0].layerIndex }
+        guard !layerIndices.isEmpty else { return }
+        // Map destination in displayItems to layers array index.
+        let destLayers: Int
+        if destination >= displayItems.count {
+            destLayers = canvasManager.layers.count - 1
+        } else {
+            destLayers = displayItems[destination].layerIndex ?? (canvasManager.layers.count - 1)
+        }
+        for src in layerIndices {
+            canvasManager.moveLayer(from: src, to: destLayers)
+        }
     }
 
     // MARK: - Background Row
@@ -278,8 +273,6 @@ struct LayerRow: View {
     let layer: Layer
     let arrayIndex: Int
     @ObservedObject var canvasManager: CanvasManager
-    var isDragging: Bool = false
-    var dragOffset: CGFloat = 0
 
     /// Indentation level for folder children (currently just 1 level).
     private var indentLevel: Int { layer.parentFolderID != nil ? 1 : 0 }
@@ -360,11 +353,6 @@ struct LayerRow: View {
         .onTapGesture {
             canvasManager.currentLayerIndex = arrayIndex
         }
-        .offset(y: isDragging ? dragOffset : 0)
-        .scaleEffect(isDragging ? 1.05 : 1)
-        .shadow(color: isDragging ? .black.opacity(0.5) : .clear, radius: isDragging ? 12 : 0, y: isDragging ? 6 : 0)
-        .zIndex(isDragging ? 100 : 0)
-        .opacity(isDragging ? 0.92 : 1)
     }
 
     private var strokeCount: Int {
