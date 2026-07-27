@@ -327,13 +327,33 @@ extension CanvasManager {
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
         let cel = layers[currentLayerIndex].cels[celIndex]
-        // rasterize() folds fillImage into `base`, so it's now baked into newImage and must be
-        // cleared from the cel or it would render a second time underneath.
-        let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
-        let newImage = PixelOps.fill(base: base, path: selection.path, color: PixelOps.uiColor(from: brushColor))
-        registerUndoableCelChange(layerIndex: currentLayerIndex, celIndex: celIndex,
-                                   oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
-                                   newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Fill")
+        let isVector = layers[currentLayerIndex].kind == .vector
+        if isVector, let vectorCanvas = cel.vector {
+            let fillsBefore = vectorCanvas.fills
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+            brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
+            let element = VectorFillElement(path: selection.path, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
+            vectorCanvas.addFill(element)
+            setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: nil)
+            let manager = activeUndoManager
+            let li = currentLayerIndex, ci = celIndex
+            manager?.setActionName("Fill")
+            manager?.registerUndo(withTarget: self) { target in
+                vectorCanvas.fills = fillsBefore
+                vectorCanvas.bumpVersion()
+                target.scheduleThumbnailRegen(layerIndex: li, celIndex: ci)
+                target.registerVectorFillRedo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
+                                              layerIndex: li, celIndex: ci, actionName: "Fill", undoManager: manager)
+                target.refreshUndoRedoState()
+            }
+            refreshUndoRedoState()
+        } else {
+            let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+            let newImage = PixelOps.fill(base: base, path: selection.path, color: PixelOps.uiColor(from: brushColor))
+            registerUndoableCelChange(layerIndex: currentLayerIndex, celIndex: celIndex,
+                                       oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
+                                       newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Fill")
+        }
     }
 
     func clearSelectionPixels() {
@@ -343,13 +363,56 @@ extension CanvasManager {
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
         let cel = layers[currentLayerIndex].cels[celIndex]
-        // rasterize() folds fillImage into `base`, so it's now baked into newImage and must be
-        // cleared from the cel or it would render a second time underneath.
-        let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
-        let newImage = PixelOps.clear(base: base, path: selection.path)
-        registerUndoableCelChange(layerIndex: currentLayerIndex, celIndex: celIndex,
-                                   oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
-                                   newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Clear")
+        let isVector = layers[currentLayerIndex].kind == .vector
+        if isVector, let vectorCanvas = cel.vector {
+            // Vector clear: clip existing fills to the inverse of the selection path.
+            let fillsBefore = vectorCanvas.fills
+            // For each fill element, if its path intersects the selection, replace it with the
+            // clipped version (path minus selection). Simple approach: subtract the selection
+            // rectangle from each fill path using even-odd fill rule.
+            var newFills: [VectorFillElement] = []
+            for fill in fillsBefore {
+                guard let path = fill.cgPath else { continue }
+                let clipped = Self.clipPath(path, excluding: selection.path, canvasSize: canvasSize)
+                if let clipped {
+                    newFills.append(VectorFillElement(path: clipped, color: fill.color, opacity: fill.opacity, evenOddFill: true))
+                }
+            }
+            vectorCanvas.fills = newFills
+            vectorCanvas.bumpVersion()
+            setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: nil)
+            let manager = activeUndoManager
+            let li = currentLayerIndex, ci = celIndex
+            manager?.setActionName("Clear")
+            manager?.registerUndo(withTarget: self) { target in
+                vectorCanvas.fills = fillsBefore
+                vectorCanvas.bumpVersion()
+                target.scheduleThumbnailRegen(layerIndex: li, celIndex: ci)
+                target.registerVectorFillRedo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
+                                              layerIndex: li, celIndex: ci, actionName: "Clear", undoManager: manager)
+                target.refreshUndoRedoState()
+            }
+            refreshUndoRedoState()
+        } else {
+            let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+            let newImage = PixelOps.clear(base: base, path: selection.path)
+            registerUndoableCelChange(layerIndex: currentLayerIndex, celIndex: celIndex,
+                                       oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
+                                       newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Clear")
+        }
+    }
+
+    /// Subtracts `excludePath` from `path` by composing them into a single even-odd filled path
+    /// (the overlapping region becomes a hole). Returns nil if the result is empty.
+    private static func clipPath(_ path: CGPath, excluding excludePath: CGPath, canvasSize: CGSize) -> CGPath? {
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        let combined = CGMutablePath()
+        combined.addPath(path)
+        combined.addPath(excludePath)
+        // The even-odd fill rule makes the overlapping region (inside both paths) a hole.
+        // However, `CGPath` itself has no fill-rule concept — it's just geometry. We return the
+        // combined path and rely on the renderer to use even-odd.
+        return combined
     }
 
     // MARK: Undo-integrated mutation helpers

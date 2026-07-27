@@ -36,12 +36,15 @@ struct VectorFillElement: Identifiable, Codable {
     var color: CodableColor
     /// Additional opacity multiplier on top of the color's own alpha (matches `VectorStroke.opacity`).
     var opacity: Double
+    /// When true the path is rendered with the even-odd fill rule (used for clear-selection holes).
+    var evenOddFill: Bool = false
 
-    init(path: CGPath, color: CodableColor, opacity: Double = 1.0) {
+    init(path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) {
         let bezier = UIBezierPath(cgPath: path)
         self.pathData = (try? NSKeyedArchiver.archivedData(withRootObject: bezier, requiringSecureCoding: true)) ?? Data()
         self.color = color
         self.opacity = opacity
+        self.evenOddFill = evenOddFill
     }
 
     var cgPath: CGPath? {
@@ -236,7 +239,11 @@ final class VectorCanvas {
                 ctx.cgContext.setFillColor(fill.uiColor.cgColor)
                 ctx.cgContext.setAlpha(fill.opacity)
                 ctx.cgContext.addPath(path)
-                ctx.cgContext.fillPath()
+                if fill.evenOddFill {
+                    ctx.cgContext.fillPath(using: .evenOdd)
+                } else {
+                    ctx.cgContext.fillPath()
+                }
             }
             ctx.cgContext.setAlpha(1.0)
             for element in images {
