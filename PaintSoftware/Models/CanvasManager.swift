@@ -589,9 +589,11 @@ final class CanvasManager: ObservableObject {
     // texture mutation alone wouldn't otherwise produce.
 
     func strokeEnded(layerIndex: Int, celIndex: Int) {
-        // A paint/erase stroke is the "canvas action" that ends an adjustable fill's config state:
+        // A paint/erase stroke is the "canvas action" that ends an adjustable fill:
         // bake it now so it becomes real layer pixels underneath/around the new stroke.
         if fillGestureActive { commitInteractiveFill() }
+        // Note: shapes are NOT committed on stroke end. They stay adjustable (transient state)
+        // until an explicit canvas action (undo/redo, layer change, new fill, etc.) commits them.
         regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
     }
 
@@ -1297,6 +1299,181 @@ final class CanvasManager: ObservableObject {
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
     }
 
+    // MARK: - Smart Shapes (interactive: detect shape from held stroke, adjustable via handles)
+
+    /// True while an interactive shape exists — either the finger is still down adjusting it, or it's
+    /// in the post-lift *adjustable* state (preview shown, handles visible, not yet baked). Cleared
+    /// only on commit or cancel. Main-thread only.
+    private(set) var shapeGestureActive = false
+    /// True only while the drawing finger is actively pressing; false in the adjustable state.
+    private var shapeFingerDown = false
+    /// True when a shape exists and the finger is NOT pressing (adjustable state).
+    var isShapeInAdjustableState: Bool { shapeGestureActive && !shapeFingerDown }
+
+    private var shapeType: VectorShapeElement.ShapeKind = .line
+    private var shapeStartPoint: CGPoint = .zero
+    private var shapeEndPoint: CGPoint = .zero
+    private var shapeRotation: CGFloat = 0
+    private var shapeIsConstrained = false
+    private var shapeGestureLayerIndex = 0
+    private var shapeGestureCelIndex = 0
+    private var shapeGestureColor: CodableColor = .init(red: 0, green: 0, blue: 0, alpha: 1)
+    private var shapeGestureStrokeWidth: CGFloat = 5
+    private var shapeGestureOpacity: Double = 1.0
+    private weak var shapeGestureUndoManager: UndoManager?
+
+    /// The current shape being drawn/edited, exposed as a read-only snapshot for the overlay view.
+    var activeShape: VectorShapeElement? {
+        guard shapeGestureActive else { return nil }
+        return VectorShapeElement(kind: shapeType, color: shapeGestureColor,
+                                  strokeWidth: shapeGestureStrokeWidth, opacity: shapeGestureOpacity,
+                                  startPoint: shapeStartPoint, endPoint: shapeEndPoint,
+                                  rotation: shapeRotation)
+    }
+
+    /// Begins an interactive shape. Called when the hold timer fires and ShapeDetector confirms a shape.
+    func beginInteractiveShape(kind: VectorShapeElement.ShapeKind, startPoint: CGPoint, endPoint: CGPoint) {
+        guard !shapeFingerDown else { return }
+        if shapeGestureActive { commitInteractiveShape() }
+        guard layers.indices.contains(currentLayerIndex) else { return }
+        let layerIndex = currentLayerIndex
+        guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return }
+
+        shapeGestureActive = true
+        shapeFingerDown = true
+        shapeType = kind
+        shapeStartPoint = startPoint
+        shapeEndPoint = endPoint
+        shapeRotation = 0
+        shapeIsConstrained = false
+        shapeGestureLayerIndex = layerIndex
+        shapeGestureCelIndex = celIndex
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+        brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
+        shapeGestureColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
+        shapeGestureStrokeWidth = brushSize
+        shapeGestureOpacity = brushOpacity
+        shapeGestureUndoManager = activeUndoManager
+        refreshUndoRedoState()
+    }
+
+    /// Updates the shape's end point as the user drags.
+    func updateInteractiveShape(endPoint: CGPoint, rotation: CGFloat? = nil, isConstrained: Bool = false) {
+        guard shapeGestureActive else { return }
+        shapeEndPoint = endPoint
+        if let rotation { shapeRotation = rotation }
+        shapeIsConstrained = isConstrained
+    }
+
+    /// Lifts the finger but leaves the shape adjustable.
+    func endInteractiveShape() {
+        guard shapeGestureActive, shapeFingerDown else { return }
+        shapeFingerDown = false
+        objectWillChange.send()
+    }
+
+    /// Bakes the current shape into the layer.
+    func commitInteractiveShape() {
+        guard shapeGestureActive else { return }
+        shapeGestureActive = false
+        shapeFingerDown = false
+        let layerIndex = shapeGestureLayerIndex, celIndex = shapeGestureCelIndex
+        let undoManager = shapeGestureUndoManager
+        defer { shapeGestureUndoManager = nil; refreshUndoRedoState() }
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        let cel = layers[layerIndex].cels[celIndex]
+
+        let shape = VectorShapeElement(kind: shapeType, color: shapeGestureColor,
+                                       strokeWidth: shapeGestureStrokeWidth, opacity: shapeGestureOpacity,
+                                       startPoint: shapeStartPoint, endPoint: shapeEndPoint,
+                                       rotation: shapeRotation)
+
+        if layers[layerIndex].kind == .vector, let vectorCanvas = cel.vector {
+            let shapesBefore = vectorCanvas.shapes
+            vectorCanvas.addShape(shape)
+            let manager = undoManager
+            manager?.setActionName("Shape")
+            manager?.registerUndo(withTarget: self) { target in
+                vectorCanvas.shapes = shapesBefore
+                vectorCanvas.bumpVersion()
+                target.scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
+                target.registerVectorShapeRedo(vectorCanvas: vectorCanvas, oldShapes: shapesBefore, newShapes: vectorCanvas.shapes,
+                                               layerIndex: layerIndex, celIndex: celIndex, actionName: "Shape", undoManager: manager)
+                target.refreshUndoRedoState()
+            }
+            refreshUndoRedoState()
+        } else {
+            let shapeImage = Self.renderShapeToImage(shape, canvasSize: canvasSize ?? .zero)
+            let newBaked = PixelOps.compositeOver(base: cel.bakedImage, overlay: shapeImage)
+            registerUndoableCelChange(layerIndex: layerIndex, celIndex: celIndex,
+                                      oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: nil,
+                                      newRaster: cel.raster, newBaked: newBaked, newFill: nil,
+                                      actionName: "Shape", undoManager: undoManager)
+        }
+        objectWillChange.send()
+    }
+
+    func registerVectorShapeRedo(vectorCanvas: VectorCanvas,
+                                 oldShapes: [VectorShapeElement], newShapes: [VectorShapeElement],
+                                 layerIndex: Int, celIndex: Int,
+                                 actionName: String, undoManager: UndoManager?) {
+        let manager = undoManager ?? activeUndoManager
+        manager?.setActionName(actionName)
+        manager?.registerUndo(withTarget: self) { target in
+            vectorCanvas.shapes = newShapes
+            vectorCanvas.bumpVersion()
+            target.scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
+            target.registerVectorShapeRedo(vectorCanvas: vectorCanvas, oldShapes: newShapes, newShapes: oldShapes,
+                                           layerIndex: layerIndex, celIndex: celIndex, actionName: actionName, undoManager: undoManager)
+            target.refreshUndoRedoState()
+        }
+    }
+
+    static func renderShapeToImage(_ shape: VectorShapeElement, canvasSize: CGSize) -> UIImage? {
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: canvasSize, format: format).image { ctx in
+            let path = UIBezierPath(cgPath: shape.rotatedCGPath)
+            ctx.cgContext.setStrokeColor(shape.uiColor.cgColor)
+            ctx.cgContext.setLineWidth(shape.strokeWidth)
+            ctx.cgContext.setLineCap(.round)
+            ctx.cgContext.setLineJoin(.round)
+            ctx.cgContext.setAlpha(shape.opacity)
+            ctx.cgContext.addPath(path.cgPath)
+            ctx.cgContext.strokePath()
+        }
+    }
+
+    func cancelInteractiveShape() {
+        guard shapeGestureActive else { return }
+        shapeGestureActive = false
+        shapeFingerDown = false
+        shapeGestureUndoManager = nil
+        objectWillChange.send()
+        refreshUndoRedoState()
+    }
+
+    /// Commits a pending shape if the finger is still down, or discards it.
+    func cancelInteractiveShapeDrag() {
+        guard shapeFingerDown else { return }
+        cancelInteractiveShape()
+    }
+
+    /// Hit-tests `point` (canvas coords) against any committed shapes on the active layer.
+    func hitTestShape(at point: CGPoint) -> VectorShapeElement? {
+        guard layers.indices.contains(currentLayerIndex),
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return nil }
+        let cel = layers[currentLayerIndex].cels[celIndex]
+        if let vector = cel.vector {
+            for shape in vector.shapes.reversed() where shape.hitTest(point) {
+                return shape
+            }
+        }
+        return nil
+    }
+
     // MARK: - Undo / redo
 
     func undo() {
@@ -1322,13 +1499,16 @@ final class CanvasManager: ObservableObject {
         } else if fillGestureActive {
             commitInteractiveFill()
         }
+        if shapeFingerDown {
+            cancelInteractiveShape()
+        } else if shapeGestureActive {
+            commitInteractiveShape()
+        }
     }
 
     func refreshUndoRedoState() {
-        // A lifted-but-not-yet-committed fill is itself an undoable action (undo finalizes then reverts
-        // it), so the Undo affordance must be live even when the committed stack is empty.
-        let newCanUndo = fillGestureActive || (activeUndoManager?.canUndo ?? false)
-        let newCanRedo = !fillGestureActive && (activeUndoManager?.canRedo ?? false)
+        let newCanUndo = fillGestureActive || shapeGestureActive || (activeUndoManager?.canUndo ?? false)
+        let newCanRedo = !fillGestureActive && !shapeGestureActive && (activeUndoManager?.canRedo ?? false)
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }
     }

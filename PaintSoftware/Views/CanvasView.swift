@@ -118,6 +118,18 @@ final class StrokeCanvasView: UIView {
     /// be committed *before* this stroke registers its own undo step — keeping undo order intuitive
     /// (the stroke, drawn last, undoes first; the fill under it undoes after).
     var onStrokeBegan: (() -> Void)?
+    /// Called for each coalesced touch sample during a stroke, in canvas coordinates.
+    var onStrokeMoved: ((CGPoint) -> Void)?
+    /// Reverts this stroke's raster changes to the pre-stroke snapshot. Used when the hold timer
+    /// fires and the stroke is detected as a smart shape — the partial stroke is replaced by the
+    /// shape overlay instead.
+    func revertStrokeToSnapshot() {
+        guard let raster, let snap = strokeBeforeSnapshot else { return }
+        raster.reset(to: snap.image, strokeCount: snap.count)
+        lastStampPoint = nil
+        refreshDisplay()
+        strokeBeforeSnapshot = nil
+    }
 
     let strokeRecognizer = StrokeGestureRecognizer()
     private let imageView = UIImageView()
@@ -204,14 +216,11 @@ final class StrokeCanvasView: UIView {
     private func handleMove(_ touch: UITouch, _ event: UIEvent) {
         if vectorCanvas != nil { moveVectorStroke(touch, event); return }
         guard let raster else { return }
-        // Coalesced touches carry the full-rate sample history since the last redraw, not just
-        // the latest point — matters for fast strokes so segments don't look faceted. Stamps go
-        // into the persistent raster individually, but the (O(canvas)) display refresh happens
-        // once for the whole batch, not per sample.
         for sample in event.coalescedTouches(for: touch) ?? [touch] {
             let input = StrokeInput(touch: sample, in: self)
             let smoothed = stabilizer.update(rawPoint: input.position)
             stampPath(to: smoothed, pressure: input.pressure, into: raster)
+            onStrokeMoved?(input.position)
         }
         refreshDisplay()
     }
@@ -499,6 +508,11 @@ struct CanvasView: UIViewRepresentable {
         floatingOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(floatingOverlay)
 
+        let shapeOverlay = ShapeOverlayView()
+        shapeOverlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(shapeOverlay)
+        context.coordinator.shapeOverlay = shapeOverlay
+
         // Paper is inset from the container by `canvasPadding` on each side (the artwork rect); the
         // coordinator updates these constants in `updatePaper()`. Positive top/leading, negative
         // bottom/trailing so a larger padding shrinks the white paper inward, revealing the grey margin.
@@ -529,7 +543,11 @@ struct CanvasView: UIViewRepresentable {
             floatingOverlay.topAnchor.constraint(equalTo: container.topAnchor),
             floatingOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             floatingOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            floatingOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+            floatingOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            shapeOverlay.topAnchor.constraint(equalTo: container.topAnchor),
+            shapeOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            shapeOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            shapeOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor)
         ])
 
         context.coordinator.hostView = host
@@ -556,6 +574,12 @@ struct CanvasView: UIViewRepresentable {
         floatingOverlay.onRequestCommit = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.commitFloatingPieceIfNeeded()
         }
+        shapeOverlay.onEndpointDragged = { [weak coordinator = context.coordinator] point in
+            coordinator?.canvasManager.updateInteractiveShape(endPoint: point)
+        }
+        shapeOverlay.onRotationDragged = { [weak coordinator = context.coordinator] rotation in
+            coordinator?.canvasManager.updateInteractiveShape(endPoint: coordinator?.canvasManager.activeShape?.endPoint ?? .zero, rotation: rotation)
+        }
 
         host.onLayout = { [weak coordinator = context.coordinator] in
             coordinator?.hostBoundsDidChange()
@@ -566,6 +590,7 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.updateTransformOverlay()
         context.coordinator.updateSelectionOverlay()
         context.coordinator.updateFloatingOverlay()
+        context.coordinator.updateShapeOverlay()
         context.coordinator.hostBoundsDidChange()
 
         return host
@@ -580,6 +605,7 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.updateTransformOverlay()
         context.coordinator.updateSelectionOverlay()
         context.coordinator.updateFloatingOverlay()
+        context.coordinator.updateShapeOverlay()
         context.coordinator.hostBoundsDidChange()
     }
 
@@ -611,6 +637,24 @@ struct CanvasView: UIViewRepresentable {
         /// Enabled when there are no layers or the active layer is hidden, so a drawing-tool touch
         /// (which would otherwise be silently swallowed) triggers a user-facing alert instead.
         weak var catchAllTapRecognizer: UILongPressGestureRecognizer?
+
+        // Smart-shape overlay and detection state
+        weak var shapeOverlay: ShapeOverlayView?
+        /// Accumulated canvas-space points from the current stroke (for shape detection).
+        private var shapeDetectionPoints: [CGPoint] = []
+        /// Timer that fires after the user holds the finger still for ~1s — triggers shape detection.
+        private var shapeHoldTimer: Timer?
+        /// True when a shape detection is in progress (timer running).
+        private var shapeDetectionActive = false
+        /// The stroke view that started the current detection stroke (needed to revert on shape found).
+        private weak var shapeDetectionHost: LayerHostView?
+        /// Minimum movement threshold (canvas points) — if the finger moves more than this after
+        /// the initial down, cancel shape detection (it's a real stroke, not a hold-for-shape).
+        private static let shapeMovementThreshold: CGFloat = 40
+        /// Minimum distance the finger must travel before we start the hold timer (prevents triggering
+        /// on a tap-and-hold that never actually drew anything).
+        private static let shapeMinTravel: CGFloat = 30
+        private var shapeDetectionOrigin: CGPoint?
 
         // Interactive-fill drag state, captured at press-down: the finger's start point in fixed
         // screen (host) space, and all three fill settings at that moment. The drag is horizontal-only —
@@ -700,10 +744,17 @@ struct CanvasView: UIViewRepresentable {
             for layer in canvasManager.layers where layerHosts[layer.id] == nil {
                 let host = LayerHostView()
                 host.strokeView.layerID = layer.id
-                host.strokeView.onStrokeBegan = { [weak self] in
+                host.strokeView.onStrokeBegan = { [weak self, weak host] in
                     // Finalize a still-adjustable fill before this stroke changes any pixels, so the fill
                     // is the older undo step and this stroke undoes first. Self-guards when no fill is live.
                     self?.canvasManager.commitInteractiveFill()
+                    // Also commit a pending shape (same ordering rationale).
+                    self?.canvasManager.commitInteractiveShape()
+                    // Begin accumulating stroke points for smart-shape detection.
+                    if let host { self?.startShapeDetection(host: host) }
+                }
+                host.strokeView.onStrokeMoved = { [weak self, weak host] point in
+                    self?.handleStrokeMoved(point, host: host)
                 }
                 host.strokeView.strokeRecognizer.onAnyTouchBegan = { [weak self] in
                     // Touching the canvas at all — even a finger tap that the pencil-only gate below
@@ -717,6 +768,13 @@ struct CanvasView: UIViewRepresentable {
                           let celIndex = self.canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: self.canvasManager.currentFrame) else { return }
                     self.canvasManager.strokeEnded(layerIndex: layerIndex, celIndex: celIndex)
                     self.canvasManager.refreshUndoRedoState()
+                    // If shape detection was still running (finger lifted before timer fired), cancel it.
+                    self.cancelShapeDetection()
+                    // If a shape is in the adjustable state, commit it on finger-lift (stroke = canvas action).
+                    if self.canvasManager.shapeGestureActive && !self.canvasManager.isShapeInAdjustableState {
+                        // Still finger-down — do nothing; endInteractiveShape transitions to adjustable.
+                    }
+                    self.updateShapeOverlay()
                 }
 
                 host.translatesAutoresizingMaskIntoConstraints = false
@@ -928,6 +986,17 @@ struct CanvasView: UIViewRepresentable {
             floatingOverlay?.update(canvasManager.floatingPiece)
         }
 
+        func updateShapeOverlay() {
+            guard let overlay = shapeOverlay else { return }
+            if canvasManager.shapeGestureActive, let shape = canvasManager.activeShape {
+                overlay.shape = shape
+                overlay.isActive = true
+            } else {
+                overlay.isActive = false
+                overlay.shape = nil
+            }
+        }
+
         func updateActiveLayerAndTool() {
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
@@ -935,6 +1004,8 @@ struct CanvasView: UIViewRepresentable {
 
             let activeKey = ActiveKey(layerID: layer.id, frame: canvasManager.currentFrame)
             if activeKey != lastActiveKey {
+                // Layer or frame changed: commit any pending shape (it belongs to the previous context).
+                if canvasManager.shapeGestureActive { canvasManager.commitInteractiveShape(); updateShapeOverlay() }
                 host.strokeView.undoManager?.removeAllActions()
                 lastActiveKey = activeKey
             }
@@ -1009,6 +1080,72 @@ struct CanvasView: UIViewRepresentable {
             onionSkinView.image = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].raster.renderToUIImage()
             onionSkinView.alpha = CGFloat(canvasManager.onionSkinOpacity)
             onionSkinView.isHidden = false
+        }
+
+        // MARK: - Smart-shape detection (hold-to-detect: accumulate stroke points, fire after ~1s idle)
+
+        private func startShapeDetection(host: LayerHostView) {
+            guard canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil else { return }
+            guard !canvasManager.shapeGestureActive else { return }
+            shapeDetectionPoints.removeAll()
+            shapeDetectionOrigin = nil
+            shapeDetectionHost = host
+            shapeDetectionActive = true
+            shapeHoldTimer?.invalidate()
+            shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
+                self?.fireShapeDetection()
+            }
+        }
+
+        private func handleStrokeMoved(_ point: CGPoint, host: LayerHostView?) {
+            guard shapeDetectionActive else { return }
+            guard let host, host === shapeDetectionHost else { return }
+            if shapeDetectionOrigin == nil { shapeDetectionOrigin = point }
+            shapeDetectionPoints.append(point)
+            // Cancel if the finger has moved too far — it's a real freehand stroke, not a hold.
+            if let origin = shapeDetectionOrigin {
+                let dist = hypot(point.x - origin.x, point.y - origin.y)
+                if dist > Self.shapeMovementThreshold {
+                    cancelShapeDetection()
+                }
+            }
+        }
+
+        private func cancelShapeDetection() {
+            shapeHoldTimer?.invalidate()
+            shapeHoldTimer = nil
+            shapeDetectionActive = false
+            shapeDetectionPoints.removeAll()
+            shapeDetectionOrigin = nil
+            shapeDetectionHost = nil
+        }
+
+        private func fireShapeDetection() {
+            shapeHoldTimer = nil
+            guard shapeDetectionActive else { return }
+            shapeDetectionActive = false
+            let points = shapeDetectionPoints
+            shapeDetectionPoints.removeAll()
+            shapeDetectionOrigin = nil
+            guard points.count >= 3,
+                  let host = shapeDetectionHost,
+                  let layerID = host.strokeView.layerID,
+                  let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == layerID }) else {
+                shapeDetectionHost = nil
+                return
+            }
+            shapeDetectionHost = nil
+
+            guard let shape = ShapeDetector.detect(from: points) else { return }
+
+            // Revert the partial stroke that was painted during the hold period.
+            host.strokeView.revertStrokeToSnapshot()
+            // Cancel the recognizer so the finger-lift doesn't re-stroke.
+            host.strokeView.strokeRecognizer.cancel()
+
+            canvasManager.beginInteractiveShape(kind: shape.kind, startPoint: shape.startPoint, endPoint: shape.endPoint)
+            shapeOverlay?.shape = canvasManager.activeShape
+            shapeOverlay?.isActive = true
         }
 
         // MARK: - Fit / transform
@@ -1175,6 +1312,12 @@ struct CanvasView: UIViewRepresentable {
             // transform takes over cleanly. An already-lifted, still-adjustable fill is left intact so the
             // user can pan/zoom to inspect it and keep adjusting. No-op when no fill drag is active.
             canvasManager.cancelInteractiveFillDrag()
+            // Two fingers down while a shape is adjustable: commit it (pan/zoom = done editing),
+            // then engage constraint snap for any *new* shape that might start.
+            if canvasManager.isShapeInAdjustableState {
+                canvasManager.commitInteractiveShape()
+                updateShapeOverlay()
+            }
             guard gestureAnchorCenter0 == nil, let container = containerView else { return }
             gestureAnchorHost0 = location
             gestureAnchorCenter0 = container.center
@@ -1216,6 +1359,11 @@ struct CanvasView: UIViewRepresentable {
             gestureAnchorHost0 = nil
             gestureAnchorCenter0 = nil
             snapEngagedAt = nil
+            // Release shape constraint snap when the two-finger gesture ends.
+            if canvasManager.isShapeInAdjustableState {
+                shapeOverlay?.isConstrained = false
+                canvasManager.updateInteractiveShape(endPoint: canvasManager.activeShape?.endPoint ?? .zero, rotation: nil, isConstrained: false)
+            }
         }
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {

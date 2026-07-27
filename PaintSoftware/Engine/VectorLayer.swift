@@ -57,6 +57,92 @@ struct VectorFillElement: Identifiable, Codable {
     }
 }
 
+/// A geometric shape stored on a vector layer: a stroked line, rectangle, or oval defined by two
+/// anchor points (start + end), a rotation angle, and the current brush color/size/opacity. Created
+/// by the smart-shape gesture (hold-to-convert a freehand stroke) and lives in a transient editable
+/// state with control-point handles until committed into the layer.
+struct VectorShapeElement: Identifiable, Codable {
+    var id: UUID = UUID()
+    var kind: ShapeKind
+    var color: CodableColor
+    var strokeWidth: CGFloat
+    var opacity: Double
+    var startPoint: CGPoint
+    var endPoint: CGPoint
+    var rotation: CGFloat
+
+    enum ShapeKind: String, Codable, CaseIterable {
+        case line
+        case rectangle
+        case oval
+    }
+
+    var uiColor: UIColor {
+        UIColor(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
+    }
+
+    /// Center point between start and end.
+    var center: CGPoint {
+        CGPoint(x: (startPoint.x + endPoint.x) / 2,
+                y: (startPoint.y + endPoint.y) / 2)
+    }
+
+    /// Bounding rect from start/end (unrotated).
+    var boundingRect: CGRect {
+        let origin = CGPoint(x: min(startPoint.x, endPoint.x),
+                             y: min(startPoint.y, endPoint.y))
+        let size = CGSize(width: abs(endPoint.x - startPoint.x),
+                          height: abs(endPoint.y - startPoint.y))
+        return CGRect(origin: origin, size: size)
+    }
+
+    /// The CGPath for this shape (stroked outline), unrotated.
+    var cgPath: CGPath {
+        switch kind {
+        case .line:
+            let path = UIBezierPath()
+            path.move(to: startPoint)
+            path.addLine(to: endPoint)
+            return path.cgPath
+        case .rectangle:
+            return UIBezierPath(rect: boundingRect).cgPath
+        case .oval:
+            return UIBezierPath(ovalIn: boundingRect).cgPath
+        }
+    }
+
+    /// The CGPath rotated around `center` by `rotation`.
+    var rotatedCGPath: CGPath {
+        let path = UIBezierPath(cgPath: cgPath)
+        let c = center
+        let t = CGAffineTransform(translationX: c.x, y: c.y)
+            .rotated(by: rotation)
+            .translatedBy(x: -c.x, y: -c.y)
+        path.apply(t)
+        return path.cgPath
+    }
+
+    /// Hit-test `point` against this shape's stroked outline (within `tolerance` canvas points).
+    func hitTest(_ point: CGPoint, tolerance: CGFloat = 12) -> Bool {
+        let path = UIBezierPath(cgPath: rotatedCGPath)
+        path.lineWidth = max(strokeWidth, tolerance)
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        return path.contains(point)
+    }
+
+    init(kind: ShapeKind, color: CodableColor, strokeWidth: CGFloat, opacity: Double,
+         startPoint: CGPoint, endPoint: CGPoint, rotation: CGFloat = 0) {
+        self.kind = kind
+        self.color = color
+        self.strokeWidth = strokeWidth
+        self.opacity = opacity
+        self.startPoint = startPoint
+        self.endPoint = endPoint
+        self.rotation = rotation
+    }
+}
+
 /// An imported image placed on a vector layer, movable/scalable/rotatable via its own transform
 /// (position/scale/rotation in canvas space) — the same idea as the existing object layer, but as
 /// one of possibly many elements on a vector layer rather than a whole dedicated layer. `image` is
@@ -80,6 +166,7 @@ final class VectorCanvas {
     var strokes: [VectorStroke]
     var fills: [VectorFillElement]
     var images: [VectorImageElement]
+    var shapes: [VectorShapeElement]
     /// Move/rotate/scale of the entire layer's content, applied at render time so it stays crisp at
     /// any transform (no resolution loss). Identity until the layer is transformed.
     var transform: CGAffineTransform
@@ -87,20 +174,21 @@ final class VectorCanvas {
     private(set) var version: Int = 0
     private var cachedImage: UIImage?
 
-    init(size: CGSize, strokes: [VectorStroke] = [], fills: [VectorFillElement] = [], images: [VectorImageElement] = [], transform: CGAffineTransform = .identity) {
+    init(size: CGSize, strokes: [VectorStroke] = [], fills: [VectorFillElement] = [], images: [VectorImageElement] = [], shapes: [VectorShapeElement] = [], transform: CGAffineTransform = .identity) {
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
         self.strokes = strokes
         self.fills = fills
         self.images = images
+        self.shapes = shapes
         self.transform = transform
     }
 
     static func empty(size: CGSize) -> VectorCanvas { VectorCanvas(size: size) }
 
-    var isEmpty: Bool { strokes.isEmpty && fills.isEmpty && images.isEmpty }
+    var isEmpty: Bool { strokes.isEmpty && fills.isEmpty && images.isEmpty && shapes.isEmpty }
 
     func makeCopy() -> VectorCanvas {
-        VectorCanvas(size: size, strokes: strokes, fills: fills, images: images, transform: transform)
+        VectorCanvas(size: size, strokes: strokes, fills: fills, images: images, shapes: shapes, transform: transform)
     }
 
     /// A new canvas sized to `newSize` with all content shifted by `offset` (canvas point space),
@@ -111,7 +199,7 @@ final class VectorCanvas {
     /// a fresh instance.
     func resized(to newSize: CGSize, offset: CGPoint) -> VectorCanvas {
         let shifted = transform.concatenating(CGAffineTransform(translationX: offset.x, y: offset.y))
-        return VectorCanvas(size: newSize, strokes: strokes, fills: fills, images: images, transform: shifted)
+        return VectorCanvas(size: newSize, strokes: strokes, fills: fills, images: images, shapes: shapes, transform: shifted)
     }
 
     private func invalidate() {
@@ -137,6 +225,11 @@ final class VectorCanvas {
 
     func addFill(_ element: VectorFillElement) {
         fills.append(element)
+        invalidate()
+    }
+
+    func addShape(_ element: VectorShapeElement) {
+        shapes.append(element)
         invalidate()
     }
 
@@ -246,6 +339,18 @@ final class VectorCanvas {
                 }
             }
             ctx.cgContext.setAlpha(1.0)
+            // Shapes (stroked geometric outlines) — drawn after fills, before images and strokes.
+            for shape in shapes {
+                let path = UIBezierPath(cgPath: shape.rotatedCGPath)
+                ctx.cgContext.setStrokeColor(shape.uiColor.cgColor)
+                ctx.cgContext.setLineWidth(shape.strokeWidth)
+                ctx.cgContext.setLineCap(.round)
+                ctx.cgContext.setLineJoin(.round)
+                ctx.cgContext.setAlpha(shape.opacity)
+                ctx.cgContext.addPath(path.cgPath)
+                ctx.cgContext.strokePath()
+            }
+            ctx.cgContext.setAlpha(1.0)
             for element in images {
                 ctx.cgContext.saveGState()
                 let t = element.transform
@@ -296,6 +401,7 @@ struct VectorCanvasData: Codable {
     }
     var strokes: [VectorStroke]
     var fills: [VectorFillElement]
+    var shapes: [VectorShapeElement]
     var images: [ImageRef]
     /// Overall transform as [a, b, c, d, tx, ty]; missing/short → identity.
     var transform: [Double]
@@ -303,6 +409,7 @@ struct VectorCanvasData: Codable {
     init(from canvas: VectorCanvas, imageFileNames: [UUID: String]) {
         strokes = canvas.strokes
         fills = canvas.fills
+        shapes = canvas.shapes
         images = canvas.images.compactMap { el in
             guard let name = el.fileName ?? imageFileNames[el.id] else { return nil }
             return ImageRef(fileName: name, x: el.transform.position.x, y: el.transform.position.y,
@@ -310,6 +417,15 @@ struct VectorCanvasData: Codable {
         }
         let t = canvas.transform
         transform = [Double(t.a), Double(t.b), Double(t.c), Double(t.d), Double(t.tx), Double(t.ty)]
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        strokes = try c.decode([VectorStroke].self, forKey: .strokes)
+        fills = try c.decode([VectorFillElement].self, forKey: .fills)
+        shapes = try c.decodeIfPresent([VectorShapeElement].self, forKey: .shapes) ?? []
+        images = try c.decode([ImageRef].self, forKey: .images)
+        transform = try c.decode([Double].self, forKey: .transform)
     }
 
     var affineTransform: CGAffineTransform {
