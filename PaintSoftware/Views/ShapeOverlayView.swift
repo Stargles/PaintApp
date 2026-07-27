@@ -35,7 +35,7 @@ final class ShapeOverlayView: UIView {
     private var activeHandle: HandleKind?
     private var lastPanPoint: CGPoint = .zero
 
-    private enum HandleKind: Equatable {
+    enum HandleKind: Equatable {
         case start, end, rotation
         case edgeTop, edgeBottom, edgeLeft, edgeRight
         case axisMajor, axisMinor
