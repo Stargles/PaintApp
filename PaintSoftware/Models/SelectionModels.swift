@@ -334,7 +334,7 @@ extension CanvasManager {
             brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
             let element = VectorFillElement(path: selection.path, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
             vectorCanvas.addFill(element)
-            setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: nil)
+            setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
             let manager = activeUndoManager
             let li = currentLayerIndex, ci = celIndex
             manager?.setActionName("Fill")
@@ -365,22 +365,16 @@ extension CanvasManager {
         let cel = layers[currentLayerIndex].cels[celIndex]
         let isVector = layers[currentLayerIndex].kind == .vector
         if isVector, let vectorCanvas = cel.vector {
-            // Vector clear: clip existing fills to the inverse of the selection path.
             let fillsBefore = vectorCanvas.fills
-            // For each fill element, if its path intersects the selection, replace it with the
-            // clipped version (path minus selection). Simple approach: subtract the selection
-            // rectangle from each fill path using even-odd fill rule.
             var newFills: [VectorFillElement] = []
             for fill in fillsBefore {
                 guard let path = fill.cgPath else { continue }
-                let clipped = Self.clipPath(path, excluding: selection.path, canvasSize: canvasSize)
-                if let clipped {
-                    newFills.append(VectorFillElement(path: clipped, color: fill.color, opacity: fill.opacity, evenOddFill: true))
-                }
+                let clipped = Self.clipPath(path, excluding: selection.path)
+                newFills.append(VectorFillElement(path: clipped, color: fill.color, opacity: fill.opacity, evenOddFill: true))
             }
             vectorCanvas.fills = newFills
             vectorCanvas.bumpVersion()
-            setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: nil)
+            setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
             let manager = activeUndoManager
             let li = currentLayerIndex, ci = celIndex
             manager?.setActionName("Clear")
@@ -404,14 +398,10 @@ extension CanvasManager {
 
     /// Subtracts `excludePath` from `path` by composing them into a single even-odd filled path
     /// (the overlapping region becomes a hole). Returns nil if the result is empty.
-    private static func clipPath(_ path: CGPath, excluding excludePath: CGPath, canvasSize: CGSize) -> CGPath? {
-        let bounds = CGRect(origin: .zero, size: canvasSize)
+    private static func clipPath(_ path: CGPath, excluding excludePath: CGPath) -> CGPath {
         let combined = CGMutablePath()
         combined.addPath(path)
         combined.addPath(excludePath)
-        // The even-odd fill rule makes the overlapping region (inside both paths) a hole.
-        // However, `CGPath` itself has no fill-rule concept — it's just geometry. We return the
-        // combined path and rely on the renderer to use even-odd.
         return combined
     }
 

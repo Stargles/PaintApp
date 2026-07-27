@@ -995,7 +995,7 @@ final class CanvasManager: ObservableObject {
     /// Re-registers the opposite undo step so redo can restore vector fills (mirrors
     /// `registerCelReversal` for raster undo). Called from the undo handler created in
     /// `commitInteractiveFill` when the layer is vector.
-    private func registerVectorFillRedo(vectorCanvas: VectorCanvas,
+    func registerVectorFillRedo(vectorCanvas: VectorCanvas,
                                         oldFills: [VectorFillElement], newFills: [VectorFillElement],
                                         layerIndex: Int, celIndex: Int,
                                         actionName: String, undoManager: UndoManager?) {
@@ -1148,7 +1148,7 @@ final class CanvasManager: ObservableObject {
     }
 
 
-    private func setFillImage(layerIndex: Int, celIndex: Int, image: UIImage?) {
+    func setFillImage(layerIndex: Int, celIndex: Int, image: UIImage?) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].fillImage = image
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
