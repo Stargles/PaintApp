@@ -56,7 +56,7 @@ SIM_INDEX=$(find_sim_for_session) || {
     echo "ERROR: No simulator locked by session '$SESSION_ID'" >&2
     echo "Check active sessions with: bash ~/PaintApp/deploy/mac/status.sh" >&2
     exit 1
-fi
+}
 
 SIM_UUID="${SIM_UUIDS[$SIM_INDEX]}"
 SIM_NAME="${SIM_NAMES[$SIM_INDEX]}"
