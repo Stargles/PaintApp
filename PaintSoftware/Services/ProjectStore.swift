@@ -21,16 +21,17 @@ struct ProjectSummary: Identifiable {
     let name: String
     let modifiedAt: Date
     let thumbnail: UIImage?
+    /// True when the package failed manifest decode or integrity validation (missing/truncated
+    /// files). Such projects are *surfaced* in the gallery (with a recovery affordance) rather
+    /// than silently dropped — see ProjectBackupManager.
+    var isCorrupted: Bool = false
 }
 
 enum ProjectStore {
     static var projectsDirectory: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = docs.appendingPathComponent("Projects", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        return dir
+        // Single source of truth for the Projects/Backups/Trash layout lives in
+        // ProjectBackupManager so the two can never drift apart.
+        ProjectBackupManager.projectsDirectory
     }
 
     static func listProjects() -> [ProjectSummary] {
@@ -38,9 +39,18 @@ enum ProjectStore {
             return []
         }
         return urls.compactMap { url -> ProjectSummary? in
-            guard url.pathExtension == "paintproj", let manifest = loadManifest(at: url) else { return nil }
-            let thumbnail = UIImage(contentsOfFile: url.appendingPathComponent("thumbnail.png").path)
-            return ProjectSummary(id: manifest.id, url: url, name: manifest.name, modifiedAt: manifest.modifiedAt, thumbnail: thumbnail)
+            guard url.pathExtension == "paintproj" else { return nil }
+            if let manifest = loadManifest(at: url), ProjectBackupManager.validateProject(at: url) {
+                let thumbnail = UIImage(contentsOfFile: url.appendingPathComponent("thumbnail.png").path)
+                return ProjectSummary(id: manifest.id, url: url, name: manifest.name, modifiedAt: manifest.modifiedAt, thumbnail: thumbnail)
+            }
+            // Damaged package (bad manifest or missing/truncated files): show it as damaged with a
+            // recovery affordance instead of letting it vanish from the gallery.
+            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let modified = (attrs?[.modificationDate] as? Date) ?? Date.distantPast
+            return ProjectSummary(id: ProjectBackupManager.manifestID(at: url) ?? UUID(), url: url,
+                                  name: url.deletingPathExtension().lastPathComponent,
+                                  modifiedAt: modified, thumbnail: nil, isCorrupted: true)
         }
         .sorted { $0.modifiedAt > $1.modifiedAt }
     }
@@ -58,8 +68,11 @@ enum ProjectStore {
         return url
     }
 
+    /// "Delete" never destroys data: the package moves to Trash (auto-purged only after
+    /// `ProjectBackupManager.trashRetentionInterval`), and its version history in Backups/
+    /// survives until then too.
     static func delete(at url: URL) {
-        try? FileManager.default.removeItem(at: url)
+        _ = ProjectBackupManager.moveToTrash(url, tag: "deleted")
     }
 
     private static func loadManifest(at projectURL: URL) -> ProjectManifest? {
@@ -108,8 +121,50 @@ enum ProjectStore {
         }
     }
 
+    /// Saves atomically: the new package is fully written and validated at a temp path before the
+    /// live package is touched, the live package is stashed as a backup (never destroyed), and the
+    /// swap is a same-volume rename — so a crash/kill at ANY point leaves either the complete old
+    /// package or the complete new one, plus restore points in Backups/ either way.
     @MainActor
     static func save(_ canvasManager: CanvasManager, to url: URL) {
+        let fm = FileManager.default
+
+        // Stage the new package beside the live one.
+        let stageURL = projectsDirectory.appendingPathComponent(".saving-\(UUID().uuidString)", isDirectory: true)
+        try? fm.removeItem(at: stageURL)
+        writePackage(canvasManager, to: stageURL)
+
+        // Only replace the live package once the staged one is provably complete (e.g. a PNG that
+        // failed to encode must not clobber the last-known-good save). The broken stage is kept
+        // in Trash for diagnosis.
+        guard ProjectBackupManager.validateProject(at: stageURL) else {
+            _ = ProjectBackupManager.moveToTrash(stageURL, tag: "failedsave")
+            return
+        }
+
+        // Stash the live package as an autosave restore point, then swap in the new one.
+        guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: canvasManager.projectID) else {
+            try? fm.removeItem(at: stageURL)
+            return
+        }
+        do {
+            try fm.moveItem(at: stageURL, to: url)
+        } catch {
+            // Swap failed: put the stashed package back so the project is never missing.
+            _ = ProjectBackupManager.restoreNewestValidBackup(forProjectAt: url, trashTag: "corrupt")
+            try? fm.removeItem(at: stageURL)
+            return
+        }
+
+        // Restore points: `latest` = exact copy of this save; autos rotated by count.
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: canvasManager.projectID)
+        ProjectBackupManager.pruneBackups(forProjectID: canvasManager.projectID)
+    }
+
+    /// Writes the complete project package at `url` (used by `save` to stage the package before
+    /// the atomic swap).
+    @MainActor
+    private static func writePackage(_ canvasManager: CanvasManager, to url: URL) {
         let fm = FileManager.default
         try? fm.createDirectory(at: url, withIntermediateDirectories: true)
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)

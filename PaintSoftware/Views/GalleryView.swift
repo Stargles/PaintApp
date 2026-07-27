@@ -6,6 +6,9 @@ struct GalleryView: View {
 
     @State private var projects: [ProjectSummary] = []
     @State private var projectPendingDeletion: ProjectSummary?
+    @State private var projectForVersions: ProjectSummary?
+    @State private var showRecentlyDeleted = false
+    @State private var showingUnrecoverableAlert = false
 
     var body: some View {
         NavigationStack {
@@ -30,7 +33,9 @@ struct GalleryView: View {
                             GalleryTileView(
                                 project: project,
                                 onOpen: { open(project) },
-                                onDelete: { projectPendingDeletion = project }
+                                onDelete: { projectPendingDeletion = project },
+                                onShowVersions: { projectForVersions = project },
+                                onRecover: { recover(project) }
                             )
                         }
                     }
@@ -38,7 +43,18 @@ struct GalleryView: View {
                 }
                 .background(Color.black.ignoresSafeArea())
                 .navigationTitle("Gallery")
-                
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showRecentlyDeleted = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .accessibilityLabel("Recently Deleted")
+                        }
+                        .accessibilityIdentifier("gallery.recentlyDeletedButton")
+                    }
+                }
+
                 // Version display in top-left corner
                 VStack {
                     HStack {
@@ -55,6 +71,16 @@ struct GalleryView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear { refresh() }
+        // Launch-time maintenance may have auto-restored a damaged project — re-list when it ends.
+        .onReceive(NotificationCenter.default.publisher(for: .projectBackupMaintenanceDidFinish)) { _ in
+            refresh()
+        }
+        .sheet(item: $projectForVersions) { project in
+            ProjectVersionsView(project: project, onRestored: { refresh() })
+        }
+        .sheet(isPresented: $showRecentlyDeleted) {
+            RecentlyDeletedView(onRestored: { refresh() })
+        }
         .alert("Delete this project?", isPresented: Binding(
             get: { projectPendingDeletion != nil },
             set: { if !$0 { projectPendingDeletion = nil } }
@@ -67,6 +93,13 @@ struct GalleryView: View {
                 projectPendingDeletion = nil
             }
             Button("Cancel", role: .cancel) { projectPendingDeletion = nil }
+        } message: {
+            Text("It will be kept in Recently Deleted for 7 days.")
+        }
+        .alert("No Backup Available", isPresented: $showingUnrecoverableAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("This project is damaged and no intact backup of it exists to restore from.")
         }
     }
 
@@ -77,6 +110,14 @@ struct GalleryView: View {
     private func open(_ project: ProjectSummary) {
         if let manager = ProjectStore.load(from: project.url) {
             onOpenProject(manager)
+        }
+    }
+
+    private func recover(_ project: ProjectSummary) {
+        if ProjectBackupManager.restoreNewestValidBackup(forProjectAt: project.url) {
+            refresh()
+        } else {
+            showingUnrecoverableAlert = true
         }
     }
 }

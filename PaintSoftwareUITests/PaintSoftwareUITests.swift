@@ -1612,4 +1612,95 @@ final class PaintSoftwareUITests: XCTestCase {
                        "Deleting the active view should fall back to 'All'")
     }
 
+    // MARK: - Project backups & recovery
+
+    /// Returns to the gallery (saving the project) and waits for its tile to appear.
+    @discardableResult
+    private func saveEditorAndReturnToGallery(_ app: XCUIApplication) -> XCUIElement {
+        let galleryButton = app.buttons["square.grid.2x2"]
+        XCTAssertTrue(galleryButton.waitForExistence(timeout: 5))
+        galleryButton.tap()
+        let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 5), "The saved project should show up in the gallery")
+        return tile
+    }
+
+    /// The critical safety net: a project damaged by an update/crash must come back on its own.
+    /// Saves a project, then relaunches with `-simulateProjectCorruption` — the app's launch hook
+    /// overwrites the newest project's manifest.json with garbage and the normal startup
+    /// maintenance pass then runs. Asserts the project is NOT left in the damaged state, is still
+    /// listed normally, and still opens with the drawn stroke intact (i.e. it was auto-restored
+    /// from its backup, not just hidden or deleted).
+    func testCorruptedProjectIsAutoRestoredFromBackupOnLaunch() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        XCTAssertTrue(launchIntoEditor(app))
+
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
+        saveEditorAndReturnToGallery(app)
+
+        app.terminate()
+        app.launchArguments = ["-simulateProjectCorruption"]
+        app.launch()
+
+        // If auto-repair failed, the tile would read as damaged instead of opening.
+        let damagedLabel = app.staticTexts["Damaged — tap to recover"]
+        XCTAssertTrue(damagedLabel.waitForNonExistence(timeout: 10),
+                      "Startup maintenance should auto-restore the damaged project from its backup")
+
+        let restoredTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(restoredTile.waitForExistence(timeout: 10), "The restored project should be listed normally")
+        restoredTile.tap()
+
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 10),
+                      "The restored project should open in the editor (a still-damaged one would not)")
+        openLayerPanel(app)
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+                       "The stroke saved before the corruption should survive the restore")
+    }
+
+    /// Deleting a project must never destroy it outright: it moves to Recently Deleted (Trash) and
+    /// can be put back, with its content intact.
+    func testDeletedProjectCanBeRestoredFromRecentlyDeleted() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        XCTAssertTrue(launchIntoEditor(app))
+
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
+        let tile = saveEditorAndReturnToGallery(app)
+
+        // Delete via the tile's menu, confirming the alert.
+        let menuButton = app.buttons["gallery.tileMenu.Untitled"]
+        XCTAssertTrue(menuButton.waitForExistence(timeout: 5))
+        menuButton.tap()
+        let deleteItem = app.buttons["Delete"]
+        XCTAssertTrue(deleteItem.waitForExistence(timeout: 5))
+        deleteItem.tap()
+        let confirmDelete = app.alerts.buttons["Delete"]
+        XCTAssertTrue(confirmDelete.waitForExistence(timeout: 5))
+        confirmDelete.tap()
+        XCTAssertTrue(tile.waitForNonExistence(timeout: 5), "The deleted project should leave the gallery")
+
+        // It must now be in Recently Deleted, from where it can be restored.
+        let trashButton = app.buttons["gallery.recentlyDeletedButton"]
+        XCTAssertTrue(trashButton.waitForExistence(timeout: 5))
+        trashButton.tap()
+        let restoreButton = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "gallery.trashRestore.")).firstMatch
+        XCTAssertTrue(restoreButton.waitForExistence(timeout: 5), "Recently Deleted should list the deleted project")
+        restoreButton.tap()
+
+        let doneButton = app.buttons["Done"]
+        XCTAssertTrue(doneButton.waitForExistence(timeout: 5))
+        doneButton.tap()
+
+        let restoredTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(restoredTile.waitForExistence(timeout: 5), "The restored project should reappear in the gallery")
+        restoredTile.tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 10),
+                      "The restored project should open in the editor")
+        openLayerPanel(app)
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+                       "The deleted project's stroke content should survive the trash/restore round trip")
+    }
+
 }
