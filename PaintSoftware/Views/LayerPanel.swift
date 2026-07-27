@@ -26,6 +26,7 @@ struct LayerPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     @State private var showBackgroundColorPicker = false
     @State private var editingLayer: EditingLayerRef?
+    @State private var isEditingList = false
 
     /// Flattened items for display, bottom-to-top. Folders appear at the position of their
     /// topmost child. Collapsed folders hide their children.
@@ -70,6 +71,18 @@ struct LayerPanel: View {
                 .foregroundColor(.white)
 
             Spacer()
+
+            // Edit/Done toggle for reorder mode
+            Button(isEditingList ? "Done" : "Edit") {
+                withAnimation { isEditingList.toggle() }
+            }
+            .foregroundColor(.white)
+            .font(.caption2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.15))
+            .cornerRadius(6)
+            .accessibilityIdentifier("layerPanel.editButton")
 
             // View preset cycling
             Button {
@@ -161,7 +174,7 @@ struct LayerPanel: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .environment(\.editMode, .constant(.active))
+        .environment(\.editMode, .constant(isEditingList ? .active : .inactive))
         .animation(.interactiveSpring(), value: displayItems.map(\.id))
     }
     
