@@ -98,6 +98,9 @@ struct ViewPresetManifest: Codable {
     var name: String
     /// UUID string -> isVisible, because JSON dictionaries require String keys.
     var layerVisibility: [String: Bool]
+    /// Folder UUID string -> isVisible. Defaults to empty so presets saved before folders had
+    /// their own visibility snapshot still decode.
+    var folderVisibility: [String: Bool] = [:]
 }
 
 struct LayerManifest: Codable {

@@ -789,41 +789,183 @@ final class CanvasManager: ObservableObject {
         folders[idx].isExpanded.toggle()
     }
 
-    // MARK: - Reorder
+    /// Creates an empty folder. It shows up at the top of the layer stack (see `layerStackRows`)
+    /// until layers are dragged into it.
+    @discardableResult
+    func addFolder(name: String? = nil) -> UUID {
+        let folder = LayerFolder(id: UUID(), name: name ?? "Folder \(folders.count + 1)")
+        folders.append(folder)
+        return folder.id
+    }
 
-    /// Moves a layer from one index to another within the `layers` array. Clamps both indices
-    /// to valid ranges. The display updates automatically via @Published.
-    func moveLayer(from sourceIndex: Int, to destinationIndex: Int) {
-        guard layers.indices.contains(sourceIndex),
-              layers.indices.contains(destinationIndex),
-              sourceIndex != destinationIndex else { return }
-        let layer = layers.remove(at: sourceIndex)
-        let adjustedDest = destinationIndex > sourceIndex ? destinationIndex - 1 : destinationIndex
-        layers.insert(layer, at: adjustedDest)
-        if currentLayerIndex == sourceIndex {
-            currentLayerIndex = adjustedDest
-        } else if sourceIndex < currentLayerIndex && adjustedDest >= currentLayerIndex {
-            currentLayerIndex -= 1
-        } else if sourceIndex > currentLayerIndex && adjustedDest <= currentLayerIndex {
-            currentLayerIndex += 1
+    /// Removes a folder. Its layers survive as top-level rows in the same stacking positions.
+    func deleteFolder(_ folderID: UUID) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        folders.remove(at: idx)
+        for li in layers.indices where layers[li].parentFolderID == folderID {
+            layers[li].parentFolderID = nil
+        }
+        for vi in viewPresets.indices {
+            viewPresets[vi].folderVisibility.removeValue(forKey: folderID)
         }
     }
 
-    /// Moves a layer into (or out of) a folder.
-    func setLayerParent(_ layerID: UUID, folderID: UUID?) {
-        guard let idx = layers.firstIndex(where: { $0.id == layerID }) else { return }
-        layers[idx].parentFolderID = folderID
+    // MARK: - Stack rows
+
+    /// The layer stack as it is presented, top-to-bottom, in both the layer panel and the animation
+    /// timeline: a folder header above its children, an empty folder on its own. Collapsed folders
+    /// hide their children. Folders that hold no layers yet sit at the very top (newest first) so a
+    /// just-created one is visible and can be dragged into.
+    var layerStackRows: [LayerStackRow] {
+        var rows: [LayerStackRow] = []
+        let occupied = Set(layers.compactMap(\.parentFolderID))
+        for folder in folders.reversed() where !occupied.contains(folder.id) {
+            rows.append(.folder(id: folder.id))
+        }
+        var emitted = Set<UUID>()
+        for index in layers.indices.reversed() {
+            let layer = layers[index]
+            // A stale parentFolderID (folder deleted out from under it) falls through to top level.
+            if let fid = layer.parentFolderID, let folder = folders.first(where: { $0.id == fid }) {
+                if emitted.insert(fid).inserted {
+                    rows.append(.folder(id: fid))
+                }
+                if folder.isExpanded {
+                    rows.append(.layer(id: layer.id, index: index))
+                }
+            } else {
+                rows.append(.layer(id: layer.id, index: index))
+            }
+        }
+        return rows
+    }
+
+    /// Every layer belonging to `folderID`, bottom-to-top by `layers` index.
+    func layerIndices(inFolder folderID: UUID) -> [Int] {
+        layers.indices.filter { layers[$0].parentFolderID == folderID }
+    }
+
+    // MARK: - Reorder
+
+    /// What a dragged layer came to rest on top of. The layer panel resolves a drop into one of
+    /// these rather than into a raw array index, because the visible row order (top-to-bottom, with
+    /// folder headers interleaved and collapsed children hidden) doesn't map 1:1 onto `layers`.
+    enum StackAnchor: Equatable {
+        /// Directly above this layer.
+        case layer(UUID)
+        /// Above every layer in this folder (the folder's header sits below the dragged row).
+        case folder(UUID)
+        /// Nothing below it — the bottom of the stack.
+        case bottom
+    }
+
+    /// Re-stacks `layerID` so it sits directly above `anchor`, reparented to `parentFolderID`.
+    /// The active layer keeps pointing at the same layer regardless of how indices shift.
+    func restackLayer(_ layerID: UUID, above anchor: StackAnchor, parentFolderID: UUID?) {
+        guard let from = layers.firstIndex(where: { $0.id == layerID }) else { return }
+        let activeID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
+
+        var moved = layers.remove(at: from)
+        moved.parentFolderID = parentFolderID
+
+        let insertAt: Int
+        switch anchor {
+        case .bottom:
+            insertAt = 0
+        case .layer(let anchorID):
+            // `layers` is bottom-to-top, so "directly above the anchor" is one past its index.
+            insertAt = layers.firstIndex(where: { $0.id == anchorID }).map { $0 + 1 } ?? layers.count
+        case .folder(let folderID):
+            // Clear the whole folder: land just past its topmost remaining child. An empty folder
+            // renders at the top of the stack, so above it means the top of the array.
+            insertAt = layers.lastIndex(where: { $0.parentFolderID == folderID }).map { $0 + 1 } ?? layers.count
+        }
+        layers.insert(moved, at: min(max(insertAt, 0), layers.count))
+
+        if let activeID, let newActive = layers.firstIndex(where: { $0.id == activeID }) {
+            currentLayerIndex = newActive
+        }
+    }
+
+    /// Moves a whole folder — header and every layer inside it, keeping their relative order — so
+    /// the group comes to rest directly above `anchor`.
+    func restackFolder(_ folderID: UUID, above anchor: StackAnchor) {
+        let activeID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
+
+        let group = layers.filter { $0.parentFolderID == folderID }
+        layers.removeAll { $0.parentFolderID == folderID }
+
+        if group.isEmpty {
+            // An empty folder has no foothold in `layers` at all — `layerStackRows` reads its
+            // position off `folders` (walked in reverse, so later entries render higher).
+            guard let from = folders.firstIndex(where: { $0.id == folderID }) else { return }
+            let moved = folders.remove(at: from)
+            if case .folder(let otherID) = anchor, let below = folders.firstIndex(where: { $0.id == otherID }) {
+                folders.insert(moved, at: below + 1)
+            } else {
+                folders.append(moved)
+            }
+            return
+        }
+
+        let insertAt: Int
+        switch anchor {
+        case .bottom:
+            insertAt = 0
+        case .layer(let anchorID):
+            insertAt = layers.firstIndex(where: { $0.id == anchorID }).map { $0 + 1 } ?? layers.count
+        case .folder(let otherID):
+            insertAt = layers.lastIndex(where: { $0.parentFolderID == otherID }).map { $0 + 1 } ?? layers.count
+        }
+        layers.insert(contentsOf: group, at: min(max(insertAt, 0), layers.count))
+
+        if let activeID, let newActive = layers.firstIndex(where: { $0.id == activeID }) {
+            currentLayerIndex = newActive
+        }
     }
 
     // MARK: - Views
 
-    /// Adds a new view preset capturing the current visibility state of all layers.
+    /// Adds a new view preset capturing the current visibility state of all layers and folders.
     func addViewPreset() {
         var vis: [UUID: Bool] = [:]
         for layer in layers { vis[layer.id] = layer.isVisible }
-        let preset = ViewPreset(id: UUID(), name: "View \(viewPresets.count + 1)", layerVisibility: vis)
+        var folderVis: [UUID: Bool] = [:]
+        for folder in folders { folderVis[folder.id] = folder.isVisible }
+        let preset = ViewPreset(id: UUID(), name: "View \(viewPresets.count + 1)",
+                                layerVisibility: vis, folderVisibility: folderVis)
         viewPresets.append(preset)
         activeViewPresetIndex = viewPresets.count - 1
+    }
+
+    /// Switches to the view preset at `index`, or back to "no view" (all layers visible) for any
+    /// index outside `viewPresets`. Passing -1 is the canonical way to clear the active view.
+    func selectViewPreset(at index: Int) {
+        if viewPresets.indices.contains(index) {
+            activeViewPresetIndex = index
+            applyViewPreset(viewPresets[index])
+        } else {
+            activeViewPresetIndex = -1
+            for idx in layers.indices where !layers[idx].isVisible {
+                layers[idx].isVisible = true
+                layers[idx].isFillReference = true
+            }
+            for idx in folders.indices where !folders[idx].isVisible {
+                folders[idx].isVisible = true
+            }
+        }
+    }
+
+    /// Deletes a view preset, keeping `activeViewPresetIndex` pointed at the same preset it was on
+    /// (or dropping to "no view" when the active one is the one being deleted).
+    func deleteViewPreset(at index: Int) {
+        guard viewPresets.indices.contains(index) else { return }
+        viewPresets.remove(at: index)
+        if activeViewPresetIndex == index {
+            selectViewPreset(at: -1)
+        } else if index < activeViewPresetIndex {
+            activeViewPresetIndex -= 1
+        }
     }
 
     /// Cycles to the next view preset. After the last preset, returns to "no view" mode
@@ -833,17 +975,10 @@ final class CanvasManager: ObservableObject {
             addViewPreset()
             return
         }
-        let nextIndex = activeViewPresetIndex + 1
-        if nextIndex >= viewPresets.count {
-            activeViewPresetIndex = -1
-            for idx in layers.indices { layers[idx].isVisible = true }
-        } else {
-            activeViewPresetIndex = nextIndex
-            applyViewPreset(viewPresets[nextIndex])
-        }
+        selectViewPreset(at: activeViewPresetIndex + 1 >= viewPresets.count ? -1 : activeViewPresetIndex + 1)
     }
 
-    /// Applies a view preset's visibility snapshot to all layers.
+    /// Applies a view preset's visibility snapshot to all layers and folders.
     private func applyViewPreset(_ preset: ViewPreset) {
         for idx in layers.indices {
             if let vis = preset.layerVisibility[layers[idx].id] {
@@ -851,13 +986,21 @@ final class CanvasManager: ObservableObject {
                 layers[idx].isFillReference = vis
             }
         }
+        for idx in folders.indices {
+            if let vis = preset.folderVisibility[folders[idx].id] {
+                folders[idx].isVisible = vis
+            }
+        }
     }
 
-    /// Saves the current visibility state of every layer into the active view preset (if any).
+    /// Saves the current visibility state of every layer and folder into the active view preset (if any).
     private func saveVisibilityToActiveView() {
         guard viewPresets.indices.contains(activeViewPresetIndex) else { return }
         for layer in layers {
             viewPresets[activeViewPresetIndex].layerVisibility[layer.id] = layer.isVisible
+        }
+        for folder in folders {
+            viewPresets[activeViewPresetIndex].folderVisibility[folder.id] = folder.isVisible
         }
     }
 
@@ -1211,6 +1354,32 @@ struct ViewPreset: Identifiable {
     let id: UUID
     var name: String
     var layerVisibility: [UUID: Bool] // layerID -> isVisible
+    var folderVisibility: [UUID: Bool] = [:] // folderID -> isVisible
+}
+
+/// One row of the layer stack as presented top-to-bottom in the layer panel and the animation
+/// timeline. See `CanvasManager.layerStackRows`. `index` is the row's position in
+/// `CanvasManager.layers` (bottom-to-top), so it is only valid for the snapshot it came from.
+enum LayerStackRow: Identifiable, Equatable {
+    case folder(id: UUID)
+    case layer(id: UUID, index: Int)
+
+    var id: UUID {
+        switch self {
+        case .folder(let id):      return id
+        case .layer(let id, _):    return id
+        }
+    }
+
+    var layerIndex: Int? {
+        if case .layer(_, let index) = self { return index }
+        return nil
+    }
+
+    var folderID: UUID? {
+        if case .folder(let id) = self { return id }
+        return nil
+    }
 }
 
 struct Cel: Identifiable {

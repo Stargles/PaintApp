@@ -139,7 +139,7 @@ extension CanvasManager {
     }
 
     /// Called whenever `currentLayerIndex`/`currentFrame` change (see the `didSet`s in
-    /// CanvasManager.swift), and explicitly by `deleteLayer`/`moveLayer` since those can leave
+    /// CanvasManager.swift), and explicitly by `deleteLayer` since it can leave
     /// `currentLayerIndex`'s numeric value unchanged while the layer it now points at is a
     /// different one (no `didSet` fires in that case). A pending floating piece is committed —
     /// never silently discarded — if the active cel actually changed; an active selection tied to
