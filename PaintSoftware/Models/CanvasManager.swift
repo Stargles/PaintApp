@@ -1357,12 +1357,18 @@ final class CanvasManager: ObservableObject {
         refreshUndoRedoState()
     }
 
-    /// Updates the shape's end point as the user drags.
-    func updateInteractiveShape(endPoint: CGPoint, rotation: CGFloat? = nil, isConstrained: Bool = false) {
+    /// Updates the shape's geometry as the user drags a handle or continues the hold stroke.
+    /// `startPoint`/`endPoint` are optional so partial updates are possible (e.g. edge-handle
+    /// drags on rectangles resize opposite edges, changing only one corner). Emits
+    /// `objectWillChange` so the SwiftUI-refresh path re-runs `updateShapeOverlay` and keeps
+    /// the overlay's handles glued to the live shape.
+    func updateInteractiveShape(startPoint: CGPoint? = nil, endPoint: CGPoint, rotation: CGFloat? = nil, isConstrained: Bool = false) {
         guard shapeGestureActive else { return }
+        if let startPoint { shapeStartPoint = startPoint }
         shapeEndPoint = endPoint
         if let rotation { shapeRotation = rotation }
         shapeIsConstrained = isConstrained
+        objectWillChange.send()
     }
 
     /// Lifts the finger but leaves the shape adjustable.
