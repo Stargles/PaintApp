@@ -1943,7 +1943,9 @@ final class PaintSoftwareUITests: XCTestCase {
         drawLine(on: canvas, from: point, to: CGVector(dx: point.dx + 0.12, dy: point.dy))
 
         openLayerPanel(app)
-        app.buttons["layerPanel.addButton"].tap() // layers: [Layer 1 (drawn on), Layer 2]
+        let addLayer = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addLayer.waitForExistence(timeout: 5)) // the panel has to finish presenting first
+        addLayer.tap() // layers: [Layer 1 (drawn on), Layer 2]
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
 
         let top = app.staticTexts["layerPanel.row.1"]
@@ -1967,7 +1969,9 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
-        app.buttons["layerPanel.addButton"].tap() // layers: [Layer 1, Layer 2]
+        let addLayer = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addLayer.waitForExistence(timeout: 5)) // the panel has to finish presenting first
+        addLayer.tap() // layers: [Layer 1, Layer 2]
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
         app.buttons["toolbar.layersButton"].tap() // close the panel so it can't cover the timeline
 

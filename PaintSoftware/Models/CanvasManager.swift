@@ -1769,23 +1769,23 @@ final class CanvasManager: ObservableObject {
     // MARK: - Undo / redo
 
     func undo() {
-        finalizeFillForHistoryAction()
+        finalizePendingGesturesForHistoryAction()
         history.undo()
         refreshUndoRedoState()
     }
 
     func redo() {
-        finalizeFillForHistoryAction()
+        finalizePendingGesturesForHistoryAction()
         history.redo()
         refreshUndoRedoState()
     }
 
-    /// An undo/redo can't operate on the interactive fill's private, off-stack state, so it's resolved
-    /// first: a fill still under the finger (a multi-finger undo/redo gesture is taking over) is
-    /// discarded; a lifted, still-adjustable fill is committed so it becomes a real "Fill" step the
-    /// following `undo()` reverts (and `redo()` can restore) — instead of the undo silently hitting the
-    /// previous action while the fill lingers.
-    private func finalizeFillForHistoryAction() {
+    /// An undo/redo can't operate on an interactive fill's or shape's private, off-stack state, so
+    /// both are resolved first: one still under the finger (a multi-finger undo/redo gesture is
+    /// taking over) is discarded; a lifted, still-adjustable one is committed so it becomes a real
+    /// "Fill"/"Shape" step the following `undo()` reverts (and `redo()` can restore) — instead of the
+    /// undo silently hitting the previous action while it lingers.
+    private func finalizePendingGesturesForHistoryAction() {
         if fillFingerDown {
             cancelInteractiveFill()
         } else if fillGestureActive {
