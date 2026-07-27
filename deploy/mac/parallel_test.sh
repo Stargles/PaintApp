@@ -69,12 +69,14 @@ else
         rm -rf "$WORKTREE_DIR"
     fi
 
+    # Remove stale local branch so -B can recreate it
+    git -C "$MAIN_REPO" branch -D "$TRACK_BRANCH" 2>/dev/null || true
     CREATED=false
     if git -C "$MAIN_REPO" show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
-        git -C "$MAIN_REPO" worktree add "$WORKTREE_DIR" -b "$TRACK_BRANCH" "origin/$BRANCH" 2>&1 && CREATED=true
+        git -C "$MAIN_REPO" worktree add "$WORKTREE_DIR" -B "$TRACK_BRANCH" "origin/$BRANCH" 2>&1 && CREATED=true
     fi
     if [ "$CREATED" = false ]; then
-        git -C "$MAIN_REPO" worktree add "$WORKTREE_DIR" -b "$TRACK_BRANCH" origin/main 2>&1 && CREATED=true
+        git -C "$MAIN_REPO" worktree add "$WORKTREE_DIR" -B "$TRACK_BRANCH" origin/main 2>&1 && CREATED=true
     fi
     if [ "$CREATED" = false ]; then
         log "ERROR: Could not create worktree for branch '$BRANCH'"
@@ -87,6 +89,12 @@ git -C "$WORKTREE_DIR" fetch origin 2>&1
 git -C "$WORKTREE_DIR" reset --hard "origin/$BRANCH" 2>&1 || \
     git -C "$WORKTREE_DIR" checkout "$TRACK_BRANCH" 2>&1 || true
 log "Worktree synced to origin/$BRANCH"
+
+# Re-exec from the worktree so the branch's version of this script is used
+if [[ "$0" != "$WORKTREE_DIR/deploy/mac/parallel_test.sh" ]]; then
+    log "Re-execing from worktree ($WORKTREE_DIR/deploy/mac/parallel_test.sh)"
+    exec bash "$WORKTREE_DIR/deploy/mac/parallel_test.sh" "$@"
+fi
 
 # ─── Step 2: Claim a simulator ──────────────────────────────────────────────
 
@@ -160,7 +168,13 @@ XCODE_ARGS=(
 )
 
 if [ -n "$TEST_FILTER" ]; then
-    XCODE_ARGS+=(-only-testing:"PaintSoftwareUITests/$TEST_FILTER")
+    # Accept either "TestMethodName" (auto-resolved) or "Target/Class/Method" (full identifier)
+    if [[ "$TEST_FILTER" == */* ]]; then
+        XCODE_ARGS+=(-only-testing:"$TEST_FILTER")
+    else
+        XCODE_ARGS+=(-only-testing:"PaintSoftwareUITests/PaintSoftwareUITests/$TEST_FILTER")
+        XCODE_ARGS+=(-only-testing:"PaintSoftwareUITests/BrushEngineLogicTests/$TEST_FILTER")
+    fi
     log "Filter: $TEST_FILTER"
 fi
 

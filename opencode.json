@@ -116,6 +116,9 @@
       }
     }
   },
+  "plugin": [
+    "opencode-wakelock"
+  ],
   "command": {
     "deploy": {
       "description": "Build and install the app on the iPad via the Mac",
