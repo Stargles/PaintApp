@@ -20,10 +20,6 @@ private enum LayerDisplayItem: Identifiable {
     var layerIndex: Int? {
         if case .layer(let i, _) = self { i } else { nil }
     }
-
-    var isMoveDisabled: Bool {
-        if case .layer = self { false } else { true }
-    }
 }
 
 struct LayerPanel: View {
@@ -129,9 +125,11 @@ struct LayerPanel: View {
         List {
             ForEach(displayItems) { item in
                 switch item {
+                switch item {
                 case .folder(let fi, let folder):
                     FolderRow(folder: folder, folderIndex: fi, canvasManager: canvasManager)
                         .listRowBackground(Color.clear)
+                        .moveDisabled(true)
 
                 case .layer(let li, let layer):
                     LayerRow(layer: layer, arrayIndex: li, canvasManager: canvasManager)
@@ -152,12 +150,13 @@ struct LayerPanel: View {
                             .tint(.blue)
                             .accessibilityIdentifier("layerPanel.row.\(li).edit")
                         }
+                        .moveDisabled(false)
 
                 case .background:
                     backgroundRow
                         .listRowBackground(Color.clear)
+                        .moveDisabled(true)
                 }
-                .moveDisabled(item.isMoveDisabled)
             }
             .onMove(perform: moveLayer)
         }
