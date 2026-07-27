@@ -1403,7 +1403,7 @@ final class CanvasManager: ObservableObject {
             }
             refreshUndoRedoState()
         } else {
-            let shapeImage = Self.renderShapeToImage(shape, canvasSize: canvasSize ?? .zero)
+            guard let shapeImage = Self.renderShapeToImage(shape, canvasSize: canvasSize ?? .zero) else { return }
             let newBaked = PixelOps.compositeOver(base: cel.bakedImage, overlay: shapeImage)
             registerUndoableCelChange(layerIndex: layerIndex, celIndex: celIndex,
                                       oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: nil,

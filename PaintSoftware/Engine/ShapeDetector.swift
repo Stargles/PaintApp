@@ -46,7 +46,7 @@ enum ShapeDetector {
         ]
 
         // Pick the highest-scoring candidate that exceeds a minimum confidence.
-        guard let best = candidates.max(by: { $0.1 < $0.1 }), best.1 > 0.5 else { return nil }
+        guard let best = candidates.max(by: { $0.1 < $1.1 }), best.1 > 0.5 else { return nil }
         return Detection(kind: best.0, startPoint: best.2, endPoint: best.3)
     }
 
