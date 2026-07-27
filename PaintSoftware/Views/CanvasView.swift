@@ -1322,8 +1322,10 @@ struct CanvasView: UIViewRepresentable {
                 // pan doesn't accidentally commit the fill via beginInteractiveFill.
                 if canvasManager.isFillInAdjustableState {
                     guard canvasManager.isPointInPendingFill(at: canvasPoint) else {
-                        // Leave the adjustable fill intact for later commit and return without
-                        // starting a new fill — this touch is likely the start of a pan/zoom.
+                        // Tap outside the pending fill: commit the adjustable fill and start a
+                        // new fill here — this is a deliberate canvas interaction, not a pan/zoom.
+                        canvasManager.commitInteractiveFill()
+                        canvasManager.beginInteractiveFill(at: canvasPoint)
                         return
                     }
                     canvasManager.resumeInteractiveFillDrag()
