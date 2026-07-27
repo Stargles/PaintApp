@@ -91,6 +91,9 @@ struct FolderManifest: Codable {
     var name: String
     var isExpanded: Bool
     var isVisible: Bool
+    /// Set when this folder is nested inside another. Optional so projects saved before folders
+    /// could nest still decode.
+    var parentFolderID: UUID? = nil
 }
 
 struct ViewPresetManifest: Codable {

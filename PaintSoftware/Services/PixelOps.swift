@@ -133,6 +133,17 @@ enum PixelOps {
         }
     }
 
+    /// Flattens two canvas-sized layer images into one, each drawn at its own layer opacity — the
+    /// pixel side of merging two layers together (see `CanvasManager.mergeLayers`).
+    static func flatten(bottom: UIImage, bottomOpacity: Double, top: UIImage, topOpacity: Double, canvasSize: CGSize) -> UIImage {
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
+        return renderer.image { _ in
+            bottom.draw(in: bounds, blendMode: .normal, alpha: CGFloat(bottomOpacity))
+            top.draw(in: bounds, blendMode: .normal, alpha: CGFloat(topOpacity))
+        }
+    }
+
     /// Draws `overlay` on top of `base` (or on transparent if `base` is nil), both canvas-sized.
     static func compositeOver(base: UIImage?, overlay: UIImage) -> UIImage {
         let bounds = CGRect(origin: .zero, size: overlay.size)

@@ -6,6 +6,8 @@ struct DrawingView: View {
 
     @State private var activePanel: ActivePanel = .none
     @State private var isTimelineExpanded: Bool = true
+    /// Layer whose options menu is open, shown to the left of the layer panel.
+    @State private var layerOptionsID: UUID?
     // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
     // discreet corner button. Lives entirely in its own view; this is just the overlay + state.
     @State private var isPerfHUDVisible: Bool = false
@@ -29,10 +31,16 @@ struct DrawingView: View {
                     AnimationTimeline(canvasManager: canvasManager, isExpanded: $isTimelineExpanded)
                 }
 
-                // Tool menus drop down directly under the toolbar, aligned to the side their icon sits on
-                // (leading tools on the left, brush/fill/layers/color on the right) rather than sliding in
-                // as a full-height rail from the screen edge.
-                if activePanel != .none {
+                // The layer panel is its own thing: a tall translucent rail down the trailing edge,
+                // wide enough to show nesting and thumbnails, with the per-layer options menu
+                // hanging off its left edge.
+                if activePanel == .layers {
+                    layerPanelRail
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else if activePanel != .none {
+                    // Other tool menus drop down directly under the toolbar, aligned to the side
+                    // their icon sits on (leading tools on the left, brush/fill/color on the right)
+                    // rather than sliding in as a full-height rail from the screen edge.
                     panelView
                         .frame(width: 300)
                         .frame(maxHeight: 420)
@@ -85,6 +93,10 @@ struct DrawingView: View {
         .onReceive(canvasManager.interactionBegan) {
             if activePanel != .none { activePanel = .none }
         }
+        // The layer options menu belongs to the layer panel — it can't outlive it.
+        .onChange(of: activePanel) { _, panel in
+            if panel != .layers { layerOptionsID = nil }
+        }
         // Alert shown when the user tries to draw but there are no layers.
         .alert("No Layers", isPresented: Binding(
             get: { canvasManager.needsLayerAlert },
@@ -118,6 +130,39 @@ struct DrawingView: View {
         }
     }
 
+    /// The layer stack rail: just under half the screen wide, running the full height below the top
+    /// toolbar, translucent so the artwork stays readable behind it. It stops short of the toolbar
+    /// deliberately — covering it would put the panel on top of its own open/close button and the
+    /// other tool buttons, leaving no way to dismiss it. The options menu for the tapped layer sits
+    /// to its left.
+    private var layerPanelRail: some View {
+        GeometryReader { geometry in
+            HStack(alignment: .top, spacing: 10) {
+                Spacer(minLength: 0)
+
+                if let layerOptionsID {
+                    LayerOptionsPanel(canvasManager: canvasManager, layerID: layerOptionsID) {
+                        self.layerOptionsID = nil
+                    }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+
+                LayerPanel(canvasManager: canvasManager, optionsLayerID: $layerOptionsID)
+                    .frame(width: min(geometry.size.width * 0.46, 460))
+                    .frame(maxHeight: .infinity)
+                    .background(Color.black.opacity(0.62))
+                    .overlay(Rectangle().frame(width: 1).foregroundColor(Color.white.opacity(0.12)), alignment: .leading)
+            }
+            .padding(.top, Self.topToolbarClearance)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .animation(.easeInOut(duration: 0.18), value: layerOptionsID)
+    }
+
+    /// Height reserved for the top toolbar so the rail never sits on top of it.
+    private static let topToolbarClearance: CGFloat = 56
+
     /// Which side of the toolbar the open menu's icon lives on, so the dropdown lands under it. The
     /// gallery/actions/adjust icons are leading; brush/fill/layers/color are trailing.
     private var panelAlignment: Alignment {
@@ -143,7 +188,7 @@ struct DrawingView: View {
         case .move:
             EmptyView() // Move's UI is the floating bottom bar, shown whenever a piece is active — see above.
         case .layers:
-            LayerPanel(canvasManager: canvasManager)
+            EmptyView() // Rendered by `layerPanelRail`, which needs the full-height layout.
         case .brush:
             BrushSettingsPanel(canvasManager: canvasManager)
         case .eraser:

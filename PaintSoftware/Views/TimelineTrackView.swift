@@ -163,7 +163,7 @@ struct TimelineTrackView: UIViewRepresentable {
             for (slot, entry) in folderEntries.enumerated() {
                 let row = folderRowViews[slot]
                 row.frame = CGRect(x: 0, y: rowY(entry.position), width: totalWidth, height: rowHeight)
-                let childIndices = canvasManager.layerIndices(inFolder: entry.folderID)
+                let childIndices = canvasManager.descendantLayerIndices(ofFolder: entry.folderID)
                 let cels = childIndices.flatMap { layers[$0].cels }
                 let span: ClosedRange<Int>? = cels.isEmpty
                     ? nil
