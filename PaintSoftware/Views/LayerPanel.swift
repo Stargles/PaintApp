@@ -125,7 +125,6 @@ struct LayerPanel: View {
         List {
             ForEach(displayItems) { item in
                 switch item {
-                switch item {
                 case .folder(let fi, let folder):
                     FolderRow(folder: folder, folderIndex: fi, canvasManager: canvasManager)
                         .listRowBackground(Color.clear)
