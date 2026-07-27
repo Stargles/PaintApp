@@ -8,6 +8,11 @@ import UIKit
 /// object's center), and one handle above the top edge (drag to rotate around the center).
 final class ObjectTransformOverlayView: UIView {
     var onTransformChange: ((LayerTransform) -> Void)?
+    /// Fired at the start/end of any move/scale/rotate drag, so the consumer can register one
+    /// undo step per whole gesture (via `CanvasManager.beginStructureGesture`/
+    /// `commitStructureGesture`) instead of one per `.changed` event.
+    var onGestureBegan: (() -> Void)?
+    var onGestureEnded: (() -> Void)?
 
     private var transform_: LayerTransform = .identity
     private var imageSize: CGSize = .zero
@@ -111,11 +116,14 @@ final class ObjectTransformOverlayView: UIView {
         switch recognizer.state {
         case .began:
             dragStartTransform = transform_
+            onGestureBegan?()
         case .changed:
             let translation = recognizer.translation(in: self)
             var updated = dragStartTransform
             updated.position = CGPoint(x: dragStartTransform.position.x + translation.x, y: dragStartTransform.position.y + translation.y)
             apply(updated)
+        case .ended, .cancelled, .failed:
+            onGestureEnded?()
         default:
             break
         }
@@ -126,6 +134,7 @@ final class ObjectTransformOverlayView: UIView {
         case .began:
             dragStartTransform = transform_
             dragStartTouch = recognizer.location(in: self)
+            onGestureBegan?()
         case .changed:
             let center = dragStartTransform.position
             let startDistance = hypot(dragStartTouch.x - center.x, dragStartTouch.y - center.y)
@@ -135,6 +144,8 @@ final class ObjectTransformOverlayView: UIView {
             var updated = dragStartTransform
             updated.scale = max(dragStartTransform.scale * (currentDistance / startDistance), 0.02)
             apply(updated)
+        case .ended, .cancelled, .failed:
+            onGestureEnded?()
         default:
             break
         }
@@ -145,6 +156,7 @@ final class ObjectTransformOverlayView: UIView {
         case .began:
             dragStartTransform = transform_
             dragStartTouch = recognizer.location(in: self)
+            onGestureBegan?()
         case .changed:
             let center = dragStartTransform.position
             let startAngle = atan2(dragStartTouch.y - center.y, dragStartTouch.x - center.x)
@@ -153,6 +165,8 @@ final class ObjectTransformOverlayView: UIView {
             var updated = dragStartTransform
             updated.rotation = dragStartTransform.rotation + (currentAngle - startAngle)
             apply(updated)
+        case .ended, .cancelled, .failed:
+            onGestureEnded?()
         default:
             break
         }

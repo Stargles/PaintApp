@@ -196,7 +196,25 @@ final class CanvasManager: ObservableObject {
 
     @Published var canUndo: Bool = false
     @Published var canRedo: Bool = false
-    weak var activeUndoManager: UndoManager?
+    /// The single global undo/redo stack for every mutating action in the document — strokes,
+    /// fills, layer/folder structure, and animation-timeline edits alike. See `UndoHistory`.
+    let history = UndoHistory()
+
+    /// Records one undoable action against the global `history` and refreshes `canUndo`/`canRedo`.
+    /// The shared entry point every call site (content edits and structural edits alike) funnels
+    /// through, so undo/redo bookkeeping lives in exactly one place.
+    func recordUndo(name: String, cost: Int = 0, undo: @escaping () -> Void, redo: @escaping () -> Void) {
+        history.record(.init(name: name, cost: cost, undo: undo, redo: redo))
+        refreshUndoRedoState()
+    }
+
+    /// Rough retained-byte estimate for an image held by an undo/redo closure, used to feed
+    /// `UndoHistory`'s memory-budgeted trimming. Precision doesn't matter here — this only needs to
+    /// be in the right ballpark so a handful of full-canvas snapshots don't silently balloon memory.
+    static func approximateImageCost(_ image: UIImage?) -> Int {
+        guard let cg = image?.cgImage else { return 0 }
+        return cg.width * cg.height * 4
+    }
 
     /// Fires whenever a real drawing/fill interaction begins on the canvas (a stroke or a fill press
     /// touching down) — `DrawingView` uses this to auto-dismiss whatever top-bar dropdown is open, so
@@ -228,10 +246,12 @@ final class CanvasManager: ObservableObject {
     // MARK: - Layers
 
     func addLayer(name: String? = nil) {
-        let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-        let layer = Layer(id: UUID(), name: name ?? "Layer \(layers.count + 1)", opacity: 1.0, isVisible: true, cels: [cel])
-        layers.append(layer)
-        currentLayerIndex = layers.count - 1
+        withStructureUndo(name: "Add Layer") {
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
+            let layer = Layer(id: UUID(), name: name ?? "Layer \(layers.count + 1)", opacity: 1.0, isVisible: true, cels: [cel])
+            layers.append(layer)
+            currentLayerIndex = layers.count - 1
+        }
     }
 
     /// Adds a `.vector` layer: brush strokes drawn here are stored as geometry (see `VectorCanvas`)
@@ -239,23 +259,27 @@ final class CanvasManager: ObservableObject {
     /// images/shapes. Its cel still keeps an (empty) `raster` so every cel-lifecycle path that
     /// assumes a non-optional raster keeps working — the live strokes just live in `vector` instead.
     func addVectorLayer(name: String? = nil) {
-        let size = canvasSize ?? CGSize(width: 1, height: 1)
-        let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: size), vector: .empty(size: size))
-        let layer = Layer(id: UUID(), name: name ?? "Vector \(layers.count + 1)", opacity: 1.0, isVisible: true, kind: .vector, cels: [cel])
-        layers.append(layer)
-        currentLayerIndex = layers.count - 1
+        withStructureUndo(name: "Add Vector Layer") {
+            let size = canvasSize ?? CGSize(width: 1, height: 1)
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: size), vector: .empty(size: size))
+            let layer = Layer(id: UUID(), name: name ?? "Vector \(layers.count + 1)", opacity: 1.0, isVisible: true, kind: .vector, cels: [cel])
+            layers.append(layer)
+            currentLayerIndex = layers.count - 1
+        }
     }
 
     /// Inserts a photo as an "object layer": the image isn't rasterized onto the canvas, it's kept
     /// as a standalone object with its own position/scale/rotation that can be adjusted at any time
     /// via the on-canvas transform handles (see ObjectTransformOverlayView).
     func addObjectLayer(image: UIImage, name: String? = nil) {
-        let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-        var layer = Layer(id: UUID(), name: name ?? "Image \(layers.count + 1)", opacity: 1.0, isVisible: true, isObjectLayer: true, objectImage: image, cels: [cel])
-        layer.thumbnail = image
-        layer.objectTransform = initialObjectTransform(for: image)
-        layers.append(layer)
-        currentLayerIndex = layers.count - 1
+        withStructureUndo(name: "Insert Image") {
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
+            var layer = Layer(id: UUID(), name: name ?? "Image \(layers.count + 1)", opacity: 1.0, isVisible: true, isObjectLayer: true, objectImage: image, cels: [cel])
+            layer.thumbnail = image
+            layer.objectTransform = initialObjectTransform(for: image)
+            layers.append(layer)
+            currentLayerIndex = layers.count - 1
+        }
     }
 
     /// Centers the image and scales it to comfortably fit inside the canvas (rather than covering
@@ -271,6 +295,11 @@ final class CanvasManager: ObservableObject {
         )
     }
 
+    /// Deliberately NOT wrapped in `withStructureUndo` — `ObjectTransformOverlayView`'s pan
+    /// handlers call this on every `.changed` event of a move/scale/rotate gesture, so the
+    /// consumer brackets the whole gesture with `beginStructureGesture()`/
+    /// `commitStructureGesture(name:)` instead of one step per call (see `resizeCelLeftEdge`'s
+    /// comment for the same pattern on the timeline).
     func updateObjectTransform(layerIndex: Int, transform: LayerTransform) {
         guard layers.indices.contains(layerIndex) else { return }
         layers[layerIndex].objectTransform = transform
@@ -278,27 +307,28 @@ final class CanvasManager: ObservableObject {
 
     func deleteLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
-        // If the layer being deleted is the active one, currentLayerIndex's *numeric* value may end
-        // up unchanged (a later layer slides down into the same slot) — the didSet below won't fire,
-        // so handleActiveContextChanged() has to be called explicitly to invalidate any selection/
-        // floating piece that was tied to the now-deleted layer (they're keyed by that layer's UUID,
-        // so this correctly detects the identity change even though the index didn't move).
-        let deletingActiveLayerInPlace = index == currentLayerIndex
-        layers.remove(at: index)
-        // No layers left — invalidate all per-layer state and set sentinel index -1.
-        if layers.isEmpty {
-            currentLayerIndex = -1
-        // Deleting a layer *below* the active one shifts every later index down by one, so
-        // currentLayerIndex must shift with it to keep pointing at the same layer. Without this,
-        // "active" silently jumps to whatever layer happened to slide into the old index —
-        // subsequent strokes land on the wrong layer and the undo manager gets reassigned out
-        // from under an unrelated layer.
-        } else if index < currentLayerIndex {
-            currentLayerIndex -= 1
-        } else if currentLayerIndex >= layers.count {
-            currentLayerIndex = layers.count - 1
-        } else if deletingActiveLayerInPlace {
-            handleActiveContextChanged()
+        withStructureUndo(name: "Delete Layer") {
+            // If the layer being deleted is the active one, currentLayerIndex's *numeric* value may end
+            // up unchanged (a later layer slides down into the same slot) — the didSet below won't fire,
+            // so handleActiveContextChanged() has to be called explicitly to invalidate any selection/
+            // floating piece that was tied to the now-deleted layer (they're keyed by that layer's UUID,
+            // so this correctly detects the identity change even though the index didn't move).
+            let deletingActiveLayerInPlace = index == currentLayerIndex
+            layers.remove(at: index)
+            // No layers left — invalidate all per-layer state and set sentinel index -1.
+            if layers.isEmpty {
+                currentLayerIndex = -1
+            // Deleting a layer *below* the active one shifts every later index down by one, so
+            // currentLayerIndex must shift with it to keep pointing at the same layer. Without this,
+            // "active" silently jumps to whatever layer happened to slide into the old index —
+            // subsequent strokes land on the wrong layer.
+            } else if index < currentLayerIndex {
+                currentLayerIndex -= 1
+            } else if currentLayerIndex >= layers.count {
+                currentLayerIndex = layers.count - 1
+            } else if deletingActiveLayerInPlace {
+                handleActiveContextChanged()
+            }
         }
     }
 
@@ -344,7 +374,7 @@ final class CanvasManager: ObservableObject {
         canvasSize = newSize
         canvasPadding = clamped
 
-        activeUndoManager?.removeAllActions()
+        history.removeAll()
         refreshUndoRedoState()
         regenerateAllThumbnails()
     }
@@ -380,6 +410,11 @@ final class CanvasManager: ObservableObject {
                 layers[layerIndex].objectTransform.rotation = -layers[layerIndex].objectTransform.rotation
             }
         }
+        // Not undoable, same as setCanvasPadding: every cel's raster/fill/baked content is mirrored
+        // in place, so any undo entry recorded before the flip would restore content in the wrong
+        // (pre-flip) orientation if left on the stack.
+        history.removeAll()
+        refreshUndoRedoState()
         regenerateAllThumbnails()
     }
 
@@ -441,12 +476,14 @@ final class CanvasManager: ObservableObject {
             length = min(length, nextStart - startFrame)
         }
         guard length > 0 else { return false }
-        let cel = Cel(id: UUID(), startFrame: startFrame, frameCount: length, raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-        layers[layerIndex].cels.append(cel)
-        layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
-        sceneFrameCount = max(sceneFrameCount, startFrame + length)
-        if let idx = activeCelIndex(inLayer: layerIndex, atFrame: startFrame) {
-            regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+        withStructureUndo(name: "Add Frame") {
+            let cel = Cel(id: UUID(), startFrame: startFrame, frameCount: length, raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
+            layers[layerIndex].cels.append(cel)
+            layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
+            sceneFrameCount = max(sceneFrameCount, startFrame + length)
+            if let idx = activeCelIndex(inLayer: layerIndex, atFrame: startFrame) {
+                regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+            }
         }
         return true
     }
@@ -461,12 +498,14 @@ final class CanvasManager: ObservableObject {
             length = min(length, nextStart - newStart)
         }
         guard length > 0 else { return }
-        let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: source.raster.makeCopy(), fillImage: source.fillImage, bakedImage: source.bakedImage, vector: source.vector?.makeCopy())
-        layers[layerIndex].cels.append(newCel)
-        layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
-        sceneFrameCount = max(sceneFrameCount, newStart + length)
-        if let idx = activeCelIndex(inLayer: layerIndex, atFrame: newStart) {
-            regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+        withStructureUndo(name: "Duplicate Frame") {
+            let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: source.raster.makeCopy(), fillImage: source.fillImage, bakedImage: source.bakedImage, vector: source.vector?.makeCopy())
+            layers[layerIndex].cels.append(newCel)
+            layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
+            sceneFrameCount = max(sceneFrameCount, newStart + length)
+            if let idx = activeCelIndex(inLayer: layerIndex, atFrame: newStart) {
+                regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+            }
         }
     }
 
@@ -478,25 +517,31 @@ final class CanvasManager: ObservableObject {
     func deleteCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
               layers[layerIndex].cels.count > 1 else { return }
-        layers[layerIndex].cels.remove(at: celIndex)
+        withStructureUndo(name: "Delete Frame") {
+            layers[layerIndex].cels.remove(at: celIndex)
+        }
     }
 
     func extendCelToEnd(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
-        resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex, newEndFrame: max(sceneFrameCount, cel.endFrame))
+        withStructureUndo(name: "Extend Frame") {
+            resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex, newEndFrame: max(sceneFrameCount, cel.endFrame))
+        }
     }
 
     func clearCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        let size = canvasSize ?? CGSize(width: 1, height: 1)
-        layers[layerIndex].cels[celIndex].raster = .empty(size: size)
-        layers[layerIndex].cels[celIndex].fillImage = nil
-        layers[layerIndex].cels[celIndex].bakedImage = nil
-        if layers[layerIndex].cels[celIndex].vector != nil {
-            layers[layerIndex].cels[celIndex].vector = .empty(size: size)
+        withStructureUndo(name: "Clear Frame") {
+            let size = canvasSize ?? CGSize(width: 1, height: 1)
+            layers[layerIndex].cels[celIndex].raster = .empty(size: size)
+            layers[layerIndex].cels[celIndex].fillImage = nil
+            layers[layerIndex].cels[celIndex].bakedImage = nil
+            if layers[layerIndex].cels[celIndex].vector != nil {
+                layers[layerIndex].cels[celIndex].vector = .empty(size: size)
+            }
+            regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
         }
-        regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
     }
 
     /// The open frame range a cel is allowed to occupy, bounded by its neighbors in the same layer.
@@ -509,6 +554,9 @@ final class CanvasManager: ObservableObject {
     }
 
     /// Drag the block's left edge: keeps the right edge fixed, changes startFrame/frameCount.
+    /// Deliberately NOT wrapped in `withStructureUndo` here — `TimelineTrackView`'s pan handler
+    /// calls this on every `.changed` event of the drag, so it brackets the whole gesture itself
+    /// with `beginStructureGesture()`/`commitStructureGesture(name:)` instead of one step per call.
     func resizeCelLeftEdge(layerIndex: Int, celIndex: Int, newStartFrame: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
@@ -518,7 +566,9 @@ final class CanvasManager: ObservableObject {
         layers[layerIndex].cels[celIndex].frameCount = cel.endFrame - clampedStart
     }
 
-    /// Drag the block's right edge: keeps the left edge fixed, changes frameCount only.
+    /// Drag the block's right edge: keeps the left edge fixed, changes frameCount only. Also used
+    /// (as a one-shot call, not a gesture) by `extendCelToEnd`, which supplies its own undo wrap
+    /// since this method doesn't register one itself — see `resizeCelLeftEdge`'s comment.
     func resizeCelRightEdge(layerIndex: Int, celIndex: Int, newEndFrame: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
@@ -528,7 +578,8 @@ final class CanvasManager: ObservableObject {
         sceneFrameCount = max(sceneFrameCount, clampedEnd)
     }
 
-    /// Drag the block body: repositions it (startFrame changes, length unchanged), clamped to not overlap neighbors.
+    /// Drag the block body: repositions it (startFrame changes, length unchanged), clamped to not
+    /// overlap neighbors. Not wrapped here either — see `resizeCelLeftEdge`'s comment.
     func moveCel(layerIndex: Int, celIndex: Int, newStartFrame: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
@@ -544,12 +595,14 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
         guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return }
-        layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
-        let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy())
-        layers[layerIndex].cels.append(secondHalf)
-        layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
-        if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
-            regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+        withStructureUndo(name: "Split Frame") {
+            layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
+            let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy())
+            layers[layerIndex].cels.append(secondHalf)
+            layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
+            if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
+                regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+            }
         }
     }
 
@@ -597,6 +650,15 @@ final class CanvasManager: ObservableObject {
 
     func scheduleThumbnailRegen(layerIndex: Int, celIndex: Int) {
         thumbnailRegenSubject.send((layerIndex, celIndex))
+    }
+
+    /// ID-based convenience for undo/redo closures, which can fire long after other structural
+    /// edits have shifted indices — resolves current indices by identity first. A no-op if the
+    /// layer/cel no longer exists.
+    func scheduleThumbnailRegen(layerID: UUID, celID: UUID) {
+        guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
+              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
+        scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
     }
 
     func regenerateAllThumbnails() {
@@ -675,10 +737,12 @@ final class CanvasManager: ObservableObject {
     private var fillGestureSeed: (x: Int, y: Int) = (0, 0)
     private var fillGestureColor: SIMD4<Float> = .zero   // premultiplied 0..1
     private var fillGestureFillColor: CodableColor = .init(red: 0, green: 0, blue: 0, alpha: 1)
-    private var fillGestureLayerIndex = 0
-    private var fillGestureCelIndex = 0
+    // IDs, not indices: the fill can stay adjustable across other edits, so the layer/cel it
+    // targets must be re-resolved by identity rather than trusting a captured index to still
+    // point at the same one (see `registerUndoableCelChange` for the same principle).
+    private var fillGestureLayerID: UUID?
+    private var fillGestureCelID: UUID?
     private var fillGestureBaseBaked: UIImage?  // layer's baked pixels before this gesture (undo/composite base)
-    private weak var fillGestureUndoManager: UndoManager?
 
     /// Begins an interactive fill at `point` (canvas-pixel coords, top-left origin): composites every
     /// fill-reference layer into a reference image once, uploads it to a GPU `MetalFillSession`, samples
@@ -709,10 +773,9 @@ final class CanvasManager: ObservableObject {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
         fillGestureFillColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
-        fillGestureLayerIndex = layerIndex
-        fillGestureCelIndex = celIndex
+        fillGestureLayerID = layers[layerIndex].id
+        fillGestureCelID = layers[layerIndex].cels[celIndex].id
         fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
-        fillGestureUndoManager = activeUndoManager
         refreshUndoRedoState() // the fill is undoable from the moment it starts, even on a blank canvas
 
         fillLock.lock()
@@ -754,8 +817,20 @@ final class CanvasManager: ObservableObject {
     /// switch). Independent of visibility, so a hidden layer can still be turned back on as a reference.
     func setFillReference(layerIndex: Int, isReference: Bool) {
         guard layers.indices.contains(layerIndex) else { return }
-        if layers[layerIndex].isFillReference != isReference {
+        guard layers[layerIndex].isFillReference != isReference else { return }
+        withStructureUndo(name: "Fill Reference") {
             layers[layerIndex].isFillReference = isReference
+        }
+    }
+
+    /// Moves a layer into (or out of, for `nil`) a folder from the Edit-menu picker, without
+    /// changing its stacking position — see `restackLayer` for drag-driven moves that also
+    /// reorder.
+    func setParentFolder(layerIndex: Int, folderID: UUID?) {
+        guard layers.indices.contains(layerIndex) else { return }
+        guard layers[layerIndex].parentFolderID != folderID else { return }
+        withStructureUndo(name: "Move to Folder") {
+            layers[layerIndex].parentFolderID = folderID
         }
     }
 
@@ -764,23 +839,27 @@ final class CanvasManager: ObservableObject {
     /// When a view preset is active, the change is saved into that preset automatically.
     func toggleLayerVisibility(layerIndex: Int) {
         guard layers.indices.contains(layerIndex) else { return }
-        let nowVisible = !layers[layerIndex].isVisible
-        layers[layerIndex].isVisible = nowVisible
-        layers[layerIndex].isFillReference = nowVisible
-        saveVisibilityToActiveView()
+        withStructureUndo(name: "Toggle Visibility") {
+            let nowVisible = !layers[layerIndex].isVisible
+            layers[layerIndex].isVisible = nowVisible
+            layers[layerIndex].isFillReference = nowVisible
+            saveVisibilityToActiveView()
+        }
     }
 
     /// Toggles a folder's own visibility and propagates it to every child layer.
     /// When a view preset is active, each child change is saved into it.
     func toggleFolderVisibility(_ folderID: UUID) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
-        let nowVisible = !folders[idx].isVisible
-        folders[idx].isVisible = nowVisible
-        for li in layers.indices where layers[li].parentFolderID == folderID {
-            layers[li].isVisible = nowVisible
-            layers[li].isFillReference = nowVisible
+        withStructureUndo(name: "Toggle Visibility") {
+            let nowVisible = !folders[idx].isVisible
+            folders[idx].isVisible = nowVisible
+            for li in layers.indices where layers[li].parentFolderID == folderID {
+                layers[li].isVisible = nowVisible
+                layers[li].isFillReference = nowVisible
+            }
+            saveVisibilityToActiveView()
         }
-        saveVisibilityToActiveView()
     }
 
     /// Toggles whether a folder's child layers are shown in the layer panel.
@@ -794,19 +873,24 @@ final class CanvasManager: ObservableObject {
     @discardableResult
     func addFolder(name: String? = nil) -> UUID {
         let folder = LayerFolder(id: UUID(), name: name ?? "Folder \(folders.count + 1)")
-        folders.append(folder)
+        withStructureUndo(name: "Add Folder") {
+            folders.append(folder)
+        }
         return folder.id
     }
 
     /// Removes a folder. Its layers survive as top-level rows in the same stacking positions.
     func deleteFolder(_ folderID: UUID) {
-        guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
-        folders.remove(at: idx)
-        for li in layers.indices where layers[li].parentFolderID == folderID {
-            layers[li].parentFolderID = nil
-        }
-        for vi in viewPresets.indices {
-            viewPresets[vi].folderVisibility.removeValue(forKey: folderID)
+        guard folders.contains(where: { $0.id == folderID }) else { return }
+        withStructureUndo(name: "Delete Folder") {
+            guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+            folders.remove(at: idx)
+            for li in layers.indices where layers[li].parentFolderID == folderID {
+                layers[li].parentFolderID = nil
+            }
+            for vi in viewPresets.indices {
+                viewPresets[vi].folderVisibility.removeValue(forKey: folderID)
+            }
         }
     }
 
@@ -862,65 +946,70 @@ final class CanvasManager: ObservableObject {
     /// Re-stacks `layerID` so it sits directly above `anchor`, reparented to `parentFolderID`.
     /// The active layer keeps pointing at the same layer regardless of how indices shift.
     func restackLayer(_ layerID: UUID, above anchor: StackAnchor, parentFolderID: UUID?) {
-        guard let from = layers.firstIndex(where: { $0.id == layerID }) else { return }
-        let activeID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
+        guard layers.contains(where: { $0.id == layerID }) else { return }
+        withStructureUndo(name: "Reorder Layer") {
+            guard let from = layers.firstIndex(where: { $0.id == layerID }) else { return }
+            let activeID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
 
-        var moved = layers.remove(at: from)
-        moved.parentFolderID = parentFolderID
+            var moved = layers.remove(at: from)
+            moved.parentFolderID = parentFolderID
 
-        let insertAt: Int
-        switch anchor {
-        case .bottom:
-            insertAt = 0
-        case .layer(let anchorID):
-            // `layers` is bottom-to-top, so "directly above the anchor" is one past its index.
-            insertAt = layers.firstIndex(where: { $0.id == anchorID }).map { $0 + 1 } ?? layers.count
-        case .folder(let folderID):
-            // Clear the whole folder: land just past its topmost remaining child. An empty folder
-            // renders at the top of the stack, so above it means the top of the array.
-            insertAt = layers.lastIndex(where: { $0.parentFolderID == folderID }).map { $0 + 1 } ?? layers.count
-        }
-        layers.insert(moved, at: min(max(insertAt, 0), layers.count))
+            let insertAt: Int
+            switch anchor {
+            case .bottom:
+                insertAt = 0
+            case .layer(let anchorID):
+                // `layers` is bottom-to-top, so "directly above the anchor" is one past its index.
+                insertAt = layers.firstIndex(where: { $0.id == anchorID }).map { $0 + 1 } ?? layers.count
+            case .folder(let folderID):
+                // Clear the whole folder: land just past its topmost remaining child. An empty folder
+                // renders at the top of the stack, so above it means the top of the array.
+                insertAt = layers.lastIndex(where: { $0.parentFolderID == folderID }).map { $0 + 1 } ?? layers.count
+            }
+            layers.insert(moved, at: min(max(insertAt, 0), layers.count))
 
-        if let activeID, let newActive = layers.firstIndex(where: { $0.id == activeID }) {
-            currentLayerIndex = newActive
+            if let activeID, let newActive = layers.firstIndex(where: { $0.id == activeID }) {
+                currentLayerIndex = newActive
+            }
         }
     }
 
     /// Moves a whole folder — header and every layer inside it, keeping their relative order — so
     /// the group comes to rest directly above `anchor`.
     func restackFolder(_ folderID: UUID, above anchor: StackAnchor) {
-        let activeID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
+        withStructureUndo(name: "Reorder Folder") {
+            let activeID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
 
-        let group = layers.filter { $0.parentFolderID == folderID }
-        layers.removeAll { $0.parentFolderID == folderID }
+            let group = layers.filter { $0.parentFolderID == folderID }
+            layers.removeAll { $0.parentFolderID == folderID }
 
-        if group.isEmpty {
-            // An empty folder has no foothold in `layers` at all — `layerStackRows` reads its
-            // position off `folders` (walked in reverse, so later entries render higher).
-            guard let from = folders.firstIndex(where: { $0.id == folderID }) else { return }
-            let moved = folders.remove(at: from)
-            if case .folder(let otherID) = anchor, let below = folders.firstIndex(where: { $0.id == otherID }) {
-                folders.insert(moved, at: below + 1)
-            } else {
-                folders.append(moved)
+            if group.isEmpty {
+                // An empty folder has no foothold in `layers` at all — `layerStackRows` reads its
+                // position off `folders` (walked in reverse, so later entries render higher).
+                guard let from = folders.firstIndex(where: { $0.id == folderID }) else { return }
+                let moved = folders.remove(at: from)
+                if case .folder(let otherID) = anchor, let below = folders.firstIndex(where: { $0.id == otherID }) {
+                    folders.insert(moved, at: below + 1)
+                } else {
+                    folders.append(moved)
+                }
+                return
             }
-            return
-        }
 
-        let insertAt: Int
-        switch anchor {
-        case .bottom:
-            insertAt = 0
-        case .layer(let anchorID):
-            insertAt = layers.firstIndex(where: { $0.id == anchorID }).map { $0 + 1 } ?? layers.count
-        case .folder(let otherID):
-            insertAt = layers.lastIndex(where: { $0.parentFolderID == otherID }).map { $0 + 1 } ?? layers.count
-        }
-        layers.insert(contentsOf: group, at: min(max(insertAt, 0), layers.count))
+            let insertAt: Int
+            switch anchor {
+            case .bottom:
+                insertAt = 0
+            case .layer(let anchorID):
+                insertAt = layers.firstIndex(where: { $0.id == anchorID }).map { $0 + 1 } ?? layers.count
+            case .folder(let otherID):
+                insertAt = layers.lastIndex(where: { $0.parentFolderID == otherID }).map { $0 + 1 } ?? layers.count
+            }
+            layers.insert(contentsOf: group, at: min(max(insertAt, 0), layers.count))
 
-        if let activeID, let newActive = layers.firstIndex(where: { $0.id == activeID }) {
-            currentLayerIndex = newActive
+            if let activeID, let newActive = layers.firstIndex(where: { $0.id == activeID }) {
+                currentLayerIndex = newActive
+            }
         }
     }
 
@@ -928,30 +1017,34 @@ final class CanvasManager: ObservableObject {
 
     /// Adds a new view preset capturing the current visibility state of all layers and folders.
     func addViewPreset() {
-        var vis: [UUID: Bool] = [:]
-        for layer in layers { vis[layer.id] = layer.isVisible }
-        var folderVis: [UUID: Bool] = [:]
-        for folder in folders { folderVis[folder.id] = folder.isVisible }
-        let preset = ViewPreset(id: UUID(), name: "View \(viewPresets.count + 1)",
-                                layerVisibility: vis, folderVisibility: folderVis)
-        viewPresets.append(preset)
-        activeViewPresetIndex = viewPresets.count - 1
+        withStructureUndo(name: "Add View") {
+            var vis: [UUID: Bool] = [:]
+            for layer in layers { vis[layer.id] = layer.isVisible }
+            var folderVis: [UUID: Bool] = [:]
+            for folder in folders { folderVis[folder.id] = folder.isVisible }
+            let preset = ViewPreset(id: UUID(), name: "View \(viewPresets.count + 1)",
+                                    layerVisibility: vis, folderVisibility: folderVis)
+            viewPresets.append(preset)
+            activeViewPresetIndex = viewPresets.count - 1
+        }
     }
 
     /// Switches to the view preset at `index`, or back to "no view" (all layers visible) for any
     /// index outside `viewPresets`. Passing -1 is the canonical way to clear the active view.
     func selectViewPreset(at index: Int) {
-        if viewPresets.indices.contains(index) {
-            activeViewPresetIndex = index
-            applyViewPreset(viewPresets[index])
-        } else {
-            activeViewPresetIndex = -1
-            for idx in layers.indices where !layers[idx].isVisible {
-                layers[idx].isVisible = true
-                layers[idx].isFillReference = true
-            }
-            for idx in folders.indices where !folders[idx].isVisible {
-                folders[idx].isVisible = true
+        withStructureUndo(name: "Switch View") {
+            if viewPresets.indices.contains(index) {
+                activeViewPresetIndex = index
+                applyViewPreset(viewPresets[index])
+            } else {
+                activeViewPresetIndex = -1
+                for idx in layers.indices where !layers[idx].isVisible {
+                    layers[idx].isVisible = true
+                    layers[idx].isFillReference = true
+                }
+                for idx in folders.indices where !folders[idx].isVisible {
+                    folders[idx].isVisible = true
+                }
             }
         }
     }
@@ -960,11 +1053,13 @@ final class CanvasManager: ObservableObject {
     /// (or dropping to "no view" when the active one is the one being deleted).
     func deleteViewPreset(at index: Int) {
         guard viewPresets.indices.contains(index) else { return }
-        viewPresets.remove(at: index)
-        if activeViewPresetIndex == index {
-            selectViewPreset(at: -1)
-        } else if index < activeViewPresetIndex {
-            activeViewPresetIndex -= 1
+        withStructureUndo(name: "Delete View") {
+            viewPresets.remove(at: index)
+            if activeViewPresetIndex == index {
+                selectViewPreset(at: -1)
+            } else if index < activeViewPresetIndex {
+                activeViewPresetIndex -= 1
+            }
         }
     }
 
@@ -1095,11 +1190,11 @@ final class CanvasManager: ObservableObject {
         let regionW = fillLastRegionW, regionH = fillLastRegionH
         fillLastRegionRGBA = nil
         fillQueue.async { [weak self] in self?.fillSession = nil }
-        let layerIndex = fillGestureLayerIndex, celIndex = fillGestureCelIndex
-        let undoManager = fillGestureUndoManager
         let fillColor = fillGestureFillColor
-        defer { fillGestureBaseBaked = nil; fillGestureUndoManager = nil; refreshUndoRedoState() }
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        defer { fillGestureBaseBaked = nil; fillGestureLayerID = nil; fillGestureCelID = nil; refreshUndoRedoState() }
+        guard let layerID = fillGestureLayerID, let celID = fillGestureCelID,
+              let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
+              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
         let cel = layers[layerIndex].cels[celIndex]
         guard let preview = cel.fillImage else { return }  // nothing was previewed
         let isVector = layers[layerIndex].kind == .vector
@@ -1113,45 +1208,35 @@ final class CanvasManager: ObservableObject {
             vectorCanvas.addFill(element)
             // Clear the transient raster fill preview so it isn't drawn a second time.
             setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: nil)
-            // Register undo that removes the fill element (mirror of the stroke undo pattern).
-            let manager = undoManager
-            manager?.setActionName("Fill")
-            manager?.registerUndo(withTarget: self) { target in
-                vectorCanvas.fills = fillsBefore
-                vectorCanvas.bumpVersion()
-                target.scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
-                target.registerVectorFillRedo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                              layerIndex: layerIndex, celIndex: celIndex, actionName: "Fill", undoManager: manager)
-                target.refreshUndoRedoState()
-            }
-            refreshUndoRedoState()
+            registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
+                                   layerID: layerID, celID: celID, actionName: "Fill")
         } else {
             // --- Raster path (original behaviour): bake into bakedImage ---
             let newBaked = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: preview)
-            registerUndoableCelChange(layerIndex: layerIndex, celIndex: celIndex,
+            registerUndoableCelChange(layerID: layerID, celID: celID,
                                       oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,
                                       newRaster: cel.raster, newBaked: newBaked, newFill: nil,
-                                      actionName: "Fill", undoManager: undoManager)
+                                      actionName: "Fill")
         }
     }
 
-    /// Re-registers the opposite undo step so redo can restore vector fills (mirrors
-    /// `registerCelReversal` for raster undo). Called from the undo handler created in
-    /// `commitInteractiveFill` when the layer is vector.
-    func registerVectorFillRedo(vectorCanvas: VectorCanvas,
-                                        oldFills: [VectorFillElement], newFills: [VectorFillElement],
-                                        layerIndex: Int, celIndex: Int,
-                                        actionName: String, undoManager: UndoManager?) {
-        let manager = undoManager ?? activeUndoManager
-        manager?.setActionName(actionName)
-        manager?.registerUndo(withTarget: self) { target in
+    /// Registers one undo step that swaps a vector layer's `.fills` between `oldFills`/`newFills` —
+    /// used by an adjustable-fill commit and by Fill/Clear-on-selection for vector layers (see
+    /// `SelectionModels.swift`). Resolves the cel by ID (not a captured index) when the thumbnail
+    /// regen fires, since other structural edits may have shifted indices by then.
+    func registerVectorFillUndo(vectorCanvas: VectorCanvas,
+                                oldFills: [VectorFillElement], newFills: [VectorFillElement],
+                                layerID: UUID, celID: UUID, actionName: String) {
+        let cost = (oldFills.count + newFills.count) * 512
+        recordUndo(name: actionName, cost: cost, undo: { [weak self] in
+            vectorCanvas.fills = oldFills
+            vectorCanvas.bumpVersion()
+            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+        }, redo: { [weak self] in
             vectorCanvas.fills = newFills
             vectorCanvas.bumpVersion()
-            target.scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
-            target.registerVectorFillRedo(vectorCanvas: vectorCanvas, oldFills: newFills, newFills: oldFills,
-                                          layerIndex: layerIndex, celIndex: celIndex, actionName: actionName, undoManager: undoManager)
-            target.refreshUndoRedoState()
-        }
+            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+        })
     }
 
     /// Abandons the interactive fill without committing, discarding the preview. Used when an undo/redo
@@ -1161,8 +1246,13 @@ final class CanvasManager: ObservableObject {
         fillGestureActive = false // stops any in-flight render from applying (its main hop checks this)
         fillFingerDown = false
         fillLastRegionRGBA = nil
-        fillGestureUndoManager = nil
-        setFillPreview(layerIndex: fillGestureLayerIndex, celIndex: fillGestureCelIndex, image: nil)
+        if let layerID = fillGestureLayerID, let celID = fillGestureCelID,
+           let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
+           let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) {
+            setFillPreview(layerIndex: layerIndex, celIndex: celIndex, image: nil)
+        }
+        fillGestureLayerID = nil
+        fillGestureCelID = nil
         fillQueue.async { [weak self] in self?.fillSession = nil }
         refreshUndoRedoState()
     }
@@ -1199,10 +1289,13 @@ final class CanvasManager: ObservableObject {
                                      gapRadius: Float(key.gap), edgeOverlap: Float(key.edge),
                                      fillColor: fillGestureColor)
             let image = bytes.flatMap { Self.imageFromRGBA($0, width: session.width, height: session.height) }
-            let layerIndex = fillGestureLayerIndex, celIndex = fillGestureCelIndex
+            let layerID = fillGestureLayerID, celID = fillGestureCelID
             let regionW = session.width, regionH = session.height
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.fillGestureActive else { return }
+                guard let self, self.fillGestureActive,
+                      let layerID, let celID,
+                      let layerIndex = self.layers.firstIndex(where: { $0.id == layerID }),
+                      let celIndex = self.layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
                 let clipped = self.clippedForSelection(image, layerIndex: layerIndex, celIndex: celIndex)
                 self.setFillPreview(layerIndex: layerIndex, celIndex: celIndex, image: clipped)
                 self.fillLastRegionRGBA = bytes
@@ -1301,13 +1394,13 @@ final class CanvasManager: ObservableObject {
 
     func undo() {
         finalizeFillForHistoryAction()
-        activeUndoManager?.undo()
+        history.undo()
         refreshUndoRedoState()
     }
 
     func redo() {
         finalizeFillForHistoryAction()
-        activeUndoManager?.redo()
+        history.redo()
         refreshUndoRedoState()
     }
 
@@ -1327,10 +1420,81 @@ final class CanvasManager: ObservableObject {
     func refreshUndoRedoState() {
         // A lifted-but-not-yet-committed fill is itself an undoable action (undo finalizes then reverts
         // it), so the Undo affordance must be live even when the committed stack is empty.
-        let newCanUndo = fillGestureActive || (activeUndoManager?.canUndo ?? false)
-        let newCanRedo = !fillGestureActive && (activeUndoManager?.canRedo ?? false)
+        let newCanUndo = fillGestureActive || history.canUndo
+        let newCanRedo = !fillGestureActive && history.canRedo
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }
+    }
+
+    // MARK: - Structural undo (layer/folder/cel-timeline edits)
+
+    /// A whole-document-structure snapshot: cheap to take because `Layer`/`Cel`/`LayerFolder`/
+    /// `ViewPreset` are all value types — copying these arrays copies no pixel/vector content
+    /// (`Cel.raster`/`Cel.vector` are class references, shared rather than duplicated), only the
+    /// lightweight struct fields (name, opacity, visibility, frame ranges, folder membership...).
+    /// This is what makes it safe and cheap to snapshot before/after every layer/folder/cel-
+    /// timeline operation, not just the pixel-editing ones.
+    private struct StructureSnapshot {
+        var layers: [Layer]
+        var folders: [LayerFolder]
+        var viewPresets: [ViewPreset]
+        var activeViewPresetIndex: Int
+        var currentLayerIndex: Int
+        var sceneFrameCount: Int
+    }
+
+    private func captureStructure() -> StructureSnapshot {
+        StructureSnapshot(layers: layers, folders: folders, viewPresets: viewPresets,
+                          activeViewPresetIndex: activeViewPresetIndex,
+                          currentLayerIndex: currentLayerIndex, sceneFrameCount: sceneFrameCount)
+    }
+
+    private func restoreStructure(_ snapshot: StructureSnapshot) {
+        layers = snapshot.layers
+        folders = snapshot.folders
+        viewPresets = snapshot.viewPresets
+        activeViewPresetIndex = snapshot.activeViewPresetIndex
+        currentLayerIndex = snapshot.currentLayerIndex
+        sceneFrameCount = snapshot.sceneFrameCount
+    }
+
+    /// Registers one undo step for a discrete (non-gesture) structural edit — call after the
+    /// mutation has already happened, passing a `before` snapshot taken right before it.
+    private func recordStructureChange(name: String, from: StructureSnapshot, to: StructureSnapshot) {
+        recordUndo(name: name, cost: 4096, undo: { [weak self] in
+            self?.restoreStructure(from)
+        }, redo: { [weak self] in
+            self?.restoreStructure(to)
+        })
+    }
+
+    /// Snapshots current structure before a mutation and registers one undo step named `name`
+    /// comparing that snapshot against whatever `layers`/`folders`/etc. look like when this
+    /// returns — i.e. call this AFTER the mutating body, wrapping it as:
+    /// `let before = beginStructureUndo(); <mutate>; commit(name: "...")`. Kept private; the
+    /// public surface is the two call shapes below (`withStructureUndo` for discrete edits,
+    /// `beginStructureGesture`/`commitStructureGesture` for continuous drags).
+    private func withStructureUndo(name: String, _ body: () -> Void) {
+        let before = captureStructure()
+        body()
+        recordStructureChange(name: name, from: before, to: captureStructure())
+    }
+
+    /// In-flight snapshot for a continuous drag (opacity slider, object transform, timeline cel
+    /// resize/move) — these call their `CanvasManager` mutator on every gesture-`.changed` event,
+    /// so wrapping each individual call would flood the stack with one step per touch-move frame.
+    /// Callers instead bracket the whole gesture: `beginStructureGesture()` at `.began`,
+    /// `commitStructureGesture(name:)` at `.ended`/`.cancelled`.
+    private var gestureSnapshot: StructureSnapshot?
+
+    func beginStructureGesture() {
+        gestureSnapshot = captureStructure()
+    }
+
+    func commitStructureGesture(name: String) {
+        guard let before = gestureSnapshot else { return }
+        gestureSnapshot = nil
+        recordStructureChange(name: name, from: before, to: captureStructure())
     }
 }
 

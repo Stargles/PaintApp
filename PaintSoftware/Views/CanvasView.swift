@@ -80,8 +80,9 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
 /// composite that buffer once at brush opacity on stroke-end — which is out of scope for the
 /// foundation.
 final class StrokeCanvasView: UIView {
-    let localUndoManager = UndoManager()
-    override var undoManager: UndoManager? { localUndoManager }
+    /// Set once by `Coordinator.reconcileLayers()` when this view is created — undo/redo
+    /// registrations go through the single global `CanvasManager.history`, not a per-view stack.
+    weak var canvasManager: CanvasManager?
 
     var layerID: UUID?
     var raster: RasterLayerTexture? {
@@ -243,19 +244,23 @@ final class StrokeCanvasView: UIView {
         onStrokeEnded?()
     }
 
-    /// Classic reversible-closure undo registration (same pattern as `CanvasManager.
-    /// registerFillUndo`/`SelectionModels.registerUndoableCelChange`): each undo re-registers the
-    /// opposite action, so redo — and further undo/redo cycling — keeps working. A whole-image
-    /// snapshot per stroke, not a dirty-rect crop; fine for a placeholder, but real bounded/cropped
-    /// undo storage (see BUGS.md's engine-rewrite notes) is real follow-up work, not done here.
+    /// Registers one step on the global `CanvasManager.history`. A whole-image snapshot per
+    /// stroke, not a dirty-rect crop; fine for a placeholder, but real bounded/cropped undo storage
+    /// (see BUGS.md's engine-rewrite notes) is real follow-up work, not done here. The `raster`
+    /// instance is captured by reference, not by index/ID — this cel's raster field never gets
+    /// reassigned to a different instance except by a structural edit (resize/clear/etc.), which
+    /// registers its own undo step and would itself be undone first.
     private func registerRasterUndo(raster: RasterLayerTexture, from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
-        localUndoManager.registerUndo(withTarget: self) { target in
+        let cost = CanvasManager.approximateImageCost(from.image) + CanvasManager.approximateImageCost(to.image)
+        canvasManager?.recordUndo(name: "Stroke", cost: cost, undo: { [weak self] in
             raster.reset(to: from.image, strokeCount: from.count)
-            target.refreshDisplay()
-            target.onStrokeEnded?()
-            target.registerRasterUndo(raster: raster, from: to, to: from)
-        }
-        localUndoManager.setActionName("Stroke")
+            self?.refreshDisplay()
+            self?.onStrokeEnded?()
+        }, redo: { [weak self] in
+            raster.reset(to: to.image, strokeCount: to.count)
+            self?.refreshDisplay()
+            self?.onStrokeEnded?()
+        })
     }
 
     /// Lays down stamps from `lastStampPoint` up to `point` into `target`, spaced a fraction of the
@@ -355,14 +360,19 @@ final class StrokeCanvasView: UIView {
     }
 
     private func registerVectorUndo(canvas: VectorCanvas, from: [VectorStroke], to: [VectorStroke]) {
-        localUndoManager.registerUndo(withTarget: self) { target in
+        let actionName = isEraser ? "Erase" : "Stroke"
+        let cost = (from.count + to.count) * 512
+        canvasManager?.recordUndo(name: actionName, cost: cost, undo: { [weak self] in
             canvas.strokes = from
             canvas.bumpVersion()
-            target.refreshDisplay()
-            target.onStrokeEnded?()
-            target.registerVectorUndo(canvas: canvas, from: to, to: from)
-        }
-        localUndoManager.setActionName(isEraser ? "Erase" : "Stroke")
+            self?.refreshDisplay()
+            self?.onStrokeEnded?()
+        }, redo: { [weak self] in
+            canvas.strokes = to
+            canvas.bumpVersion()
+            self?.refreshDisplay()
+            self?.onStrokeEnded?()
+        })
     }
 }
 
@@ -439,6 +449,28 @@ final class LayerHostView: UIView {
 /// can refit the canvas when the window/split-view size changes.
 final class CanvasHostView: UIView {
     var onLayout: (() -> Void)?
+    /// Set once by `CanvasView.makeUIView`. `UndoManager` no longer backs undo/redo (see
+    /// `CanvasManager.history`), so hardware-keyboard Cmd-Z/Cmd-Shift-Z needs an explicit
+    /// `UIKeyCommand` pair instead of relying on the responder chain's built-in undo-manager
+    /// integration.
+    weak var canvasManager: CanvasManager?
+
+    override var canBecomeFirstResponder: Bool { true }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { becomeFirstResponder() }
+    }
+
+    override var keyCommands: [UIKeyCommand]? {
+        [
+            UIKeyCommand(input: "z", modifierFlags: .command, action: #selector(handleUndoKeyCommand)),
+            UIKeyCommand(input: "z", modifierFlags: [.command, .shift], action: #selector(handleRedoKeyCommand))
+        ]
+    }
+
+    @objc private func handleUndoKeyCommand() { canvasManager?.undo() }
+    @objc private func handleRedoKeyCommand() { canvasManager?.redo() }
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -456,6 +488,7 @@ struct CanvasView: UIViewRepresentable {
         host.clipsToBounds = true
         host.isAccessibilityElement = true
         host.accessibilityIdentifier = "canvas.host"
+        host.canvasManager = canvasManager
 
         let container = UIView()
         container.backgroundColor = .clear
@@ -543,6 +576,16 @@ struct CanvasView: UIViewRepresentable {
 
         transformOverlay.onTransformChange = { [weak coordinator = context.coordinator] transform in
             coordinator?.objectTransformChanged(transform)
+        }
+        // One undo step per whole move/scale/rotate drag, not per intermediate value — see
+        // `CanvasManager.beginStructureGesture`'s doc comment. (Covers object-layer transforms;
+        // vector-layer whole-layer transforms mutate `VectorCanvas` in place and aren't captured
+        // by this value-based snapshot — pre-existing gap, not introduced here.)
+        transformOverlay.onGestureBegan = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.beginStructureGesture()
+        }
+        transformOverlay.onGestureEnded = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.commitStructureGesture(name: "Transform")
         }
         selectionOverlay.onFinishPath = { [weak coordinator = context.coordinator] path in
             coordinator?.canvasManager.finishSelection(path: path)
@@ -649,12 +692,6 @@ struct CanvasView: UIViewRepresentable {
 
         private var lastAppliedTransform: (scale: CGFloat, rotation: CGFloat, offset: CGSize)?
 
-        private struct ActiveKey: Equatable {
-            let layerID: UUID
-            let frame: Int
-        }
-        private var lastActiveKey: ActiveKey?
-
         /// Guards against reassigning the stroke view's tool settings on every SwiftUI re-render
         /// (this method runs on every re-render, including mid-stroke ones).
         private struct AppliedTool: Equatable {
@@ -700,6 +737,7 @@ struct CanvasView: UIViewRepresentable {
             for layer in canvasManager.layers where layerHosts[layer.id] == nil {
                 let host = LayerHostView()
                 host.strokeView.layerID = layer.id
+                host.strokeView.canvasManager = canvasManager
                 host.strokeView.onStrokeBegan = { [weak self] in
                     // Finalize a still-adjustable fill before this stroke changes any pixels, so the fill
                     // is the older undo step and this stroke undoes first. Self-guards when no fill is live.
@@ -932,26 +970,6 @@ struct CanvasView: UIViewRepresentable {
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
             guard let host = layerHosts[layer.id] else { return }
-
-            let activeKey = ActiveKey(layerID: layer.id, frame: canvasManager.currentFrame)
-            if activeKey != lastActiveKey {
-                host.strokeView.undoManager?.removeAllActions()
-                lastActiveKey = activeKey
-            }
-            canvasManager.activeUndoManager = host.strokeView.undoManager
-            let newCanUndo = host.strokeView.undoManager?.canUndo ?? false
-            let newCanRedo = host.strokeView.undoManager?.canRedo ?? false
-            if canvasManager.canUndo != newCanUndo || canvasManager.canRedo != newCanRedo {
-                // Mutating @Published state synchronously here would be "publishing changes from
-                // within view updates" (this method runs inside CanvasView.updateUIView), which
-                // SwiftUI warns can cause undefined/re-entrant behavior. In practice that showed up
-                // as a hang right when the active layer's identity changed (e.g. right after
-                // deleting a layer), since removeAllActions() above flips canUndo/canRedo on the
-                // same pass. Defer the publish to the next run loop turn instead.
-                DispatchQueue.main.async { [weak self] in
-                    self?.canvasManager.refreshUndoRedoState()
-                }
-            }
 
             // Not per-layer (there's only one global selected tool), so it lives outside the
             // per-layer caching guard below and is kept in sync on every call. Also suspended while
