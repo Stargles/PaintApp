@@ -69,12 +69,14 @@ else
         rm -rf "$WORKTREE_DIR"
     fi
 
+    # Remove stale local branch so -B can recreate it
+    git -C "$MAIN_REPO" branch -D "$TRACK_BRANCH" 2>/dev/null || true
     CREATED=false
     if git -C "$MAIN_REPO" show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
-        git -C "$MAIN_REPO" worktree add "$WORKTREE_DIR" -b "$TRACK_BRANCH" "origin/$BRANCH" 2>&1 && CREATED=true
+        git -C "$MAIN_REPO" worktree add "$WORKTREE_DIR" -B "$TRACK_BRANCH" "origin/$BRANCH" 2>&1 && CREATED=true
     fi
     if [ "$CREATED" = false ]; then
-        git -C "$MAIN_REPO" worktree add "$WORKTREE_DIR" -b "$TRACK_BRANCH" origin/main 2>&1 && CREATED=true
+        git -C "$MAIN_REPO" worktree add "$WORKTREE_DIR" -B "$TRACK_BRANCH" origin/main 2>&1 && CREATED=true
     fi
     if [ "$CREATED" = false ]; then
         log "ERROR: Could not create worktree for branch '$BRANCH'"
