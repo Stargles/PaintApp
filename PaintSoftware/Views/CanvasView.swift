@@ -99,7 +99,7 @@ final class StrokeCanvasView: UIView {
         didSet { stabilizer.stabilization = brush.stabilization }
     }
     var isEraser: Bool = false
-    var pencilOnlyDrawing: Bool = true {
+    var pencilOnlyDrawing: Bool = false {
         didSet { strokeRecognizer.requiresPencilOnly = pencilOnlyDrawing }
     }
     /// When non-nil (an active selection exists and `CanvasManager.allowsPaintingOutsideSelection` is
@@ -878,7 +878,8 @@ struct CanvasView: UIViewRepresentable {
         private func bakedImageToDisplay(layerIndex: Int, celIndex: Int?) -> UIImage? {
             guard let celIndex else { return nil }
             if let piece = canvasManager.floatingPiece, piece.kind == .move,
-               piece.sourceLayerIndex == layerIndex, piece.sourceCelIndex == celIndex {
+               canvasManager.layers[layerIndex].id == piece.sourceLayerID,
+               canvasManager.layers[layerIndex].cels[celIndex].id == piece.sourceCelID {
                 return piece.remainderPreview
             }
             return canvasManager.layers[layerIndex].cels[celIndex].bakedImage
@@ -886,7 +887,8 @@ struct CanvasView: UIViewRepresentable {
 
         private func isFloatingMoveSource(layerIndex: Int, celIndex: Int?) -> Bool {
             guard let celIndex, let piece = canvasManager.floatingPiece, piece.kind == .move else { return false }
-            return piece.sourceLayerIndex == layerIndex && piece.sourceCelIndex == celIndex
+            return canvasManager.layers[layerIndex].id == piece.sourceLayerID
+                && canvasManager.layers[layerIndex].cels[celIndex].id == piece.sourceCelID
         }
 
         // MARK: - Select & Move overlays
@@ -948,8 +950,9 @@ struct CanvasView: UIViewRepresentable {
             // to the exact layer/cel the selection belongs to (selection is always cleared when the
             // active layer/cel moves away from it — see handleActiveContextChanged).
             let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame)
+            let celID = celIdx.map { layer.cels[$0].id }
             if let selection = canvasManager.selection, !canvasManager.allowsPaintingOutsideSelection,
-               selection.layerIndex == canvasManager.currentLayerIndex, selection.celIndex == celIdx {
+               selection.layerID == layer.id, selection.celID == celID {
                 host.strokeView.selectionClipPath = selection.path
             } else {
                 host.strokeView.selectionClipPath = nil

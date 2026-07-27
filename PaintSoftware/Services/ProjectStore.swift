@@ -4,9 +4,8 @@ import SwiftUI
 
 private extension Color {
     var codable: CodableColor {
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-        UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a)
-        return CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
+        let c = rgbaComponents
+        return CodableColor(red: c.r, green: c.g, blue: c.b, alpha: c.a)
     }
 }
 
@@ -117,9 +116,8 @@ enum ProjectStore {
         try? fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
 
         var layerManifests: [LayerManifest] = []
-        var thumbnailImage: UIImage?
 
-        for (index, layer) in canvasManager.layers.enumerated() {
+        for layer in canvasManager.layers {
             var imageFileName: String?
             if layer.isObjectLayer, let image = layer.objectImage, let data = image.pngData() {
                 let fileName = "\(layer.id.uuidString).png"
@@ -186,18 +184,14 @@ enum ProjectStore {
                 objectTransform: transformManifest,
                 cels: celManifests
             ))
+        }
 
-            if thumbnailImage == nil, layer.isVisible, let canvasSize = canvasManager.canvasSize,
-               let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) {
-                let cel = layer.cels[celIdx]
-                if layer.isObjectLayer {
-                    thumbnailImage = layer.objectImage
-                } else if cel.bakedImage != nil {
-                    thumbnailImage = ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize), canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
-                } else {
-                    thumbnailImage = ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
-                }
-            }
+        // The composited stack of every visible layer (not just the bottom-most one) at the
+        // current frame, downscaled for the gallery tile.
+        var thumbnailImage: UIImage?
+        if let canvasSize = canvasManager.canvasSize,
+           let composited = PixelOps.compositeCanvas(layers: canvasManager.layers, atFrame: canvasManager.currentFrame, canvasSize: canvasSize) {
+            thumbnailImage = ThumbnailRenderer.render(composited, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
         }
 
         // Persist the user's actual brush choice + imported custom brushes (Worker B's brush engine

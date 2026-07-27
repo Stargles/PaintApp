@@ -47,12 +47,15 @@ enum TransformMode: String, CaseIterable, Identifiable {
 
 /// A finalized selection: a closed path in canvas point space, stamped with the (layer, cel) it
 /// belongs to so a layer/frame switch can tell whether it's still valid (see
-/// `CanvasManager.handleActiveContextChanged`).
+/// `CanvasManager.handleActiveContextChanged`). Keyed by stable UUID rather than array index —
+/// indices shift (or get silently reused) whenever `layers` is mutated, e.g. deleting the very
+/// layer a selection lives on can leave `currentLayerIndex` numerically unchanged while it now
+/// points at a different layer, which an index-based selection would wrongly treat as still valid.
 struct Selection {
     var path: CGPath
     var bounds: CGRect
-    var layerIndex: Int
-    var celIndex: Int
+    var layerID: UUID
+    var celID: UUID
 }
 
 // MARK: - Floating piece
@@ -91,12 +94,13 @@ enum FloatingPieceKind {
 /// A piece of pixel content lifted out for interactive move/resize/rotate, not yet committed back
 /// into a `Cel.bakedImage`. Purely transient UI state — never persisted (see `CanvasManager.
 /// commitFloatingPieceIfNeeded`, called before saving and whenever the layer/frame changes).
+/// Keyed by stable UUID rather than array index — see `Selection`'s doc comment for why.
 struct FloatingPiece {
     var kind: FloatingPieceKind
-    var sourceLayerIndex: Int
-    var sourceCelIndex: Int
-    var targetLayerIndex: Int
-    var targetCelIndex: Int
+    var sourceLayerID: UUID
+    var sourceCelID: UUID
+    var targetLayerID: UUID
+    var targetCelID: UUID
 
     /// The extracted content, cropped to its own bounding box: `pieceImage`'s bounds map directly
     /// onto `baseSize` centered at the origin, before `transform` is applied.
@@ -127,24 +131,36 @@ struct FloatingPiece {
 // MARK: - CanvasManager operations
 
 extension CanvasManager {
+    /// Resolves a stable layer UUID back to its current array index — `layers` gets reordered/
+    /// spliced by delete, insert, and (eventually) drag-to-reorder, so callers holding onto a
+    /// `Selection`/`FloatingPiece`'s ID must re-look-up the index every time rather than caching it.
+    func layerIndex(ofID id: UUID) -> Int? {
+        layers.firstIndex { $0.id == id }
+    }
+
     /// Called whenever `currentLayerIndex`/`currentFrame` change (see the `didSet`s in
-    /// CanvasManager.swift). A pending floating piece is committed — never silently discarded — if
-    /// the active cel actually changed; an active selection tied to a now-inactive cel is cleared.
-    /// Same-cel frame ticks (scrubbing within one cel's frame range) intentionally leave both alone.
+    /// CanvasManager.swift), and explicitly by `deleteLayer`/`moveLayer` since those can leave
+    /// `currentLayerIndex`'s numeric value unchanged while the layer it now points at is a
+    /// different one (no `didSet` fires in that case). A pending floating piece is committed —
+    /// never silently discarded — if the active cel actually changed; an active selection tied to
+    /// a now-inactive cel is cleared. Same-cel frame ticks (scrubbing within one cel's frame
+    /// range) intentionally leave both alone.
     func handleActiveContextChanged() {
         // A still-adjustable fill can't follow the user to another cel — finalize it here so it lands as
         // a committed "Fill" step on its own layer's undo stack before the context moves on. (Runs before
         // activeUndoManager is repointed at the new layer, and commit uses the fill's captured manager
         // anyway, so the step is registered on the right stack.) commitInteractiveFill self-guards.
         commitInteractiveFill()
+        let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
         let activeCel = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
+        let activeCelID = activeCel.map { layers[currentLayerIndex].cels[$0].id }
         if let piece = floatingPiece {
-            let stillTargeted = piece.targetLayerIndex == currentLayerIndex && activeCel == piece.targetCelIndex
+            let stillTargeted = piece.targetLayerID == activeLayerID && piece.targetCelID == activeCelID
             if !stillTargeted {
                 commitFloatingPieceIfNeeded()
             }
         }
-        if let sel = selection, !(sel.layerIndex == currentLayerIndex && activeCel == sel.celIndex) {
+        if let sel = selection, !(sel.layerID == activeLayerID && sel.celID == activeCelID) {
             selection = nil
         }
         // Leaving the layer/frame ends any in-progress vector-layer transform.
@@ -159,10 +175,11 @@ extension CanvasManager {
     }
 
     func finishSelection(path: CGPath) {
-        guard let canvasSize, let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
+        guard let canvasSize, layers.indices.contains(currentLayerIndex),
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
         let bounds = path.boundingBoxOfPath.intersection(CGRect(origin: .zero, size: canvasSize))
         guard bounds.width > 1, bounds.height > 1 else { return }
-        selection = Selection(path: path, bounds: bounds, layerIndex: currentLayerIndex, celIndex: celIndex)
+        selection = Selection(path: path, bounds: bounds, layerID: layers[currentLayerIndex].id, celID: layers[currentLayerIndex].cels[celIndex].id)
     }
 
     func finishAutomaticSelection(at point: CGPoint) {
@@ -196,10 +213,12 @@ extension CanvasManager {
         let (rawPiece, remainder) = PixelOps.maskedPiece(image: fullImage, path: path)
         guard let croppedPiece = PixelOps.crop(rawPiece, to: bounds) else { return }
 
+        let sourceLayerID = layers[currentLayerIndex].id
+        let sourceCelID = cel.id
         floatingPiece = FloatingPiece(
             kind: .move,
-            sourceLayerIndex: currentLayerIndex, sourceCelIndex: celIndex,
-            targetLayerIndex: currentLayerIndex, targetCelIndex: celIndex,
+            sourceLayerID: sourceLayerID, sourceCelID: sourceCelID,
+            targetLayerID: sourceLayerID, targetCelID: sourceCelID,
             pieceImage: croppedPiece, baseSize: bounds.size,
             remainderPreview: remainder,
             transform: FloatingTransform(position: CGPoint(x: bounds.midX, y: bounds.midY), scaleX: 1, scaleY: 1, rotation: 0),
@@ -226,6 +245,8 @@ extension CanvasManager {
         let (rawPiece, _) = PixelOps.maskedPiece(image: fullImage, path: selection.path)
         guard let croppedPiece = PixelOps.crop(rawPiece, to: bounds) else { return }
 
+        let sourceLayerID = layers[sourceLayerIndex].id
+        let sourceCelID = cel.id
         let newCel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize))
         let newLayer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0, isVisible: true, cels: [newCel])
         let insertIndex = sourceLayerIndex + 1
@@ -235,8 +256,8 @@ extension CanvasManager {
         self.selection = nil
         floatingPiece = FloatingPiece(
             kind: .duplicate,
-            sourceLayerIndex: sourceLayerIndex, sourceCelIndex: celIndex,
-            targetLayerIndex: insertIndex, targetCelIndex: 0,
+            sourceLayerID: sourceLayerID, sourceCelID: sourceCelID,
+            targetLayerID: newLayer.id, targetCelID: newCel.id,
             pieceImage: croppedPiece, baseSize: bounds.size,
             remainderPreview: nil,
             transform: FloatingTransform(position: CGPoint(x: bounds.midX, y: bounds.midY), scaleX: 1, scaleY: 1, rotation: 0),
@@ -273,11 +294,11 @@ extension CanvasManager {
     func commitFloatingPieceIfNeeded() -> Bool {
         guard let piece = floatingPiece, let canvasSize else { return false }
         floatingPiece = nil
-        guard layers.indices.contains(piece.targetLayerIndex),
-              layers[piece.targetLayerIndex].cels.indices.contains(piece.targetCelIndex) else { return true }
+        guard let targetLayerIndex = layerIndex(ofID: piece.targetLayerID),
+              let targetCelIndex = layers[targetLayerIndex].cels.firstIndex(where: { $0.id == piece.targetCelID }) else { return true }
 
         let rendered = PixelOps.render(floatingPiece: piece, into: canvasSize)
-        let targetCel = layers[piece.targetLayerIndex].cels[piece.targetCelIndex]
+        let targetCel = layers[targetLayerIndex].cels[targetCelIndex]
 
         switch piece.kind {
         case .move:
@@ -286,13 +307,13 @@ extension CanvasManager {
             // must be cleared here, or it would render a second time underneath.
             let baseForComposite = piece.remainderPreview ?? targetCel.bakedImage
             let newBaked = PixelOps.compositeOver(base: baseForComposite, overlay: rendered)
-            registerUndoableCelChange(layerIndex: piece.targetLayerIndex, celIndex: piece.targetCelIndex,
+            registerUndoableCelChange(layerIndex: targetLayerIndex, celIndex: targetCelIndex,
                                        oldRaster: targetCel.raster, oldBaked: targetCel.bakedImage, oldFill: targetCel.fillImage,
                                        newRaster: .empty(size: canvasSize), newBaked: newBaked, newFill: nil,
                                        actionName: "Move")
         case .duplicate:
             let newBaked = PixelOps.compositeOver(base: targetCel.bakedImage, overlay: rendered)
-            registerUndoableLayerInsertion(layerIndex: piece.targetLayerIndex, finalBaked: newBaked, actionName: "Duplicate")
+            registerUndoableLayerInsertion(layerIndex: targetLayerIndex, finalBaked: newBaked, actionName: "Duplicate")
         }
         return true
     }
@@ -301,9 +322,10 @@ extension CanvasManager {
 
     func fillSelection() {
         guard let selection, let canvasSize,
-              currentLayerIndex == selection.layerIndex,
+              layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].id == selection.layerID,
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              celIndex == selection.celIndex else { return }
+              layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
         let cel = layers[currentLayerIndex].cels[celIndex]
         // rasterize() folds fillImage into `base`, so it's now baked into newImage and must be
         // cleared from the cel or it would render a second time underneath.
@@ -316,9 +338,10 @@ extension CanvasManager {
 
     func clearSelectionPixels() {
         guard let selection, let canvasSize,
-              currentLayerIndex == selection.layerIndex,
+              layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].id == selection.layerID,
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              celIndex == selection.celIndex else { return }
+              layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
         let cel = layers[currentLayerIndex].cels[celIndex]
         // rasterize() folds fillImage into `base`, so it's now baked into newImage and must be
         // cleared from the cel or it would render a second time underneath.

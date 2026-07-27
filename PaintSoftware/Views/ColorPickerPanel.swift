@@ -57,11 +57,7 @@ struct ColorPickerPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black.opacity(0.9))
         .onAppear {
-            let hsba = canvasManager.brushColor.hsbaComponents
-            hue = hsba.h
-            saturation = hsba.s
-            brightness = hsba.b
-            alpha = hsba.a
+            applyHSBA(canvasManager.brushColor.hsbaComponents)
             hexText = canvasManager.brushColor.hexString
         }
         .alert("Rename Palette", isPresented: renameAlertBinding) {
@@ -264,6 +260,21 @@ struct ColorPickerPanel: View {
         }
     }
 
+    /// Updates `hue`/`saturation`/`brightness`/`alpha` from HSBA components, preserving the
+    /// *previous* hue when the incoming color is achromatic (saturation ≈ 0 — black, white, or any
+    /// gray) instead of snapping it to 0/red. `ColorMath.rgbToHSB` returns hue 0 for any r==g==b
+    /// color since hue is genuinely undefined there; without this, raising saturation/brightness
+    /// right after picking a gray swatch would jump to red instead of returning to whatever hue was
+    /// active before.
+    private func applyHSBA(_ hsba: (h: Double, s: Double, b: Double, a: Double)) {
+        if hsba.s > 0.0001 {
+            hue = hsba.h
+        }
+        saturation = hsba.s
+        brightness = hsba.b
+        alpha = hsba.a
+    }
+
     /// Parses `hexText` and, if valid, updates the HSBA state (and brushColor) from it. On invalid
     /// input, reverts the displayed text to the last known-good color instead of leaving the field
     /// showing something that was never actually applied.
@@ -272,11 +283,7 @@ struct ColorPickerPanel: View {
             hexText = currentColor.hexString
             return
         }
-        let hsba = parsed.hsbaComponents
-        hue = hsba.h
-        saturation = hsba.s
-        brightness = hsba.b
-        alpha = hsba.a
+        applyHSBA(parsed.hsbaComponents)
         hexText = parsed.hexString
         canvasManager.brushColor = parsed
     }
@@ -401,11 +408,7 @@ struct ColorPickerPanel: View {
     }
 
     private func selectSwatch(_ color: Color) {
-        let hsba = color.hsbaComponents
-        hue = hsba.h
-        saturation = hsba.s
-        brightness = hsba.b
-        alpha = hsba.a
+        applyHSBA(color.hsbaComponents)
         hexText = color.hexString
         canvasManager.brushColor = color
     }

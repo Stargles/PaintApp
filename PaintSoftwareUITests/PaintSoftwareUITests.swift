@@ -278,12 +278,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        // Synthetic XCUITest touches arrive as finger touches, not Apple Pencil, so pencil-only
-        // drawing must be off for PKCanvasView to accept them.
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap()
-
         let layersButton = app.buttons["toolbar.layersButton"]
         XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
         layersButton.tap()
@@ -400,10 +394,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap() // Synthetic XCUITest touches are finger touches, not Apple Pencil.
-
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -435,10 +425,6 @@ final class PaintSoftwareUITests: XCTestCase {
 
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap()
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
@@ -497,10 +483,6 @@ final class PaintSoftwareUITests: XCTestCase {
     func testFillToolMasksFromReferenceLayerAcrossLayers() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap()
 
         let layersButton = app.buttons["toolbar.layersButton"]
         XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
@@ -582,10 +564,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap() // Synthetic XCUITest touches are finger touches, not Apple Pencil.
-
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -652,10 +630,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap()
-
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -711,10 +685,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap()
-
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -765,10 +735,6 @@ final class PaintSoftwareUITests: XCTestCase {
     func testRaisingEdgeOverlapAfterFillGrowsFillUnderSoftEdge() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap()
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
@@ -846,10 +812,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap()
-
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -876,8 +838,6 @@ final class PaintSoftwareUITests: XCTestCase {
     func testRedoRestoresUndoneFill() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5)); pencilToggle.tap()
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -905,8 +865,6 @@ final class PaintSoftwareUITests: XCTestCase {
     func testUndoEnabledAndClearsFillOnBlankCanvas() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5)); pencilToggle.tap()
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -927,8 +885,6 @@ final class PaintSoftwareUITests: XCTestCase {
     func testFillUndoRedoCyclesRepeatedly() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5)); pencilToggle.tap()
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -958,8 +914,6 @@ final class PaintSoftwareUITests: XCTestCase {
     func testDrawingOverFillCommitsFillAndStrokeUndoesFirst() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5)); pencilToggle.tap()
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -1146,8 +1100,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        app.buttons["sideToolbar.pencilOnlyToggle"].tap() // allow synthetic (non-Pencil) touches to draw
-
         app.buttons["toolbar.selectButton"].tap()
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
@@ -1189,7 +1141,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        app.buttons["sideToolbar.pencilOnlyToggle"].tap() // allow synthetic (non-Pencil) touches to draw
         dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
 
         app.buttons["toolbar.layersButton"].tap()
@@ -1198,11 +1149,10 @@ final class PaintSoftwareUITests: XCTestCase {
 
         app.buttons["toolbar.moveButton"].tap()
         let doneButton = app.buttons["moveBar.doneButton"]
-        // Rendering the whole cel's live PKDrawing to a full-resolution raster image (to lift it
-        // into a floating piece — see CanvasManager.beginMove/PixelOps.rasterize) can be very slow
-        // specifically in the Simulator's software PencilKit rendering path, so this one wait is
-        // deliberately generous — diagnosing whether this is "slow but correct" vs. a real hang.
-        XCTAssertTrue(doneButton.waitForExistence(timeout: 240), "Move with no selection should float the whole layer")
+        // beginMove() rasterizes the whole cel synchronously via PixelOps.rasterize (plain Core
+        // Graphics, no PencilKit involved since the Session 11 engine rewrite), so this should be
+        // near-instant; kept in line with the suite's other generous waits.
+        XCTAssertTrue(doneButton.waitForExistence(timeout: 10), "Move with no selection should float the whole layer")
         doneButton.tap()
 
         app.buttons["toolbar.layersButton"].tap()
@@ -1232,7 +1182,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        app.buttons["sideToolbar.pencilOnlyToggle"].tap() // allow synthetic (non-Pencil) touches to draw
         dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
 
         app.buttons["toolbar.layersButton"].tap()
@@ -1320,10 +1269,6 @@ final class PaintSoftwareUITests: XCTestCase {
 
         colorButton.tap() // Close the panel so it can't cover the canvas.
 
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap() // Synthetic XCUITest touches are finger touches, not Apple Pencil.
-
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
@@ -1353,8 +1298,6 @@ final class PaintSoftwareUITests: XCTestCase {
     func testVectorLayerRecordsStrokeAsGeometryAndRenders() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-
-        app.buttons["sideToolbar.pencilOnlyToggle"].tap() // allow synthetic (finger) touches to draw
 
         app.buttons["toolbar.layersButton"].tap()
         let addButton = app.buttons["layerPanel.addButton"]
@@ -1449,10 +1392,6 @@ final class PaintSoftwareUITests: XCTestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap() // Synthetic XCUITest touches are finger touches, not Apple Pencil.
-
         // Brush is the default tool, so a single tap opens its settings menu directly.
         let brushButton = app.buttons["toolbar.brushButton"]
         XCTAssertTrue(brushButton.waitForExistence(timeout: 5))
@@ -1501,10 +1440,6 @@ final class PaintSoftwareUITests: XCTestCase {
     func testEraserHasOwnPanelAndErasesStroke() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-
-        let pencilToggle = app.buttons["sideToolbar.pencilOnlyToggle"]
-        XCTAssertTrue(pencilToggle.waitForExistence(timeout: 5))
-        pencilToggle.tap()
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))

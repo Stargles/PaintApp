@@ -49,6 +49,7 @@ struct AnimationTimeline: View {
                 Button("Extend to End") { canvasManager.extendCelToEnd(layerIndex: layerIndex, celIndex: celIndex) }
                 Button("Clear") { canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex) }
                 Button("Delete", role: .destructive) { canvasManager.deleteCel(layerIndex: layerIndex, celIndex: celIndex) }
+                    .disabled(canvasManager.layers[layerIndex].cels.count <= 1)
             }
         }
     }

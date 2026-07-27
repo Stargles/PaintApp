@@ -41,6 +41,24 @@ final class RasterLayerTexture {
     /// Memoized `renderToUIImage()` result, invalidated (set to nil) on every mutation via `version`.
     private var cachedImage: UIImage?
 
+    /// Guards `context`/`cachedImage`. Live strokes call `stampCircle` on the main thread, but a
+    /// fill's reference composite (`CanvasManager.performFill`) reads a reference layer's texture via
+    /// `renderToUIImage()` on a background queue — without this, a stroke landing on that layer mid-
+    /// fill could mutate the `CGContext` while the background thread is concurrently calling
+    /// `makeImage()` on it (see BUGS.md). `ensureContext()`/`setContents()` are internal helpers only
+    /// ever called from a method that already holds this lock (or, for `setContents` from `init`,
+    /// before the instance is shared with any other thread), so they don't lock themselves —
+    /// otherwise this non-reentrant lock would deadlock.
+    private let lock = NSLock()
+
+    /// Thread-safe check of whether this texture has any backing bitmap at all, used by `makeCopy`/
+    /// `flipped`/`resized` to skip work for a still-blank texture without racing `context` directly.
+    private var hasContent: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return context != nil
+    }
+
     private static let colorSpace = CGColorSpaceCreateDeviceRGB()
     private static let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
 
@@ -103,6 +121,8 @@ final class RasterLayerTexture {
     /// drawn yet. Always at native resolution (scale 1) — callers that need a smaller render
     /// (thumbnails) downscale this themselves, same as the existing `fillImage`/`bakedImage` path.
     func renderToUIImage() -> UIImage {
+        lock.lock()
+        defer { lock.unlock() }
         if let cachedImage { return cachedImage }
         let image: UIImage
         if let context, let cg = context.makeImage() {
@@ -123,7 +143,7 @@ final class RasterLayerTexture {
     /// for the mutable-persistent-buffer performance reasons described above, so those call sites
     /// now need an explicit copy instead of getting one for free. A blank texture copies for free.
     func makeCopy() -> RasterLayerTexture {
-        guard context != nil else { return RasterLayerTexture(size: size, strokeCount: strokeCount) }
+        guard hasContent else { return RasterLayerTexture(size: size, strokeCount: strokeCount) }
         return RasterLayerTexture(size: size, image: renderToUIImage(), strokeCount: strokeCount)
     }
 
@@ -132,7 +152,7 @@ final class RasterLayerTexture {
     /// live-stroke tier in lockstep with `fillImage`/`bakedImage`. Infrequent (whole-canvas op), so
     /// it renders through `UIGraphicsImageRenderer` rather than the incremental path.
     func flipped(horizontal: Bool) -> RasterLayerTexture {
-        guard context != nil else { return RasterLayerTexture(size: size, strokeCount: strokeCount) }
+        guard hasContent else { return RasterLayerTexture(size: size, strokeCount: strokeCount) }
         let current = renderToUIImage()
         let format = UIGraphicsImageRendererFormat()
         format.opaque = false
@@ -157,7 +177,7 @@ final class RasterLayerTexture {
     /// bitmap yet) stays blank and free — no bitmap is allocated. Infrequent whole-canvas op, so it
     /// renders through `UIGraphicsImageRenderer` rather than the incremental stamp path.
     func resized(to newSize: CGSize, offset: CGPoint) -> RasterLayerTexture {
-        guard context != nil else { return RasterLayerTexture(size: newSize, strokeCount: strokeCount) }
+        guard hasContent else { return RasterLayerTexture(size: newSize, strokeCount: strokeCount) }
         let current = renderToUIImage()
         let format = UIGraphicsImageRendererFormat()
         format.opaque = false
@@ -185,7 +205,10 @@ final class RasterLayerTexture {
     ///   - hardness: 0...1, edge falloff — 0 is fully soft/feathered, 1 is a hard-edged disc.
     ///   - blendMode: `.normal` to paint, `.destinationOut` to erase (alpha controls erase strength).
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor, alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode = .normal) {
-        guard radius > 0, alpha > 0, let ctx = ensureContext() else { return }
+        guard radius > 0, alpha > 0 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        guard let ctx = ensureContext() else { return }
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, ignoredAlpha: CGFloat = 0
         color.getRed(&r, green: &g, blue: &b, alpha: &ignoredAlpha)
         let coreFraction = max(0, min(hardness, 1))
@@ -217,6 +240,8 @@ final class RasterLayerTexture {
     /// Replaces the content wholesale — used by undo/redo restoring a pre-stroke snapshot, and by
     /// `clear()`. `nil` resets to a fully transparent canvas.
     func reset(to image: UIImage?, strokeCount: Int) {
+        lock.lock()
+        defer { lock.unlock() }
         setContents(image)
         self.strokeCount = strokeCount
         cachedImage = nil

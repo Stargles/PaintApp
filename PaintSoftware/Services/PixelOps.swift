@@ -15,9 +15,7 @@ enum PixelOps {
     }
 
     static func uiColor(from color: Color, opacity: Double = 1.0) -> UIColor {
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-        UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
-        return UIColor(red: r, green: g, blue: b, alpha: a * CGFloat(opacity))
+        color.resolvedUIColor(opacity: opacity)
     }
 
     /// Flattens a cel's fill-tool wash, baked raster content, and live strokes into one
@@ -36,6 +34,45 @@ enum PixelOps {
             cel.bakedImage?.draw(in: bounds)
             strokesImage.draw(in: bounds)
             vectorImage?.draw(in: bounds)
+        }
+    }
+
+    /// Renders an object layer's photo at its own position/rotation/scale onto a canvas-sized image
+    /// — the same geometry `CanvasView.applyObjectTransform` uses to place its `UIImageView` (center
+    /// = `transform.position`, then rotate, then scale, applied to the image's own bounds).
+    private static func renderObjectLayer(image: UIImage, transform: LayerTransform, canvasSize: CGSize) -> UIImage {
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
+        return renderer.image { ctx in
+            ctx.cgContext.saveGState()
+            ctx.cgContext.translateBy(x: transform.position.x, y: transform.position.y)
+            ctx.cgContext.rotate(by: transform.rotation)
+            ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
+            let drawRect = CGRect(x: -image.size.width / 2, y: -image.size.height / 2, width: image.size.width, height: image.size.height)
+            image.draw(in: drawRect)
+            ctx.cgContext.restoreGState()
+        }
+    }
+
+    /// Flattens every *visible* layer's content, bottom-to-top with each layer's own opacity, into
+    /// one canvas-sized image — used for the gallery/project thumbnail so a multi-layer drawing
+    /// shows the whole composited stack instead of just its bottom-most visible layer.
+    static func compositeCanvas(layers: [Layer], atFrame frame: Int, canvasSize: CGSize) -> UIImage? {
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return nil }
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
+        return renderer.image { _ in
+            for layer in layers where layer.isVisible {
+                let layerImage: UIImage?
+                if layer.isObjectLayer {
+                    layerImage = layer.objectImage.map { renderObjectLayer(image: $0, transform: layer.objectTransform, canvasSize: canvasSize) }
+                } else if let cel = layer.cels.first(where: { frame >= $0.startFrame && frame < $0.startFrame + $0.frameCount }) {
+                    layerImage = rasterize(cel: cel, canvasSize: canvasSize)
+                } else {
+                    layerImage = nil
+                }
+                layerImage?.draw(in: bounds, blendMode: .normal, alpha: CGFloat(layer.opacity))
+            }
         }
     }
 

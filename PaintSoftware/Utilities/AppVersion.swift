@@ -1,12 +1,13 @@
 import Foundation
 
-/// Tracks the current app version for debugging purposes
+/// Tracks the current app version for debugging purposes. Reads the bundle's own version info
+/// (Xcode's MARKETING_VERSION/CURRENT_PROJECT_VERSION build settings) rather than a hardcoded git
+/// hash — a manually-updated constant would immediately drift out of sync with HEAD.
 struct AppVersion {
-    /// The current git commit hash (short form)
-    static let current = "c8125aa"
-    
-    /// A human-readable version string
+    /// A human-readable version string, e.g. "v1.0 (1)".
     static var versionString: String {
-        return "v\(current)"
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+        return "v\(shortVersion) (\(build))"
     }
 }

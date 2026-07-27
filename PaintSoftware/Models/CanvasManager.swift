@@ -94,7 +94,11 @@ final class CanvasManager: ObservableObject {
     @Published var brushOpacity: Double = 1.0
     @Published var brushColor: Color = .black
     @Published var selectedTool: Tool = .pen
-    @Published var pencilOnlyDrawing: Bool = true
+    // Defaults to false: on a device/simulator with no Apple Pencil, an ON-by-default gate silently
+    // swallows every finger touch on the canvas with no feedback, reading as "drawing is broken"
+    // until the user finds this toggle in the SideToolbar. Users with a Pencil who want to rest a
+    // palm on the canvas can still switch it on.
+    @Published var pencilOnlyDrawing: Bool = false
 
     /// The full brush preset currently active (shape, hardness, spacing, stabilization, dynamics,
     /// scatter/rotation jitter, grain, blend mode) — everything `StrokeCanvasView.stampOne` reads
@@ -262,6 +266,12 @@ final class CanvasManager: ObservableObject {
 
     func deleteLayer(at index: Int) {
         guard layers.count > 1, layers.indices.contains(index) else { return }
+        // If the layer being deleted is the active one, currentLayerIndex's *numeric* value may end
+        // up unchanged (a later layer slides down into the same slot) — the didSet below won't fire,
+        // so handleActiveContextChanged() has to be called explicitly to invalidate any selection/
+        // floating piece that was tied to the now-deleted layer (they're keyed by that layer's UUID,
+        // so this correctly detects the identity change even though the index didn't move).
+        let deletingActiveLayerInPlace = index == currentLayerIndex
         layers.remove(at: index)
         // Deleting a layer *below* the active one shifts every later index down by one, so
         // currentLayerIndex must shift with it to keep pointing at the same layer. Without this,
@@ -272,11 +282,9 @@ final class CanvasManager: ObservableObject {
             currentLayerIndex -= 1
         } else if currentLayerIndex >= layers.count {
             currentLayerIndex = layers.count - 1
+        } else if deletingActiveLayerInPlace {
+            handleActiveContextChanged()
         }
-    }
-
-    func moveLayer(from source: IndexSet, to destination: Int) {
-        layers.move(fromOffsets: source, toOffset: destination)
     }
 
     /// Sets the light-grey drawable margin around the artwork, resizing every layer/cel buffer so the
@@ -338,8 +346,46 @@ final class CanvasManager: ObservableObject {
                     layers[layerIndex].cels[celIndex].bakedImage = Self.flippedImage(bakedImage, canvasSize: canvasSize, horizontal: horizontal)
                 }
             }
+            // Object layers hold their content as an independent image + LayerTransform (position/
+            // scale/rotation) rather than a canvas-sized buffer, so they need their own mirroring:
+            // the photo's own pixels are mirrored about its own center (so its content reads
+            // correctly reflected, same as everything else on the canvas), its position mirrors
+            // about the canvas center axis, and its rotation negates — mirroring reverses the sense
+            // of rotation (a shape rotated 30° clockwise reads as 30° counter-clockwise once the
+            // whole scene is mirrored). Without this, Flip Horizontal/Vertical left inserted photos
+            // unmirrored and unmoved while everything else flipped around them.
+            if layers[layerIndex].isObjectLayer, let objectImage = layers[layerIndex].objectImage {
+                layers[layerIndex].objectImage = Self.mirroredImage(objectImage, horizontal: horizontal)
+                layers[layerIndex].thumbnail = layers[layerIndex].objectImage
+                if horizontal {
+                    layers[layerIndex].objectTransform.position.x = canvasSize.width - layers[layerIndex].objectTransform.position.x
+                } else {
+                    layers[layerIndex].objectTransform.position.y = canvasSize.height - layers[layerIndex].objectTransform.position.y
+                }
+                layers[layerIndex].objectTransform.rotation = -layers[layerIndex].objectTransform.rotation
+            }
         }
         regenerateAllThumbnails()
+    }
+
+    /// Mirrors an image's own pixel content about its own center — used for an object layer's photo,
+    /// which (unlike raster/fillImage/bakedImage) isn't a canvas-sized buffer, so `flippedImage`'s
+    /// canvas-relative mirroring doesn't apply to it.
+    private static func mirroredImage(_ image: UIImage, horizontal: Bool) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+        return renderer.image { ctx in
+            if horizontal {
+                ctx.cgContext.translateBy(x: image.size.width, y: 0)
+                ctx.cgContext.scaleBy(x: -1, y: 1)
+            } else {
+                ctx.cgContext.translateBy(x: 0, y: image.size.height)
+                ctx.cgContext.scaleBy(x: 1, y: -1)
+            }
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
     }
 
     /// Mirrors a cel's raster content (fillImage or bakedImage) about the canvas center to match
@@ -409,8 +455,14 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// A layer must always keep at least one cel to stay drawable — every other cel-creating path
+    /// (addLayer, addVectorLayer, beginDuplicate, ...) already maintains that invariant, so this is a
+    /// no-op on a layer's last remaining cel rather than leaving it with zero (which made
+    /// `activeCelIndex` return nil everywhere, permanently blanking the layer and its thumbnail).
+    /// Use `clearCel` to empty a cel's content while keeping it.
     func deleteCel(layerIndex: Int, celIndex: Int) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
+              layers[layerIndex].cels.count > 1 else { return }
         layers[layerIndex].cels.remove(at: celIndex)
     }
 
@@ -864,7 +916,8 @@ final class CanvasManager: ObservableObject {
     /// `allowsPaintingOutsideSelection` here.
     private func clippedForSelection(_ image: UIImage?, layerIndex: Int, celIndex: Int) -> UIImage? {
         guard let image, let selection, !allowsPaintingOutsideSelection,
-              selection.layerIndex == layerIndex, selection.celIndex == celIndex else { return image }
+              layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
+              layers[layerIndex].id == selection.layerID, layers[layerIndex].cels[celIndex].id == selection.celID else { return image }
         return PixelOps.maskedComposite(base: nil, overlay: image, insidePath: selection.path)
     }
 
