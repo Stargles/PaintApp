@@ -9,7 +9,7 @@ import Combine
 /// gestureRecognizer(_:shouldRequireFailureOf:)` — can take over cleanly instead of racing a
 /// stray single-finger dot.
 final class StrokeGestureRecognizer: UIGestureRecognizer {
-    var requiresPencilOnly = true
+    var requiresPencilOnly = false
     var onBegin: ((UITouch) -> Void)?
     var onMove: ((UITouch, UIEvent) -> Void)?
     var onEnd: ((UITouch) -> Void)?
