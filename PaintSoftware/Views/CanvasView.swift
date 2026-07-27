@@ -613,13 +613,26 @@ struct CanvasView: UIViewRepresentable {
                 rotation: rotation)
             coordinator.updateShapeOverlay()
         }
+        shapeOverlay.onCornerDragged = { [weak coordinator = context.coordinator] point, corner in
+            guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
+            let r = shape.boundingRect
+            // The dragged corner is anchored by the fixed opposite corner.
+            let fixedX: CGFloat, fixedY: CGFloat
+            switch corner {
+            case .topLeft:     fixedX = r.maxX; fixedY = r.maxY
+            case .topRight:    fixedX = r.minX; fixedY = r.maxY
+            case .bottomLeft:  fixedX = r.maxX; fixedY = r.minY
+            case .bottomRight: fixedX = r.minX; fixedY = r.minY
+            }
+            let start = CGPoint(x: min(point.x, fixedX), y: min(point.y, fixedY))
+            let end = CGPoint(x: max(point.x, fixedX), y: max(point.y, fixedY))
+            coordinator.canvasManager.updateInteractiveShape(startPoint: start, endPoint: end)
+            coordinator.updateShapeOverlay()
+        }
         shapeOverlay.onEdgeDragged = { [weak coordinator = context.coordinator] point, edge in
             guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
             let r = shape.boundingRect
             if shape.kind == .oval {
-                // Oval axis-handle drag: the dragged handle defines a new rotation angle and
-                // axis length. The perpendicular axis keeps its length — only stretch/rotate
-                // in the handle's direction.
                 let cx = r.midX, cy = r.midY
                 let W = r.width / 2, H = r.height / 2
                 var newW = W, newH = H, newRot = shape.rotation
@@ -642,7 +655,6 @@ struct CanvasView: UIViewRepresentable {
                 coordinator.canvasManager.updateInteractiveShape(
                     startPoint: start, endPoint: end, rotation: newRot)
             } else {
-                // Rectangle edge drag: move one side of the bounding rect.
                 var minX = r.minX, minY = r.minY, maxX = r.maxX, maxY = r.maxY
                 switch edge {
                 case .top:    minY = point.y
@@ -717,6 +729,8 @@ struct CanvasView: UIViewRepresentable {
         /// Enabled when there are no layers or the active layer is hidden, so a drawing-tool touch
         /// (which would otherwise be silently swallowed) triggers a user-facing alert instead.
         weak var catchAllTapRecognizer: UILongPressGestureRecognizer?
+        /// Two-finger hold — engages the shape constraint snap (rect→square, oval→circle, etc.).
+        weak var twoFingerHoldRecognizer: UILongPressGestureRecognizer?
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
@@ -828,16 +842,31 @@ struct CanvasView: UIViewRepresentable {
                 host.strokeView.onStrokeMoved = { [weak self, weak host] point in
                     guard let self else { return }
                     if self.canvasManager.shapeGestureActive && !self.canvasManager.isShapeInAdjustableState {
-                        // Shape following: rects & ovals expand symmetrically from their centre;
-                        // lines simply move the endpoint to the finger position.
-                        if let shape = self.canvasManager.activeShape, shape.kind != .line {
+                        // Shape following: the user is still holding after detection. For lines,
+                        // just move the endpoint. For rects & ovals, the finger angle sets
+                        // rotation and the distance sets a uniform scale from centre.
+                        if case .line? = self.canvasManager.activeShape?.kind {
+                            self.canvasManager.updateInteractiveShape(endPoint: point)
+                        } else if let shape = self.canvasManager.activeShape {
                             let cx = (shape.startPoint.x + shape.endPoint.x) / 2
                             let cy = (shape.startPoint.y + shape.endPoint.y) / 2
+                            if !self.shapeInitFrameSet {
+                                self.shapeInitAngle = atan2(point.y - cy, point.x - cx)
+                                self.shapeInitRadius = hypot(point.x - cx, point.y - cy)
+                                self.shapeInitHalfW = abs(shape.endPoint.x - shape.startPoint.x) / 2
+                                self.shapeInitHalfH = abs(shape.endPoint.y - shape.startPoint.y) / 2
+                                self.shapeInitFrameSet = true
+                            }
+                            let curAngle = atan2(point.y - cy, point.x - cx)
+                            let curRadius = hypot(point.x - cx, point.y - cy)
+                            let deltaRot = curAngle - self.shapeInitAngle
+                            let scale = self.shapeInitRadius > 0 ? curRadius / self.shapeInitRadius : 1
+                            let newW = self.shapeInitHalfW * scale
+                            let newH = self.shapeInitHalfH * scale
+                            let start = CGPoint(x: cx - newW, y: cy - newH)
+                            let end = CGPoint(x: cx + newW, y: cy + newH)
                             self.canvasManager.updateInteractiveShape(
-                                startPoint: CGPoint(x: 2 * cx - point.x, y: 2 * cy - point.y),
-                                endPoint: point)
-                        } else {
-                            self.canvasManager.updateInteractiveShape(endPoint: point)
+                                startPoint: start, endPoint: end, rotation: deltaRot)
                         }
                         self.updateShapeOverlay()
                     } else {
@@ -1192,6 +1221,7 @@ struct CanvasView: UIViewRepresentable {
             shapeDetectionHost = host
             shapeDetectionActive = true
             shapeLastPoint = nil
+            shapeInitFrameSet = false
             shapeHoldTimer?.invalidate()
             // The timer resets on meaningful moves — fires 0.8s after the finger stops.
             shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
@@ -1205,6 +1235,14 @@ struct CanvasView: UIViewRepresentable {
         /// micro-moves that Apple Pencil generates even when held still, which would otherwise
         /// prevent the timer from ever completing.
         private var shapeLastPoint: CGPoint?
+
+        // Initial state captured when shape following begins — used to compute rotation + uniform
+        // scale from the finger's angle and distance relative to the shape centre.
+        private var shapeInitAngle: CGFloat = 0
+        private var shapeInitRadius: CGFloat = 0
+        private var shapeInitHalfW: CGFloat = 0
+        private var shapeInitHalfH: CGFloat = 0
+        private var shapeInitFrameSet = false
 
         private func handleStrokeMoved(_ point: CGPoint, host: LayerHostView?) {
             guard shapeDetectionActive else { return }
@@ -1346,6 +1384,18 @@ struct CanvasView: UIViewRepresentable {
             twoFingerTap.cancelsTouchesInView = false
             view.addGestureRecognizer(twoFingerTap)
 
+            // Two-finger hold detector for the shape constraint snap. Fires after 0.12 s of
+            // two‑finger contact — long enough that a quick tap (undo) ignores it, short enough
+            // that the snap engages before the user starts to drag. Coexists with every other
+            // gesture via shouldRecognizeSimultaneouslyWith.
+            let twoFingerHold = UILongPressGestureRecognizer(target: self, action: #selector(handleTwoFingerHold(_:)))
+            twoFingerHold.minimumPressDuration = 0.12
+            twoFingerHold.numberOfTouchesRequired = 2
+            twoFingerHold.delegate = self
+            twoFingerHold.cancelsTouchesInView = false
+            view.addGestureRecognizer(twoFingerHold)
+            twoFingerHoldRecognizer = twoFingerHold
+
             let threeFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap))
             threeFingerTap.numberOfTouchesRequired = 3
             threeFingerTap.cancelsTouchesInView = false
@@ -1383,15 +1433,8 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            // The fill press is allowed to coexist with every other recognizer: as a zero-duration long
-            // press it recognizes on the first touch, and if it were mutually exclusive with the
-            // two-finger pan/zoom/rotate and undo/redo taps it would block them (a fill already begun
-            // would prevent them from ever recognizing). Instead those handlers explicitly cancel the
-            // in-progress fill when they take over — see the cancelInteractiveFill() calls below.
-            // The catch-all gesture (no layers / hidden layer alert) and the fill gesture must both
-            // coexist with every other recognizer so they don't block two-finger pan/zoom/rotation.
-            let catchAllAndFill: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer]
-            if catchAllAndFill.contains(where: { $0 === gestureRecognizer }) || catchAllAndFill.contains(where: { $0 === otherGestureRecognizer }) {
+            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, twoFingerHoldRecognizer]
+            if alwaysConcurrent.contains(where: { $0 === gestureRecognizer }) || alwaysConcurrent.contains(where: { $0 === otherGestureRecognizer }) {
                 return true
             }
             let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
@@ -1568,6 +1611,20 @@ struct CanvasView: UIViewRepresentable {
             // under the finger is dropped; a lifted, adjustable one is committed so undo reverts it),
             // so it does exactly one thing rather than both discarding a fill and undoing the prior step.
             canvasManager.undo()
+        }
+
+        @objc func handleTwoFingerHold(_ recognizer: UILongPressGestureRecognizer) {
+            guard canvasManager.shapeGestureActive else { return }
+            let on = recognizer.state == .began
+            if shapeOverlay?.isConstrained != on {
+                shapeOverlay?.isConstrained = on
+                if canvasManager.isShapeInAdjustableState {
+                    canvasManager.updateInteractiveShape(
+                        endPoint: canvasManager.activeShape?.endPoint ?? .zero,
+                        rotation: nil, isConstrained: on)
+                }
+                updateShapeOverlay()
+            }
         }
 
         @objc func handleThreeFingerTap() {

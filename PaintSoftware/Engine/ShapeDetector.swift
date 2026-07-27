@@ -253,9 +253,11 @@ enum ShapeDetector {
         (angle / increment).rounded() * increment
     }
 
-    /// Constrains a bounding rect to a square with equal sides (max of width/height).
+    /// Constrains a bounding rect to a square with equal sides (max of width/height),
+    /// keeping the centre fixed so the square stays aligned with the original shape.
     static func constrainToSquare(_ rect: CGRect) -> CGRect {
         let side = max(rect.width, rect.height)
-        return CGRect(x: rect.origin.x, y: rect.origin.y, width: side, height: side)
+        return CGRect(x: rect.midX - side / 2, y: rect.midY - side / 2,
+                      width: side, height: side)
     }
 }
