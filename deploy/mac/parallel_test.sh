@@ -88,6 +88,12 @@ git -C "$WORKTREE_DIR" reset --hard "origin/$BRANCH" 2>&1 || \
     git -C "$WORKTREE_DIR" checkout "$TRACK_BRANCH" 2>&1 || true
 log "Worktree synced to origin/$BRANCH"
 
+# Re-exec from the worktree so the branch's version of this script is used
+if [[ "$0" != "$WORKTREE_DIR/deploy/mac/parallel_test.sh" ]]; then
+    log "Re-execing from worktree ($WORKTREE_DIR/deploy/mac/parallel_test.sh)"
+    exec bash "$WORKTREE_DIR/deploy/mac/parallel_test.sh" "$@"
+fi
+
 # ─── Step 2: Claim a simulator ──────────────────────────────────────────────
 
 claim_sim() {
