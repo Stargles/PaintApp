@@ -39,29 +39,50 @@ This Windows machine has no Xcode. Tests must run on the MacBook over Tailscale.
 ssh juliapark@100.70.148.78 "command"
 ```
 
-### Sync and test
+### Parallel testing
 
-The repo is cloned at `~/PaintApp` on the Mac. Before running tests:
+Each session gets its own isolated worktree + DerivedData + simulator on the Mac, so multiple sessions can test concurrently without conflicts.
 
+**Session ID:** Pick a short unique ID for your session (e.g. the opencode worktree name, or `session-N` from the session log). Sanitised to `[a-zA-Z0-9_-]`.
+
+**Push first, then test:**
 ```bash
-# Pull latest code
-ssh juliapark@100.70.148.78 "cd ~/PaintApp && git pull origin main"
+# 1. Push your branch to origin
+git push origin <branch>
 
-# Run full UI test suite on iPad simulator
-ssh juliapark@100.70.148.78 "cd ~/PaintApp && xcodebuild test \
-  -project PaintSoftware.xcodeproj \
-  -scheme PaintSoftware \
-  -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=latest' \
-  2>&1 | tail -80"
-
-# Run a single test
-ssh juliapark@100.70.148.78 "cd ~/PaintApp && xcodebuild test \
-  -project PaintSoftware.xcodeproj \
-  -scheme PaintSoftware \
-  -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=latest' \
-  -only-testing:PaintSoftwareUITests/testCreateCanvasReachesEditorWithoutFreezing \
-  2>&1 | tail -80"
+# 2. Run tests on the Mac (parallel-safe)
+ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/parallel_test.sh <session-id> <branch>"
 ```
+
+**Run a single test:**
+```bash
+ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/parallel_test.sh <session-id> <branch> testCreateCanvasReachesEditorWithoutFreezing"
+```
+
+**Check what's running:**
+```bash
+ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/status.sh"
+```
+
+**When done, clean up your session:**
+```bash
+ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/cleanup_session.sh <session-id>"
+```
+
+**Emergency — clean up everything:**
+```bash
+ssh juliapark@100.70.148.78 "bash ~/PaintApp/deploy/mac/cleanup_session.sh --all"
+```
+
+The script auto-reclaims simulator locks older than 2 hours (stale/crashed sessions). It waits up to 20 minutes for a free simulator before failing.
+
+**Mac directory layout:**
+| Path | Contents |
+|------|----------|
+| `~/PaintApp` | Main clone (never tested directly) |
+| `~/PaintApp-worktrees/<session-id>/` | Per-session worktree |
+| `~/PaintApp-derived/<session-id>/` | Per-session DerivedData |
+| `/tmp/paintapp-sim-locks/<uuid>/` | Simulator claim locks (atomic mkdir) |
 
 ### Available iPad simulators on the Mac
 
