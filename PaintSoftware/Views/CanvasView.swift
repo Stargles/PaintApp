@@ -608,6 +608,9 @@ struct CanvasView: UIViewRepresentable {
         weak var pinchRecognizer: UIPinchGestureRecognizer?
         weak var rotationRecognizer: UIRotationGestureRecognizer?
         weak var fillTapRecognizer: UILongPressGestureRecognizer?
+        /// Enabled when there are no layers or the active layer is hidden, so a drawing-tool touch
+        /// (which would otherwise be silently swallowed) triggers a user-facing alert instead.
+        weak var catchAllTapRecognizer: UILongPressGestureRecognizer?
 
         // Interactive-fill drag state, captured at press-down: the finger's start point in fixed
         // screen (host) space, and all three fill settings at that moment. The drag is horizontal-only —
@@ -809,6 +812,20 @@ struct CanvasView: UIViewRepresentable {
                 if host.strokeView.isUserInteractionEnabled != shouldInteract {
                     host.strokeView.isUserInteractionEnabled = shouldInteract
                 }
+            }
+
+            // Enable the catch-all gesture when no layers exist or the active layer is hidden,
+            // so a drawing-tool touch triggers a user-facing alert instead of being silently swallowed.
+            let needsCatch: Bool
+            if canvasManager.layers.isEmpty {
+                needsCatch = true
+            } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) {
+                needsCatch = !canvasManager.layers[canvasManager.currentLayerIndex].isVisible
+            } else {
+                needsCatch = false
+            }
+            if catchAllTapRecognizer?.isEnabled != needsCatch {
+                catchAllTapRecognizer?.isEnabled = needsCatch
             }
         }
 
@@ -1102,6 +1119,19 @@ struct CanvasView: UIViewRepresentable {
             fillPress.isEnabled = false
             view.addGestureRecognizer(fillPress)
             fillTapRecognizer = fillPress
+
+            // Catch-all gesture for when no layers or the active layer is hidden: fires immediately
+            // on any single-finger touch so we can surface an actionable alert instead of silently
+            // swallowing the touch. Disabled by default — enabled in reconcileLayers only when the
+            // canvas can't accept drawing input.
+            let catchAll = UILongPressGestureRecognizer(target: self, action: #selector(handleCatchAllTap(_:)))
+            catchAll.minimumPressDuration = 0
+            catchAll.numberOfTouchesRequired = 1
+            catchAll.delegate = self
+            catchAll.cancelsTouchesInView = false
+            catchAll.isEnabled = false
+            view.addGestureRecognizer(catchAll)
+            catchAllTapRecognizer = catchAll
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -1110,7 +1140,10 @@ struct CanvasView: UIViewRepresentable {
             // two-finger pan/zoom/rotate and undo/redo taps it would block them (a fill already begun
             // would prevent them from ever recognizing). Instead those handlers explicitly cancel the
             // in-progress fill when they take over — see the cancelInteractiveFill() calls below.
-            if gestureRecognizer === fillTapRecognizer || otherGestureRecognizer === fillTapRecognizer {
+            // The catch-all gesture (no layers / hidden layer alert) and the fill gesture must both
+            // coexist with every other recognizer so they don't block two-finger pan/zoom/rotation.
+            let catchAllAndFill: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer]
+            if catchAllAndFill.contains(where: { $0 === gestureRecognizer }) || catchAllAndFill.contains(where: { $0 === otherGestureRecognizer }) {
                 return true
             }
             let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
@@ -1253,6 +1286,18 @@ struct CanvasView: UIViewRepresentable {
 
         @objc func handleThreeFingerTap() {
             canvasManager.redo()
+        }
+
+        @objc func handleCatchAllTap(_ recognizer: UILongPressGestureRecognizer) {
+            guard recognizer.state == .began else { return }
+            // Only respond for drawing tools — fill/select have their own paths.
+            guard canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil || canvasManager.selectedTool == .eraser else { return }
+            if canvasManager.layers.isEmpty {
+                canvasManager.needsLayerAlert = true
+            } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
+                      !canvasManager.layers[canvasManager.currentLayerIndex].isVisible {
+                canvasManager.needsVisibilityAlert = true
+            }
         }
 
         @objc func handleFillPress(_ recognizer: UILongPressGestureRecognizer) {

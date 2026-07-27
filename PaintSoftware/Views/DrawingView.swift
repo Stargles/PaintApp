@@ -85,6 +85,37 @@ struct DrawingView: View {
         .onReceive(canvasManager.interactionBegan) {
             if activePanel != .none { activePanel = .none }
         }
+        // Alert shown when the user tries to draw but there are no layers.
+        .alert("No Layers", isPresented: Binding(
+            get: { canvasManager.needsLayerAlert },
+            set: { if !$0 { canvasManager.needsLayerAlert = false } }
+        )) {
+            Button("Add Raster Layer") {
+                canvasManager.addLayer()
+                canvasManager.needsLayerAlert = false
+            }
+            Button("Cancel", role: .cancel) {
+                canvasManager.needsLayerAlert = false
+            }
+        } message: {
+            Text("Create a layer to start drawing.")
+        }
+        // Alert shown when the user tries to draw but the active layer is hidden.
+        .alert("Hidden Layer", isPresented: Binding(
+            get: { canvasManager.needsVisibilityAlert },
+            set: { if !$0 { canvasManager.needsVisibilityAlert = false } }
+        )) {
+            Button("Show Layer") {
+                guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
+                canvasManager.toggleLayerVisibility(layerIndex: canvasManager.currentLayerIndex)
+                canvasManager.needsVisibilityAlert = false
+            }
+            Button("Cancel", role: .cancel) {
+                canvasManager.needsVisibilityAlert = false
+            }
+        } message: {
+            Text("This layer is hidden. Show it to draw on it.")
+        }
     }
 
     /// Which side of the toolbar the open menu's icon lives on, so the dropdown lands under it. The

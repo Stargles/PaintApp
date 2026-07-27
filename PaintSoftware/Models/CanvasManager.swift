@@ -205,6 +205,14 @@ final class CanvasManager: ObservableObject {
     /// requiring a separate dismiss tap first.
     let interactionBegan = PassthroughSubject<Void, Never>()
 
+    /// Set to true by the canvas coordinator when the user touches the canvas with a drawing tool
+    /// selected but no layers exist. `DrawingView` observes this and presents an alert asking the
+    /// user to create a layer. Reset to false once the alert is dismissed.
+    @Published var needsLayerAlert: Bool = false
+    /// Set to true when the user touches the canvas with a drawing tool but the active layer is
+    /// hidden. `DrawingView` presents an alert offering to show the layer. Reset on dismissal.
+    @Published var needsVisibilityAlert: Bool = false
+
     private let thumbnailRegenSubject = PassthroughSubject<(Int, Int), Never>()
     private var cancellables = Set<AnyCancellable>()
 
@@ -269,7 +277,7 @@ final class CanvasManager: ObservableObject {
     }
 
     func deleteLayer(at index: Int) {
-        guard layers.count > 1, layers.indices.contains(index) else { return }
+        guard layers.indices.contains(index) else { return }
         // If the layer being deleted is the active one, currentLayerIndex's *numeric* value may end
         // up unchanged (a later layer slides down into the same slot) — the didSet below won't fire,
         // so handleActiveContextChanged() has to be called explicitly to invalidate any selection/
@@ -277,12 +285,15 @@ final class CanvasManager: ObservableObject {
         // so this correctly detects the identity change even though the index didn't move).
         let deletingActiveLayerInPlace = index == currentLayerIndex
         layers.remove(at: index)
+        // No layers left — invalidate all per-layer state and set sentinel index -1.
+        if layers.isEmpty {
+            currentLayerIndex = -1
         // Deleting a layer *below* the active one shifts every later index down by one, so
         // currentLayerIndex must shift with it to keep pointing at the same layer. Without this,
         // "active" silently jumps to whatever layer happened to slide into the old index —
         // subsequent strokes land on the wrong layer and the undo manager gets reassigned out
         // from under an unrelated layer.
-        if index < currentLayerIndex {
+        } else if index < currentLayerIndex {
             currentLayerIndex -= 1
         } else if currentLayerIndex >= layers.count {
             currentLayerIndex = layers.count - 1
