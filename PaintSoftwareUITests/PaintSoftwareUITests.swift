@@ -2090,9 +2090,13 @@ final class PaintSoftwareUITests: XCTestCase {
     /// Bakes a shape sitting in the adjustable state, without drawing anything: while a shape is
     /// pending, the overlay covers the canvas and takes drags itself, so a drag well away from the
     /// shape's handles is "tap outside" — it commits and lays down no stroke of its own.
+    ///
+    /// Stays near the horizontal centre deliberately. `canvas.host` includes the letterbox margin
+    /// around the canvas itself, and the overlay only spans the canvas — a drag out at the edge lands
+    /// in the margin, misses the overlay entirely, and silently fails to commit anything.
     private func commitPendingShape(on canvas: XCUIElement) {
-        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.88))
-        start.press(forDuration: 0.1, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.88)))
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.48, dy: 0.78))
+        start.press(forDuration: 0.1, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.56, dy: 0.78)))
     }
 
     /// The whole raster-layer path for the user-visible feature: hold a drawn line until it snaps to
@@ -2113,6 +2117,13 @@ final class PaintSoftwareUITests: XCTestCase {
         commitPendingShape(on: canvas)
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
                        "Baking the shape must leave the ink where the preview showed it")
+
+        // Not just "still looks inked" — the pixels have to be in the cel's own raster, which is the
+        // whole point of rasterizing on the way out of the transient state.
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+                       "The shape should have been stamped into the raster layer as one stroke")
+        app.buttons["toolbar.layersButton"].tap()
 
         // Erase along the line. A shape stamped into the raster erases like any other stroke.
         // (The left rail's sliders are rotated and unreliable to `adjust` from XCUITest — see the

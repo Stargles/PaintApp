@@ -1145,20 +1145,20 @@ struct CanvasView: UIViewRepresentable {
 
         func updateFloatingOverlay() {
             floatingOverlay?.update(canvasManager.floatingPiece)
-            guard let overlay = floatingOverlay,
-                  let piece = canvasManager.floatingPiece,
-                  piece.kind == .move,
-                  let container = containerView else { return }
-            guard let sourceIdx = canvasManager.layers.firstIndex(where: { $0.id == piece.sourceLayerID }),
-                  let sourceHost = layerHosts[piece.sourceLayerID] else { return }
-            let isTopLayer = sourceIdx == canvasManager.layers.count - 1
-            if !isTopLayer {
-                let aboveIdx = sourceIdx + 1
-                if let aboveHost = layerHosts[canvasManager.layers[aboveIdx].id] {
-                    container.insertSubview(overlay, belowSubview: aboveHost)
-                } else {
-                    container.bringSubviewToFront(overlay)
-                }
+            guard let overlay = floatingOverlay, let container = containerView else { return }
+
+            // A piece lifted by the Move tool still belongs to its source layer, so it has to render
+            // in that layer's place in the stack — floating it above everything makes content that
+            // should sit *under* the layers above it appear on top while it's being dragged.
+            //
+            // Every other case (no piece, or a duplicate/paste that isn't tied to a position in the
+            // stack) puts it back at the front. Without that `else`, one move would leave the overlay
+            // wedged below a layer host for good, and the next operation would render behind it.
+            if let piece = canvasManager.floatingPiece, piece.kind == .move,
+               let sourceIndex = canvasManager.layers.firstIndex(where: { $0.id == piece.sourceLayerID }),
+               sourceIndex + 1 < canvasManager.layers.count,
+               let hostAbove = layerHosts[canvasManager.layers[sourceIndex + 1].id] {
+                container.insertSubview(overlay, belowSubview: hostAbove)
             } else {
                 container.bringSubviewToFront(overlay)
             }
