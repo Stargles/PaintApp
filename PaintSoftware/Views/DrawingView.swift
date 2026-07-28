@@ -5,7 +5,6 @@ struct DrawingView: View {
     var onOpenGallery: () -> Void = {}
 
     @State private var activePanel: ActivePanel = .none
-    @State private var isTimelineExpanded: Bool = true
     /// Layer whose options menu is open, shown to the left of the layer panel.
     @State private var layerOptionsID: UUID?
     // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
@@ -28,7 +27,7 @@ struct DrawingView: View {
 
                     Spacer()
 
-                    AnimationTimeline(canvasManager: canvasManager, isExpanded: $isTimelineExpanded)
+                    AnimationTimeline(canvasManager: canvasManager)
                 }
 
                 // The layer panel is its own thing: a tall translucent rail down the trailing edge,

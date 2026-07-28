@@ -2,13 +2,20 @@ import SwiftUI
 
 struct AnimationTimeline: View {
     @ObservedObject var canvasManager: CanvasManager
-    @Binding var isExpanded: Bool
+    @State private var timelineHeight: CGFloat = 250
 
     @State private var isPlaying: Bool = false
     @State private var playbackTimer: Timer?
 
     private let rowHeight: CGFloat = 34
     private let rulerHeight: CGFloat = 18
+    private let collapsedHeight: CGFloat = 48
+    private let minExpandedHeight: CGFloat = 130
+    private let dragHandleHeight: CGFloat = 12
+
+    private var isCollapsed: Bool {
+        timelineHeight <= collapsedHeight + 2
+    }
 
     // Tapping a frame that's already the current playhead position opens the block's options menu
     // (ToonSquid-style: first tap moves the cursor there, a second tap on the same spot opens it).
@@ -23,27 +30,32 @@ struct AnimationTimeline: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if isExpanded {
+            dragHandle
+            if isCollapsed {
+                collapsedBar
+            } else {
                 miniToolbar
                 Rectangle().fill(Color.white.opacity(0.15)).frame(height: 1)
-                HStack(alignment: .top, spacing: 0) {
-                    layerNameColumn
-                    TimelineTrackView(
-                        canvasManager: canvasManager,
-                        rowHeight: rowHeight,
-                        rulerHeight: rulerHeight,
-                        onRequestBlockMenu: { layerIndex, celIndex in
-                            menuLayerIndex = layerIndex
-                            menuCelIndex = celIndex
-                            showBlockMenu = true
-                        }
-                    )
+                ScrollView(.vertical, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 0) {
+                        layerNameColumn
+                        TimelineTrackView(
+                            canvasManager: canvasManager,
+                            rowHeight: rowHeight,
+                            rulerHeight: rulerHeight,
+                            onRequestBlockMenu: { layerIndex, celIndex in
+                                menuLayerIndex = layerIndex
+                                menuCelIndex = celIndex
+                                showBlockMenu = true
+                            }
+                        )
+                    }
+                    .frame(height: contentHeight)
                 }
-                .frame(height: contentHeight)
-            } else {
-                collapsedBar
+                .frame(height: max(0, timelineHeight - toolbarHeight - dragHandleHeight))
             }
         }
+        .frame(height: timelineHeight)
         .background(Color.black)
         .onDisappear { playbackTimer?.invalidate() }
         .confirmationDialog("Block Options", isPresented: $showBlockMenu, titleVisibility: .hidden) {
@@ -58,8 +70,38 @@ struct AnimationTimeline: View {
         }
     }
 
+    private var toolbarHeight: CGFloat {
+        38
+    }
+
     private var contentHeight: CGFloat {
         rulerHeight + CGFloat(max(canvasManager.layerStackRows.count, 1)) * (rowHeight + 2) + 8
+    }
+
+    // MARK: - Drag handle
+
+    private var dragHandle: some View {
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(Color.white.opacity(0.35))
+                .frame(width: 32, height: 4)
+                .padding(.top, 4)
+        }
+        .frame(height: dragHandleHeight)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    let newHeight = timelineHeight - value.translation.height
+                    timelineHeight = min(max(newHeight, collapsedHeight), maxTimelineHeight)
+                }
+                .onEnded { _ in }
+        )
+    }
+
+    private var maxTimelineHeight: CGFloat {
+        UIScreen.main.bounds.height * 0.55
     }
 
     // MARK: - Collapsed
@@ -93,7 +135,7 @@ struct AnimationTimeline: View {
                 .foregroundColor(.gray)
                 .accessibilityIdentifier("timeline.frameLabel")
 
-            Button(action: { isExpanded = true }) {
+            Button(action: { timelineHeight = max(minExpandedHeight, contentHeight.rounded()) }) {
                 Image(systemName: "chevron.up")
             }
         }
@@ -149,7 +191,7 @@ struct AnimationTimeline: View {
                 .font(.caption)
                 .foregroundColor(.gray)
 
-            Button(action: { isExpanded = false }) {
+            Button(action: { timelineHeight = collapsedHeight }) {
                 Image(systemName: "chevron.down")
             }
         }
