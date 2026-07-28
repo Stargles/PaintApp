@@ -13,18 +13,33 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     var onBegin: ((UITouch) -> Void)?
     var onMove: ((UITouch, UIEvent) -> Void)?
     var onEnd: ((UITouch) -> Void)?
+    /// The tracked touch went away without finishing its stroke — a second finger arrived and handed
+    /// the sequence to the transform recognizers, or the system cancelled it. Distinct from `onEnd`
+    /// because there is no stroke to commit: whatever was painted so far has to be rolled back.
+    var onCancel: (() -> Void)?
     /// Fires for every touch that lands here, *before* the pencil-only gate below is even checked —
     /// used to dismiss an open top-bar dropdown the instant the canvas is touched at all. A finger tap
     /// while pencil-only mode is on fails that gate and never actually draws, but should still close
     /// whatever menu was open, same as a real stroke does (see `CanvasManager.interactionBegan`).
     var onAnyTouchBegan: (() -> Void)?
+    /// When this answers true, a second touch arriving mid-stroke is ignored and the tracked touch
+    /// keeps the recognizer, instead of failing it. Set while a smart shape is following the pen:
+    /// that second finger means "snap this shape", not "start panning", and failing here would also
+    /// strand the shape — a failed recognizer receives no further touches, so the pen lifting would
+    /// never reach `onEnd` and the shape would never reach its adjustable state.
+    var shouldIgnoreAdditionalTouches: (() -> Bool)?
 
     private var trackedTouch: UITouch?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
         onAnyTouchBegan?()
-        guard trackedTouch == nil, touches.count == 1, let touch = touches.first,
+        if trackedTouch != nil {
+            guard shouldIgnoreAdditionalTouches?() != true else { return }
+            failTrackedStroke()
+            return
+        }
+        guard touches.count == 1, let touch = touches.first,
               !requiresPencilOnly || touch.type == .pencil else {
             state = .failed
             return
@@ -53,13 +68,73 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
         super.touchesCancelled(touches, with: event)
         guard let trackedTouch, touches.contains(trackedTouch) else { return }
         state = .cancelled
-        onEnd?(trackedTouch)
         self.trackedTouch = nil
+        onCancel?()
     }
 
     override func reset() {
         super.reset()
         trackedTouch = nil
+    }
+
+    /// Gives up a stroke already in progress. Failing without this left the partial stroke painted
+    /// into the layer with no undo step behind it (the recognizer stops receiving touches the moment
+    /// it fails, so `onEnd` never came), which is how a two-finger pan started mid-stroke used to
+    /// leave a permanent, un-undoable mark.
+    private func failTrackedStroke() {
+        trackedTouch = nil
+        state = .failed
+        onCancel?()
+    }
+}
+
+/// Reports how many touches are currently on the canvas without ever recognizing anything itself,
+/// so it can sit alongside every other recognizer without competing for a single touch.
+///
+/// This exists because the smart-shape snap constraint has to engage when a finger joins a touch
+/// sequence that is *already* under way — the pen has been drawing for a second or more by then.
+/// `UILongPressGestureRecognizer(numberOfTouchesRequired: 2)`, which used to drive the snap, has
+/// long since failed by that point: it starts its clock on the first touch and gives up when the
+/// required fingers aren't all down in time. Counting touches directly has no such window.
+final class TouchCountRecognizer: UIGestureRecognizer {
+    var onCountChanged: ((Int) -> Void)?
+
+    /// Touches currently down, for anything that needs the count at a moment no touch event is
+    /// arriving — e.g. a shape appearing under fingers that were already resting on the canvas.
+    var activeCount: Int { active.count }
+
+    private var active: Set<UITouch> = []
+
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        active.formUnion(touches)
+        onCountChanged?(active.count)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        active.subtract(touches)
+        onCountChanged?(active.count)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        active.subtract(touches)
+        onCountChanged?(active.count)
+    }
+
+    override func reset() {
+        super.reset()
+        guard !active.isEmpty else { return }
+        active.removeAll()
+        onCountChanged?(0)
     }
 }
 
@@ -119,6 +194,8 @@ final class StrokeCanvasView: UIView {
     /// be committed *before* this stroke registers its own undo step — keeping undo order intuitive
     /// (the stroke, drawn last, undoes first; the fill under it undoes after).
     var onStrokeBegan: (() -> Void)?
+    /// Called when a stroke is abandoned rather than finished (see `StrokeGestureRecognizer.onCancel`).
+    var onStrokeCancelled: (() -> Void)?
     /// Called for each coalesced touch sample during a stroke, in canvas coordinates.
     var onStrokeMoved: ((VectorSample) -> Void)?
     /// True after the smart-shape detector has reverted this stroke and begun a shape: subsequent
@@ -207,6 +284,7 @@ final class StrokeCanvasView: UIView {
         strokeRecognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
         strokeRecognizer.onMove = { [weak self] touch, event in self?.handleMove(touch, event) }
         strokeRecognizer.onEnd = { [weak self] touch in self?.handleEnd(touch) }
+        strokeRecognizer.onCancel = { [weak self] in self?.handleCancel() }
         addGestureRecognizer(strokeRecognizer)
     }
 
@@ -322,6 +400,32 @@ final class StrokeCanvasView: UIView {
         registerRasterUndo(raster: raster, from: before, to: after)
         strokeBeforeSnapshot = nil
         onStrokeEnded?()
+    }
+
+    /// Rolls the abandoned stroke back to where the canvas was before it started. Nothing is
+    /// committed and no undo step is registered — as far as the document is concerned this stroke
+    /// never happened, which is what the user means by putting a second finger down to pan.
+    private func handleCancel() {
+        if shapeFollowingTouch {
+            // The stroke was already reverted when the shape was detected; the shape itself is the
+            // live state now, so hand off exactly as a normal lift does.
+            shapeFollowingTouch = false
+            onStrokeEnded?()
+            return
+        }
+        if vectorCanvas != nil {
+            vectorScratch = nil
+            currentVectorSamples = []
+            vectorStrokesBeforeSnapshot = nil
+        } else if let raster, let snapshot = strokeBeforeSnapshot {
+            // `reset` restores the stroke count too, so deliberately no `endStroke()` here — that
+            // would count a stroke that is being thrown away.
+            raster.reset(to: snapshot.image, strokeCount: snapshot.count)
+            strokeBeforeSnapshot = nil
+        }
+        lastStampPoint = nil
+        refreshDisplay()
+        onStrokeCancelled?()
     }
 
     /// Registers one step on the global `CanvasManager.history`. A whole-image snapshot per
@@ -689,11 +793,13 @@ struct CanvasView: UIViewRepresentable {
         floatingOverlay.onRequestCommit = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.commitFloatingPieceIfNeeded()
         }
-        shapeOverlay.onEndpointDragged = { [weak coordinator = context.coordinator] point in
+        shapeOverlay.onEndpointDragged = { [weak coordinator = context.coordinator] point, endpoint in
             guard let coordinator else { return }
-            // Lines: just update the endpoint. For rects/ovals, treat endpoint drag as resizing
-            // the whole bounding rect (start fixed).
-            coordinator.canvasManager.updateInteractiveShape(endPoint: point)
+            // Move the end that was actually grabbed, leaving the other anchored.
+            switch endpoint {
+            case .start: coordinator.canvasManager.updateInteractiveShape(startPoint: point)
+            case .end: coordinator.canvasManager.updateInteractiveShape(endPoint: point)
+            }
             coordinator.updateShapeOverlay()
         }
         shapeOverlay.onRotationDragged = { [weak coordinator = context.coordinator] rotation in
@@ -762,14 +868,6 @@ struct CanvasView: UIViewRepresentable {
             }
             coordinator.updateShapeOverlay()
         }
-        shapeOverlay.onTapOutside = { [weak coordinator = context.coordinator] in
-            coordinator?.commitTransientsAndRefresh()
-        }
-        shapeOverlay.onConstraintChanged = { [weak coordinator = context.coordinator] on in
-            guard let coordinator else { return }
-            coordinator.canvasManager.updateInteractiveShape(isConstrained: on)
-            coordinator.updateShapeOverlay()
-        }
 
         host.onLayout = { [weak coordinator = context.coordinator] in
             coordinator?.hostBoundsDidChange()
@@ -827,11 +925,20 @@ struct CanvasView: UIViewRepresentable {
         /// Enabled when there are no layers or the active layer is hidden, so a drawing-tool touch
         /// (which would otherwise be silently swallowed) triggers a user-facing alert instead.
         weak var catchAllTapRecognizer: UILongPressGestureRecognizer?
-        /// Two-finger hold — engages the shape constraint snap (rect→square, oval→circle, etc.).
-        weak var twoFingerHoldRecognizer: UILongPressGestureRecognizer?
+        /// Counts live canvas touches — engages the shape constraint snap (rect→square, oval→circle,
+        /// line→nearest 15°) whenever a second one is down.
+        weak var touchCountRecognizer: TouchCountRecognizer?
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
+        /// True while the two-finger snap constraint is engaged on the pending shape. Owned here
+        /// rather than by the overlay, because the touches that engage it usually land on the canvas
+        /// rather than on the overlay (which only claims its handles).
+        private(set) var isShapeConstraintEngaged = false
+        /// Debounces the snap by `shapeConstraintDelay` so a quick two-finger tap — undo — doesn't
+        /// flash a shape into its snapped form on the way past.
+        private var shapeConstraintTimer: Timer?
+        private static let shapeConstraintDelay: TimeInterval = 0.12
         /// See `scheduleShapePreviewRenderIfNeeded`.
         private var isShapePreviewRenderScheduled = false
         /// Accumulated canvas-space stroke samples from the current stroke (for shape detection
@@ -932,9 +1039,23 @@ struct CanvasView: UIViewRepresentable {
                     // changes a single pixel: they become the older undo steps and this stroke
                     // undoes first, and the caller snapshots the raster for undo *after* this
                     // returns, so the baked content is part of that snapshot rather than lost by it.
+                    //
+                    // This is also what makes drawing straight over a pending shape work in one
+                    // touch: the shape overlay only claims touches on its handles, so this stroke's
+                    // very first touch arrives here, bakes the shape, and then goes on to draw —
+                    // rather than being consumed as a dismissal the user has to follow with a
+                    // second touch to actually start drawing.
                     self.commitTransientsAndRefresh()
                     // Begin accumulating stroke points for smart-shape detection.
                     if let host { self.startShapeDetection(host: host) }
+                }
+                host.strokeView.onStrokeCancelled = { [weak self] in
+                    self?.cancelShapeDetection()
+                    self?.canvasManager.refreshUndoRedoState()
+                }
+                // A second finger during shape following means "snap", not "pan" — keep the pen.
+                host.strokeView.strokeRecognizer.shouldIgnoreAdditionalTouches = { [weak self] in
+                    self?.canvasManager.isShapeFollowingFinger ?? false
                 }
                 host.strokeView.onStrokeMoved = { [weak self, weak host] sample in
                     guard let self else { return }
@@ -1266,6 +1387,13 @@ struct CanvasView: UIViewRepresentable {
             canvasManager.beginCanvasEdit()
             syncLayerDisplays()
             updateShapeOverlay()
+            // Nothing is pending any more, so the snap has nothing to constrain — drop it here
+            // rather than waiting for the fingers holding it to leave.
+            if !canvasManager.shapeGestureActive {
+                shapeConstraintTimer?.invalidate()
+                shapeConstraintTimer = nil
+                isShapeConstraintEngaged = false
+            }
         }
 
         func updateActiveLayerAndTool() {
@@ -1424,6 +1552,9 @@ struct CanvasView: UIViewRepresentable {
 
             canvasManager.beginInteractiveShape(shape, samples: samples)
             updateShapeOverlay()
+            // The snapping finger may already have been down before the hold timer fired, in which
+            // case no touch event is coming to engage the constraint — re-read the count instead.
+            canvasTouchCountChanged(touchCountRecognizer?.activeCount ?? 0)
         }
 
         // MARK: - Fit / transform
@@ -1513,17 +1644,20 @@ struct CanvasView: UIViewRepresentable {
             twoFingerTap.cancelsTouchesInView = false
             view.addGestureRecognizer(twoFingerTap)
 
-            // Two-finger hold detector for the shape constraint snap. Fires after 0.12 s of
-            // two‑finger contact — long enough that a quick tap (undo) ignores it, short enough
-            // that the snap engages before the user starts to drag. Coexists with every other
-            // gesture via shouldRecognizeSimultaneouslyWith.
-            let twoFingerHold = UILongPressGestureRecognizer(target: self, action: #selector(handleTwoFingerHold(_:)))
-            twoFingerHold.minimumPressDuration = 0.12
-            twoFingerHold.numberOfTouchesRequired = 2
-            twoFingerHold.delegate = self
-            twoFingerHold.cancelsTouchesInView = false
-            view.addGestureRecognizer(twoFingerHold)
-            twoFingerHoldRecognizer = twoFingerHold
+            // Drives the shape constraint snap: it reports the live canvas touch count, and two or
+            // more touches engage the snap (after a short delay — see `canvasTouchCountChanged`).
+            // Unlike the two-finger long press this replaced, it also fires when the second touch
+            // joins a sequence the pen started seconds ago, which is exactly the "keep the pen down
+            // after the shape appears, then drop a finger to snap it" gesture — a long press with
+            // `numberOfTouchesRequired = 2` has already failed by then, because it starts its clock
+            // on the first touch and gives up when the fingers aren't all down in time.
+            let touchCounter = TouchCountRecognizer(target: self, action: nil)
+            touchCounter.delegate = self
+            touchCounter.onCountChanged = { [weak self] count in
+                self?.canvasTouchCountChanged(count)
+            }
+            view.addGestureRecognizer(touchCounter)
+            touchCountRecognizer = touchCounter
 
             let threeFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap))
             threeFingerTap.numberOfTouchesRequired = 3
@@ -1562,7 +1696,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, twoFingerHoldRecognizer]
+            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer]
             if alwaysConcurrent.contains(where: { $0 === gestureRecognizer }) || alwaysConcurrent.contains(where: { $0 === otherGestureRecognizer }) {
                 return true
             }
@@ -1591,11 +1725,11 @@ struct CanvasView: UIViewRepresentable {
         /// pan/pinch/rotation begins first, so all three can share one anchor for this touch sequence.
         private func beginAnchorIfNeeded(at location: CGPoint) {
             canvasManager.cancelInteractiveFillDrag()
-            if canvasManager.isShapeInAdjustableState {
-                // Two-finger snap: engage constraint (rect→square, oval→circle, line→snapped angle)
-                // rather than committing. The snap releases when all two-finger gestures end.
-                setShapeConstraint(true)
-                // Don't set gesture anchors — the pan/zoom is not engaged, only the snap.
+            if canvasManager.shapeGestureActive {
+                // Two fingers on a pending shape mean "snap it" (the touch counter engages that),
+                // not "pan the canvas" — so don't set gesture anchors here. Panning only takes over
+                // once the user keeps moving, which `commitSnappedShapeIfTransforming` reads as
+                // "done editing", bakes the shape, and anchors from there.
                 return
             }
             guard gestureAnchorCenter0 == nil, let container = containerView else { return }
@@ -1639,8 +1773,9 @@ struct CanvasView: UIViewRepresentable {
             gestureAnchorHost0 = nil
             gestureAnchorCenter0 = nil
             snapEngagedAt = nil
-            // Release shape constraint snap when the two-finger gesture ends.
-            setShapeConstraint(false)
+            // The shape snap isn't released here: it follows the touches themselves (see
+            // `canvasTouchCountChanged`), which is what lets the pen lift out of a snapped shape
+            // while the snapping finger is still down.
         }
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
@@ -1715,25 +1850,52 @@ struct CanvasView: UIViewRepresentable {
             canvasManager.undo()
         }
 
-        @objc func handleTwoFingerHold(_ recognizer: UILongPressGestureRecognizer) {
-            guard canvasManager.shapeGestureActive else { return }
-            // A `UILongPressGestureRecognizer` re-invokes its action on every `.changed` event too
-            // (each tiny finger tremor while held), not just `.began` — gating on `== .began` alone
-            // engaged the constraint for exactly one event and then immediately released it on the
-            // very next `.changed`, so held two fingers never kept the shape snapped.
-            switch recognizer.state {
-            case .began, .changed:
-                setShapeConstraint(true)
-            default:
-                setShapeConstraint(false)
+        // MARK: - Two-finger snap constraint
+
+        /// The number of touches on the canvas changed. Two or more of them, while a shape is
+        /// pending, means the snap constraint: a rectangle becomes a square, an oval a circle, a
+        /// line jumps to the nearest 15°. Applies whether the shape is still following the pen
+        /// (finger added mid-stroke) or already adjustable (two fingers on the canvas).
+        private func canvasTouchCountChanged(_ count: Int) {
+            guard canvasManager.shapeGestureActive, count >= 2 else {
+                shapeConstraintTimer?.invalidate()
+                shapeConstraintTimer = nil
+                releaseShapeConstraintAfterCurrentEvent()
+                return
+            }
+            guard shapeConstraintTimer == nil, !isShapeConstraintEngaged else { return }
+            shapeConstraintTimer = Timer.scheduledTimer(withTimeInterval: Self.shapeConstraintDelay,
+                                                        repeats: false) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.shapeConstraintTimer = nil
+                    guard self.canvasManager.shapeGestureActive else { return }
+                    self.setShapeConstraint(true)
+                }
             }
         }
 
-        /// Engages or releases the two-finger snap constraint on the pending shape, keeping the
-        /// overlay and the manager (which owns the constraint) in step.
+        /// Releases the snap one run-loop turn later rather than inline.
+        ///
+        /// The same touch event that drops the count below two can also be the pen leaving the
+        /// board, and it is the pen's lift — `CanvasManager.endInteractiveShape` — that makes a snap
+        /// permanent. Both arrive through recognizers attached to the same event, which UIKit fires
+        /// in no defined order, so releasing inline would be a coin flip on whether the circle the
+        /// user just settled springs back into the oval it was drawn as. Deferring lets the lift
+        /// land first however the event was ordered; the count is re-read on the way out so a finger
+        /// that came straight back down doesn't lose its snap.
+        private func releaseShapeConstraintAfterCurrentEvent() {
+            guard isShapeConstraintEngaged else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, (self.touchCountRecognizer?.activeCount ?? 0) < 2 else { return }
+                self.setShapeConstraint(false)
+            }
+        }
+
+        /// Engages or releases the snap constraint on the pending shape.
         private func setShapeConstraint(_ on: Bool) {
-            guard shapeOverlay?.isConstrained != on else { return }
-            shapeOverlay?.setConstrained(on)
+            guard isShapeConstraintEngaged != on else { return }
+            isShapeConstraintEngaged = on
             guard canvasManager.shapeGestureActive else { return }
             canvasManager.updateInteractiveShape(isConstrained: on)
             updateShapeOverlay()
@@ -1743,8 +1905,10 @@ struct CanvasView: UIViewRepresentable {
         /// it: bake it and hand the gesture over to the canvas transform. Shared by all three
         /// transform recognizers, which otherwise carried three copies of this.
         private func commitSnappedShapeIfTransforming(at location: CGPoint) {
-            guard canvasManager.isShapeInAdjustableState, shapeOverlay?.isConstrained == true else { return }
-            shapeOverlay?.setConstrained(false)
+            guard canvasManager.isShapeInAdjustableState, isShapeConstraintEngaged else { return }
+            // Commit without clearing the constraint first: the shape has to bake in the snapped
+            // form the user is looking at. `commitTransientsAndRefresh` drops the constraint on the
+            // way out, once there's no longer a shape for it to apply to.
             commitTransientsAndRefresh()
             if gestureAnchorCenter0 == nil, let container = containerView {
                 gestureAnchorHost0 = location

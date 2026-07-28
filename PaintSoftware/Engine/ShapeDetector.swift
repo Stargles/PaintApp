@@ -4,39 +4,84 @@ import Foundation
 /// Analyses a sequence of vector stroke samples to detect whether the freehand path most closely
 /// resembles a line, rectangle, or oval. All functions are pure — no UIKit dependency, no state.
 ///
-/// Detection strategy: compute three independent fit scores (line straightness, rect edge density,
-/// oval distance uniformity) and pick the winner — but each candidate is gated by shape-specific
-/// sanity checks so it cannot steal a result from a better-fit neighbour:
+/// Detection strategy: **fit the candidates and keep the one the stroke actually lies on.** Every
+/// candidate is scored by the same quantity — the RMS distance from the stroke's points to that
+/// candidate's outline, divided by the candidate's own size — so the three scores live on one
+/// comparable scale and the winner is simply the smallest. (The previous detector scored each kind
+/// with a metric of its own invention — "fraction of points near a box edge" against "radial
+/// variance" — which are not comparable numbers; a hand-drawn square scored 1.00 as a rectangle and
+/// 0.94 as an oval, so any wobble at all flipped the answer. That is what made rectangles come out
+/// as ellipses.)
 ///
-///   - **Line** requires a near-straight path and that the Bresenham-like end-to-end distance is
-///     close to the actual arc length.
-///   - **Rectangle** requires the bounding-box aspect ratio to be reasonable (rejects thin,
-///     line-shaped boxes) and a high fraction of points to lie near the box edges.
-///   - **Oval** requires the points to wrap almost all the way around the centroid (angular
-///     coverage) AND their radii to be roughly uniform.
+/// Three things make the fit reliable:
+///
+///   - **Arc-length resampling.** Raw samples cluster wherever the pen moved slowly — and the
+///     hold-to-detect gesture *ends* with the pen parked in one spot for 0.8s, piling hundreds of
+///     samples on a single point. Resampling to evenly spaced points first makes every mean and
+///     RMS below measure the shape rather than the drawing speed.
+///   - **A rotation sweep instead of a PCA axis.** A square's covariance matrix is isotropic, so
+///     its principal axis is pure noise — the old detector routinely evaluated a square inside a
+///     45°-rotated (diamond) bounding box, where it fits nothing and the oval wins by default.
+///     Sweeping the angle and keeping the best-fitting box has no degenerate case: for a circle
+///     every angle ties and the sweep simply keeps 0°.
+///   - **Gates on shape, not on score.** A line is recognised by its own arc-length test (a closed
+///     shape must double back, so its arc length always exceeds ~2× its extent) before rect/oval
+///     are considered at all, and a closed candidate must have points spread over essentially its
+///     whole outline, which is what rejects arcs, hooks and part-drawn boxes.
 enum ShapeDetector {
 
     // MARK: - Tunable thresholds
 
-    /// Minimum fraction of points on the bounding-box edges for a rectangle (0..1).
-    private static let rectEdgeDensityMin: CGFloat = 0.72
-
-    /// Maximum aspect ratio (longest÷shortest) of a rectangle's bounding box. 3× means a 2:1
-    /// rectangle passes but the tight box of a wavy line (100pt×35pt → 2.9) passes only if edge
-    /// density and all-four-sides checks also pass, which they typically won't for a wavy line.
-    private static let rectAspectRatioMax: CGFloat = 3
-
-    /// Maximum normalized variance for an oval (0.20 = ±20% radial deviation tolerated). This is
-    /// about 2.5× more lenient than the original 0.08 — freehand circles have higher variance than
-    /// perfect ones, and the angular-coverage gate already filters out false positives (arcs).
-    private static let ovalDistanceVarianceThreshold: CGFloat = 0.20
-
-    /// Minimum angular coverage (radians) around the centroid for an oval. ~4π/3 ≈ 4.19 rad is
-    /// 240° — rules out arcs and crescents that happen to have low radius variance.
-    private static let ovalMinAngularCoverage: CGFloat = 4 * .pi / 3
-
     /// The minimum total path length (in canvas points) before shape detection fires.
     static let minimumPathLength: CGFloat = 40
+
+    /// Points every stroke is resampled to, evenly spaced by arc length, before anything is fitted.
+    /// 64 is far more than the fits need for accuracy and keeps the whole sweep well under a
+    /// millisecond.
+    private static let resampleCount = 64
+
+    /// A line's arc length may exceed the extent along its own axis by this much (wobble, a slight
+    /// bow). Any closed shape has to travel out and back, so its ratio is at least ~2 — this
+    /// separates the two cases regardless of how elongated the closed shape is, which an aspect
+    /// ratio cutoff cannot do.
+    private static let lineLengthRatioMax: CGFloat = 1.5
+
+    /// RMS deviation from the line's own axis, as a fraction of the axis extent.
+    private static let lineDeviationMax: CGFloat = 0.06
+
+    /// Worst normalized RMS outline-fit error a rectangle or oval may have and still be accepted.
+    /// For reference: a perfect circle measured against a rectangle scores ≈0.07, and a perfect
+    /// square measured against an oval ≈0.10, so this floor admits genuinely wobbly freehand while
+    /// still rejecting scribbles.
+    private static let closedFitErrorMax: CGFloat = 0.16
+
+    /// Angle sweep for rect/oval fitting. The bounding box repeats every 90°, so the sweep runs
+    /// ±44° in 2° steps (45 evaluations, including exactly 0°) and then refines around the winner.
+    private static let sweepStep: CGFloat = 2 * .pi / 180
+    private static let sweepHalfSteps = 22
+    private static let refineStep: CGFloat = 0.25 * .pi / 180
+    private static let refineHalfSteps = 8
+
+    /// A best-fit rotation this close to axis-aligned is taken as axis-aligned — hand-drawn boxes
+    /// land a degree or two off true and reading back as "tilted by 1.5°" looks like a mistake.
+    private static let axisSnapTolerance: CGFloat = 2.5 * .pi / 180
+
+    /// Smallest bounding-box side (canvas points) a closed shape may have.
+    private static let minimumClosedDimension: CGFloat = 5
+
+    /// The outline is split into this many equal-parameter buckets; a closed candidate is rejected
+    /// unless at least `coverageBucketsRequired` of them contain a point. 13/16 tolerates a gap of
+    /// about an eighth of the outline (an unclosed circle, a rectangle missing its last corner)
+    /// while rejecting arcs and hooks.
+    private static let coverageBuckets = 16
+    private static let coverageBucketsRequired = 13
+
+    /// A stroke that *traces* an outline covers roughly that outline's own length; freehand wobble
+    /// and the micro-jitter of the pen parked in place during the hold push it a little higher.
+    /// A stroke covering far more than its outline is doing something else inside the same box —
+    /// a zigzag between two edges, hatching, a scribble — and coverage alone can't tell, because
+    /// every one of those points really is sitting on the box.
+    private static let closedLengthRatioMax: CGFloat = 1.75
 
     // MARK: - Public API
 
@@ -54,40 +99,194 @@ enum ShapeDetector {
     static func detect(from samples: [VectorSample]) -> ShapeGeometry? {
         guard samples.count >= 3 else { return nil }
 
-        let points = samples.map(\.point)
-        let totalLength = pathLength(points)
-        guard totalLength >= minimumPathLength else { return nil }
+        let raw = samples.map(\.point)
+        let arcLength = pathLength(raw)
+        guard arcLength >= minimumPathLength else { return nil }
 
-        let lineStart = points.first!
-        let lineEnd = points.last!
+        let points = resampled(raw, count: resampleCount)
+        guard points.count >= 8 else { return nil }
 
-        let (lineScore, lineValid) = lineScore(points: points, totalLength: totalLength,
-                                              start: lineStart, end: lineEnd)
-
-        // Rectangles/ovals aren't always axis-aligned: estimate the point cloud's own principal axis
-        // first (the direction its spread is greatest/least along), and score both candidates against
-        // their bounding box in *that* rotated frame — so e.g. an oval traced at 45° is recognised as
-        // a 45°-rotated oval instead of forcing an axis-aligned bounding box around it.
-        let pivot = centroid(points)
-        let rotation = estimateRotation(points: points, about: pivot)
-        let localPoints = points.map { rotated($0, about: pivot, by: -rotation) }
-
-        let (rectScore, rectValid, rectStart, rectEnd) = rectResult(points: localPoints)
-        let (ovalScore, ovalValid, ovalStart, ovalEnd) = ovalResult(points: localPoints)
-
-        // Build a candidate table with validity flags so we can skip invalid candidates rather
-        // than letting a high-but-invalidated score win.
-        let candidates: [(ShapeGeometry.Kind, CGFloat, CGPoint, CGPoint, CGFloat, Bool)] = [
-            (.line, lineScore, lineStart, lineEnd, 0, lineValid),
-            (.rectangle, rectScore, rectStart, rectEnd, rotation, rectValid),
-            (.oval, ovalScore, ovalStart, ovalEnd, rotation, ovalValid),
-        ]
-
-        // Pick the highest-scoring valid candidate above the 0.5 confidence floor.
-        let validCandidates = candidates.filter { $0.5 }
-        guard let best = validCandidates.max(by: { $0.1 < $1.1 }), best.1 > 0.5 else { return nil }
-        return ShapeGeometry(kind: best.0, startPoint: best.2, endPoint: best.3, rotation: best.4)
+        // A line is tested first and on its own terms: its gate (below) is one no closed shape can
+        // pass, so there is nothing for the closed fits to steal and no scores to reconcile.
+        if let line = lineCandidate(points: points, arcLength: arcLength) { return line }
+        return closedCandidate(points: points, arcLength: arcLength)
     }
+
+    // MARK: - Line
+
+    /// The stroke as a line, or `nil` if it isn't one. The axis comes from the point cloud's
+    /// principal direction rather than the first→last chord, so a hooked lift or a shaky start
+    /// tilts the result far less; the endpoints are the extreme projections onto that axis.
+    private static func lineCandidate(points: [CGPoint], arcLength: CGFloat) -> ShapeGeometry? {
+        let pivot = centroid(points)
+        let axis = principalAxis(points: points, about: pivot)
+
+        var minT = CGFloat.greatestFiniteMagnitude, maxT = -CGFloat.greatestFiniteMagnitude
+        var sumSquaredPerp: CGFloat = 0
+        for p in points {
+            let dx = p.x - pivot.x, dy = p.y - pivot.y
+            let along = dx * axis.dx + dy * axis.dy
+            let across = -dx * axis.dy + dy * axis.dx
+            if along < minT { minT = along }
+            if along > maxT { maxT = along }
+            sumSquaredPerp += across * across
+        }
+        let extent = maxT - minT
+        guard extent > 0 else { return nil }
+        // A closed shape doubles back on itself, so its arc length runs to ~2× its extent or more.
+        guard arcLength <= extent * lineLengthRatioMax else { return nil }
+        let deviation = (sumSquaredPerp / CGFloat(points.count)).squareRoot()
+        guard deviation / extent <= lineDeviationMax else { return nil }
+
+        let low = CGPoint(x: pivot.x + axis.dx * minT, y: pivot.y + axis.dy * minT)
+        let high = CGPoint(x: pivot.x + axis.dx * maxT, y: pivot.y + axis.dy * maxT)
+        // Keep the direction the user drew in: `startPoint` is the end they started from, which is
+        // what makes the two endpoint handles behave the way the stroke did.
+        let first = points[0]
+        let startIsLow = hypot(first.x - low.x, first.y - low.y) <= hypot(first.x - high.x, first.y - high.y)
+        return ShapeGeometry(kind: .line,
+                             startPoint: startIsLow ? low : high,
+                             endPoint: startIsLow ? high : low)
+    }
+
+    // MARK: - Rectangle / oval
+
+    /// One evaluated rect-or-oval fit: the bounding box in the frame rotated by `rotation`, and how
+    /// far the stroke sits from that outline (RMS distance ÷ the box's geometric mean side).
+    private struct ClosedFit {
+        var kind: ShapeGeometry.Kind
+        var rotation: CGFloat
+        var rect: CGRect
+        var error: CGFloat
+    }
+
+    /// The stroke as a rectangle or an oval — whichever it lies closer to — or `nil` if it is
+    /// neither. If the better fit fails the outline-coverage gate the runner-up still gets its
+    /// chance, so e.g. a squarish oval isn't lost just because the rectangle scored marginally
+    /// better before coverage was considered.
+    private static func closedCandidate(points: [CGPoint], arcLength: CGFloat) -> ShapeGeometry? {
+        let pivot = centroid(points)
+        let offsets = points.map { CGPoint(x: $0.x - pivot.x, y: $0.y - pivot.y) }
+
+        let fits = [ShapeGeometry.Kind.rectangle, .oval]
+            .compactMap { bestFit($0, offsets: offsets) }
+            .filter { $0.error <= closedFitErrorMax }
+            .sorted { $0.error < $1.error }
+
+        for candidate in fits {
+            // Re-fit dead-on axis-aligned when the winner is within a couple of degrees of it, so
+            // the snap can't leave the box measured at one angle and drawn at another.
+            let snapped = abs(candidate.rotation) < axisSnapTolerance
+                ? (fit(candidate.kind, angle: 0, offsets: offsets) ?? candidate)
+                : candidate
+            let shape = geometry(for: snapped, pivot: pivot)
+            guard arcLength <= shape.outlineLength * closedLengthRatioMax else { continue }
+            guard hasOutlineCoverage(snapped, offsets: offsets) else { continue }
+            return shape
+        }
+        return nil
+    }
+
+    /// The lowest-error fit of `kind` over the rotation sweep: a coarse pass across the full 90°
+    /// of distinct box orientations, then a fine pass around whatever that found.
+    private static func bestFit(_ kind: ShapeGeometry.Kind, offsets: [CGPoint]) -> ClosedFit? {
+        var best: ClosedFit?
+        func consider(_ angle: CGFloat) {
+            guard let candidate = fit(kind, angle: angle, offsets: offsets) else { return }
+            if best == nil || candidate.error < best!.error { best = candidate }
+        }
+        for step in -sweepHalfSteps...sweepHalfSteps { consider(CGFloat(step) * sweepStep) }
+        guard let coarse = best else { return nil }
+        for step in -refineHalfSteps...refineHalfSteps where step != 0 {
+            consider(coarse.rotation + CGFloat(step) * refineStep)
+        }
+        return best
+    }
+
+    /// Fits `kind` to the points inside the frame rotated by `angle`: the bounding box there is the
+    /// candidate rectangle (or the box the candidate ellipse is inscribed in), and the error is the
+    /// RMS distance to that outline, normalized by √(w·h) so it is scale-free.
+    private static func fit(_ kind: ShapeGeometry.Kind, angle: CGFloat, offsets: [CGPoint]) -> ClosedFit? {
+        let c = cos(-angle), s = sin(-angle)
+        var minX = CGFloat.greatestFiniteMagnitude, maxX = -CGFloat.greatestFiniteMagnitude
+        var minY = CGFloat.greatestFiniteMagnitude, maxY = -CGFloat.greatestFiniteMagnitude
+        for p in offsets {
+            let x = p.x * c - p.y * s, y = p.x * s + p.y * c
+            if x < minX { minX = x }
+            if x > maxX { maxX = x }
+            if y < minY { minY = y }
+            if y > maxY { maxY = y }
+        }
+        let rect = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        guard rect.width >= minimumClosedDimension, rect.height >= minimumClosedDimension else { return nil }
+        let scale = (rect.width * rect.height).squareRoot()
+
+        var sumSquared: CGFloat = 0
+        for p in offsets {
+            let q = CGPoint(x: p.x * c - p.y * s, y: p.x * s + p.y * c)
+            let d = kind == .rectangle ? distanceToRectOutline(q, rect) : distanceToEllipse(q, rect)
+            sumSquared += d * d
+        }
+        let error = (sumSquared / CGFloat(offsets.count)).squareRoot() / scale
+        return ClosedFit(kind: kind, rotation: angle, rect: rect, error: error)
+    }
+
+    /// Distance from a point to a rectangle's *outline* — zero on the perimeter, growing both
+    /// outward and inward, unlike the usual point-in-rect distance which is zero everywhere inside.
+    private static func distanceToRectOutline(_ p: CGPoint, _ rect: CGRect) -> CGFloat {
+        let qx = max(rect.minX - p.x, p.x - rect.maxX)
+        let qy = max(rect.minY - p.y, p.y - rect.maxY)
+        if qx > 0 || qy > 0 { return hypot(max(qx, 0), max(qy, 0)) }
+        return -max(qx, qy)  // inside: distance to the nearest edge
+    }
+
+    /// Distance from a point to the ellipse inscribed in `rect`, measured along the ray from the
+    /// centre. The true nearest-point distance needs an iterative solve; this closed form agrees
+    /// with it to within a few percent near the curve, is monotone in the same direction, and is
+    /// what makes the whole sweep cheap enough to run twice per detection.
+    private static func distanceToEllipse(_ p: CGPoint, _ rect: CGRect) -> CGFloat {
+        let a = rect.width / 2, b = rect.height / 2
+        let dx = p.x - rect.midX, dy = p.y - rect.midY
+        let normalized = hypot(dx / a, dy / b)
+        guard normalized > 0 else { return min(a, b) }
+        let radius = hypot(dx, dy)
+        return abs(radius - radius / normalized)
+    }
+
+    /// True when the stroke covers essentially the whole of `fit`'s outline. Buckets the points by
+    /// their outline parameter, which is arc length for a rectangle and angle for an oval, so a
+    /// missing side and a missing arc are both caught by one rule.
+    private static func hasOutlineCoverage(_ fit: ClosedFit, offsets: [CGPoint]) -> Bool {
+        let outline = ShapeGeometry(kind: fit.kind, startPoint: fit.rect.origin,
+                                    endPoint: CGPoint(x: fit.rect.maxX, y: fit.rect.maxY))
+        let c = cos(-fit.rotation), s = sin(-fit.rotation)
+        var covered = [Bool](repeating: false, count: coverageBuckets)
+        for p in offsets {
+            let local = CGPoint(x: p.x * c - p.y * s, y: p.x * s + p.y * c)
+            let u = outline.outlineParameter(of: local)
+            covered[min(Int(u * CGFloat(coverageBuckets)), coverageBuckets - 1)] = true
+        }
+        return covered.lazy.filter { $0 }.count >= coverageBucketsRequired
+    }
+
+    /// Lifts a fit back into canvas space. The fit's box lives in a frame rotated about the point
+    /// cloud's centroid, but `ShapeGeometry.rotation` turns about the shape's *own* centre — so the
+    /// box is shifted by however far its centre moves under that rotation, which makes the two
+    /// placements identical.
+    private static func geometry(for fit: ClosedFit, pivot: CGPoint) -> ShapeGeometry {
+        let localCenter = CGPoint(x: fit.rect.midX, y: fit.rect.midY)
+        let c = cos(fit.rotation), s = sin(fit.rotation)
+        let rotatedCenter = CGPoint(x: localCenter.x * c - localCenter.y * s,
+                                    y: localCenter.x * s + localCenter.y * c)
+        let originX = pivot.x + fit.rect.minX + (rotatedCenter.x - localCenter.x)
+        let originY = pivot.y + fit.rect.minY + (rotatedCenter.y - localCenter.y)
+        return ShapeGeometry(kind: fit.kind,
+                             startPoint: CGPoint(x: originX, y: originY),
+                             endPoint: CGPoint(x: originX + fit.rect.width, y: originY + fit.rect.height),
+                             rotation: fit.rotation)
+    }
+
+    // MARK: - Path utilities
 
     /// Mean of a point set.
     private static func centroid(_ points: [CGPoint]) -> CGPoint {
@@ -96,177 +295,45 @@ enum ShapeDetector {
         return CGPoint(x: sum.x / CGFloat(points.count), y: sum.y / CGFloat(points.count))
     }
 
-    private static func rotated(_ point: CGPoint, about pivot: CGPoint, by angle: CGFloat) -> CGPoint {
-        guard angle != 0 else { return point }
-        let dx = point.x - pivot.x, dy = point.y - pivot.y
-        let c = cos(angle), s = sin(angle)
-        return CGPoint(x: pivot.x + dx * c - dy * s, y: pivot.y + dx * s + dy * c)
-    }
-
-    /// The point cloud's principal-axis angle about `pivot`, via the closed-form dominant eigenvector
-    /// of its 2×2 covariance matrix. An ellipse/rectangle drawn at angle θ has its points' variance
-    /// maximised along θ, which this recovers directly without an iterative fit. Eigenvectors of a
-    /// symmetric matrix are only defined up to a 180° flip, which is fine here — a rect/oval's
-    /// bounding box looks identical rotated by another 180°, so the ambiguity is invisible.
-    private static func estimateRotation(points: [CGPoint], about pivot: CGPoint) -> CGFloat {
-        guard points.count >= 2 else { return 0 }
+    /// Unit vector along the point cloud's direction of greatest spread, from the closed-form
+    /// dominant eigenvector of its 2×2 covariance matrix. Only the line fit uses this — rect and
+    /// oval sweep instead, because this is degenerate (pure noise) for anything square or circular.
+    private static func principalAxis(points: [CGPoint], about pivot: CGPoint) -> (dx: CGFloat, dy: CGFloat) {
         var sxx: CGFloat = 0, syy: CGFloat = 0, sxy: CGFloat = 0
         for p in points {
             let dx = p.x - pivot.x, dy = p.y - pivot.y
             sxx += dx * dx; syy += dy * dy; sxy += dx * dy
         }
-        guard sxx != syy || sxy != 0 else { return 0 }
-        return 0.5 * atan2(2 * sxy, sxx - syy)
+        guard sxx != syy || sxy != 0 else { return (1, 0) }
+        let angle = 0.5 * atan2(2 * sxy, sxx - syy)
+        return (cos(angle), sin(angle))
     }
 
-    // MARK: - Line detection
-
-    /// Returns `(score, isLine)` — `isLine` becomes false when the path clearly isn't straight
-    /// (the function of straightness × deviation isn't enough on its own for very small wiggles
-    /// that all three metrics happily accept as "line-like").
-    private static func lineScore(points: [CGPoint], totalLength: CGFloat, start: CGPoint, end: CGPoint) -> (CGFloat, Bool) {
-        guard totalLength > 0 else { return (0, false) }
-        let directDist = hypot(end.x - start.x, end.y - start.y)
-        let straightness = directDist / totalLength  // 1.0 = perfectly straight
-
-        let maxDeviation = maxDeviationFromLine(points: points, a: start, b: end)
-        let size = CGSize(width: abs(end.x - start.x), height: abs(end.y - start.y))
-        let diag = hypot(size.width, size.height)
-        let deviationScore = diag > 0 ? max(0, 1 - (maxDeviation / (diag * 0.3))) : 1
-
-        let score = straightness * 0.6 + deviationScore * 0.4
-        let isLinear = straightness > 0.85                 // almost no significant backtracking
-            && (diag == 0 || maxDeviation / diag < 0.30)   // moderate wiggle OK
-        return (score, isLinear)
-    }
-
-    /// Maximum perpendicular distance of any point from the line segment a→b.
-    private static func maxDeviationFromLine(points: [CGPoint], a: CGPoint, b: CGPoint) -> CGFloat {
-        let dx = b.x - a.x, dy = b.y - a.y
-        let len2 = dx * dx + dy * dy
-        guard len2 > 0 else { return 0 }
-        var maxDev: CGFloat = 0
-        for p in points {
-            let t = max(0, min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
-            let proj = CGPoint(x: a.x + t * dx, y: a.y + t * dy)
-            let dist = hypot(p.x - proj.x, p.y - proj.y)
-            if dist > maxDev { maxDev = dist }
+    /// Resamples a polyline to exactly `count` points spaced evenly by arc length. Every metric in
+    /// this file assumes points sample the *shape* uniformly; raw input samples the *pen's motion*,
+    /// which bunches up wherever it slowed or stopped.
+    static func resampled(_ points: [CGPoint], count: Int) -> [CGPoint] {
+        guard points.count >= 2, count >= 2 else { return points }
+        var cumulative: [CGFloat] = [0]
+        cumulative.reserveCapacity(points.count)
+        for i in 1..<points.count {
+            cumulative.append(cumulative[i - 1] + hypot(points[i].x - points[i - 1].x,
+                                                        points[i].y - points[i - 1].y))
         }
-        return maxDev
-    }
+        guard let total = cumulative.last, total > 0 else { return points }
 
-    // MARK: - Rectangle detection
-
-    /// Detects a rectangle by checking that (a) points cluster near the bounding-box edges,
-    /// (b) the box is not too thin (rejecting lines drawn with a tiny wiggle), and (c) there
-    /// is broad coverage on all four sides (rejecting curves like ovals that merely have
-    /// cardinal-axis crossings near the box edges).
-    private static func rectResult(points: [CGPoint]) -> (score: CGFloat, valid: Bool, start: CGPoint, end: CGPoint) {
-        guard let (minX, maxX, minY, maxY) = boundingExtrema(points) else { return (0, false, .zero, .zero) }
-        let width = maxX - minX, height = maxY - minY
-        guard width > 5, height > 5 else { return (0, false, .zero, .zero) }
-
-        // Thin boxes (aspect ratio > 4×) are lines that happened to wiggle slightly —
-        // let the line detector own those. This kills bug 5 ("lines show up as rectangles") at
-        // the source: a line's bounding box is typically 10–20× taller than wide.
-        let aspect = max(width, height) / max(min(width, height), 1)
-        guard aspect <= rectAspectRatioMax else { return (0, false, .zero, .zero) }
-
-        // Edge density: fraction of points within `margin` of ANY edge.
-        let margin = max(width, height) * 0.12
-        let (nearCount, perEdge) = nearEdgeCounts(points: points, minX: minX, maxX: maxX,
-                                                  minY: minY, maxY: maxY, margin: margin)
-        let edgeDensity = CGFloat(nearCount) / CGFloat(points.count)
-
-        // Rectangles should have points on roughly all four sides (else it's probably an oval
-        // whose curve merely crosses near the cardinal axes, or a line whose corner points
-        // happen to count toward every edge). Require at least 15% of the points per edge.
-        let minPerEdge = max(CGFloat(points.count) * 0.15, 2)
-        let fullCoverage = perEdge.allSatisfy { $0 >= minPerEdge }
-        let valid = edgeDensity >= rectEdgeDensityMin && fullCoverage
-
-        return (edgeDensity, valid, CGPoint(x: minX, y: minY), CGPoint(x: maxX, y: maxY))
-    }
-
-    // MARK: - Oval detection
-
-    /// Detects an oval by checking (a) that distances from the centroid are roughly uniform
-    /// (low normalized variance — corners of a rectangle are ~√2× farther from centre than
-    /// edge midpoints, so rectangles have high variance), (b) that the points wrap almost
-    /// all the way around the centroid (so partial arcs that coincidentally have low variance
-    /// get rejected), and (c) some basic size floor.
-    private static func ovalResult(points: [CGPoint]) -> (score: CGFloat, valid: Bool, start: CGPoint, end: CGPoint) {
-        guard points.count >= 8 else { return (0, false, .zero, .zero) }
-        guard let (minX, maxX, minY, maxY) = boundingExtrema(points) else { return (0, false, .zero, .zero) }
-        let width = maxX - minX, height = maxY - minY
-        guard width > 5, height > 5 else { return (0, false, .zero, .zero) }
-
-        let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2  // bounding-box centre, not mean (workhorse for ovals)
-
-        // Angular coverage: sort angles from centre, find the largest gap between consecutive
-        // angles (including wrap), subtract from 2π to get the coverage arc.
-        let angles = points.map { atan2($0.y - cy, $0.x - cx) }.sorted()
-        var maxGap: CGFloat = 0
-        for i in 1..<angles.count {
-            let gap = angles[i] - angles[i - 1]
-            if gap > maxGap { maxGap = gap }
+        var result: [CGPoint] = []
+        result.reserveCapacity(count)
+        var segment = 1
+        for i in 0..<count {
+            let target = total * CGFloat(i) / CGFloat(count - 1)
+            while segment < points.count - 1 && cumulative[segment] < target { segment += 1 }
+            let span = cumulative[segment] - cumulative[segment - 1]
+            let t = span > 0 ? (target - cumulative[segment - 1]) / span : 0
+            let a = points[segment - 1], b = points[segment]
+            result.append(CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
         }
-        let wrapGap = angles[0] + 2 * .pi - angles[angles.count - 1]
-        if wrapGap > maxGap { maxGap = wrapGap }
-        let coverage = 2 * .pi - maxGap
-        guard coverage >= ovalMinAngularCoverage else {
-            return (0, false, .zero, .zero)
-        }
-
-        // Distance variance.
-        let distances = points.map { hypot($0.x - cx, $0.y - cy) }
-        let meanDist = distances.reduce(0, +) / CGFloat(distances.count)
-        guard meanDist > 2 else { return (0, false, .zero, .zero) }
-        let variance = distances.map { ($0 - meanDist) * ($0 - meanDist) }.reduce(0, +) / CGFloat(distances.count)
-        let normalizedVariance = variance / (meanDist * meanDist)
-        let score = max(0, 1 - (normalizedVariance / ovalDistanceVarianceThreshold))
-        let valid = score > 0.5
-
-        return (score, valid, CGPoint(x: minX, y: minY), CGPoint(x: maxX, y: maxY))
-    }
-
-    // MARK: - Path utilities
-
-    /// `(minX, maxX, minY, maxY)` of a point set in a single pass.
-    private static func boundingExtrema(_ points: [CGPoint]) -> (CGFloat, CGFloat, CGFloat, CGFloat)? {
-        guard let p0 = points.first else { return nil }
-        var minX = p0.x, maxX = p0.x, minY = p0.y, maxY = p0.y
-        for p in points.dropFirst() {
-            if p.x < minX { minX = p.x }
-            if p.x > maxX { maxX = p.x }
-            if p.y < minY { minY = p.y }
-            if p.y > maxY { maxY = p.y }
-        }
-        return (minX, maxX, minY, maxY)
-    }
-
-    /// Number of points within `margin` of ANY bounding-box edge, plus per-edge counts
-    /// `(left, right, top, bottom)` which is used by `rectResult`'s "all four sides have points"
-    /// check.
-    private static func nearEdgeCounts(points: [CGPoint], minX: CGFloat, maxX: CGFloat,
-                                       minY: CGFloat, maxY: CGFloat, margin: CGFloat)
-        -> (Int, [CGFloat]) {
-        var near = 0
-        var perEdge = [CGFloat](repeating: 0, count: 4)  // 0=left, 1=right, 2=top, 3=bottom
-        for p in points {
-            let nearLeft = abs(p.x - minX) <= margin
-            let nearRight = abs(p.x - maxX) <= margin
-            let nearTop = abs(p.y - minY) <= margin
-            let nearBottom = abs(p.y - maxY) <= margin
-            if nearLeft || nearRight || nearTop || nearBottom {
-                near += 1
-                if nearLeft { perEdge[0] += 1 }
-                if nearRight { perEdge[1] += 1 }
-                if nearTop { perEdge[2] += 1 }
-                if nearBottom { perEdge[3] += 1 }
-            }
-        }
-        return (near, perEdge)
+        return result
     }
 
     /// Total arc length of a polyline.

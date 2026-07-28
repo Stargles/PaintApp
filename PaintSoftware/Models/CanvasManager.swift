@@ -1869,10 +1869,17 @@ final class CanvasManager: ObservableObject {
         objectWillChange.send()
     }
 
-    /// Lifts the finger but leaves the shape adjustable.
+    /// Lifts the pen but leaves the shape adjustable.
+    ///
+    /// If the snap constraint is engaged at that moment, it stops being a live constraint and
+    /// becomes the geometry itself. The pen coming off the board is what settles the shape, so
+    /// releasing the snapping finger afterwards leaves the circle a circle — rather than springing
+    /// it back to the oval it was originally drawn as, which is what the user saw before. Lifting
+    /// the finger *first*, while still drawing, releases the snap as usual.
     func endInteractiveShape() {
         guard shapeGestureActive, shapeFingerDown else { return }
         shapeFingerDown = false
+        if shapeIsConstrained { shapeGeometry = shapeGeometry.constrained }
         objectWillChange.send()
     }
 

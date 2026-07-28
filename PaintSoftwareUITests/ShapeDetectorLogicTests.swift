@@ -81,9 +81,147 @@ final class ShapeDetectorLogicTests: XCTestCase {
     }
 
     func testRejectsPartialArc() {
-        // A 90° arc has uniform radii but nowhere near the angular coverage an oval needs.
+        // A 90° arc has uniform radii but nowhere near the outline coverage an oval needs.
         let points = circlePoints(center: CGPoint(x: 200, y: 200), radius: 90, coverage: 0.25)
         XCTAssertNotEqual(ShapeDetector.detect(from: points)?.kind, .oval)
+    }
+
+    /// The reported bug: "rectangle detection does not work at all, everything becomes an ellipse."
+    ///
+    /// A square is the worst case for it. Its covariance matrix is isotropic, so the principal axis
+    /// the old detector fitted rect and oval inside was pure noise — often ~45°, where a square sits
+    /// in a diamond-shaped box it fits nothing of, leaving the oval to win by default.
+    func testDetectsSquareAsRectangleNotOval() {
+        for side in [80, 150, 260] as [CGFloat] {
+            let points = rectPoints(CGRect(x: 60, y: 60, width: side, height: side), perSide: 16)
+            XCTAssertEqual(ShapeDetector.detect(from: points)?.kind, .rectangle,
+                           "a \(side)pt square should detect as a rectangle")
+        }
+    }
+
+    /// The same square, drawn at every angle. The rotation sweep has no degenerate orientation, so
+    /// none of these may fall through to the oval.
+    func testDetectsSquareAtEveryAngleAsRectangle() {
+        let center = CGPoint(x: 200, y: 200)
+        for degrees in stride(from: 0, through: 85, by: 5) {
+            let angle = CGFloat(degrees) * .pi / 180
+            let points = rectPoints(CGRect(x: 110, y: 110, width: 180, height: 180), perSide: 16)
+                .map { p -> CGPoint in
+                    let dx = p.x - center.x, dy = p.y - center.y
+                    return CGPoint(x: center.x + dx * cos(angle) - dy * sin(angle),
+                                   y: center.y + dx * sin(angle) + dy * cos(angle))
+                }
+            XCTAssertEqual(ShapeDetector.detect(from: points)?.kind, .rectangle,
+                           "a square drawn at \(degrees)° should detect as a rectangle")
+        }
+    }
+
+    /// Circles must still win against the rectangle fit at every angle — the sweep made the two
+    /// candidates directly comparable, which only helps if it didn't just flip the old bias around.
+    func testDetectsEllipsesAsOvalsNotRectangles() {
+        let center = CGPoint(x: 220, y: 220)
+        for (a, b) in [(90, 90), (120, 70), (150, 40)] as [(CGFloat, CGFloat)] {
+            for degrees in stride(from: 0, through: 75, by: 15) {
+                let angle = CGFloat(degrees) * .pi / 180
+                let points = (0..<56).map { i -> CGPoint in
+                    let t = 2 * CGFloat.pi * CGFloat(i) / 56
+                    let x = a * cos(t), y = b * sin(t)
+                    return CGPoint(x: center.x + x * cos(angle) - y * sin(angle),
+                                   y: center.y + x * sin(angle) + y * cos(angle))
+                }
+                XCTAssertEqual(ShapeDetector.detect(from: points)?.kind, .oval,
+                               "a \(a)×\(b) ellipse at \(degrees)° should detect as an oval")
+            }
+        }
+    }
+
+    /// The hold gesture parks the pen for 0.8s before detection fires, which piles hundreds of
+    /// samples onto one point. Every metric here is computed on arc-length-resampled points for
+    /// exactly this reason — weighted by raw sample count, that pile drags the fit toward wherever
+    /// the stroke happened to end.
+    func testHoldTailOfPiledUpSamplesDoesNotSkewDetection() {
+        let drawn = rectPoints(CGRect(x: 60, y: 80, width: 200, height: 160), perSide: 16)
+        let parked = (0..<300).map { i -> CGPoint in
+            // Sub-pixel tremor around the last point, as a Pencil held still reports.
+            let wobble = CGFloat((i % 7)) * 0.1 - 0.3
+            return CGPoint(x: drawn.last!.x + wobble, y: drawn.last!.y - wobble)
+        }
+        guard let shape = ShapeDetector.detect(from: drawn + parked) else {
+            XCTFail("the held stroke should still detect")
+            return
+        }
+        XCTAssertEqual(shape.kind, .rectangle)
+        XCTAssertEqual(shape.boundingRect.width, 200, accuracy: 2)
+        XCTAssertEqual(shape.boundingRect.height, 160, accuracy: 2)
+    }
+
+    /// A stroke zigzagging between the top and bottom of a box has every point sitting exactly on
+    /// the box outline and covers all of it, so fit error and coverage both say "rectangle". Its
+    /// arc length is what gives it away: tracing an outline costs about the outline's own length.
+    func testRejectsZigzagThatFillsARectangularBox() {
+        let points = (0..<40).map { i in
+            CGPoint(x: CGFloat(i) * 10, y: i % 2 == 0 ? 100 : 160)
+        }
+        XCTAssertNil(ShapeDetector.detect(from: points))
+    }
+
+    func testRejectsRandomScribble() {
+        // A deterministic, non-repeating wander that stays inside one region.
+        let points = (0..<80).map { i -> CGPoint in
+            let t = CGFloat(i)
+            return CGPoint(x: 200 + 90 * sin(t * 1.7), y: 200 + 90 * cos(t * 2.9))
+        }
+        XCTAssertNil(ShapeDetector.detect(from: points))
+    }
+
+    /// A detected line's `startPoint` is the end the stroke started from. The overlay's two endpoint
+    /// handles are identified by that ordering, so getting it backwards means the handle the user
+    /// grabs and the end that moves are on opposite sides of the line.
+    func testDetectedLineKeepsTheDirectionItWasDrawn() {
+        let rightwards = ShapeDetector.detect(from: (0...20).map { CGPoint(x: 100 + CGFloat($0) * 10, y: 140) })
+        XCTAssertEqual(rightwards?.kind, .line)
+        XCTAssertEqual(rightwards?.startPoint.x ?? -1, 100, accuracy: 1)
+        XCTAssertEqual(rightwards?.endPoint.x ?? -1, 300, accuracy: 1)
+
+        let leftwards = ShapeDetector.detect(from: (0...20).map { CGPoint(x: 300 - CGFloat($0) * 10, y: 140) })
+        XCTAssertEqual(leftwards?.kind, .line)
+        XCTAssertEqual(leftwards?.startPoint.x ?? -1, 300, accuracy: 1)
+        XCTAssertEqual(leftwards?.endPoint.x ?? -1, 100, accuracy: 1)
+    }
+
+    /// Elongated rectangles must not be handed to the line detector. The old detector rejected any
+    /// box past 3:1 outright, which is well within what people actually draw.
+    func testDetectsElongatedRectangles() {
+        XCTAssertEqual(ShapeDetector.detect(from: rectPoints(CGRect(x: 20, y: 100, width: 400, height: 90)))?.kind,
+                       .rectangle)
+        XCTAssertEqual(ShapeDetector.detect(from: rectPoints(CGRect(x: 100, y: 20, width: 80, height: 340)))?.kind,
+                       .rectangle)
+    }
+
+    /// A line with real freehand wobble stays a line rather than becoming the thin rectangle its
+    /// bounding box describes.
+    func testWobblyLineStaysALine() {
+        let points = (0...40).map { i -> CGPoint in
+            let t = CGFloat(i)
+            return CGPoint(x: t * 9, y: 200 + 5 * sin(t * 0.8))
+        }
+        XCTAssertEqual(ShapeDetector.detect(from: points)?.kind, .line)
+    }
+
+    // MARK: - Resampling
+
+    func testResamplingSpacesPointsEvenlyAlongThePath() {
+        // Deliberately lopsided input: dense at the start, one long jump at the end.
+        let dense = (0...20).map { CGPoint(x: CGFloat($0), y: 0) }
+        let sparse = [CGPoint(x: 220, y: 0)]
+        let resampled = ShapeDetector.resampled(dense + sparse, count: 24)
+
+        XCTAssertEqual(resampled.count, 24)
+        XCTAssertEqual(resampled.first?.x ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(resampled.last?.x ?? -1, 220, accuracy: 0.001)
+        let gaps = (1..<resampled.count).map { resampled[$0].x - resampled[$0 - 1].x }
+        XCTAssertEqual(gaps.min() ?? 0, gaps.max() ?? 0, accuracy: 0.001,
+                       "resampled points should be evenly spaced regardless of input density")
     }
 
     // MARK: - Outline parameterisation
@@ -204,8 +342,6 @@ final class ShapeDetectorLogicTests: XCTestCase {
         // fall back to an axis-aligned bounding box around the tilted points.
         let angle = 40 * CGFloat.pi / 180
         let center = CGPoint(x: 200, y: 200)
-        // Close to circular (not very eccentric) — the detector's oval-vs-rectangle distance-variance
-        // gate is a separate, pre-existing concern from what's being tested here (rotation recovery).
         let a: CGFloat = 100, b: CGFloat = 88 // semi-major/minor axes
         let points = (0..<64).map { i -> CGPoint in
             let t = 2 * CGFloat.pi * CGFloat(i) / 64
