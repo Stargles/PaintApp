@@ -1934,6 +1934,13 @@ final class CanvasManager: ObservableObject {
         gestureSnapshot = nil
         recordStructureChange(name: name, from: before, to: captureStructure())
     }
+
+    /// Drops a gesture's snapshot without recording anything — for a drag that ended up changing
+    /// nothing, or was cancelled. Leaving the snapshot in place instead would hand it to whichever
+    /// gesture committed next, which would then record an undo step spanning both.
+    func cancelStructureGesture() {
+        gestureSnapshot = nil
+    }
 }
 
 enum Tool: Hashable {
