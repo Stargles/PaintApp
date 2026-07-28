@@ -206,8 +206,18 @@ extension CanvasManager {
         let cel = layers[currentLayerIndex].cels[celIndex]
         let fullImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
-        let path = selection?.path ?? CGPath(rect: canvasRect, transform: nil)
-        let bounds = (selection?.bounds ?? canvasRect).intersection(canvasRect)
+        let path: CGPath
+        let bounds: CGRect
+        if let sel = selection {
+            path = sel.path
+            bounds = sel.bounds.intersection(canvasRect)
+        } else if let contentBounds = PixelOps.opaqueContentBounds(fullImage) {
+            bounds = contentBounds.intersection(canvasRect)
+            path = CGPath(rect: bounds, transform: nil)
+        } else {
+            path = CGPath(rect: canvasRect, transform: nil)
+            bounds = canvasRect
+        }
         guard bounds.width > 0, bounds.height > 0 else { return }
 
         let (rawPiece, remainder) = PixelOps.maskedPiece(image: fullImage, path: path)

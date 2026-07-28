@@ -1109,6 +1109,23 @@ struct CanvasView: UIViewRepresentable {
 
         func updateFloatingOverlay() {
             floatingOverlay?.update(canvasManager.floatingPiece)
+            guard let overlay = floatingOverlay,
+                  let piece = canvasManager.floatingPiece,
+                  piece.kind == .move,
+                  let container = containerView else { return }
+            guard let sourceIdx = canvasManager.layers.firstIndex(where: { $0.id == piece.sourceLayerID }),
+                  let sourceHost = layerHosts[piece.sourceLayerID] else { return }
+            let isTopLayer = sourceIdx == canvasManager.layers.count - 1
+            if !isTopLayer {
+                let aboveIdx = sourceIdx + 1
+                if let aboveHost = layerHosts[canvasManager.layers[aboveIdx].id] {
+                    container.insertSubview(overlay, belowSubview: aboveHost)
+                } else {
+                    container.bringSubviewToFront(overlay)
+                }
+            } else {
+                container.bringSubviewToFront(overlay)
+            }
         }
 
         func updateShapeOverlay() {

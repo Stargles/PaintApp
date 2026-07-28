@@ -52,6 +52,37 @@ enum PixelOps {
         }
     }
 
+    /// Finds the bounding rect (in point space, assuming scale 1) of all non-transparent pixels in
+    /// the image. Returns nil if the image has no visible content.
+    static func opaqueContentBounds(_ image: UIImage) -> CGRect? {
+        guard let cgImage = image.cgImage else { return nil }
+        let width = cgImage.width, height = cgImage.height
+        guard width > 0, height > 0 else { return nil }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let ctx = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
+                                   bytesPerRow: width * 4, space: colorSpace,
+                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var minX = width, minY = height, maxX = 0, maxY = 0
+        var hasContent = false
+        for y in 0..<height {
+            for x in 0..<width {
+                let a = pixels[(y * width + x) * 4 + 3]
+                if a > 0 {
+                    hasContent = true
+                    if x < minX { minX = x }
+                    if x > maxX { maxX = x }
+                    if y < minY { minY = y }
+                    if y > maxY { maxY = y }
+                }
+            }
+        }
+        guard hasContent else { return nil }
+        return CGRect(x: CGFloat(minX), y: CGFloat(minY),
+                       width: CGFloat(maxX - minX + 1), height: CGFloat(maxY - minY + 1))
+    }
+
     /// Splits a canvas-sized image into the pixels inside `path` ("piece") and the same image with
     /// that region cleared to transparent ("remainder"), both still canvas-sized.
     static func maskedPiece(image: UIImage, path: CGPath) -> (piece: UIImage, remainder: UIImage) {

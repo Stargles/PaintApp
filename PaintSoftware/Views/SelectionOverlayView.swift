@@ -16,12 +16,13 @@ final class SelectionOverlayView: UIView {
         didSet { isUserInteractionEnabled = isCapturingGestures }
     }
 
-    /// A solid black "shadow" stroke directly under `antsLayer`'s white dashes: since the dashes only
-    /// cover half the path at any instant, the black line shows through the gaps, giving the classic
-    /// alternating black/white marching-ants look that reads on top of any background color — a plain
-    /// white line (the previous implementation) was invisible against light canvas content.
+    /// A solid blue shadow directly under `antsLayer`'s white dashes: the blue shows through the gaps,
+    /// giving a white & blue dotted line readable against both light and dark canvas content.
     private let antsShadowLayer = CAShapeLayer()
     private let antsLayer = CAShapeLayer()
+    /// Solid blue shadow beneath the live lasso/rectangle preview — same white-on-blue technique
+    /// so the in-progress outline is visible against the white canvas background.
+    private let liveShadowLayer = CAShapeLayer()
     private let liveLayer = CAShapeLayer() // in-progress lasso/rectangle preview, while dragging
     /// Diagonal-stripe fill covering everything *outside* the current selection (even-odd: full view
     /// bounds minus the selection path), matching Procreate's "outside the selection is off-limits"
@@ -45,7 +46,7 @@ final class SelectionOverlayView: UIView {
         layer.addSublayer(hatchLayer)
 
         antsShadowLayer.fillColor = UIColor.clear.cgColor
-        antsShadowLayer.strokeColor = UIColor.black.cgColor
+        antsShadowLayer.strokeColor = UIColor.systemBlue.cgColor
         antsShadowLayer.lineWidth = 2.5
         antsShadowLayer.isHidden = true
         layer.addSublayer(antsShadowLayer)
@@ -56,6 +57,12 @@ final class SelectionOverlayView: UIView {
         antsLayer.lineDashPattern = [6, 4]
         antsLayer.isHidden = true
         layer.addSublayer(antsLayer)
+
+        liveShadowLayer.fillColor = UIColor.clear.cgColor
+        liveShadowLayer.strokeColor = UIColor.systemBlue.cgColor
+        liveShadowLayer.lineWidth = 2.5
+        liveShadowLayer.isHidden = true
+        layer.addSublayer(liveShadowLayer)
 
         liveLayer.fillColor = UIColor.white.withAlphaComponent(0.12).cgColor
         liveLayer.strokeColor = UIColor.white.cgColor
@@ -149,10 +156,11 @@ final class SelectionOverlayView: UIView {
             lassoPoints.append(location)
             let path = CGMutablePath()
             path.addLines(between: lassoPoints)
+            liveShadowLayer.path = path
             liveLayer.path = path
         case .ended:
             lassoPoints.append(location)
-            defer { lassoPoints = []; liveLayer.path = nil }
+            defer { lassoPoints = []; liveShadowLayer.path = nil; liveLayer.path = nil }
             guard lassoPoints.count > 2 else { return }
             let path = CGMutablePath()
             path.addLines(between: lassoPoints)
@@ -160,6 +168,7 @@ final class SelectionOverlayView: UIView {
             onFinishPath?(path)
         default:
             lassoPoints = []
+            liveShadowLayer.path = nil
             liveLayer.path = nil
         }
     }
@@ -171,15 +180,18 @@ final class SelectionOverlayView: UIView {
             rectStart = location
         case .changed:
             guard let start = rectStart else { return }
-            liveLayer.path = CGPath(rect: rect(from: start, to: location), transform: nil)
+            let path = CGPath(rect: rect(from: start, to: location), transform: nil)
+            liveShadowLayer.path = path
+            liveLayer.path = path
         case .ended:
-            defer { rectStart = nil; liveLayer.path = nil }
+            defer { rectStart = nil; liveShadowLayer.path = nil; liveLayer.path = nil }
             guard let start = rectStart else { return }
             let rect = rect(from: start, to: location)
             guard rect.width > 2, rect.height > 2 else { return }
             onFinishPath?(CGPath(rect: rect, transform: nil))
         default:
             rectStart = nil
+            liveShadowLayer.path = nil
             liveLayer.path = nil
         }
     }
