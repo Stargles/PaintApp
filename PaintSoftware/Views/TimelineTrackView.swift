@@ -20,6 +20,8 @@ struct TimelineTrackView: UIViewRepresentable {
     var rowHeight: CGFloat
     var rulerHeight: CGFloat
     var onRequestBlockMenu: (Int, Int) -> Void
+    var onRequestGapMenu: (Int, Int) -> Void
+    var onRequestLoopMenu: (Int) -> Void
 
     func makeUIView(context: Context) -> UIScrollView {
         let scrollView = UIScrollView()
@@ -47,6 +49,8 @@ struct TimelineTrackView: UIViewRepresentable {
         context.coordinator.rowHeight = rowHeight
         context.coordinator.rulerHeight = rulerHeight
         context.coordinator.onRequestBlockMenu = onRequestBlockMenu
+        context.coordinator.onRequestGapMenu = onRequestGapMenu
+        context.coordinator.onRequestLoopMenu = onRequestLoopMenu
         context.coordinator.relayout()
     }
 
@@ -60,6 +64,8 @@ struct TimelineTrackView: UIViewRepresentable {
         var rowHeight: CGFloat = 34
         var rulerHeight: CGFloat = 18
         var onRequestBlockMenu: ((Int, Int) -> Void)?
+        var onRequestGapMenu: ((Int, Int) -> Void)?
+        var onRequestLoopMenu: ((Int) -> Void)?
 
         weak var scrollView: UIScrollView?
         weak var contentView: UIView?
@@ -68,6 +74,11 @@ struct TimelineTrackView: UIViewRepresentable {
         private let zoomRange: ClosedRange<CGFloat> = (30 * 0.35)...(30 * 4.0)
         private(set) var pixelsPerFrame: CGFloat = 30
         private var pinchStartPixelsPerFrame: CGFloat = 30
+        /// The frame under the fingers at pinch-began, and where those fingers sat in the scroll
+        /// view's own bounds — held fixed for the gesture's life so the content under the pinch
+        /// stays put as `pixelsPerFrame` changes, instead of the view always zooming from frame 0.
+        private var pinchAnchorFrame: CGFloat = 0
+        private var pinchAnchorLocationInScrollView: CGFloat = 0
 
         private let rulerView = TimelineRulerView()
         private var rowViews: [TimelineRowView] = []
@@ -80,12 +91,20 @@ struct TimelineTrackView: UIViewRepresentable {
         }
 
         @objc func handlePinch(_ gr: UIPinchGestureRecognizer) {
+            guard let scrollView else { return }
             switch gr.state {
             case .began:
                 pinchStartPixelsPerFrame = pixelsPerFrame
+                let locationInScrollView = gr.location(in: scrollView).x
+                pinchAnchorLocationInScrollView = locationInScrollView
+                pinchAnchorFrame = (scrollView.contentOffset.x + locationInScrollView) / pixelsPerFrame
             case .changed:
                 pixelsPerFrame = min(max(pinchStartPixelsPerFrame * gr.scale, zoomRange.lowerBound), zoomRange.upperBound)
                 relayout()
+                let newContentX = pinchAnchorFrame * pixelsPerFrame
+                let newOffsetX = newContentX - pinchAnchorLocationInScrollView
+                let maxOffsetX = max(0, scrollView.contentSize.width - scrollView.bounds.width)
+                scrollView.contentOffset.x = min(max(newOffsetX, 0), maxOffsetX)
             default:
                 break
             }
@@ -111,12 +130,15 @@ struct TimelineTrackView: UIViewRepresentable {
                 rulerView.isAccessibilityElement = true
                 rulerView.accessibilityIdentifier = "timeline.ruler"
                 rulerView.onScrub = { [weak self] frame in self?.canvasManager.goToFrame(frame) }
+                rulerView.onNumberTap = { [weak self] frame in self?.onRequestLoopMenu?(frame) }
                 contentView.addSubview(rulerView)
                 scrollView.panGestureRecognizer.require(toFail: rulerView.panRecognizer)
             }
             rulerView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: rulerHeight)
             rulerView.sceneFrameCount = sceneFrameCount
             rulerView.pixelsPerFrame = pixelsPerFrame
+            rulerView.currentFrame = canvasManager.currentFrame
+            rulerView.loopRange = (canvasManager.loopStartFrame != nil || canvasManager.loopEndFrame != nil) ? canvasManager.effectiveLoopRange : nil
             rulerView.setNeedsDisplay()
 
             // Split the presented rows into the two kinds of track, each drawn from its own pool.
@@ -218,11 +240,13 @@ struct TimelineTrackView: UIViewRepresentable {
             }
         }
 
-        func createCelInGap(layerIndex: Int, start: Int, length: Int, tappedFrame: Int) {
+        /// Tapping an empty slot no longer creates a cel directly (it used to extend all the way to
+        /// the end of the gap, which was never what a single tap meant) — it opens a small menu
+        /// ("Add Drawing" / "Paste") at the tapped frame instead, same as tapping an existing block
+        /// opens its options menu.
+        func handleTapOnGap(layerIndex: Int, start: Int, length: Int, tappedFrame: Int) {
             let clamped = max(start, min(tappedFrame, start + length - 1))
-            canvasManager.currentLayerIndex = layerIndex
-            canvasManager.addCel(layerIndex: layerIndex, startFrame: clamped, frameCount: max(length - (clamped - start), 1))
-            canvasManager.goToFrame(clamped)
+            onRequestGapMenu?(layerIndex, clamped)
         }
     }
 }
@@ -234,6 +258,15 @@ private final class TimelineRulerView: UIView {
     var sceneFrameCount: Int = 12
     var pixelsPerFrame: CGFloat = 30
     var onScrub: ((Int) -> Void)?
+    /// Fired when a tap (not a scrub drag) lands on the frame number that was *already* the current
+    /// playhead position before this touch began — ToonSquid-style start/end loop menu trigger.
+    var onNumberTap: ((Int) -> Void)?
+    /// The playhead frame as of the last `relayout`, used only to recognize "tapped the already-
+    /// selected frame's number" at touch-down, before this touch's own scrub moves it.
+    var currentFrame: Int = 0
+    /// Non-nil once a loop range has been set via the number-tap menu — drawn as a blue band
+    /// regardless of whether `isLoopEnabled` currently gates playback.
+    var loopRange: ClosedRange<Int>?
 
     let panRecognizer: UILongPressGestureRecognizer = {
         let gr = UILongPressGestureRecognizer()
@@ -241,6 +274,10 @@ private final class TimelineRulerView: UIView {
         gr.numberOfTouchesRequired = 1
         return gr
     }()
+
+    private var touchDownLocation: CGPoint = .zero
+    private var touchMoved = false
+    private var tappedFrameWasCurrent = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -255,15 +292,34 @@ private final class TimelineRulerView: UIView {
 
     @objc private func handleTouch(_ gr: UILongPressGestureRecognizer) {
         switch gr.state {
-        case .began, .changed:
-            let x = gr.location(in: self).x
-            onScrub?(Int(x / pixelsPerFrame))
+        case .began:
+            touchDownLocation = gr.location(in: self)
+            touchMoved = false
+            let frame = Int(touchDownLocation.x / pixelsPerFrame)
+            tappedFrameWasCurrent = (frame == currentFrame)
+            onScrub?(frame)
+        case .changed:
+            let loc = gr.location(in: self)
+            if hypot(loc.x - touchDownLocation.x, loc.y - touchDownLocation.y) > 4 { touchMoved = true }
+            onScrub?(Int(loc.x / pixelsPerFrame))
+        case .ended, .cancelled:
+            if !touchMoved, tappedFrameWasCurrent {
+                onNumberTap?(currentFrame)
+            }
         default:
             break
         }
     }
 
     override func draw(_ rect: CGRect) {
+        if let loopRange {
+            let bandRect = CGRect(x: CGFloat(loopRange.lowerBound) * pixelsPerFrame,
+                                  y: 0,
+                                  width: CGFloat(loopRange.upperBound - loopRange.lowerBound + 1) * pixelsPerFrame,
+                                  height: bounds.height)
+            UIColor.systemBlue.withAlphaComponent(0.25).setFill()
+            UIRectFill(bandRect)
+        }
         let attrs: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: 9),
             .foregroundColor: UIColor.gray
@@ -460,9 +516,12 @@ private final class TimelineRowView: UIView {
         }
     }
 
+    /// Fixed handle width rather than a fraction of the block: at high zoom a wide block would
+    /// otherwise grow an oversized resize hitbox that eats most of the body, making a plain swipe
+    /// (meant to scroll/move) register as an edge resize instead.
     private static func handleWidth(for width: CGFloat) -> CGFloat {
-        let raw = max(10, width * 0.35)
-        return min(raw, max(width / 2 - 2, 4))
+        let preferred: CGFloat = 14
+        return min(preferred, max(width / 2 - 2, 4))
     }
 
     private func zone(at point: CGPoint) -> Zone? {
@@ -586,7 +645,7 @@ private final class TimelineRowView: UIView {
         case .leftHandle(let celIndex, _, _), .rightHandle(let celIndex, _, _), .body(let celIndex, _):
             coordinator.handleTapOnCel(layerIndex: layerIndex, celIndex: celIndex, tappedFrame: tappedFrame)
         case .gap(let start, let length):
-            coordinator.createCelInGap(layerIndex: layerIndex, start: start, length: length, tappedFrame: tappedFrame)
+            coordinator.handleTapOnGap(layerIndex: layerIndex, start: start, length: length, tappedFrame: tappedFrame)
         }
     }
 }

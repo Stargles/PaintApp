@@ -94,13 +94,14 @@ final class CanvasManager: ObservableObject {
 
     /// Applies an overall move/rotate/scale to the active vector layer's content, losslessly (the
     /// geometry is re-rasterized at the new transform, no resolution loss). Driven by the transform
-    /// overlay while `isVectorTransforming` is on.
-    func setVectorTransform(_ transform: LayerTransform, layerIndex: Int) {
-        guard let canvasSize, layers.indices.contains(layerIndex),
+    /// overlay while `isVectorTransforming` is on. `pivot` is the fixed local-space point the overlay's
+    /// box is centered on — the content's own bounding box center, not the canvas center, so Move
+    /// only carries the actual content along rather than treating the whole canvas as the object.
+    func setVectorTransform(_ transform: LayerTransform, layerIndex: Int, pivot: CGPoint) {
+        guard layers.indices.contains(layerIndex),
               let celIdx = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame),
               let vector = layers[layerIndex].cels[celIdx].vector else { return }
-        let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-        vector.setTransform(VectorCanvas.affine(from: transform, canvasCenter: center))
+        vector.setTransform(VectorCanvas.affine(from: transform, pivot: pivot))
         // VectorCanvas is a reference type, so mutating it doesn't trip the @Published layers
         // republish; the coordinator refreshes the canvas view directly (see objectTransformChanged),
         // and this debounced regen updates the layer-panel thumbnail.
@@ -136,6 +137,10 @@ final class CanvasManager: ObservableObject {
     @Published var magicWandTolerance: Double = 0.15
     @Published var selection: Selection?
     @Published var floatingPiece: FloatingPiece?
+    /// Single-slot clipboard for the timeline's Copy/Paste block menu — holds a cel's content (not
+    /// its position), set by `copyCel` and consumed (non-destructively; copy stays available for
+    /// repeated pastes) by `pasteCel`.
+    @Published var copiedCel: CopiedCel?
     /// Whether painting/erasing/filling is allowed to touch pixels outside the active selection.
     /// Defaults to false (deny) — matching Procreate-style selections, where drawing outside the
     /// marching ants is blocked until you deselect. Shown as a toggle in the Select bottom bar; only
@@ -242,6 +247,11 @@ final class CanvasManager: ObservableObject {
     @Published var isOnionSkinEnabled: Bool = true
     @Published var onionSkinOpacity: Double = 0.3
     @Published var isLoopEnabled: Bool = true
+    /// The frame range playback loops within, set via the ruler's frame-number tap menu (ToonSquid-
+    /// style start/end loop markers). Nil means "the whole scene" — highlighted blue across its span
+    /// in the ruler once set, independent of whether `isLoopEnabled` currently gates playback.
+    @Published var loopStartFrame: Int?
+    @Published var loopEndFrame: Int?
 
     @Published var canUndo: Bool = false
     @Published var canRedo: Bool = false
@@ -483,6 +493,43 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// Snapshots a cel's content (not its position) onto a single clipboard slot, for `pasteCel` to
+    /// drop into an empty slot elsewhere. Unlike `duplicateCel` this doesn't touch the timeline at
+    /// all — copy and paste are two separate steps, matching the gap-tap "Add Drawing / Paste" menu.
+    func copyCel(layerIndex: Int, celIndex: Int) {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        let source = layers[layerIndex].cels[celIndex]
+        copiedCel = CopiedCel(raster: source.raster.makeCopy(), fillImage: source.fillImage,
+                              bakedImage: source.bakedImage, vector: source.vector?.makeCopy(),
+                              frameCount: source.frameCount)
+    }
+
+    /// Drops the clipboard's content into an empty slot as a new cel, sized to the copied cel's own
+    /// length (clamped, like `addCel`, to whatever room is actually free before the next cel).
+    @discardableResult
+    func pasteCel(layerIndex: Int, startFrame: Int) -> Bool {
+        guard let copiedCel, layers.indices.contains(layerIndex) else { return false }
+        guard activeCelIndex(inLayer: layerIndex, atFrame: startFrame) == nil else { return false }
+        var length = copiedCel.frameCount
+        let laterStarts = layers[layerIndex].cels.map(\.startFrame).filter { $0 > startFrame }
+        if let nextStart = laterStarts.min() {
+            length = min(length, nextStart - startFrame)
+        }
+        guard length > 0 else { return false }
+        withStructureUndo(name: "Paste Frame") {
+            let newCel = Cel(id: UUID(), startFrame: startFrame, frameCount: length,
+                             raster: copiedCel.raster.makeCopy(), fillImage: copiedCel.fillImage,
+                             bakedImage: copiedCel.bakedImage, vector: copiedCel.vector?.makeCopy())
+            layers[layerIndex].cels.append(newCel)
+            layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
+            sceneFrameCount = max(sceneFrameCount, startFrame + length)
+            if let idx = activeCelIndex(inLayer: layerIndex, atFrame: startFrame) {
+                regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+            }
+        }
+        return true
+    }
+
     /// A layer must always keep at least one cel to stay drawable — every other cel-creating path
     /// (addLayer, addVectorLayer, beginDuplicate, ...) already maintains that invariant, so this is a
     /// no-op on a layer's last remaining cel rather than leaving it with zero (which made
@@ -594,11 +641,38 @@ final class CanvasManager: ObservableObject {
         currentFrame = max(0, min(frame, sceneFrameCount - 1))
     }
 
+    /// `loopStartFrame`/`loopEndFrame` clamped into the current scene length and ordered — the scene
+    /// may have shortened since a range was set, and the two markers can be set in either order.
+    var effectiveLoopRange: ClosedRange<Int> {
+        let maxFrame = max(sceneFrameCount - 1, 0)
+        let start = min(max(min(loopStartFrame ?? 0, loopEndFrame ?? maxFrame), 0), maxFrame)
+        let end = min(max(max(loopStartFrame ?? 0, loopEndFrame ?? maxFrame), start), maxFrame)
+        return start...end
+    }
+
+    func setLoopStart(_ frame: Int) {
+        let end = loopEndFrame ?? max(sceneFrameCount - 1, 0)
+        loopStartFrame = min(frame, end)
+        loopEndFrame = max(frame, end)
+    }
+
+    func setLoopEnd(_ frame: Int) {
+        let start = loopStartFrame ?? 0
+        loopStartFrame = min(start, frame)
+        loopEndFrame = max(start, frame)
+    }
+
+    func clearLoopRange() {
+        loopStartFrame = nil
+        loopEndFrame = nil
+    }
+
     func stepFrame(by delta: Int) {
         var next = currentFrame + delta
         if isLoopEnabled {
-            if next < 0 { next = sceneFrameCount - 1 }
-            if next >= sceneFrameCount { next = 0 }
+            let range = effectiveLoopRange
+            if next < range.lowerBound { next = range.upperBound }
+            if next > range.upperBound { next = range.lowerBound }
         } else {
             next = max(0, min(next, sceneFrameCount - 1))
         }
@@ -2051,6 +2125,16 @@ struct Cel: Identifiable {
     var thumbnail: UIImage? = nil
 
     var endFrame: Int { startFrame + frameCount }
+}
+
+/// A cel's content, detached from any position on the timeline — the timeline's Copy/Paste
+/// clipboard payload. See `CanvasManager.copyCel`/`pasteCel`.
+struct CopiedCel {
+    var raster: RasterLayerTexture
+    var fillImage: UIImage?
+    var bakedImage: UIImage?
+    var vector: VectorCanvas?
+    var frameCount: Int
 }
 
 /// The three layer kinds in the app's roadmap (see BUGS.md/README future-enhancements notes).

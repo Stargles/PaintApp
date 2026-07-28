@@ -142,24 +142,34 @@ final class VectorCanvas {
     }
 
     /// The overall transform expressed as a `LayerTransform` (position/uniform-scale/rotation) about
-    /// the canvas center, for driving the on-canvas transform overlay (which speaks `LayerTransform`,
-    /// same as object layers). Assumes `transform` is a translate·rotate·uniform-scale (which is all
-    /// the overlay can produce), so it decomposes cleanly.
-    func layerTransform(canvasCenter: CGPoint) -> LayerTransform {
+    /// `pivot` — a fixed point in the content's own local (untransformed) space, typically its
+    /// content bounding box's center rather than the canvas center, so the Move tool's on-canvas box
+    /// tracks the actual content instead of the whole canvas. Assumes `transform` is a
+    /// translate·rotate·uniform-scale (which is all the overlay can produce), so it decomposes cleanly.
+    func layerTransform(pivot: CGPoint) -> LayerTransform {
         let scale = hypot(transform.a, transform.b)
-        return LayerTransform(position: canvasCenter.applying(transform),
+        return LayerTransform(position: pivot.applying(transform),
                               scale: scale == 0 ? 1 : scale,
                               rotation: atan2(transform.b, transform.a))
     }
 
-    /// Inverse of `layerTransform(canvasCenter:)`: builds the affine that maps content drawn at the
-    /// canvas origin so its center lands at `t.position`, rotated/scaled about that center.
-    static func affine(from t: LayerTransform, canvasCenter: CGPoint) -> CGAffineTransform {
+    /// Inverse of `layerTransform(pivot:)`: builds the affine that maps content drawn at `pivot` so
+    /// its center lands at `t.position`, rotated/scaled about that center. `pivot` must be the same
+    /// fixed point used to derive `t` via `layerTransform(pivot:)`.
+    static func affine(from t: LayerTransform, pivot: CGPoint) -> CGAffineTransform {
         CGAffineTransform.identity
             .translatedBy(x: t.position.x, y: t.position.y)
             .rotated(by: t.rotation)
             .scaledBy(x: t.scale, y: t.scale)
-            .translatedBy(x: -canvasCenter.x, y: -canvasCenter.y)
+            .translatedBy(x: -pivot.x, y: -pivot.y)
+    }
+
+    /// Bounding box of the layer's own content (strokes/fills/images) in its local, untransformed
+    /// coordinate space — i.e. where it sits before `transform` is applied. Nil if there's no
+    /// visible content. Used to size/pivot the Move tool's on-canvas box to the actual content
+    /// rather than the whole canvas.
+    func localContentBounds() -> CGRect? {
+        PixelOps.opaqueContentBounds(renderLocalContent())
     }
 
     /// Splits/erases vector strokes along an eraser path: any stroke sample within `radius` of any
@@ -228,7 +238,31 @@ final class VectorCanvas {
         format.scale = 1
 
         // 1. Content in local (untransformed) space.
-        let content = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+        let content = renderLocalContent()
+
+        // 2. Apply the overall transform (identity → skip the extra pass).
+        let final: UIImage
+        if transform.isIdentity {
+            final = content
+        } else {
+            final = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+                ctx.cgContext.concatenate(transform)
+                content.draw(in: bounds)
+            }
+        }
+        cachedImage = final
+        return final
+    }
+
+    /// Just step 1 of `render()`: the layer's own content stamped at native resolution, before the
+    /// overall `transform` is applied. Not cached — only called from `render()` (once per
+    /// invalidation) and `localContentBounds()` (once per Move-tool overlay refresh).
+    private func renderLocalContent() -> UIImage {
+        let bounds = CGRect(origin: .zero, size: size)
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             // Fills (flat color regions) — drawn first, underneath images and strokes.
             for fill in fills {
                 guard let path = fill.cgPath else { continue }
@@ -262,19 +296,6 @@ final class VectorCanvas {
                 raster.renderToUIImage().draw(in: bounds)
             }
         }
-
-        // 2. Apply the overall transform (identity → skip the extra pass).
-        let final: UIImage
-        if transform.isIdentity {
-            final = content
-        } else {
-            final = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
-                ctx.cgContext.concatenate(transform)
-                content.draw(in: bounds)
-            }
-        }
-        cachedImage = final
-        return final
     }
 }
 

@@ -199,6 +199,53 @@ final class ShapeDetectorLogicTests: XCTestCase {
 
     // MARK: - Rotation
 
+    func testDetectsRotatedOvalWithMatchingRotation() {
+        // An oval traced at 40° should detect as `.oval` with a rotation near 40°, not silently
+        // fall back to an axis-aligned bounding box around the tilted points.
+        let angle = 40 * CGFloat.pi / 180
+        let center = CGPoint(x: 200, y: 200)
+        let a: CGFloat = 120, b: CGFloat = 60 // semi-major/minor axes
+        let points = (0..<64).map { i -> CGPoint in
+            let t = 2 * CGFloat.pi * CGFloat(i) / 64
+            let localX = a * cos(t), localY = b * sin(t)
+            return CGPoint(x: center.x + localX * cos(angle) - localY * sin(angle),
+                           y: center.y + localX * sin(angle) + localY * cos(angle))
+        }
+        guard let shape = ShapeDetector.detect(from: points) else {
+            XCTFail("expected a detected shape")
+            return
+        }
+        XCTAssertEqual(shape.kind, .oval)
+        // The detector's angle is only defined up to a 180° flip (an ellipse's axis is symmetric),
+        // so accept either the swept angle or its mirror.
+        let normalized = shape.rotation.truncatingRemainder(dividingBy: .pi)
+        let wrapped = normalized < 0 ? normalized + .pi : normalized
+        let target = angle.truncatingRemainder(dividingBy: .pi)
+        let diff = min(abs(wrapped - target), abs(wrapped - target - .pi), abs(wrapped - target + .pi))
+        XCTAssertLessThan(diff, 0.1, "expected rotation near \(angle) but got \(shape.rotation)")
+    }
+
+    func testDetectsRotatedRectangleWithMatchingRotation() {
+        let angle = 30 * CGFloat.pi / 180
+        let center = CGPoint(x: 200, y: 200)
+        let localRect = CGRect(x: -100, y: -60, width: 200, height: 120)
+        let localPoints = rectPoints(localRect)
+        let points = localPoints.map { p -> CGPoint in
+            CGPoint(x: center.x + p.x * cos(angle) - p.y * sin(angle),
+                    y: center.y + p.x * sin(angle) + p.y * cos(angle))
+        }
+        guard let shape = ShapeDetector.detect(from: points) else {
+            XCTFail("expected a detected shape")
+            return
+        }
+        XCTAssertEqual(shape.kind, .rectangle)
+        let normalized = shape.rotation.truncatingRemainder(dividingBy: .pi)
+        let wrapped = normalized < 0 ? normalized + .pi : normalized
+        let target = angle.truncatingRemainder(dividingBy: .pi)
+        let diff = min(abs(wrapped - target), abs(wrapped - target - .pi), abs(wrapped - target + .pi))
+        XCTAssertLessThan(diff, 0.1, "expected rotation near \(angle) but got \(shape.rotation)")
+    }
+
     func testCollapseAppliesRotationSoTheBakedStrokeMatchesThePreview() {
         // The bug this guards: the preview drew `rotatedCGPath` but the committed stroke was built
         // from the unrotated geometry, so rotating a shape and letting go moved it back.
