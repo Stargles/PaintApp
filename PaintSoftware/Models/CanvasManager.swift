@@ -849,7 +849,7 @@ final class CanvasManager: ObservableObject {
     /// fill-reference layer into a reference image once, uploads it to a GPU `MetalFillSession`, samples
     /// the tapped colour, and paints an initial fill. A plain tap is just this immediately followed by
     /// `endInteractiveFill`; a press-and-drag streams `updateInteractiveFill` calls in between. The fill
-    /// preview lives in `fillImage` and is baked into the layer's pixels (`bakedImage`) on commit.
+    /// preview lives in `fillImage` until `commitInteractiveFill` bakes it into the layer proper.
     func beginInteractiveFill(at point: CGPoint) {
         guard !fillFingerDown else { return }
         // A fill is a canvas edit like any other: an earlier adjustable fill (or a pending shape)
@@ -1484,9 +1484,13 @@ final class CanvasManager: ObservableObject {
     }
 
     /// Bakes the current adjustable fill into the layer as a single "Fill" undo step and tears the
-    /// session down. On a **vector layer** the fill becomes a `VectorFillElement` (a closed path on
-    /// the `VectorCanvas`); on a **raster layer** it's flattened directly into `Cel.raster` (see
-    /// `registerUndoableCelChange`'s doc comment) so the eraser can reach it afterwards.
+    /// session down. The layer's kind decides the destination outright, with no fallback between
+    /// them — each tier is invisible to the other's renderer:
+    ///
+    /// - **vector layer** → a `VectorFillElement` (a closed path) on the `VectorCanvas`, which is
+    ///   the only thing such a layer draws.
+    /// - **raster layer** → flattened straight into `Cel.raster`, the tier the eraser stamps, so the
+    ///   fill can be erased afterwards (see `registerUndoableCelChange`'s doc comment).
     func commitInteractiveFill() {
         guard fillGestureActive else { return }
         fillGestureActive = false
