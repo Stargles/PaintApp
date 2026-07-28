@@ -677,6 +677,10 @@ struct CanvasView: UIViewRepresentable {
         shapeOverlay.onCornerDragged = { [weak coordinator = context.coordinator] point, corner in
             guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
             let r = shape.boundingRect
+            // `point` is a raw touch location in canvas (screen) space, but the corner math below is
+            // axis-aligned in the shape's own *local* frame — map it back through the shape's current
+            // rotation first, or a rotated rectangle would resize toward the wrong corner.
+            let localPoint = point.applying(shape.rotationTransform.inverted())
             // The dragged corner is anchored by the fixed opposite corner.
             let fixedX: CGFloat, fixedY: CGFloat
             switch corner {
@@ -685,8 +689,8 @@ struct CanvasView: UIViewRepresentable {
             case .bottomLeft:  fixedX = r.maxX; fixedY = r.minY
             case .bottomRight: fixedX = r.minX; fixedY = r.minY
             }
-            let start = CGPoint(x: min(point.x, fixedX), y: min(point.y, fixedY))
-            let end = CGPoint(x: max(point.x, fixedX), y: max(point.y, fixedY))
+            let start = CGPoint(x: min(localPoint.x, fixedX), y: min(localPoint.y, fixedY))
+            let end = CGPoint(x: max(localPoint.x, fixedX), y: max(localPoint.y, fixedY))
             coordinator.canvasManager.updateInteractiveShape(startPoint: start, endPoint: end)
             coordinator.updateShapeOverlay()
         }
@@ -716,12 +720,14 @@ struct CanvasView: UIViewRepresentable {
                 coordinator.canvasManager.updateInteractiveShape(
                     startPoint: start, endPoint: end, rotation: newRot)
             } else {
+                // Same local-frame mapping as the corner-drag case above.
+                let localPoint = point.applying(shape.rotationTransform.inverted())
                 var minX = r.minX, minY = r.minY, maxX = r.maxX, maxY = r.maxY
                 switch edge {
-                case .top:    minY = point.y
-                case .bottom: maxY = point.y
-                case .left:   minX = point.x
-                case .right:  maxX = point.x
+                case .top:    minY = localPoint.y
+                case .bottom: maxY = localPoint.y
+                case .left:   minX = localPoint.x
+                case .right:  maxX = localPoint.x
                 }
                 let start = CGPoint(x: min(minX, maxX), y: min(minY, maxY))
                 let end = CGPoint(x: max(minX, maxX), y: max(minY, maxY))
@@ -1081,14 +1087,17 @@ struct CanvasView: UIViewRepresentable {
             }
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
 
-            // Vector layer being transformed: box the whole (canvas-sized) content, driven by the
-            // VectorCanvas's current overall transform.
+            // Vector layer being transformed: box just the layer's own content (its bounding box in
+            // local space), driven by the VectorCanvas's current overall transform — not the whole
+            // canvas, so Move only carries the actual drawn content along, matching the raster Move
+            // tool's use of the content's bounding box.
             if layer.kind == .vector, layer.isVisible, canvasManager.isVectorTransforming,
                let canvasSize = canvasManager.canvasSize,
                let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame),
                let vector = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].vector {
-                let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-                overlay.update(transform: vector.layerTransform(canvasCenter: center), imageSize: canvasSize)
+                let localBounds = vector.localContentBounds() ?? CGRect(origin: .zero, size: canvasSize)
+                let pivot = CGPoint(x: localBounds.midX, y: localBounds.midY)
+                overlay.update(transform: vector.layerTransform(pivot: pivot), imageSize: localBounds.size)
                 container.bringSubviewToFront(overlay)
                 return
             }
@@ -1099,8 +1108,16 @@ struct CanvasView: UIViewRepresentable {
         func objectTransformChanged(_ transform: LayerTransform) {
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
             let index = canvasManager.currentLayerIndex
-            guard canvasManager.isVectorTransforming, canvasManager.layers[index].kind == .vector else { return }
-            canvasManager.setVectorTransform(transform, layerIndex: index)
+            guard canvasManager.isVectorTransforming, canvasManager.layers[index].kind == .vector,
+                  let canvasSize = canvasManager.canvasSize,
+                  let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame),
+                  let vector = canvasManager.layers[index].cels[celIdx].vector else { return }
+            // Same pivot `updateTransformOverlay` handed the overlay: the content's own local bounding
+            // box center, fixed for the gesture since the raw (untransformed) geometry doesn't change
+            // while it's only being moved/scaled/rotated.
+            let localBounds = vector.localContentBounds() ?? CGRect(origin: .zero, size: canvasSize)
+            let pivot = CGPoint(x: localBounds.midX, y: localBounds.midY)
+            canvasManager.setVectorTransform(transform, layerIndex: index, pivot: pivot)
             // VectorCanvas is a reference type mutated in place, so refresh its host directly
             // (the @Published layers array didn't change identity).
             let layerID = canvasManager.layers[index].id
@@ -1655,7 +1672,16 @@ struct CanvasView: UIViewRepresentable {
 
         @objc func handleTwoFingerHold(_ recognizer: UILongPressGestureRecognizer) {
             guard canvasManager.shapeGestureActive else { return }
-            setShapeConstraint(recognizer.state == .began)
+            // A `UILongPressGestureRecognizer` re-invokes its action on every `.changed` event too
+            // (each tiny finger tremor while held), not just `.began` — gating on `== .began` alone
+            // engaged the constraint for exactly one event and then immediately released it on the
+            // very next `.changed`, so held two fingers never kept the shape snapped.
+            switch recognizer.state {
+            case .began, .changed:
+                setShapeConstraint(true)
+            default:
+                setShapeConstraint(false)
+            }
         }
 
         /// Engages or releases the two-finger snap constraint on the pending shape, keeping the

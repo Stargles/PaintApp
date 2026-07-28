@@ -86,6 +86,10 @@ final class ShapeOverlayView: UIView {
     private func setup() {
         isHidden = true
         isUserInteractionEnabled = false
+        // Off by default on UIView: without this, a second finger touching down while the first is
+        // already tracked (adjusting a handle) never reaches `touchesBegan` at all, so the two-finger
+        // "hold to snap into a circle/square" constraint could never engage mid-adjustment.
+        isMultipleTouchEnabled = true
 
         previewView.contentMode = .scaleToFill
         previewView.isUserInteractionEnabled = false
@@ -161,25 +165,32 @@ final class ShapeOverlayView: UIView {
 
     /// The handles a shape kind gets, and where they sit for the given geometry. The single source
     /// of truth for both `rebuildHandles` and `repositionHandles`, so the two can't drift apart.
+    /// Every position is expressed in the shape's own unrotated frame and then carried through
+    /// `shape.rotationTransform`, same as `shapeLayer.path` uses `rotatedCGPath` — otherwise the
+    /// handles stay glued to the axis-aligned layout even as the outline itself turns.
     private func handleLayout(for shape: ShapeGeometry) -> [(kind: HandleKind, position: CGPoint, isRotation: Bool)] {
         let r = shape.boundingRect
-        let rotationPoint = CGPoint(x: r.midX, y: r.minY - Self.rotationHandleOffset)
+        let rotationPointLocal = CGPoint(x: r.midX, y: r.minY - Self.rotationHandleOffset)
+        let t = shape.rotationTransform
+        let unrotated: [(HandleKind, CGPoint, Bool)]
         switch shape.kind {
         case .line:
+            // Lines carry their placement directly in start/end, with no separate rotation to apply.
             return [(.start, shape.startPoint, false), (.end, shape.endPoint, false)]
         case .rectangle:
-            return [(.cornerTL, CGPoint(x: r.minX, y: r.minY), false),
-                    (.cornerTR, CGPoint(x: r.maxX, y: r.minY), false),
-                    (.cornerBL, CGPoint(x: r.minX, y: r.maxY), false),
-                    (.cornerBR, CGPoint(x: r.maxX, y: r.maxY), false),
-                    (.rotation, rotationPoint, true)]
+            unrotated = [(.cornerTL, CGPoint(x: r.minX, y: r.minY), false),
+                        (.cornerTR, CGPoint(x: r.maxX, y: r.minY), false),
+                        (.cornerBL, CGPoint(x: r.minX, y: r.maxY), false),
+                        (.cornerBR, CGPoint(x: r.maxX, y: r.maxY), false),
+                        (.rotation, rotationPointLocal, true)]
         case .oval:
-            return [(.axisTop, CGPoint(x: r.midX, y: r.minY), false),
-                    (.axisBottom, CGPoint(x: r.midX, y: r.maxY), false),
-                    (.axisLeft, CGPoint(x: r.minX, y: r.midY), false),
-                    (.axisRight, CGPoint(x: r.maxX, y: r.midY), false),
-                    (.rotation, rotationPoint, true)]
+            unrotated = [(.axisTop, CGPoint(x: r.midX, y: r.minY), false),
+                        (.axisBottom, CGPoint(x: r.midX, y: r.maxY), false),
+                        (.axisLeft, CGPoint(x: r.minX, y: r.midY), false),
+                        (.axisRight, CGPoint(x: r.maxX, y: r.midY), false),
+                        (.rotation, rotationPointLocal, true)]
         }
+        return unrotated.map { ($0.0, $0.1.applying(t), $0.2) }
     }
 
     private func rebuildHandles(for shape: ShapeGeometry) {

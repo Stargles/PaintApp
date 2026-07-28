@@ -37,6 +37,17 @@ struct AnimationTimeline: View {
     @State private var menuLayerIndex: Int?
     @State private var menuCelIndex: Int?
 
+    // Tapping an empty slot opens an "Add Drawing" / "Paste" menu instead of directly creating a
+    // cel that extends to the end of the gap. Set by TimelineTrackView via onRequestGapMenu.
+    @State private var showGapMenu = false
+    @State private var gapLayerIndex: Int?
+    @State private var gapFrame: Int?
+
+    // Tapping the already-selected frame's number on the ruler opens the start/end loop menu.
+    // Set by TimelineTrackView via onRequestLoopMenu.
+    @State private var showLoopMenu = false
+    @State private var loopMenuFrame: Int?
+
     // Press-and-hold reorder state for the pinned name column.
     @State private var draggingRowID: UUID?
     @State private var dragOffsetRows: Int = 0
@@ -66,6 +77,15 @@ struct AnimationTimeline: View {
                                 menuLayerIndex = layerIndex
                                 menuCelIndex = celIndex
                                 showBlockMenu = true
+                            },
+                            onRequestGapMenu: { layerIndex, frame in
+                                gapLayerIndex = layerIndex
+                                gapFrame = frame
+                                showGapMenu = true
+                            },
+                            onRequestLoopMenu: { frame in
+                                loopMenuFrame = frame
+                                showLoopMenu = true
                             }
                         )
                     }
@@ -79,12 +99,39 @@ struct AnimationTimeline: View {
         .onDisappear { playbackTimer?.invalidate() }
         .confirmationDialog("Block Options", isPresented: $showBlockMenu, titleVisibility: .hidden) {
             if let layerIndex = menuLayerIndex, let celIndex = menuCelIndex {
-                Button("Copy") { canvasManager.duplicateCel(layerIndex: layerIndex, celIndex: celIndex) }
+                // Copy only snapshots the block's content onto the clipboard — it doesn't touch the
+                // timeline. Pasting it somewhere else happens from the target empty slot's own menu.
+                Button("Copy") { canvasManager.copyCel(layerIndex: layerIndex, celIndex: celIndex) }
                 Button("Select Multiple") { }.disabled(true)
                 Button("Extend to End") { canvasManager.extendCelToEnd(layerIndex: layerIndex, celIndex: celIndex) }
                 Button("Clear") { canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex) }
                 Button("Delete", role: .destructive) { canvasManager.deleteCel(layerIndex: layerIndex, celIndex: celIndex) }
                     .disabled(canvasManager.layers[layerIndex].cels.count <= 1)
+            }
+        }
+        .confirmationDialog("Empty Frame", isPresented: $showGapMenu, titleVisibility: .hidden) {
+            if let layerIndex = gapLayerIndex, let frame = gapFrame {
+                Button("Add Drawing") {
+                    canvasManager.currentLayerIndex = layerIndex
+                    canvasManager.addCel(layerIndex: layerIndex, startFrame: frame, frameCount: 1)
+                    canvasManager.goToFrame(frame)
+                }
+                if canvasManager.copiedCel != nil {
+                    Button("Paste") {
+                        canvasManager.currentLayerIndex = layerIndex
+                        canvasManager.pasteCel(layerIndex: layerIndex, startFrame: frame)
+                        canvasManager.goToFrame(frame)
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Loop Range", isPresented: $showLoopMenu, titleVisibility: .hidden) {
+            if let frame = loopMenuFrame {
+                Button("Set Loop Start") { canvasManager.setLoopStart(frame) }
+                Button("Set Loop End") { canvasManager.setLoopEnd(frame) }
+                if canvasManager.loopStartFrame != nil || canvasManager.loopEndFrame != nil {
+                    Button("Clear Loop Range", role: .destructive) { canvasManager.clearLoopRange() }
+                }
             }
         }
     }
@@ -113,7 +160,11 @@ struct AnimationTimeline: View {
     /// bar, so hiding it is the bottom of the same motion rather than a separate mode. The chevron
     /// buttons jump to the same two ends, which is what makes them feel like part of this.
     private var resizeGesture: some Gesture {
-        DragGesture(minimumDistance: 6)
+        // `.global` coordinate space, not the default `.local`: the drag handle's own view moves
+        // upward as the panel grows, so measuring translation in its local frame creates a feedback
+        // loop where the handle keeps "running away" from the finger — global coordinates are fixed
+        // to the screen and don't have that problem.
+        DragGesture(minimumDistance: 6, coordinateSpace: .global)
             .onChanged { value in
                 let proposed = resizeStartHeight ?? timelineHeight
                 if resizeStartHeight == nil { resizeStartHeight = timelineHeight }
@@ -134,8 +185,10 @@ struct AnimationTimeline: View {
         min(max(proposed, collapsedHeight), maxTimelineHeight)
     }
 
+    /// Leaves just enough room for the top toolbar to stay visible above the panel; otherwise the
+    /// timeline is free to grow across essentially the whole available height, not just half of it.
     private var maxTimelineHeight: CGFloat {
-        max(availableHeight * 0.55, minExpandedHeight)
+        max(availableHeight - 64, minExpandedHeight)
     }
 
     /// The height the timeline expands to when the chevron is used: enough for every row, capped.

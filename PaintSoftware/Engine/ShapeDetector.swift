@@ -48,7 +48,9 @@ enum ShapeDetector {
 
     /// Analyses the given samples and returns the most likely shape, or `nil` if nothing is
     /// confidently detected. The result's anchors are the two defining points of the detected
-    /// shape (line endpoints, rect opposing corners, oval bounding-box corners), unrotated.
+    /// shape (line endpoints, rect opposing corners, oval bounding-box corners), in the shape's own
+    /// unrotated frame — paired with whatever `rotation` was detected for rect/oval candidates, so a
+    /// shape drawn at an angle detects as a rotated rect/oval instead of always axis-aligned.
     static func detect(from samples: [VectorSample]) -> ShapeGeometry? {
         guard samples.count >= 3 else { return nil }
 
@@ -61,21 +63,60 @@ enum ShapeDetector {
 
         let (lineScore, lineValid) = lineScore(points: points, totalLength: totalLength,
                                               start: lineStart, end: lineEnd)
-        let (rectScore, rectValid, rectStart, rectEnd) = rectResult(points: points)
-        let (ovalScore, ovalValid, ovalStart, ovalEnd) = ovalResult(points: points)
+
+        // Rectangles/ovals aren't always axis-aligned: estimate the point cloud's own principal axis
+        // first (the direction its spread is greatest/least along), and score both candidates against
+        // their bounding box in *that* rotated frame — so e.g. an oval traced at 45° is recognised as
+        // a 45°-rotated oval instead of forcing an axis-aligned bounding box around it.
+        let pivot = centroid(points)
+        let rotation = estimateRotation(points: points, about: pivot)
+        let localPoints = points.map { rotated($0, about: pivot, by: -rotation) }
+
+        let (rectScore, rectValid, rectStart, rectEnd) = rectResult(points: localPoints)
+        let (ovalScore, ovalValid, ovalStart, ovalEnd) = ovalResult(points: localPoints)
 
         // Build a candidate table with validity flags so we can skip invalid candidates rather
         // than letting a high-but-invalidated score win.
-        let candidates: [(ShapeGeometry.Kind, CGFloat, CGPoint, CGPoint, Bool)] = [
-            (.line, lineScore, lineStart, lineEnd, lineValid),
-            (.rectangle, rectScore, rectStart, rectEnd, rectValid),
-            (.oval, ovalScore, ovalStart, ovalEnd, ovalValid),
+        let candidates: [(ShapeGeometry.Kind, CGFloat, CGPoint, CGPoint, CGFloat, Bool)] = [
+            (.line, lineScore, lineStart, lineEnd, 0, lineValid),
+            (.rectangle, rectScore, rectStart, rectEnd, rotation, rectValid),
+            (.oval, ovalScore, ovalStart, ovalEnd, rotation, ovalValid),
         ]
 
         // Pick the highest-scoring valid candidate above the 0.5 confidence floor.
-        let validCandidates = candidates.filter { $0.4 }
+        let validCandidates = candidates.filter { $0.5 }
         guard let best = validCandidates.max(by: { $0.1 < $1.1 }), best.1 > 0.5 else { return nil }
-        return ShapeGeometry(kind: best.0, startPoint: best.2, endPoint: best.3)
+        return ShapeGeometry(kind: best.0, startPoint: best.2, endPoint: best.3, rotation: best.4)
+    }
+
+    /// Mean of a point set.
+    private static func centroid(_ points: [CGPoint]) -> CGPoint {
+        guard !points.isEmpty else { return .zero }
+        let sum = points.reduce(CGPoint.zero) { CGPoint(x: $0.x + $1.x, y: $0.y + $1.y) }
+        return CGPoint(x: sum.x / CGFloat(points.count), y: sum.y / CGFloat(points.count))
+    }
+
+    private static func rotated(_ point: CGPoint, about pivot: CGPoint, by angle: CGFloat) -> CGPoint {
+        guard angle != 0 else { return point }
+        let dx = point.x - pivot.x, dy = point.y - pivot.y
+        let c = cos(angle), s = sin(angle)
+        return CGPoint(x: pivot.x + dx * c - dy * s, y: pivot.y + dx * s + dy * c)
+    }
+
+    /// The point cloud's principal-axis angle about `pivot`, via the closed-form dominant eigenvector
+    /// of its 2×2 covariance matrix. An ellipse/rectangle drawn at angle θ has its points' variance
+    /// maximised along θ, which this recovers directly without an iterative fit. Eigenvectors of a
+    /// symmetric matrix are only defined up to a 180° flip, which is fine here — a rect/oval's
+    /// bounding box looks identical rotated by another 180°, so the ambiguity is invisible.
+    private static func estimateRotation(points: [CGPoint], about pivot: CGPoint) -> CGFloat {
+        guard points.count >= 2 else { return 0 }
+        var sxx: CGFloat = 0, syy: CGFloat = 0, sxy: CGFloat = 0
+        for p in points {
+            let dx = p.x - pivot.x, dy = p.y - pivot.y
+            sxx += dx * dx; syy += dy * dy; sxy += dx * dy
+        }
+        guard sxx != syy || sxy != 0 else { return 0 }
+        return 0.5 * atan2(2 * sxy, sxx - syy)
     }
 
     // MARK: - Line detection
