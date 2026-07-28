@@ -1582,6 +1582,10 @@ final class CanvasManager: ObservableObject {
     private var shapeGestureColor: CodableColor = .init(red: 0, green: 0, blue: 0, alpha: 1)
     private var shapeGestureStrokeWidth: CGFloat = 5
     private var shapeGestureOpacity: Double = 1.0
+    /// The original stroke samples captured before shape detection fired, saved so they can be
+    /// collapsed onto the final shape geometry at commit time (preserving brush dynamics).
+    private var shapeGestureSamples: [VectorSample] = []
+    private var shapeGestureBrush: Brush = BrushLibrary.softRound
 
     /// The current shape being drawn/edited, exposed as a read-only snapshot for the overlay view.
     var activeShape: VectorShapeElement? {
@@ -1593,7 +1597,8 @@ final class CanvasManager: ObservableObject {
     }
 
     /// Begins an interactive shape. Called when the hold timer fires and ShapeDetector confirms a shape.
-    func beginInteractiveShape(kind: VectorShapeElement.ShapeKind, startPoint: CGPoint, endPoint: CGPoint) {
+    func beginInteractiveShape(kind: VectorShapeElement.ShapeKind, startPoint: CGPoint, endPoint: CGPoint,
+                                samples: [VectorSample] = []) {
         guard !shapeFingerDown else { return }
         if shapeGestureActive { commitInteractiveShape() }
         guard layers.indices.contains(currentLayerIndex) else { return }
@@ -1609,13 +1614,18 @@ final class CanvasManager: ObservableObject {
         shapeIsConstrained = false
         shapeGestureLayerID = layers[layerIndex].id
         shapeGestureCelID = layers[layerIndex].cels[celIndex].id
+        shapeGestureSamples = samples
+        shapeGestureBrush = isEraser ? selectedEraserBrush : selectedBrush
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
         shapeGestureColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
-        shapeGestureStrokeWidth = brushSize
-        shapeGestureOpacity = brushOpacity
+        shapeGestureStrokeWidth = isEraser ? eraserSize : brushSize
+        shapeGestureOpacity = isEraser ? eraserOpacity : brushOpacity
         refreshUndoRedoState()
     }
+
+    /// Returns the eraser tool's state, needed by `beginInteractiveShape` to snapshot brush config.
+    private var isEraser: Bool { selectedTool == .eraser }
 
     /// Updates the shape's geometry as the user drags a handle or continues the hold stroke.
     /// `startPoint`/`endPoint` are optional so partial updates are possible (e.g. edge-handle
@@ -1638,12 +1648,16 @@ final class CanvasManager: ObservableObject {
         objectWillChange.send()
     }
 
-    /// Bakes the current shape into the layer.
+    /// Bakes the current shape into the layer. On a vector layer the original stroke samples are
+    /// collapsed onto the shape outline to produce a `VectorStroke` (erasable like any other stroke);
+    /// on a raster layer the collapsed stroke is rasterized into `bakedImage`.
     func commitInteractiveShape() {
         guard shapeGestureActive else { return }
         shapeGestureActive = false
         shapeFingerDown = false
-        defer { shapeGestureLayerID = nil; shapeGestureCelID = nil; refreshUndoRedoState() }
+        let savedSamples = shapeGestureSamples
+        let savedBrush = shapeGestureBrush
+        defer { shapeGestureLayerID = nil; shapeGestureCelID = nil; shapeGestureSamples = []; refreshUndoRedoState() }
         guard let layerID = shapeGestureLayerID, let celID = shapeGestureCelID,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
@@ -1654,41 +1668,89 @@ final class CanvasManager: ObservableObject {
                                        startPoint: shapeStartPoint, endPoint: shapeEndPoint,
                                        rotation: shapeRotation)
 
-        if layers[layerIndex].kind == .vector, let vectorCanvas = cel.vector {
-            let shapesBefore = vectorCanvas.shapes
-            vectorCanvas.addShape(shape)
-            registerVectorShapeUndo(vectorCanvas: vectorCanvas, oldShapes: shapesBefore, newShapes: vectorCanvas.shapes,
-                                    layerID: layerID, celID: celID, actionName: "Shape")
+        // Collapse the original stroke samples onto the shape outline, preserving pressure
+        // so the resulting stroke has the same brush feel as the freehand input.
+        let collapsed = ShapeDetector.collapseSamplesToShape(samples: savedSamples, shape: shape)
+
+        if layers[layerIndex].kind == .vector, let vectorCanvas = cel.vector, !collapsed.isEmpty {
+            let stroke = VectorStroke(brush: savedBrush, color: shapeGestureColor,
+                                      size: shapeGestureStrokeWidth, opacity: shapeGestureOpacity,
+                                      samples: collapsed)
+            let strokesBefore = vectorCanvas.strokes
+            vectorCanvas.addStroke(stroke)
+            // Reuse the same undo/redo pattern as normal vector strokes (swap the whole strokes array).
+            registerVectorStrokeUndo(vectorCanvas: vectorCanvas, oldStrokes: strokesBefore,
+                                     newStrokes: vectorCanvas.strokes, layerID: layerID, celID: celID,
+                                     actionName: "Shape")
+        } else if !collapsed.isEmpty {
+            // Raster layer: stamp the collapsed stroke directly into the cel's raster so the
+            // eraser can erase it normally (eraser stamps into raster with .destinationOut).
+            let cast = collapsed.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+            let rasterBefore = cel.raster.renderToUIImage()
+            let strokeCountBefore = cel.raster.strokeCount
+            // BrushStamper.stampStroke calls beginStroke/endStroke internally, so we just invoke it.
+            BrushStamper.stampStroke(into: cel.raster, samples: cast, brush: savedBrush,
+                                     color: shape.uiColor, brushSize: shapeGestureStrokeWidth,
+                                     brushOpacity: shapeGestureOpacity)
+            let rasterAfter = cel.raster.renderToUIImage()
+            let strokeCountAfter = cel.raster.strokeCount
+            let cost = Self.approximateImageCost(rasterBefore) + Self.approximateImageCost(rasterAfter)
+            let capturedRaster = cel.raster // capture by reference for undo closure
+            recordUndo(name: "Shape", cost: cost, undo: { [weak self] in
+                capturedRaster.reset(to: rasterBefore, strokeCount: strokeCountBefore)
+                self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                self?.objectWillChange.send()
+            }, redo: { [weak self] in
+                capturedRaster.reset(to: rasterAfter, strokeCount: strokeCountAfter)
+                self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                self?.objectWillChange.send()
+            })
         } else {
-            guard let shapeImage = Self.renderShapeToImage(shape, canvasSize: canvasSize ?? .zero) else { return }
-            let newBaked = PixelOps.compositeOver(base: cel.bakedImage, overlay: shapeImage)
-            registerUndoableCelChange(layerID: layerID, celID: celID,
-                                      oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: nil,
-                                      newRaster: cel.raster, newBaked: newBaked, newFill: nil,
-                                      actionName: "Shape")
+            // Fallback: no original stroke samples — generate evenly-spaced samples along the
+            // shape outline and stamp those, preserving the brush feel as best we can.
+            let generated = ShapeDetector.generateSamplesAlongShape(shape, spacing: shapeGestureStrokeWidth * savedBrush.spacingFraction)
+            let cast = generated.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+            let rasterBefore = cel.raster.renderToUIImage()
+            let strokeCountBefore = cel.raster.strokeCount
+            BrushStamper.stampStroke(into: cel.raster, samples: cast, brush: savedBrush,
+                                     color: shape.uiColor, brushSize: shapeGestureStrokeWidth,
+                                     brushOpacity: shapeGestureOpacity)
+            let rasterAfter = cel.raster.renderToUIImage()
+            let strokeCountAfter = cel.raster.strokeCount
+            let cost = Self.approximateImageCost(rasterBefore) + Self.approximateImageCost(rasterAfter)
+            let capturedRaster = cel.raster
+            recordUndo(name: "Shape", cost: cost, undo: { [weak self] in
+                capturedRaster.reset(to: rasterBefore, strokeCount: strokeCountBefore)
+                self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                self?.objectWillChange.send()
+            }, redo: { [weak self] in
+                capturedRaster.reset(to: rasterAfter, strokeCount: strokeCountAfter)
+                self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                self?.objectWillChange.send()
+            })
         }
         objectWillChange.send()
     }
 
-    /// Registers one undo step that swaps a vector layer's `.shapes` between `oldShapes`/`newShapes`.
-    /// Exact counterpart of `registerVectorFillUndo` — `UndoHistory` moves the same action between its
-    /// undo/redo stacks, so unlike the old `UndoManager` idiom this needs no recursive re-registration.
-    func registerVectorShapeUndo(vectorCanvas: VectorCanvas,
-                                 oldShapes: [VectorShapeElement], newShapes: [VectorShapeElement],
-                                 layerID: UUID, celID: UUID, actionName: String) {
-        let cost = (oldShapes.count + newShapes.count) * 512
+    /// Registers one undo step that swaps a vector layer's `.strokes` between `oldStrokes`/`newStrokes`.
+    private func registerVectorStrokeUndo(vectorCanvas: VectorCanvas,
+                                           oldStrokes: [VectorStroke], newStrokes: [VectorStroke],
+                                           layerID: UUID, celID: UUID, actionName: String) {
+        let cost = (oldStrokes.count + newStrokes.count) * 2048
         recordUndo(name: actionName, cost: cost, undo: { [weak self] in
-            vectorCanvas.shapes = oldShapes
+            vectorCanvas.strokes = oldStrokes
             vectorCanvas.bumpVersion()
             self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
-            vectorCanvas.shapes = newShapes
+            vectorCanvas.strokes = newStrokes
             vectorCanvas.bumpVersion()
             self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
         })
     }
 
-    static func renderShapeToImage(_ shape: VectorShapeElement, canvasSize: CGSize) -> UIImage? {
+    /// Renders a `VectorShapeElement` as a simple stroked image (no brush dynamics — the fallback
+    /// for when no original stroke samples were captured to collapse onto the shape).
+    private static func renderShapeAsImage(_ shape: VectorShapeElement, canvasSize: CGSize) -> UIImage? {
         guard canvasSize.width > 0, canvasSize.height > 0 else { return nil }
         let format = UIGraphicsImageRendererFormat()
         format.opaque = false
@@ -1711,6 +1773,7 @@ final class CanvasManager: ObservableObject {
         shapeFingerDown = false
         shapeGestureLayerID = nil
         shapeGestureCelID = nil
+        shapeGestureSamples = []
         objectWillChange.send()
         refreshUndoRedoState()
     }
@@ -1719,19 +1782,6 @@ final class CanvasManager: ObservableObject {
     func cancelInteractiveShapeDrag() {
         guard shapeFingerDown else { return }
         cancelInteractiveShape()
-    }
-
-    /// Hit-tests `point` (canvas coords) against any committed shapes on the active layer.
-    func hitTestShape(at point: CGPoint) -> VectorShapeElement? {
-        guard layers.indices.contains(currentLayerIndex),
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return nil }
-        let cel = layers[currentLayerIndex].cels[celIndex]
-        if let vector = cel.vector {
-            for shape in vector.shapes.reversed() where shape.hitTest(point) {
-                return shape
-            }
-        }
-        return nil
     }
 
     // MARK: - Undo / redo

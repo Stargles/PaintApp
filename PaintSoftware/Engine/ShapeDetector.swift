@@ -246,6 +246,162 @@ enum ShapeDetector {
         return length
     }
 
+    // MARK: - Stroke collapsing (project original samples onto the detected shape outline)
+
+    /// Projects each sample in `samples` onto the nearest point of `shape`'s outline, preserving
+    /// pressure/timing so the resulting stroke has the same brush feel but follows the shape
+    /// geometry exactly. Samples are re-ordered by position along the shape path (line: t along
+    /// segment; rect: clockwise distance along perimeter; oval: angle from center) so the stroke
+    /// traces the shape in a single clean pass.
+    static func collapseSamplesToShape(samples: [VectorSample], shape: VectorShapeElement) -> [VectorSample] {
+        guard !samples.isEmpty else { return [] }
+
+        switch shape.kind {
+        case .line:
+            return collapseToLine(samples: samples, shape: shape)
+        case .rectangle:
+            return collapseToRectangle(samples: samples, shape: shape)
+        case .oval:
+            return collapseToOval(samples: samples, shape: shape)
+        }
+    }
+
+    // ── Line ──────────────────────────────────────────────────────────────────
+
+    private static func collapseToLine(samples: [VectorSample], shape: VectorShapeElement) -> [VectorSample] {
+        let a = shape.startPoint, b = shape.endPoint
+        let dx = b.x - a.x, dy = b.y - a.y
+        let len2 = dx * dx + dy * dy
+        guard len2 > 0 else { return samples }
+
+        let projected: [(t: CGFloat, sample: VectorSample)] = samples.map { s in
+            let t = max(0, min(1, ((s.x - a.x) * dx + (s.y - a.y) * dy) / len2))
+            let px = a.x + t * dx, py = a.y + t * dy
+            return (t, VectorSample(x: px, y: py, pressure: s.pressure))
+        }
+        return projected.sorted { $0.t < $1.t }.map { $0.sample }
+    }
+
+    // ── Rectangle ─────────────────────────────────────────────────────────────
+
+    private static func collapseToRectangle(samples: [VectorSample], shape: VectorShapeElement) -> [VectorSample] {
+        let r = shape.boundingRect
+        let perimeter = 2 * (r.width + r.height)
+        guard perimeter > 0 else { return samples }
+
+        let projected: [(d: CGFloat, sample: VectorSample)] = samples.map { s in
+            let (px, py, d) = nearestOnRectPerimeter(point: CGPoint(x: s.x, y: s.y), rect: r)
+            return (d, VectorSample(x: px, y: py, pressure: s.pressure))
+        }
+        return projected.sorted { $0.d < $1.d }.map { $0.sample }
+    }
+
+    /// Returns the nearest point on the rectangle perimeter and its clockwise
+    /// distance from the top-left corner (0…perimeter).
+    private static func nearestOnRectPerimeter(point: CGPoint, rect: CGRect) -> (CGFloat, CGFloat, CGFloat) {
+        let cx = min(max(point.x, rect.minX), rect.maxX)
+        let cy = min(max(point.y, rect.minY), rect.maxY)
+
+        // Clamp to nearest edge if the point projects inside the rect.
+        let dxLeft = abs(point.x - rect.minX), dxRight = abs(point.x - rect.maxX)
+        let dyTop = abs(point.y - rect.minY), dyBottom = abs(point.y - rect.maxY)
+        let minH = min(dxLeft, dxRight), minV = min(dyTop, dyBottom)
+
+        let px: CGFloat, py: CGFloat
+        if minH <= minV {
+            px = dxLeft <= dxRight ? rect.minX : rect.maxX
+            py = cy
+        } else {
+            px = cx
+            py = dyTop <= dyBottom ? rect.minY : rect.maxY
+        }
+
+        // Clockwise distance from top-left.
+        let d: CGFloat
+        if abs(py - rect.minY) < 0.01 {
+            d = px - rect.minX
+        } else if abs(px - rect.maxX) < 0.01 {
+            d = rect.width + (py - rect.minY)
+        } else if abs(py - rect.maxY) < 0.01 {
+            d = rect.width + rect.height + (rect.maxX - px)
+        } else {
+            d = 2 * rect.width + rect.height + (rect.maxY - py)
+        }
+        return (px, py, d)
+    }
+
+    // ── Oval ──────────────────────────────────────────────────────────────────
+
+    private static func collapseToOval(samples: [VectorSample], shape: VectorShapeElement) -> [VectorSample] {
+        let r = shape.boundingRect
+        let cx = r.midX, cy = r.midY
+        let rx = r.width / 2, ry = r.height / 2
+        guard rx > 0, ry > 0 else { return samples }
+
+        let projected: [(angle: CGFloat, sample: VectorSample)] = samples.map { s in
+            let angle = atan2((s.y - cy) * rx, (s.x - cx) * ry)
+            let px = cx + rx * cos(angle)
+            let py = cy + ry * sin(angle)
+            var normAngle = angle < 0 ? angle + 2 * .pi : angle
+            if normAngle > .pi { normAngle -= 2 * .pi } // keep -π…π to preserve wrapping
+            return (normAngle, VectorSample(x: px, y: py, pressure: s.pressure))
+        }
+        return projected.sorted { $0.angle < $1.angle }.map { $0.sample }
+    }
+
+    // MARK: - Sample generation (fallback when no original stroke samples are available)
+
+    /// Generates evenly-spaced `VectorSample` points along the shape outline at the given spacing.
+    /// Used as a fallback when the original stroke samples weren't captured.
+    static func generateSamplesAlongShape(_ shape: VectorShapeElement, spacing: CGFloat) -> [VectorSample] {
+        let sp = max(spacing, 1)
+        switch shape.kind {
+        case .line:
+            let dx = shape.endPoint.x - shape.startPoint.x
+            let dy = shape.endPoint.y - shape.startPoint.y
+            let len = hypot(dx, dy)
+            guard len > 0 else { return [] }
+            let steps = max(2, Int(len / sp))
+            return (0...steps).map { i in
+                let t = CGFloat(i) / CGFloat(steps)
+                return VectorSample(x: shape.startPoint.x + dx * t,
+                                    y: shape.startPoint.y + dy * t,
+                                    pressure: 0.5)
+            }
+        case .rectangle:
+            let r = shape.boundingRect
+            let perim = 2 * (r.width + r.height)
+            let steps = max(4, Int(perim / sp))
+            var result: [VectorSample] = []
+            for i in 0...steps {
+                let d = (CGFloat(i) / CGFloat(steps)) * perim
+                let (px, py): (CGFloat, CGFloat)
+                if d < r.width {
+                    px = r.minX + d; py = r.minY
+                } else if d < r.width + r.height {
+                    px = r.maxX; py = r.minY + (d - r.width)
+                } else if d < 2 * r.width + r.height {
+                    px = r.maxX - (d - r.width - r.height); py = r.maxY
+                } else {
+                    px = r.minX; py = r.maxY - (d - 2 * r.width - r.height)
+                }
+                result.append(VectorSample(x: px, y: py, pressure: 0.5))
+            }
+            return result
+        case .oval:
+            let r = shape.boundingRect
+            let circum = .pi * (3 * (r.width + r.height) / 2 - sqrt(r.width * r.height))
+            let steps = max(12, Int(circum / sp))
+            let cx = r.midX, cy = r.midY, rx = r.width / 2, ry = r.height / 2
+            return (0...steps).map { i in
+                let angle = 2 * .pi * CGFloat(i) / CGFloat(steps)
+                return VectorSample(x: cx + rx * cos(angle),
+                                    y: cy + ry * sin(angle),
+                                    pressure: 0.5)
+            }
+        }
+    }
+
     // MARK: - Constraint helpers
 
     /// Snaps an angle (radians) to the nearest `increment` (radians).
