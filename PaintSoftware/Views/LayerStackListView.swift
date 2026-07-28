@@ -432,6 +432,7 @@ extension LayerStackListView.Coordinator {
         guard resolved != dropTarget else { return }
         dropTarget = resolved
         renderDropFeedback()
+        animateRowShifts()
     }
 
     /// Highlights the folder/layer a drop would land in, or draws a line where it would slot in.
@@ -461,9 +462,64 @@ extension LayerStackListView.Coordinator {
             } else {
                 y = tableView.rectForRow(at: IndexPath(row: insertionIndex, section: 0)).minY
             }
-            line.frame = CGRect(x: 12, y: y - 1, width: tableView.bounds.width - 24, height: 2)
+            // When rows are shifted during a drag, account for the cell's translation
+            // so the line tracks the visual gap rather than the unshifted layout.
+            var adjustedY = y
+            if insertionIndex < rows.count,
+               let cell = tableView.cellForRow(at: IndexPath(row: insertionIndex, section: 0)) as? LayerStackCell {
+                adjustedY += cell.transform.ty
+            }
+            line.frame = CGRect(x: 12, y: adjustedY - 1, width: tableView.bounds.width - 24, height: 2)
             line.isHidden = false
             tableView.bringSubviewToFront(line)
+        }
+    }
+
+    /// Shifts rows to make room for the dragged row at the drop target, so the user sees
+    /// where the row will land before releasing. The source row stays dimmed; all others
+    /// slide to their preview positions.
+    private func animateRowShifts() {
+        guard let tableView, let draggedID = dragRowID, let dropTarget else { return }
+        guard let srcIndex = rows.firstIndex(where: { $0.id == draggedID }) else { return }
+
+        // Build the preview row order: remove the dragged row, optionally insert a gap
+        // at the drop position so every other row shifts to where it will end up.
+        var previewRows = rows
+        let moved = previewRows.remove(at: srcIndex)
+
+        switch dropTarget {
+        case .onto:
+            break // no gap — rows just close the source hole; target is highlighted
+        case .between(let insertionIndex):
+            let gapIndex = insertionIndex > srcIndex
+                ? max(0, insertionIndex - 1)
+                : max(0, insertionIndex)
+            previewRows.insert(moved, at: min(gapIndex, previewRows.count))
+        }
+
+        // Reset all cell transforms so previous shifts don't accumulate.
+        for case let cell as LayerStackCell in tableView.visibleCells {
+            cell.transform = .identity
+        }
+
+        for case let cell as LayerStackCell in tableView.visibleCells {
+            guard let ip = tableView.indexPath(for: cell), ip.row != srcIndex else { continue }
+            let rowID = rows[ip.row].id
+            guard let previewIndex = previewRows.firstIndex(where: { $0.id == rowID }) else { continue }
+
+            let oldY = cell.frame.origin.y
+            var newY: CGFloat = 0
+            for i in 0..<previewIndex {
+                newY += previewRows[i].isFolder ? LayerStackCell.folderHeight : LayerStackCell.layerHeight
+            }
+
+            let delta = newY - oldY
+            if abs(delta) > 0.5 {
+                UIView.animate(withDuration: 0.22, delay: 0,
+                               options: [.allowUserInteraction, .curveEaseOut]) {
+                    cell.transform = CGAffineTransform(translationX: 0, y: delta)
+                }
+            }
         }
     }
 
@@ -476,6 +532,7 @@ extension LayerStackListView.Coordinator {
         for case let cell as LayerStackCell in tableView.visibleCells {
             cell.contentView.alpha = 1
             cell.setDropHighlight(false)
+            cell.transform = .identity
         }
         tableView.isScrollEnabled = true
         dragRowID = nil
