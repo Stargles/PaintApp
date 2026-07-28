@@ -1506,6 +1506,15 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         fillButton.tap()
 
+        // Deselect before erasing: fillSelection() deliberately leaves the selection active (matching
+        // Fill's normal behavior), and with it active "paint outside selection" stays denied by
+        // default — clip the eraser stroke to a region matching the fill exactly is a separate,
+        // already-covered concern (testDenyOutsideSelectionClipsStrokeUntilToggledOn), not what this
+        // regression test is isolating.
+        let deselectButton = app.buttons["selectPanel.deselectButton"]
+        XCTAssertTrue(deselectButton.waitForExistence(timeout: 5))
+        deselectButton.tap()
+
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.66, dy: 0.33)), "Sanity: the fill should be visible before erasing it")
