@@ -64,16 +64,22 @@ struct TopToolbar: View {
     }
 
     private func toggle(_ panel: ActivePanel) {
-        // Switching to any other tool/panel commits an in-progress Move/Duplicate rather than
-        // silently discarding it — Undo is the way to back out of a completed move, matching
-        // Procreate (there's no separate "cancel transform").
-        canvasManager.commitFloatingPieceIfNeeded()
+        // Switching to any other tool/panel commits an in-progress Move/Duplicate/shape/fill rather
+        // than silently discarding or stranding it — Undo is the way to back out of a completed move,
+        // matching Procreate (there's no separate "cancel transform").
+        canvasManager.commitAnyPendingInteractiveState()
         activePanel = (activePanel == panel) ? .none : panel
     }
 
     /// Tapping Move toggles between lifting the current selection (or, if there is none, the whole
     /// current layer) into a floating piece, and committing whatever's currently floating.
     private func toggleMove() {
+        // A still-adjustable shape or fill must bake before Move can act on it — otherwise Move
+        // would engage against stale committed content while the shape/fill sits in its own
+        // transient tier, then get silently re-baked (at its *original*, undragged geometry) the
+        // next time something else forces a commit, producing exactly the "content teleports back"
+        // bug this guards against.
+        canvasManager.commitAnyPendingInteractiveState()
         // On a vector layer, Move transforms the whole layer's geometry losslessly via the on-canvas
         // box (no raster floating piece) — toggle that mode instead of lifting pixels.
         if canvasManager.activeLayerIsVector {
@@ -103,7 +109,7 @@ struct TopToolbar: View {
         if brushActive {
             toggle(.brush)
         } else {
-            canvasManager.commitFloatingPieceIfNeeded()
+            canvasManager.commitAnyPendingInteractiveState()
             canvasManager.selectedTool = .pen
             activePanel = .none
         }
@@ -114,7 +120,7 @@ struct TopToolbar: View {
         if eraserActive {
             toggle(.eraser)
         } else {
-            canvasManager.commitFloatingPieceIfNeeded()
+            canvasManager.commitAnyPendingInteractiveState()
             canvasManager.selectedTool = .eraser
             activePanel = .none
         }
@@ -125,7 +131,7 @@ struct TopToolbar: View {
         if fillActive {
             toggle(.fill)
         } else {
-            canvasManager.commitFloatingPieceIfNeeded()
+            canvasManager.commitAnyPendingInteractiveState()
             canvasManager.selectedTool = .fill
             activePanel = .none
         }

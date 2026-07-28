@@ -298,6 +298,19 @@ extension CanvasManager {
 
     // MARK: Committing
 
+    /// Finalizes every kind of transient, not-yet-committed state (an adjustable fill, an adjustable
+    /// smart shape, a floating Move/Duplicate piece) as real, undoable edits. Any tool switch that's
+    /// about to act on "the layer's current content" — Move, Select, a paint tool — must call this
+    /// first: leaving a shape/fill pending while a different tool starts operating on the layer is
+    /// exactly the bug where the pending shape/fill silently re-bakes later, at its *original*
+    /// geometry, once something else finally forces the commit (its own drag updates only ever
+    /// touched the transient state, never the committed layer content).
+    func commitAnyPendingInteractiveState() {
+        commitInteractiveFill()
+        commitInteractiveShape()
+        commitFloatingPieceIfNeeded()
+    }
+
     /// Renders the floating piece at its current transform and bakes it into its target cel, as one
     /// undoable step. No-op if there's nothing floating.
     @discardableResult
@@ -313,17 +326,20 @@ extension CanvasManager {
         switch piece.kind {
         case .move:
             // remainderPreview was rendered from PixelOps.rasterize (see beginMove), which already
-            // folds fillImage into it — so fillImage's old content is now baked into newBaked and
-            // must be cleared here, or it would render a second time underneath.
+            // folds fillImage/bakedImage/the old raster strokes into it — so the result lands purely
+            // on the raster tier (see `bakedRasterTexture`'s doc comment): a raster-layer cel must
+            // hold its content in exactly one place at rest, or the eraser (which only ever stamps
+            // `Cel.raster`) can never touch whatever landed in `bakedImage` instead.
             let baseForComposite = piece.remainderPreview ?? targetCel.bakedImage
-            let newBaked = PixelOps.compositeOver(base: baseForComposite, overlay: rendered)
+            let newImage = PixelOps.compositeOver(base: baseForComposite, overlay: rendered)
             registerUndoableCelChange(layerID: layers[targetLayerIndex].id, celID: targetCel.id,
                                        oldRaster: targetCel.raster, oldBaked: targetCel.bakedImage, oldFill: targetCel.fillImage,
-                                       newRaster: .empty(size: canvasSize), newBaked: newBaked, newFill: nil,
+                                       newRaster: bakedRasterTexture(image: newImage, likeExisting: targetCel.raster),
+                                       newBaked: nil, newFill: nil,
                                        actionName: "Move")
         case .duplicate:
-            let newBaked = PixelOps.compositeOver(base: targetCel.bakedImage, overlay: rendered)
-            registerUndoableLayerInsertion(layerIndex: targetLayerIndex, finalBaked: newBaked, actionName: "Duplicate")
+            let newImage = PixelOps.compositeOver(base: targetCel.bakedImage, overlay: rendered)
+            registerUndoableLayerInsertion(layerIndex: targetLayerIndex, finalImage: newImage, actionName: "Duplicate")
         }
         return true
     }
@@ -352,7 +368,8 @@ extension CanvasManager {
             let newImage = PixelOps.fill(base: base, path: selection.path, color: PixelOps.uiColor(from: brushColor))
             registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
                                        oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
-                                       newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Fill")
+                                       newRaster: bakedRasterTexture(image: newImage, likeExisting: cel.raster),
+                                       newBaked: nil, newFill: nil, actionName: "Fill")
         }
     }
 
@@ -382,7 +399,8 @@ extension CanvasManager {
             let newImage = PixelOps.clear(base: base, path: selection.path)
             registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
                                        oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
-                                       newRaster: .empty(size: canvasSize), newBaked: newImage, newFill: nil, actionName: "Clear")
+                                       newRaster: bakedRasterTexture(image: newImage, likeExisting: cel.raster),
+                                       newBaked: nil, newFill: nil, actionName: "Clear")
         }
     }
 
@@ -408,6 +426,14 @@ extension CanvasManager {
     /// drawing into that instance, so it's safe for undo/redo to swap it back in later without a
     /// snapshot. `layerID`/`celID` (rather than indices) are what the undo/redo closures resolve
     /// against — other edits may shift array positions between now and whenever undo/redo fires.
+    ///
+    /// A raster-layer cel must hold its *at-rest* content in exactly one tier: `raster`.
+    /// `bakedImage`/`fillImage` exist only as transient scratch space while a fill or shape is still
+    /// adjustable — every commit path (Move, Duplicate, Fill, Clear) must pass its flattened result
+    /// as `newRaster` (via `bakedRasterTexture`) and `nil` for `newBaked`/`newFill`. Landing a commit
+    /// in `bakedImage` instead is the "ghost layer" bug: the eraser only ever stamps `Cel.raster`, so
+    /// content left in `bakedImage` becomes permanently uneraseable, and any code that reasons about
+    /// "the raster tier" (Move's lift, undo snapshots) silently disagrees with what's on screen.
     func registerUndoableCelChange(layerID: UUID, celID: UUID,
                                     oldRaster: RasterLayerTexture, oldBaked: UIImage?, oldFill: UIImage?,
                                     newRaster: RasterLayerTexture, newBaked: UIImage?, newFill: UIImage?,
@@ -435,6 +461,16 @@ extension CanvasManager {
         })
     }
 
+    /// Wraps a fully-flattened image (whatever combination of the old raster/baked/fill tiers a
+    /// commit path composited together) as a *new* `RasterLayerTexture` instance — see
+    /// `registerUndoableCelChange`'s doc comment for why every commit must land here instead of in
+    /// `bakedImage`. `strokeCount` is carried forward from `existing` (or set to 1 if it was 0, since
+    /// there's now visible content) — it's a display-only "has content" heuristic, not exact once
+    /// pixels have been flattened together.
+    func bakedRasterTexture(image: UIImage, likeExisting existing: RasterLayerTexture) -> RasterLayerTexture {
+        RasterLayerTexture(size: existing.size, image: image, strokeCount: max(existing.strokeCount, 1))
+    }
+
     private func applyCelChange(layerID: UUID, celID: UUID, raster: RasterLayerTexture, baked: UIImage?, fill: UIImage?) {
         guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
@@ -449,14 +485,17 @@ extension CanvasManager {
     /// if other layers have since shifted its index); the redo side re-inserts at the position it
     /// was originally created at, which is safe because `history`'s redo stack only ever holds this
     /// action while nothing else has been recorded in between (any new edit clears it).
-    private func registerUndoableLayerInsertion(layerIndex: Int, finalBaked: UIImage, actionName: String) {
+    private func registerUndoableLayerInsertion(layerIndex: Int, finalImage: UIImage, actionName: String) {
         guard layers.indices.contains(layerIndex) else { return }
-        layers[layerIndex].cels[0].bakedImage = finalBaked
+        // Same "raster tier only" rule as `registerUndoableCelChange` — the freshly-inserted cel
+        // starts with an empty `raster` (see `beginDuplicate`), so without this the duplicated
+        // content would land solely in `bakedImage` and never be eraseable on the new layer either.
+        layers[layerIndex].cels[0].raster = bakedRasterTexture(image: finalImage, likeExisting: layers[layerIndex].cels[0].raster)
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: 0)
         let insertedLayer = layers[layerIndex]
         let insertedLayerID = insertedLayer.id
 
-        recordUndo(name: actionName, cost: Self.approximateImageCost(finalBaked), undo: { [weak self] in
+        recordUndo(name: actionName, cost: Self.approximateImageCost(finalImage), undo: { [weak self] in
             guard let self, let idx = self.layers.firstIndex(where: { $0.id == insertedLayerID }) else { return }
             self.layers.remove(at: idx)
             if self.currentLayerIndex >= self.layers.count {

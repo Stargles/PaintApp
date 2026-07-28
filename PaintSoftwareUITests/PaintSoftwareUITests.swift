@@ -54,9 +54,13 @@ final class PaintSoftwareUITests: XCTestCase {
         return Int(value)
     }
 
-    /// Whether a layer's active cel has raster content baked into it by a select/move/fill/clear
-    /// operation (see LayerRow.hasBakedImage) — the Select & Move tool's operations write here
-    /// instead of adding PencilKit strokes, so this is how tests verify they landed.
+    /// Whether a layer's active cel still has a separate `Cel.bakedImage` tier (see
+    /// `LayerRow.hasBakedImage`) — expected `false` for every settled (non-transient) cel: Fill,
+    /// Clear, Move, Duplicate, Rasterize, and Merge all land their result in `Cel.raster` directly
+    /// (the tier the eraser stamps into), never leaving content in `bakedImage` — see
+    /// `CanvasManager.registerUndoableCelChange`'s doc comment. This marker exists as a regression
+    /// guard for exactly that "ghost layer" bug, not as the tool's normal success signal (use
+    /// `readLayerStrokeCount` for that).
     private func readHasBakedImage(_ app: XCUIApplication, layerIndex: Int) -> Bool? {
         let marker = app.otherElements["layerPanel.row.\(layerIndex).hasBaked"]
         guard marker.waitForExistence(timeout: 5), let value = marker.value as? String else { return nil }
@@ -1003,8 +1007,9 @@ final class PaintSoftwareUITests: XCTestCase {
 
     // MARK: - Select & Move
 
-    /// Rectangle-select a region, then Fill it — the fill should land as baked raster content on
-    /// the active layer (Cel.bakedImage), not a PencilKit stroke.
+    /// Rectangle-select a region, then Fill it — the fill should land directly in the raster tier
+    /// (Cel.raster), the same tier the eraser stamps into, not a separate Cel.bakedImage layer the
+    /// eraser can never reach (see `CanvasManager.registerUndoableCelChange`'s doc comment).
     func testRectangleSelectThenFillBakesPixels() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -1027,12 +1032,13 @@ final class PaintSoftwareUITests: XCTestCase {
         fillButton.tap()
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), true, "Filling the selection should bake pixels into the active layer")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "Filling should land in the raster tier, not a separate baked-image tier")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Filling the selection should register as raster content, so the eraser can reach it")
     }
 
     /// Rectangle-select, Duplicate: a new layer should appear immediately (holding the floating
-    /// piece), and the Move bottom bar's Done button should commit it into that new layer as baked
-    /// content, without touching the source layer.
+    /// piece), and the Move bottom bar's Done button should commit it into that new layer's raster
+    /// tier, without touching the source layer.
     func testDuplicateSelectionCreatesNewLayerAndCommits() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -1056,7 +1062,8 @@ final class PaintSoftwareUITests: XCTestCase {
 
         app.buttons["toolbar.layersButton"].tap()
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5), "Duplicate should have inserted a second layer")
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), true, "Committing should bake the duplicated piece into the new layer")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), false, "Committing should land the duplicated piece in the raster tier, not a separate baked-image tier")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "The duplicated piece should register as raster content on the new layer")
         XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "Duplicate must not modify the source layer")
     }
 
@@ -1102,8 +1109,9 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.65, dy: 0.275)), "With outside interaction allowed, the same stroke should now paint past the selection boundary")
     }
 
-    /// With no active selection, Move lifts the whole current layer; committing bakes it back
-    /// (flattening any prior stroke into Cel.bakedImage and clearing the live PencilKit drawing).
+    /// With no active selection, Move lifts the whole current layer; committing bakes it back into
+    /// the raster tier (not a separate Cel.bakedImage layer — see `registerUndoableCelChange`'s doc
+    /// comment) so the moved content stays reachable by the eraser afterwards.
     func testMoveWithNoSelectionLiftsWholeLayerAndCommits() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -1123,8 +1131,8 @@ final class PaintSoftwareUITests: XCTestCase {
         doneButton.tap()
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), true, "Committing the move should bake the layer's content")
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 0, "The original stroke should be flattened into bakedImage, not left as a live PencilKit stroke")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "Committing the move should land in the raster tier, not a separate baked-image tier")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "The moved content should still register as raster content, not disappear from the tier the eraser reaches")
     }
 
     /// Save -> relaunch -> reload round trip, exercising the real `ProjectStore.save`/`load` path
@@ -1294,8 +1302,8 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "The vector stroke should be visible on the canvas")
     }
 
-    /// Rasterize folds a vector layer's stroke into bakedImage and flips its kind to raster — and
-    /// the whole thing (content + kind) undoes as one step.
+    /// Rasterize folds a vector layer's stroke into the raster tier (not a separate bakedImage layer)
+    /// and flips its kind to raster — and the whole thing (content + kind) undoes as one step.
     func testRasterizeFoldsVectorLayerToBakedRasterAndUndoes() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -1326,7 +1334,8 @@ final class PaintSoftwareUITests: XCTestCase {
         rasterize.tap()
 
         XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, false, "Rasterize should flip the layer to raster")
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), true, "The stroke should be folded into bakedImage")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), false, "The stroke should be folded into the raster tier, not a separate baked-image tier")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "The rasterized stroke should register as raster content")
         app.buttons["toolbar.layersButton"].tap() // close panel
 
         // Pixels should be unchanged by the conversion.
@@ -1477,6 +1486,83 @@ final class PaintSoftwareUITests: XCTestCase {
         drawLine(on: canvas, from: p, to: q) // Drag back over the same stroke to erase it.
         XCTAssertTrue(sizeSlider.waitForNonExistence(timeout: 3), "Continuing to erase should dismiss the open eraser menu")
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: p.dx + 0.06, dy: p.dy)), "Erasing over the stroke should restore blank paper")
+    }
+
+    /// Regression test for the "ghost layer" bug: a fill used to land in `Cel.bakedImage`, a tier the
+    /// eraser (which only ever stamps `Cel.raster`) could never reach, so a filled region was
+    /// permanently un-eraseable. Fill now lands directly in `raster` (see
+    /// `CanvasManager.registerUndoableCelChange`'s doc comment), so this must actually work.
+    func testEraserCanEraseAFilledSelection() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
+        rectangleMode.tap()
+        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.25), to: CGVector(dx: 0.78, dy: 0.42))
+
+        let fillButton = app.buttons["selectPanel.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap()
+
+        // Deselect before erasing: fillSelection() deliberately leaves the selection active (matching
+        // Fill's normal behavior), and with it active "paint outside selection" stays denied by
+        // default — clip the eraser stroke to a region matching the fill exactly is a separate,
+        // already-covered concern (testDenyOutsideSelectionClipsStrokeUntilToggledOn), not what this
+        // regression test is isolating.
+        let deselectButton = app.buttons["selectPanel.deselectButton"]
+        XCTAssertTrue(deselectButton.waitForExistence(timeout: 5))
+        deselectButton.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.66, dy: 0.33)), "Sanity: the fill should be visible before erasing it")
+
+        let eraserButton = app.buttons["toolbar.eraserButton"]
+        XCTAssertTrue(eraserButton.waitForExistence(timeout: 5))
+        eraserButton.tap() // select
+        eraserButton.tap() // open settings
+        let sizeSlider = app.sliders["eraserPanel.sizeSlider"]
+        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5))
+        sizeSlider.adjust(toNormalizedSliderPosition: 1.0)
+
+        drawLine(on: canvas, from: CGVector(dx: 0.55, dy: 0.33), to: CGVector(dx: 0.78, dy: 0.33))
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.66, dy: 0.33)), "Erasing over the filled region should restore blank paper")
+    }
+
+    /// Regression test for the "ghost layer" bug: committing a Move used to wipe `Cel.raster` and put
+    /// the moved content in `Cel.bakedImage` instead, so it became permanently un-eraseable (and any
+    /// stroke drawn afterward was the only thing the eraser could still touch). Move now folds its
+    /// result back into `raster`.
+    func testEraserCanEraseContentAfterMoveCommits() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let p = safeOutsideCornerPoint(canvas)
+        let q = CGVector(dx: p.dx + 0.12, dy: p.dy)
+        drawLine(on: canvas, from: p, to: q)
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: p.dx + 0.06, dy: p.dy)), "Sanity: the stroke should be drawn before moving it")
+
+        app.buttons["toolbar.moveButton"].tap()
+        let doneButton = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(doneButton.waitForExistence(timeout: 10), "Move with no selection should float the whole layer")
+        doneButton.tap() // commit in place — no drag needed to exercise the bake path
+
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: p.dx + 0.06, dy: p.dy)), "Sanity: the stroke should still be visible right after committing the move")
+
+        let eraserButton = app.buttons["toolbar.eraserButton"]
+        XCTAssertTrue(eraserButton.waitForExistence(timeout: 5))
+        eraserButton.tap() // select
+        eraserButton.tap() // open settings
+        let sizeSlider = app.sliders["eraserPanel.sizeSlider"]
+        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5))
+        sizeSlider.adjust(toNormalizedSliderPosition: 1.0)
+
+        drawLine(on: canvas, from: p, to: q)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: p.dx + 0.06, dy: p.dy)), "Erasing after a committed Move should reach the moved content")
     }
 
     private func brushIsSelected(_ app: XCUIApplication) -> Bool {
@@ -2006,8 +2092,10 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForNonExistence(timeout: 5),
                       "Merging should leave exactly one layer")
         XCTAssertTrue(app.staticTexts["layerPanel.row.0"].waitForExistence(timeout: 5))
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), true,
-                       "The surviving layer should hold the flattened pixels of both")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false,
+                       "The surviving layer should hold the flattened pixels in the raster tier, not a separate baked-image tier")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+                       "The flattened pixels of both layers should register as raster content")
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: point.dx + 0.06, dy: point.dy)),
                        "The merged artwork should still be on the canvas")
     }
@@ -2046,7 +2134,8 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForNonExistence(timeout: 5))
         XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, false,
                        "The survivor should come out of the merge as a raster layer, not vector with emptied geometry")
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), true, "The survivor should hold the flattened pixels")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), false, "The survivor should hold the flattened pixels in the raster tier, not a separate baked-image tier")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "The flattened pixels should register as raster content")
         app.buttons["toolbar.layersButton"].tap() // close panel
 
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "The vector stroke should survive the merge")

@@ -927,6 +927,7 @@ struct CanvasView: UIViewRepresentable {
                                 self.shapeInitRadius = hypot(point.x - cx, point.y - cy)
                                 self.shapeInitHalfW = abs(shape.endPoint.x - shape.startPoint.x) / 2
                                 self.shapeInitHalfH = abs(shape.endPoint.y - shape.startPoint.y) / 2
+                                self.shapeInitRotation = shape.rotation
                                 self.shapeInitFrameSet = true
                             }
                             let curAngle = atan2(point.y - cy, point.x - cx)
@@ -938,7 +939,7 @@ struct CanvasView: UIViewRepresentable {
                             let start = CGPoint(x: cx - newW, y: cy - newH)
                             let end = CGPoint(x: cx + newW, y: cy + newH)
                             self.canvasManager.updateInteractiveShape(
-                                startPoint: start, endPoint: end, rotation: deltaRot)
+                                startPoint: start, endPoint: end, rotation: self.shapeInitRotation + deltaRot)
                         }
                         self.updateShapeOverlay()
                     } else {
@@ -1328,6 +1329,11 @@ struct CanvasView: UIViewRepresentable {
         private var shapeInitRadius: CGFloat = 0
         private var shapeInitHalfW: CGFloat = 0
         private var shapeInitHalfH: CGFloat = 0
+        /// The shape's own detected rotation (e.g. from a stroke traced at an angle) at the moment
+        /// following begins — the finger's own bearing change (`deltaRot` below) is added *on top of*
+        /// this, not used in its place, or continuing to drag a shape that was already rotated would
+        /// reset it to axis-aligned the instant the finger moved at all.
+        private var shapeInitRotation: CGFloat = 0
         private var shapeInitFrameSet = false
 
         private func handleStrokeMoved(_ sample: VectorSample, host: LayerHostView?) {
@@ -1612,8 +1618,13 @@ struct CanvasView: UIViewRepresentable {
                 beginAnchorIfNeeded(at: recognizer.location(in: host))
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
-                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
+                // Require the touch count *before* treating this as "the user is deliberately
+                // transforming, bake the snapped shape": a lifting finger can still produce one more
+                // `.changed` event as the recognizer's geometry collapses from 2 touches to 1 (or 0),
+                // which isn't an intentional pan — without this guard, simply lifting the second
+                // finger from the two-finger snap baked the shape instead of just releasing the snap.
                 guard recognizer.numberOfTouches >= 2 else { return }
+                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .ended, .cancelled:
                 commitLiveTransformIfAllEnded()
@@ -1631,8 +1642,9 @@ struct CanvasView: UIViewRepresentable {
                 liveScale = recognizer.scale
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
-                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
+                // See handlePan's `.changed` case for why the touch-count guard must come first.
                 guard recognizer.numberOfTouches >= 2 else { return }
+                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
                 liveScale = recognizer.scale
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .ended, .cancelled:
@@ -1651,8 +1663,9 @@ struct CanvasView: UIViewRepresentable {
                 liveRotation = recognizer.rotation
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
-                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
+                // See handlePan's `.changed` case for why the touch-count guard must come first.
                 guard recognizer.numberOfTouches >= 2 else { return }
+                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
                 liveRotation = recognizer.rotation
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .ended, .cancelled:

@@ -110,12 +110,14 @@ final class CanvasManager: ObservableObject {
 
     /// Converts a vector layer to raster in place: each cel's full content (vector strokes/images,
     /// plus any existing fillImage/bakedImage — `PixelOps.rasterize` already flattens all of it into
-    /// one image) is folded into `bakedImage`, `vector` is cleared, and `kind` becomes `.raster`. A
-    /// no-op if the layer isn't currently `.vector`. `mergeLayers` also calls this, on both layers
-    /// being merged, before flattening them together — so a vector layer never comes out of a merge
-    /// still labeled `.vector` with stale/empty geometry. The nested `withStructureUndo` call below
-    /// coalesces into whichever undo scope is already open, so calling this from inside
-    /// `mergeLayers`'s own `withStructureUndo` doesn't add a second, separate undo step.
+    /// one image) is folded into `raster` (not `bakedImage` — see `registerUndoableCelChange`'s doc
+    /// comment: a raster-layer cel holds its content in exactly one tier at rest, or the eraser can
+    /// never reach it), `vector` is cleared, and `kind` becomes `.raster`. A no-op if the layer isn't
+    /// currently `.vector`. `mergeLayers` also calls this, on both layers being merged, before
+    /// flattening them together — so a vector layer never comes out of a merge still labeled
+    /// `.vector` with stale/empty geometry. The nested `withStructureUndo` call below coalesces into
+    /// whichever undo scope is already open, so calling this from inside `mergeLayers`'s own
+    /// `withStructureUndo` doesn't add a second, separate undo step.
     func rasterizeLayer(layerIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .vector,
               let canvasSize else { return }
@@ -123,7 +125,9 @@ final class CanvasManager: ObservableObject {
         withStructureUndo(name: "Rasterize") {
             for celIndex in layers[layerIndex].cels.indices {
                 let cel = layers[layerIndex].cels[celIndex]
-                layers[layerIndex].cels[celIndex].bakedImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+                let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+                layers[layerIndex].cels[celIndex].raster = bakedRasterTexture(image: flattened, likeExisting: cel.raster)
+                layers[layerIndex].cels[celIndex].bakedImage = nil
                 layers[layerIndex].cels[celIndex].fillImage = nil
                 layers[layerIndex].cels[celIndex].vector = nil
             }
@@ -1223,9 +1227,10 @@ final class CanvasManager: ObservableObject {
                 canvasSize: canvasSize
             )
 
-            layers[bottomIndex].cels[bottomCel].raster = .empty(size: canvasSize)
+            layers[bottomIndex].cels[bottomCel].raster =
+                bakedRasterTexture(image: flattened, likeExisting: layers[bottomIndex].cels[bottomCel].raster)
             layers[bottomIndex].cels[bottomCel].fillImage = nil
-            layers[bottomIndex].cels[bottomCel].bakedImage = flattened
+            layers[bottomIndex].cels[bottomCel].bakedImage = nil
             layers[bottomIndex].opacity = 1
             layers[bottomIndex].isVisible = true
 
@@ -1426,7 +1431,8 @@ final class CanvasManager: ObservableObject {
 
     /// Bakes the current adjustable fill into the layer as a single "Fill" undo step and tears the
     /// session down. On a **vector layer** the fill becomes a `VectorFillElement` (a closed path on
-    /// the `VectorCanvas`); on a **raster layer** it is composited into `bakedImage` as before.
+    /// the `VectorCanvas`); on a **raster layer** it's flattened directly into `Cel.raster` (see
+    /// `registerUndoableCelChange`'s doc comment) so the eraser can reach it afterwards.
     func commitInteractiveFill() {
         guard fillGestureActive else { return }
         fillGestureActive = false
@@ -1457,11 +1463,19 @@ final class CanvasManager: ObservableObject {
             registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
                                    layerID: layerID, celID: celID, actionName: "Fill")
         } else {
-            // --- Raster path (original behaviour): bake into bakedImage ---
-            let newBaked = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: preview)
+            // --- Raster path: flatten into `raster` directly ---
+            // `fillGestureBaseBaked` is only the pre-gesture `bakedImage` tier (see where it's
+            // captured in `beginInteractiveFill`); the live raster strokes sit *above* both baked and
+            // fill in render order (see `PixelOps.rasterize`), so they have to be composited back on
+            // top explicitly here rather than just carried over via `newRaster: cel.raster` — leaving
+            // the fill's own pixels stuck underneath a `raster` tier the eraser stamps into but the
+            // fill itself never touched.
+            let belowStrokes = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: preview)
+            let finalImage = PixelOps.compositeOver(base: belowStrokes, overlay: cel.raster.renderToUIImage())
             registerUndoableCelChange(layerID: layerID, celID: celID,
                                       oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,
-                                      newRaster: cel.raster, newBaked: newBaked, newFill: nil,
+                                      newRaster: bakedRasterTexture(image: finalImage, likeExisting: cel.raster),
+                                      newBaked: nil, newFill: nil,
                                       actionName: "Fill")
         }
     }
