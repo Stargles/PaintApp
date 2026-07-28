@@ -189,6 +189,12 @@ struct LayerOptionsPanel: View {
                         onClose()
                     }
                 }
+                if canvasManager.layers[index].kind == .vector {
+                    action("Rasterize", systemImage: "square.on.square", identifier: "layerOptions.rasterize") {
+                        canvasManager.rasterizeLayer(layerIndex: index)
+                        onClose()
+                    }
+                }
                 action("Delete", systemImage: "trash", identifier: "layerOptions.delete", role: .destructive) {
                     canvasManager.deleteLayer(at: index)
                     onClose()

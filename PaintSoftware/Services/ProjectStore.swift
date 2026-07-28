@@ -173,13 +173,6 @@ enum ProjectStore {
         var layerManifests: [LayerManifest] = []
 
         for layer in canvasManager.layers {
-            var imageFileName: String?
-            if layer.isObjectLayer, let image = layer.objectImage, let data = image.pngData() {
-                let fileName = "\(layer.id.uuidString).png"
-                try? data.write(to: imagesDir.appendingPathComponent(fileName))
-                imageFileName = fileName
-            }
-
             var celManifests: [CelManifest] = []
             for cel in layer.cels {
                 let fileName = "\(cel.id.uuidString)_raster.png"
@@ -223,20 +216,12 @@ enum ProjectStore {
                                                  vectorFileName: vectorFileName))
             }
 
-            let transformManifest = layer.isObjectLayer
-                ? ObjectTransformManifest(x: layer.objectTransform.position.x, y: layer.objectTransform.position.y,
-                                           scale: layer.objectTransform.scale, rotation: layer.objectTransform.rotation)
-                : nil
-
-                layerManifests.append(LayerManifest(
+            layerManifests.append(LayerManifest(
                 id: layer.id,
                 name: layer.name,
                 opacity: layer.opacity,
                 isVisible: layer.isVisible,
                 kind: layer.kind,
-                isObjectLayer: layer.isObjectLayer,
-                objectImageFileName: imageFileName,
-                objectTransform: transformManifest,
                 parentFolderID: layer.parentFolderID?.uuidString,
                 cels: celManifests
             ))
@@ -343,11 +328,6 @@ enum ProjectStore {
 
         var layers: [Layer] = []
         for layerManifest in manifest.layers {
-            var objectImage: UIImage?
-            if let fileName = layerManifest.objectImageFileName {
-                objectImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fileName).path)
-            }
-
             var cels: [Cel] = []
             for celManifest in layerManifest.cels {
                 let rasterURL = imagesDir.appendingPathComponent(celManifest.rasterFileName)
@@ -384,18 +364,6 @@ enum ProjectStore {
                                  raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector))
             }
 
-            let transform: LayerTransform
-            if let m = layerManifest.objectTransform {
-                transform = LayerTransform(position: CGPoint(x: m.x, y: m.y), scale: m.scale, rotation: m.rotation)
-            } else if let objectImage, let canvasSize = manager.canvasSize, objectImage.size.width > 0 {
-                // Pre-object-layer project: reproduce the old full-bleed appearance as a starting
-                // transform (covering the canvas, centered, unrotated) that the user can adjust.
-                let coverScale = max(canvasSize.width / objectImage.size.width, canvasSize.height / objectImage.size.height)
-                transform = LayerTransform(position: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2), scale: coverScale, rotation: 0)
-            } else {
-                transform = .identity
-            }
-
             let parentID = layerManifest.parentFolderID.flatMap { UUID(uuidString: $0) }
             layers.append(Layer(
                 id: layerManifest.id,
@@ -403,9 +371,6 @@ enum ProjectStore {
                 opacity: layerManifest.opacity,
                 isVisible: layerManifest.isVisible,
                 kind: layerManifest.kind,
-                isObjectLayer: layerManifest.isObjectLayer,
-                objectImage: objectImage,
-                objectTransform: transform,
                 parentFolderID: parentID,
                 cels: cels
             ))

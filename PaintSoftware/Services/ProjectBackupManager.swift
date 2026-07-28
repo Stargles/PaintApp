@@ -433,7 +433,6 @@ nonisolated enum ProjectBackupManager {
         var id: UUID
         var layers: [Layer]
         struct Layer: Decodable {
-            var objectImageFileName: String?
             var cels: [Cel]
         }
         struct Cel: Decodable {
@@ -447,8 +446,8 @@ nonisolated enum ProjectBackupManager {
     private static let pngMagic: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
 
     /// A project package counts as intact when its manifest decodes and every file the manifest
-    /// references (raster/fill/baked/object PNGs, vector JSON) both exists and — for PNGs — starts
-    /// with the 8-byte PNG signature (catches crash-truncated writes, not just missing files).
+    /// references (raster/fill/baked PNGs, vector JSON) both exists and — for PNGs — starts with the
+    /// 8-byte PNG signature (catches crash-truncated writes, not just missing files).
     static func validateProject(at url: URL) -> Bool {
         let fm = FileManager.default
         let manifestURL = url.appendingPathComponent("manifest.json")
@@ -470,7 +469,6 @@ nonisolated enum ProjectBackupManager {
         }
 
         for layer in skeleton.layers {
-            if let objectFile = layer.objectImageFileName, !fileIntact(objectFile, isPNG: true) { return false }
             for cel in layer.cels {
                 if !fileIntact(cel.rasterFileName, isPNG: true) { return false }
                 if let fill = cel.fillImageFileName, !fileIntact(fill, isPNG: true) { return false }

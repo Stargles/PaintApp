@@ -410,13 +410,11 @@ final class StrokeCanvasView: UIView {
     }
 }
 
-/// One slot in the layer stack: an optional static image (for object/photo layers, positioned by its
-/// own position/scale/rotation via `objectTransform` rather than pinned to the host's edges — see
-/// `applyObjectTransform`), a raster fill layer (bucket-fill output for the current cel, pinned
+/// One slot in the layer stack: a raster fill layer (bucket-fill output for the current cel, pinned
 /// edge-to-edge), and a drawable stroke canvas on top — so fill color always sits visually behind
-/// that layer's own ink strokes.
+/// that layer's own ink strokes. (Inserted photos are vector-layer content — see `VectorCanvas` —
+/// and render as part of `strokeView`'s vector display, not a dedicated image view here.)
 final class LayerHostView: UIView {
-    let imageView = UIImageView()
     let fillImageView = UIImageView()
     /// Raster content "baked" into this layer's active cel by a select/move/fill/clear operation
     /// (see `Cel.bakedImage`), or the transient "hole" preview while that cel's content is lifted
@@ -426,8 +424,6 @@ final class LayerHostView: UIView {
 
     init() {
         super.init(frame: .zero)
-        imageView.isUserInteractionEnabled = false
-        imageView.isHidden = true
 
         // The fill raster is always rendered at exactly canvasSize (see FloodFillEngine), matching this
         // view's bounds 1:1, so a plain stretch-to-fill can't introduce any resampling blur at the edges.
@@ -447,20 +443,16 @@ final class LayerHostView: UIView {
         // default magnificationFilter (.linear) would bilinearly blur these raster layers' textures as
         // the user zooms in. Nearest-neighbor keeps pixels crisp/blocky at high zoom instead. strokeView
         // sets this on its own internal image view (see StrokeCanvasView.init).
-        imageView.layer.magnificationFilter = .nearest
         fillImageView.layer.magnificationFilter = .nearest
         bakedImageView.layer.magnificationFilter = .nearest
 
         // `fillImageView` now shows the *live* fill-tool preview (committed fills are baked into
         // `bakedImage`), so it sits ABOVE `bakedImageView` — a recolour preview has to draw over the
         // existing baked content it's replacing — and below `strokeView`'s live ink.
-        addSubview(imageView)
         addSubview(bakedImageView)
         addSubview(fillImageView)
         addSubview(strokeView)
         NSLayoutConstraint.activate([
-            // imageView is deliberately NOT pinned here: object layers position it directly via
-            // bounds/transform/center in applyObjectTransform, which Auto Layout constraints would fight.
             fillImageView.topAnchor.constraint(equalTo: topAnchor),
             fillImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
             fillImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -969,14 +961,6 @@ struct CanvasView: UIViewRepresentable {
                 let targetAlpha = CGFloat(layer.opacity)
                 if host.alpha != targetAlpha { host.alpha = targetAlpha }
 
-                if layer.isObjectLayer {
-                    if host.imageView.image !== layer.objectImage { host.imageView.image = layer.objectImage }
-                    host.imageView.isHidden = false
-                    applyObjectTransform(layer.objectTransform, imageSize: layer.objectImage?.size, to: host.imageView)
-                } else {
-                    host.imageView.isHidden = true
-                }
-
                 let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame)
 
                 let displayedBaked = bakedImageToDisplay(layerIndex: index, celIndex: celIdx)
@@ -1018,12 +1002,10 @@ struct CanvasView: UIViewRepresentable {
                 // reaching an active layer underneath. Disabling the host itself lets hit-testing
                 // fall through to the next layer down. The fill tool also disables it on the active
                 // layer: it works via a tap gesture on the container, not stroke capture.
-                // Object layers are never drawable — they're moved/scaled/rotated via the transform
-                // overlay instead, which lives above the whole layer stack (see updateTransformOverlay).
                 // Select/Move take over touch handling entirely while engaged (via SelectionOverlayView/
                 // FloatingPieceOverlayView, both above the whole layer stack), so drawing is disabled then too.
                 let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil
-                    && !layer.isObjectLayer && canvasManager.selectedTool != .fill
+                    && canvasManager.selectedTool != .fill
                     && activePanel != .select && canvasManager.floatingPiece == nil
                     && !(canvasManager.isVectorTransforming && layer.kind == .vector)
                 if host.isUserInteractionEnabled != shouldInteract {
@@ -1049,22 +1031,12 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        private func applyObjectTransform(_ transform: LayerTransform, imageSize: CGSize?, to imageView: UIImageView) {
-            guard let imageSize, imageSize.width > 0, imageSize.height > 0 else { return }
-            if imageView.bounds.size != imageSize {
-                imageView.bounds = CGRect(origin: .zero, size: imageSize)
-            }
-            let newTransform = CGAffineTransform.identity.rotated(by: transform.rotation).scaledBy(x: transform.scale, y: transform.scale)
-            if imageView.transform != newTransform {
-                imageView.transform = newTransform
-            }
-            if imageView.center != transform.position {
-                imageView.center = transform.position
-            }
-        }
+        // MARK: - Vector-layer transform overlay
 
-        // MARK: - Object transform overlay
-
+        /// Drives `ObjectTransformOverlayView` (a generic single-`LayerTransform` handle box) from the
+        /// active vector layer's aggregate transform while `isVectorTransforming` is on — the only
+        /// remaining user of this overlay now that dedicated object layers are gone (inserted photos
+        /// are vector elements moved as part of their layer's overall transform, same as this).
         func updateTransformOverlay() {
             guard let overlay = transformOverlay, let container = containerView else { return }
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else {
@@ -1085,27 +1057,18 @@ struct CanvasView: UIViewRepresentable {
                 return
             }
 
-            guard layer.isObjectLayer, layer.isVisible, let image = layer.objectImage else {
-                overlay.isHidden = true
-                return
-            }
-            overlay.update(transform: layer.objectTransform, imageSize: image.size)
-            container.bringSubviewToFront(overlay)
+            overlay.isHidden = true
         }
 
         func objectTransformChanged(_ transform: LayerTransform) {
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
             let index = canvasManager.currentLayerIndex
-            // Route to the vector-layer transform when that mode is active; otherwise the object path.
-            if canvasManager.isVectorTransforming, canvasManager.layers[index].kind == .vector {
-                canvasManager.setVectorTransform(transform, layerIndex: index)
-                // VectorCanvas is a reference type mutated in place, so refresh its host directly
-                // (the @Published layers array didn't change identity).
-                let layerID = canvasManager.layers[index].id
-                layerHosts[layerID]?.strokeView.refreshDisplay()
-                return
-            }
-            canvasManager.updateObjectTransform(layerIndex: index, transform: transform)
+            guard canvasManager.isVectorTransforming, canvasManager.layers[index].kind == .vector else { return }
+            canvasManager.setVectorTransform(transform, layerIndex: index)
+            // VectorCanvas is a reference type mutated in place, so refresh its host directly
+            // (the @Published layers array didn't change identity).
+            let layerID = canvasManager.layers[index].id
+            layerHosts[layerID]?.strokeView.refreshDisplay()
         }
 
         /// What a layer's `bakedImageView` should show for its active cel: the real `bakedImage`,

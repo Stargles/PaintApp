@@ -1294,6 +1294,54 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "The vector stroke should be visible on the canvas")
     }
 
+    /// Rasterize folds a vector layer's stroke into bakedImage and flips its kind to raster — and
+    /// the whole thing (content + kind) undoes as one step.
+    func testRasterizeFoldsVectorLayerToBakedRasterAndUndoes() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.layersButton"].tap()
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.2)
+        let vectorItem = app.buttons["Vector Layer"]
+        XCTAssertTrue(vectorItem.waitForExistence(timeout: 5))
+        vectorItem.tap()
+        app.buttons["toolbar.layersButton"].tap() // close panel
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, true, "Setup: should still be a vector layer")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 1, "Setup: the stroke should have landed as vector geometry")
+
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap() // select
+        row.tap() // open options
+        let rasterize = app.buttons["layerOptions.rasterize"]
+        XCTAssertTrue(rasterize.waitForExistence(timeout: 5), "A vector layer's options should offer Rasterize")
+        rasterize.tap()
+
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, false, "Rasterize should flip the layer to raster")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), true, "The stroke should be folded into bakedImage")
+        app.buttons["toolbar.layersButton"].tap() // close panel
+
+        // Pixels should be unchanged by the conversion.
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "Rasterizing should not change what's on the canvas")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.isEnabled, "Rasterize should be undoable")
+        undo.tap()
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, true, "Undo should restore the vector layer in one step")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 1, "Undo should restore the vector stroke, not just the kind")
+    }
+
     /// Exercises the custom palette builder end to end: sets a known color (blue) via the hex field
     /// on the Color tab, switches to the Palettes tab and taps "add current color" to append it to
     /// the seeded "Spectrum" preset, taps a different existing swatch to move the picker off blue,
@@ -1962,6 +2010,46 @@ final class PaintSoftwareUITests: XCTestCase {
                        "The surviving layer should hold the flattened pixels of both")
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: point.dx + 0.06, dy: point.dy)),
                        "The merged artwork should still be on the canvas")
+    }
+
+    /// Merging a vector layer must leave the survivor as a genuine `.raster` layer, not `.vector`
+    /// with emptied-out geometry — the inconsistency `rasterizeLayer` exists to prevent.
+    func testMergeDownFromVectorLayerRasterizesTheSurvivor() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.layersButton"].tap()
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.2)
+        let vectorItem = app.buttons["Vector Layer"]
+        XCTAssertTrue(vectorItem.waitForExistence(timeout: 5))
+        vectorItem.tap() // layers: [Layer 1, Vector 2 (active)]
+        app.buttons["toolbar.layersButton"].tap() // close panel
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, true, "Setup: should be a vector layer")
+        addButton.tap() // layers: [Layer 1, Vector 2, Layer 3 (active, raster, on top)]
+        XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForExistence(timeout: 5))
+
+        let top = app.staticTexts["layerPanel.row.2"]
+        top.tap()
+        top.tap()
+        let mergeDown = app.buttons["layerOptions.mergeDown"]
+        XCTAssertTrue(mergeDown.waitForExistence(timeout: 5))
+        mergeDown.tap() // merges Layer 3 into the vector layer below it
+
+        XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForNonExistence(timeout: 5))
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, false,
+                       "The survivor should come out of the merge as a raster layer, not vector with emptied geometry")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), true, "The survivor should hold the flattened pixels")
+        app.buttons["toolbar.layersButton"].tap() // close panel
+
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "The vector stroke should survive the merge")
     }
 
     /// The timeline's name column reorders too: press and hold a name, then drag it.

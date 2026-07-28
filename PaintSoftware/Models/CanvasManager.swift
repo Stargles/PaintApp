@@ -47,7 +47,7 @@ final class CanvasManager: ObservableObject {
 
     /// Imports an image onto the active vector layer as a movable element (centered, scaled to fit),
     /// participating in the layer's overall transform. Returns false if the active layer isn't a
-    /// vector layer (caller falls back to inserting an object layer). Shapes and video slot in here
+    /// vector layer (`insertImage` below falls back to creating one). Shapes and video slot in here
     /// the same way in future.
     @discardableResult
     func addImageToActiveVectorLayer(_ image: UIImage) -> Bool {
@@ -59,11 +59,37 @@ final class CanvasManager: ObservableObject {
         let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
         let element = VectorImageElement(image: image,
                                          transform: LayerTransform(position: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2), scale: fit, rotation: 0))
+        let imagesBefore = vector.images
         vector.addImage(element)
         scheduleThumbnailRegen(layerIndex: currentLayerIndex, celIndex: celIdx)
         // VectorCanvas is a reference type; nudge SwiftUI so the canvas view reconciles + re-renders.
         objectWillChange.send()
+        let layerID = layers[currentLayerIndex].id
+        let celID = layers[currentLayerIndex].cels[celIdx].id
+        recordUndo(name: "Insert Image", cost: Self.approximateImageCost(image), undo: { [weak self] in
+            vector.images = imagesBefore
+            vector.bumpVersion()
+            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+            self?.objectWillChange.send()
+        }, redo: { [weak self] in
+            vector.images = imagesBefore + [element]
+            vector.bumpVersion()
+            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+            self?.objectWillChange.send()
+        })
         return true
+    }
+
+    /// Inserts a photo as a movable vector element — images are always vector content (resolution-
+    /// independent, move/rotate/scale with the rest of that layer's transform), never raster pixels.
+    /// Adds to the active layer if it's already a vector layer; otherwise creates a fresh vector layer
+    /// first (a separate, preceding undo step — see `addVectorLayer`). Replaces the old dedicated
+    /// "object layer" concept (a whole layer pinned to one image).
+    @discardableResult
+    func insertImage(_ image: UIImage) -> Bool {
+        if addImageToActiveVectorLayer(image) { return true }
+        addVectorLayer()
+        return addImageToActiveVectorLayer(image)
     }
 
     /// Applies an overall move/rotate/scale to the active vector layer's content, losslessly (the
@@ -79,6 +105,29 @@ final class CanvasManager: ObservableObject {
         // republish; the coordinator refreshes the canvas view directly (see objectTransformChanged),
         // and this debounced regen updates the layer-panel thumbnail.
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIdx)
+    }
+
+    /// Converts a vector layer to raster in place: each cel's full content (vector strokes/images,
+    /// plus any existing fillImage/bakedImage — `PixelOps.rasterize` already flattens all of it into
+    /// one image) is folded into `bakedImage`, `vector` is cleared, and `kind` becomes `.raster`. A
+    /// no-op if the layer isn't currently `.vector`. `mergeLayers` also calls this, on both layers
+    /// being merged, before flattening them together — so a vector layer never comes out of a merge
+    /// still labeled `.vector` with stale/empty geometry. The nested `withStructureUndo` call below
+    /// coalesces into whichever undo scope is already open, so calling this from inside
+    /// `mergeLayers`'s own `withStructureUndo` doesn't add a second, separate undo step.
+    func rasterizeLayer(layerIndex: Int) {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .vector,
+              let canvasSize else { return }
+        if isVectorTransforming && currentLayerIndex == layerIndex { isVectorTransforming = false }
+        withStructureUndo(name: "Rasterize") {
+            for celIndex in layers[layerIndex].cels.indices {
+                let cel = layers[layerIndex].cels[celIndex]
+                layers[layerIndex].cels[celIndex].bakedImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+                layers[layerIndex].cels[celIndex].fillImage = nil
+                layers[layerIndex].cels[celIndex].vector = nil
+            }
+            layers[layerIndex].kind = .raster
+        }
     }
 
     // MARK: - Select & Move tool state (see SelectionModels.swift for the operations)
@@ -268,43 +317,6 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Inserts a photo as an "object layer": the image isn't rasterized onto the canvas, it's kept
-    /// as a standalone object with its own position/scale/rotation that can be adjusted at any time
-    /// via the on-canvas transform handles (see ObjectTransformOverlayView).
-    func addObjectLayer(image: UIImage, name: String? = nil) {
-        withStructureUndo(name: "Insert Image") {
-            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-            var layer = Layer(id: UUID(), name: name ?? "Image \(layers.count + 1)", opacity: 1.0, isVisible: true, isObjectLayer: true, objectImage: image, cels: [cel])
-            layer.thumbnail = image
-            layer.objectTransform = initialObjectTransform(for: image)
-            layers.append(layer)
-            currentLayerIndex = layers.count - 1
-        }
-    }
-
-    /// Centers the image and scales it to comfortably fit inside the canvas (rather than covering
-    /// it edge-to-edge), so a freshly-inserted photo starts fully visible with room to grab its
-    /// transform handles right away.
-    private func initialObjectTransform(for image: UIImage) -> LayerTransform {
-        guard let canvasSize, image.size.width > 0, image.size.height > 0 else { return .identity }
-        let fitScale = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height)
-        return LayerTransform(
-            position: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
-            scale: fitScale * 0.8,
-            rotation: 0
-        )
-    }
-
-    /// Deliberately NOT wrapped in `withStructureUndo` — `ObjectTransformOverlayView`'s pan
-    /// handlers call this on every `.changed` event of a move/scale/rotate gesture, so the
-    /// consumer brackets the whole gesture with `beginStructureGesture()`/
-    /// `commitStructureGesture(name:)` instead of one step per call (see `resizeCelLeftEdge`'s
-    /// comment for the same pattern on the timeline).
-    func updateObjectTransform(layerIndex: Int, transform: LayerTransform) {
-        guard layers.indices.contains(layerIndex) else { return }
-        layers[layerIndex].objectTransform = transform
-    }
-
     func deleteLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
         withStructureUndo(name: "Delete Layer") {
@@ -352,10 +364,6 @@ final class CanvasManager: ObservableObject {
         let newSize = CGSize(width: oldSize.width + 2 * delta, height: oldSize.height + 2 * delta)
 
         for layerIndex in layers.indices {
-            if layers[layerIndex].isObjectLayer {
-                layers[layerIndex].objectTransform.position.x += offset.x
-                layers[layerIndex].objectTransform.position.y += offset.y
-            }
             for celIndex in layers[layerIndex].cels.indices {
                 layers[layerIndex].cels[celIndex].raster =
                     layers[layerIndex].cels[celIndex].raster.resized(to: newSize, offset: offset)
@@ -391,24 +399,10 @@ final class CanvasManager: ObservableObject {
                     layers[layerIndex].cels[celIndex].bakedImage = Self.flippedImage(bakedImage, canvasSize: canvasSize, horizontal: horizontal)
                 }
             }
-            // Object layers hold their content as an independent image + LayerTransform (position/
-            // scale/rotation) rather than a canvas-sized buffer, so they need their own mirroring:
-            // the photo's own pixels are mirrored about its own center (so its content reads
-            // correctly reflected, same as everything else on the canvas), its position mirrors
-            // about the canvas center axis, and its rotation negates — mirroring reverses the sense
-            // of rotation (a shape rotated 30° clockwise reads as 30° counter-clockwise once the
-            // whole scene is mirrored). Without this, Flip Horizontal/Vertical left inserted photos
-            // unmirrored and unmoved while everything else flipped around them.
-            if layers[layerIndex].isObjectLayer, let objectImage = layers[layerIndex].objectImage {
-                layers[layerIndex].objectImage = Self.mirroredImage(objectImage, horizontal: horizontal)
-                layers[layerIndex].thumbnail = layers[layerIndex].objectImage
-                if horizontal {
-                    layers[layerIndex].objectTransform.position.x = canvasSize.width - layers[layerIndex].objectTransform.position.x
-                } else {
-                    layers[layerIndex].objectTransform.position.y = canvasSize.height - layers[layerIndex].objectTransform.position.y
-                }
-                layers[layerIndex].objectTransform.rotation = -layers[layerIndex].objectTransform.rotation
-            }
+            // NOTE: vector-layer content (strokes/shapes/fills/images, all stored as geometry in
+            // `cel.vector` — see `VectorCanvas`) is not mirrored by this loop at all, unlike
+            // raster/fillImage/bakedImage above. This predates object layers being retired; a vector
+            // layer's live strokes already didn't flip. Flagged as a follow-up, not fixed here.
         }
         // Not undoable, same as setCanvasPadding: every cel's raster/fill/baked content is mirrored
         // in place, so any undo entry recorded before the flip would restore content in the wrong
@@ -416,26 +410,6 @@ final class CanvasManager: ObservableObject {
         history.removeAll()
         refreshUndoRedoState()
         regenerateAllThumbnails()
-    }
-
-    /// Mirrors an image's own pixel content about its own center — used for an object layer's photo,
-    /// which (unlike raster/fillImage/bakedImage) isn't a canvas-sized buffer, so `flippedImage`'s
-    /// canvas-relative mirroring doesn't apply to it.
-    private static func mirroredImage(_ image: UIImage, horizontal: Bool) -> UIImage {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = image.scale
-        format.opaque = false
-        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
-        return renderer.image { ctx in
-            if horizontal {
-                ctx.cgContext.translateBy(x: image.size.width, y: 0)
-                ctx.cgContext.scaleBy(x: -1, y: 1)
-            } else {
-                ctx.cgContext.translateBy(x: 0, y: image.size.height)
-                ctx.cgContext.scaleBy(x: 1, y: -1)
-            }
-            image.draw(in: CGRect(origin: .zero, size: image.size))
-        }
     }
 
     /// Mirrors a cel's raster content (fillImage or bakedImage) about the canvas center to match
@@ -675,12 +649,6 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               let canvasSize else { return }
-        // Object layers never have drawing content in their cel, so the normal render-the-drawing
-        // path would just produce a blank thumbnail — show the photo itself instead.
-        if layers[layerIndex].isObjectLayer {
-            layers[layerIndex].thumbnail = layers[layerIndex].objectImage
-            return
-        }
         let cel = layers[layerIndex].cels[celIndex]
         let image: UIImage
         if cel.bakedImage != nil || cel.vector != nil {
@@ -1147,9 +1115,12 @@ final class CanvasManager: ObservableObject {
     }
 
     /// Flattens two layers into one at the current frame — the pinch-together gesture in the layer
-    /// panel. The lower of the two survives (keeping its name and folder); the upper is removed and
-    /// its pixels are baked down with both layers' opacities applied. Not undoable: the merged
-    /// result replaces both layers' per-layer stroke stacks, the same way `setCanvasPadding` works.
+    /// panel. The lower of the two survives (keeping its name and folder) as a `.raster` layer; the
+    /// upper is removed and its pixels are baked down with both layers' opacities applied. If either
+    /// layer is `.vector`, it's fully rasterized first (every cel, not just the merged one — see
+    /// `rasterizeLayer`) so it never comes out of this still labeled `.vector`. One undo step
+    /// covering the rasterize(s) + the flatten + the deletion together (nested `withStructureUndo`
+    /// calls, including the one inside `deleteLayer`, all coalesce into this outer scope).
     @discardableResult
     func mergeLayers(_ firstID: UUID, _ secondID: UUID) -> Bool {
         guard let canvasSize, firstID != secondID,
@@ -1158,27 +1129,29 @@ final class CanvasManager: ObservableObject {
 
         let bottomIndex = min(firstIndex, secondIndex)
         let topIndex = max(firstIndex, secondIndex)
-        guard let bottomCel = activeCelIndex(inLayer: bottomIndex, atFrame: currentFrame),
-              let topCel = activeCelIndex(inLayer: topIndex, atFrame: currentFrame) else { return false }
-
-        let flattened = PixelOps.flatten(
-            bottom: PixelOps.rasterize(cel: layers[bottomIndex].cels[bottomCel], canvasSize: canvasSize),
-            bottomOpacity: layers[bottomIndex].isVisible ? layers[bottomIndex].opacity : 0,
-            top: PixelOps.rasterize(cel: layers[topIndex].cels[topCel], canvasSize: canvasSize),
-            topOpacity: layers[topIndex].isVisible ? layers[topIndex].opacity : 0,
-            canvasSize: canvasSize
-        )
+        guard activeCelIndex(inLayer: bottomIndex, atFrame: currentFrame) != nil,
+              activeCelIndex(inLayer: topIndex, atFrame: currentFrame) != nil else { return false }
 
         let survivorID = layers[bottomIndex].id
-        // Merging is destructive (the top layer's pixels are flattened away), so the whole thing has
-        // to be one undo step — the nested deleteLayer coalesces into this scope.
         withStructureUndo(name: "Merge Layers") {
+            rasterizeLayer(layerIndex: bottomIndex)
+            rasterizeLayer(layerIndex: topIndex)
+            // Re-resolve the current-frame cels post-rasterize: rasterizeLayer doesn't reorder
+            // layers or change cel boundaries, but re-deriving keeps this robust regardless.
+            guard let bottomCel = activeCelIndex(inLayer: bottomIndex, atFrame: currentFrame),
+                  let topCel = activeCelIndex(inLayer: topIndex, atFrame: currentFrame) else { return }
+
+            let flattened = PixelOps.flatten(
+                bottom: PixelOps.rasterize(cel: layers[bottomIndex].cels[bottomCel], canvasSize: canvasSize),
+                bottomOpacity: layers[bottomIndex].isVisible ? layers[bottomIndex].opacity : 0,
+                top: PixelOps.rasterize(cel: layers[topIndex].cels[topCel], canvasSize: canvasSize),
+                topOpacity: layers[topIndex].isVisible ? layers[topIndex].opacity : 0,
+                canvasSize: canvasSize
+            )
+
             layers[bottomIndex].cels[bottomCel].raster = .empty(size: canvasSize)
             layers[bottomIndex].cels[bottomCel].fillImage = nil
             layers[bottomIndex].cels[bottomCel].bakedImage = flattened
-            if layers[bottomIndex].cels[bottomCel].vector != nil {
-                layers[bottomIndex].cels[bottomCel].vector = .empty(size: canvasSize)
-            }
             layers[bottomIndex].opacity = 1
             layers[bottomIndex].isVisible = true
 
@@ -1204,9 +1177,7 @@ final class CanvasManager: ObservableObject {
         }
         var copy = Layer(id: UUID(), name: source.name + " copy", opacity: source.opacity,
                          isVisible: source.isVisible, isFillReference: source.isFillReference,
-                         kind: source.kind, isObjectLayer: source.isObjectLayer,
-                         objectImage: source.objectImage, objectTransform: source.objectTransform,
-                         parentFolderID: source.parentFolderID, cels: cels)
+                         kind: source.kind, parentFolderID: source.parentFolderID, cels: cels)
         copy.thumbnail = source.thumbnail
         withStructureUndo(name: "Duplicate Layer") {
             layers.insert(copy, at: index + 1)
@@ -1545,9 +1516,6 @@ final class CanvasManager: ObservableObject {
         let composited = renderer.image { _ in
             let rect = CGRect(x: 0, y: 0, width: width, height: height)
             for source in references {
-                if source.layer.isObjectLayer, let objectImage = source.layer.objectImage {
-                    objectImage.draw(in: rect)
-                }
                 source.cel.bakedImage?.draw(in: rect)
                 source.cel.raster.renderToUIImage().draw(in: rect)
                 source.cel.vector?.render().draw(in: rect)
@@ -2002,9 +1970,6 @@ struct Layer: Identifiable {
     /// on independently from the layer's Edit menu. See [[feedback-vector-layer-extensibility]].
     var isFillReference: Bool = true
     var kind: LayerKind = .raster
-    var isObjectLayer: Bool = false
-    var objectImage: UIImage? = nil
-    var objectTransform: LayerTransform = .identity
     /// If set, this layer belongs to the folder with this ID. Layer ordering in the `layers` array
     /// determines the stacking order within each folder. A folder's visibility/expand state lives on
     /// the corresponding `LayerFolder` in `CanvasManager.folders`.
@@ -2013,9 +1978,9 @@ struct Layer: Identifiable {
     var thumbnail: UIImage? = nil
 }
 
-/// Position/scale/rotation of an object layer's photo, in canvas point space (same coordinate
-/// system as everything drawn into a Cel's raster). One transform per layer for now; if/when
-/// these become animatable, this is what would move onto (or get keyframed alongside) each Cel.
+/// Position/scale/rotation, in canvas point space (same coordinate system as everything drawn into
+/// a Cel's raster). Used for a `VectorImageElement`'s own placement, and for driving/reading a
+/// vector layer's overall transform via `ObjectTransformOverlayView` while `isVectorTransforming`.
 struct LayerTransform: Equatable {
     var position: CGPoint
     var scale: CGFloat
