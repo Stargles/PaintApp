@@ -1,12 +1,10 @@
 import UIKit
 import CoreGraphics
 
-/// One input sample of a vector stroke, in the stroke's own canvas-point space at draw time.
-struct VectorSample: Codable, Equatable {
-    var x: CGFloat
-    var y: CGFloat
-    var pressure: CGFloat
-    var point: CGPoint { CGPoint(x: x, y: y) }
+extension CodableColor {
+    /// The stored components as a `UIColor`. One definition rather than the same four-argument
+    /// initialiser repeated at every call site.
+    var uiColor: UIColor { UIColor(red: red, green: green, blue: blue, alpha: alpha) }
 }
 
 /// A brush stroke stored as *geometry* (its input samples + the brush/color/size used), not baked
@@ -22,7 +20,7 @@ struct VectorStroke: Identifiable, Codable {
     var opacity: Double
     var samples: [VectorSample]
 
-    var uiColor: UIColor { UIColor(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha) }
+    var uiColor: UIColor { color.uiColor }
 }
 
 /// A filled region stored as a vector path on a vector layer: the flood-fill tool's output when
@@ -52,95 +50,7 @@ struct VectorFillElement: Identifiable, Codable {
         return bezier.cgPath
     }
 
-    var uiColor: UIColor {
-        UIColor(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
-    }
-}
-
-/// A geometric shape stored on a vector layer: a stroked line, rectangle, or oval defined by two
-/// anchor points (start + end), a rotation angle, and the current brush color/size/opacity. Created
-/// by the smart-shape gesture (hold-to-convert a freehand stroke) and lives in a transient editable
-/// state with control-point handles until committed into the layer.
-struct VectorShapeElement: Identifiable, Codable {
-    var id: UUID = UUID()
-    var kind: ShapeKind
-    var color: CodableColor
-    var strokeWidth: CGFloat
-    var opacity: Double
-    var startPoint: CGPoint
-    var endPoint: CGPoint
-    var rotation: CGFloat
-
-    enum ShapeKind: String, Codable, CaseIterable {
-        case line
-        case rectangle
-        case oval
-    }
-
-    var uiColor: UIColor {
-        UIColor(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
-    }
-
-    /// Center point between start and end.
-    var center: CGPoint {
-        CGPoint(x: (startPoint.x + endPoint.x) / 2,
-                y: (startPoint.y + endPoint.y) / 2)
-    }
-
-    /// Bounding rect from start/end (unrotated).
-    var boundingRect: CGRect {
-        let origin = CGPoint(x: min(startPoint.x, endPoint.x),
-                             y: min(startPoint.y, endPoint.y))
-        let size = CGSize(width: abs(endPoint.x - startPoint.x),
-                          height: abs(endPoint.y - startPoint.y))
-        return CGRect(origin: origin, size: size)
-    }
-
-    /// The CGPath for this shape (stroked outline), unrotated.
-    var cgPath: CGPath {
-        switch kind {
-        case .line:
-            let path = UIBezierPath()
-            path.move(to: startPoint)
-            path.addLine(to: endPoint)
-            return path.cgPath
-        case .rectangle:
-            return UIBezierPath(rect: boundingRect).cgPath
-        case .oval:
-            return UIBezierPath(ovalIn: boundingRect).cgPath
-        }
-    }
-
-    /// The CGPath rotated around `center` by `rotation`.
-    var rotatedCGPath: CGPath {
-        let path = UIBezierPath(cgPath: cgPath)
-        let c = center
-        let t = CGAffineTransform(translationX: c.x, y: c.y)
-            .rotated(by: rotation)
-            .translatedBy(x: -c.x, y: -c.y)
-        path.apply(t)
-        return path.cgPath
-    }
-
-    /// Hit-test `point` against this shape's stroked outline (within `tolerance` canvas points).
-    func hitTest(_ point: CGPoint, tolerance: CGFloat = 12) -> Bool {
-        let path = UIBezierPath(cgPath: rotatedCGPath)
-        path.lineWidth = max(strokeWidth, tolerance)
-        path.lineCapStyle = .round
-        path.lineJoinStyle = .round
-        return path.contains(point)
-    }
-
-    init(kind: ShapeKind, color: CodableColor, strokeWidth: CGFloat, opacity: Double,
-         startPoint: CGPoint, endPoint: CGPoint, rotation: CGFloat = 0) {
-        self.kind = kind
-        self.color = color
-        self.strokeWidth = strokeWidth
-        self.opacity = opacity
-        self.startPoint = startPoint
-        self.endPoint = endPoint
-        self.rotation = rotation
-    }
+    var uiColor: UIColor { color.uiColor }
 }
 
 /// An imported image placed on a vector layer, movable/scalable/rotatable via its own transform

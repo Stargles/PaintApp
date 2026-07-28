@@ -3,10 +3,15 @@ import UIKit
 /// A transparent overlay that displays a transient smart-shape preview with draggable
 /// control-point handles. Placed in the canvas container above all layers when active.
 ///
+/// The preview is the *collapsed brush stroke* the shape will bake into — supplied as an already-
+/// rendered image by `CanvasManager.activeShapePreviewImage` — not a uniform stroked outline. That
+/// way the transient state looks exactly like the result, instead of visibly changing the instant it
+/// commits. A faint outline is drawn under it purely as a geometry guide for the handles.
+///
 /// Two visual modes:
-///   1. **Following** (finger still down after hold-detection): shape outline only, no handles,
+///   1. **Following** (finger still down after hold-detection): preview only, no handles,
 ///      `isUserInteractionEnabled = false` so touches pass through to the stroke view.
-///   2. **Adjustable** (finger lifted): shape outline + draggable handles. A pan gesture on
+///   2. **Adjustable** (finger lifted): preview + draggable handles. A pan gesture on
 ///      this view tracks handle dragging; touching elsewhere fires `onTapOutside`.
 ///
 /// Lines have start + end handles. Rectangles have 4 corner handles + rotation.
@@ -15,14 +20,26 @@ final class ShapeOverlayView: UIView {
 
     var isActive: Bool = false {
         didSet {
+            guard isActive != oldValue else { return }
             isHidden = !isActive
-            if !isActive { clearHandles(); isUserInteractionEnabled = false }
+            if !isActive {
+                clearHandles()
+                isUserInteractionEnabled = false
+                previewView.image = nil
+                shapeLayer.path = nil
+                shape = nil
+            }
         }
     }
 
-    var shape: VectorShapeElement? { didSet { updateShapePath() } }
+    /// The geometry to draw handles for — already constraint-resolved by the caller, so this view
+    /// never has to second-guess what the user is going to get.
+    private(set) var shape: ShapeGeometry?
 
-    var isConstrained: Bool = false { didSet { updateShapePath() } }
+    /// True while two fingers are on the overlay, which engages the snap constraint. Reported
+    /// upward rather than acted on here: `CanvasManager` owns the constraint so the preview and the
+    /// committed stroke can't disagree about it.
+    private(set) var isConstrained: Bool = false
 
     // MARK: - Callbacks
 
@@ -31,6 +48,7 @@ final class ShapeOverlayView: UIView {
     var onCornerDragged: ((CGPoint, CornerHandle) -> Void)?
     var onEdgeDragged: ((CGPoint, EdgeHandle) -> Void)?
     var onTapOutside: (() -> Void)?
+    var onConstraintChanged: ((Bool) -> Void)?
 
     enum EdgeHandle { case top, bottom, left, right }
     enum CornerHandle { case topLeft, topRight, bottomLeft, bottomRight }
@@ -45,8 +63,14 @@ final class ShapeOverlayView: UIView {
 
     private struct HandleInfo { let kind: HandleKind; let layer: CALayer }
 
+    private static let handleSize: CGFloat = 12
+    private static let rotationHandleSize: CGFloat = 10
+    private static let rotationHandleOffset: CGFloat = 30
+
     // MARK: - Layers & gesture
 
+    /// The collapsed-stroke preview, in canvas coordinates (this view is canvas-sized).
+    private let previewView = UIImageView()
     private let shapeLayer = CAShapeLayer()
     private let handleLayer = CALayer()
     private var handles: [HandleInfo] = []
@@ -63,7 +87,25 @@ final class ShapeOverlayView: UIView {
         isHidden = true
         isUserInteractionEnabled = false
 
+        previewView.contentMode = .scaleToFill
+        previewView.isUserInteractionEnabled = false
+        // Same reasoning as the layer hosts: native-resolution raster content should zoom blocky
+        // rather than blurred, so the preview matches the stroke it turns into.
+        previewView.layer.magnificationFilter = .nearest
+        previewView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(previewView)
+        NSLayoutConstraint.activate([
+            previewView.topAnchor.constraint(equalTo: topAnchor),
+            previewView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            previewView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            previewView.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+
+        // A thin guide outline under the preview, so the handles visibly belong to a shape even
+        // where the brush stroke is faint or the brush is very small.
         shapeLayer.fillColor = UIColor.clear.cgColor
+        shapeLayer.strokeColor = UIColor.systemBlue.withAlphaComponent(0.55).cgColor
+        shapeLayer.lineWidth = 1
         shapeLayer.lineJoin = .round
         shapeLayer.lineCap = .round
         layer.addSublayer(shapeLayer)
@@ -74,39 +116,32 @@ final class ShapeOverlayView: UIView {
         addGestureRecognizer(pan)
     }
 
-    // MARK: - Shape rendering
+    // MARK: - Content updates
 
-    private func updateShapePath() {
-        guard let shape else { shapeLayer.path = nil; clearHandles(); return }
-        let display = displayShape(shape)
-        shapeLayer.path = display.rotatedCGPath
-        shapeLayer.lineWidth = display.strokeWidth
-        shapeLayer.strokeColor = display.uiColor.cgColor
-        rebuildHandles(for: display)
-    }
+    /// Updates everything the overlay draws in one shot. `previewImage` is the collapsed stroke;
+    /// `showHandles` is false while the finger is still following the shape.
+    ///
+    /// All CALayer mutations here run with implicit animations disabled. Without that, every geometry
+    /// update animates its path/frame over the default 0.25s, and since this is called on every
+    /// SwiftUI render pass those animations restart continuously — which is what made the transient
+    /// shape appear to flicker and lag behind the finger.
+    func update(shape: ShapeGeometry, previewImage: UIImage?, showHandles: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
 
-    private func displayShape(_ shape: VectorShapeElement) -> VectorShapeElement {
-        guard isConstrained else { return shape }
-        switch shape.kind {
-        case .line:
-            let angle = atan2(shape.endPoint.y - shape.startPoint.y,
-                              shape.endPoint.x - shape.startPoint.x)
-            let snapped = ShapeDetector.snapAngle(angle, toIncrement: .pi / 12)
-            let dist = hypot(shape.endPoint.x - shape.startPoint.x,
-                             shape.endPoint.y - shape.startPoint.y)
-            let newEnd = CGPoint(x: shape.startPoint.x + cos(snapped) * dist,
-                                 y: shape.startPoint.y + sin(snapped) * dist)
-            return VectorShapeElement(kind: .line, color: shape.color,
-                                      strokeWidth: shape.strokeWidth, opacity: shape.opacity,
-                                      startPoint: shape.startPoint, endPoint: newEnd,
-                                      rotation: shape.rotation)
-        case .rectangle, .oval:
-            let sq = ShapeDetector.constrainToSquare(shape.boundingRect)
-            return VectorShapeElement(kind: shape.kind, color: shape.color,
-                                      strokeWidth: shape.strokeWidth, opacity: shape.opacity,
-                                      startPoint: sq.origin,
-                                      endPoint: CGPoint(x: sq.maxX, y: sq.maxY),
-                                      rotation: shape.rotation)
+        let kindChanged = self.shape?.kind != shape.kind
+        self.shape = shape
+        previewView.image = previewImage
+        shapeLayer.path = shape.rotatedCGPath
+
+        guard showHandles else { clearHandles(); return }
+        // Rebuild only when the handle *set* changes; otherwise just move the existing layers.
+        // Tearing down and re-adding sublayers on every update made the handles blink.
+        if kindChanged || handles.isEmpty {
+            rebuildHandles(for: shape)
+        } else {
+            repositionHandles(for: shape)
         }
     }
 
@@ -118,71 +153,52 @@ final class ShapeOverlayView: UIView {
         activeHandle = nil
     }
 
-    private func rebuildHandles(for shape: VectorShapeElement) {
-        clearHandles()
-        let hs: CGFloat = 12, rh: CGFloat = 10, ro: CGFloat = 30
-
-        func add(_ pos: CGPoint, _ kind: HandleKind, _ size: CGFloat, _ isRot: Bool) {
-            let h = makeLayer(isRot: isRot)
-            h.frame = CGRect(x: pos.x - size/2, y: pos.y - size/2, width: size, height: size)
-            handleLayer.addSublayer(h)
-            handles.append(HandleInfo(kind: kind, layer: h))
-        }
-
+    /// The handles a shape kind gets, and where they sit for the given geometry. The single source
+    /// of truth for both `rebuildHandles` and `repositionHandles`, so the two can't drift apart.
+    private func handleLayout(for shape: ShapeGeometry) -> [(kind: HandleKind, position: CGPoint, isRotation: Bool)] {
+        let r = shape.boundingRect
+        let rotationPoint = CGPoint(x: r.midX, y: r.minY - Self.rotationHandleOffset)
         switch shape.kind {
         case .line:
-            add(shape.startPoint, .start, hs, false)
-            add(shape.endPoint, .end, hs, false)
-
+            return [(.start, shape.startPoint, false), (.end, shape.endPoint, false)]
         case .rectangle:
-            let r = shape.boundingRect
-            add(CGPoint(x: r.minX, y: r.minY), .cornerTL, hs, false)
-            add(CGPoint(x: r.maxX, y: r.minY), .cornerTR, hs, false)
-            add(CGPoint(x: r.minX, y: r.maxY), .cornerBL, hs, false)
-            add(CGPoint(x: r.maxX, y: r.maxY), .cornerBR, hs, false)
-            add(CGPoint(x: r.midX, y: r.minY - ro), .rotation, rh, true)
-
+            return [(.cornerTL, CGPoint(x: r.minX, y: r.minY), false),
+                    (.cornerTR, CGPoint(x: r.maxX, y: r.minY), false),
+                    (.cornerBL, CGPoint(x: r.minX, y: r.maxY), false),
+                    (.cornerBR, CGPoint(x: r.maxX, y: r.maxY), false),
+                    (.rotation, rotationPoint, true)]
         case .oval:
-            let r = shape.boundingRect
-            add(CGPoint(x: r.midX, y: r.minY), .axisTop, hs, false)
-            add(CGPoint(x: r.midX, y: r.maxY), .axisBottom, hs, false)
-            add(CGPoint(x: r.minX, y: r.midY), .axisLeft, hs, false)
-            add(CGPoint(x: r.maxX, y: r.midY), .axisRight, hs, false)
-            add(CGPoint(x: r.midX, y: r.minY - ro), .rotation, rh, true)
+            return [(.axisTop, CGPoint(x: r.midX, y: r.minY), false),
+                    (.axisBottom, CGPoint(x: r.midX, y: r.maxY), false),
+                    (.axisLeft, CGPoint(x: r.minX, y: r.midY), false),
+                    (.axisRight, CGPoint(x: r.maxX, y: r.midY), false),
+                    (.rotation, rotationPoint, true)]
         }
     }
 
-    private func makeLayer(isRot: Bool) -> CALayer {
-        let h = CALayer()
-        h.backgroundColor = isRot ? UIColor.systemGreen.cgColor : UIColor.white.cgColor
-        h.borderColor = isRot ? UIColor.white.cgColor : UIColor.systemBlue.cgColor
-        h.borderWidth = 2
-        return h
+    private func rebuildHandles(for shape: ShapeGeometry) {
+        clearHandles()
+        for entry in handleLayout(for: shape) {
+            let size = entry.isRotation ? Self.rotationHandleSize : Self.handleSize
+            let h = CALayer()
+            h.backgroundColor = entry.isRotation ? UIColor.systemGreen.cgColor : UIColor.white.cgColor
+            h.borderColor = entry.isRotation ? UIColor.white.cgColor : UIColor.systemBlue.cgColor
+            h.borderWidth = 2
+            h.frame = CGRect(x: entry.position.x - size / 2, y: entry.position.y - size / 2,
+                             width: size, height: size)
+            handleLayer.addSublayer(h)
+            handles.append(HandleInfo(kind: entry.kind, layer: h))
+        }
     }
 
-    func repositionHandles(for shape: VectorShapeElement) {
-        let hs: CGFloat = 12, rh: CGFloat = 10, ro: CGFloat = 30
+    private func repositionHandles(for shape: ShapeGeometry) {
+        let positions = Dictionary(handleLayout(for: shape).map { ($0.kind, $0.position) },
+                                   uniquingKeysWith: { first, _ in first })
         for info in handles {
-            let pos: CGPoint = {
-                let r = shape.boundingRect
-                switch info.kind {
-                case .start:    return shape.startPoint
-                case .end:      return shape.endPoint
-                case .cornerTL: return CGPoint(x: r.minX, y: r.minY)
-                case .cornerTR: return CGPoint(x: r.maxX, y: r.minY)
-                case .cornerBL: return CGPoint(x: r.minX, y: r.maxY)
-                case .cornerBR: return CGPoint(x: r.maxX, y: r.maxY)
-                case .axisTop:  return CGPoint(x: r.midX, y: r.minY)
-                case .axisBottom: return CGPoint(x: r.midX, y: r.maxY)
-                case .axisLeft:  return CGPoint(x: r.minX, y: r.midY)
-                case .axisRight: return CGPoint(x: r.maxX, y: r.midY)
-                case .rotation:  return CGPoint(x: r.midX, y: r.minY - ro)
-                }
-            }()
-            info.layer.frame = CGRect(x: pos.x - info.layer.bounds.width/2,
-                                       y: pos.y - info.layer.bounds.height/2,
-                                       width: info.layer.bounds.width,
-                                       height: info.layer.bounds.height)
+            guard let position = positions[info.kind] else { continue }
+            let size = info.layer.bounds.size
+            info.layer.frame = CGRect(x: position.x - size.width / 2, y: position.y - size.height / 2,
+                                      width: size.width, height: size.height)
         }
     }
 
@@ -221,7 +237,7 @@ final class ShapeOverlayView: UIView {
             case .axisRight: onEdgeDragged?(point, .right)
             case .rotation:
                 if let shape {
-                    let c = CGPoint(x: shape.boundingRect.midX, y: shape.boundingRect.midY)
+                    let c = shape.center
                     onRotationDragged?(atan2(point.y - c.y, point.x - c.x) + .pi / 2)
                 }
             }
@@ -250,9 +266,17 @@ final class ShapeOverlayView: UIView {
         updateSnap(event)
     }
 
+    /// Reports the two-finger constraint upward. Setting it directly is also allowed (the canvas's
+    /// own pinch recognizer drives it when the touches land outside this view).
+    func setConstrained(_ on: Bool) {
+        guard isConstrained != on else { return }
+        isConstrained = on
+        onConstraintChanged?(on)
+    }
+
     private func updateSnap(_ event: UIEvent?) {
         guard isUserInteractionEnabled else { return }
         let count = (event?.allTouches ?? []).filter { $0.phase != .ended && $0.phase != .cancelled }.count
-        isConstrained = count >= 2
+        setConstrained(count >= 2)
     }
 }

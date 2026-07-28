@@ -14,6 +14,9 @@
 		C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */; };
 		B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */; };
 		B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */; };
+		B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */; };
+		B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */; };
+		B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,6 +39,9 @@
 		C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectBackupManager.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Brush.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeStabilizer.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeGeometry.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeDetector.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeDetectorLogicTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -107,6 +113,7 @@
 				9A3A0221A22D3DDFCD4EEF94 /* PaintSoftwareUITests.swift */,
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
+				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
 			);
 			path = PaintSoftwareUITests;
 			sourceTree = "<group>";
@@ -116,6 +123,8 @@
 			children = (
 				B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */,
 				B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */,
+				B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */,
+				B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */,
 				C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */,
 			);
 			name = "Engine sources shared with PaintSoftwareUITests";
@@ -231,6 +240,9 @@
 				C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */,
 				B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */,
 				B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */,
+				B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */,
+				B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */,
+				B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
