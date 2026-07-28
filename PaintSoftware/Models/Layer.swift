@@ -1,0 +1,20 @@
+import UIKit
+
+struct Layer: Identifiable {
+    let id: UUID
+    var name: String
+    var opacity: Double
+    var isVisible: Bool
+    /// Whether this layer's content contributes to the fill tool's boundary walls. The fill uses the
+    /// union of all layers with this set (see `CanvasManager.fillReferenceSources`). Defaults to true;
+    /// hiding a layer clears it (hidden layers are fill-excluded by default) and it can be toggled back
+    /// on independently from the layer's Edit menu. See [[feedback-vector-layer-extensibility]].
+    var isFillReference: Bool = true
+    var kind: LayerKind = .raster
+    /// If set, this layer belongs to the folder with this ID. Layer ordering in the `layers` array
+    /// determines the stacking order within each folder. A folder's visibility/expand state lives on
+    /// the corresponding `LayerFolder` in `CanvasManager.folders`.
+    var parentFolderID: UUID? = nil
+    var cels: [Cel]
+    var thumbnail: UIImage? = nil
+}

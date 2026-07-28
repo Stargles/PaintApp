@@ -39,6 +39,15 @@
 		DEC0DE000000000000000028 /* PaintSoftware/Utilities/ColorMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */; };
 		DEC0DE00000000000000002A /* PaintSoftware/Utilities/ThumbnailRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */; };
 		DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */; };
+		DEC0DE000000000000000031 /* PaintSoftware/Models/Tool.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000030 /* PaintSoftware/Models/Tool.swift */; };
+		DEC0DE000000000000000033 /* PaintSoftware/Models/LayerFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */; };
+		DEC0DE000000000000000035 /* PaintSoftware/Models/ViewPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000034 /* PaintSoftware/Models/ViewPreset.swift */; };
+		DEC0DE000000000000000037 /* PaintSoftware/Models/LayerStackRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000036 /* PaintSoftware/Models/LayerStackRow.swift */; };
+		DEC0DE000000000000000039 /* PaintSoftware/Models/Cel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000038 /* PaintSoftware/Models/Cel.swift */; };
+		DEC0DE00000000000000003B /* PaintSoftware/Models/CopiedCel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000003A /* PaintSoftware/Models/CopiedCel.swift */; };
+		DEC0DE00000000000000003D /* PaintSoftware/Models/LayerKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000003C /* PaintSoftware/Models/LayerKind.swift */; };
+		DEC0DE00000000000000003F /* PaintSoftware/Models/Layer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000003E /* PaintSoftware/Models/Layer.swift */; };
+		DEC0DE000000000000000041 /* PaintSoftware/Models/LayerTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000040 /* PaintSoftware/Models/LayerTransform.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +95,15 @@
 		DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ColorMath.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ThumbnailRenderer.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PerfBaselineTests.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000030 /* PaintSoftware/Models/Tool.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Tool.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LayerFolder.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000034 /* PaintSoftware/Models/ViewPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ViewPreset.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000036 /* PaintSoftware/Models/LayerStackRow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LayerStackRow.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000038 /* PaintSoftware/Models/Cel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Cel.swift; sourceTree = "<group>"; };
+		DEC0DE00000000000000003A /* PaintSoftware/Models/CopiedCel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CopiedCel.swift; sourceTree = "<group>"; };
+		DEC0DE00000000000000003C /* PaintSoftware/Models/LayerKind.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LayerKind.swift; sourceTree = "<group>"; };
+		DEC0DE00000000000000003E /* PaintSoftware/Models/Layer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Layer.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000040 /* PaintSoftware/Models/LayerTransform.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LayerTransform.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -182,6 +200,15 @@
 				DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */,
 				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
 				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
+				DEC0DE000000000000000030 /* PaintSoftware/Models/Tool.swift */,
+				DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */,
+				DEC0DE000000000000000034 /* PaintSoftware/Models/ViewPreset.swift */,
+				DEC0DE000000000000000036 /* PaintSoftware/Models/LayerStackRow.swift */,
+				DEC0DE000000000000000038 /* PaintSoftware/Models/Cel.swift */,
+				DEC0DE00000000000000003A /* PaintSoftware/Models/CopiedCel.swift */,
+				DEC0DE00000000000000003C /* PaintSoftware/Models/LayerKind.swift */,
+				DEC0DE00000000000000003E /* PaintSoftware/Models/Layer.swift */,
+				DEC0DE000000000000000040 /* PaintSoftware/Models/LayerTransform.swift */,
 				DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */,
 				DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */,
 				DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */,
@@ -322,6 +349,15 @@
 				DEC0DE000000000000000012 /* PaintSoftware/Engine/StrokeInput.swift in Sources */,
 				DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */,
 				DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */,
+				DEC0DE000000000000000031 /* PaintSoftware/Models/Tool.swift in Sources */,
+				DEC0DE000000000000000033 /* PaintSoftware/Models/LayerFolder.swift in Sources */,
+				DEC0DE000000000000000035 /* PaintSoftware/Models/ViewPreset.swift in Sources */,
+				DEC0DE000000000000000037 /* PaintSoftware/Models/LayerStackRow.swift in Sources */,
+				DEC0DE000000000000000039 /* PaintSoftware/Models/Cel.swift in Sources */,
+				DEC0DE00000000000000003B /* PaintSoftware/Models/CopiedCel.swift in Sources */,
+				DEC0DE00000000000000003D /* PaintSoftware/Models/LayerKind.swift in Sources */,
+				DEC0DE00000000000000003F /* PaintSoftware/Models/Layer.swift in Sources */,
+				DEC0DE000000000000000041 /* PaintSoftware/Models/LayerTransform.swift in Sources */,
 				DEC0DE000000000000000018 /* PaintSoftware/Models/Palette.swift in Sources */,
 				DEC0DE00000000000000001A /* PaintSoftware/Models/ProjectManifest.swift in Sources */,
 				DEC0DE00000000000000001C /* PaintSoftware/Models/SelectionModels.swift in Sources */,
