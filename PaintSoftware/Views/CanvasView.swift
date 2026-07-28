@@ -799,6 +799,8 @@ struct CanvasView: UIViewRepresentable {
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
+        /// See `scheduleShapePreviewRenderIfNeeded`.
+        private var isShapePreviewRenderScheduled = false
         /// Accumulated canvas-space stroke samples from the current stroke (for shape detection
         /// and later collapsing onto the detected shape geometry).
         private var shapeDetectionSamples: [VectorSample] = []
@@ -1170,15 +1172,36 @@ struct CanvasView: UIViewRepresentable {
             }
             let isAdjustable = canvasManager.isShapeInAdjustableState
             overlay.isActive = true
+            // Render inline the first time (otherwise the shape would be invisible for a frame the
+            // moment it's detected); after that let the coalescing below carry it.
+            if canvasManager.activeShapePreviewImage == nil { canvasManager.renderActiveShapePreview() }
             overlay.update(shape: shape,
                            previewImage: canvasManager.activeShapePreviewImage,
                            showHandles: isAdjustable)
+            scheduleShapePreviewRenderIfNeeded()
             // Put the overlay above every layer host so it's visible and, in the adjustable
             // state, its handles are hit-testable. During shape following (finger still down)
             // we disable interaction so touches pass through to the stroke view, which routes
             // them back to `updateInteractiveShape`.
             container.bringSubviewToFront(overlay)
             overlay.isUserInteractionEnabled = isAdjustable
+        }
+
+        /// Coalesces preview re-renders to one per run-loop turn. A Pencil delivers several coalesced
+        /// samples per frame and each one moves the shape, but re-stamping a canvas-sized preview for
+        /// every sample would cost far more than the one frame of lag this trades for. Feeding the
+        /// result straight to the overlay (rather than re-entering `updateShapeOverlay`) also keeps
+        /// this from scheduling itself in a loop.
+        private func scheduleShapePreviewRenderIfNeeded() {
+            guard canvasManager.isActiveShapePreviewStale, !isShapePreviewRenderScheduled else { return }
+            isShapePreviewRenderScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isShapePreviewRenderScheduled = false
+                guard self.canvasManager.shapeGestureActive else { return }
+                self.canvasManager.renderActiveShapePreview()
+                self.shapeOverlay?.setPreviewImage(self.canvasManager.activeShapePreviewImage)
+            }
         }
 
         /// Bakes the pending shape and brings the canvas back in sync *synchronously*.

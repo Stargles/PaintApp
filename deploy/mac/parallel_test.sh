@@ -168,13 +168,23 @@ XCODE_ARGS=(
 )
 
 if [ -n "$TEST_FILTER" ]; then
-    # Accept either "TestMethodName" (auto-resolved) or "Target/Class/Method" (full identifier)
-    if [[ "$TEST_FILTER" == */* ]]; then
-        XCODE_ARGS+=(-only-testing:"$TEST_FILTER")
-    else
-        XCODE_ARGS+=(-only-testing:"PaintSoftwareUITests/PaintSoftwareUITests/$TEST_FILTER")
-        XCODE_ARGS+=(-only-testing:"PaintSoftwareUITests/BrushEngineLogicTests/$TEST_FILTER")
-    fi
+    # Accepts a comma-separated list, so a targeted regression sweep is one run rather than one
+    # simulator claim per test. Each entry is either a bare "TestMethodName" (resolved against every
+    # class in the bundle, since a bare name says nothing about which one owns it) or a full
+    # "Target/Class/Method" — or "Target/Class" to take a whole suite.
+    TEST_CLASSES=(PaintSoftwareUITests BrushEngineLogicTests BackupManagerLogicTests ShapeDetectorLogicTests)
+    IFS=',' read -ra FILTER_ENTRIES <<< "$TEST_FILTER"
+    for entry in "${FILTER_ENTRIES[@]}"; do
+        entry="$(echo "$entry" | xargs)"   # trim surrounding whitespace
+        [ -z "$entry" ] && continue
+        if [[ "$entry" == */* ]]; then
+            XCODE_ARGS+=(-only-testing:"$entry")
+        else
+            for class in "${TEST_CLASSES[@]}"; do
+                XCODE_ARGS+=(-only-testing:"PaintSoftwareUITests/$class/$entry")
+            done
+        fi
+    done
     log "Filter: $TEST_FILTER"
 fi
 

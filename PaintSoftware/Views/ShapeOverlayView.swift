@@ -145,6 +145,12 @@ final class ShapeOverlayView: UIView {
         }
     }
 
+    /// Swaps in a freshly rendered preview without disturbing the handles — used by the coordinator's
+    /// coalesced render, which catches the preview up a frame after the geometry moved.
+    func setPreviewImage(_ image: UIImage?) {
+        previewView.image = image
+    }
+
     // MARK: - Handle management
 
     private func clearHandles() {

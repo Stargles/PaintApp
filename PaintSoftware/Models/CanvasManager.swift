@@ -1621,10 +1621,27 @@ final class CanvasManager: ObservableObject {
                                              spacing: shapeStampSpacing)
     }
 
-    /// The transient shape rendered as the collapsed brush stroke that committing it would produce —
+    /// The most recently rendered preview. May lag the current geometry by a frame — see
+    /// `isActiveShapePreviewStale` — which is deliberate: showing the previous stroke for one frame
+    /// beats re-stamping a canvas-sized raster for every coalesced Pencil sample.
+    var activeShapePreviewImage: UIImage? {
+        shapeGestureActive ? shapePreviewCache?.image : nil
+    }
+
+    /// True when the geometry has moved on from what `activeShapePreviewImage` was rendered for.
+    var isActiveShapePreviewStale: Bool {
+        guard let shape = resolvedShape else { return false }
+        return shapePreviewCache?.shape != shape
+    }
+
+    /// Renders the transient shape as the collapsed brush stroke that committing it would produce —
     /// so the adjustable preview shows the user's own stroke, pressure profile and all, rather than a
     /// uniform generated outline that then visibly changes the moment it bakes.
-    var activeShapePreviewImage: UIImage? {
+    ///
+    /// Memoized per geometry, and stamped into a texture reused across the gesture, so a handle drag
+    /// costs one re-stamp rather than one allocation plus one re-stamp per event.
+    @discardableResult
+    func renderActiveShapePreview() -> UIImage? {
         guard let shape = resolvedShape, let canvasSize else { return nil }
         if let cached = shapePreviewCache, cached.shape == shape { return cached.image }
 
