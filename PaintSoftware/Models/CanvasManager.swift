@@ -550,6 +550,11 @@ final class CanvasManager: ObservableObject {
     /// drop into an empty slot elsewhere. Unlike `duplicateCel` this doesn't touch the timeline at
     /// all — copy and paste are two separate steps, matching the gap-tap "Add Drawing / Paste" menu.
     func copyCel(layerIndex: Int, celIndex: Int) {
+        // Copying doesn't change the canvas, but it does snapshot the cel's tiers — including a
+        // still-transient fill preview, which `pasteCel` would then plant in the new cel as
+        // permanent content while the original fill bakes separately into the source. Bake first so
+        // what's copied is what's actually committed.
+        beginCanvasEdit()
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let source = layers[layerIndex].cels[celIndex]
         copiedCel = CopiedCel(raster: source.raster.makeCopy(), fillImage: source.fillImage,
