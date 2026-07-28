@@ -2,6 +2,45 @@
 
 Format: one section per bug, newest first. See [CLAUDE.md](CLAUDE.md) for the multi-session protocol.
 
+## `duplicateCel` can create a cel overlapping its immediate neighbour (2026-07-28)
+
+**Status:** open, found by the Stage 0 characterization pass. Not fixed there on purpose — that
+stage's job was to pin existing behavior, and a behavior fix does not belong in the same commit as
+the tests that establish the baseline.
+
+`addCel`, `duplicateCel` and `pasteCel` share a copy-pasted frame-length clamp:
+
+```swift
+let laterStarts = layers[layerIndex].cels.map(\.startFrame).filter { $0 > startFrame }
+if let nextStart = laterStarts.min() { length = min(length, nextStart - startFrame) }
+guard length > 0 else { return }
+```
+
+`addCel` and `pasteCel` are additionally fronted by `guard activeCelIndex(...) == nil`, so a
+position that is already covered is rejected outright. `duplicateCel` has no such guard, and its
+start frame is the source cel's `endFrame` — the one value the clamp's strict `filter { $0 > startFrame }`
+excludes. So when a neighbour begins at *exactly* the source's end frame, nothing bounds the copy:
+
+* cels at `0..<3` and `3..<5`, Duplicate the first one
+* copy is placed at frame 3 with the source's full 3-frame length, i.e. `3..<6`
+* two cels now cover frames 3 and 4
+
+`activeCelIndex` is a `firstIndex(where:)`, so from then on the layer draws into one of the two and
+may render the other — the same class of "content is there but unreachable" problem as the session
+49 ghost-layer bug.
+
+Reachable from the UI: "attach a new block to the end" (`addBlankCelAfter`) produces exactly this
+adjacency, and Duplicate is available on the earlier block.
+
+Current behavior is pinned by `CelCRUDCharacterizationTests.testDuplicatingIntoAnImmediatelyAdjacentNeighbourOverlapsIt`
+so a refactor cannot change it silently. Fixing it means updating that test in the same commit.
+
+The likely fix is to give `duplicateCel` the same `activeCelIndex(...) == nil` guard the other two
+have — but note that changes Duplicate from "silently overlaps" to "silently does nothing", which
+may want a UI affordance rather than a bare no-op.
+
+---
+
 ## REGRESSION: strokes intermittently fail to register after the pencil-only-drawing default fix (2026-07-26)
 
 **Status:** fixed (Session 25).

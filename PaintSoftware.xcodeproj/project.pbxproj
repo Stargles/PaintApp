@@ -17,6 +17,27 @@
 		B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */; };
 		B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */; };
 		B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */; };
+		DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */; };
+		DEC0DE000000000000000004 /* CelCRUDCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */; };
+		DEC0DE000000000000000006 /* LayerTreeCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */; };
+		DEC0DE000000000000000008 /* ViewPresetCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */; };
+		DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */; };
+		DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */; };
+		DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */; };
+		DEC0DE000000000000000010 /* PaintSoftware/Engine/RasterLayerTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */; };
+		DEC0DE000000000000000012 /* PaintSoftware/Engine/StrokeInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */; };
+		DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */; };
+		DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */; };
+		DEC0DE000000000000000018 /* PaintSoftware/Models/Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */; };
+		DEC0DE00000000000000001A /* PaintSoftware/Models/ProjectManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */; };
+		DEC0DE00000000000000001C /* PaintSoftware/Models/SelectionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */; };
+		DEC0DE00000000000000001E /* PaintSoftware/Models/UndoHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000001D /* PaintSoftware/Models/UndoHistory.swift */; };
+		DEC0DE000000000000000020 /* PaintSoftware/Services/PixelOps.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000001F /* PaintSoftware/Services/PixelOps.swift */; };
+		DEC0DE000000000000000022 /* PaintSoftware/Services/ProjectStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000021 /* PaintSoftware/Services/ProjectStore.swift */; };
+		DEC0DE000000000000000024 /* PaintSoftware/Utilities/AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000023 /* PaintSoftware/Utilities/AppVersion.swift */; };
+		DEC0DE000000000000000026 /* PaintSoftware/Utilities/ColorConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */; };
+		DEC0DE000000000000000028 /* PaintSoftware/Utilities/ColorMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */; };
+		DEC0DE00000000000000002A /* PaintSoftware/Utilities/ThumbnailRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,6 +63,27 @@
 		B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeGeometry.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeDetector.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeDetectorLogicTests.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasManagerTestSupport.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelCRUDCharacterizationTests.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LayerTreeCharacterizationTests.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ViewPresetCharacterizationTests.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushLibrary.swift; sourceTree = "<group>"; };
+		DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushStamper.swift; sourceTree = "<group>"; };
+		DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/MetalFillEngine.swift; sourceTree = "<group>"; };
+		DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/RasterLayerTexture.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeInput.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VectorLayer.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasManager.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Palette.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ProjectManifest.swift; sourceTree = "<group>"; };
+		DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/SelectionModels.swift; sourceTree = "<group>"; };
+		DEC0DE00000000000000001D /* PaintSoftware/Models/UndoHistory.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/UndoHistory.swift; sourceTree = "<group>"; };
+		DEC0DE00000000000000001F /* PaintSoftware/Services/PixelOps.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/PixelOps.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000021 /* PaintSoftware/Services/ProjectStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectStore.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000023 /* PaintSoftware/Utilities/AppVersion.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/AppVersion.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ColorConversion.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ColorMath.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ThumbnailRenderer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -94,7 +136,7 @@
 				3FC5E356300DBDA400401D35 /* Products */,
 				059C668961D473A5DA641268 /* Frameworks */,
 				7DD8CAB96CBC75B388C33457 /* PaintSoftwareUITests */,
-				C3D4E5F6001122334455A1B2 /* Engine sources shared with PaintSoftwareUITests */,
+				C3D4E5F6001122334455A1B2 /* App sources shared with PaintSoftwareUITests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -114,11 +156,15 @@
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
+				DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */,
+				DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */,
+				DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */,
+				DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */,
 			);
 			path = PaintSoftwareUITests;
 			sourceTree = "<group>";
 		};
-		C3D4E5F6001122334455A1B2 /* Engine sources shared with PaintSoftwareUITests */ = {
+		C3D4E5F6001122334455A1B2 /* App sources shared with PaintSoftwareUITests */ = {
 			isa = PBXGroup;
 			children = (
 				B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */,
@@ -126,8 +172,25 @@
 				B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */,
 				B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */,
 				C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */,
+				DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */,
+				DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */,
+				DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */,
+				DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */,
+				DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */,
+				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
+				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
+				DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */,
+				DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */,
+				DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */,
+				DEC0DE00000000000000001D /* PaintSoftware/Models/UndoHistory.swift */,
+				DEC0DE00000000000000001F /* PaintSoftware/Services/PixelOps.swift */,
+				DEC0DE000000000000000021 /* PaintSoftware/Services/ProjectStore.swift */,
+				DEC0DE000000000000000023 /* PaintSoftware/Utilities/AppVersion.swift */,
+				DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */,
+				DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */,
+				DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */,
 			);
-			name = "Engine sources shared with PaintSoftwareUITests";
+			name = "App sources shared with PaintSoftwareUITests";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -244,6 +307,27 @@
 				B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */,
 				B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */,
+				DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */,
+				DEC0DE000000000000000004 /* CelCRUDCharacterizationTests.swift in Sources */,
+				DEC0DE000000000000000006 /* LayerTreeCharacterizationTests.swift in Sources */,
+				DEC0DE000000000000000008 /* ViewPresetCharacterizationTests.swift in Sources */,
+				DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */,
+				DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */,
+				DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */,
+				DEC0DE000000000000000010 /* PaintSoftware/Engine/RasterLayerTexture.swift in Sources */,
+				DEC0DE000000000000000012 /* PaintSoftware/Engine/StrokeInput.swift in Sources */,
+				DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */,
+				DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */,
+				DEC0DE000000000000000018 /* PaintSoftware/Models/Palette.swift in Sources */,
+				DEC0DE00000000000000001A /* PaintSoftware/Models/ProjectManifest.swift in Sources */,
+				DEC0DE00000000000000001C /* PaintSoftware/Models/SelectionModels.swift in Sources */,
+				DEC0DE00000000000000001E /* PaintSoftware/Models/UndoHistory.swift in Sources */,
+				DEC0DE000000000000000020 /* PaintSoftware/Services/PixelOps.swift in Sources */,
+				DEC0DE000000000000000022 /* PaintSoftware/Services/ProjectStore.swift in Sources */,
+				DEC0DE000000000000000024 /* PaintSoftware/Utilities/AppVersion.swift in Sources */,
+				DEC0DE000000000000000026 /* PaintSoftware/Utilities/ColorConversion.swift in Sources */,
+				DEC0DE000000000000000028 /* PaintSoftware/Utilities/ColorMath.swift in Sources */,
+				DEC0DE00000000000000002A /* PaintSoftware/Utilities/ThumbnailRenderer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
