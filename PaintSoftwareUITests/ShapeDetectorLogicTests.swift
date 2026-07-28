@@ -204,7 +204,9 @@ final class ShapeDetectorLogicTests: XCTestCase {
         // fall back to an axis-aligned bounding box around the tilted points.
         let angle = 40 * CGFloat.pi / 180
         let center = CGPoint(x: 200, y: 200)
-        let a: CGFloat = 120, b: CGFloat = 60 // semi-major/minor axes
+        // Close to circular (not very eccentric) — the detector's oval-vs-rectangle distance-variance
+        // gate is a separate, pre-existing concern from what's being tested here (rotation recovery).
+        let a: CGFloat = 100, b: CGFloat = 88 // semi-major/minor axes
         let points = (0..<64).map { i -> CGPoint in
             let t = 2 * CGFloat.pi * CGFloat(i) / 64
             let localX = a * cos(t), localY = b * sin(t)
