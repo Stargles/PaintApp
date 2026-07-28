@@ -9,13 +9,23 @@ import UIKit
 /// commits. A faint outline is drawn under it purely as a geometry guide for the handles.
 ///
 /// Two visual modes:
-///   1. **Following** (finger still down after hold-detection): preview only, no handles,
-///      `isUserInteractionEnabled = false` so touches pass through to the stroke view.
-///   2. **Adjustable** (finger lifted): preview + draggable handles. A pan gesture on
-///      this view tracks handle dragging; touching elsewhere fires `onTapOutside`.
+///   1. **Following** (finger still down after hold-detection): preview only, no handles.
+///   2. **Adjustable** (finger lifted): preview + draggable handles.
+///
+/// In both modes this view only ever claims the touches that land on a handle — see `hitTest`.
+/// Everything else falls through to the stroke view underneath, which is what lets the user start
+/// the next stroke straight over a pending shape: the touch that begins that stroke commits the
+/// shape on its way past (`onStrokeBegan` → `commitTransientsAndRefresh`) and then draws, instead of
+/// being swallowed as a "dismiss" that has to be followed by a second, separate touch.
 ///
 /// Lines have start + end handles. Rectangles have 4 corner handles + rotation.
 /// Ovals have 4 axis handles + rotation.
+///
+/// Note there is no gesture recognizer here: handles are dragged from raw touch callbacks, so a
+/// drag takes effect on the first pixel of movement rather than after a pan recognizer's ~10pt
+/// slop. The two-finger snap constraint is *not* tracked here either — `CanvasView.Coordinator`
+/// counts canvas touches for that, because the second finger usually lands somewhere this view has
+/// deliberately made itself transparent to.
 final class ShapeOverlayView: UIView {
 
     var isActive: Bool = false {
@@ -36,20 +46,16 @@ final class ShapeOverlayView: UIView {
     /// never has to second-guess what the user is going to get.
     private(set) var shape: ShapeGeometry?
 
-    /// True while two fingers are on the overlay, which engages the snap constraint. Reported
-    /// upward rather than acted on here: `CanvasManager` owns the constraint so the preview and the
-    /// committed stroke can't disagree about it.
-    private(set) var isConstrained: Bool = false
-
     // MARK: - Callbacks
 
-    var onEndpointDragged: ((CGPoint) -> Void)?
+    var onEndpointDragged: ((CGPoint, EndpointHandle) -> Void)?
     var onRotationDragged: ((CGFloat) -> Void)?
     var onCornerDragged: ((CGPoint, CornerHandle) -> Void)?
     var onEdgeDragged: ((CGPoint, EdgeHandle) -> Void)?
-    var onTapOutside: (() -> Void)?
-    var onConstraintChanged: ((Bool) -> Void)?
 
+    /// Which end of a line is being dragged. Both ends used to report through one callback that
+    /// unconditionally wrote `endPoint`, so grabbing the start handle moved the far end instead.
+    enum EndpointHandle { case start, end }
     enum EdgeHandle { case top, bottom, left, right }
     enum CornerHandle { case topLeft, topRight, bottomLeft, bottomRight }
 
@@ -86,10 +92,6 @@ final class ShapeOverlayView: UIView {
     private func setup() {
         isHidden = true
         isUserInteractionEnabled = false
-        // Off by default on UIView: without this, a second finger touching down while the first is
-        // already tracked (adjusting a handle) never reaches `touchesBegan` at all, so the two-finger
-        // "hold to snap into a circle/square" constraint could never engage mid-adjustment.
-        isMultipleTouchEnabled = true
 
         previewView.contentMode = .scaleToFill
         previewView.isUserInteractionEnabled = false
@@ -114,10 +116,6 @@ final class ShapeOverlayView: UIView {
         shapeLayer.lineCap = .round
         layer.addSublayer(shapeLayer)
         layer.addSublayer(handleLayer)
-
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        pan.maximumNumberOfTouches = 1
-        addGestureRecognizer(pan)
     }
 
     // MARK: - Content updates
@@ -221,79 +219,68 @@ final class ShapeOverlayView: UIView {
 
     // MARK: - Hit testing
 
+    /// The handle *nearest* the point, within the enlarged hitbox — not merely the first one whose
+    /// box contains it. On a short line the two endpoint hitboxes overlap, and taking the first
+    /// match meant one end could never be grabbed at all.
     private func handleKind(at point: CGPoint) -> HandleKind? {
-        let expand: CGFloat = 22
+        let reach: CGFloat = Self.handleSize / 2 + 22
+        var best: (kind: HandleKind, distance: CGFloat)?
         for info in handles {
-            if info.layer.frame.insetBy(dx: -expand, dy: -expand).contains(point) {
-                return info.kind
-            }
+            let center = CGPoint(x: info.layer.frame.midX, y: info.layer.frame.midY)
+            let distance = hypot(point.x - center.x, point.y - center.y)
+            guard distance <= reach else { continue }
+            if best == nil || distance < best!.distance { best = (info.kind, distance) }
         }
-        return nil
+        return best?.kind
     }
 
-    // MARK: - Pan gesture
-
-    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-        let point = recognizer.location(in: self)
-        switch recognizer.state {
-        case .began:
-            if let kind = handleKind(at: point) { activeHandle = kind }
-            else { onTapOutside?() }
-        case .changed:
-            guard let kind = activeHandle else { return }
-            switch kind {
-            case .start, .end:
-                onEndpointDragged?(point)
-            case .cornerTL: onCornerDragged?(point, .topLeft)
-            case .cornerTR: onCornerDragged?(point, .topRight)
-            case .cornerBL: onCornerDragged?(point, .bottomLeft)
-            case .cornerBR: onCornerDragged?(point, .bottomRight)
-            case .axisTop:  onEdgeDragged?(point, .top)
-            case .axisBottom: onEdgeDragged?(point, .bottom)
-            case .axisLeft:  onEdgeDragged?(point, .left)
-            case .axisRight: onEdgeDragged?(point, .right)
-            case .rotation:
-                if let shape {
-                    let c = shape.center
-                    onRotationDragged?(atan2(point.y - c.y, point.x - c.x) + .pi / 2)
-                }
-            }
-        case .ended, .cancelled, .failed:
-            activeHandle = nil
-        default: break
-        }
+    /// Claims only the handles. Everywhere else the overlay is transparent to touch, so the canvas
+    /// underneath keeps receiving strokes, fills and two-finger gestures while a shape is pending.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard isActive, !isHidden, isUserInteractionEnabled, handleKind(at: point) != nil else { return nil }
+        return self
     }
 
-    // MARK: - Two-finger snap (pen still on board → shapes snap)
+    // MARK: - Handle dragging
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
-        updateSnap(event)
+        guard let touch = touches.first else { return }
+        activeHandle = handleKind(at: touch.location(in: self))
     }
+
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
-        updateSnap(event)
+        guard let kind = activeHandle, let touch = touches.first else { return }
+        report(kind, at: touch.location(in: self))
     }
+
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
-        updateSnap(event)
+        activeHandle = nil
     }
+
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesCancelled(touches, with: event)
-        updateSnap(event)
+        activeHandle = nil
     }
 
-    /// Reports the two-finger constraint upward. Setting it directly is also allowed (the canvas's
-    /// own pinch recognizer drives it when the touches land outside this view).
-    func setConstrained(_ on: Bool) {
-        guard isConstrained != on else { return }
-        isConstrained = on
-        onConstraintChanged?(on)
-    }
-
-    private func updateSnap(_ event: UIEvent?) {
-        guard isUserInteractionEnabled else { return }
-        let count = (event?.allTouches ?? []).filter { $0.phase != .ended && $0.phase != .cancelled }.count
-        setConstrained(count >= 2)
+    private func report(_ kind: HandleKind, at point: CGPoint) {
+        switch kind {
+        case .start: onEndpointDragged?(point, .start)
+        case .end: onEndpointDragged?(point, .end)
+        case .cornerTL: onCornerDragged?(point, .topLeft)
+        case .cornerTR: onCornerDragged?(point, .topRight)
+        case .cornerBL: onCornerDragged?(point, .bottomLeft)
+        case .cornerBR: onCornerDragged?(point, .bottomRight)
+        case .axisTop: onEdgeDragged?(point, .top)
+        case .axisBottom: onEdgeDragged?(point, .bottom)
+        case .axisLeft: onEdgeDragged?(point, .left)
+        case .axisRight: onEdgeDragged?(point, .right)
+        case .rotation:
+            guard let shape else { return }
+            let c = shape.center
+            onRotationDragged?(atan2(point.y - c.y, point.x - c.x) + .pi / 2)
+        }
     }
 }

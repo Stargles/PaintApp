@@ -2176,16 +2176,16 @@ final class PaintSoftwareUITests: XCTestCase {
         start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1.5)
     }
 
-    /// Bakes a shape sitting in the adjustable state, without drawing anything: while a shape is
-    /// pending, the overlay covers the canvas and takes drags itself, so a drag well away from the
-    /// shape's handles is "tap outside" — it commits and lays down no stroke of its own.
+    /// Bakes a shape sitting in the adjustable state, without drawing anything.
     ///
-    /// Stays near the horizontal centre deliberately. `canvas.host` includes the letterbox margin
-    /// around the canvas itself, and the overlay only spans the canvas — a drag out at the edge lands
-    /// in the margin, misses the overlay entirely, and silently fails to commit anything.
-    private func commitPendingShape(on canvas: XCUIElement) {
-        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.48, dy: 0.78))
-        start.press(forDuration: 0.1, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.56, dy: 0.78)))
+    /// Switching tools is a canvas edit, so it commits whatever is transient — and unlike touching
+    /// the canvas it adds no ink of its own. Touching the canvas *also* commits the shape (that is
+    /// the point of `testDrawingOverAPendingShapeCommitsItAndDrawsInOneTouch`), but it commits it
+    /// and then draws the stroke the touch asked for, so it is no use to a caller that wants to
+    /// count exactly what the shape itself laid down.
+    private func commitPendingShape(on app: XCUIApplication) {
+        app.buttons["toolbar.eraserButton"].tap()
+        app.buttons["toolbar.brushButton"].tap()
     }
 
     /// The whole raster-layer path for the user-visible feature: hold a drawn line until it snaps to
@@ -2203,7 +2203,7 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
                        "The shape should be visible while it sits in the adjustable state")
 
-        commitPendingShape(on: canvas)
+        commitPendingShape(on: app)
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
                        "Baking the shape must leave the ink where the preview showed it")
 
@@ -2244,7 +2244,7 @@ final class PaintSoftwareUITests: XCTestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
-        commitPendingShape(on: canvas)
+        commitPendingShape(on: app)
 
         app.buttons["toolbar.layersButton"].tap()
         XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 1,
@@ -2302,7 +2302,7 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
-        commitPendingShape(on: canvas)
+        commitPendingShape(on: app)
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5, timeout: 5),
                       "The baked shape should be on screen before undoing it")
 
@@ -2313,6 +2313,72 @@ final class PaintSoftwareUITests: XCTestCase {
         app.buttons["sideToolbar.redoButton"].tap()
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5, timeout: 5),
                       "Redoing the shape must bring its ink back without waiting for another edit")
+    }
+
+    /// Drawing over a pending shape has to commit it *and* draw, in the one touch — the reported
+    /// behaviour was that the first touch only dismissed the transient state, so the user had to
+    /// lift and put the pen down a second time before any ink appeared.
+    ///
+    /// The shape overlay used to sit across the whole canvas with interaction enabled, swallowing
+    /// that first touch as a "tap outside". It now only claims the touches that land on its handles,
+    /// so this stroke reaches the stroke view, whose `onStrokeBegan` bakes the shape on the way past.
+    func testDrawingOverAPendingShapeCommitsItAndDrawsInOneTouch() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.38), to: CGVector(dx: 0.75, dy: 0.38))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.38)),
+                       "the shape should be sitting in the adjustable state")
+
+        // One touch, well clear of the shape's endpoint handles.
+        drawLine(on: canvas, from: CGVector(dx: 0.25, dy: 0.68), to: CGVector(dx: 0.75, dy: 0.68))
+
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.68, timeout: 5),
+                      "the stroke drawn over a pending shape must land on the first touch, "
+                      + "not be swallowed as a dismissal of the shape")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.38)),
+                       "committing the shape must keep its ink, not discard it")
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 2,
+                       "the layer should hold both the baked shape and the stroke drawn over it")
+    }
+
+    /// Grabbing a line's *start* handle has to move that end. Both handles reported through one
+    /// callback that unconditionally wrote `endPoint`, so dragging the start handle silently
+    /// dragged the far end instead and the line collapsed toward the handle being held.
+    func testDraggingALinesStartHandleMovesThatEndAndLeavesTheOther() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // A horizontal line; its start handle sits at dx 0.25, its end handle at dx 0.75.
+        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                       "the line should be sitting in the adjustable state")
+
+        // Drag the start handle down and to the right, far enough that the two possible outcomes
+        // don't overlap anywhere:
+        //   fixed  — the line runs (0.30, 0.75) → (0.75, 0.50), through (0.525, 0.625)
+        //   broken — the *end* follows the finger instead, collapsing the line into the short
+        //            stub (0.25, 0.50) → (0.30, 0.75), which never comes near that midpoint.
+        let startHandle = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+        startHandle.press(forDuration: 0.3,
+                          thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.75)),
+                          withVelocity: .slow,
+                          thenHoldForDuration: 0.3)
+        commitPendingShape(on: app)
+
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                      "the line should have moved off its original path")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.525, dy: 0.625)),
+                       "the line should run from the dragged start handle to the end that was left "
+                       + "alone — an empty midpoint here means the far end followed the finger instead")
     }
 
     /// The vector-layer half of the "filled section gets duplicated in a very buggy way" report.
