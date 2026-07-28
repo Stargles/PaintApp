@@ -1696,10 +1696,10 @@ final class CanvasManager: ObservableObject {
                                       oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: nil,
                                       newRaster: cel.raster, newBaked: newBaked, newFill: nil,
                                       actionName: "Shape")
-        } else if let canvasSize {
+        } else if let canvasSize,
+                  let fallbackImage = Self.renderShapeAsImage(shape, canvasSize: canvasSize) {
             // Fallback: no original stroke samples available — render the shape as a simple
             // stroked path (no brush dynamics, just the pure geometric outline).
-            let fallbackImage = Self.renderShapeAsImage(shape, canvasSize: canvasSize)
             let newBaked = PixelOps.compositeOver(base: cel.bakedImage, overlay: fallbackImage)
             registerUndoableCelChange(layerID: layerID, celID: celID,
                                       oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: nil,
