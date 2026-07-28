@@ -67,7 +67,18 @@ struct TopToolbar: View {
         // Switching to any other tool/panel commits an in-progress Move/Duplicate/shape/fill rather
         // than silently discarding or stranding it — Undo is the way to back out of a completed move,
         // matching Procreate (there's no separate "cancel transform").
-        canvasManager.commitAnyPendingInteractiveState()
+        canvasManager.commitAllInteractiveState()
+        activePanel = (activePanel == panel) ? .none : panel
+    }
+
+    /// Opens (or closes) the settings panel of the tool that's *already* active. Unlike `toggle`,
+    /// this deliberately bakes nothing: showing a tool's own sliders changes nothing about the
+    /// canvas, so by the "does the canvas look different" rule it isn't a canvas edit.
+    ///
+    /// For the fill tool it must not bake, because those sliders exist precisely to re-run a
+    /// still-adjustable fill (see `CanvasManager.setFillSetting`) — committing on the way in freezes
+    /// the fill and turns every slider in the panel into a no-op.
+    private func toggleSettingsPanel(_ panel: ActivePanel) {
         activePanel = (activePanel == panel) ? .none : panel
     }
 
@@ -79,7 +90,7 @@ struct TopToolbar: View {
         // transient tier, then get silently re-baked (at its *original*, undragged geometry) the
         // next time something else forces a commit, producing exactly the "content teleports back"
         // bug this guards against.
-        canvasManager.commitAnyPendingInteractiveState()
+        canvasManager.commitAllInteractiveState()
         // On a vector layer, Move transforms the whole layer's geometry losslessly via the on-canvas
         // box (no raster floating piece) — toggle that mode instead of lifting pixels.
         if canvasManager.activeLayerIsVector {
@@ -107,9 +118,9 @@ struct TopToolbar: View {
     private func selectBrushToolAndTogglePanel() {
         let brushActive = !isToolHighlightSuppressed && (canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil)
         if brushActive {
-            toggle(.brush)
+            toggleSettingsPanel(.brush)
         } else {
-            canvasManager.commitAnyPendingInteractiveState()
+            canvasManager.commitAllInteractiveState()
             canvasManager.selectedTool = .pen
             activePanel = .none
         }
@@ -118,9 +129,9 @@ struct TopToolbar: View {
     private func selectEraserToolAndTogglePanel() {
         let eraserActive = !isToolHighlightSuppressed && canvasManager.selectedTool == .eraser
         if eraserActive {
-            toggle(.eraser)
+            toggleSettingsPanel(.eraser)
         } else {
-            canvasManager.commitAnyPendingInteractiveState()
+            canvasManager.commitAllInteractiveState()
             canvasManager.selectedTool = .eraser
             activePanel = .none
         }
@@ -129,9 +140,9 @@ struct TopToolbar: View {
     private func selectFillToolAndTogglePanel() {
         let fillActive = !isToolHighlightSuppressed && canvasManager.selectedTool == .fill
         if fillActive {
-            toggle(.fill)
+            toggleSettingsPanel(.fill)
         } else {
-            canvasManager.commitAnyPendingInteractiveState()
+            canvasManager.commitAllInteractiveState()
             canvasManager.selectedTool = .fill
             activePanel = .none
         }

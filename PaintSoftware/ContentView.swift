@@ -51,9 +51,10 @@ struct ContentView: View {
 
     private func saveIfNeeded() {
         guard screen == .editor, canvasManager.canvasSize != nil else { return }
-        // A move/duplicate mid-transform is UI-only state (see SelectionModels.swift) — bake it in
-        // before saving so backgrounding the app never loses or corrupts it.
-        canvasManager.commitFloatingPieceIfNeeded()
+        // An adjustable fill, an adjustable smart shape, and a mid-transform move/duplicate are all
+        // UI-only state (see `CanvasManager.beginCanvasEdit`) — bake every one of them in before
+        // saving, or backgrounding the app silently drops whichever was still pending.
+        canvasManager.commitAllInteractiveState()
         let url = canvasManager.projectURL ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName)
         canvasManager.projectURL = url
         ProjectStore.save(canvasManager, to: url)

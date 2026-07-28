@@ -126,6 +126,38 @@ final class VectorCanvas {
         invalidate()
     }
 
+    /// Adds a stroke whose samples were captured in **canvas** space — a live drag, or a smart
+    /// shape's collapsed outline — mapping both its geometry and its width into this canvas's local
+    /// space. See `addFill(canvasSpacePath:...)`: stored content is local-space and `render()`
+    /// applies `transform` on top, so storing canvas-space samples verbatim puts the stroke through
+    /// the transform twice and lands it away from where it was drawn, again with every later move.
+    func addStroke(canvasSpaceStroke stroke: VectorStroke) {
+        guard !transform.isIdentity else { return addStroke(stroke) }
+        var mapped = stroke
+        mapped.samples = localSamples(fromCanvas: stroke.samples)
+        // Width is a canvas-space measurement too: `render()` scales the stamped result by the
+        // transform, so a stroke drawn at N points on a layer scaled by k must be stored at N/k to
+        // come back out N points wide.
+        let scale = transformScale
+        if scale > 0 { mapped.size = stroke.size / scale }
+        addStroke(mapped)
+    }
+
+    /// Uniform scale factor of the overall `transform` (the overlay only ever produces
+    /// translate·rotate·uniform-scale, so one number describes it).
+    var transformScale: CGFloat { hypot(transform.a, transform.b) }
+
+    /// Maps canvas-space stroke samples into this canvas's local (pre-`transform`) space, preserving
+    /// pressure. The point-wise counterpart of `localPath(fromCanvas:)`.
+    func localSamples(fromCanvas samples: [VectorSample]) -> [VectorSample] {
+        guard !transform.isIdentity else { return samples }
+        let inverse = transform.inverted()
+        return samples.map {
+            let p = $0.point.applying(inverse)
+            return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
+        }
+    }
+
     func addImage(_ element: VectorImageElement) {
         images.append(element)
         invalidate()
@@ -134,6 +166,28 @@ final class VectorCanvas {
     func addFill(_ element: VectorFillElement) {
         fills.append(element)
         invalidate()
+    }
+
+    /// Adds a fill whose path was captured in **canvas** space — where the flood-fill mask, the
+    /// lasso, and every other on-screen path are measured — mapping it into this canvas's own local
+    /// space first.
+    ///
+    /// `renderLocalContent` draws `fills` untransformed and `render()` then applies `transform` on
+    /// top, so storing a canvas-space path verbatim puts the fill through `transform` a second time:
+    /// on any layer that has ever been moved, the filled region lands detached from the contour it
+    /// was poured into, and shifts again with every subsequent move. `erase(alongPath:)` already
+    /// maps its input the same way; this exists so the fill paths can't drift back out of step.
+    func addFill(canvasSpacePath path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) {
+        addFill(VectorFillElement(path: localPath(fromCanvas: path), color: color,
+                                  opacity: opacity, evenOddFill: evenOddFill))
+    }
+
+    /// Maps a canvas-space path into this canvas's local (pre-`transform`) space — see
+    /// `addFill(canvasSpacePath:...)` for why every stored path must be in local space.
+    func localPath(fromCanvas path: CGPath) -> CGPath {
+        guard !transform.isIdentity else { return path }
+        var inverse = transform.inverted()
+        return path.copy(using: &inverse) ?? path
     }
 
     func setTransform(_ t: CGAffineTransform) {
@@ -147,10 +201,9 @@ final class VectorCanvas {
     /// tracks the actual content instead of the whole canvas. Assumes `transform` is a
     /// translate·rotate·uniform-scale (which is all the overlay can produce), so it decomposes cleanly.
     func layerTransform(pivot: CGPoint) -> LayerTransform {
-        let scale = hypot(transform.a, transform.b)
-        return LayerTransform(position: pivot.applying(transform),
-                              scale: scale == 0 ? 1 : scale,
-                              rotation: atan2(transform.b, transform.a))
+        LayerTransform(position: pivot.applying(transform),
+                       scale: transformScale == 0 ? 1 : transformScale,
+                       rotation: atan2(transform.b, transform.a))
     }
 
     /// Inverse of `layerTransform(pivot:)`: builds the affine that maps content drawn at `pivot` so
@@ -182,7 +235,12 @@ final class VectorCanvas {
         guard !eraserPoints.isEmpty, !strokes.isEmpty else { return false }
         let inverse = transform.inverted()
         let localEraser = eraserPoints.map { $0.applying(inverse) }
-        let r2 = radius * radius
+        // The radius is a canvas-space measurement like the points, so it has to be brought into
+        // local space alongside them — otherwise erasing a scaled-up layer cuts a nib-sized hole
+        // where the user swept a wide one (or vice versa).
+        let scale = transformScale
+        let localRadius = scale > 0 ? radius / scale : radius
+        let r2 = localRadius * localRadius
         func isErased(_ s: VectorSample) -> Bool {
             let p = s.point
             for e in localEraser {

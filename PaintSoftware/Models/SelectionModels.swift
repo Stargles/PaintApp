@@ -146,11 +146,10 @@ extension CanvasManager {
     /// a now-inactive cel is cleared. Same-cel frame ticks (scrubbing within one cel's frame
     /// range) intentionally leave both alone.
     func handleActiveContextChanged() {
-        // A still-adjustable fill or shape can't follow the user to another cel — finalize both here
-        // so they land as committed steps on the global history before the context moves on. Both
-        // commit calls self-guard when nothing is pending.
-        commitInteractiveFill()
-        commitInteractiveShape()
+        // A still-adjustable fill or shape can't follow the user to another cel — bake both here so
+        // they land as committed steps on the global history, against the cel they were drawn on,
+        // before the active context moves off it.
+        beginCanvasEdit()
         let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
         let activeCel = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
         let activeCelID = activeCel.map { layers[currentLayerIndex].cels[$0].id }
@@ -170,11 +169,16 @@ extension CanvasManager {
     // MARK: Making a selection
 
     func beginSelection(mode: SelectionMode) {
-        commitFloatingPieceIfNeeded()
+        commitAllInteractiveState()
         selectionMode = mode
     }
 
     func finishSelection(path: CGPath) {
+        // Drawing a selection is a canvas edit under the "does the canvas look different" rule, and
+        // more concretely: the selection is stamped with the cel it belongs to and immediately
+        // clips subsequent painting, so a shape/fill still hanging over that cel has to be part of
+        // its content by now rather than arriving on top of the selection afterwards.
+        beginCanvasEdit()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
         let bounds = path.boundingBoxOfPath.intersection(CGRect(origin: .zero, size: canvasSize))
@@ -183,6 +187,10 @@ extension CanvasManager {
     }
 
     func finishAutomaticSelection(at point: CGPoint) {
+        // Bake before sampling: the magic wand reads the cel's flattened pixels below, which include
+        // a pending fill's preview — selecting against content that isn't committed yet would produce
+        // a selection the layer no longer matches once that fill bakes (or is undone).
+        beginCanvasEdit()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
         let image = PixelOps.rasterize(cel: layers[currentLayerIndex].cels[celIndex], canvasSize: canvasSize)
@@ -199,7 +207,11 @@ extension CanvasManager {
     /// Begins transforming the current selection (or, if there isn't one, the whole current layer),
     /// in place: the source cel immediately shows a transparent hole where the piece was lifted from.
     func beginMove() {
-        commitFloatingPieceIfNeeded()
+        // Lifting pixels reads the cel's *flattened* content (`PixelOps.rasterize` below folds in
+        // the transient fill preview), so anything still transient must be committed first — else
+        // the fill is carried into the floating piece AND re-bakes into the source cel later, which
+        // is exactly the "the filled section gets duplicated" report.
+        commitAllInteractiveState()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
 
@@ -243,7 +255,8 @@ extension CanvasManager {
     func beginDuplicate() {
         guard let selection, let canvasSize,
               layers.indices.contains(currentLayerIndex) else { return }
-        commitFloatingPieceIfNeeded()
+        // Same reasoning as `beginMove`: the copy is taken from flattened content, so bake first.
+        commitAllInteractiveState()
 
         let sourceLayerIndex = currentLayerIndex
         guard let celIndex = activeCelIndex(inLayer: sourceLayerIndex, atFrame: currentFrame) else { return }
@@ -298,19 +311,6 @@ extension CanvasManager {
 
     // MARK: Committing
 
-    /// Finalizes every kind of transient, not-yet-committed state (an adjustable fill, an adjustable
-    /// smart shape, a floating Move/Duplicate piece) as real, undoable edits. Any tool switch that's
-    /// about to act on "the layer's current content" — Move, Select, a paint tool — must call this
-    /// first: leaving a shape/fill pending while a different tool starts operating on the layer is
-    /// exactly the bug where the pending shape/fill silently re-bakes later, at its *original*
-    /// geometry, once something else finally forces the commit (its own drag updates only ever
-    /// touched the transient state, never the committed layer content).
-    func commitAnyPendingInteractiveState() {
-        commitInteractiveFill()
-        commitInteractiveShape()
-        commitFloatingPieceIfNeeded()
-    }
-
     /// Renders the floating piece at its current transform and bakes it into its target cel, as one
     /// undoable step. No-op if there's nothing floating.
     @discardableResult
@@ -347,6 +347,7 @@ extension CanvasManager {
     // MARK: Fill / Clear (one-shot pixel edits on the current selection)
 
     func fillSelection() {
+        beginCanvasEdit()
         guard let selection, let canvasSize,
               layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].id == selection.layerID,
@@ -358,8 +359,10 @@ extension CanvasManager {
             let fillsBefore = vectorCanvas.fills
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
             brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
-            let element = VectorFillElement(path: selection.path, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
-            vectorCanvas.addFill(element)
+            // `selection.path` is in canvas space, like every on-screen path — see
+            // `VectorCanvas.addFill(canvasSpacePath:...)` for why it must not be stored verbatim.
+            vectorCanvas.addFill(canvasSpacePath: selection.path,
+                                 color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
             registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
                                    layerID: layers[currentLayerIndex].id, celID: cel.id, actionName: "Fill")
@@ -374,6 +377,7 @@ extension CanvasManager {
     }
 
     func clearSelectionPixels() {
+        beginCanvasEdit()
         guard let selection, let canvasSize,
               layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].id == selection.layerID,
@@ -383,10 +387,13 @@ extension CanvasManager {
         let isVector = layers[currentLayerIndex].kind == .vector
         if isVector, let vectorCanvas = cel.vector {
             let fillsBefore = vectorCanvas.fills
+            // Stored fill paths are local-space; `selection.path` is canvas-space. Punching the hole
+            // needs both in the same frame, so map the selection down rather than the fills up.
+            let localExclusion = vectorCanvas.localPath(fromCanvas: selection.path)
             var newFills: [VectorFillElement] = []
             for fill in fillsBefore {
                 guard let path = fill.cgPath else { continue }
-                let clipped = Self.clipPath(path, excluding: selection.path)
+                let clipped = Self.clipPath(path, excluding: localExclusion)
                 newFills.append(VectorFillElement(path: clipped, color: fill.color, opacity: fill.opacity, evenOddFill: true))
             }
             vectorCanvas.fills = newFills
