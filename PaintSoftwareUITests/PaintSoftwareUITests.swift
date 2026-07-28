@@ -2115,9 +2115,10 @@ final class PaintSoftwareUITests: XCTestCase {
                        "Baking the shape must leave the ink where the preview showed it")
 
         // Erase along the line. A shape stamped into the raster erases like any other stroke.
+        // (The left rail's sliders are rotated and unreliable to `adjust` from XCUITest — see the
+        // fill-slider tests — so this runs at the eraser's default size, which comfortably covers a
+        // default-size brush stroke.)
         app.buttons["toolbar.eraserButton"].tap()
-        let eraserSize = app.sliders["sideToolbar.sizeSlider"]
-        if eraserSize.waitForExistence(timeout: 3) { eraserSize.adjust(toNormalizedSliderPosition: 0.9) }
         drawLine(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
 
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
