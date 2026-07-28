@@ -38,26 +38,18 @@ enum ShapeDetector {
     /// The minimum total path length (in canvas points) before shape detection fires.
     static let minimumPathLength: CGFloat = 40
 
-    // MARK: - Result type
-
-    struct Detection {
-        var kind: VectorShapeElement.ShapeKind
-        var startPoint: CGPoint
-        var endPoint: CGPoint
-    }
-
     // MARK: - Public API
 
     /// Detect from raw CGPoints (pressure-agnostic — used by the hold-to-detect gesture).
-    static func detect(from points: [CGPoint]) -> Detection? {
+    static func detect(from points: [CGPoint]) -> ShapeGeometry? {
         let samples = points.map { VectorSample(x: $0.x, y: $0.y, pressure: 0.5) }
         return detect(from: samples)
     }
 
     /// Analyses the given samples and returns the most likely shape, or `nil` if nothing is
-    /// confidently detected. `startPoint` and `endPoint` are the two anchors of the detected
-    /// shape (line endpoints, rect opposing corners, oval axis endpoints).
-    static func detect(from samples: [VectorSample]) -> Detection? {
+    /// confidently detected. The result's anchors are the two defining points of the detected
+    /// shape (line endpoints, rect opposing corners, oval bounding-box corners), unrotated.
+    static func detect(from samples: [VectorSample]) -> ShapeGeometry? {
         guard samples.count >= 3 else { return nil }
 
         let points = samples.map(\.point)
@@ -74,7 +66,7 @@ enum ShapeDetector {
 
         // Build a candidate table with validity flags so we can skip invalid candidates rather
         // than letting a high-but-invalidated score win.
-        let candidates: [(VectorShapeElement.ShapeKind, CGFloat, CGPoint, CGPoint, Bool)] = [
+        let candidates: [(ShapeGeometry.Kind, CGFloat, CGPoint, CGPoint, Bool)] = [
             (.line, lineScore, lineStart, lineEnd, lineValid),
             (.rectangle, rectScore, rectStart, rectEnd, rectValid),
             (.oval, ovalScore, ovalStart, ovalEnd, ovalValid),
@@ -83,7 +75,7 @@ enum ShapeDetector {
         // Pick the highest-scoring valid candidate above the 0.5 confidence floor.
         let validCandidates = candidates.filter { $0.4 }
         guard let best = validCandidates.max(by: { $0.1 < $1.1 }), best.1 > 0.5 else { return nil }
-        return Detection(kind: best.0, startPoint: best.2, endPoint: best.3)
+        return ShapeGeometry(kind: best.0, startPoint: best.2, endPoint: best.3)
     }
 
     // MARK: - Line detection
@@ -246,174 +238,92 @@ enum ShapeDetector {
         return length
     }
 
-    // MARK: - Stroke collapsing (project original samples onto the detected shape outline)
+    // MARK: - Stroke collapsing (collapse the freehand stroke down onto the detected shape)
 
-    /// Projects each sample in `samples` onto the nearest point of `shape`'s outline, preserving
-    /// pressure/timing so the resulting stroke has the same brush feel but follows the shape
-    /// geometry exactly. Samples are re-ordered by position along the shape path (line: t along
-    /// segment; rect: clockwise distance along perimeter; oval: angle from center) so the stroke
-    /// traces the shape in a single clean pass.
-    static func collapseSamplesToShape(samples: [VectorSample], shape: VectorShapeElement) -> [VectorSample] {
-        guard !samples.isEmpty else { return [] }
-
-        switch shape.kind {
-        case .line:
-            return collapseToLine(samples: samples, shape: shape)
-        case .rectangle:
-            return collapseToRectangle(samples: samples, shape: shape)
-        case .oval:
-            return collapseToOval(samples: samples, shape: shape)
+    /// The fewest outline steps worth emitting, so a tiny shape still reads as its own kind rather
+    /// than as a couple of stray dabs.
+    private static func minimumSteps(for kind: ShapeGeometry.Kind) -> Int {
+        switch kind {
+        case .line: return 2
+        case .rectangle: return 8
+        case .oval: return 24
         }
     }
 
-    // ── Line ──────────────────────────────────────────────────────────────────
+    /// Collapses a freehand stroke down onto a detected shape: walks the shape's outline at
+    /// `spacing` and gives every step the pressure the freehand stroke had where it passed that part
+    /// of the outline. The result traces the shape exactly while keeping the original stroke's
+    /// pressure profile, so the baked shape carries the same brush feel the user actually drew.
+    ///
+    /// Resampling the outline — rather than projecting each sample onto it and re-sorting — is what
+    /// makes this seam-free. Projected samples leave a hole wherever the freehand path didn't quite
+    /// close, and re-sorting them by outline position turns that hole into a chord drawn straight
+    /// across the shape. Walking the outline instead means coverage is complete by construction.
+    ///
+    /// With no samples at all (nothing was captured before detection fired) the pressure is a flat
+    /// 0.5, which makes this the sole shape-baking path rather than needing a separate fallback.
+    /// `shape.rotation` is applied last, so the result lands exactly where the preview showed it.
+    static func collapseSamplesToShape(samples: [VectorSample], shape: ShapeGeometry,
+                                       spacing: CGFloat) -> [VectorSample] {
+        let length = shape.outlineLength
+        guard length > 0 else { return [] }
 
-    private static func collapseToLine(samples: [VectorSample], shape: VectorShapeElement) -> [VectorSample] {
-        let a = shape.startPoint, b = shape.endPoint
-        let dx = b.x - a.x, dy = b.y - a.y
-        let len2 = dx * dx + dy * dy
-        guard len2 > 0 else { return samples }
+        let step = max(spacing, 1)
+        let steps = max(Int((length / step).rounded()), minimumSteps(for: shape.kind))
+        let profile = pressureProfile(samples: samples, shape: shape)
+        let rotation = shape.rotationTransform
 
-        let projected: [(t: CGFloat, sample: VectorSample)] = samples.map { s in
-            let t = max(0, min(1, ((s.x - a.x) * dx + (s.y - a.y) * dy) / len2))
-            let px = a.x + t * dx, py = a.y + t * dy
-            return (t, VectorSample(x: px, y: py, pressure: s.pressure))
-        }
-        return projected.sorted { $0.t < $1.t }.map { $0.sample }
-    }
-
-    // ── Rectangle ─────────────────────────────────────────────────────────────
-
-    private static func collapseToRectangle(samples: [VectorSample], shape: VectorShapeElement) -> [VectorSample] {
-        let r = shape.boundingRect
-        let perimeter = 2 * (r.width + r.height)
-        guard perimeter > 0 else { return samples }
-
-        let projected: [(d: CGFloat, sample: VectorSample)] = samples.map { s in
-            let (px, py, d) = nearestOnRectPerimeter(point: CGPoint(x: s.x, y: s.y), rect: r)
-            return (d, VectorSample(x: px, y: py, pressure: s.pressure))
-        }
-        return projected.sorted { $0.d < $1.d }.map { $0.sample }
-    }
-
-    /// Returns the nearest point on the rectangle perimeter and its clockwise
-    /// distance from the top-left corner (0…perimeter).
-    private static func nearestOnRectPerimeter(point: CGPoint, rect: CGRect) -> (CGFloat, CGFloat, CGFloat) {
-        let cx = min(max(point.x, rect.minX), rect.maxX)
-        let cy = min(max(point.y, rect.minY), rect.maxY)
-
-        // Clamp to nearest edge if the point projects inside the rect.
-        let dxLeft = abs(point.x - rect.minX), dxRight = abs(point.x - rect.maxX)
-        let dyTop = abs(point.y - rect.minY), dyBottom = abs(point.y - rect.maxY)
-        let minH = min(dxLeft, dxRight), minV = min(dyTop, dyBottom)
-
-        let px: CGFloat, py: CGFloat
-        if minH <= minV {
-            px = dxLeft <= dxRight ? rect.minX : rect.maxX
-            py = cy
-        } else {
-            px = cx
-            py = dyTop <= dyBottom ? rect.minY : rect.maxY
-        }
-
-        // Clockwise distance from top-left.
-        let d: CGFloat
-        if abs(py - rect.minY) < 0.01 {
-            d = px - rect.minX
-        } else if abs(px - rect.maxX) < 0.01 {
-            d = rect.width + (py - rect.minY)
-        } else if abs(py - rect.maxY) < 0.01 {
-            d = rect.width + rect.height + (rect.maxX - px)
-        } else {
-            d = 2 * rect.width + rect.height + (rect.maxY - py)
-        }
-        return (px, py, d)
-    }
-
-    // ── Oval ──────────────────────────────────────────────────────────────────
-
-    private static func collapseToOval(samples: [VectorSample], shape: VectorShapeElement) -> [VectorSample] {
-        let r = shape.boundingRect
-        let cx = r.midX, cy = r.midY
-        let rx = r.width / 2, ry = r.height / 2
-        guard rx > 0, ry > 0 else { return samples }
-
-        let projected: [(angle: CGFloat, sample: VectorSample)] = samples.map { s in
-            let angle = atan2((s.y - cy) * rx, (s.x - cx) * ry)
-            let px = cx + rx * cos(angle)
-            let py = cy + ry * sin(angle)
-            var normAngle = angle < 0 ? angle + 2 * .pi : angle
-            if normAngle > .pi { normAngle -= 2 * .pi } // keep -π…π to preserve wrapping
-            return (normAngle, VectorSample(x: px, y: py, pressure: s.pressure))
-        }
-        return projected.sorted { $0.angle < $1.angle }.map { $0.sample }
-    }
-
-    // MARK: - Sample generation (fallback when no original stroke samples are available)
-
-    /// Generates evenly-spaced `VectorSample` points along the shape outline at the given spacing.
-    /// Used as a fallback when the original stroke samples weren't captured.
-    static func generateSamplesAlongShape(_ shape: VectorShapeElement, spacing: CGFloat) -> [VectorSample] {
-        let sp = max(spacing, 1)
-        switch shape.kind {
-        case .line:
-            let dx = shape.endPoint.x - shape.startPoint.x
-            let dy = shape.endPoint.y - shape.startPoint.y
-            let len = hypot(dx, dy)
-            guard len > 0 else { return [] }
-            let steps = max(2, Int(len / sp))
-            return (0...steps).map { i in
-                let t = CGFloat(i) / CGFloat(steps)
-                return VectorSample(x: shape.startPoint.x + dx * t,
-                                    y: shape.startPoint.y + dy * t,
-                                    pressure: 0.5)
-            }
-        case .rectangle:
-            let r = shape.boundingRect
-            let perim = 2 * (r.width + r.height)
-            let steps = max(4, Int(perim / sp))
-            var result: [VectorSample] = []
-            for i in 0...steps {
-                let d = (CGFloat(i) / CGFloat(steps)) * perim
-                let (px, py): (CGFloat, CGFloat)
-                if d < r.width {
-                    px = r.minX + d; py = r.minY
-                } else if d < r.width + r.height {
-                    px = r.maxX; py = r.minY + (d - r.width)
-                } else if d < 2 * r.width + r.height {
-                    px = r.maxX - (d - r.width - r.height); py = r.maxY
-                } else {
-                    px = r.minX; py = r.maxY - (d - 2 * r.width - r.height)
-                }
-                result.append(VectorSample(x: px, y: py, pressure: 0.5))
-            }
-            return result
-        case .oval:
-            let r = shape.boundingRect
-            let circum = .pi * (3 * (r.width + r.height) / 2 - sqrt(r.width * r.height))
-            let steps = max(12, Int(circum / sp))
-            let cx = r.midX, cy = r.midY, rx = r.width / 2, ry = r.height / 2
-            return (0...steps).map { i in
-                let angle = 2 * .pi * CGFloat(i) / CGFloat(steps)
-                return VectorSample(x: cx + rx * cos(angle),
-                                    y: cy + ry * sin(angle),
-                                    pressure: 0.5)
-            }
+        return (0...steps).map { i in
+            let u = CGFloat(i) / CGFloat(steps)
+            let point = shape.pointOnOutline(at: u).applying(rotation)
+            return VectorSample(x: point.x, y: point.y,
+                                pressure: pressure(at: u, in: profile, isClosed: shape.isClosed))
         }
     }
 
-    // MARK: - Constraint helpers
-
-    /// Snaps an angle (radians) to the nearest `increment` (radians).
-    static func snapAngle(_ angle: CGFloat, toIncrement increment: CGFloat) -> CGFloat {
-        (angle / increment).rounded() * increment
+    /// The freehand stroke's pressure as a function of outline position, sorted by parameter.
+    ///
+    /// The samples are compared against the shape's *unrotated* outline on purpose: they were drawn
+    /// in that frame (rotation only ever gets applied afterwards, by the user turning the shape), so
+    /// this keeps the pressure profile glued to the shape's own frame and lets it turn with it.
+    private static func pressureProfile(samples: [VectorSample],
+                                        shape: ShapeGeometry) -> [(u: CGFloat, pressure: CGFloat)] {
+        samples
+            .map { (u: shape.outlineParameter(of: $0.point), pressure: max(0, min(1, $0.pressure))) }
+            .sorted { $0.u < $1.u }
     }
 
-    /// Constrains a bounding rect to a square with equal sides (max of width/height),
-    /// keeping the centre fixed so the square stays aligned with the original shape.
-    static func constrainToSquare(_ rect: CGRect) -> CGRect {
-        let side = max(rect.width, rect.height)
-        return CGRect(x: rect.midX - side / 2, y: rect.midY - side / 2,
-                      width: side, height: side)
+    /// Pressure at outline parameter `u`, linearly interpolated between the two profile entries
+    /// bracketing it. A closed shape wraps around the seam (last entry → first entry + 1) so its
+    /// pressure is continuous there instead of stepping at `u = 0`.
+    private static func pressure(at u: CGFloat, in profile: [(u: CGFloat, pressure: CGFloat)],
+                                 isClosed: Bool) -> CGFloat {
+        guard let first = profile.first, let last = profile.last else { return 0.5 }
+        guard profile.count > 1 else { return first.pressure }
+
+        // First index at or after `u`.
+        var low = 0, high = profile.count
+        while low < high {
+            let mid = (low + high) / 2
+            if profile[mid].u < u { low = mid + 1 } else { high = mid }
+        }
+
+        if low == 0 {
+            guard isClosed else { return first.pressure }
+            return interpolate(from: (last.u - 1, last.pressure), to: (first.u, first.pressure), at: u)
+        }
+        if low == profile.count {
+            guard isClosed else { return last.pressure }
+            return interpolate(from: (last.u, last.pressure), to: (first.u + 1, first.pressure), at: u)
+        }
+        return interpolate(from: profile[low - 1], to: profile[low], at: u)
+    }
+
+    private static func interpolate(from a: (u: CGFloat, pressure: CGFloat),
+                                    to b: (u: CGFloat, pressure: CGFloat), at u: CGFloat) -> CGFloat {
+        let span = b.u - a.u
+        guard span > 0 else { return b.pressure }
+        let t = max(0, min(1, (u - a.u) / span))
+        return a.pressure + (b.pressure - a.pressure) * t
     }
 }

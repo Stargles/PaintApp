@@ -2,16 +2,29 @@ import SwiftUI
 
 struct AnimationTimeline: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// How tall the panel is right now. The user sets this by dragging the top bar; it does *not*
+    /// grow on its own when layers are added (the tracks scroll instead), so the timeline never
+    /// takes canvas space back without being asked.
     @State private var timelineHeight: CGFloat = 250
+    /// Height at the start of the current resize drag, so the drag tracks its own translation
+    /// rather than accumulating rounding from each `onChanged`.
+    @State private var resizeStartHeight: CGFloat?
 
     @State private var isPlaying: Bool = false
     @State private var playbackTimer: Timer?
+
+    /// Height available to the timeline's container, supplied by the parent so the maximum size
+    /// respects Split View instead of assuming the whole screen.
+    var availableHeight: CGFloat = 1024
 
     private let rowHeight: CGFloat = 34
     private let rulerHeight: CGFloat = 18
     private let collapsedHeight: CGFloat = 48
     private let minExpandedHeight: CGFloat = 130
     private let dragHandleHeight: CGFloat = 12
+    private let collapsedBarHeight: CGFloat = 48
+    private let miniToolbarHeight: CGFloat = 40
+    private let dividerHeight: CGFloat = 1
 
     private var isCollapsed: Bool {
         timelineHeight <= collapsedHeight + 2
@@ -30,12 +43,18 @@ struct AnimationTimeline: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            dragHandle
-            if isCollapsed {
-                collapsedBar
-            } else {
-                miniToolbar
-                Rectangle().fill(Color.white.opacity(0.15)).frame(height: 1)
+            // The whole top bar resizes the timeline, not just the grab handle: a drag anywhere on
+            // it (including across the buttons — `simultaneousGesture` with a minimum distance lets
+            // taps through untouched) raises or lowers the panel.
+            VStack(spacing: 0) {
+                dragHandle
+                if isCollapsed { collapsedBar } else { miniToolbar }
+            }
+            .contentShape(Rectangle())
+            .simultaneousGesture(resizeGesture)
+
+            if !isCollapsed {
+                Rectangle().fill(Color.white.opacity(0.15)).frame(height: dividerHeight)
                 ScrollView(.vertical, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 0) {
                         layerNameColumn
@@ -52,7 +71,7 @@ struct AnimationTimeline: View {
                     }
                     .frame(height: contentHeight)
                 }
-                .frame(height: max(0, timelineHeight - toolbarHeight - dragHandleHeight))
+                .frame(height: max(0, timelineHeight - topBarHeight - dividerHeight))
             }
         }
         .frame(height: timelineHeight)
@@ -70,38 +89,58 @@ struct AnimationTimeline: View {
         }
     }
 
-    private var toolbarHeight: CGFloat {
-        38
+    /// Height of the grab handle plus whichever bar is showing — the fixed chrome above the tracks.
+    private var topBarHeight: CGFloat {
+        dragHandleHeight + (isCollapsed ? collapsedBarHeight : miniToolbarHeight)
     }
 
     private var contentHeight: CGFloat {
         rulerHeight + CGFloat(max(canvasManager.layerStackRows.count, 1)) * (rowHeight + 2) + 8
     }
 
-    // MARK: - Drag handle
+    // MARK: - Resizing
 
     private var dragHandle: some View {
-        VStack(spacing: 0) {
-            Capsule()
-                .fill(Color.white.opacity(0.35))
-                .frame(width: 32, height: 4)
-                .padding(.top, 4)
-        }
-        .frame(height: dragHandleHeight)
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 2)
-                .onChanged { value in
-                    let newHeight = timelineHeight - value.translation.height
-                    timelineHeight = min(max(newHeight, collapsedHeight), maxTimelineHeight)
-                }
-                .onEnded { _ in }
-        )
+        Capsule()
+            .fill(Color.white.opacity(0.35))
+            .frame(width: 32, height: 4)
+            .padding(.top, 4)
+            .frame(maxWidth: .infinity)
+            .frame(height: dragHandleHeight)
+    }
+
+    /// Drag up to grow the timeline, down to shrink it — continuous all the way into the collapsed
+    /// bar, so hiding it is the bottom of the same motion rather than a separate mode. The chevron
+    /// buttons jump to the same two ends, which is what makes them feel like part of this.
+    private var resizeGesture: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                let proposed = resizeStartHeight ?? timelineHeight
+                if resizeStartHeight == nil { resizeStartHeight = timelineHeight }
+                timelineHeight = clampedHeight(proposed - value.translation.height)
+            }
+            .onEnded { _ in
+                resizeStartHeight = nil
+                // Anything below the halfway point of the first real row settles as collapsed, so a
+                // drag can't leave the timeline stuck at an unusable in-between height.
+                if timelineHeight < minExpandedHeight { timelineHeight = collapsedHeight }
+            }
+    }
+
+    /// Heights the timeline is allowed to take: collapsed at the bottom, and never so tall that it
+    /// crowds out the canvas. `availableHeight` comes from the parent rather than the screen, so
+    /// this stays correct in Split View and Slide Over.
+    private func clampedHeight(_ proposed: CGFloat) -> CGFloat {
+        min(max(proposed, collapsedHeight), maxTimelineHeight)
     }
 
     private var maxTimelineHeight: CGFloat {
-        UIScreen.main.bounds.height * 0.55
+        max(availableHeight * 0.55, minExpandedHeight)
+    }
+
+    /// The height the timeline expands to when the chevron is used: enough for every row, capped.
+    private var fittedHeight: CGFloat {
+        clampedHeight((contentHeight + topBarHeight + dividerHeight).rounded())
     }
 
     // MARK: - Collapsed
@@ -135,9 +174,10 @@ struct AnimationTimeline: View {
                 .foregroundColor(.gray)
                 .accessibilityIdentifier("timeline.frameLabel")
 
-            Button(action: { timelineHeight = max(minExpandedHeight, contentHeight.rounded()) }) {
+            Button(action: { withAnimation(.easeOut(duration: 0.2)) { timelineHeight = fittedHeight } }) {
                 Image(systemName: "chevron.up")
             }
+            .accessibilityIdentifier("timeline.expandButton")
         }
         .foregroundColor(.white)
         .font(.title3)
@@ -191,9 +231,10 @@ struct AnimationTimeline: View {
                 .font(.caption)
                 .foregroundColor(.gray)
 
-            Button(action: { timelineHeight = collapsedHeight }) {
+            Button(action: { withAnimation(.easeOut(duration: 0.2)) { timelineHeight = collapsedHeight } }) {
                 Image(systemName: "chevron.down")
             }
+            .accessibilityIdentifier("timeline.collapseButton")
         }
         .foregroundColor(.white)
         .padding(.horizontal, 12)

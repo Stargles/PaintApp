@@ -431,8 +431,10 @@ extension LayerStackListView.Coordinator {
         }
         guard resolved != dropTarget else { return }
         dropTarget = resolved
-        renderDropFeedback()
+        // Shift first: the insertion line's position is read off the cells' new translations, so
+        // drawing it before they move would place it against the *previous* drop target's layout.
         animateRowShifts()
+        renderDropFeedback()
     }
 
     /// Highlights the folder/layer a drop would land in, or draws a line where it would slot in.
@@ -456,20 +458,16 @@ extension LayerStackListView.Coordinator {
                 dropLine = view
                 return view
             }()
-            let y: CGFloat
-            if insertionIndex >= rows.count {
-                y = rows.isEmpty ? 0 : tableView.rectForRow(at: IndexPath(row: rows.count - 1, section: 0)).maxY
-            } else {
-                y = tableView.rectForRow(at: IndexPath(row: insertionIndex, section: 0)).minY
+            // The line marks the gap the row will drop into, so it has to follow the rows that
+            // shifted to open that gap — `rectForRow` reports the unshifted layout, so add the
+            // neighbouring cell's translation on top of it.
+            let anchorRow = min(insertionIndex, max(rows.count - 1, 0))
+            let anchorRect = rows.isEmpty ? CGRect.zero : tableView.rectForRow(at: IndexPath(row: anchorRow, section: 0))
+            var y = insertionIndex >= rows.count ? anchorRect.maxY : anchorRect.minY
+            if let cell = tableView.cellForRow(at: IndexPath(row: anchorRow, section: 0)) as? LayerStackCell {
+                y += cell.transform.ty
             }
-            // When rows are shifted during a drag, account for the cell's translation
-            // so the line tracks the visual gap rather than the unshifted layout.
-            var adjustedY = y
-            if insertionIndex < rows.count,
-               let cell = tableView.cellForRow(at: IndexPath(row: insertionIndex, section: 0)) as? LayerStackCell {
-                adjustedY += cell.transform.ty
-            }
-            line.frame = CGRect(x: 12, y: adjustedY - 1, width: tableView.bounds.width - 24, height: 2)
+            line.frame = CGRect(x: 12, y: y - 1, width: tableView.bounds.width - 24, height: 2)
             line.isHidden = false
             tableView.bringSubviewToFront(line)
         }
@@ -491,34 +489,41 @@ extension LayerStackListView.Coordinator {
         case .onto:
             break // no gap — rows just close the source hole; target is highlighted
         case .between(let insertionIndex):
-            let gapIndex = insertionIndex > srcIndex
-                ? max(0, insertionIndex - 1)
-                : max(0, insertionIndex)
-            previewRows.insert(moved, at: min(gapIndex, previewRows.count))
+            // Indices above the source shed one position once it's lifted out.
+            let gapIndex = insertionIndex > srcIndex ? insertionIndex - 1 : insertionIndex
+            previewRows.insert(moved, at: min(max(gapIndex, 0), previewRows.count))
         }
 
-        // Reset all cell transforms so previous shifts don't accumulate.
-        for case let cell as LayerStackCell in tableView.visibleCells {
-            cell.transform = .identity
+        // Where each preview position starts, measured from the same origin `rectForRow` reports
+        // so the two are directly comparable (a table header or content inset would otherwise
+        // offset every computed position by a constant).
+        let origin = tableView.rectForRow(at: IndexPath(row: 0, section: 0)).minY
+        var previewTops: [UUID: CGFloat] = [:]
+        var y = origin
+        for row in previewRows {
+            previewTops[row.id] = y
+            y += row.isFolder ? LayerStackCell.folderHeight : LayerStackCell.layerHeight
         }
 
+        // One animation per cell, straight to its new offset. Resetting transforms to identity
+        // first (as this used to) makes every drop-target change snap the rows home before
+        // re-animating them out, which reads as a jitter under the finger.
         for case let cell as LayerStackCell in tableView.visibleCells {
-            guard let ip = tableView.indexPath(for: cell), ip.row != srcIndex else { continue }
-            let rowID = rows[ip.row].id
-            guard let previewIndex = previewRows.firstIndex(where: { $0.id == rowID }) else { continue }
-
-            let oldY = cell.frame.origin.y
-            var newY: CGFloat = 0
-            for i in 0..<previewIndex {
-                newY += previewRows[i].isFolder ? LayerStackCell.folderHeight : LayerStackCell.layerHeight
+            guard let indexPath = tableView.indexPath(for: cell) else { continue }
+            let target: CGAffineTransform
+            if indexPath.row == srcIndex {
+                target = .identity // the lifted row is represented by the drag snapshot
+            } else if let top = previewTops[rows[indexPath.row].id] {
+                // `rectForRow` is the untransformed layout position, so the delta is absolute
+                // rather than relative to whatever shift is currently applied.
+                target = CGAffineTransform(translationX: 0, y: top - tableView.rectForRow(at: indexPath).minY)
+            } else {
+                target = .identity
             }
-
-            let delta = newY - oldY
-            if abs(delta) > 0.5 {
-                UIView.animate(withDuration: 0.22, delay: 0,
-                               options: [.allowUserInteraction, .curveEaseOut]) {
-                    cell.transform = CGAffineTransform(translationX: 0, y: delta)
-                }
+            guard cell.transform != target else { continue }
+            UIView.animate(withDuration: 0.22, delay: 0,
+                           options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]) {
+                cell.transform = target
             }
         }
     }

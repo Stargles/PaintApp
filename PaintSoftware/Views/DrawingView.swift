@@ -22,12 +22,16 @@ struct DrawingView: View {
             ZStack {
                 CanvasView(canvasManager: canvasManager, activePanel: activePanel)
 
-                VStack(spacing: 0) {
-                    TopToolbar(canvasManager: canvasManager, activePanel: $activePanel, onOpenGallery: onOpenGallery)
+                // GeometryReader only to tell the timeline how much room it may claim when the user
+                // drags it taller — using the screen instead would over-report in Split View.
+                GeometryReader { proxy in
+                    VStack(spacing: 0) {
+                        TopToolbar(canvasManager: canvasManager, activePanel: $activePanel, onOpenGallery: onOpenGallery)
 
-                    Spacer()
+                        Spacer()
 
-                    AnimationTimeline(canvasManager: canvasManager)
+                        AnimationTimeline(canvasManager: canvasManager, availableHeight: proxy.size.height)
+                    }
                 }
 
                 // The layer panel is its own thing: a tall translucent rail down the trailing edge,

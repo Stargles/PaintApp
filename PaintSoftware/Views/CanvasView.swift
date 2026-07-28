@@ -671,9 +671,7 @@ struct CanvasView: UIViewRepresentable {
         }
         shapeOverlay.onRotationDragged = { [weak coordinator = context.coordinator] rotation in
             guard let coordinator else { return }
-            coordinator.canvasManager.updateInteractiveShape(
-                endPoint: coordinator.canvasManager.activeShape?.endPoint ?? .zero,
-                rotation: rotation)
+            coordinator.canvasManager.updateInteractiveShape(rotation: rotation)
             coordinator.updateShapeOverlay()
         }
         shapeOverlay.onCornerDragged = { [weak coordinator = context.coordinator] point, corner in
@@ -732,8 +730,12 @@ struct CanvasView: UIViewRepresentable {
             coordinator.updateShapeOverlay()
         }
         shapeOverlay.onTapOutside = { [weak coordinator = context.coordinator] in
-            coordinator?.canvasManager.commitInteractiveShape()
-            coordinator?.updateShapeOverlay()
+            coordinator?.commitShapeAndRefresh()
+        }
+        shapeOverlay.onConstraintChanged = { [weak coordinator = context.coordinator] on in
+            guard let coordinator else { return }
+            coordinator.canvasManager.updateInteractiveShape(isConstrained: on)
+            coordinator.updateShapeOverlay()
         }
 
         host.onLayout = { [weak coordinator = context.coordinator] in
@@ -797,6 +799,8 @@ struct CanvasView: UIViewRepresentable {
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
+        /// See `scheduleShapePreviewRenderIfNeeded`.
+        private var isShapePreviewRenderScheduled = false
         /// Accumulated canvas-space stroke samples from the current stroke (for shape detection
         /// and later collapsing onto the detected shape geometry).
         private var shapeDetectionSamples: [VectorSample] = []
@@ -890,13 +894,15 @@ struct CanvasView: UIViewRepresentable {
                 host.strokeView.layerID = layer.id
                 host.strokeView.canvasManager = canvasManager
                 host.strokeView.onStrokeBegan = { [weak self, weak host] in
+                    guard let self else { return }
                     // Finalize a still-adjustable fill before this stroke changes any pixels, so the fill
                     // is the older undo step and this stroke undoes first. Self-guards when no fill is live.
-                    self?.canvasManager.commitInteractiveFill()
-                    // Also commit a pending shape (same ordering rationale).
-                    self?.canvasManager.commitInteractiveShape()
+                    self.canvasManager.commitInteractiveFill()
+                    // Also bake a pending shape (same ordering rationale) — and bring its layer back
+                    // in sync now, so the shape doesn't blink out for a frame as this stroke starts.
+                    self.commitShapeAndRefresh()
                     // Begin accumulating stroke points for smart-shape detection.
-                    if let host { self?.startShapeDetection(host: host) }
+                    if let host { self.startShapeDetection(host: host) }
                 }
                 host.strokeView.onStrokeMoved = { [weak self, weak host] sample in
                     guard let self else { return }
@@ -1139,20 +1145,20 @@ struct CanvasView: UIViewRepresentable {
 
         func updateFloatingOverlay() {
             floatingOverlay?.update(canvasManager.floatingPiece)
-            guard let overlay = floatingOverlay,
-                  let piece = canvasManager.floatingPiece,
-                  piece.kind == .move,
-                  let container = containerView else { return }
-            guard let sourceIdx = canvasManager.layers.firstIndex(where: { $0.id == piece.sourceLayerID }),
-                  let sourceHost = layerHosts[piece.sourceLayerID] else { return }
-            let isTopLayer = sourceIdx == canvasManager.layers.count - 1
-            if !isTopLayer {
-                let aboveIdx = sourceIdx + 1
-                if let aboveHost = layerHosts[canvasManager.layers[aboveIdx].id] {
-                    container.insertSubview(overlay, belowSubview: aboveHost)
-                } else {
-                    container.bringSubviewToFront(overlay)
-                }
+            guard let overlay = floatingOverlay, let container = containerView else { return }
+
+            // A piece lifted by the Move tool still belongs to its source layer, so it has to render
+            // in that layer's place in the stack — floating it above everything makes content that
+            // should sit *under* the layers above it appear on top while it's being dragged.
+            //
+            // Every other case (no piece, or a duplicate/paste that isn't tied to a position in the
+            // stack) puts it back at the front. Without that `else`, one move would leave the overlay
+            // wedged below a layer host for good, and the next operation would render behind it.
+            if let piece = canvasManager.floatingPiece, piece.kind == .move,
+               let sourceIndex = canvasManager.layers.firstIndex(where: { $0.id == piece.sourceLayerID }),
+               sourceIndex + 1 < canvasManager.layers.count,
+               let hostAbove = layerHosts[canvasManager.layers[sourceIndex + 1].id] {
+                container.insertSubview(overlay, belowSubview: hostAbove)
             } else {
                 container.bringSubviewToFront(overlay)
             }
@@ -1160,19 +1166,56 @@ struct CanvasView: UIViewRepresentable {
 
         func updateShapeOverlay() {
             guard let overlay = shapeOverlay, let container = containerView else { return }
-            if canvasManager.shapeGestureActive, let shape = canvasManager.activeShape {
-                overlay.shape = shape
-                overlay.isActive = true
-                // Put the overlay above every layer host so it's visible and, in the adjustable
-                // state, its handles are hit-testable. During shape following (finger still down)
-                // we disable interaction so touches pass through to the stroke view, which routes
-                // them back to `updateInteractiveShape`.
-                container.bringSubviewToFront(overlay)
-                overlay.isUserInteractionEnabled = canvasManager.isShapeInAdjustableState
-            } else {
+            guard canvasManager.shapeGestureActive, let shape = canvasManager.resolvedShape else {
                 overlay.isActive = false
-                overlay.shape = nil
+                return
             }
+            let isAdjustable = canvasManager.isShapeInAdjustableState
+            overlay.isActive = true
+            // Render inline the first time (otherwise the shape would be invisible for a frame the
+            // moment it's detected); after that let the coalescing below carry it.
+            if canvasManager.activeShapePreviewImage == nil { canvasManager.renderActiveShapePreview() }
+            overlay.update(shape: shape,
+                           previewImage: canvasManager.activeShapePreviewImage,
+                           showHandles: isAdjustable)
+            scheduleShapePreviewRenderIfNeeded()
+            // Put the overlay above every layer host so it's visible and, in the adjustable
+            // state, its handles are hit-testable. During shape following (finger still down)
+            // we disable interaction so touches pass through to the stroke view, which routes
+            // them back to `updateInteractiveShape`.
+            container.bringSubviewToFront(overlay)
+            overlay.isUserInteractionEnabled = isAdjustable
+        }
+
+        /// Coalesces preview re-renders to one per run-loop turn. A Pencil delivers several coalesced
+        /// samples per frame and each one moves the shape, but re-stamping a canvas-sized preview for
+        /// every sample would cost far more than the one frame of lag this trades for. Feeding the
+        /// result straight to the overlay (rather than re-entering `updateShapeOverlay`) also keeps
+        /// this from scheduling itself in a loop.
+        private func scheduleShapePreviewRenderIfNeeded() {
+            guard canvasManager.isActiveShapePreviewStale, !isShapePreviewRenderScheduled else { return }
+            isShapePreviewRenderScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isShapePreviewRenderScheduled = false
+                guard self.canvasManager.shapeGestureActive else { return }
+                self.canvasManager.renderActiveShapePreview()
+                self.shapeOverlay?.setPreviewImage(self.canvasManager.activeShapePreviewImage)
+            }
+        }
+
+        /// Bakes the pending shape and brings the canvas back in sync *synchronously*.
+        ///
+        /// Committing alone only marks the model dirty: the overlay stays up and the layer host
+        /// still shows its pre-commit render until SwiftUI's next pass. That one-pass gap is what
+        /// made a committing shape flicker off and back on — the overlay's preview disappeared a
+        /// frame before the baked stroke appeared. Tearing down the overlay and re-rendering the
+        /// affected host in the same turn closes it.
+        func commitShapeAndRefresh() {
+            let layerID = canvasManager.shapeGestureLayerID
+            canvasManager.commitInteractiveShape()
+            if let layerID { layerHosts[layerID]?.strokeView.refreshDisplay() }
+            updateShapeOverlay()
         }
 
         func updateActiveLayerAndTool() {
@@ -1324,10 +1367,8 @@ struct CanvasView: UIViewRepresentable {
                 host.strokeView.revertStrokeToSnapshot()
             }
 
-            canvasManager.beginInteractiveShape(kind: shape.kind, startPoint: shape.startPoint, endPoint: shape.endPoint,
-                                                 samples: samples)
-            shapeOverlay?.shape = canvasManager.activeShape
-            shapeOverlay?.isActive = true
+            canvasManager.beginInteractiveShape(shape, samples: samples)
+            updateShapeOverlay()
         }
 
         // MARK: - Fit / transform
@@ -1498,11 +1539,7 @@ struct CanvasView: UIViewRepresentable {
             if canvasManager.isShapeInAdjustableState {
                 // Two-finger snap: engage constraint (rect→square, oval→circle, line→snapped angle)
                 // rather than committing. The snap releases when all two-finger gestures end.
-                shapeOverlay?.isConstrained = true
-                canvasManager.updateInteractiveShape(
-                    endPoint: canvasManager.activeShape?.endPoint ?? .zero,
-                    rotation: nil, isConstrained: true)
-                updateShapeOverlay()
+                setShapeConstraint(true)
                 // Don't set gesture anchors — the pan/zoom is not engaged, only the snap.
                 return
             }
@@ -1548,10 +1585,7 @@ struct CanvasView: UIViewRepresentable {
             gestureAnchorCenter0 = nil
             snapEngagedAt = nil
             // Release shape constraint snap when the two-finger gesture ends.
-            if canvasManager.isShapeInAdjustableState {
-                shapeOverlay?.isConstrained = false
-                canvasManager.updateInteractiveShape(endPoint: canvasManager.activeShape?.endPoint ?? .zero, rotation: nil, isConstrained: false)
-            }
+            setShapeConstraint(false)
         }
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
@@ -1561,18 +1595,7 @@ struct CanvasView: UIViewRepresentable {
                 beginAnchorIfNeeded(at: recognizer.location(in: host))
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
-                // If the snap was engaged and the user is now actually panning, commit the
-                // shape (pan = done editing) and initialise the gesture anchor so the pan
-                // tracks smoothly from here.
-                if canvasManager.isShapeInAdjustableState && shapeOverlay?.isConstrained == true {
-                    canvasManager.commitInteractiveShape()
-                    shapeOverlay?.isConstrained = false
-                    updateShapeOverlay()
-                    if gestureAnchorCenter0 == nil, let container = containerView {
-                        gestureAnchorHost0 = recognizer.location(in: host)
-                        gestureAnchorCenter0 = container.center
-                    }
-                }
+                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
                 guard recognizer.numberOfTouches >= 2 else { return }
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .ended, .cancelled:
@@ -1591,15 +1614,7 @@ struct CanvasView: UIViewRepresentable {
                 liveScale = recognizer.scale
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
-                if canvasManager.isShapeInAdjustableState && shapeOverlay?.isConstrained == true {
-                    canvasManager.commitInteractiveShape()
-                    shapeOverlay?.isConstrained = false
-                    updateShapeOverlay()
-                    if gestureAnchorCenter0 == nil, let container = containerView {
-                        gestureAnchorHost0 = recognizer.location(in: host)
-                        gestureAnchorCenter0 = container.center
-                    }
-                }
+                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
                 guard recognizer.numberOfTouches >= 2 else { return }
                 liveScale = recognizer.scale
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
@@ -1619,15 +1634,7 @@ struct CanvasView: UIViewRepresentable {
                 liveRotation = recognizer.rotation
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
-                if canvasManager.isShapeInAdjustableState && shapeOverlay?.isConstrained == true {
-                    canvasManager.commitInteractiveShape()
-                    shapeOverlay?.isConstrained = false
-                    updateShapeOverlay()
-                    if gestureAnchorCenter0 == nil, let container = containerView {
-                        gestureAnchorHost0 = recognizer.location(in: host)
-                        gestureAnchorCenter0 = container.center
-                    }
-                }
+                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
                 guard recognizer.numberOfTouches >= 2 else { return }
                 liveRotation = recognizer.rotation
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
@@ -1648,15 +1655,29 @@ struct CanvasView: UIViewRepresentable {
 
         @objc func handleTwoFingerHold(_ recognizer: UILongPressGestureRecognizer) {
             guard canvasManager.shapeGestureActive else { return }
-            let on = recognizer.state == .began
-            if shapeOverlay?.isConstrained != on {
-                shapeOverlay?.isConstrained = on
-                if canvasManager.isShapeInAdjustableState {
-                    canvasManager.updateInteractiveShape(
-                        endPoint: canvasManager.activeShape?.endPoint ?? .zero,
-                        rotation: nil, isConstrained: on)
-                }
-                updateShapeOverlay()
+            setShapeConstraint(recognizer.state == .began)
+        }
+
+        /// Engages or releases the two-finger snap constraint on the pending shape, keeping the
+        /// overlay and the manager (which owns the constraint) in step.
+        private func setShapeConstraint(_ on: Bool) {
+            guard shapeOverlay?.isConstrained != on else { return }
+            shapeOverlay?.setConstrained(on)
+            guard canvasManager.shapeGestureActive else { return }
+            canvasManager.updateInteractiveShape(isConstrained: on)
+            updateShapeOverlay()
+        }
+
+        /// While a shape is snapped, a two-finger *pan/zoom/rotate* means the user is done editing
+        /// it: bake it and hand the gesture over to the canvas transform. Shared by all three
+        /// transform recognizers, which otherwise carried three copies of this.
+        private func commitSnappedShapeIfTransforming(at location: CGPoint) {
+            guard canvasManager.isShapeInAdjustableState, shapeOverlay?.isConstrained == true else { return }
+            shapeOverlay?.setConstrained(false)
+            commitShapeAndRefresh()
+            if gestureAnchorCenter0 == nil, let container = containerView {
+                gestureAnchorHost0 = location
+                gestureAnchorCenter0 = container.center
             }
         }
 

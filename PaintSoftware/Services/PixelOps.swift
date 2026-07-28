@@ -52,35 +52,52 @@ enum PixelOps {
         }
     }
 
-    /// Finds the bounding rect (in point space, assuming scale 1) of all non-transparent pixels in
-    /// the image. Returns nil if the image has no visible content.
+    /// Finds the bounding rect (in point space, assuming scale 1 — which everything here renders at)
+    /// of all non-transparent pixels in the image. Returns nil if the image has no visible content.
+    ///
+    /// Scans through an unsafe pointer rather than subscripting the array: this runs synchronously on
+    /// the main thread when the Move tool engages, and a canvas-sized image is several million
+    /// pixels — enough for the bounds-checked version to be a visible hang in a debug build.
     static func opaqueContentBounds(_ image: UIImage) -> CGRect? {
         guard let cgImage = image.cgImage else { return nil }
         let width = cgImage.width, height = cgImage.height
         guard width > 0, height > 0 else { return nil }
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         guard let ctx = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
-                                   bytesPerRow: width * 4, space: colorSpace,
+                                   bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        var minX = width, minY = height, maxX = 0, maxY = 0
-        var hasContent = false
-        for y in 0..<height {
-            for x in 0..<width {
-                let a = pixels[(y * width + x) * 4 + 3]
-                if a > 0 {
-                    hasContent = true
-                    if x < minX { minX = x }
-                    if x > maxX { maxX = x }
-                    if y < minY { minY = y }
-                    if y > maxY { maxY = y }
+
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        pixels.withUnsafeBufferPointer { buffer in
+            guard let base = buffer.baseAddress else { return }
+            for y in 0..<height {
+                let row = base + y * width * 4
+                // Narrow the horizontal search to what's still unknown: once a row's pixels all sit
+                // inside the running [minX, maxX] span they can't widen it, so only the edges matter.
+                var x = 0
+                var rowHasContent = false
+                while x < width {
+                    if row[x * 4 + 3] > 0 {
+                        rowHasContent = true
+                        if x < minX { minX = x }
+                        break
+                    }
+                    x += 1
                 }
+                guard rowHasContent else { continue }
+                var right = width - 1
+                while right > maxX {
+                    if row[right * 4 + 3] > 0 { maxX = right; break }
+                    right -= 1
+                }
+                if y < minY { minY = y }
+                maxY = y
             }
         }
-        guard hasContent else { return nil }
+        guard maxX >= minX, maxY >= minY else { return nil }
         return CGRect(x: CGFloat(minX), y: CGFloat(minY),
-                       width: CGFloat(maxX - minX + 1), height: CGFloat(maxY - minY + 1))
+                      width: CGFloat(maxX - minX + 1), height: CGFloat(maxY - minY + 1))
     }
 
     /// Splits a canvas-sized image into the pixels inside `path` ("piece") and the same image with

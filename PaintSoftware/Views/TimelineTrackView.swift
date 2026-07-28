@@ -384,6 +384,7 @@ private final class TimelineRowView: UIView {
     private var longPressStartX: CGFloat = 0
     private var longPressBaselineStart: Int = 0
     private var longPressCelIndex: Int?
+    private var longPressCelID: UUID?
     private var longPressMoved = false
 
     lazy var panRecognizer: UIPanGestureRecognizer = {
@@ -451,7 +452,7 @@ private final class TimelineRowView: UIView {
             }()
             let slotX = CGFloat(segment.start) * pixelsPerFrame
             let slotWidth = CGFloat(segment.length) * pixelsPerFrame
-            view.frame = CGRect(x: slotX, y: 0, width: slotWidth, height: bounds.height).insetBy(dx: 2, dy: 2)
+            view.setUntransformedFrame(CGRect(x: slotX, y: 0, width: slotWidth, height: bounds.height).insetBy(dx: 2, dy: 2))
             view.configure(isCurrent: isCurrentLayer, thumbnail: cel.thumbnail)
             view.setAccessibilityIdentifiers(base: "timeline.cel.\(layerIndex).\(arrayIndex)")
             view.accessibilityValue = "\(cel.startFrame),\(cel.frameCount)"
@@ -513,7 +514,13 @@ private final class TimelineRowView: UIView {
         case .ended, .cancelled, .failed:
             switch activeZone {
             case .leftHandle, .rightHandle:
-                coordinator.canvasManager.commitStructureGesture(name: "Resize Frame")
+                // Cancelling mid-resize leaves the block where it currently sits, so there's still
+                // a real change to record; only an outright failure before `.changed` has nothing.
+                if gr.state == .failed {
+                    coordinator.canvasManager.cancelStructureGesture()
+                } else {
+                    coordinator.canvasManager.commitStructureGesture(name: "Resize Frame")
+                }
             case .body, .gap, .none:
                 break
             }
@@ -524,56 +531,46 @@ private final class TimelineRowView: UIView {
         }
     }
 
+    /// Press and hold a block for half a second to pick it up, then slide it along the timeline.
+    /// The pan recognizer deliberately declines body touches (see `shouldReceive`) so a plain swipe
+    /// there scrolls the timeline instead of dragging blocks.
     @objc private func handleLongPress(_ gr: UILongPressGestureRecognizer) {
         guard let coordinator else { return }
         switch gr.state {
         case .began:
             let point = gr.location(in: self)
-            guard let z = zone(at: point),
-                  case .body(let celIndex, let baselineStart) = z else {
+            guard let z = zone(at: point), case .body(let celIndex, let baselineStart) = z,
+                  coordinator.canvasManager.layers.indices.contains(layerIndex),
+                  coordinator.canvasManager.layers[layerIndex].cels.indices.contains(celIndex) else {
                 gr.isEnabled = false; gr.isEnabled = true
                 return
             }
             longPressCelIndex = celIndex
+            // Hold onto the block's identity, not just its slot: the lift has to be cleared on the
+            // same view at the end of the drag even though the array may have been rebuilt since.
+            longPressCelID = coordinator.canvasManager.layers[layerIndex].cels[celIndex].id
             longPressBaselineStart = baselineStart
             longPressStartX = point.x
             longPressMoved = false
             coordinator.canvasManager.beginStructureGesture()
-            if let cels = coordinator.canvasManager.layers.indices.contains(layerIndex)
-                ? coordinator.canvasManager.layers[layerIndex].cels : nil,
-               cels.indices.contains(celIndex) {
-                let celID = cels[celIndex].id
-                celViews[celID]?.setLifted(true)
-            }
+            if let celID = longPressCelID { celViews[celID]?.setLifted(true) }
         case .changed:
             guard let celIndex = longPressCelIndex else { return }
-            let currentX = gr.location(in: self).x
-            let frameDelta = Int(((currentX - longPressStartX) / pixelsPerFrame).rounded())
-            let newStart = longPressBaselineStart + frameDelta
-            if newStart != longPressBaselineStart || frameDelta != 0 {
-                longPressMoved = true
-            }
-            coordinator.moveCel(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: newStart)
-        case .ended:
-            if let celIndex = longPressCelIndex,
-               coordinator.canvasManager.layers.indices.contains(layerIndex),
-               coordinator.canvasManager.layers[layerIndex].cels.indices.contains(celIndex) {
-                let celID = coordinator.canvasManager.layers[layerIndex].cels[celIndex].id
-                celViews[celID]?.setLifted(false)
-            }
-            if longPressMoved {
+            let frameDelta = Int(((gr.location(in: self).x - longPressStartX) / pixelsPerFrame).rounded())
+            if frameDelta != 0 { longPressMoved = true }
+            coordinator.moveCel(layerIndex: layerIndex, celIndex: celIndex,
+                                newStartFrame: longPressBaselineStart + frameDelta)
+        case .ended, .cancelled, .failed:
+            if let celID = longPressCelID { celViews[celID]?.setLifted(false) }
+            // A hold that never moved anything must drop its snapshot rather than record an empty
+            // step — and leaving it open would fold the next gesture's undo into this one.
+            if gr.state == .ended, longPressMoved {
                 coordinator.canvasManager.commitStructureGesture(name: "Move Frame")
+            } else {
+                coordinator.canvasManager.cancelStructureGesture()
             }
             longPressCelIndex = nil
-            longPressMoved = false
-        case .cancelled, .failed:
-            if let celIndex = longPressCelIndex,
-               coordinator.canvasManager.layers.indices.contains(layerIndex),
-               coordinator.canvasManager.layers[layerIndex].cels.indices.contains(celIndex) {
-                let celID = coordinator.canvasManager.layers[layerIndex].cels[celIndex].id
-                celViews[celID]?.setLifted(false)
-            }
-            longPressCelIndex = nil
+            longPressCelID = nil
             longPressMoved = false
         default:
             break
@@ -678,21 +675,41 @@ private final class CelBlockView: UIView {
         thumbnailView.isHidden = thumbnail == nil
     }
 
+    private(set) var isLifted = false
+
+    /// Scales the block up with a drop shadow while it's being dragged along the timeline, so the
+    /// user can see which block the long press picked up.
     func setLifted(_ lifted: Bool) {
+        guard isLifted != lifted else { return }
+        isLifted = lifted
         if lifted {
-            shadowView.frame = bounds.insetBy(dx: -4, dy: -4)
-            shadowView.layer.cornerRadius = layer.cornerRadius + 2
+            layoutShadow()
             shadowView.alpha = 0.35
             layer.masksToBounds = false
-            transform = CGAffineTransform(scaleX: 1.08, y: 1.08).translatedBy(x: 0, y: -4)
+            transform = CGAffineTransform(scaleX: 1.08, y: 1.08)
         } else {
             UIView.animate(withDuration: 0.15) {
                 self.shadowView.alpha = 0
                 self.transform = .identity
             } completion: { _ in
-                self.layer.masksToBounds = true
+                if !self.isLifted { self.layer.masksToBounds = true }
             }
         }
+    }
+
+    private func layoutShadow() {
+        shadowView.frame = bounds.insetBy(dx: -4, dy: -4)
+        shadowView.layer.cornerRadius = layer.cornerRadius + 2
+    }
+
+    /// Positions the block without touching `frame`, whose behaviour is undefined while a
+    /// non-identity `transform` is applied — which is exactly the case for a lifted block, and it is
+    /// re-laid-out on every frame of the drag that lifted it. `bounds` + `center` are the
+    /// transform-independent pair, so the block keeps its true size while scaled up.
+    func setUntransformedFrame(_ rect: CGRect) {
+        bounds = CGRect(origin: .zero, size: rect.size)
+        center = CGPoint(x: rect.midX, y: rect.midY)
+        if isLifted { layoutShadow() }
     }
 
     func setAccessibilityIdentifiers(base: String) {
