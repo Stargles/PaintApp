@@ -166,7 +166,6 @@ final class VectorCanvas {
     var strokes: [VectorStroke]
     var fills: [VectorFillElement]
     var images: [VectorImageElement]
-    var shapes: [VectorShapeElement]
     /// Move/rotate/scale of the entire layer's content, applied at render time so it stays crisp at
     /// any transform (no resolution loss). Identity until the layer is transformed.
     var transform: CGAffineTransform
@@ -174,21 +173,20 @@ final class VectorCanvas {
     private(set) var version: Int = 0
     private var cachedImage: UIImage?
 
-    init(size: CGSize, strokes: [VectorStroke] = [], fills: [VectorFillElement] = [], images: [VectorImageElement] = [], shapes: [VectorShapeElement] = [], transform: CGAffineTransform = .identity) {
+    init(size: CGSize, strokes: [VectorStroke] = [], fills: [VectorFillElement] = [], images: [VectorImageElement] = [], transform: CGAffineTransform = .identity) {
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
         self.strokes = strokes
         self.fills = fills
         self.images = images
-        self.shapes = shapes
         self.transform = transform
     }
 
     static func empty(size: CGSize) -> VectorCanvas { VectorCanvas(size: size) }
 
-    var isEmpty: Bool { strokes.isEmpty && fills.isEmpty && images.isEmpty && shapes.isEmpty }
+    var isEmpty: Bool { strokes.isEmpty && fills.isEmpty && images.isEmpty }
 
     func makeCopy() -> VectorCanvas {
-        VectorCanvas(size: size, strokes: strokes, fills: fills, images: images, shapes: shapes, transform: transform)
+        VectorCanvas(size: size, strokes: strokes, fills: fills, images: images, transform: transform)
     }
 
     /// A new canvas sized to `newSize` with all content shifted by `offset` (canvas point space),
@@ -199,7 +197,7 @@ final class VectorCanvas {
     /// a fresh instance.
     func resized(to newSize: CGSize, offset: CGPoint) -> VectorCanvas {
         let shifted = transform.concatenating(CGAffineTransform(translationX: offset.x, y: offset.y))
-        return VectorCanvas(size: newSize, strokes: strokes, fills: fills, images: images, shapes: shapes, transform: shifted)
+        return VectorCanvas(size: newSize, strokes: strokes, fills: fills, images: images, transform: shifted)
     }
 
     private func invalidate() {
@@ -225,11 +223,6 @@ final class VectorCanvas {
 
     func addFill(_ element: VectorFillElement) {
         fills.append(element)
-        invalidate()
-    }
-
-    func addShape(_ element: VectorShapeElement) {
-        shapes.append(element)
         invalidate()
     }
 
@@ -339,18 +332,6 @@ final class VectorCanvas {
                 }
             }
             ctx.cgContext.setAlpha(1.0)
-            // Shapes (stroked geometric outlines) — drawn after fills, before images and strokes.
-            for shape in shapes {
-                let path = UIBezierPath(cgPath: shape.rotatedCGPath)
-                ctx.cgContext.setStrokeColor(shape.uiColor.cgColor)
-                ctx.cgContext.setLineWidth(shape.strokeWidth)
-                ctx.cgContext.setLineCap(.round)
-                ctx.cgContext.setLineJoin(.round)
-                ctx.cgContext.setAlpha(shape.opacity)
-                ctx.cgContext.addPath(path.cgPath)
-                ctx.cgContext.strokePath()
-            }
-            ctx.cgContext.setAlpha(1.0)
             for element in images {
                 ctx.cgContext.saveGState()
                 let t = element.transform
@@ -401,7 +382,6 @@ struct VectorCanvasData: Codable {
     }
     var strokes: [VectorStroke]
     var fills: [VectorFillElement]
-    var shapes: [VectorShapeElement]
     var images: [ImageRef]
     /// Overall transform as [a, b, c, d, tx, ty]; missing/short → identity.
     var transform: [Double]
@@ -409,7 +389,6 @@ struct VectorCanvasData: Codable {
     init(from canvas: VectorCanvas, imageFileNames: [UUID: String]) {
         strokes = canvas.strokes
         fills = canvas.fills
-        shapes = canvas.shapes
         images = canvas.images.compactMap { el in
             guard let name = el.fileName ?? imageFileNames[el.id] else { return nil }
             return ImageRef(fileName: name, x: el.transform.position.x, y: el.transform.position.y,
@@ -423,7 +402,6 @@ struct VectorCanvasData: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         strokes = try c.decode([VectorStroke].self, forKey: .strokes)
         fills = try c.decode([VectorFillElement].self, forKey: .fills)
-        shapes = try c.decodeIfPresent([VectorShapeElement].self, forKey: .shapes) ?? []
         images = try c.decode([ImageRef].self, forKey: .images)
         transform = try c.decode([Double].self, forKey: .transform)
     }

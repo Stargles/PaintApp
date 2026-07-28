@@ -120,7 +120,7 @@ final class StrokeCanvasView: UIView {
     /// (the stroke, drawn last, undoes first; the fill under it undoes after).
     var onStrokeBegan: (() -> Void)?
     /// Called for each coalesced touch sample during a stroke, in canvas coordinates.
-    var onStrokeMoved: ((CGPoint) -> Void)?
+    var onStrokeMoved: ((VectorSample) -> Void)?
     /// True after the smart-shape detector has reverted this stroke and begun a shape: subsequent
     /// moves/ends should NOT stamp (the raster was reset) but should still route through
     /// `onStrokeMoved` / `onStrokeEnded` so the coordinator can follow the shape and transition it
@@ -135,6 +135,17 @@ final class StrokeCanvasView: UIView {
         lastStampPoint = nil
         refreshDisplay()
         strokeBeforeSnapshot = nil
+        shapeFollowingTouch = true
+    }
+
+    /// Discards the in-progress vector stroke scratch so the shape overlay replaces it.
+    func revertVectorStrokeToSnapshot() {
+        guard vectorCanvas != nil else { return }
+        vectorScratch = nil
+        currentVectorSamples = []
+        lastStampPoint = nil
+        refreshDisplay()
+        vectorStrokesBeforeSnapshot = nil
         shapeFollowingTouch = true
     }
 
@@ -222,7 +233,18 @@ final class StrokeCanvasView: UIView {
     }
 
     private func handleMove(_ touch: UITouch, _ event: UIEvent) {
-        if vectorCanvas != nil { moveVectorStroke(touch, event); return }
+        if vectorCanvas != nil {
+            if shapeFollowingTouch {
+                // Shape was detected on a vector layer; the scratch is cleared, so just forward
+                // touch positions to `onStrokeMoved` so the coordinator can follow the shape.
+                for sample in event.coalescedTouches(for: touch) ?? [touch] {
+                    let input = StrokeInput(touch: sample, in: self)
+                    onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure))
+                }
+                return
+            }
+            moveVectorStroke(touch, event); return
+        }
         guard let raster else { return }
         // When the stroke was reverted by a smart-shape detection, do not stamp — the raster has
         // already been reset to the pre-stroke snapshot, so stamping would re-add pixels. We still
@@ -230,7 +252,7 @@ final class StrokeCanvasView: UIView {
         if shapeFollowingTouch {
             for sample in event.coalescedTouches(for: touch) ?? [touch] {
                 let input = StrokeInput(touch: sample, in: self)
-                onStrokeMoved?(input.position)
+                onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure))
             }
             return
         }
@@ -238,7 +260,7 @@ final class StrokeCanvasView: UIView {
             let input = StrokeInput(touch: sample, in: self)
             let smoothed = stabilizer.update(rawPoint: input.position)
             stampPath(to: smoothed, pressure: input.pressure, into: raster)
-            onStrokeMoved?(input.position)
+            onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure))
         }
         refreshDisplay()
     }
@@ -347,11 +369,17 @@ final class StrokeCanvasView: UIView {
             // The eraser isn't smoothed (it should cut exactly where the finger passes).
             let point = isEraser ? input.position : stabilizer.update(rawPoint: input.position)
             recordVectorSample(at: point, pressure: input.pressure)
+            onStrokeMoved?(VectorSample(x: point.x, y: point.y, pressure: input.pressure))
         }
         refreshDisplay()
     }
 
     private func endVectorStroke(_ touch: UITouch) {
+        if shapeFollowingTouch {
+            shapeFollowingTouch = false
+            onStrokeEnded?()
+            return
+        }
         guard let vectorCanvas, vectorScratch != nil else { return }
         let input = StrokeInput(touch: touch, in: self)
         recordVectorSample(at: input.position, pressure: input.pressure)
@@ -769,8 +797,9 @@ struct CanvasView: UIViewRepresentable {
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
-        /// Accumulated canvas-space points from the current stroke (for shape detection).
-        private var shapeDetectionPoints: [CGPoint] = []
+        /// Accumulated canvas-space stroke samples from the current stroke (for shape detection
+        /// and later collapsing onto the detected shape geometry).
+        private var shapeDetectionSamples: [VectorSample] = []
         /// Timer that fires after the user holds the finger still for ~1s — triggers shape detection.
         private var shapeHoldTimer: Timer?
         /// True when a shape detection is in progress (timer running).
@@ -869,12 +898,13 @@ struct CanvasView: UIViewRepresentable {
                     // Begin accumulating stroke points for smart-shape detection.
                     if let host { self?.startShapeDetection(host: host) }
                 }
-                host.strokeView.onStrokeMoved = { [weak self, weak host] point in
+                host.strokeView.onStrokeMoved = { [weak self, weak host] sample in
                     guard let self else { return }
                     if self.canvasManager.shapeGestureActive && !self.canvasManager.isShapeInAdjustableState {
                         // Shape following: the user is still holding after detection. For lines,
                         // just move the endpoint. For rects & ovals, the finger angle sets
                         // rotation and the distance sets a uniform scale from centre.
+                        let point = sample.point
                         if case .line? = self.canvasManager.activeShape?.kind {
                             self.canvasManager.updateInteractiveShape(endPoint: point)
                         } else if let shape = self.canvasManager.activeShape {
@@ -900,7 +930,7 @@ struct CanvasView: UIViewRepresentable {
                         }
                         self.updateShapeOverlay()
                     } else {
-                        self.handleStrokeMoved(point, host: host)
+                        self.handleStrokeMoved(sample, host: host)
                     }
                 }
                 host.strokeView.strokeRecognizer.onAnyTouchBegan = { [weak self] in
@@ -1196,7 +1226,7 @@ struct CanvasView: UIViewRepresentable {
         private func startShapeDetection(host: LayerHostView) {
             guard canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil else { return }
             guard !canvasManager.shapeGestureActive else { return }
-            shapeDetectionPoints.removeAll()
+            shapeDetectionSamples.removeAll()
             shapeDetectionHost = host
             shapeDetectionActive = true
             shapeLastPoint = nil
@@ -1223,10 +1253,11 @@ struct CanvasView: UIViewRepresentable {
         private var shapeInitHalfH: CGFloat = 0
         private var shapeInitFrameSet = false
 
-        private func handleStrokeMoved(_ point: CGPoint, host: LayerHostView?) {
+        private func handleStrokeMoved(_ sample: VectorSample, host: LayerHostView?) {
             guard shapeDetectionActive else { return }
             guard let host, host === shapeDetectionHost else { return }
-            shapeDetectionPoints.append(point)
+            shapeDetectionSamples.append(sample)
+            let point = sample.point
             // Only restart the timer if the finger / pencil moved more than 2pt — Apple Pencil
             // generates continual micro-moves that would otherwise never let the timer fire.
             if let last = shapeLastPoint {
@@ -1246,7 +1277,7 @@ struct CanvasView: UIViewRepresentable {
             shapeHoldTimer?.invalidate()
             shapeHoldTimer = nil
             shapeDetectionActive = false
-            shapeDetectionPoints.removeAll()
+            shapeDetectionSamples.removeAll()
             shapeDetectionHost = nil
         }
 
@@ -1254,9 +1285,9 @@ struct CanvasView: UIViewRepresentable {
             shapeHoldTimer = nil
             guard shapeDetectionActive else { return }
             shapeDetectionActive = false
-            let points = shapeDetectionPoints
-            shapeDetectionPoints.removeAll()
-            guard points.count >= 3,
+            let samples = shapeDetectionSamples
+            shapeDetectionSamples.removeAll()
+            guard samples.count >= 3,
                   let host = shapeDetectionHost,
                   let layerID = host.strokeView.layerID,
                   let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == layerID }) else {
@@ -1265,13 +1296,19 @@ struct CanvasView: UIViewRepresentable {
             }
             shapeDetectionHost = nil
 
+            let points = samples.map(\.point)
             guard let shape = ShapeDetector.detect(from: points) else { return }
 
             // Revert the partial stroke that was painted during the hold period.
             // strokeBeforeSnapshot becomes nil, so the subsequent handleEnd bails out early.
-            host.strokeView.revertStrokeToSnapshot()
+            if host.strokeView.vectorCanvas != nil {
+                host.strokeView.revertVectorStrokeToSnapshot()
+            } else {
+                host.strokeView.revertStrokeToSnapshot()
+            }
 
-            canvasManager.beginInteractiveShape(kind: shape.kind, startPoint: shape.startPoint, endPoint: shape.endPoint)
+            canvasManager.beginInteractiveShape(kind: shape.kind, startPoint: shape.startPoint, endPoint: shape.endPoint,
+                                                 samples: samples)
             shapeOverlay?.shape = canvasManager.activeShape
             shapeOverlay?.isActive = true
         }
