@@ -54,6 +54,33 @@ Note the shape of that number: 63 of 118 tests are XCUITest end-to-end tests and
 of the runtime. The characterization tests added in this stage are pure-logic and run in
 milliseconds.
 
+### After Stage 0's additions
+
+Re-run at the end of this stage, with the 61 characterization tests and 5 perf tests in:
+
+| | |
+|---|---|
+| Executed | **184** |
+| Passed | **183** |
+| Failed | **0** |
+| Skipped | **1** (the same pre-existing one) |
+| Test-execution wall clock | **1220.9 s** (20 m 21 s) |
+
+| Suite | Tests | Failures | Seconds |
+|---|---|---|---|
+| `PaintSoftwareUITests` (XCUITest, end-to-end) | 63 | 0 (1 skipped) | 1211.8 |
+| `ShapeDetectorLogicTests` | 27 | 0 | 1.7 |
+| `CelCRUDCharacterizationTests` *(new)* | 26 | 0 | 1.7 |
+| `ViewPresetCharacterizationTests` *(new)* | 19 | 0 | 1.2 |
+| `LayerTreeCharacterizationTests` *(new)* | 16 | 0 | 1.0 |
+| `BackupManagerLogicTests` | 15 | 0 | 1.2 |
+| `BrushEngineLogicTests` | 13 | 0 | 0.8 |
+| `PerfBaselineTests` *(new)* | 5 | 0 | 1.5 |
+
+66 tests added for **&minus;10.5 s** of wall clock (run-to-run noise in the XCUITest suite dwarfs
+them). A later stage can therefore run every non-XCUITest suite as a fast inner loop — all 121 of
+them finish in about 9 seconds — and save the 20-minute end-to-end pass for pre-commit.
+
 ## Performance baseline
 
 Measured by `PaintSoftwareUITests/PerfBaselineTests.swift`, which drives synthetic strokes through
@@ -95,6 +122,13 @@ Four things a later stage should carry forward from these numbers:
 
 These are simulator numbers on an idle host, single-run, not averaged across runs. Treat a change
 under ~2× as noise.
+
+**Absolute footprint depends on what ran before it in the same process; the deltas do not.** The
+table above is from an isolated `-only-testing:PerfBaselineTests` run, which starts at 68.8 MB. In
+the full-suite run the same tests start at 98.1 MB, because the 63 XCUITest cases ran first in that
+process. Timings and every delta match to within noise (27.6 vs 28.0 ms per stroke, 4.4 vs 4.7 ms
+per thumbnail, 3.04× vs 2.94× path scaling, 0.0 vs 0.1 MB growth). Compare deltas, not the
+starting footprint, and re-measure the way this table was measured.
 
 
 
