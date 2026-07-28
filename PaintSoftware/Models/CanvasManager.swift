@@ -776,10 +776,19 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// How many thumbnail re-renders have actually run (i.e. reached the renderer, not counting
+    /// calls that bail on a stale index). Pure instrumentation for `PerfBaselineTests`, which
+    /// records it as part of the pre-refactor performance baseline — thumbnail regeneration
+    /// rasterizes the whole cel, so how often one stroke triggers it is a real cost. Never read by
+    /// the app itself; monotonic, and deliberately not `@Published` so reading it can't drive a
+    /// view update.
+    private(set) var thumbnailRegenerationCount = 0
+
     private func regenerateThumbnail(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               let canvasSize else { return }
+        thumbnailRegenerationCount += 1
         let cel = layers[layerIndex].cels[celIndex]
         let image: UIImage
         if cel.bakedImage != nil || cel.vector != nil {

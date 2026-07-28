@@ -38,6 +38,7 @@
 		DEC0DE000000000000000026 /* PaintSoftware/Utilities/ColorConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */; };
 		DEC0DE000000000000000028 /* PaintSoftware/Utilities/ColorMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */; };
 		DEC0DE00000000000000002A /* PaintSoftware/Utilities/ThumbnailRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */; };
+		DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -84,6 +85,7 @@
 		DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ColorConversion.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ColorMath.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ThumbnailRenderer.swift; sourceTree = "<group>"; };
+		DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PerfBaselineTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -160,6 +162,7 @@
 				DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */,
 				DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */,
 				DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */,
+				DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */,
 			);
 			path = PaintSoftwareUITests;
 			sourceTree = "<group>";
@@ -311,6 +314,7 @@
 				DEC0DE000000000000000004 /* CelCRUDCharacterizationTests.swift in Sources */,
 				DEC0DE000000000000000006 /* LayerTreeCharacterizationTests.swift in Sources */,
 				DEC0DE000000000000000008 /* ViewPresetCharacterizationTests.swift in Sources */,
+				DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */,
 				DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */,
 				DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */,
 				DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */,

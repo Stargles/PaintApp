@@ -61,7 +61,42 @@ the real pipeline (`StrokeStabilizer` → `BrushStamper.stampStroke` → `Raster
 `CanvasManager.strokeEnded`) on a 2048×2048 canvas. It does **not** include UIKit touch delivery or
 `CADisplayLink` presentation — no headless harness can reproduce those faithfully.
 
-<!-- PERF NUMBERS INSERTED BY THE PERF-HARNESS COMMIT -->
+### As measured, 2026-07-28
+
+| Measurement | Value |
+|---|---|
+| One 500-sample stroke, end to end | **27.6 ms** (0.055 ms/sample; the log line rounds that to 0.1) |
+| Peak footprint delta during that stroke | **0.0 MB** (68.8 MB before, 68.8 MB peak) |
+| Thumbnail regenerations per completed stroke | **1** |
+| One thumbnail rasterize (2048×2048) | **4.4 ms** — ~16% of a stroke |
+| 50 × `scheduleThumbnailRegen`, synchronous cost | **0.3 ms**, **0** rasterizes (debounce holds) |
+| 20 consecutive 200-sample strokes, mean | **28.2 ms** each |
+| Footprint growth over those 20 strokes | **0.0 MB** (68.7 → 68.6 MB) |
+| Same path at 250 vs 1000 samples | 27.3 → 27.4 ms, **1.00×** |
+| 1× vs 4× path length, same sample count | 26.8 → 81.5 ms, **3.04×** (ideal 4.00×) |
+
+Four things a later stage should carry forward from these numbers:
+
+1. **Cost is set by path length, not sample count.** `BrushStamper.stampStroke` derives its dab
+   count from `distance ÷ (brushSize × spacingFraction)` per segment, so quadrupling the samples
+   over the same path costs 1.00× — thinning input samples buys nothing. Any before/after
+   comparison must hold path length fixed or it measures nothing. Scaling with path length is
+   3.04× for 4× the path: linear, slightly sublinear from fixed per-stroke overhead.
+2. **Thumbnail regeneration is 4.4 ms of the 27.6 ms stroke** and rasterizes the entire cel. It
+   fires exactly once per completed stroke today; if a decomposition makes it fire per dab or per
+   layer, `testSyntheticStrokeBaseline` fails on the count, not on a timing threshold.
+3. **Steady-state memory is flat.** The cel's `RasterLayerTexture` is written in place, so repeated
+   strokes plateau. Growth over 20 strokes is 0.0 MB.
+4. **Beware the autorelease artifact when re-measuring.** `renderToUIImage()` materializes a
+   canvas-sized CGImage (16 MB here) per regeneration. The app's run loop drains those every turn;
+   a test method does not, so measuring without an explicit `autoreleasepool` reports ~16 MB/stroke
+   of phantom growth (measured: 322 MB over 20 strokes). `PerfBaselineTests.stamp` pools
+   deliberately — do not remove it and then read the growth number as a leak.
+
+These are simulator numbers on an idle host, single-run, not averaged across runs. Treat a change
+under ~2× as noise.
+
+
 
 To re-measure:
 
