@@ -2340,31 +2340,35 @@ final class PaintSoftwareUITests: XCTestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // Something to move: a short stroke in the upper-left, far from where the second one goes so
-        // the two can never be mistaken for each other.
-        drawLine(on: canvas, from: CGVector(dx: 0.25, dy: 0.25), to: CGVector(dx: 0.40, dy: 0.25))
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.325, dy: 0.25)),
-                       "The first stroke should be on screen before moving it")
+        // Something to move: a cross in the upper-left, well away from where the second stroke goes
+        // so the two can never be mistaken for each other. Deliberately a cross rather than a single
+        // line — Move boxes the layer's own *content bounds*, and one horizontal stroke's bounds are
+        // a strip barely a brush-width tall, which a drag aimed at its centre can miss outright.
+        drawLine(on: canvas, from: CGVector(dx: 0.25, dy: 0.28), to: CGVector(dx: 0.39, dy: 0.28))
+        drawLine(on: canvas, from: CGVector(dx: 0.32, dy: 0.21), to: CGVector(dx: 0.32, dy: 0.35))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.32, dy: 0.28)),
+                       "The cross should be on screen before moving it")
 
         // Move the layer straight down. Move on a vector layer transforms the geometry via the
-        // on-canvas box (no raster piece), and that box wraps the layer's own content bounds — so a
-        // drag starting on the stroke itself lands on the box body, which is what pans it.
+        // on-canvas box (no raster piece), and that box wraps the content bounds — so a drag from
+        // the middle of the cross lands on the box body, which is what pans it.
         app.buttons["toolbar.moveButton"].tap()
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.325, dy: 0.25))
-            .press(forDuration: 0.3,
-                   thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.325, dy: 0.45)),
-                   withVelocity: .slow, thenHoldForDuration: 0.3)
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.28))
+            .press(forDuration: 0.5,
+                   thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.48)),
+                   withVelocity: .slow, thenHoldForDuration: 0.5)
         app.buttons["toolbar.moveButton"].tap() // leave Move
 
         // Guard against a vacuous pass: if the drag missed the box the layer never moved, and the
         // rest of this test would prove nothing.
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.325, dy: 0.45, timeout: 5),
-                      "The Move drag should have carried the stroke down to the new position")
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.325, dy: 0.25)),
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.32, dy: 0.48, timeout: 5),
+                      "The Move drag should have carried the cross down to the new position")
+        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.32, dy: 0.28, timeout: 5),
                       "...and left its original position blank")
 
-        // The real assertion: a stroke drawn now must land under the finger.
-        app.buttons["toolbar.brushButton"].tap()
+        // The real assertion: a stroke drawn now must land under the finger. No tool tap needed —
+        // leaving Move restores the pen that was already selected, and tapping the brush button
+        // here would only toggle its settings panel open over the canvas.
         drawLine(on: canvas, from: CGVector(dx: 0.55, dy: 0.70), to: CGVector(dx: 0.80, dy: 0.70))
 
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.675, dy: 0.70)),
