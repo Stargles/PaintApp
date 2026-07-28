@@ -171,7 +171,18 @@ final class StrokeCanvasView: UIView {
     }
     /// The `VectorCanvas.version` last shown, so the coordinator can detect in-place vector edits
     /// (transform, image add — which don't change the canvas's object identity) and refresh.
-    private(set) var displayedVectorVersion: Int = -1
+    private var displayedVectorVersion: Int = -1
+    /// The `RasterLayerTexture.version` last shown — the raster twin of `displayedVectorVersion`.
+    ///
+    /// Both `RasterLayerTexture` and `VectorCanvas` are reference types mutated in place, so neither
+    /// changes the `@Published layers` value when its *content* changes; nothing about a SwiftUI pass
+    /// implies the pixels on screen are current. Anything that isn't the live stroke — a smart shape
+    /// or fill baking down, an undo/redo of one, a Move commit — therefore left this view showing
+    /// stale content until some unrelated later edit happened to call `refreshDisplay()`. That is
+    /// precisely the reported "make a shape, tap the eraser, the shape disappears; erase something
+    /// and it comes back": the shape was baked correctly all along, just never repainted. The vector
+    /// tier already had this guard; the raster tier didn't.
+    private var displayedRasterVersion: Int = -1
     /// Live-preview raster for the in-progress vector stroke (nil except mid-stroke).
     private var vectorScratch: RasterLayerTexture?
     private var currentVectorSamples: [VectorSample] = []
@@ -201,7 +212,20 @@ final class StrokeCanvasView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Repaints only when the backing content has actually moved on from what's displayed. Called
+    /// once per layer on every SwiftUI pass, which is what makes in-place mutations (a baked shape,
+    /// an undone fill) self-healing rather than something each mutation site has to remember to
+    /// announce — see `displayedRasterVersion`.
+    func refreshDisplayIfStale() {
+        if let vectorCanvas {
+            if displayedVectorVersion != vectorCanvas.version { refreshDisplay() }
+        } else if let raster, displayedRasterVersion != raster.version {
+            refreshDisplay()
+        }
+    }
+
     func refreshDisplay() {
+        displayedRasterVersion = raster?.version ?? -1
         if let vectorCanvas {
             displayedVectorVersion = vectorCanvas.version
             let base = vectorCanvas.render()
@@ -401,7 +425,10 @@ final class StrokeCanvasView: UIView {
             brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
             let stroke = VectorStroke(brush: brush, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
                                       size: brushSize, opacity: brushOpacity, samples: currentVectorSamples)
-            vectorCanvas.addStroke(stroke)
+            // Samples come straight off the touch, i.e. canvas space — this overload maps them into
+            // the layer's local space so a stroke drawn on an already-moved layer lands under the
+            // finger instead of being put through the layer transform a second time.
+            vectorCanvas.addStroke(canvasSpaceStroke: stroke)
         }
 
         vectorScratch = nil
@@ -736,7 +763,7 @@ struct CanvasView: UIViewRepresentable {
             coordinator.updateShapeOverlay()
         }
         shapeOverlay.onTapOutside = { [weak coordinator = context.coordinator] in
-            coordinator?.commitShapeAndRefresh()
+            coordinator?.commitTransientsAndRefresh()
         }
         shapeOverlay.onConstraintChanged = { [weak coordinator = context.coordinator] on in
             guard let coordinator else { return }
@@ -901,12 +928,11 @@ struct CanvasView: UIViewRepresentable {
                 host.strokeView.canvasManager = canvasManager
                 host.strokeView.onStrokeBegan = { [weak self, weak host] in
                     guard let self else { return }
-                    // Finalize a still-adjustable fill before this stroke changes any pixels, so the fill
-                    // is the older undo step and this stroke undoes first. Self-guards when no fill is live.
-                    self.canvasManager.commitInteractiveFill()
-                    // Also bake a pending shape (same ordering rationale) — and bring its layer back
-                    // in sync now, so the shape doesn't blink out for a frame as this stroke starts.
-                    self.commitShapeAndRefresh()
+                    // A stroke is a canvas edit, so any adjustable fill/shape bakes before this one
+                    // changes a single pixel: they become the older undo steps and this stroke
+                    // undoes first, and the caller snapshots the raster for undo *after* this
+                    // returns, so the baked content is part of that snapshot rather than lost by it.
+                    self.commitTransientsAndRefresh()
                     // Begin accumulating stroke points for smart-shape detection.
                     if let host { self.startShapeDetection(host: host) }
                 }
@@ -1028,10 +1054,13 @@ struct CanvasView: UIViewRepresentable {
                     let targetVector = celIdx.flatMap { canvasManager.layers[index].cels[$0].vector }
                     if host.strokeView.vectorCanvas !== targetVector {
                         host.strokeView.vectorCanvas = targetVector
-                    } else if let v = targetVector, host.strokeView.displayedVectorVersion != v.version {
-                        // Same VectorCanvas instance, but its content changed in place (transform,
-                        // image import, undo) — re-render.
-                        host.strokeView.refreshDisplay()
+                    } else {
+                        // Same backing instance, but it may have been mutated in place — a shape or
+                        // fill baking down, an undo/redo of one, a vector transform or image import.
+                        // Neither `RasterLayerTexture` nor `VectorCanvas` changes the `layers` value
+                        // when its content changes, so this version check is the only thing that
+                        // brings the display back in sync. See `displayedRasterVersion`.
+                        host.strokeView.refreshDisplayIfStale()
                     }
                 }
                 let targetFillImage = celIdx.flatMap { canvasManager.layers[index].cels[$0].fillImage }
@@ -1222,17 +1251,22 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// Bakes the pending shape and brings the canvas back in sync *synchronously*.
-        ///
-        /// Committing alone only marks the model dirty: the overlay stays up and the layer host
-        /// still shows its pre-commit render until SwiftUI's next pass. That one-pass gap is what
-        /// made a committing shape flicker off and back on — the overlay's preview disappeared a
-        /// frame before the baked stroke appeared. Tearing down the overlay and re-rendering the
-        /// affected host in the same turn closes it.
-        func commitShapeAndRefresh() {
-            let layerID = canvasManager.shapeGestureLayerID
-            canvasManager.commitInteractiveShape()
-            if let layerID { layerHosts[layerID]?.strokeView.refreshDisplay() }
+        /// Repaints every layer host whose backing content has drifted from what it last rendered.
+        /// `reconcileLayers` does the same per layer on each SwiftUI pass; this is the synchronous
+        /// form, for the moment a transient bakes — the overlay drawing its preview is torn down
+        /// immediately, so waiting a pass for the baked pixels to appear shows a visible flicker.
+        func syncLayerDisplays() {
+            for host in layerHosts.values {
+                host.strokeView.refreshDisplayIfStale()
+            }
+        }
+
+        /// Bakes whatever is transient (shape or fill) and brings the canvas back in sync in the
+        /// same turn — the entry point for every "the user did something that ends shape editing"
+        /// path in this coordinator.
+        func commitTransientsAndRefresh() {
+            canvasManager.beginCanvasEdit()
+            syncLayerDisplays()
             updateShapeOverlay()
         }
 
@@ -1713,7 +1747,7 @@ struct CanvasView: UIViewRepresentable {
         private func commitSnappedShapeIfTransforming(at location: CGPoint) {
             guard canvasManager.isShapeInAdjustableState, shapeOverlay?.isConstrained == true else { return }
             shapeOverlay?.setConstrained(false)
-            commitShapeAndRefresh()
+            commitTransientsAndRefresh()
             if gestureAnchorCenter0 == nil, let container = containerView {
                 gestureAnchorHost0 = location
                 gestureAnchorCenter0 = container.center

@@ -51,6 +51,7 @@ final class CanvasManager: ObservableObject {
     /// the same way in future.
     @discardableResult
     func addImageToActiveVectorLayer(_ image: UIImage) -> Bool {
+        beginCanvasEdit()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].kind == .vector,
               let celIdx = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
@@ -69,13 +70,11 @@ final class CanvasManager: ObservableObject {
         recordUndo(name: "Insert Image", cost: Self.approximateImageCost(image), undo: { [weak self] in
             vector.images = imagesBefore
             vector.bumpVersion()
-            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
-            self?.objectWillChange.send()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
             vector.images = imagesBefore + [element]
             vector.bumpVersion()
-            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
-            self?.objectWillChange.send()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         })
         return true
     }
@@ -286,6 +285,51 @@ final class CanvasManager: ObservableObject {
     /// requiring a separate dismiss tap first.
     let interactionBegan = PassthroughSubject<Void, Never>()
 
+    // MARK: - Canvas-edit chokepoint
+
+    /// Reentrancy depth for `beginCanvasEdit`. The commits it performs are themselves canvas edits
+    /// (they register undo steps and, for a structural edit, run inside `withStructureUndo`), so
+    /// without this the first call would recurse back into itself through its own bookkeeping.
+    private var canvasEditDepth = 0
+
+    /// Bakes any transient, not-yet-committed content into the document. **Every operation that
+    /// changes what the canvas looks like calls this before it does anything else** — a stroke, an
+    /// erase, a fill, making or acting on a selection, Move/Duplicate, any layer/folder/timeline
+    /// edit, a canvas flip or resize, and saving.
+    ///
+    /// A transient smart shape or fill is not part of the document yet: it lives in this manager's
+    /// private gesture state and is drawn by an overlay above the layer stack. An edit that runs
+    /// while one is still pending reads layer content that doesn't include it — and the transient
+    /// then bakes *later*, at whatever geometry it happens to hold by then, landing out of order on
+    /// the undo stack and on the wrong side of the edit that logically preceded it. That one
+    /// mis-ordering is the shared root cause of the shape/fill "teleports back", "gets duplicated",
+    /// and "disappears then reappears" bugs, which is why this is a single chokepoint invoked from
+    /// inside the mutating operations themselves rather than a rule each view call site has to
+    /// remember.
+    ///
+    /// Fill commits before shape: a shape stroke is drawn over the fill in the same cel, so baking
+    /// in that order preserves what the user was looking at. Both self-guard when nothing is
+    /// pending, so calling this unconditionally costs nothing.
+    ///
+    /// A floating Move/Duplicate piece is deliberately *not* settled here — Move stays engaged
+    /// across its own nudges and mode changes, which are canvas edits in their own right. Use
+    /// `commitAllInteractiveState()` where the tool itself is changing out from under the user.
+    func beginCanvasEdit() {
+        guard canvasEditDepth == 0 else { return }
+        canvasEditDepth += 1
+        defer { canvasEditDepth -= 1 }
+        commitInteractiveFill()
+        commitInteractiveShape()
+    }
+
+    /// `beginCanvasEdit()` plus settling a floating Move/Duplicate piece — for the points where the
+    /// active tool is being replaced (tool switch, layer/frame change, save), at which a piece left
+    /// floating would otherwise be stranded or silently discarded.
+    func commitAllInteractiveState() {
+        beginCanvasEdit()
+        commitFloatingPieceIfNeeded()
+    }
+
     /// Set to true by the canvas coordinator when the user touches the canvas with a drawing tool
     /// selected but no layers exist. `DrawingView` observes this and presents an alert asking the
     /// user to create a layer. Reset to false once the alert is dismissed.
@@ -370,8 +414,10 @@ final class CanvasManager: ObservableObject {
         let delta = clamped - canvasPadding
         guard delta != 0 else { return }
 
-        // Selection/floating-piece buffers are canvas-sized; bake/clear them before the size changes.
-        commitFloatingPieceIfNeeded()
+        // Every transient buffer here is canvas-sized, so all of them have to be baked before the
+        // size changes underneath them (a shape/fill preview rendered at the old size would land
+        // mis-scaled once it eventually committed).
+        commitAllInteractiveState()
         selection = nil
 
         let offset = CGPoint(x: delta, y: delta)
@@ -403,6 +449,9 @@ final class CanvasManager: ObservableObject {
 
     func flipCanvas(horizontal: Bool) {
         guard let canvasSize else { return }
+        // Mirroring is a canvas edit: bake first, or the pending shape/fill would commit afterwards
+        // at its un-mirrored geometry, landing on the wrong side of the canvas it was drawn on.
+        commitAllInteractiveState()
         for layerIndex in layers.indices {
             for celIndex in layers[layerIndex].cels.indices {
                 layers[layerIndex].cels[celIndex].raster = layers[layerIndex].cels[celIndex].raster.flipped(horizontal: horizontal)
@@ -693,12 +742,11 @@ final class CanvasManager: ObservableObject {
     // needs, to trigger a thumbnail regen and force the `@Published layers` diff that in-place
     // texture mutation alone wouldn't otherwise produce.
 
+    /// Called once per completed stroke. Any pending shape/fill was already baked at stroke *start*
+    /// (`beginCanvasEdit`, via the drawing surface's `onStrokeBegan`) — which is the correct point,
+    /// since that's when the canvas began changing — so there is nothing transient left to settle
+    /// here, only the thumbnail to refresh.
     func strokeEnded(layerIndex: Int, celIndex: Int) {
-        // A paint/erase stroke is the "canvas action" that ends an adjustable fill:
-        // bake it now so it becomes real layer pixels underneath/around the new stroke.
-        if fillGestureActive { commitInteractiveFill() }
-        // Note: shapes are NOT committed on stroke end. They stay adjustable (transient state)
-        // until an explicit canvas action (undo/redo, layer change, new fill, etc.) commits them.
         regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
     }
 
@@ -799,9 +847,10 @@ final class CanvasManager: ObservableObject {
     /// preview lives in `fillImage` and is baked into the layer's pixels (`bakedImage`) on commit.
     func beginInteractiveFill(at point: CGPoint) {
         guard !fillFingerDown else { return }
-        // A fresh fill while an earlier one is still adjustable (pending) commits that earlier one first,
-        // so it's baked into the layer before this fill reads it as a boundary/recolour target.
-        if fillGestureActive { commitInteractiveFill() }
+        // A fill is a canvas edit like any other: an earlier adjustable fill (or a pending shape)
+        // bakes first, so this fill reads it as a real boundary/recolour target instead of flooding
+        // against content that is about to change.
+        beginCanvasEdit()
         guard let canvasSize else { return }
         guard layers.indices.contains(currentLayerIndex) else { return }
         let layerIndex = currentLayerIndex
@@ -1447,22 +1496,34 @@ final class CanvasManager: ObservableObject {
         guard let layerID = fillGestureLayerID, let celID = fillGestureCelID,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
-        let cel = layers[layerIndex].cels[celIndex]
-        guard let preview = cel.fillImage else { return }  // nothing was previewed
-        let isVector = layers[layerIndex].kind == .vector
+        guard layers[layerIndex].cels[celIndex].fillImage != nil else { return }  // nothing was previewed
 
-        if isVector, let vectorCanvas = cel.vector,
-           let bytes = regionBytes, regionW > 0, regionH > 0,
-           let path = PixelOps.pathFromAlphaMask(bytes: bytes, width: regionW, height: regionH) {
-            // --- Vector path: store as a VectorFillElement on the canvas ---
-            let fillsBefore = vectorCanvas.fills
-            let element = VectorFillElement(path: path, color: fillColor)
-            vectorCanvas.addFill(element)
-            // Clear the transient raster fill preview so it isn't drawn a second time.
+        if layers[layerIndex].kind == .vector {
+            // --- Vector layer: the fill becomes a VectorFillElement, never raster pixels ---
+            // A vector layer's on-screen content is `VectorCanvas.render()` alone (see
+            // `StrokeCanvasView.refreshDisplay`), so this must NOT fall through to the raster branch
+            // below when the contour can't be extracted: `PixelOps.rasterize` *does* read the raster
+            // tier, so a fill left there would vanish from the canvas while still showing up in
+            // thumbnails, fill references, Move lifts and merges — the vector twin of the raster
+            // "ghost layer" bug. An unextractable mask means an empty fill, so dropping the preview
+            // is the correct outcome; nothing is recorded.
+            if layers[layerIndex].cels[celIndex].vector == nil, let canvasSize {
+                layers[layerIndex].cels[celIndex].vector = .empty(size: canvasSize)
+            }
+            // Clear the transient raster preview either way so it isn't drawn a second time.
             setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: nil)
+            guard let vectorCanvas = layers[layerIndex].cels[celIndex].vector,
+                  let bytes = regionBytes, regionW > 0, regionH > 0,
+                  let path = PixelOps.pathFromAlphaMask(bytes: bytes, width: regionW, height: regionH) else { return }
+            let fillsBefore = vectorCanvas.fills
+            // The mask is measured against the *rendered* canvas, so it's canvas-space — this
+            // overload maps it back through the layer's transform (see its doc comment).
+            vectorCanvas.addFill(canvasSpacePath: path, color: fillColor)
             registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
                                    layerID: layerID, celID: celID, actionName: "Fill")
         } else {
+            let cel = layers[layerIndex].cels[celIndex]
+            guard let preview = cel.fillImage else { return }
             // --- Raster path: flatten into `raster` directly ---
             // `fillGestureBaseBaked` is only the pre-gesture `bakedImage` tier (see where it's
             // captured in `beginInteractiveFill`); the live raster strokes sit *above* both baked and
@@ -1491,11 +1552,11 @@ final class CanvasManager: ObservableObject {
         recordUndo(name: actionName, cost: cost, undo: { [weak self] in
             vectorCanvas.fills = oldFills
             vectorCanvas.bumpVersion()
-            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
             vectorCanvas.fills = newFills
             vectorCanvas.bumpVersion()
-            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         })
     }
 
@@ -1666,8 +1727,7 @@ final class CanvasManager: ObservableObject {
     private var shapeIsConstrained = false
     /// Identify the target cel by ID, not index: the shape stays adjustable across other edits that
     /// may shift array positions before it commits (same reasoning as `fillGestureLayerID`).
-    /// Readable so the canvas coordinator can refresh exactly the host a commit landed on.
-    private(set) var shapeGestureLayerID: UUID?
+    private var shapeGestureLayerID: UUID?
     private var shapeGestureCelID: UUID?
     private var shapeGestureColor: CodableColor = .init(red: 0, green: 0, blue: 0, alpha: 1)
     private var shapeGestureStrokeWidth: CGFloat = 5
@@ -1755,7 +1815,9 @@ final class CanvasManager: ObservableObject {
     /// Begins an interactive shape. Called when the hold timer fires and ShapeDetector confirms a shape.
     func beginInteractiveShape(_ shape: ShapeGeometry, samples: [VectorSample] = []) {
         guard !shapeFingerDown else { return }
-        if shapeGestureActive { commitInteractiveShape() }
+        // Laying down a new shape is a canvas edit: whatever was still pending bakes first, so the
+        // two never share the transient tier (only one shape's geometry is tracked at a time).
+        beginCanvasEdit()
         guard layers.indices.contains(currentLayerIndex) else { return }
         let layerIndex = currentLayerIndex
         guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return }
@@ -1811,21 +1873,20 @@ final class CanvasManager: ObservableObject {
         shapeFingerDown = false
         let savedBrush = shapeGestureBrush
         let collapsed = collapsedShapeSamples(for: shape)
+        let layerID = shapeGestureLayerID
+        let celID = shapeGestureCelID
         defer {
             shapeGestureLayerID = nil
             shapeGestureCelID = nil
             shapeGestureSamples = []
             shapePreviewCache = nil
             shapePreviewTexture = nil
+            objectWillChange.send()
             refreshUndoRedoState()
         }
-        guard !collapsed.isEmpty,
-              let layerID = shapeGestureLayerID, let celID = shapeGestureCelID,
+        guard !collapsed.isEmpty, let layerID, let celID,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
-              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else {
-            objectWillChange.send()
-            return
-        }
+              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
 
         if layers[layerIndex].kind == .vector {
             // A vector layer's cel should always have a VectorCanvas, but stamping into the cel's
@@ -1839,7 +1900,10 @@ final class CanvasManager: ObservableObject {
                                           size: shapeGestureStrokeWidth, opacity: shapeGestureOpacity,
                                           samples: collapsed)
                 let strokesBefore = vectorCanvas.strokes
-                vectorCanvas.addStroke(stroke)
+                // The shape outline is in canvas space (it was dragged there) — same mapping the
+                // live vector-stroke path uses, so a shape drawn on a moved layer lands where the
+                // preview showed it.
+                vectorCanvas.addStroke(canvasSpaceStroke: stroke)
                 // Same undo/redo shape as an ordinary vector stroke (swap the whole strokes array).
                 registerVectorStrokeUndo(vectorCanvas: vectorCanvas, oldStrokes: strokesBefore,
                                          newStrokes: vectorCanvas.strokes, layerID: layerID, celID: celID,
@@ -1848,7 +1912,6 @@ final class CanvasManager: ObservableObject {
                 // reverted when detection fired), so the thumbnail has to be refreshed here or the
                 // layer panel keeps showing the cel as it was before the shape landed.
                 scheduleThumbnailRegen(layerID: layerID, celID: celID)
-                objectWillChange.send()
                 return
             }
         }
@@ -1856,7 +1919,6 @@ final class CanvasManager: ObservableObject {
         stampShapeIntoRaster(collapsed, raster: layers[layerIndex].cels[celIndex].raster,
                              brush: savedBrush, layerID: layerID, celID: celID)
         scheduleThumbnailRegen(layerID: layerID, celID: celID)
-        objectWillChange.send()
     }
 
     /// Stamps a collapsed shape stroke into a raster cel and registers its undo step. Kept separate
@@ -1873,14 +1935,15 @@ final class CanvasManager: ObservableObject {
         let after = raster.renderToUIImage()
         let strokeCountAfter = raster.strokeCount
         let cost = Self.approximateImageCost(before) + Self.approximateImageCost(after)
+        // Undo/redo mutates the texture in place, which no live stroke is driving — so these have to
+        // republish the host refresh for the same reason the commit itself does, or undoing a shape
+        // leaves it on screen (and redoing leaves it off) until the next unrelated edit repaints.
         recordUndo(name: "Shape", cost: cost, undo: { [weak self] in
             raster.reset(to: before, strokeCount: strokeCountBefore)
-            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
-            self?.objectWillChange.send()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
             raster.reset(to: after, strokeCount: strokeCountAfter)
-            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
-            self?.objectWillChange.send()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         })
     }
 
@@ -1892,14 +1955,24 @@ final class CanvasManager: ObservableObject {
         recordUndo(name: actionName, cost: cost, undo: { [weak self] in
             vectorCanvas.strokes = oldStrokes
             vectorCanvas.bumpVersion()
-            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
-            self?.objectWillChange.send()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
             vectorCanvas.strokes = newStrokes
             vectorCanvas.bumpVersion()
-            self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
-            self?.objectWillChange.send()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         })
+    }
+
+    /// What must happen when a cel's committed content changes without a live stroke driving it (a
+    /// transient baking down, an undo/redo of one): refresh the layer-panel thumbnail and republish.
+    ///
+    /// `RasterLayerTexture`/`VectorCanvas` are reference types mutated in place, so the `@Published
+    /// layers` value is unchanged and nothing would otherwise trigger a SwiftUI pass. The pass is
+    /// all that's needed — repainting the canvas itself is handled by the version check in
+    /// `reconcileLayers`, not by announcing the change from here.
+    func celContentChangedOutsideStroke(layerID: UUID, celID: UUID) {
+        scheduleThumbnailRegen(layerID: layerID, celID: celID)
+        objectWillChange.send()
     }
 
     func cancelInteractiveShape() {
@@ -1915,7 +1988,9 @@ final class CanvasManager: ObservableObject {
         refreshUndoRedoState()
     }
 
-    /// Commits a pending shape if the finger is still down, or discards it.
+    /// Discards the shape only while a finger is still drawing it — a lifted, adjustable shape
+    /// survives, so a two-finger pan/zoom to look around doesn't wipe out work in progress. The
+    /// fill's `cancelInteractiveFillDrag` draws the same distinction for the same reason.
     func cancelInteractiveShapeDrag() {
         guard shapeFingerDown else { return }
         cancelInteractiveShape()
@@ -2021,6 +2096,12 @@ final class CanvasManager: ObservableObject {
             body() // an enclosing scope is already recording this
             return
         }
+        // Every structural edit is a canvas edit, so a pending shape/fill bakes first — before the
+        // snapshot below, so the transient lands as its own earlier undo step rather than being
+        // swallowed into this one (or re-baking afterwards on top of it). This one call is what
+        // covers add/delete/merge/duplicate/group/restack/rasterize/clear and every cel-timeline
+        // operation: they all funnel through here. See `beginCanvasEdit`.
+        beginCanvasEdit()
         let before = captureStructure()
         structureUndoDepth += 1
         defer { structureUndoDepth -= 1 }
@@ -2036,6 +2117,9 @@ final class CanvasManager: ObservableObject {
     private var gestureSnapshot: StructureSnapshot?
 
     func beginStructureGesture() {
+        // Same rule as `withStructureUndo`: bake transients before the baseline snapshot, so the
+        // drag about to start doesn't span a shape/fill that wasn't committed when it began.
+        beginCanvasEdit()
         gestureSnapshot = captureStructure()
     }
 
