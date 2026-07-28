@@ -349,6 +349,59 @@ enum ShapeDetector {
         return projected.sorted { $0.angle < $1.angle }.map { $0.sample }
     }
 
+    // MARK: - Sample generation (fallback when no original stroke samples are available)
+
+    /// Generates evenly-spaced `VectorSample` points along the shape outline at the given spacing.
+    /// Used as a fallback when the original stroke samples weren't captured.
+    static func generateSamplesAlongShape(_ shape: VectorShapeElement, spacing: CGFloat) -> [VectorSample] {
+        let sp = max(spacing, 1)
+        switch shape.kind {
+        case .line:
+            let dx = shape.endPoint.x - shape.startPoint.x
+            let dy = shape.endPoint.y - shape.startPoint.y
+            let len = hypot(dx, dy)
+            guard len > 0 else { return [] }
+            let steps = max(2, Int(len / sp))
+            return (0...steps).map { i in
+                let t = CGFloat(i) / CGFloat(steps)
+                return VectorSample(x: shape.startPoint.x + dx * t,
+                                    y: shape.startPoint.y + dy * t,
+                                    pressure: 0.5)
+            }
+        case .rectangle:
+            let r = shape.boundingRect
+            let perim = 2 * (r.width + r.height)
+            let steps = max(4, Int(perim / sp))
+            var result: [VectorSample] = []
+            for i in 0...steps {
+                let d = (CGFloat(i) / CGFloat(steps)) * perim
+                let (px, py): (CGFloat, CGFloat)
+                if d < r.width {
+                    px = r.minX + d; py = r.minY
+                } else if d < r.width + r.height {
+                    px = r.maxX; py = r.minY + (d - r.width)
+                } else if d < 2 * r.width + r.height {
+                    px = r.maxX - (d - r.width - r.height); py = r.maxY
+                } else {
+                    px = r.minX; py = r.maxY - (d - 2 * r.width - r.height)
+                }
+                result.append(VectorSample(x: px, y: py, pressure: 0.5))
+            }
+            return result
+        case .oval:
+            let r = shape.boundingRect
+            let circum = .pi * (3 * (r.width + r.height) / 2 - sqrt(r.width * r.height))
+            let steps = max(12, Int(circum / sp))
+            let cx = r.midX, cy = r.midY, rx = r.width / 2, ry = r.height / 2
+            return (0...steps).map { i in
+                let angle = 2 * .pi * CGFloat(i) / CGFloat(steps)
+                return VectorSample(x: cx + rx * cos(angle),
+                                    y: cy + ry * sin(angle),
+                                    pressure: 0.5)
+            }
+        }
+    }
+
     // MARK: - Constraint helpers
 
     /// Snaps an angle (radians) to the nearest `increment` (radians).

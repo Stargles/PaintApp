@@ -1683,28 +1683,51 @@ final class CanvasManager: ObservableObject {
                                      newStrokes: vectorCanvas.strokes, layerID: layerID, celID: celID,
                                      actionName: "Shape")
         } else if !collapsed.isEmpty {
-            // Raster layer: stamp the collapsed stroke into a temp raster, then bake it into bakedImage.
-            guard let canvasSize, !collapsed.isEmpty else { return }
-            let stampRaster = RasterLayerTexture.empty(size: canvasSize)
+            // Raster layer: stamp the collapsed stroke directly into the cel's raster so the
+            // eraser can erase it normally (eraser stamps into raster with .destinationOut).
             let cast = collapsed.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
-            BrushStamper.stampStroke(into: stampRaster, samples: cast, brush: savedBrush,
+            let rasterBefore = cel.raster.renderToUIImage()
+            let strokeCountBefore = cel.raster.strokeCount
+            // BrushStamper.stampStroke calls beginStroke/endStroke internally, so we just invoke it.
+            BrushStamper.stampStroke(into: cel.raster, samples: cast, brush: savedBrush,
                                      color: shape.uiColor, brushSize: shapeGestureStrokeWidth,
                                      brushOpacity: shapeGestureOpacity)
-            let shapeImage = stampRaster.renderToUIImage()
-            let newBaked = PixelOps.compositeOver(base: cel.bakedImage, overlay: shapeImage)
-            registerUndoableCelChange(layerID: layerID, celID: celID,
-                                      oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: nil,
-                                      newRaster: cel.raster, newBaked: newBaked, newFill: nil,
-                                      actionName: "Shape")
-        } else if let canvasSize,
-                  let fallbackImage = Self.renderShapeAsImage(shape, canvasSize: canvasSize) {
-            // Fallback: no original stroke samples available — render the shape as a simple
-            // stroked path (no brush dynamics, just the pure geometric outline).
-            let newBaked = PixelOps.compositeOver(base: cel.bakedImage, overlay: fallbackImage)
-            registerUndoableCelChange(layerID: layerID, celID: celID,
-                                      oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: nil,
-                                      newRaster: cel.raster, newBaked: newBaked, newFill: nil,
-                                      actionName: "Shape")
+            let rasterAfter = cel.raster.renderToUIImage()
+            let strokeCountAfter = cel.raster.strokeCount
+            let cost = Self.approximateImageCost(rasterBefore) + Self.approximateImageCost(rasterAfter)
+            let capturedRaster = cel.raster // capture by reference for undo closure
+            recordUndo(name: "Shape", cost: cost, undo: { [weak self] in
+                capturedRaster.reset(to: rasterBefore, strokeCount: strokeCountBefore)
+                self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                self?.objectWillChange.send()
+            }, redo: { [weak self] in
+                capturedRaster.reset(to: rasterAfter, strokeCount: strokeCountAfter)
+                self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                self?.objectWillChange.send()
+            })
+        } else {
+            // Fallback: no original stroke samples — generate evenly-spaced samples along the
+            // shape outline and stamp those, preserving the brush feel as best we can.
+            let generated = ShapeDetector.generateSamplesAlongShape(shape, spacing: shapeGestureStrokeWidth * savedBrush.spacingFraction)
+            let cast = generated.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+            let rasterBefore = cel.raster.renderToUIImage()
+            let strokeCountBefore = cel.raster.strokeCount
+            BrushStamper.stampStroke(into: cel.raster, samples: cast, brush: savedBrush,
+                                     color: shape.uiColor, brushSize: shapeGestureStrokeWidth,
+                                     brushOpacity: shapeGestureOpacity)
+            let rasterAfter = cel.raster.renderToUIImage()
+            let strokeCountAfter = cel.raster.strokeCount
+            let cost = Self.approximateImageCost(rasterBefore) + Self.approximateImageCost(rasterAfter)
+            let capturedRaster = cel.raster
+            recordUndo(name: "Shape", cost: cost, undo: { [weak self] in
+                capturedRaster.reset(to: rasterBefore, strokeCount: strokeCountBefore)
+                self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                self?.objectWillChange.send()
+            }, redo: { [weak self] in
+                capturedRaster.reset(to: rasterAfter, strokeCount: strokeCountAfter)
+                self?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                self?.objectWillChange.send()
+            })
         }
         objectWillChange.send()
     }
