@@ -938,7 +938,7 @@ struct CanvasView: UIViewRepresentable {
                 }
                 host.strokeView.onStrokeMoved = { [weak self, weak host] sample in
                     guard let self else { return }
-                    if self.canvasManager.shapeGestureActive && !self.canvasManager.isShapeInAdjustableState {
+                    if self.canvasManager.isShapeFollowingFinger {
                         // Shape following: the user is still holding after detection. For lines,
                         // just move the endpoint. For rects & ovals, the finger angle sets
                         // rotation and the distance sets a uniform scale from centre.
@@ -984,11 +984,9 @@ struct CanvasView: UIViewRepresentable {
                     self.cancelShapeDetection()
                     // If the shape was being followed (finger down since detection), lift transitions
                     // it to the adjustable state — no stroke was committed (it was reverted), so skip
-                    // the normal stroke-end path.
+                    // the normal stroke-end path. `endInteractiveShape` self-guards on finger-down.
                     if self.canvasManager.shapeGestureActive {
-                        if !self.canvasManager.isShapeInAdjustableState {
-                            self.canvasManager.endInteractiveShape()
-                        }
+                        self.canvasManager.endInteractiveShape()
                         self.updateShapeOverlay()
                         return
                     }
@@ -1786,20 +1784,11 @@ struct CanvasView: UIViewRepresentable {
                 fillDragStartThreshold = canvasManager.fillThreshold
                 fillDragStartEdge = canvasManager.fillExpand
                 let canvasPoint = recognizer.location(in: container)
-                // When the fill is in adjustable state (finger lifted, preview live), only respond
-                // to touches inside the pending fill region — that's the user re-tapping to resume
-                // drag-adjusting. Touches outside are ignored so the first finger of a two-finger
-                // pan doesn't accidentally commit the fill via beginInteractiveFill.
-                if canvasManager.isFillInAdjustableState {
-                    guard canvasManager.isPointInPendingFill(at: canvasPoint) else {
-                        // Tap outside the pending fill: commit the adjustable fill and start a
-                        // new fill here — this is a deliberate canvas interaction, not a pan/zoom.
-                        canvasManager.commitInteractiveFill()
-                        canvasManager.beginInteractiveFill(at: canvasPoint)
-                        return
-                    }
-                    canvasManager.resumeInteractiveFillDrag()
-                } else if canvasManager.isPointInPendingFill(at: canvasPoint) {
+                // Pressing back inside the current adjustable fill (finger lifted, preview still
+                // live) resumes drag-adjusting it. A press anywhere else is a new fill, which bakes
+                // the adjustable one first — `beginInteractiveFill` goes through `beginCanvasEdit`,
+                // so this doesn't have to commit by hand.
+                if canvasManager.isFillInAdjustableState, canvasManager.isPointInPendingFill(at: canvasPoint) {
                     canvasManager.resumeInteractiveFillDrag()
                 } else {
                     canvasManager.beginInteractiveFill(at: canvasPoint)

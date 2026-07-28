@@ -1718,6 +1718,10 @@ final class CanvasManager: ObservableObject {
     private var shapeFingerDown = false
     /// True when a shape exists and the finger is NOT pressing (adjustable state).
     var isShapeInAdjustableState: Bool { shapeGestureActive && !shapeFingerDown }
+    /// True while the finger that drew the shape is still down and steering it, before lift hands it
+    /// over to the adjustable state. Named rather than spelled out at each call site as
+    /// `shapeGestureActive && !isShapeInAdjustableState`, which reads as a double negative.
+    var isShapeFollowingFinger: Bool { shapeGestureActive && shapeFingerDown }
 
     /// The shape's editable geometry. Handle drags read this, adjust it, and write it back, so it
     /// stays *unconstrained* — `resolvedShape` is what the constraint gets applied to, and what the
@@ -1986,14 +1990,6 @@ final class CanvasManager: ObservableObject {
         shapePreviewTexture = nil
         objectWillChange.send()
         refreshUndoRedoState()
-    }
-
-    /// Discards the shape only while a finger is still drawing it — a lifted, adjustable shape
-    /// survives, so a two-finger pan/zoom to look around doesn't wipe out work in progress. The
-    /// fill's `cancelInteractiveFillDrag` draws the same distinction for the same reason.
-    func cancelInteractiveShapeDrag() {
-        guard shapeFingerDown else { return }
-        cancelInteractiveShape()
     }
 
     // MARK: - Undo / redo

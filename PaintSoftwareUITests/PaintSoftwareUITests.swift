@@ -141,6 +141,19 @@ final class PaintSoftwareUITests: XCTestCase {
         return false
     }
 
+    /// The inverse of `waitUntilFilled`: polls until the point goes back to blank paper. Used where
+    /// an edit is expected to *remove* ink (undoing a baked shape), so the assertion doesn't race
+    /// whichever run-loop turn SwiftUI happens to repaint on.
+    @discardableResult
+    private func waitUntilBlank(_ element: XCUIElement, dx: Double, dy: Double, timeout: TimeInterval = 15) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if isWhitish(rgbaPixel(of: element, dx: dx, dy: dy)) { return true }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return false
+    }
+
     /// The canvas is always rendered as a square (2048x2048 by default) scaled to fit and centered
     /// within `canvas.host`'s own element frame. On this iPad simulator that frame is *not* square
     /// (portrait-ish, taller than wide), so the canvas content is vertically letterboxed: there's a
@@ -2261,5 +2274,114 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 2,
                        "Erasing through the middle of a shape should split it into two strokes, "
                        + "exactly as it does for a freehand stroke")
+    }
+
+    /// The reported bug in its exact user-visible form: make a shape, then tap the eraser — and the
+    /// shape vanishes until you erase something, at which point it comes back.
+    ///
+    /// Switching tools bakes the pending shape, which stamps the cel's `RasterLayerTexture` in
+    /// place. That changes neither the `@Published layers` value nor the stroke view's own render,
+    /// so the canvas kept showing its pre-bake picture: the ink was committed correctly and simply
+    /// never repainted, and the next unrelated edit's own `refreshDisplay()` was what revealed it.
+    /// Nothing is erased here on purpose — the whole assertion is that the ink is on screen the
+    /// moment the tool changes. (`waitUntilFilled` just polls for "no longer blank paper", which is
+    /// what makes this robust against when SwiftUI happens to run its pass.)
+    func testShapeStaysOnScreenWhenSwitchingToTheEraser() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                       "The shape should be visible while it sits in the adjustable state")
+
+        app.buttons["toolbar.eraserButton"].tap()
+
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5, timeout: 5),
+                      "Selecting the eraser bakes the pending shape — its ink must stay on screen, "
+                      + "not disappear until some later edit happens to repaint the layer")
+    }
+
+    /// The undo/redo half of the same repaint gap. Undo and redo swap a baked shape's pixels back
+    /// into the cel's raster in place, with no live stroke driving a redraw — so without the
+    /// version check an undone shape stayed on screen and a redone one stayed missing.
+    func testUndoAndRedoOfABakedShapeRepaintTheCanvas() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+        commitPendingShape(on: canvas)
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5, timeout: 5),
+                      "The baked shape should be on screen before undoing it")
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5, timeout: 5),
+                      "Undoing the shape must repaint the layer, not leave the ink on screen")
+
+        app.buttons["sideToolbar.redoButton"].tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5, timeout: 5),
+                      "Redoing the shape must bring its ink back without waiting for another edit")
+    }
+
+    /// The vector-layer half of the "filled section gets duplicated in a very buggy way" report.
+    ///
+    /// A vector layer stores its content in *local* space and `VectorCanvas.render()` applies the
+    /// layer transform on top. A fill path (taken from the flood mask) and a live stroke's samples
+    /// are both captured in *canvas* space, and used to be stored verbatim — so on a layer that had
+    /// been moved they went through the transform a second time and landed one displacement away
+    /// from where they were put, reading as a detached second copy that slid further with every
+    /// subsequent move. Driven here with a stroke rather than a fill because both go through the
+    /// same mapping and a stroke needs no enclosing contour to be probed.
+    func testContentDrawnOnAMovedVectorLayerLandsWhereItWasDrawn() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.layersButton"].tap()
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.2) // long-press opens the kind menu
+        let vectorItem = app.buttons["Vector Layer"]
+        XCTAssertTrue(vectorItem.waitForExistence(timeout: 5))
+        vectorItem.tap()
+        app.buttons["toolbar.layersButton"].tap() // close the panel
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // Something to move: a short stroke in the upper-left, far from where the second one goes so
+        // the two can never be mistaken for each other.
+        drawLine(on: canvas, from: CGVector(dx: 0.25, dy: 0.25), to: CGVector(dx: 0.40, dy: 0.25))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.325, dy: 0.25)),
+                       "The first stroke should be on screen before moving it")
+
+        // Move the layer straight down. Move on a vector layer transforms the geometry via the
+        // on-canvas box (no raster piece), and that box wraps the layer's own content bounds — so a
+        // drag starting on the stroke itself lands on the box body, which is what pans it.
+        app.buttons["toolbar.moveButton"].tap()
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.325, dy: 0.25))
+            .press(forDuration: 0.3,
+                   thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.325, dy: 0.45)),
+                   withVelocity: .slow, thenHoldForDuration: 0.3)
+        app.buttons["toolbar.moveButton"].tap() // leave Move
+
+        // Guard against a vacuous pass: if the drag missed the box the layer never moved, and the
+        // rest of this test would prove nothing.
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.325, dy: 0.45, timeout: 5),
+                      "The Move drag should have carried the stroke down to the new position")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.325, dy: 0.25)),
+                      "...and left its original position blank")
+
+        // The real assertion: a stroke drawn now must land under the finger.
+        app.buttons["toolbar.brushButton"].tap()
+        drawLine(on: canvas, from: CGVector(dx: 0.55, dy: 0.70), to: CGVector(dx: 0.80, dy: 0.70))
+
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.675, dy: 0.70)),
+                       "A stroke drawn on an already-moved vector layer must land where it was "
+                       + "drawn, not be put through the layer transform a second time")
     }
 }
