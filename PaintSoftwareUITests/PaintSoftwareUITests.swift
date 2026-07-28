@@ -2075,4 +2075,90 @@ final class PaintSoftwareUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["timeline.layerName.0"].label, "Layer 2",
                        "Dragging a timeline name down should restack that layer")
     }
+
+    // MARK: - Smart shapes
+
+    /// Draws a stroke and keeps the finger down at the end of it, which is the smart-shape gesture:
+    /// the hold timer fires ~0.8s after the finger stops, the freehand stroke is replaced by the
+    /// detected shape, and lifting leaves it in the adjustable state.
+    private func drawAndHoldShape(on canvas: XCUIElement, from: CGVector, to: CGVector) {
+        let start = canvas.coordinate(withNormalizedOffset: from)
+        let end = canvas.coordinate(withNormalizedOffset: to)
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1.5)
+    }
+
+    /// Bakes a shape sitting in the adjustable state, without drawing anything: while a shape is
+    /// pending, the overlay covers the canvas and takes drags itself, so a drag well away from the
+    /// shape's handles is "tap outside" — it commits and lays down no stroke of its own.
+    private func commitPendingShape(on canvas: XCUIElement) {
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.88))
+        start.press(forDuration: 0.1, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.88)))
+    }
+
+    /// The whole raster-layer path for the user-visible feature: hold a drawn line until it snaps to
+    /// a shape, bake it, and then erase it. The shape has to land in the cel's own raster (not as a
+    /// separate object tier) for the eraser to be able to punch through it at all.
+    func testHeldStrokeBecomesAShapeThatTheEraserCanRemove() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // A horizontal line across the middle of the canvas, held at the end so it snaps to a shape.
+        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                       "The shape should be visible while it sits in the adjustable state")
+
+        commitPendingShape(on: canvas)
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                       "Baking the shape must leave the ink where the preview showed it")
+
+        // Erase along the line. A shape stamped into the raster erases like any other stroke.
+        app.buttons["toolbar.eraserButton"].tap()
+        let eraserSize = app.sliders["sideToolbar.sizeSlider"]
+        if eraserSize.waitForExistence(timeout: 3) { eraserSize.adjust(toNormalizedSliderPosition: 0.9) }
+        drawLine(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                      "The eraser should have removed the baked shape")
+    }
+
+    /// The vector-layer path: the same gesture must produce an ordinary `VectorStroke` — not a shape
+    /// object, and not a raster stamp — so the vector eraser splits it in two the way it splits any
+    /// freehand stroke drawn through the middle.
+    func testHeldStrokeOnVectorLayerBecomesAVectorStrokeTheEraserSplits() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.layersButton"].tap()
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.2) // long-press opens the kind menu
+        let vectorItem = app.buttons["Vector Layer"]
+        XCTAssertTrue(vectorItem.waitForExistence(timeout: 5))
+        vectorItem.tap()
+        app.buttons["toolbar.layersButton"].tap() // close the panel
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+        commitPendingShape(on: canvas)
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 1,
+                       "The shape should commit as exactly one ordinary vector stroke")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 0,
+                       "A shape on a vector layer must not be stamped into the raster tier")
+        app.buttons["toolbar.layersButton"].tap()
+
+        // Erase straight down through the middle of the shape: the stroke should be cut in two.
+        app.buttons["toolbar.eraserButton"].tap()
+        drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.42), to: CGVector(dx: 0.5, dy: 0.58))
+
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 2,
+                       "Erasing through the middle of a shape should split it into two strokes, "
+                       + "exactly as it does for a freehand stroke")
+    }
 }

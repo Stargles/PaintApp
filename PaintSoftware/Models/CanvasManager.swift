@@ -1756,6 +1756,10 @@ final class CanvasManager: ObservableObject {
                 registerVectorStrokeUndo(vectorCanvas: vectorCanvas, oldStrokes: strokesBefore,
                                          newStrokes: vectorCanvas.strokes, layerID: layerID, celID: celID,
                                          actionName: "Shape")
+                // Baking a shape never goes through `strokeEnded` (the stroke that produced it was
+                // reverted when detection fired), so the thumbnail has to be refreshed here or the
+                // layer panel keeps showing the cel as it was before the shape landed.
+                scheduleThumbnailRegen(layerID: layerID, celID: celID)
                 objectWillChange.send()
                 return
             }
@@ -1763,6 +1767,7 @@ final class CanvasManager: ObservableObject {
 
         stampShapeIntoRaster(collapsed, raster: layers[layerIndex].cels[celIndex].raster,
                              brush: savedBrush, layerID: layerID, celID: celID)
+        scheduleThumbnailRegen(layerID: layerID, celID: celID)
         objectWillChange.send()
     }
 
