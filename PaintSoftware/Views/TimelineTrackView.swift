@@ -381,6 +381,11 @@ private final class TimelineRowView: UIView {
     private var pendingZone: Zone?
     private var activeZone: Zone?
 
+    private var longPressStartX: CGFloat = 0
+    private var longPressBaselineStart: Int = 0
+    private var longPressCelIndex: Int?
+    private var longPressMoved = false
+
     lazy var panRecognizer: UIPanGestureRecognizer = {
         let gr = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         gr.maximumNumberOfTouches = 1
@@ -393,12 +398,23 @@ private final class TimelineRowView: UIView {
         return gr
     }()
 
+    lazy var longPressRecognizer: UILongPressGestureRecognizer = {
+        let gr = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        gr.minimumPressDuration = 0.5
+        gr.numberOfTouchesRequired = 1
+        gr.allowableMovement = 20
+        gr.delegate = self
+        return gr
+    }()
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(tapRecognizer)
+        addGestureRecognizer(longPressRecognizer)
         tapRecognizer.require(toFail: panRecognizer)
+        tapRecognizer.require(toFail: longPressRecognizer)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -477,12 +493,10 @@ private final class TimelineRowView: UIView {
         switch gr.state {
         case .began:
             activeZone = pendingZone
-            // One undo step per whole drag, not per `.changed` event — see `CanvasManager.
-            // beginStructureGesture`'s doc comment. `.gap`/nil aren't drags that move anything.
             switch activeZone {
-            case .leftHandle, .rightHandle, .body:
+            case .leftHandle, .rightHandle:
                 coordinator.canvasManager.beginStructureGesture()
-            case .gap, .none:
+            case .body, .gap, .none:
                 break
             }
         case .changed:
@@ -493,22 +507,74 @@ private final class TimelineRowView: UIView {
                 coordinator.resizeLeft(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: baselineStart + frameDelta)
             case .rightHandle(let celIndex, _, let baselineEnd):
                 coordinator.resizeRight(layerIndex: layerIndex, celIndex: celIndex, newEndFrame: baselineEnd + frameDelta)
-            case .body(let celIndex, let baselineStart):
-                coordinator.moveCel(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: baselineStart + frameDelta)
-            case .gap:
+            case .body, .gap:
                 break
             }
         case .ended, .cancelled, .failed:
             switch activeZone {
             case .leftHandle, .rightHandle:
                 coordinator.canvasManager.commitStructureGesture(name: "Resize Frame")
-            case .body:
-                coordinator.canvasManager.commitStructureGesture(name: "Move Frame")
-            case .gap, .none:
+            case .body, .gap, .none:
                 break
             }
             activeZone = nil
             pendingZone = nil
+        default:
+            break
+        }
+    }
+
+    @objc private func handleLongPress(_ gr: UILongPressGestureRecognizer) {
+        guard let coordinator else { return }
+        switch gr.state {
+        case .began:
+            let point = gr.location(in: self)
+            guard let z = zone(at: point),
+                  case .body(let celIndex, let baselineStart) = z else {
+                gr.isEnabled = false; gr.isEnabled = true
+                return
+            }
+            longPressCelIndex = celIndex
+            longPressBaselineStart = baselineStart
+            longPressStartX = point.x
+            longPressMoved = false
+            coordinator.canvasManager.beginStructureGesture()
+            if let cels = coordinator.canvasManager.layers.indices.contains(layerIndex)
+                ? coordinator.canvasManager.layers[layerIndex].cels : nil,
+               cels.indices.contains(celIndex) {
+                let celID = cels[celIndex].id
+                celViews[celID]?.setLifted(true)
+            }
+        case .changed:
+            guard let celIndex = longPressCelIndex else { return }
+            let currentX = gr.location(in: self).x
+            let frameDelta = Int(((currentX - longPressStartX) / pixelsPerFrame).rounded())
+            let newStart = longPressBaselineStart + frameDelta
+            if newStart != longPressBaselineStart || frameDelta != 0 {
+                longPressMoved = true
+            }
+            coordinator.moveCel(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: newStart)
+        case .ended:
+            if let celIndex = longPressCelIndex,
+               coordinator.canvasManager.layers.indices.contains(layerIndex),
+               coordinator.canvasManager.layers[layerIndex].cels.indices.contains(celIndex) {
+                let celID = coordinator.canvasManager.layers[layerIndex].cels[celIndex].id
+                celViews[celID]?.setLifted(false)
+            }
+            if longPressMoved {
+                coordinator.canvasManager.commitStructureGesture(name: "Move Frame")
+            }
+            longPressCelIndex = nil
+            longPressMoved = false
+        case .cancelled, .failed:
+            if let celIndex = longPressCelIndex,
+               coordinator.canvasManager.layers.indices.contains(layerIndex),
+               coordinator.canvasManager.layers[layerIndex].cels.indices.contains(celIndex) {
+                let celID = coordinator.canvasManager.layers[layerIndex].cels[celIndex].id
+                celViews[celID]?.setLifted(false)
+            }
+            longPressCelIndex = nil
+            longPressMoved = false
         default:
             break
         }
@@ -529,17 +595,34 @@ private final class TimelineRowView: UIView {
 }
 
 extension TimelineRowView: UIGestureRecognizerDelegate {
-    /// Declines gap touches outright so the pan recognizer never begins tracking them, which is
-    /// what lets the enclosing ScrollView's own pan gesture win those touches for scrolling.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard gestureRecognizer === panRecognizer else { return true }
         let point = touch.location(in: self)
         guard let z = zone(at: point) else { return false }
-        if case .gap = z {
-            pendingZone = nil
-            return false
+
+        if gestureRecognizer === panRecognizer {
+            switch z {
+            case .leftHandle, .rightHandle:
+                pendingZone = z
+                return true
+            case .body, .gap:
+                pendingZone = nil
+                return false
+            }
         }
-        pendingZone = z
+
+        if gestureRecognizer === longPressRecognizer {
+            switch z {
+            case .body:
+                return true
+            case .leftHandle, .rightHandle, .gap:
+                return false
+            }
+        }
+
+        if gestureRecognizer === tapRecognizer {
+            return true
+        }
+
         return true
     }
 }
@@ -554,6 +637,7 @@ private final class CelBlockView: UIView {
     private let rightHandleBar = UIView()
     private let leftHandleMarker = UIView()
     private let rightHandleMarker = UIView()
+    private let shadowView = UIView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -578,6 +662,10 @@ private final class CelBlockView: UIView {
             addSubview(marker)
         }
 
+        shadowView.backgroundColor = .black
+        shadowView.alpha = 0
+        insertSubview(shadowView, at: 0)
+
         isAccessibilityElement = true
         accessibilityTraits = .none
     }
@@ -588,6 +676,23 @@ private final class CelBlockView: UIView {
         layer.borderColor = (isCurrent ? UIColor.systemBlue : UIColor.white.withAlphaComponent(0.15)).cgColor
         thumbnailView.image = thumbnail
         thumbnailView.isHidden = thumbnail == nil
+    }
+
+    func setLifted(_ lifted: Bool) {
+        if lifted {
+            shadowView.frame = bounds.insetBy(dx: -4, dy: -4)
+            shadowView.layer.cornerRadius = layer.cornerRadius + 2
+            shadowView.alpha = 0.35
+            layer.masksToBounds = false
+            transform = CGAffineTransform(scaleX: 1.08, y: 1.08).translatedBy(x: 0, y: -4)
+        } else {
+            UIView.animate(withDuration: 0.15) {
+                self.shadowView.alpha = 0
+                self.transform = .identity
+            } completion: { _ in
+                self.layer.masksToBounds = true
+            }
+        }
     }
 
     func setAccessibilityIdentifiers(base: String) {
