@@ -141,19 +141,6 @@ final class PaintSoftwareUITests: XCTestCase {
         return false
     }
 
-    /// The inverse of `waitUntilFilled`: polls until the point goes back to blank paper. Used where
-    /// an edit is expected to *remove* ink (undoing a baked shape), so the assertion doesn't race
-    /// whichever run-loop turn SwiftUI happens to repaint on.
-    @discardableResult
-    private func waitUntilBlank(_ element: XCUIElement, dx: Double, dy: Double, timeout: TimeInterval = 15) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if isWhitish(rgbaPixel(of: element, dx: dx, dy: dy)) { return true }
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-        return false
-    }
-
     /// The canvas is always rendered as a square (2048x2048 by default) scaled to fit and centered
     /// within `canvas.host`'s own element frame. On this iPad simulator that frame is *not* square
     /// (portrait-ish, taller than wide), so the canvas content is vertically letterboxed: there's a
