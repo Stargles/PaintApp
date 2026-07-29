@@ -2,134 +2,31 @@ import SwiftUI
 import PhotosUI
 import UIKit
 
-/// Procreate-style brush settings: a horizontally-scrolling preset picker (5 built-ins plus any
-/// custom imports) and sliders for every `Brush` setting that's expected to be user-tunable day to
-/// day (size, opacity, pressure dynamics, stabilization, spacing, and — only for the Pencil preset —
-/// grain depth). Replaces the earlier pen/pencil segmented-control placeholder now that `Brush`/
-/// `BrushLibrary` (Engine/Brush.swift, Engine/BrushLibrary.swift) and `CanvasManager.selectedBrush`
-/// exist to back it.
+/// Procreate-style brush settings: the shared `StrokeSettingsPanel` driven by the paint brush's
+/// `CanvasManager` state (`selectedBrush`/`brushSize`/`brushOpacity`), plus the two pieces unique to
+/// the paint brush — importing a custom texture, and a solid-color preview swatch.
 struct BrushSettingsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     @State private var customBrushPickerItem: PhotosPickerItem?
     @State private var importError: String?
 
+    private static let spec = StrokeSettingsSpec(
+        title: "Brush",
+        idPrefix: "brushPanel",
+        presets: \.availableBrushes,
+        selectedBrush: \.selectedBrush,
+        size: \.brushSize,
+        opacity: \.brushOpacity,
+        selectPreset: { manager, preset in manager.selectBrush(preset) }
+    )
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Brush")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding([.horizontal, .top])
-
-                brushPicker
-
-                sliderRow(
-                    title: "Size",
-                    valueText: "\(Int(canvasManager.brushSize))",
-                    value: sizeBinding,
-                    range: 1...200,
-                    accessibilityID: "brushPanel.sizeSlider"
-                )
-                sliderRow(
-                    title: "Opacity",
-                    valueText: "\(Int(canvasManager.brushOpacity * 100))%",
-                    value: opacityBinding,
-                    range: 0...1,
-                    accessibilityID: "brushPanel.opacitySlider"
-                )
-                sliderRow(
-                    title: "Pressure → Size",
-                    valueText: "\(Int(canvasManager.selectedBrush.dynamics.sizePressure * 100))%",
-                    value: sizePressureBinding,
-                    range: 0...1,
-                    accessibilityID: "brushPanel.pressureSizeSlider"
-                )
-                sliderRow(
-                    title: "Pressure → Opacity",
-                    valueText: "\(Int(canvasManager.selectedBrush.dynamics.opacityPressure * 100))%",
-                    value: opacityPressureBinding,
-                    range: 0...1,
-                    accessibilityID: "brushPanel.pressureOpacitySlider"
-                )
-                sliderRow(
-                    title: "Stabilization",
-                    valueText: "\(Int(canvasManager.selectedBrush.stabilization * 100))%",
-                    value: stabilizationBinding,
-                    range: 0...1,
-                    accessibilityID: "brushPanel.stabilizationSlider"
-                )
-                sliderRow(
-                    title: "Spacing",
-                    valueText: "\(Int(canvasManager.selectedBrush.spacingFraction * 100))%",
-                    value: spacingBinding,
-                    range: 0.02...0.5,
-                    accessibilityID: "brushPanel.spacingSlider"
-                )
-
-                if canvasManager.selectedBrush.shape == .pencil {
-                    sliderRow(
-                        title: "Grain Depth",
-                        valueText: "\(Int(canvasManager.selectedBrush.grain.depth * 100))%",
-                        value: grainDepthBinding,
-                        range: 0...1,
-                        accessibilityID: "brushPanel.grainDepthSlider"
-                    )
-                }
-
-                importCustomBrushRow
-
-                preview
-
-                Spacer(minLength: 8)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color.black.opacity(0.9))
-    }
-
-    // MARK: - Preset picker
-
-    private var brushPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(canvasManager.availableBrushes) { preset in
-                    presetButton(preset)
-                }
-            }
-            .padding(.horizontal)
-        }
-    }
-
-    private func presetButton(_ preset: Brush) -> some View {
-        let isSelected = preset.id == canvasManager.selectedBrush.id
-        return Button {
-            canvasManager.selectBrush(preset)
-        } label: {
-            VStack(spacing: 6) {
-                Image(systemName: icon(for: preset.shape))
-                    .font(.title2)
-                    .foregroundColor(isSelected ? .blue : .white)
-                    .frame(width: 44, height: 44)
-                    .background(isSelected ? Color.white.opacity(0.2) : Color.clear)
-                    .cornerRadius(8)
-                Text(preset.name)
-                    .font(.caption2)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-            }
-        }
-        .accessibilityIdentifier("brushPanel.preset.\(preset.name)")
-    }
-
-    private func icon(for shape: BrushShape) -> String {
-        switch shape {
-        case .softRound: return "circle"
-        case .hardRound: return "circle.fill"
-        case .pencil: return "pencil"
-        case .pen: return "pencil.tip"
-        case .square: return "square.fill"
-        case .custom: return "photo"
-        }
+        StrokeSettingsPanel(
+            canvasManager: canvasManager,
+            spec: Self.spec,
+            accessory: { importCustomBrushRow },
+            preview: { preview }
+        )
     }
 
     // MARK: - Custom brush import
@@ -214,83 +111,5 @@ struct BrushSettingsPanel: View {
             .cornerRadius(8)
             .padding(.horizontal)
         }
-    }
-
-    // MARK: - Slider row helper
-
-    private func sliderRow(title: String, valueText: String, value: Binding<Double>, range: ClosedRange<Double>, accessibilityID: String) -> some View {
-        VStack(alignment: .leading) {
-            Text("\(title): \(valueText)")
-                .foregroundColor(.white)
-            Slider(value: value, in: range)
-                .accessibilityIdentifier(accessibilityID)
-        }
-        .padding(.horizontal)
-    }
-
-    // MARK: - Bindings
-
-    /// Drives both the live `brushSize` (what `SideToolbar`'s own size slider and `stampOne` read)
-    /// and `selectedBrush.size`, so this slider and `SideToolbar`'s stay in lockstep no matter which
-    /// one the user last touched. Note this only tweaks the *active* brush in place — tapping away
-    /// to another preset and back re-copies that preset's original values from `BrushLibrary`/
-    /// `customBrushes` rather than remembering the tweak; persisting per-preset edits is real
-    /// follow-up work, not implemented here.
-    private var sizeBinding: Binding<Double> {
-        Binding(
-            get: { Double(canvasManager.brushSize) },
-            set: { newValue in
-                canvasManager.brushSize = CGFloat(newValue)
-                canvasManager.selectedBrush.size = CGFloat(newValue)
-            }
-        )
-    }
-
-    private var opacityBinding: Binding<Double> {
-        Binding(
-            get: { canvasManager.brushOpacity },
-            set: { newValue in
-                canvasManager.brushOpacity = newValue
-                canvasManager.selectedBrush.opacity = newValue
-            }
-        )
-    }
-
-    private var sizePressureBinding: Binding<Double> {
-        Binding(
-            get: { canvasManager.selectedBrush.dynamics.sizePressure },
-            set: { canvasManager.selectedBrush.dynamics.sizePressure = $0 }
-        )
-    }
-
-    private var opacityPressureBinding: Binding<Double> {
-        Binding(
-            get: { canvasManager.selectedBrush.dynamics.opacityPressure },
-            set: { canvasManager.selectedBrush.dynamics.opacityPressure = $0 }
-        )
-    }
-
-    private var stabilizationBinding: Binding<Double> {
-        Binding(
-            get: { canvasManager.selectedBrush.stabilization },
-            set: { canvasManager.selectedBrush.stabilization = $0 }
-        )
-    }
-
-    private var spacingBinding: Binding<Double> {
-        Binding(
-            get: { canvasManager.selectedBrush.spacingFraction },
-            set: { canvasManager.selectedBrush.spacingFraction = $0 }
-        )
-    }
-
-    private var grainDepthBinding: Binding<Double> {
-        Binding(
-            get: { canvasManager.selectedBrush.grain.depth },
-            set: {
-                canvasManager.selectedBrush.grain.depth = $0
-                canvasManager.selectedBrush.grain.isEnabled = $0 > 0
-            }
-        )
     }
 }
