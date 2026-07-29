@@ -143,24 +143,31 @@ final class RasterLayerTexture {
         return RasterLayerTexture(size: size, image: renderToUIImage(), strokeCount: strokeCount)
     }
 
-    /// A new instance with this texture's pixels flipped about the canvas center — mirrors
-    /// `CanvasManager`'s own `flippedImage` geometry exactly, so a canvas flip moves the
-    /// live-stroke tier in lockstep with `fillImage`/`bakedImage`. Infrequent (whole-canvas op), so
-    /// it renders through `UIGraphicsImageRenderer` rather than the incremental path.
-    func flipped(horizontal: Bool) -> RasterLayerTexture {
-        guard hasContent else { return RasterLayerTexture(size: size, strokeCount: strokeCount) }
-        let current = renderToUIImage()
-        let flippedImage = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+    /// The single implementation of canvas-flip geometry: `image` mirrored about the centre of a
+    /// `canvasSize` canvas. A canvas flip has to move all three raster tiers — this texture (the
+    /// live-stroke tier) plus the cel's `fillImage` and `bakedImage` — in exact lockstep, or content
+    /// lands on the wrong side of the canvas relative to the rest. Both `flipped(horizontal:)` below
+    /// and `CanvasManager.flipCanvas` route through here so there is only one translate+scale to keep
+    /// in step. Infrequent (whole-canvas op), so it renders through `UIGraphicsImageRenderer` rather
+    /// than the incremental path.
+    static func flippedImage(_ image: UIImage, canvasSize: CGSize, horizontal: Bool) -> UIImage {
+        UIGraphicsImageRenderer(size: canvasSize, format: PixelOps.transparentFormat()).image { ctx in
             if horizontal {
-                ctx.cgContext.translateBy(x: size.width, y: 0)
+                ctx.cgContext.translateBy(x: canvasSize.width, y: 0)
                 ctx.cgContext.scaleBy(x: -1, y: 1)
             } else {
-                ctx.cgContext.translateBy(x: 0, y: size.height)
+                ctx.cgContext.translateBy(x: 0, y: canvasSize.height)
                 ctx.cgContext.scaleBy(x: 1, y: -1)
             }
-            current.draw(in: CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(origin: .zero, size: canvasSize))
         }
-        return RasterLayerTexture(size: size, image: flippedImage, strokeCount: strokeCount)
+    }
+
+    /// A new instance with this texture's pixels flipped about the canvas center.
+    func flipped(horizontal: Bool) -> RasterLayerTexture {
+        guard hasContent else { return RasterLayerTexture(size: size, strokeCount: strokeCount) }
+        let flipped = Self.flippedImage(renderToUIImage(), canvasSize: size, horizontal: horizontal)
+        return RasterLayerTexture(size: size, image: flipped, strokeCount: strokeCount)
     }
 
     /// A new instance sized to `newSize` with this texture's pixels re-placed at `offset` (canvas

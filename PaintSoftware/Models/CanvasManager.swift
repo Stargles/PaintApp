@@ -417,97 +417,6 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Sets the light-grey drawable margin around the artwork, resizing every layer/cel buffer so the
-    /// existing artwork stays centred (a uniform translate — no resampling of vector content, and
-    /// raster/baked/fill content is re-placed at the offset). Growing the margin shifts content by a
-    /// positive offset; shrinking crops whatever falls outside the new bounds. Not undoable — buffer
-    /// dimensions change, so the active layer's stroke-undo stack is cleared (inactive layers' stacks
-    /// clear on next activation, see `updateActiveLayerAndTool`).
-    func setCanvasPadding(_ newPadding: CGFloat) {
-        guard let oldSize = canvasSize else { return }
-        let clamped = min(max(newPadding, Self.canvasPaddingRange.lowerBound), Self.canvasPaddingRange.upperBound)
-        let delta = clamped - canvasPadding
-        guard delta != 0 else { return }
-
-        // Every transient buffer here is canvas-sized, so all of them have to be baked before the
-        // size changes underneath them (a shape/fill preview rendered at the old size would land
-        // mis-scaled once it eventually committed).
-        commitAllInteractiveState()
-        selection = nil
-
-        let offset = CGPoint(x: delta, y: delta)
-        let newSize = CGSize(width: oldSize.width + 2 * delta, height: oldSize.height + 2 * delta)
-
-        for layerIndex in layers.indices {
-            for celIndex in layers[layerIndex].cels.indices {
-                layers[layerIndex].cels[celIndex].raster =
-                    layers[layerIndex].cels[celIndex].raster.resized(to: newSize, offset: offset)
-                if let fill = layers[layerIndex].cels[celIndex].fillImage {
-                    layers[layerIndex].cels[celIndex].fillImage = PixelOps.resizedCanvasImage(fill, to: newSize, offset: offset)
-                }
-                if let baked = layers[layerIndex].cels[celIndex].bakedImage {
-                    layers[layerIndex].cels[celIndex].bakedImage = PixelOps.resizedCanvasImage(baked, to: newSize, offset: offset)
-                }
-                if let vector = layers[layerIndex].cels[celIndex].vector {
-                    layers[layerIndex].cels[celIndex].vector = vector.resized(to: newSize, offset: offset)
-                }
-            }
-        }
-
-        canvasSize = newSize
-        canvasPadding = clamped
-
-        history.removeAll()
-        refreshUndoRedoState()
-        regenerateAllThumbnails()
-    }
-
-    func flipCanvas(horizontal: Bool) {
-        guard let canvasSize else { return }
-        // Mirroring is a canvas edit: bake first, or the pending shape/fill would commit afterwards
-        // at its un-mirrored geometry, landing on the wrong side of the canvas it was drawn on.
-        commitAllInteractiveState()
-        for layerIndex in layers.indices {
-            for celIndex in layers[layerIndex].cels.indices {
-                layers[layerIndex].cels[celIndex].raster = layers[layerIndex].cels[celIndex].raster.flipped(horizontal: horizontal)
-                if let fillImage = layers[layerIndex].cels[celIndex].fillImage {
-                    layers[layerIndex].cels[celIndex].fillImage = Self.flippedImage(fillImage, canvasSize: canvasSize, horizontal: horizontal)
-                }
-                if let bakedImage = layers[layerIndex].cels[celIndex].bakedImage {
-                    layers[layerIndex].cels[celIndex].bakedImage = Self.flippedImage(bakedImage, canvasSize: canvasSize, horizontal: horizontal)
-                }
-            }
-            // NOTE: vector-layer content (strokes/shapes/fills/images, all stored as geometry in
-            // `cel.vector` — see `VectorCanvas`) is not mirrored by this loop at all, unlike
-            // raster/fillImage/bakedImage above. This predates object layers being retired; a vector
-            // layer's live strokes already didn't flip. Flagged as a follow-up, not fixed here.
-        }
-        // Not undoable, same as setCanvasPadding: every cel's raster/fill/baked content is mirrored
-        // in place, so any undo entry recorded before the flip would restore content in the wrong
-        // (pre-flip) orientation if left on the stack.
-        history.removeAll()
-        refreshUndoRedoState()
-        regenerateAllThumbnails()
-    }
-
-    /// Mirrors a cel's raster content (fillImage or bakedImage) about the canvas center to match
-    /// `RasterLayerTexture.flipped(horizontal:)` above, so a flipped canvas doesn't leave raster
-    /// content behind on the wrong side.
-    private static func flippedImage(_ image: UIImage, canvasSize: CGSize, horizontal: Bool) -> UIImage? {
-        guard image.cgImage != nil else { return nil }
-        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: PixelOps.transparentFormat())
-        return renderer.image { ctx in
-            if horizontal {
-                ctx.cgContext.translateBy(x: canvasSize.width, y: 0)
-                ctx.cgContext.scaleBy(x: -1, y: 1)
-            } else {
-                ctx.cgContext.translateBy(x: 0, y: canvasSize.height)
-                ctx.cgContext.scaleBy(x: 1, y: -1)
-            }
-            image.draw(in: CGRect(origin: .zero, size: canvasSize))
-        }
-    }
-
     // MARK: - Playhead
 
     func goToFrame(_ frame: Int) {
@@ -1311,7 +1220,7 @@ final class CanvasManager: ObservableObject {
         if let layerID = fillGestureLayerID, let celID = fillGestureCelID,
            let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
            let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) {
-            setFillPreview(layerIndex: layerIndex, celIndex: celIndex, image: nil)
+            setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: nil)
         }
         fillGestureLayerID = nil
         fillGestureCelID = nil
@@ -1359,16 +1268,12 @@ final class CanvasManager: ObservableObject {
                       let layerIndex = self.layers.firstIndex(where: { $0.id == layerID }),
                       let celIndex = self.layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
                 let clipped = self.clippedForSelection(image, layerIndex: layerIndex, celIndex: celIndex)
-                self.setFillPreview(layerIndex: layerIndex, celIndex: celIndex, image: clipped)
+                self.setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: clipped)
                 self.fillLastRegionRGBA = bytes
                 self.fillLastRegionW = regionW
                 self.fillLastRegionH = regionH
             }
         }
-    }
-
-    private func setFillPreview(layerIndex: Int, celIndex: Int, image: UIImage?) {
-        setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: image)
     }
 
     /// Clips a fill preview to the active selection's path when the fill lands on the exact layer/cel
