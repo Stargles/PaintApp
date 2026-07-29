@@ -359,6 +359,69 @@ final class PerfBaselineTests: XCTestCase {
 
     // MARK: - Stage 5 additions
 
+    /// Baking a snapped shape is idempotent, which is what makes the two-finger-transform path cheap
+    /// without needing a per-gesture flag to guard it.
+    ///
+    /// Item 5.4 of the Stage 5 plan described `commitSnappedShapeIfTransforming` as baking the shape
+    /// "on every single `.changed` frame during a two-finger transform, combined with an
+    /// `objectWillChange.send()` per frame", and asked for a boolean reset on `.began` so it bakes
+    /// once. That is not what the code does. `commitInteractiveShape` opens with
+    /// `guard shapeGestureActive, let shape = resolvedShape else { return }` and clears
+    /// `shapeGestureActive` on the way through, and its `objectWillChange.send()` sits in a `defer`
+    /// that is only reached past that guard — so the bake and the publish both happen exactly once
+    /// however many times the frame handler calls them. `commitSnappedShapeIfTransforming`'s own
+    /// guard (`isShapeInAdjustableState && isShapeConstraintEngaged`) then also fails on every later
+    /// frame, since committing clears both.
+    ///
+    /// This test is here so that stays true. It drives the real state machine — begin a shape, lift
+    /// the pen into the adjustable state, then commit 50 times the way 50 `.changed` frames would —
+    /// and asserts one stroke lands, not 50. A regression that made the bake re-entrant would show up
+    /// as 50 overlapping strokes on the layer and 50 undo steps, which is exactly the shape of bug
+    /// the plan was worried about.
+    func testCommittingASnappedShapeRepeatedlyBakesItExactlyOnce() {
+        let manager = perfManager()
+        manager.addVectorLayer(name: "Shape")
+        manager.currentLayerIndex = manager.layers.count - 1
+        let celIndex = 0
+        XCTAssertNotNil(manager.layers[manager.currentLayerIndex].cels[celIndex].vector,
+                        "A vector layer's cel should carry a VectorCanvas for the shape to bake into")
+
+        let geometry = ShapeGeometry(kind: .oval,
+                                     startPoint: CGPoint(x: 200, y: 200),
+                                     endPoint: CGPoint(x: 800, y: 600),
+                                     rotation: 0)
+        var samples: [VectorSample] = []
+        for step in 0..<80 {
+            let t = CGFloat(step) / 79
+            samples.append(VectorSample(x: 200 + 600 * t, y: 200 + 400 * t, pressure: 1))
+        }
+        manager.beginInteractiveShape(geometry, samples: samples)
+        XCTAssertTrue(manager.shapeGestureActive)
+
+        // The snap engages, then the pen lifts — the state `commitSnappedShapeIfTransforming`
+        // requires (`isShapeInAdjustableState && isShapeConstraintEngaged`) before it will bake.
+        manager.updateInteractiveShape(isConstrained: true)
+        manager.endInteractiveShape()
+        XCTAssertTrue(manager.isShapeInAdjustableState,
+                      "Lifting the pen should leave the shape adjustable — the state a two-finger transform then bakes")
+
+        let layerIndex = manager.currentLayerIndex
+        let strokesBefore = manager.layers[layerIndex].cels[celIndex].vector?.strokes.count ?? 0
+        for _ in 0..<50 { manager.commitInteractiveShape() }
+        let strokesAfter = manager.layers[layerIndex].cels[celIndex].vector?.strokes.count ?? 0
+
+        report("snapped shape commit", [
+            ("commitCalls", "50"),
+            ("strokesAdded", "\(strokesAfter - strokesBefore)"),
+            ("shapeStillActive", "\(manager.shapeGestureActive)"),
+        ])
+
+        XCTAssertEqual(strokesAfter - strokesBefore, 1,
+                       "50 commit calls must add exactly one stroke. More than one means the bake became re-entrant and every transform frame is now laying down another copy.")
+        XCTAssertFalse(manager.shapeGestureActive,
+                       "The first commit ends the shape gesture, which is what makes every later call a no-op")
+    }
+
     /// `VectorCanvas.render()` — the path 5.3 changed. It used to allocate a canvas-sized throwaway
     /// `RasterLayerTexture`, stamp into it, `makeImage()` a second canvas-sized copy out, blit that
     /// in, and drop both, once per visible vector layer per invalidation. Now the strokes go straight
