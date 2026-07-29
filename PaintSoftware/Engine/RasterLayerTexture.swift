@@ -207,6 +207,11 @@ final class RasterLayerTexture {
         defer { lock.unlock() }
         guard let ctx = ensureContext() else { return }
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, ignoredAlpha: CGFloat = 0
+        // Contract: `color` is always an already-resolved color by the time it reaches getRed — see
+        // Utilities/ColorConversion.swift. Every stamp arrives via `BrushStamper`, which is only
+        // ever handed colors that have been through that resolution (the live brush color, or a
+        // `CodableColor` rebuilt from components extracted the same way), so this reads a concrete,
+        // non-dynamic color rather than one whose components depend on the ambient trait collection.
         color.getRed(&r, green: &g, blue: &b, alpha: &ignoredAlpha)
         let coreFraction = max(0, min(hardness, 1))
         let colors = [

@@ -387,6 +387,12 @@ final class StrokeCanvasView: UIView {
             vectorCanvas.erase(alongPath: currentVectorSamples.map { $0.point }, radius: brushSize / 2)
         } else if !currentVectorSamples.isEmpty {
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+            // Contract: `brushColor` is always an already-resolved color by the time it reaches
+            // getRed — see Utilities/ColorConversion.swift. The coordinator only ever assigns it
+            // from `canvasManager.brushColor.resolvedUIColor(opacity: 1)` (CanvasView
+            // .updateActiveLayerAndTool), so this reads components off a concrete, non-dynamic
+            // color rather than a semantic one, where getRed can fail and silently leave these
+            // inout values at whatever they were initialized to.
             brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
             let stroke = VectorStroke(brush: brush, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
                                       size: brushSize, opacity: brushOpacity, samples: currentVectorSamples)
