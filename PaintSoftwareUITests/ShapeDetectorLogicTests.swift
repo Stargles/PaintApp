@@ -432,4 +432,125 @@ final class ShapeDetectorLogicTests: XCTestCase {
         let xs = collapsed.map(\.x), ys = collapsed.map(\.y)
         XCTAssertEqual(xs.max()! - xs.min()!, ys.max()! - ys.min()!, accuracy: 1)
     }
+
+    // MARK: - Handle-drag math
+    //
+    // This math used to live inside CanvasView's overlay callbacks, where nothing could reach it.
+    // Sessions 48 and 49 both shipped bugs in it; these pin the two behaviours those fixes added.
+
+    func testDraggingACornerAnchorsTheOppositeCorner() {
+        let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 10, y: 20),
+                                  endPoint: CGPoint(x: 110, y: 120))
+        let dragged = shape.draggingCorner(.bottomRight, to: CGPoint(x: 160, y: 170))
+        // The top-left corner is the anchor and must not have moved.
+        XCTAssertEqual(dragged.boundingRect.minX, 10, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.minY, 20, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.maxX, 160, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.maxY, 170, accuracy: 0.001)
+        XCTAssertEqual(dragged.rotation, 0, accuracy: 0.001, "a corner drag resizes, it never rotates")
+    }
+
+    func testDraggingACornerPastTheAnchorFlipsRatherThanInverting() {
+        let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 0, y: 0),
+                                  endPoint: CGPoint(x: 100, y: 100))
+        // Drag the bottom-right corner up past the anchored top-left one.
+        let dragged = shape.draggingCorner(.bottomRight, to: CGPoint(x: -40, y: -30))
+        XCTAssertEqual(dragged.boundingRect.minX, -40, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.minY, -30, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.maxX, 0, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.maxY, 0, accuracy: 0.001)
+        XCTAssertGreaterThan(dragged.boundingRect.width, 0, "the rect must stay well-formed")
+    }
+
+    /// Session 48: a rotated rectangle used to resize toward the wrong corner, because the touch
+    /// point was applied to axis-aligned math without being mapped into the shape's own frame first.
+    func testDraggingACornerOfARotatedShapeResizesInItsOwnFrame() {
+        let rotation = CGFloat.pi / 4
+        let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 0, y: 0),
+                                  endPoint: CGPoint(x: 100, y: 100), rotation: rotation)
+        // A touch on the *rotated* position of the shape's own bottom-right corner should leave the
+        // geometry where it is — the point maps back onto exactly that corner in local space.
+        let rotatedCorner = CGPoint(x: 100, y: 100).applying(shape.rotationTransform)
+        let dragged = shape.draggingCorner(.bottomRight, to: rotatedCorner)
+        XCTAssertEqual(dragged.boundingRect.minX, 0, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.minY, 0, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.maxX, 100, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.maxY, 100, accuracy: 0.001)
+        XCTAssertEqual(dragged.rotation, rotation, accuracy: 0.001)
+    }
+
+    func testDraggingAnOvalAxisHandleSetsBothLengthAndRotation() {
+        // Centre (100, 100), half-axes 50 x 20.
+        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 50, y: 80),
+                                  endPoint: CGPoint(x: 150, y: 120))
+        // Drag the right axis handle straight down from the centre, 60pt away.
+        let dragged = shape.draggingEdge(.right, to: CGPoint(x: 100, y: 160))
+        XCTAssertEqual(dragged.boundingRect.width / 2, 60, accuracy: 0.001, "dragged axis takes the touch distance")
+        XCTAssertEqual(dragged.boundingRect.height / 2, 20, accuracy: 0.001, "perpendicular axis is untouched")
+        XCTAssertEqual(dragged.rotation, .pi / 2, accuracy: 0.001, "rotation follows the touch's bearing")
+        XCTAssertEqual(dragged.center.x, 100, accuracy: 0.001, "an axis drag is symmetric about the centre")
+        XCTAssertEqual(dragged.center.y, 100, accuracy: 0.001)
+    }
+
+    func testDraggingARectangleEdgeMovesOnlyThatEdge() {
+        let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 0, y: 0),
+                                  endPoint: CGPoint(x: 100, y: 100))
+        let dragged = shape.draggingEdge(.top, to: CGPoint(x: 999, y: 30))
+        XCTAssertEqual(dragged.boundingRect.minY, 30, accuracy: 0.001, "top edge follows the touch's y")
+        XCTAssertEqual(dragged.boundingRect.maxY, 100, accuracy: 0.001)
+        XCTAssertEqual(dragged.boundingRect.minX, 0, accuracy: 0.001, "the touch's x is irrelevant to a top-edge drag")
+        XCTAssertEqual(dragged.boundingRect.maxX, 100, accuracy: 0.001)
+        XCTAssertEqual(dragged.rotation, 0, accuracy: 0.001)
+    }
+
+    // MARK: - Follow-the-finger math
+
+    func testFollowingTheFingerFromItsOwnStartPointChangesNothing() {
+        let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 0, y: 0),
+                                  endPoint: CGPoint(x: 100, y: 60), rotation: 0.3)
+        let start = CGPoint(x: 90, y: 10)
+        let frame = shape.followFrame(startingAt: start)
+        let unmoved = shape.following(start, from: frame)
+        XCTAssertEqual(unmoved.startPoint.x, shape.startPoint.x, accuracy: 0.001)
+        XCTAssertEqual(unmoved.startPoint.y, shape.startPoint.y, accuracy: 0.001)
+        XCTAssertEqual(unmoved.endPoint.x, shape.endPoint.x, accuracy: 0.001)
+        XCTAssertEqual(unmoved.endPoint.y, shape.endPoint.y, accuracy: 0.001)
+        XCTAssertEqual(unmoved.rotation, shape.rotation, accuracy: 0.001)
+    }
+
+    /// Session 49: the shape's already-detected rotation used to be *replaced* by the finger's own
+    /// bearing, so an angled shape snapped back to axis-aligned on the first drag sample. The
+    /// finger's bearing change has to be added on top of the shape's own rotation.
+    func testFollowingAddsTheFingersBearingOnTopOfTheShapesOwnRotation() {
+        let ownRotation: CGFloat = 0.5
+        // Centre (0, 0) so the bearing maths is easy to state.
+        let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: -50, y: -25),
+                                  endPoint: CGPoint(x: 50, y: 25), rotation: ownRotation)
+        let frame = shape.followFrame(startingAt: CGPoint(x: 100, y: 0))   // bearing 0
+        let moved = shape.following(CGPoint(x: 0, y: 100), from: frame)     // bearing +pi/2
+        XCTAssertEqual(moved.rotation, ownRotation + .pi / 2, accuracy: 0.001,
+                       "the finger's +90 deg must add to the shape's own 0.5 rad, not replace it")
+    }
+
+    func testFollowingScalesUniformlyAboutTheShapesCentre() {
+        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 0, y: 50),
+                                  endPoint: CGPoint(x: 100, y: 150))   // centre (50, 100), half 50x50
+        let frame = shape.followFrame(startingAt: CGPoint(x: 90, y: 100))   // radius 40
+        let moved = shape.following(CGPoint(x: 130, y: 100), from: frame)   // radius 80 => scale 2
+        XCTAssertEqual(moved.boundingRect.width, 200, accuracy: 0.001)
+        XCTAssertEqual(moved.boundingRect.height, 200, accuracy: 0.001)
+        XCTAssertEqual(moved.center.x, 50, accuracy: 0.001, "the centre is the anchor, not the finger")
+        XCTAssertEqual(moved.center.y, 100, accuracy: 0.001)
+    }
+
+    func testFollowingFromTheExactCentreHoldsTheShapesSize() {
+        // Capturing the frame with the finger on the centre gives radius 0; the scale must fall back
+        // to 1 rather than dividing by zero.
+        let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 0, y: 0),
+                                  endPoint: CGPoint(x: 100, y: 100))
+        let frame = shape.followFrame(startingAt: CGPoint(x: 50, y: 50))
+        let moved = shape.following(CGPoint(x: 90, y: 50), from: frame)
+        XCTAssertEqual(moved.boundingRect.width, 100, accuracy: 0.001)
+        XCTAssertEqual(moved.boundingRect.height, 100, accuracy: 0.001)
+    }
 }

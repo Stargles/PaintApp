@@ -177,6 +177,139 @@ struct ShapeGeometry: Equatable {
         return 2 * rect.width + rect.height + (rect.maxY - y)
     }
 
+    // MARK: - Handle dragging
+
+    /// Which corner of `boundingRect` a resize handle sits on.
+    ///
+    /// Declared here rather than on `ShapeOverlayView` so the drag math below can live in this
+    /// dependency-free file — which is what makes it unit-testable without a simulator. The overlay
+    /// typealiases straight to these, so its callback signatures are unchanged.
+    enum Corner {
+        case topLeft, topRight, bottomLeft, bottomRight
+    }
+
+    /// Which edge of `boundingRect` a resize handle sits on. On an oval these are the axis handles.
+    enum Edge {
+        case top, bottom, left, right
+    }
+
+    /// The geometry produced by dragging `corner` to `point` (a raw touch location in canvas space):
+    /// the dragged corner follows the touch, anchored by the fixed opposite corner. `rotation` is
+    /// carried through unchanged — a corner drag resizes, it doesn't turn the shape.
+    ///
+    /// `point` is mapped back through `rotationTransform` first because the corner math is
+    /// axis-aligned in the shape's own *local* frame; without that a rotated rectangle resizes
+    /// toward the wrong corner.
+    func draggingCorner(_ corner: Corner, to point: CGPoint) -> ShapeGeometry {
+        let r = boundingRect
+        let localPoint = point.applying(rotationTransform.inverted())
+        // The dragged corner is anchored by the fixed opposite corner.
+        let fixedX: CGFloat, fixedY: CGFloat
+        switch corner {
+        case .topLeft:     fixedX = r.maxX; fixedY = r.maxY
+        case .topRight:    fixedX = r.minX; fixedY = r.maxY
+        case .bottomLeft:  fixedX = r.maxX; fixedY = r.minY
+        case .bottomRight: fixedX = r.minX; fixedY = r.minY
+        }
+        var result = self
+        result.startPoint = CGPoint(x: min(localPoint.x, fixedX), y: min(localPoint.y, fixedY))
+        result.endPoint = CGPoint(x: max(localPoint.x, fixedX), y: max(localPoint.y, fixedY))
+        return result
+    }
+
+    /// The geometry produced by dragging the `edge` handle to `point` (canvas space).
+    ///
+    /// An oval's edge handles are *axis* handles: the touch sets both that axis's new half-length
+    /// (its distance from the centre) and the shape's rotation (its bearing from the centre), while
+    /// the perpendicular axis holds. Every other kind moves just that one edge of the bounding box,
+    /// in the shape's local frame — the same mapping `draggingCorner` uses — and leaves `rotation`
+    /// alone.
+    func draggingEdge(_ edge: Edge, to point: CGPoint) -> ShapeGeometry {
+        let r = boundingRect
+        var result = self
+        if kind == .oval {
+            let cx = r.midX, cy = r.midY
+            let W = r.width / 2, H = r.height / 2
+            var newW = W, newH = H, newRot = rotation
+            switch edge {
+            case .top:
+                let dx = point.x - cx, dy = cy - point.y
+                newH = hypot(dx, dy); newRot = atan2(dx, dy)
+            case .bottom:
+                let dx = cx - point.x, dy = point.y - cy
+                newH = hypot(dx, dy); newRot = atan2(dx, dy)
+            case .left:
+                let dx = cx - point.x, dy = cy - point.y
+                newW = hypot(dx, dy); newRot = atan2(dy, dx)
+            case .right:
+                let dx = point.x - cx, dy = point.y - cy
+                newW = hypot(dx, dy); newRot = atan2(dy, dx)
+            }
+            result.startPoint = CGPoint(x: cx - newW, y: cy - newH)
+            result.endPoint = CGPoint(x: cx + newW, y: cy + newH)
+            result.rotation = newRot
+            return result
+        }
+        let localPoint = point.applying(rotationTransform.inverted())
+        var minX = r.minX, minY = r.minY, maxX = r.maxX, maxY = r.maxY
+        switch edge {
+        case .top:    minY = localPoint.y
+        case .bottom: maxY = localPoint.y
+        case .left:   minX = localPoint.x
+        case .right:  maxX = localPoint.x
+        }
+        result.startPoint = CGPoint(x: min(minX, maxX), y: min(minY, maxY))
+        result.endPoint = CGPoint(x: max(minX, maxX), y: max(minY, maxY))
+        return result
+    }
+
+    // MARK: - Follow-the-finger dragging
+
+    /// The reference frame captured the first time a freshly-detected shape starts following the
+    /// finger that drew it (the pen is still down after hold-detection fired). Every later sample is
+    /// measured against this, which is what makes the drag *relative*.
+    struct FollowFrame: Equatable {
+        /// Bearing from the shape's centre to the finger at capture time.
+        var angle: CGFloat
+        /// Distance from the shape's centre to the finger at capture time.
+        var radius: CGFloat
+        var halfWidth: CGFloat
+        var halfHeight: CGFloat
+        /// The shape's *own* rotation at capture time — the finger's bearing change is added on top
+        /// of this, never used in its place. Using it in its place is a bug that shipped once: a
+        /// shape detected at an angle snapped back to axis-aligned the instant the finger moved.
+        var rotation: CGFloat
+    }
+
+    /// Captures the frame for a follow-the-finger drag starting at `point`.
+    func followFrame(startingAt point: CGPoint) -> FollowFrame {
+        let c = center
+        return FollowFrame(angle: atan2(point.y - c.y, point.x - c.x),
+                           radius: hypot(point.x - c.x, point.y - c.y),
+                           halfWidth: abs(endPoint.x - startPoint.x) / 2,
+                           halfHeight: abs(endPoint.y - startPoint.y) / 2,
+                           rotation: rotation)
+    }
+
+    /// The geometry produced by the finger having moved to `point`, given the frame captured when
+    /// the drag began: the finger's angle about the centre sets rotation, and its distance sets a
+    /// uniform scale. The centre itself is fixed, so the shape grows and turns about the spot it
+    /// was detected at rather than chasing the finger.
+    ///
+    /// Only meaningful for rectangles and ovals — a line follows its endpoint directly.
+    func following(_ point: CGPoint, from frame: FollowFrame) -> ShapeGeometry {
+        let c = center
+        let deltaRotation = atan2(point.y - c.y, point.x - c.x) - frame.angle
+        let scale = frame.radius > 0 ? hypot(point.x - c.x, point.y - c.y) / frame.radius : 1
+        let halfWidth = frame.halfWidth * scale
+        let halfHeight = frame.halfHeight * scale
+        var result = self
+        result.startPoint = CGPoint(x: c.x - halfWidth, y: c.y - halfHeight)
+        result.endPoint = CGPoint(x: c.x + halfWidth, y: c.y + halfHeight)
+        result.rotation = frame.rotation + deltaRotation
+        return result
+    }
+
     // MARK: - Two-finger constraint
 
     /// The shape as drawn while the two-finger constraint is engaged: a line snaps to 15°

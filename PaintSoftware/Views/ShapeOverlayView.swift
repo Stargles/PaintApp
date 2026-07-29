@@ -56,8 +56,12 @@ final class ShapeOverlayView: UIView {
     /// Which end of a line is being dragged. Both ends used to report through one callback that
     /// unconditionally wrote `endPoint`, so grabbing the start handle moved the far end instead.
     enum EndpointHandle { case start, end }
-    enum EdgeHandle { case top, bottom, left, right }
-    enum CornerHandle { case topLeft, topRight, bottomLeft, bottomRight }
+    /// The edge/corner handles are `ShapeGeometry`'s own, because the math a drag on one performs
+    /// lives there (`draggingEdge`/`draggingCorner`) — it used to be written out inline in
+    /// `CanvasView`'s callbacks, where nothing could unit-test it. Aliased rather than re-declared
+    /// so this view's callback signatures and every `.topLeft`/`.top` spelling stay as they were.
+    typealias EdgeHandle = ShapeGeometry.Edge
+    typealias CornerHandle = ShapeGeometry.Corner
 
     // MARK: - Handle model
 

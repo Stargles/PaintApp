@@ -146,66 +146,18 @@ struct CanvasView: UIViewRepresentable {
             coordinator.canvasManager.updateInteractiveShape(rotation: rotation)
             coordinator.updateShapeOverlay()
         }
+        // Both handle drags are pure geometry — see `ShapeGeometry.draggingCorner`/`draggingEdge`,
+        // which is where the rotation-inverted local-frame mapping and the oval's axis math live.
+        // Writing the whole resulting geometry back (rather than only the fields a given drag can
+        // change) is the same update either way: a drag that leaves rotation alone writes back the
+        // rotation it read.
         shapeOverlay.onCornerDragged = { [weak coordinator = context.coordinator] point, corner in
             guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
-            let r = shape.boundingRect
-            // `point` is a raw touch location in canvas (screen) space, but the corner math below is
-            // axis-aligned in the shape's own *local* frame — map it back through the shape's current
-            // rotation first, or a rotated rectangle would resize toward the wrong corner.
-            let localPoint = point.applying(shape.rotationTransform.inverted())
-            // The dragged corner is anchored by the fixed opposite corner.
-            let fixedX: CGFloat, fixedY: CGFloat
-            switch corner {
-            case .topLeft:     fixedX = r.maxX; fixedY = r.maxY
-            case .topRight:    fixedX = r.minX; fixedY = r.maxY
-            case .bottomLeft:  fixedX = r.maxX; fixedY = r.minY
-            case .bottomRight: fixedX = r.minX; fixedY = r.minY
-            }
-            let start = CGPoint(x: min(localPoint.x, fixedX), y: min(localPoint.y, fixedY))
-            let end = CGPoint(x: max(localPoint.x, fixedX), y: max(localPoint.y, fixedY))
-            coordinator.canvasManager.updateInteractiveShape(startPoint: start, endPoint: end)
-            coordinator.updateShapeOverlay()
+            coordinator.applyShapeDrag(shape.draggingCorner(corner, to: point))
         }
         shapeOverlay.onEdgeDragged = { [weak coordinator = context.coordinator] point, edge in
             guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
-            let r = shape.boundingRect
-            if shape.kind == .oval {
-                let cx = r.midX, cy = r.midY
-                let W = r.width / 2, H = r.height / 2
-                var newW = W, newH = H, newRot = shape.rotation
-                switch edge {
-                case .top:
-                    let dx = point.x - cx, dy = cy - point.y
-                    newH = hypot(dx, dy); newRot = atan2(dx, dy)
-                case .bottom:
-                    let dx = cx - point.x, dy = point.y - cy
-                    newH = hypot(dx, dy); newRot = atan2(dx, dy)
-                case .left:
-                    let dx = cx - point.x, dy = cy - point.y
-                    newW = hypot(dx, dy); newRot = atan2(dy, dx)
-                case .right:
-                    let dx = point.x - cx, dy = point.y - cy
-                    newW = hypot(dx, dy); newRot = atan2(dy, dx)
-                }
-                let start = CGPoint(x: cx - newW, y: cy - newH)
-                let end = CGPoint(x: cx + newW, y: cy + newH)
-                coordinator.canvasManager.updateInteractiveShape(
-                    startPoint: start, endPoint: end, rotation: newRot)
-            } else {
-                // Same local-frame mapping as the corner-drag case above.
-                let localPoint = point.applying(shape.rotationTransform.inverted())
-                var minX = r.minX, minY = r.minY, maxX = r.maxX, maxY = r.maxY
-                switch edge {
-                case .top:    minY = localPoint.y
-                case .bottom: maxY = localPoint.y
-                case .left:   minX = localPoint.x
-                case .right:  maxX = localPoint.x
-                }
-                let start = CGPoint(x: min(minX, maxX), y: min(minY, maxY))
-                let end = CGPoint(x: max(minX, maxX), y: max(minY, maxY))
-                coordinator.canvasManager.updateInteractiveShape(startPoint: start, endPoint: end)
-            }
-            coordinator.updateShapeOverlay()
+            coordinator.applyShapeDrag(shape.draggingEdge(edge, to: point))
         }
 
         host.onLayout = { [weak coordinator = context.coordinator] in
@@ -401,31 +353,16 @@ struct CanvasView: UIViewRepresentable {
                     if self.canvasManager.isShapeFollowingFinger {
                         // Shape following: the user is still holding after detection. For lines,
                         // just move the endpoint. For rects & ovals, the finger angle sets
-                        // rotation and the distance sets a uniform scale from centre.
+                        // rotation and the distance sets a uniform scale from centre — see
+                        // `ShapeGeometry.following(_:from:)`, measured against the frame captured
+                        // on the first sample of the drag.
                         let point = sample.point
                         if case .line? = self.canvasManager.activeShape?.kind {
                             self.canvasManager.updateInteractiveShape(endPoint: point)
                         } else if let shape = self.canvasManager.activeShape {
-                            let cx = (shape.startPoint.x + shape.endPoint.x) / 2
-                            let cy = (shape.startPoint.y + shape.endPoint.y) / 2
-                            if !self.shapeInitFrameSet {
-                                self.shapeInitAngle = atan2(point.y - cy, point.x - cx)
-                                self.shapeInitRadius = hypot(point.x - cx, point.y - cy)
-                                self.shapeInitHalfW = abs(shape.endPoint.x - shape.startPoint.x) / 2
-                                self.shapeInitHalfH = abs(shape.endPoint.y - shape.startPoint.y) / 2
-                                self.shapeInitRotation = shape.rotation
-                                self.shapeInitFrameSet = true
-                            }
-                            let curAngle = atan2(point.y - cy, point.x - cx)
-                            let curRadius = hypot(point.x - cx, point.y - cy)
-                            let deltaRot = curAngle - self.shapeInitAngle
-                            let scale = self.shapeInitRadius > 0 ? curRadius / self.shapeInitRadius : 1
-                            let newW = self.shapeInitHalfW * scale
-                            let newH = self.shapeInitHalfH * scale
-                            let start = CGPoint(x: cx - newW, y: cy - newH)
-                            let end = CGPoint(x: cx + newW, y: cy + newH)
-                            self.canvasManager.updateInteractiveShape(
-                                startPoint: start, endPoint: end, rotation: self.shapeInitRotation + deltaRot)
+                            let frame = self.shapeFollowFrame ?? shape.followFrame(startingAt: point)
+                            self.shapeFollowFrame = frame
+                            self.applyShapeDrag(shape.following(point, from: frame), refreshOverlay: false)
                         }
                         self.updateShapeOverlay()
                     } else {
@@ -807,7 +744,7 @@ struct CanvasView: UIViewRepresentable {
             shapeDetectionHost = host
             shapeDetectionActive = true
             shapeLastPoint = nil
-            shapeInitFrameSet = false
+            shapeFollowFrame = nil
             shapeHoldTimer?.invalidate()
             // The timer resets on meaningful moves — fires 0.8s after the finger stops.
             shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
@@ -822,18 +759,23 @@ struct CanvasView: UIViewRepresentable {
         /// prevent the timer from ever completing.
         private var shapeLastPoint: CGPoint?
 
-        // Initial state captured when shape following begins — used to compute rotation + uniform
-        // scale from the finger's angle and distance relative to the shape centre.
-        private var shapeInitAngle: CGFloat = 0
-        private var shapeInitRadius: CGFloat = 0
-        private var shapeInitHalfW: CGFloat = 0
-        private var shapeInitHalfH: CGFloat = 0
-        /// The shape's own detected rotation (e.g. from a stroke traced at an angle) at the moment
-        /// following begins — the finger's own bearing change (`deltaRot` below) is added *on top of*
-        /// this, not used in its place, or continuing to drag a shape that was already rotated would
-        /// reset it to axis-aligned the instant the finger moved at all.
-        private var shapeInitRotation: CGFloat = 0
-        private var shapeInitFrameSet = false
+        /// Captured on the first sample after shape following begins, and held for the rest of that
+        /// drag: where the finger was relative to the shape's centre, how big the shape was, and the
+        /// rotation it was already detected at. Nil until then. See `ShapeGeometry.FollowFrame`,
+        /// which carries the math and the reason the shape's own rotation has to be part of it.
+        private var shapeFollowFrame: ShapeGeometry.FollowFrame?
+
+        /// Writes a dragged geometry back onto the pending shape and repaints the overlay. The one
+        /// place a handle drag or a follow-the-finger sample lands, so each of those only has to
+        /// produce the new `ShapeGeometry` (see `ShapeGeometry`'s handle-dragging section).
+        ///
+        /// `refreshOverlay: false` is for callers that update the overlay themselves right after.
+        fileprivate func applyShapeDrag(_ geometry: ShapeGeometry, refreshOverlay: Bool = true) {
+            canvasManager.updateInteractiveShape(startPoint: geometry.startPoint,
+                                                 endPoint: geometry.endPoint,
+                                                 rotation: geometry.rotation)
+            if refreshOverlay { updateShapeOverlay() }
+        }
 
         private func handleStrokeMoved(_ sample: VectorSample, host: LayerHostView?) {
             guard shapeDetectionActive else { return }
