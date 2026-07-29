@@ -55,7 +55,7 @@ extension CanvasManager {
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             sceneFrameCount = max(sceneFrameCount, startFrame + length)
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: startFrame) {
-                regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+                scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
         }
         return true
@@ -78,7 +78,7 @@ extension CanvasManager {
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             sceneFrameCount = max(sceneFrameCount, newStart + length)
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: newStart) {
-                regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+                scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
         }
     }
@@ -114,7 +114,7 @@ extension CanvasManager {
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             sceneFrameCount = max(sceneFrameCount, startFrame + length)
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: startFrame) {
-                regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+                scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
         }
         return true
@@ -151,7 +151,7 @@ extension CanvasManager {
             if layers[layerIndex].cels[celIndex].vector != nil {
                 layers[layerIndex].cels[celIndex].vector = .empty(size: size)
             }
-            regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
+            scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
         }
     }
 
@@ -212,7 +212,7 @@ extension CanvasManager {
             layers[layerIndex].cels.append(secondHalf)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
-                regenerateThumbnail(layerIndex: layerIndex, celIndex: idx)
+                scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
         }
     }

@@ -200,8 +200,27 @@ final class PerfBaselineTests: XCTestCase {
                           "A single 500-sample stroke taking over 10s means something is catastrophically wrong, not merely slow")
         XCTAssertLessThan(measured.peakBytes, 3_000_000_000,
                           "Peak footprint for one stroke on a 2048x2048 canvas should stay well under 3 GB")
-        XCTAssertEqual(thumbnailRegens, 1,
-                       "One completed stroke must trigger exactly one thumbnail rasterize. Per-sample regeneration is the specific regression this guards.")
+        // Stage 0 asserted 1 here, because `strokeEnded` rasterized the thumbnail inline. Stage 5.2
+        // routed it through the existing 400 ms debounce, so finishing a stroke now queues the regen
+        // instead of paying for it — deliberately changed, and the point of the change: that
+        // rasterize measured ~4.3 ms against a ~14 ms stroke. The count that matters is still
+        // bounded, though, so the original regression this guarded (a regen per sample or per dab)
+        // would still fail here: 500 samples must not produce 500 anything.
+        XCTAssertEqual(thumbnailRegens, 0,
+                       "A completed stroke should queue its thumbnail regen on the debounce, not rasterize inline. Per-sample regeneration is the specific regression this guards.")
+        XCTAssertEqual(pumpDebouncedThumbnails(manager), 1,
+                       "The queued regen must still actually happen once the debounce fires — deferring it must not lose it")
+    }
+
+    /// Spins the main run loop long enough for `CanvasManager`'s 400 ms thumbnail debounce to fire,
+    /// and returns how many regenerations it produced. Without this a test can only observe that a
+    /// regen was *deferred*, not that it was ever *performed* — which is exactly the bug a careless
+    /// debounce introduces.
+    @discardableResult
+    private func pumpDebouncedThumbnails(_ manager: CanvasManager) -> Int {
+        let before = manager.thumbnailRegenerationCount
+        RunLoop.current.run(until: Date().addingTimeInterval(0.7))
+        return manager.thumbnailRegenerationCount - before
     }
 
     /// What a stroke costs is set by how many *dabs* get stamped, and `stampStroke` derives that
@@ -297,9 +316,17 @@ final class PerfBaselineTests: XCTestCase {
         let samples = syntheticStroke(sampleCount: Self.sampleCount)
         stamp(samples, into: manager)
 
+        // The cost of the rasterize itself, measured on the un-debounced entry point so the number
+        // stays comparable with Stage 0's. Stage 0 measured this through `strokeEnded`, which was
+        // the same thing then; 5.2 moved `strokeEnded` onto the debounce, so measuring it that way
+        // now would time an enqueue and report ~0.
         let before = manager.thumbnailRegenerationCount
-        let direct = measuringPeakMemory { manager.strokeEnded(layerIndex: 0, celIndex: 0) }
+        let direct = measuringPeakMemory { manager.regenerateThumbnail(layerIndex: 0, celIndex: 0) }
         let directRegens = manager.thumbnailRegenerationCount - before
+
+        let beforeStrokeEnd = manager.thumbnailRegenerationCount
+        let strokeEnd = measuringPeakMemory { manager.strokeEnded(layerIndex: 0, celIndex: 0) }
+        let strokeEndRegens = manager.thumbnailRegenerationCount - beforeStrokeEnd
 
         let beforeScheduled = manager.thumbnailRegenerationCount
         let scheduled = measuringPeakMemory {
@@ -307,20 +334,86 @@ final class PerfBaselineTests: XCTestCase {
         }
         let scheduledRegens = manager.thumbnailRegenerationCount - beforeScheduled
 
+        // 50 schedules plus the strokeEnded above all name the same cel, so the whole burst
+        // collapses to one render when the debounce finally fires.
+        let flushedRegens = pumpDebouncedThumbnails(manager)
+
         report("thumbnail", [
             ("oneRegen", milliseconds(direct.seconds)),
-            ("regensFromOneStrokeEnd", "\(directRegens)"),
+            ("regensFromOneStrokeEnd", "\(strokeEndRegens)"),
+            ("strokeEndCost", milliseconds(strokeEnd.seconds)),
             ("50xScheduleCallCost", milliseconds(scheduled.seconds)),
             ("regensFrom50Schedules", "\(scheduledRegens)"),
+            ("regensAfterDebounceFires", "\(flushedRegens)"),
         ])
 
         XCTAssertEqual(directRegens, 1)
+        XCTAssertEqual(strokeEndRegens, 0,
+                       "5.2: finishing a stroke queues the regen on the debounce instead of rasterizing inline")
         XCTAssertEqual(scheduledRegens, 0,
                        "`scheduleThumbnailRegen` is debounced onto the main run loop, so 50 synchronous calls rasterize nothing on the spot")
+        XCTAssertEqual(flushedRegens, 1,
+                       "51 queued regens naming one cel must coalesce to exactly one render, not replay one per call")
         XCTAssertLessThan(direct.seconds, 5.0, "One 2048x2048 thumbnail rasterize taking over 5s is a catastrophic regression")
     }
 
     // MARK: - Stage 5 additions
+
+    /// The debounce coalesces per *cel*, not down to a single cel.
+    ///
+    /// `.debounce` forwards only the last element it saw, so while the subject carried the
+    /// `(layerIndex, celIndex)` itself, queueing two different cels inside the 400 ms window
+    /// regenerated the second and silently left the first with a stale thumbnail. 5.2 moved the
+    /// identities into a pending set so the sink drains all of them; without that fix, routing the
+    /// per-stroke path through the debounce would have turned a rare bug into an everyday one.
+    func testDebouncedRegensCoalescePerCelRatherThanDroppingAllButTheLast() {
+        let manager = perfManager()
+        manager.addLayer(name: "Perf B")
+        XCTAssertEqual(manager.layers.count, 2, "Fixture should have given us two layers to schedule against")
+
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+        manager.scheduleThumbnailRegen(layerIndex: 1, celIndex: 0)
+        XCTAssertEqual(pumpDebouncedThumbnails(manager), 2,
+                       "Two distinct cels queued inside one debounce window must both be regenerated — dropping all but the last leaves a permanently stale thumbnail")
+
+        // And the same cel queued repeatedly still collapses to one.
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+        XCTAssertEqual(pumpDebouncedThumbnails(manager), 1,
+                       "Repeated schedules for one cel should still coalesce to a single render")
+    }
+
+    /// A queued regen names a cel by identity, so a structural edit that renumbers indices in the
+    /// meantime cannot make the flush render the wrong cel — it renders the right one, or nothing if
+    /// that cel is gone. Deleting the *lower* layer shifts the queued layer's index from 1 to 0,
+    /// which under the old index-based queue would have rendered whatever now sits at index 1.
+    func testQueuedRegenFollowsTheCelThroughAnIndexShift() {
+        let manager = perfManager()
+        manager.addLayer(name: "Perf B")
+        let targetLayerID = manager.layers[1].id
+
+        manager.scheduleThumbnailRegen(layerIndex: 1, celIndex: 0)
+        manager.deleteLayer(at: 0)
+        XCTAssertEqual(manager.layers.count, 1)
+        XCTAssertEqual(manager.layers[0].id, targetLayerID, "The queued layer should now be at index 0")
+
+        XCTAssertEqual(pumpDebouncedThumbnails(manager), 1,
+                       "The queued cel still exists at a new index, so its thumbnail should still be rendered")
+        XCTAssertNotNil(manager.layers[0].cels[0].thumbnail,
+                        "...and the thumbnail that got rendered should be the surviving cel's own")
+    }
+
+    /// A cel deleted before the debounce fires is dropped rather than rendering something arbitrary.
+    func testQueuedRegenForADeletedCelIsDropped() {
+        let manager = perfManager()
+        manager.addLayer(name: "Perf B")
+
+        manager.scheduleThumbnailRegen(layerIndex: 1, celIndex: 0)
+        manager.deleteLayer(at: 1)
+        XCTAssertEqual(pumpDebouncedThumbnails(manager), 0,
+                       "A queued regen whose cel no longer exists should resolve to nothing, not render a different cel")
+    }
 
     /// `stampCircle` memoizes its radial gradient instead of building one per dab. A cache is only
     /// worth having if it actually hits, and the hit rate here is not self-evident: the naive key

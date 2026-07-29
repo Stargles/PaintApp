@@ -353,14 +353,35 @@ final class CanvasManager: ObservableObject {
     /// hidden. `DrawingView` presents an alert offering to show the layer. Reset on dismissal.
     @Published var needsVisibilityAlert: Bool = false
 
-    private let thumbnailRegenSubject = PassthroughSubject<(Int, Int), Never>()
+    /// Ticks the debounce. The *what* travels in `pendingThumbnailRegens` rather than in the value,
+    /// because `.debounce` keeps only the last element it saw: when this subject carried the
+    /// `(layerIndex, celIndex)` itself, scheduling two different cels inside the 400 ms window
+    /// regenerated only the second one and left the first showing a stale thumbnail indefinitely.
+    /// That was reachable before this stage (merge-down, then any other scheduled regen) and routing
+    /// the per-stroke path through here would have made it routine, so the queue is now a set that
+    /// the debounced sink drains in full.
+    private let thumbnailRegenSubject = PassthroughSubject<Void, Never>()
+
+    /// Cels awaiting a debounced thumbnail regen, identified by `(layerID, celID)` rather than by
+    /// index. Indices are not stable across the debounce interval — deleting a layer or sorting a
+    /// layer's cels renumbers them, so an index queued 400 ms ago can now point at a different cel,
+    /// or at a valid index that simply isn't the cel whose content changed. Identity survives all of
+    /// that, and `flushPendingThumbnailRegens` resolves back to current indices at the moment it
+    /// renders. A cel that has since been deleted resolves to nothing and is dropped.
+    private var pendingThumbnailRegens: Set<CelLocation> = []
+
+    struct CelLocation: Hashable {
+        let layerID: UUID
+        let celID: UUID
+    }
+
     private var cancellables = Set<AnyCancellable>()
 
     init() {
         thumbnailRegenSubject
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
-            .sink { [weak self] location in
-                self?.regenerateThumbnail(layerIndex: location.0, celIndex: location.1)
+            .sink { [weak self] in
+                self?.flushPendingThumbnailRegens()
             }
             .store(in: &cancellables)
     }
@@ -475,24 +496,58 @@ final class CanvasManager: ObservableObject {
     /// (`beginCanvasEdit`, via the drawing surface's `onStrokeBegan`) — which is the correct point,
     /// since that's when the canvas began changing — so there is nothing transient left to settle
     /// here, only the thumbnail to refresh.
+    /// Goes through the debounce rather than rasterizing on the spot, which is what makes the
+    /// thumbnail stop being a per-stroke tax. Regenerating a 2048x2048 cel's thumbnail measures
+    /// ~4.3 ms against a ~14 ms stroke — roughly a quarter of the cost of finishing a stroke, paid on
+    /// every stroke, to refresh a 120x120 image in the timeline and layer panel that no one can be
+    /// looking at closely mid-drawing. Debounced, a burst of quick strokes on one cel pays it once
+    /// 400 ms after the user stops instead of once per stroke.
+    ///
+    /// Safe to defer because nothing reads `Cel.thumbnail`/`Layer.thumbnail` except the timeline and
+    /// layer-panel views. In particular **saving does not**: `ProjectStore.Snapshot` renders its own
+    /// gallery thumbnail from `PixelOps.compositeCanvas` and stores each cel's pixels via
+    /// `cel.raster.renderToUIImage()`, so no per-cel thumbnail is ever persisted and a pending regen
+    /// cannot put a stale image on disk. (`flushPendingThumbnailRegens()` exists for any future
+    /// caller that does need synchronous freshness.)
     func strokeEnded(layerIndex: Int, celIndex: Int) {
-        regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
-    }
-
-    func scheduleThumbnailRegen(layerIndex: Int, celIndex: Int) {
-        thumbnailRegenSubject.send((layerIndex, celIndex))
-    }
-
-    /// ID-based convenience for undo/redo closures, which can fire long after other structural
-    /// edits have shifted indices — resolves current indices by identity first. A no-op if the
-    /// layer/cel no longer exists.
-    func scheduleThumbnailRegen(layerID: UUID, celID: UUID) {
-        guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
-              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
     }
 
+    func scheduleThumbnailRegen(layerIndex: Int, celIndex: Int) {
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        scheduleThumbnailRegen(layerID: layers[layerIndex].id,
+                               celID: layers[layerIndex].cels[celIndex].id)
+    }
+
+    /// The ID-based entry point every scheduled regen funnels through — used directly by undo/redo
+    /// closures, which can fire long after other structural edits have shifted indices.
+    func scheduleThumbnailRegen(layerID: UUID, celID: UUID) {
+        pendingThumbnailRegens.insert(CelLocation(layerID: layerID, celID: celID))
+        thumbnailRegenSubject.send(())
+    }
+
+    /// Renders every queued thumbnail immediately and empties the queue. Called by the debounced
+    /// sink; also the escape hatch for anything that needs `Cel.thumbnail` guaranteed current right
+    /// now rather than up to 400 ms from now.
+    func flushPendingThumbnailRegens() {
+        guard !pendingThumbnailRegens.isEmpty else { return }
+        let pending = pendingThumbnailRegens
+        pendingThumbnailRegens.removeAll()
+        for location in pending {
+            guard let layerIndex = layers.firstIndex(where: { $0.id == location.layerID }),
+                  let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == location.celID }) else { continue }
+            regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
+        }
+    }
+
+    /// Deliberately *not* debounced: this is a whole-project fan-out over every cel (project load,
+    /// canvas resize), and every one of those thumbnails is a different cel that genuinely has to be
+    /// rendered. Queueing them would work — the queue is a set, so none would be dropped — but it
+    /// would only defer the same total work by 400 ms while leaving the whole timeline blank until
+    /// then. Any regen already queued is redundant once this has run, so the queue is cleared.
     func regenerateAllThumbnails() {
+        pendingThumbnailRegens.removeAll()
         for layerIndex in layers.indices {
             for celIndex in layers[layerIndex].cels.indices {
                 regenerateThumbnail(layerIndex: layerIndex, celIndex: celIndex)
