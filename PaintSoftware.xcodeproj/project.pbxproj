@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		10B07D0848312BA79330D207 /* PaintSoftwareUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A3A0221A22D3DDFCD4EEF94 /* PaintSoftwareUITests.swift */; };
 		4E03FE4A7BAA4323E6837013 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F624FB57490A92DFBDB344A /* Foundation.framework */; };
 		A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */; };
 		C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */; };
@@ -19,6 +18,12 @@
 		B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */; };
 		DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */; };
 		DEC0DE000000000000000004 /* CelCRUDCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */; };
+		DEC0DE0000000000000000FE /* VectorShapeAndRecoveryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000FD /* VectorShapeAndRecoveryUITests.swift */; };
+		DEC0DE0000000000000000FC /* ToolsAndSelectionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */; };
+		DEC0DE0000000000000000FA /* FillUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F9 /* FillUITests.swift */; };
+		DEC0DE0000000000000000F8 /* LayerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F7 /* LayerUITests.swift */; };
+		DEC0DE0000000000000000F6 /* TimelineAndUndoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F5 /* TimelineAndUndoUITests.swift */; };
+		DEC0DE0000000000000000F4 /* PaintUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F3 /* PaintUITestCase.swift */; };
 		DEC0DE000000000000000006 /* LayerTreeCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */; };
 		DEC0DE000000000000000008 /* ViewPresetCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */; };
 		DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */; };
@@ -71,7 +76,6 @@
 		1F2F226A8353848514BB7213 /* PaintSoftwareUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PaintSoftwareUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3FC5E355300DBDA400401D35 /* PaintSoftware.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PaintSoftware.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7F624FB57490A92DFBDB344A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
-		9A3A0221A22D3DDFCD4EEF94 /* PaintSoftwareUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushEngineLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackupManagerLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectBackupManager.swift; sourceTree = "<group>"; };
@@ -82,6 +86,12 @@
 		B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeDetectorLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasManagerTestSupport.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelCRUDCharacterizationTests.swift; sourceTree = "<group>"; };
+		DEC0DE0000000000000000FD /* VectorShapeAndRecoveryUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorShapeAndRecoveryUITests.swift; sourceTree = "<group>"; };
+		DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolsAndSelectionUITests.swift; sourceTree = "<group>"; };
+		DEC0DE0000000000000000F9 /* FillUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FillUITests.swift; sourceTree = "<group>"; };
+		DEC0DE0000000000000000F7 /* LayerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LayerUITests.swift; sourceTree = "<group>"; };
+		DEC0DE0000000000000000F5 /* TimelineAndUndoUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineAndUndoUITests.swift; sourceTree = "<group>"; };
+		DEC0DE0000000000000000F3 /* PaintUITestCase.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintUITestCase.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LayerTreeCharacterizationTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ViewPresetCharacterizationTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushLibrary.swift; sourceTree = "<group>"; };
@@ -186,12 +196,17 @@
 		7DD8CAB96CBC75B388C33457 /* PaintSoftwareUITests */ = {
 			isa = PBXGroup;
 			children = (
-				9A3A0221A22D3DDFCD4EEF94 /* PaintSoftwareUITests.swift */,
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
 				DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */,
 				DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */,
+				DEC0DE0000000000000000FD /* VectorShapeAndRecoveryUITests.swift */,
+				DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */,
+				DEC0DE0000000000000000F9 /* FillUITests.swift */,
+				DEC0DE0000000000000000F7 /* LayerUITests.swift */,
+				DEC0DE0000000000000000F5 /* TimelineAndUndoUITests.swift */,
+				DEC0DE0000000000000000F3 /* PaintUITestCase.swift */,
 				DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */,
 				DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */,
 				DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */,
@@ -349,7 +364,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				10B07D0848312BA79330D207 /* PaintSoftwareUITests.swift in Sources */,
 				A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */,
 				B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */,
@@ -360,6 +374,12 @@
 				C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */,
 				DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */,
 				DEC0DE000000000000000004 /* CelCRUDCharacterizationTests.swift in Sources */,
+				DEC0DE0000000000000000FE /* VectorShapeAndRecoveryUITests.swift in Sources */,
+				DEC0DE0000000000000000FC /* ToolsAndSelectionUITests.swift in Sources */,
+				DEC0DE0000000000000000FA /* FillUITests.swift in Sources */,
+				DEC0DE0000000000000000F8 /* LayerUITests.swift in Sources */,
+				DEC0DE0000000000000000F6 /* TimelineAndUndoUITests.swift in Sources */,
+				DEC0DE0000000000000000F4 /* PaintUITestCase.swift in Sources */,
 				DEC0DE000000000000000006 /* LayerTreeCharacterizationTests.swift in Sources */,
 				DEC0DE000000000000000008 /* ViewPresetCharacterizationTests.swift in Sources */,
 				DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */,

@@ -44,7 +44,8 @@
       codeCoverageEnabled = "NO">
       <Testables>
          <TestableReference
-            skipped = "NO">
+            skipped = "NO"
+            parallelizable = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "64610B6C176260C993719948"

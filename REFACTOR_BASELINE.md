@@ -142,3 +142,43 @@ Then read the `PERF BASELINE |` lines out of the test log. The assertions in tha
 deliberately loose order-of-magnitude ceilings (simulator timings swing with host load) — they
 catch catastrophic regressions only. Judge a performance change by the printed numbers, not by
 whether the test passed.
+
+---
+
+## Suite parallelisation (2026-07-29, between Stage 3 and Stage 4)
+
+The 63 XCUITest cases used to live in **one** class. XCTest parallelises by test *class*, so the
+suite had exactly one unit of schedulable work and ran serially regardless of how many simulators
+were free. They are now split across five classes over a shared `PaintUITestCase` base (all 63 test
+bodies byte-identical; the only edit to any helper was `private` -> internal, since subclasses now
+live in other files).
+
+Run with `deploy/mac/fast_test.sh`, or `-parallel-testing-enabled YES -maximum-parallel-testing-workers 5`.
+
+| | Serial (before) | Parallel, 5 workers (after) |
+|---|---|---|
+| Test-execution wall clock | **1231.4 s** | **611.4 s** |
+| Passed / failed / skipped | 117 / 0 / 1 (118 total) | **192 / 0 / 1** (193 total) |
+
+**~2.0x.** Not the ~5x the worker count implies, and the reason is not class imbalance — the five
+UI classes come out at 318 / 313 / 308 / 292 / 225 s, which is about as even as name-based grouping
+gets. The remaining cost is simulator clone startup (2-3 minutes before the first test completes)
+plus contention between five concurrent Metal-rendering simulators on an 8-core / 16 GB M1 Pro.
+The floor on this hardware is the slowest class, ~318 s.
+
+### Counting caveat, if you are reading a text log
+
+Concurrent workers interleave their writes into the same stream, which **tears individual lines**
+(`Test c` + a timestamp + `ase '...' passed`). Grepping the log therefore undercounts — it reported
+189/1 for a run that actually passed 192/1. Take counts from the `.xcresult` bundle instead:
+
+```
+xcrun xcresulttool get test-results summary --path <DerivedData>/Logs/Test/<bundle>.xcresult
+```
+
+### What this means for later stages
+
+The ~130 pure-logic tests (characterization, shape-detector, brush-engine, backup, perf) never
+launch the app and total **~30 s**; the 63 XCUITest cases are still ~98% of the runtime. Naming the
+logic suites directly is a far bigger win than parallelism for per-item verification — seconds
+instead of minutes. Reserve the full parallel run for the pre-push check.
