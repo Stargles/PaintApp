@@ -182,3 +182,83 @@ The ~130 pure-logic tests (characterization, shape-detector, brush-engine, backu
 launch the app and total **~30 s**; the 63 XCUITest cases are still ~98% of the runtime. Naming the
 logic suites directly is a far bigger win than parallelism for per-item verification — seconds
 instead of minutes. Reserve the full parallel run for the pre-push check.
+
+---
+
+## Stage 5 (2026-07-29) — after
+
+Same machine and simulator as Stage 0 (iPad Pro 13-inch (M5), iOS 26.5). Every row below is the
+**median of 3 runs** per side, not a single sample: the Stage 0 table's own caution that a change
+under ~2x is noise turned out to understate it for single runs (re-measuring the untouched
+250-vs-1000-sample ratio gave 0.81x where Stage 0 recorded 1.00x). Path length was held fixed in
+every comparison, per trap 1. Memory was measured inside an explicit `autoreleasepool`, per trap 2.
+
+### Live stroke cost
+
+The "Stage 0 recorded" column is that stage's own figure, reproduced here for continuity. The
+ratio is computed from **re-measured**, i.e. this session's own baseline run of the unmodified
+pre-5.1 code, so the whole chain comes from one measurement session on one machine state rather than
+mixing two. The two baselines agree to within noise, which is itself the check that this
+environment reproduces Stage 0's.
+
+| Measurement | Stage 0 recorded | re-measured | after 5.1 | after 5.2 | Ratio |
+|---|---|---|---|---|---|
+| One 500-sample stroke, end to end | 27.6 ms | 27.1 ms | 14.8 ms | **6.5 ms** | **4.2x** |
+| 20 consecutive 200-sample strokes, mean | 28.2 ms | 26.2 ms | 13.2 ms | **6.1 ms** | **4.3x** |
+| Thumbnail rasterizes per completed stroke | 1 | 1 | 1 | **0** (1 per 400 ms idle) | |
+| Footprint growth over 20 strokes | 0.0 MB | 0.0 MB | 0.0 MB | **0.0 MB** | unchanged |
+| Path-length scaling, 1x vs 4x (ideal 4.00x) | 3.04x | 3.02x | 2.02x | **4.07x** | |
+
+That last row is corroboration rather than a target: removing a *fixed* per-stroke cost is exactly
+what makes the remaining cost purely dab-proportional, so 5.2 moving it to 4.07x against an ideal of
+4.00x is independent evidence the thumbnail really did leave the per-stroke path.
+
+Per-run spread on the single-stroke figure: Stage 0 side 27.1 / 27.0 / 27.7, after-5.1 side
+14.8 / 13.9 / 15.0, after-5.2 side 6.8 / 6.5 / 6.5. No overlap between any two stages, so each step
+is well clear of the noise floor.
+
+### Other paths
+
+| Measurement | before | after | |
+|---|---|---|---|
+| Vector layer first render, 20 strokes (5.3) | 70.9 ms | **63.6 ms** | 1.11x |
+| Vector layer render, peak footprint delta (5.3) | 48.1 MB | **16.0 MB** | **3.0x** |
+| Undo cost, small localised stroke (5.5) | 32.0 MB | **17,680 bytes** | ~1,900x |
+| Undo cost, canvas-spanning sweep (5.5) | 32.0 MB | **24.9 MB** | 1.29x |
+| Small strokes retained in the 300 MB budget (5.5) | **9** | 40 of 40 recorded (~0.7 MB) | |
+| Dab gradient cache hit rate (5.1) | n/a | **100.0%** (2635 hits / 1 miss / 2636 dabs) | |
+
+The 5.3 memory figure was identical across all three reps on both sides, so it is structural (one
+canvas-sized buffer per render instead of three), not sampling. The two 5.5 rows are both reported
+deliberately: dirty-rect cropping helps in proportion to how *localised* a stroke is, so quoting only
+the first row would overstate it.
+
+### Three things later work should carry forward
+
+1. **`UIGraphicsImageRendererFormat.preferredRange` defaults to `.automatic`, which on a wide-colour
+   iPad means an extended-range 16-bit-per-component context.** This cost 5.3 a 2.2x wall-clock
+   regression (155 ms vs the old 70 ms) that the memory win would have hidden, and it silently
+   doubles the size of any buffer whose bytes you are accounting for (5.5's undo patches). Pin
+   `.standard` anywhere dabs are rasterized or a buffer's byte cost matters — `RasterLayerTexture`
+   was always explicitly 8-bit deviceRGB, which is why this never showed up before.
+2. **`CGImage.cropping(to:)` keeps a reference to the parent's pixel data.** A "crop" used to shrink
+   what something retains does not shrink anything. `PixelOps.copiedSubimage` renders into a fresh
+   buffer for this reason.
+3. **Stage 0's 4.4 ms "one thumbnail rasterize" understated the real per-stroke cost.** It timed a
+   *second* consecutive regen, whose `renderToUIImage()` was already cached. The regen that follows a
+   stroke pays an uncached full-canvas `makeImage()` plus the `@Published layers` republish, and
+   measures 5.9-7.8 ms — which is why 5.2 recovered 8.3 ms, not 4.3 ms.
+
+### Full suite
+
+| | Stage 0 | Stage 4 | Stage 5 |
+|---|---|---|---|
+| Passed | 183 | 198 | **213** |
+| Failed | 0 | 0 | **0** |
+| Skipped | 1 | 1 | **1** (the same pre-existing one) |
+| Total | 184 | 199 | **214** |
+| Wall clock | 1220.9 s (serial) | 611.4 s (parallel) | **541 s** (parallel, 5 workers) |
+
++15 over Stage 4 is exactly the 15 tests this stage added. **Counts read from the `.xcresult`
+bundle, never from the text log** — parallel workers tear each other's lines and grepping undercounts
+(the caveat above reported 189 for a run that passed 192).
