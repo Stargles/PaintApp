@@ -313,24 +313,24 @@ final class StrokeCanvasView: UIView {
     /// continuous line instead of isolated dots. `target` is the cel's raster for a raster layer, or
     /// the live-preview scratch raster for an in-progress vector stroke. Delegates each dab to the
     /// shared `BrushStamper` so live drawing and vector re-rendering are pixel-identical.
+    ///
+    /// The spacing/interpolation arithmetic itself is `BrushStamper.advance`, shared with
+    /// `BrushStamper.stampStroke`. This stays a separate entry point rather than calling
+    /// `stampStroke` because the two are shaped differently: this one is called once per touch
+    /// sample and carries `lastStampPoint` across calls, so a live stroke keeps its dab rhythm
+    /// across sample boundaries instead of restarting at every one.
     private func stampPath(to point: CGPoint, pressure: CGFloat, into target: RasterLayerTexture) {
         guard let last = lastStampPoint else {
             BrushStamper.stampDab(into: target, at: point, pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
             lastStampPoint = point
             return
         }
-        let dx = point.x - last.x, dy = point.y - last.y
-        let distance = hypot(dx, dy)
-        // The 1pt floor keeps thin/tight-spacing brushes continuous even at spacingFraction ~= 0.
-        let spacing = max(brushSize * CGFloat(brush.spacingFraction), 1)
-        guard distance >= spacing else { return } // not far enough yet — accumulate on the next sample
-        let steps = Int(distance / spacing)
-        for i in 1...steps {
-            let t = (CGFloat(i) * spacing) / distance
-            BrushStamper.stampDab(into: target, at: CGPoint(x: last.x + dx * t, y: last.y + dy * t), pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
+        // A walk shorter than one spacing returns `last` unchanged — not far enough yet, so the
+        // distance accumulates into the next sample.
+        lastStampPoint = BrushStamper.advance(from: last, to: point,
+                                              spacing: BrushStamper.stampSpacing(brushSize: brushSize, brush: brush)) { dab in
+            BrushStamper.stampDab(into: target, at: dab, pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
         }
-        let coveredT = (CGFloat(steps) * spacing) / distance
-        lastStampPoint = CGPoint(x: last.x + dx * coveredT, y: last.y + dy * coveredT)
     }
 
     // MARK: - Vector-layer drawing

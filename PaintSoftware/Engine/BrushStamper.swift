@@ -11,12 +11,44 @@ enum BrushStamper {
         var pressure: CGFloat
     }
 
+    /// Distance between consecutive stamps along a path. The 1pt floor keeps thin or tight-spacing
+    /// brushes continuous even at `spacingFraction` ~= 0.
+    static func stampSpacing(brushSize: CGFloat, brush: Brush) -> CGFloat {
+        max(brushSize * CGFloat(brush.spacingFraction), 1)
+    }
+
+    /// Walks from `last` toward `point`, invoking `body` at each `spacing`-sized step along the way,
+    /// and returns the position of the final stamp — the carry point the next walk continues from.
+    /// When the two points are closer together than one spacing, nothing is stamped and `last` comes
+    /// straight back, so the leftover distance accumulates into the next call instead of being
+    /// stamped short (which is what keeps a slow drag from bunching dabs up at the start).
+    ///
+    /// This is the arithmetic both callers share, and all they share: `stampStroke` below replays a
+    /// whole finished stroke in one call and holds the carry point in a local, while
+    /// `StrokeCanvasView.stampPath` is called once per incoming touch sample and holds it in a
+    /// property across calls. Returning the carry point rather than storing it is what lets one
+    /// helper serve both.
+    static func advance(from last: CGPoint, to point: CGPoint, spacing: CGFloat,
+                        _ body: (CGPoint) -> Void) -> CGPoint {
+        let dx = point.x - last.x, dy = point.y - last.y
+        let distance = hypot(dx, dy)
+        guard spacing > 0, distance >= spacing else { return last }
+        let steps = Int(distance / spacing)
+        for i in 1...steps {
+            let t = (CGFloat(i) * spacing) / distance
+            body(CGPoint(x: last.x + dx * t, y: last.y + dy * t))
+        }
+        let coveredT = (CGFloat(steps) * spacing) / distance
+        return CGPoint(x: last.x + dx * coveredT, y: last.y + dy * coveredT)
+    }
+
     /// Replays a whole stroke (spacing-interpolated between samples, exactly like
     /// `StrokeCanvasView.stampPath`) into `raster`, as one `beginStroke`/`endStroke` unit.
     static func stampStroke(into raster: RasterLayerTexture, samples: [Sample], brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false) {
         guard !samples.isEmpty else { return }
         raster.beginStroke()
+        let spacing = stampSpacing(brushSize: brushSize, brush: brush)
         var last: CGPoint?
         for sample in samples {
             let point = sample.point
@@ -26,19 +58,10 @@ enum BrushStamper {
                 last = point
                 continue
             }
-            let dx = point.x - lastPoint.x, dy = point.y - lastPoint.y
-            let distance = hypot(dx, dy)
-            let spacing = max(brushSize * CGFloat(brush.spacingFraction), 1)
-            guard distance >= spacing else { continue }
-            let steps = Int(distance / spacing)
-            for i in 1...steps {
-                let t = (CGFloat(i) * spacing) / distance
-                stampDab(into: raster, at: CGPoint(x: lastPoint.x + dx * t, y: lastPoint.y + dy * t),
-                         pressure: sample.pressure, brush: brush, color: color, brushSize: brushSize,
-                         brushOpacity: brushOpacity, isEraser: isEraser)
+            last = advance(from: lastPoint, to: point, spacing: spacing) { dab in
+                stampDab(into: raster, at: dab, pressure: sample.pressure, brush: brush, color: color,
+                         brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
             }
-            let coveredT = (CGFloat(steps) * spacing) / distance
-            last = CGPoint(x: lastPoint.x + dx * coveredT, y: lastPoint.y + dy * coveredT)
         }
         raster.endStroke()
     }
