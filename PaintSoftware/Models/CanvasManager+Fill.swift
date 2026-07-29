@@ -9,6 +9,22 @@ import UIKit
 // cancelling the result. Extracted from CanvasManager.swift as an extension — all state still lives
 // on the class itself (see that file's header), so the gesture's stored properties and the
 // `@Published` fill parameters the sliders bind to stay declared over there.
+//
+// This subsystem was the candidate for promotion to a real `InteractiveFillService` owned by
+// CanvasManager, and it was measured for that rather than assumed. The machinery *is* private —
+// nothing outside CanvasManager's own files names `fillQueue`, `fillLock`, `fillSession`, `FillKey`
+// or any of the gesture fields. But the operations are not separable from the document: this file
+// touches `layers` 29 times (10 of them writes into the `@Published` array, including the vector
+// materialisation in `commitInteractiveFill`), plus `selection`, `currentFrame`,
+// `currentLayerIndex`, `canvasSize` and `allowsPaintingOutsideSelection`, and it calls back into
+// `beginCanvasEdit`, `recordUndo`, `registerUndoableCelChange`, `bakedRasterTexture`,
+// `celContentChangedOutsideStroke`, `refreshUndoRedoState`, `scheduleThumbnailRegen`,
+// `activeCelIndex`, `refreshDisplay` and `objectWillChange`.
+//
+// A service object would therefore hold a back-reference to CanvasManager and route all of that
+// through it — mutating the `@Published` array from inside a child object, which is exactly the
+// republishing failure mode sessions 47, 49 and 50 were spent fixing. The boundary is not clean, so
+// it stays an extension.
 
 extension CanvasManager {
 
