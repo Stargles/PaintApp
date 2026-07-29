@@ -268,6 +268,103 @@ final class BrushEngineLogicTests: XCTestCase {
                        "A 0.5-alpha eraser dab over opaque ink should leave half of it behind")
     }
 
+    // MARK: - Vector render isolation
+
+    /// `VectorCanvas.renderLocalContent` stamps strokes straight into its `UIGraphicsImageRenderer`
+    /// context now, instead of into a throwaway `RasterLayerTexture` that was then composited in. The
+    /// scratch texture *isolated* the strokes from the fills and images beneath them, so dropping it
+    /// naively would let a non-normal brush blend with that backdrop and change the render. A
+    /// transparency layer restores the isolation; this test is what proves it is there.
+    ///
+    /// The colours are chosen so the two behaviours cannot be confused. A **green** stroke set to
+    /// **multiply** laid over a **red** fill renders green when isolated (the stroke layer composites
+    /// source-over), but `multiply((0,1,0), (1,0,0))` = black if the dab blends directly against the
+    /// fill. Green vs. black is unambiguous.
+    func testVectorMultiplyStrokeDoesNotBlendWithTheFillBeneathIt() {
+        let size = CGSize(width: 64, height: 64)
+        let fillPath = CGPath(rect: CGRect(x: 0, y: 0, width: 64, height: 64), transform: nil)
+        let fill = VectorFillElement(path: fillPath,
+                                     color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let brush = Self.opaqueTestBrush(blendMode: .multiply)
+        let stroke = VectorStroke(brush: brush,
+                                  color: CodableColor(red: 0, green: 1, blue: 0, alpha: 1),
+                                  size: 20, opacity: 1,
+                                  samples: [VectorSample(x: 32, y: 32, pressure: 1),
+                                            VectorSample(x: 32, y: 32, pressure: 1)])
+        let canvas = VectorCanvas(size: size, strokes: [stroke], fills: [fill])
+
+        guard let pixels = rgbaPixels(of: canvas.render(), width: 64, height: 64) else {
+            return XCTFail("Could not read back the rendered vector canvas")
+        }
+        let (r, g, b) = rgb(pixels, x: 32, y: 32)
+        XCTAssertGreaterThan(g, 0.8, "The multiply stroke should composite source-over onto the fill, staying green")
+        XCTAssertLessThan(r, 0.2, "A red component here means the stroke blended with the red fill beneath it instead of being isolated from it")
+        XCTAssertLessThan(b, 0.2)
+
+        // Sanity: away from the stroke, the fill itself is untouched red.
+        let (fr, fg, _) = rgb(pixels, x: 4, y: 4)
+        XCTAssertGreaterThan(fr, 0.8, "The fill should still render red where the stroke doesn't cover it")
+        XCTAssertLessThan(fg, 0.2)
+    }
+
+    /// The ordinary case, and the one that must not have regressed: a plain `.normal` stroke over a
+    /// fill still lands on top of it. Source-over is associative, so this needs no isolation — but if
+    /// the transparency-layer condition were inverted, or the dabs stopped reaching the context at
+    /// all, this is what would catch it.
+    func testVectorNormalStrokeStillPaintsOverTheFill() {
+        let size = CGSize(width: 64, height: 64)
+        let fillPath = CGPath(rect: CGRect(x: 0, y: 0, width: 64, height: 64), transform: nil)
+        let fill = VectorFillElement(path: fillPath,
+                                     color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let brush = Self.opaqueTestBrush(blendMode: .normal)
+        let stroke = VectorStroke(brush: brush,
+                                  color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                  size: 20, opacity: 1,
+                                  samples: [VectorSample(x: 32, y: 32, pressure: 1),
+                                            VectorSample(x: 32, y: 32, pressure: 1)])
+        let canvas = VectorCanvas(size: size, strokes: [stroke], fills: [fill])
+
+        guard let pixels = rgbaPixels(of: canvas.render(), width: 64, height: 64) else {
+            return XCTFail("Could not read back the rendered vector canvas")
+        }
+        let (r, _, b) = rgb(pixels, x: 32, y: 32)
+        XCTAssertGreaterThan(b, 0.8, "A normal blue stroke should paint over the red fill")
+        XCTAssertLessThan(r, 0.2)
+    }
+
+    /// A fully deterministic, fully opaque brush: no pressure dynamics, no grain, no scatter, no
+    /// rotation jitter, hard edge. Any of those would make a single-pixel colour assertion flaky.
+    private static func opaqueTestBrush(blendMode: BrushBlendMode) -> Brush {
+        Brush(name: "Test", shape: .hardRound, size: 20, opacity: 1, flow: 1,
+              spacingFraction: 0.1, hardness: 1, stabilization: 0, scatter: 0,
+              rotationJitter: 0, dynamics: .fixed, grain: .disabled, blendMode: blendMode)
+    }
+
+    private func rgbaPixels(of image: UIImage, width: Int, height: Int) -> (bytes: [UInt8], width: Int, height: Int)? {
+        guard let cg = image.cgImage else { return nil }
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let ok = bytes.withUnsafeMutableBytes { raw -> Bool in
+            guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height,
+                                      bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return ok ? (bytes, width, height) : nil
+    }
+
+    /// Un-premultiplied RGB at a pixel. The dabs under test are fully opaque, so dividing out alpha
+    /// is only guarding against a near-1 alpha skewing the comparison.
+    private func rgb(_ pixels: (bytes: [UInt8], width: Int, height: Int), x: Int, y: Int) -> (CGFloat, CGFloat, CGFloat) {
+        let i = (y * pixels.width + x) * 4
+        let a = CGFloat(pixels.bytes[i + 3]) / 255
+        guard a > 0 else { return (0, 0, 0) }
+        return (CGFloat(pixels.bytes[i]) / 255 / a,
+                CGFloat(pixels.bytes[i + 1]) / 255 / a,
+                CGFloat(pixels.bytes[i + 2]) / 255 / a)
+    }
+
     /// The cache must not leak one dab's alpha into the next. Stamping full alpha *after* a faint
     /// dab, at the same colour and hardness (so the second stamp is a cache hit), still has to paint
     /// fully opaque — a stale baked-in alpha would show up here as a faint second dab.

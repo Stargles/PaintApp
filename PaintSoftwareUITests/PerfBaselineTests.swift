@@ -359,6 +359,59 @@ final class PerfBaselineTests: XCTestCase {
 
     // MARK: - Stage 5 additions
 
+    /// `VectorCanvas.render()` — the path 5.3 changed. It used to allocate a canvas-sized throwaway
+    /// `RasterLayerTexture`, stamp into it, `makeImage()` a second canvas-sized copy out, blit that
+    /// in, and drop both, once per visible vector layer per invalidation. Now the strokes go straight
+    /// into the renderer's own context.
+    ///
+    /// Memory is measured inside `autoreleasepool` for the reason `stamp` documents: without it, the
+    /// canvas-sized CGImages this path materializes read as a leak that the app's run loop would
+    /// never actually show.
+    func testVectorLayerRenderCostAndMemory() {
+        let strokeCount = 20
+        var strokes: [VectorStroke] = []
+        for i in 0..<strokeCount {
+            let offset = CGFloat(i) * 90
+            var samples: [VectorSample] = []
+            for step in 0..<60 {
+                let t = CGFloat(step) / 59
+                samples.append(VectorSample(x: 128 + t * 1700,
+                                            y: 128 + offset.truncatingRemainder(dividingBy: 1700),
+                                            pressure: 0.2 + 0.8 * sin(t * .pi)))
+            }
+            strokes.append(VectorStroke(brush: Brush(name: "Perf", shape: .softRound, size: 24),
+                                        color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                        size: 24, opacity: 1, samples: samples))
+        }
+
+        // Warm-up render: faults in the first bitmap so its cost isn't charged to the measured one.
+        _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: strokes).render() }
+
+        let canvas = VectorCanvas(size: Self.canvasSize, strokes: strokes)
+        let baseline = residentBytes()
+        let measured = measuringPeakMemory {
+            autoreleasepool { _ = canvas.render() }
+        }
+
+        // A second render must be free — it is cached by version.
+        let cached = measuringPeakMemory { autoreleasepool { _ = canvas.render() } }
+
+        report("vector layer render", [
+            ("strokes", "\(strokeCount)"),
+            ("canvas", "\(Int(Self.canvasSize.width))x\(Int(Self.canvasSize.height))"),
+            ("firstRender", milliseconds(measured.seconds)),
+            ("cachedRender", milliseconds(cached.seconds)),
+            ("footprintBefore", megabytes(baseline)),
+            ("peakFootprint", megabytes(measured.peakBytes)),
+            ("peakDelta", megabytes(measured.peakBytes > baseline ? measured.peakBytes - baseline : 0)),
+        ])
+
+        XCTAssertLessThan(measured.seconds, 10.0,
+                          "Rendering 20 vector strokes taking over 10s is a catastrophic regression, not slowness")
+        XCTAssertLessThan(cached.seconds, measured.seconds,
+                          "The second render must come from the version cache, not re-stamp every stroke")
+    }
+
     /// The debounce coalesces per *cel*, not down to a single cel.
     ///
     /// `.debounce` forwards only the last element it saw, so while the subject carried the

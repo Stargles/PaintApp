@@ -1,6 +1,145 @@
 import UIKit
 import CoreGraphics
 
+/// Anything `BrushStamper` can lay dabs onto.
+///
+/// Exists so a stroke can be stamped straight into a `CGContext` that someone else owns, not only
+/// into a `RasterLayerTexture` that owns its own bitmap. `VectorCanvas.renderLocalContent` is the
+/// case that needs it: re-rendering a vector layer used to allocate a whole throwaway
+/// `RasterLayerTexture` (a canvas-sized CGContext — ~16 MB at 2048², ~64 MB at 4000²), stamp into
+/// it, `makeImage()` a second canvas-sized copy out of it, blit that into the renderer's context,
+/// and drop both — once per visible vector layer per invalidation. Conforming a thin wrapper over
+/// the renderer's own context removes the allocation, the copy and the blit while keeping
+/// `BrushStamper` the single source of truth for how a stroke rasterizes.
+protocol DabTarget: AnyObject {
+    func beginStroke()
+    func endStroke()
+    func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
+                     alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode)
+}
+
+/// Memoized radial gradients for round dabs, plus the drawing itself — the shared implementation
+/// behind every `DabTarget`.
+///
+/// Building a dab gradient is not cheap: three `UIColor`s, three `.cgColor` bridges, a `CFArray`,
+/// and a `CGGradient`. This used to happen once per dab, on the order of 100 allocations a second
+/// while drawing.
+///
+/// **The key deliberately excludes `alpha`, and that is the whole reason the cache works.** `alpha`
+/// arrives from `BrushStamper.stampDab` as `brushOpacity × flow × opacityFraction(pressure)`, times
+/// a per-position grain multiplier for a pencil — i.e. a different float on essentially every dab,
+/// since pressure varies continuously along a stroke. Keying on it would hit approximately never.
+/// Instead the entry is built at full alpha and the per-dab alpha is applied by `CGContext.setAlpha`.
+///
+/// That substitution is exact, not an approximation. All three stops carry the *same* RGB and differ
+/// only in alpha, so the gradient never interpolates colour — under either premultiplied or
+/// unpremultiplied interpolation the result is constant RGB with linearly interpolated alpha. Baking
+/// `α` into the stops yields alpha `α` across the core and `α·(1-s)` through the falloff; a
+/// full-alpha gradient under `setAlpha(α)` yields `1` and `1·(1-s)` scaled by `α` — the same two
+/// functions. CG's global alpha multiplies *source* alpha, so this holds for `.destinationOut`
+/// erasing (`dst·(1 - src_a·α)`) as well as for `.normal` painting. `BrushEngineLogicTests` pins the
+/// resulting alpha profile so the equivalence can't silently drift.
+///
+/// What is left in the key — colour and hardness — is fixed for the entire duration of any one
+/// stroke, so the steady-state hit rate is one miss per stroke and a hit for every dab after it
+/// (measured: 2635 hits, 1 miss over 2636 dabs).
+///
+/// **Not thread-safe, by design.** Each owner serializes access its own way: `RasterLayerTexture`
+/// only touches its cache while holding its `NSLock`, and `CGContextDabTarget` is created and used
+/// inside a single render call. Adding a lock here would put one on the hottest path in the app for
+/// no benefit.
+final class DabGradientCache {
+    private var gradients: [Key: CGGradient] = [:]
+    private(set) var hits = 0
+    private(set) var misses = 0
+
+    /// Ceiling on distinct cached gradients. Colour and hardness change at human speed (a palette
+    /// tap, a slider drag), so this is never approached in normal drawing; it exists so something
+    /// pathological — a rainbow brush stamping a new colour per dab — degrades to "rebuild
+    /// sometimes" rather than growing a dictionary without bound. Eviction is a wholesale clear
+    /// because there is no access-ordering worth maintaining at this size.
+    private static let limit = 32
+
+    private struct Key: Hashable {
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+        let coreFraction: CGFloat
+    }
+
+    /// Paints one round dab into `ctx`, at `point` in the context's current user space.
+    func stamp(into ctx: CGContext, at point: CGPoint, radius: CGFloat, color: UIColor,
+               alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, ignoredAlpha: CGFloat = 0
+        // Contract: `color` is always an already-resolved color by the time it reaches getRed — see
+        // Utilities/ColorConversion.swift. Every stamp arrives via `BrushStamper`, which is only
+        // ever handed colors that have been through that resolution (the live brush color, or a
+        // `CodableColor` rebuilt from components extracted the same way), so this reads a concrete,
+        // non-dynamic color rather than one whose components depend on the ambient trait collection.
+        color.getRed(&r, green: &g, blue: &b, alpha: &ignoredAlpha)
+        let coreFraction = max(0, min(hardness, 1))
+        guard let gradient = gradient(red: r, green: g, blue: b, coreFraction: coreFraction) else { return }
+
+        ctx.saveGState()
+        ctx.setBlendMode(blendMode)
+        // The per-dab alpha, applied here rather than baked into the gradient's stops — see above for
+        // why that is both equivalent and the thing that makes the cache work.
+        ctx.setAlpha(alpha)
+        // options: [] means nothing is painted beyond endRadius, so this only touches the disc under
+        // the stamp — the incremental, O(stamp area) behavior that keeps drawing fast.
+        ctx.drawRadialGradient(gradient, startCenter: point, startRadius: 0,
+                               endCenter: point, endRadius: radius, options: [])
+        ctx.restoreGState()
+    }
+
+    private func gradient(red: CGFloat, green: CGFloat, blue: CGFloat, coreFraction: CGFloat) -> CGGradient? {
+        let key = Key(red: red, green: green, blue: blue, coreFraction: coreFraction)
+        if let cached = gradients[key] {
+            hits += 1
+            return cached
+        }
+        misses += 1
+        let colors = [
+            UIColor(red: red, green: green, blue: blue, alpha: 1).cgColor,
+            UIColor(red: red, green: green, blue: blue, alpha: 1).cgColor,
+            UIColor(red: red, green: green, blue: blue, alpha: 0).cgColor
+        ] as CFArray
+        guard let gradient = CGGradient(colorsSpace: PixelOps.deviceRGBColorSpace,
+                                        colors: colors,
+                                        locations: [0, coreFraction, 1]) else { return nil }
+        if gradients.count >= Self.limit { gradients.removeAll(keepingCapacity: true) }
+        gradients[key] = gradient
+        return gradient
+    }
+}
+
+/// A `DabTarget` that stamps into a `CGContext` it does not own — used by
+/// `VectorCanvas.renderLocalContent` to stamp into a `UIGraphicsImageRenderer`'s own context.
+///
+/// Coordinates need no adjustment: a `UIGraphicsImageRenderer` context is already in UIKit top-left
+/// space, which is exactly what `RasterLayerTexture.ensureContext()` flips its own bitmap to, so a
+/// dab at a given canvas point lands on the same pixels either way.
+///
+/// `beginStroke`/`endStroke` are no-ops. They exist on `RasterLayerTexture` to maintain
+/// `strokeCount`, which is display-only bookkeeping for a *persistent* texture; a render-local
+/// context has no such state and nothing reads a stroke count off it.
+final class CGContextDabTarget: DabTarget {
+    private let ctx: CGContext
+    private let gradients = DabGradientCache()
+
+    init(_ ctx: CGContext) { self.ctx = ctx }
+
+    func beginStroke() {}
+    func endStroke() {}
+
+    func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
+                     alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
+        guard radius > 0, alpha > 0 else { return }
+        gradients.stamp(into: ctx, at: point, radius: radius, color: color,
+                        alpha: alpha, hardness: hardness, blendMode: blendMode)
+    }
+}
+
 /// Persistent raster backing store for one cel's live brush strokes, at canvas-native resolution.
 ///
 /// This replaces `PKDrawing`: instead of vector stroke geometry re-rasterized at whatever zoom
@@ -27,7 +166,7 @@ import CoreGraphics
 /// GPU draw the texture directly. The public API here (`renderToUIImage`, `stamp`, `beginStroke`/
 /// `endStroke`, `makeCopy`, `flipped`, `reset`/`clear`) is the seam every other piece of the engine
 /// and the rest of the app depends on — keep it stable even as the internals change.
-final class RasterLayerTexture {
+final class RasterLayerTexture: DabTarget {
     let size: CGSize
     let pixelWidth: Int
     let pixelHeight: Int
@@ -206,94 +345,21 @@ final class RasterLayerTexture {
         lock.lock()
         defer { lock.unlock() }
         guard let ctx = ensureContext() else { return }
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, ignoredAlpha: CGFloat = 0
-        // Contract: `color` is always an already-resolved color by the time it reaches getRed — see
-        // Utilities/ColorConversion.swift. Every stamp arrives via `BrushStamper`, which is only
-        // ever handed colors that have been through that resolution (the live brush color, or a
-        // `CodableColor` rebuilt from components extracted the same way), so this reads a concrete,
-        // non-dynamic color rather than one whose components depend on the ambient trait collection.
-        color.getRed(&r, green: &g, blue: &b, alpha: &ignoredAlpha)
-        let coreFraction = max(0, min(hardness, 1))
-        guard let gradient = dabGradient(red: r, green: g, blue: b, coreFraction: coreFraction) else { return }
-
-        ctx.saveGState()
-        ctx.setBlendMode(blendMode)
-        // The per-dab alpha, applied here rather than baked into the gradient's stops — see
-        // `dabGradient` for why that is both equivalent and the thing that makes the cache work.
-        ctx.setAlpha(alpha)
-        // options: [] means nothing is painted beyond endRadius, so this only touches the disc under
-        // the stamp — the incremental, O(stamp area) behavior that keeps drawing fast.
-        ctx.drawRadialGradient(gradient, startCenter: point, startRadius: 0, endCenter: point, endRadius: radius, options: [])
-        ctx.restoreGState()
+        dabGradients.stamp(into: ctx, at: point, radius: radius, color: color,
+                           alpha: alpha, hardness: hardness, blendMode: blendMode)
         cachedImage = nil
         version += 1
     }
 
-    /// Memoized radial gradients for `stampCircle`, keyed by everything the gradient's *shape*
-    /// depends on. Building one is not cheap — three `UIColor`s, three `.cgColor` bridges, a
-    /// `CFArray`, and a `CGGradient` — and `stampCircle` used to build a fresh one for every dab,
-    /// which is on the order of 100 allocations a second while drawing.
-    ///
-    /// **The key deliberately excludes `alpha`, and that is the whole reason the cache works.**
-    /// `alpha` reaches `stampCircle` from `BrushStamper.stampDab` as
-    /// `brushOpacity × flow × opacityFraction(pressure)`, times a per-position grain multiplier for
-    /// a pencil — i.e. a different float on essentially every dab, since pressure varies
-    /// continuously along a stroke. Keying on it would hit approximately never. Instead the entry
-    /// is built at full alpha and the per-dab alpha is applied by `CGContext.setAlpha`.
-    ///
-    /// That substitution is exact, not an approximation. All three stops carry the *same* RGB and
-    /// differ only in alpha, so the gradient never interpolates color — under either premultiplied
-    /// or unpremultiplied interpolation the result is constant RGB with linearly interpolated
-    /// alpha. Baking `α` into the stops yields alpha `α` across the core and `α·(1-s)` through the
-    /// falloff; a full-alpha gradient under `setAlpha(α)` yields `1` and `1·(1-s)` scaled by `α` —
-    /// the same two functions. CG's global alpha multiplies *source* alpha, so this holds for
-    /// `.destinationOut` erasing (`dst·(1 - src_a·α)`) as well as for `.normal` painting.
-    ///
-    /// What is left in the key — color and hardness — is fixed for the entire duration of any one
-    /// stroke, so the steady-state hit rate is one miss per stroke and a hit for every dab after it.
-    private var dabGradients: [DabGradientKey: CGGradient] = [:]
+    /// This texture's gradient cache. Only ever touched from a method already holding `lock`, which
+    /// is what serializes it — see `DabGradientCache`, which is deliberately not thread-safe itself.
+    private let dabGradients = DabGradientCache()
 
     /// Instrumentation for the gradient cache, read by `PerfBaselineTests`. The item that added the
     /// cache called for measuring the real hit rate rather than assuming one, and an unmeasured
     /// cache whose key silently stops matching is indistinguishable from no cache at all.
-    private(set) var dabGradientCacheHits = 0
-    private(set) var dabGradientCacheMisses = 0
-
-    private struct DabGradientKey: Hashable {
-        let red: CGFloat
-        let green: CGFloat
-        let blue: CGFloat
-        let coreFraction: CGFloat
-    }
-
-    /// Ceiling on distinct cached gradients. Colour and hardness change at human speed (a palette
-    /// tap, a slider drag), so this is never approached in normal drawing; it exists so that
-    /// something pathological — a rainbow brush stamping a new colour per dab — degrades to
-    /// "rebuild sometimes" rather than growing a dictionary without bound. Eviction is a wholesale
-    /// clear because there is no access-ordering worth maintaining at this size.
-    private static let dabGradientCacheLimit = 32
-
-    /// Caller must already hold `lock` — this touches `dabGradients` and the counters, and the lock
-    /// is non-reentrant. Same convention as `ensureContext()`/`setContents()`.
-    private func dabGradient(red: CGFloat, green: CGFloat, blue: CGFloat, coreFraction: CGFloat) -> CGGradient? {
-        let key = DabGradientKey(red: red, green: green, blue: blue, coreFraction: coreFraction)
-        if let cached = dabGradients[key] {
-            dabGradientCacheHits += 1
-            return cached
-        }
-        dabGradientCacheMisses += 1
-        let colors = [
-            UIColor(red: red, green: green, blue: blue, alpha: 1).cgColor,
-            UIColor(red: red, green: green, blue: blue, alpha: 1).cgColor,
-            UIColor(red: red, green: green, blue: blue, alpha: 0).cgColor
-        ] as CFArray
-        guard let gradient = CGGradient(colorsSpace: PixelOps.deviceRGBColorSpace,
-                                        colors: colors,
-                                        locations: [0, coreFraction, 1]) else { return nil }
-        if dabGradients.count >= Self.dabGradientCacheLimit { dabGradients.removeAll(keepingCapacity: true) }
-        dabGradients[key] = gradient
-        return gradient
-    }
+    var dabGradientCacheHits: Int { lock.lock(); defer { lock.unlock() }; return dabGradients.hits }
+    var dabGradientCacheMisses: Int { lock.lock(); defer { lock.unlock() }; return dabGradients.misses }
 
     func endStroke() {
         guard isMidStroke else { return }

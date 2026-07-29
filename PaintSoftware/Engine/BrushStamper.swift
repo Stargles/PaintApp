@@ -44,7 +44,7 @@ enum BrushStamper {
 
     /// Replays a whole stroke (spacing-interpolated between samples, exactly like
     /// `StrokeCanvasView.stampPath`) into `raster`, as one `beginStroke`/`endStroke` unit.
-    static func stampStroke(into raster: RasterLayerTexture, samples: [Sample], brush: Brush,
+    static func stampStroke(into raster: DabTarget, samples: [Sample], brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false) {
         guard !samples.isEmpty else { return }
         raster.beginStroke()
@@ -74,7 +74,7 @@ enum BrushStamper {
     /// `.destinationOut` instead of the brush's own blend mode — i.e. painting with 0 opacity as the
     /// color, so its stamp punches a hole instead of adding color. `color` is irrelevant under
     /// `.destinationOut` (only the stamp's alpha coverage matters), so it's ignored for an eraser dab.
-    static func stampDab(into raster: RasterLayerTexture, at point: CGPoint, pressure: CGFloat,
+    static func stampDab(into raster: DabTarget, at point: CGPoint, pressure: CGFloat,
                          brush: Brush, color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool) {
         let pressureValue = Double(max(0, min(pressure, 1)))
         let sizeFraction = brush.dynamics.sizeFraction(forPressure: pressureValue)
@@ -117,7 +117,7 @@ enum BrushStamper {
         return (1 - depth) + depth * CGFloat(noise)
     }
 
-    static func stampApproximateSquare(into raster: RasterLayerTexture, at center: CGPoint, diameter: CGFloat,
+    static func stampApproximateSquare(into raster: DabTarget, at center: CGPoint, diameter: CGFloat,
                                        rotation: CGFloat, color: UIColor, alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
         guard diameter > 0 else { return }
         let half = diameter / 2

@@ -425,11 +425,48 @@ final class VectorCanvas {
     /// Caller must hold `lock`. Note this means a rasterization holds the lock for its whole
     /// duration, so a main-thread stroke can briefly block behind a background render — the same
     /// trade-off `RasterLayerTexture.renderToUIImage()` already makes, and the cache means it happens
-    /// at most once per change. The nested `RasterLayerTexture` below is a fresh local instance with
-    /// its own lock, so stamping into it can't contend with this one.
+    /// at most once per change. Strokes are stamped straight into this renderer's own context via
+    /// `CGContextDabTarget`, which holds no lock of its own and cannot re-enter this one.
+    ///
+    /// It used to allocate a throwaway `RasterLayerTexture` here, stamp into that, `makeImage()` a
+    /// second canvas-sized copy out of it, and blit that in — a canvas-sized CGContext plus a
+    /// canvas-sized CGImage (~16 MB each at 2048², ~64 MB at 4000²) per visible vector layer per
+    /// invalidation, both immediately discarded, plus a lock acquisition per dab on the scratch
+    /// texture. Stamping direct removes all of it.
+    ///
+    /// **Why the transparency layer.** Dropping the intermediate is not unconditionally
+    /// behaviour-preserving. The scratch texture isolated the strokes: they blended against each
+    /// other on transparent, and only the finished result was composited over the fills and images.
+    /// Stamping into this context instead exposes each dab to whatever is already underneath. For
+    /// `.normal` that is provably identical — source-over is associative, so
+    /// `(dab₂ over dab₁) over backdrop` equals `dab₂ over (dab₁ over backdrop)` — but a brush set to
+    /// multiply/screen/darken/lighten would start blending with the fills and images beneath it and
+    /// visibly change the render. So when any stroke carries a non-normal blend mode the strokes go
+    /// into a transparency layer, which restores exactly the isolation the scratch texture provided
+    /// (one group for all strokes, composited once, source-over — the outer blend mode and alpha are
+    /// `.normal`/1 at that point, matching the old `draw(in:)`). The common all-normal case pays
+    /// nothing for it.
     private func renderLocalContent() -> UIImage {
-        let bounds = CGRect(origin: .zero, size: size)
-        return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+        // `.standard` is not a detail — it is load-bearing, and measuring 5.3 is what found it.
+        // `UIGraphicsImageRendererFormat.preferredRange` defaults to `.automatic`, which on a
+        // wide-colour iPad backs the context with an extended-range 16-bit-per-component bitmap.
+        // That was invisible while the dabs went into a scratch `RasterLayerTexture` (an explicit
+        // 8-bit deviceRGB context) and only the finished image was drawn in. Stamping thousands of
+        // radial gradients directly into an extended-range context instead measured **155 ms
+        // against the old 70 ms** — the memory win would have shipped with a 2.2x wall-clock
+        // regression behind it. Pinning standard range puts dab rasterization back on the same 8-bit
+        // path `RasterLayerTexture` uses and brings it to 62 ms, i.e. faster than before as well as
+        // lighter.
+        //
+        // No fidelity is lost relative to what this app actually delivers: every raster tier already
+        // renders and persists as 8-bit deviceRGB (`RasterLayerTexture.ensureContext`,
+        // `PixelOps.deviceRGBColorSpace`, the cel PNGs), and the strokes here were being stamped
+        // into an 8-bit texture before this change regardless. A wide-gamut imported image is the
+        // one thing that previously kept extended range through this pass, and it was clipped
+        // downstream anyway the moment it was composited or saved.
+        let format = PixelOps.transparentFormat()
+        format.preferredRange = .standard
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             // Fills (flat color regions) — drawn first, underneath images and strokes.
             for fill in _fills {
                 guard let path = fill.cgPath else { continue }
@@ -454,13 +491,15 @@ final class VectorCanvas {
                 ctx.cgContext.restoreGState()
             }
             if !_strokes.isEmpty {
-                let raster = RasterLayerTexture.empty(size: size)
+                let needsIsolation = _strokes.contains { $0.brush.blendMode != .normal }
+                if needsIsolation { ctx.cgContext.beginTransparencyLayer(auxiliaryInfo: nil) }
+                let target = CGContextDabTarget(ctx.cgContext)
                 for stroke in _strokes {
                     let samples = stroke.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
-                    BrushStamper.stampStroke(into: raster, samples: samples, brush: stroke.brush,
+                    BrushStamper.stampStroke(into: target, samples: samples, brush: stroke.brush,
                                              color: stroke.uiColor, brushSize: stroke.size, brushOpacity: stroke.opacity)
                 }
-                raster.renderToUIImage().draw(in: bounds)
+                if needsIsolation { ctx.cgContext.endTransparencyLayer() }
             }
         }
     }
