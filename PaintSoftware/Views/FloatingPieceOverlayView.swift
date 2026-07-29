@@ -5,7 +5,7 @@ import UIKit
 /// top edge — rather than multi-touch gestures. Lives in `CanvasView`'s `container` above
 /// `SelectionOverlayView`, so its coordinate space matches canvas points exactly (same placement and
 /// handle-drag technique as the object-layer work's `ObjectTransformOverlayView`).
-final class FloatingPieceOverlayView: UIView {
+final class FloatingPieceOverlayView: TransformOverlayView {
     var onTransformChange: ((FloatingTransform) -> Void)?
     var onRequestCommit: (() -> Void)?
 
@@ -14,9 +14,9 @@ final class FloatingPieceOverlayView: UIView {
     private let pieceImageView = UIImageView()
     private let outlineView = UIView()
     private let outlineDashLayer = CAShapeLayer()
-    private let corners: [HandleView] = (0..<4).map { _ in HandleView(kind: .scale) }
-    private let edges: [HandleView] = (0..<4).map { _ in HandleView(kind: .scale) }
-    private let rotateHandle = HandleView(kind: .rotate)
+    private let corners: [TransformHandleView] = (0..<4).map { _ in TransformHandleView(kind: .scale, cornerRadius: 4) }
+    private let edges: [TransformHandleView] = (0..<4).map { _ in TransformHandleView(kind: .scale, cornerRadius: 4) }
+    private let rotateHandle = TransformHandleView(kind: .rotate)
     private let rotateLine = UIView()
 
     private var dragStartTransform: FloatingTransform = .identity
@@ -76,12 +76,6 @@ final class FloatingPieceOverlayView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// Handles can end up outside this view's own bounds (the rotate handle, or a corner/edge when
-    /// the piece sits near the canvas edge) — without this override those touches never reach them,
-    /// since UIKit only recurses into subviews once a point is inside the hit-testing view's own
-    /// bounds. Same technique as `ObjectTransformOverlayView`.
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { true }
-
     func update(_ newPiece: FloatingPiece?) {
         piece = newPiece
         isHidden = newPiece == nil
@@ -112,36 +106,17 @@ final class FloatingPieceOverlayView: UIView {
         let cornerLocal = [CGPoint(x: -hw, y: -hh), CGPoint(x: hw, y: -hh), CGPoint(x: hw, y: hh), CGPoint(x: -hw, y: hh)]
         let edgeLocal = [CGPoint(x: 0, y: -hh), CGPoint(x: hw, y: 0), CGPoint(x: 0, y: hh), CGPoint(x: -hw, y: 0)]
 
-        for (i, local) in cornerLocal.enumerated() { corners[i].center = project(local, transform: t) }
+        for (i, local) in cornerLocal.enumerated() { corners[i].center = t.projected(local) }
         // Edge (single-axis) handles only make sense in Freeform — Uniform/Distort/Warp keep the
         // aspect ratio locked, so only corner handles are shown for those.
         let showEdgeHandles = piece.mode == .freeform
         for (i, local) in edgeLocal.enumerated() {
-            edges[i].center = project(local, transform: t)
+            edges[i].center = t.projected(local)
             edges[i].isHidden = !showEdgeHandles
         }
 
-        let topCenter = project(CGPoint(x: 0, y: -hh), transform: t)
-        let upDirection = CGPoint(x: sin(t.rotation), y: -cos(t.rotation))
-        let handleDistance: CGFloat = 32
-        let rotateCenter = CGPoint(x: topCenter.x + upDirection.x * handleDistance, y: topCenter.y + upDirection.y * handleDistance)
-        rotateHandle.center = rotateCenter
-
-        rotateLine.bounds = CGRect(x: 0, y: 0, width: 1.5, height: handleDistance)
-        rotateLine.center = CGPoint(x: (topCenter.x + rotateCenter.x) / 2, y: (topCenter.y + rotateCenter.y) / 2)
-        rotateLine.transform = CGAffineTransform(rotationAngle: t.rotation)
-    }
-
-    /// Maps a point in the piece's own local space (untransformed, centered on its own origin) into
-    /// this view's coordinate space by applying the current scale/flip/rotation/position.
-    private func project(_ local: CGPoint, transform t: FloatingTransform) -> CGPoint {
-        let sx = t.scaleX * (t.flipH ? -1 : 1)
-        let sy = t.scaleY * (t.flipV ? -1 : 1)
-        let x = local.x * sx, y = local.y * sy
-        let r = t.rotation
-        let rx = x * cos(r) - y * sin(r)
-        let ry = x * sin(r) + y * cos(r)
-        return CGPoint(x: t.position.x + rx, y: t.position.y + ry)
+        let topCenter = t.projected(CGPoint(x: 0, y: -hh))
+        placeRotateHandle(rotateHandle, line: rotateLine, topCenter: topCenter, rotation: t.rotation)
     }
 
     // MARK: - Move (drag anywhere on the outline)
@@ -190,7 +165,7 @@ final class FloatingPieceOverlayView: UIView {
         switch recognizer.state {
         case .began:
             dragStartTransform = piece.transform
-            dragAnchor = project(oppositeCornerLocal(index, size: piece.baseSize), transform: dragStartTransform)
+            dragAnchor = dragStartTransform.projected(oppositeCornerLocal(index, size: piece.baseSize))
         case .changed:
             resizeFromAnchor(current: recognizer.location(in: self), uniform: piece.mode != .freeform, axisIsHorizontal: nil)
         default:
@@ -204,7 +179,7 @@ final class FloatingPieceOverlayView: UIView {
         switch recognizer.state {
         case .began:
             dragStartTransform = piece.transform
-            dragAnchor = project(oppositeEdgeLocal(index, size: piece.baseSize), transform: dragStartTransform)
+            dragAnchor = dragStartTransform.projected(oppositeEdgeLocal(index, size: piece.baseSize))
         case .changed:
             resizeFromAnchor(current: recognizer.location(in: self), uniform: false, axisIsHorizontal: (index == 1 || index == 3))
         default:
@@ -289,18 +264,4 @@ final class FloatingPieceOverlayView: UIView {
         layoutFromPiece()
         onTransformChange?(updated)
     }
-}
-
-private final class HandleView: UIView {
-    enum Kind { case scale, rotate }
-
-    init(kind: Kind) {
-        super.init(frame: CGRect(x: 0, y: 0, width: 24, height: 24))
-        layer.cornerRadius = kind == .scale ? 4 : 12
-        layer.borderWidth = 1.5
-        layer.borderColor = UIColor.systemBlue.cgColor
-        backgroundColor = kind == .scale ? .white : .systemBlue
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
