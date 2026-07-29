@@ -1059,20 +1059,35 @@ struct CanvasView: UIViewRepresentable {
             // while the snapping finger is still down.
         }
 
-        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        /// The shared body of the three canvas-transform gestures. Pan, pinch and rotate run the
+        /// identical state machine and the identical side effects; the only thing that differs is
+        /// which live value each contributes, which `applyLiveValue` supplies (nothing, for pan —
+        /// its contribution is the offset `updateLiveOffset` derives from the touch location).
+        ///
+        /// Two orderings inside here are load-bearing and must not be rearranged:
+        ///
+        /// 1. In `.changed`, the touch-count guard runs *before*
+        ///    `commitSnappedShapeIfTransforming`. A lifting finger can still produce one more
+        ///    `.changed` as the recognizer's geometry collapses from 2 touches to 1 (or 0), and
+        ///    that is not an intentional transform. With the two the other way round, simply
+        ///    lifting the second finger out of a two-finger snap baked the shape instead of just
+        ///    releasing the snap — a real shipped bug, fixed in session 49. Note the guard
+        ///    `return`s, so a collapsing event also contributes no live value and no offset.
+        /// 2. `applyLiveValue` runs *after* `beginAnchorIfNeeded` / the commit above and *before*
+        ///    `updateLiveOffset`, which reads `liveScale` to place the anchor — feeding it a stale
+        ///    scale would slip the content out from under the fingers by one event.
+        private func handleTransformGesture<Recognizer: UIGestureRecognizer>(
+            _ recognizer: Recognizer, applyLiveValue: (Recognizer) -> Void) {
             guard let host = hostView else { return }
             switch recognizer.state {
             case .began:
                 beginAnchorIfNeeded(at: recognizer.location(in: host))
+                applyLiveValue(recognizer)
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
-                // Require the touch count *before* treating this as "the user is deliberately
-                // transforming, bake the snapped shape": a lifting finger can still produce one more
-                // `.changed` event as the recognizer's geometry collapses from 2 touches to 1 (or 0),
-                // which isn't an intentional pan — without this guard, simply lifting the second
-                // finger from the two-finger snap baked the shape instead of just releasing the snap.
                 guard recognizer.numberOfTouches >= 2 else { return }
                 commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
+                applyLiveValue(recognizer)
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .ended, .cancelled:
                 commitLiveTransformIfAllEnded()
@@ -1080,48 +1095,19 @@ struct CanvasView: UIViewRepresentable {
                 break
             }
             applyTransform()
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            // Pan contributes no live value of its own; the offset comes from the touch location.
+            handleTransformGesture(recognizer) { _ in }
         }
 
         @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
-            guard let host = hostView else { return }
-            switch recognizer.state {
-            case .began:
-                beginAnchorIfNeeded(at: recognizer.location(in: host))
-                liveScale = recognizer.scale
-                updateLiveOffset(currentLocation: recognizer.location(in: host))
-            case .changed:
-                // See handlePan's `.changed` case for why the touch-count guard must come first.
-                guard recognizer.numberOfTouches >= 2 else { return }
-                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
-                liveScale = recognizer.scale
-                updateLiveOffset(currentLocation: recognizer.location(in: host))
-            case .ended, .cancelled:
-                commitLiveTransformIfAllEnded()
-            default:
-                break
-            }
-            applyTransform()
+            handleTransformGesture(recognizer) { self.liveScale = $0.scale }
         }
 
         @objc func handleRotation(_ recognizer: UIRotationGestureRecognizer) {
-            guard let host = hostView else { return }
-            switch recognizer.state {
-            case .began:
-                beginAnchorIfNeeded(at: recognizer.location(in: host))
-                liveRotation = recognizer.rotation
-                updateLiveOffset(currentLocation: recognizer.location(in: host))
-            case .changed:
-                // See handlePan's `.changed` case for why the touch-count guard must come first.
-                guard recognizer.numberOfTouches >= 2 else { return }
-                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
-                liveRotation = recognizer.rotation
-                updateLiveOffset(currentLocation: recognizer.location(in: host))
-            case .ended, .cancelled:
-                commitLiveTransformIfAllEnded()
-            default:
-                break
-            }
-            applyTransform()
+            handleTransformGesture(recognizer) { self.liveRotation = $0.rotation }
         }
 
         @objc func handleTwoFingerTap() {
