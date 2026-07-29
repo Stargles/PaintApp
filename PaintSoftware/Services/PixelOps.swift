@@ -7,12 +7,14 @@ import SwiftUI
 /// are the bridge: whenever a selection-based edit touches a cel, its current content (baked image
 /// + live strokes) gets flattened into a plain `UIImage` — see `Cel.bakedImage`.
 enum PixelOps {
-    private static func transparentFormat(scale: CGFloat = 1) -> UIGraphicsImageRendererFormat {
+    static func transparentFormat(scale: CGFloat = 1) -> UIGraphicsImageRendererFormat {
         let format = UIGraphicsImageRendererFormat()
         format.opaque = false
         format.scale = scale
         return format
     }
+
+    static let deviceRGBColorSpace = CGColorSpaceCreateDeviceRGB()
 
     static func uiColor(from color: Color, opacity: Double = 1.0) -> UIColor {
         color.resolvedUIColor(opacity: opacity)
@@ -64,7 +66,7 @@ enum PixelOps {
         guard width > 0, height > 0 else { return nil }
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         guard let ctx = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
-                                   bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                   bytesPerRow: width * 4, space: deviceRGBColorSpace,
                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
@@ -236,9 +238,8 @@ enum PixelOps {
         guard width > 0, height > 0 else { return nil }
 
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
-                                   bytesPerRow: width * 4, space: colorSpace,
+                                   bytesPerRow: width * 4, space: deviceRGBColorSpace,
                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 

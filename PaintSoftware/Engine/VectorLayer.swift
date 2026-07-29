@@ -291,9 +291,7 @@ final class VectorCanvas {
     func render() -> UIImage {
         if let cachedImage { return cachedImage }
         let bounds = CGRect(origin: .zero, size: size)
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = false
-        format.scale = 1
+        let format = PixelOps.transparentFormat()
 
         // 1. Content in local (untransformed) space.
         let content = renderLocalContent()
@@ -317,10 +315,7 @@ final class VectorCanvas {
     /// invalidation) and `localContentBounds()` (once per Move-tool overlay refresh).
     private func renderLocalContent() -> UIImage {
         let bounds = CGRect(origin: .zero, size: size)
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = false
-        format.scale = 1
-        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+        return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
             // Fills (flat color regions) — drawn first, underneath images and strokes.
             for fill in fills {
                 guard let path = fill.cgPath else { continue }

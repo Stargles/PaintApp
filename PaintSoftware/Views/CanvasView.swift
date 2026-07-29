@@ -310,8 +310,7 @@ final class StrokeCanvasView: UIView {
             guard let scratch = vectorScratch else { imageView.image = base; return }
             // Mid vector stroke: composite the live scratch preview over the committed content.
             let bounds = CGRect(origin: .zero, size: vectorCanvas.size)
-            let format = UIGraphicsImageRendererFormat(); format.opaque = false; format.scale = 1
-            imageView.image = UIGraphicsImageRenderer(size: vectorCanvas.size, format: format).image { _ in
+            imageView.image = UIGraphicsImageRenderer(size: vectorCanvas.size, format: PixelOps.transparentFormat()).image { _ in
                 base.draw(in: bounds)
                 scratch.renderToUIImage().draw(in: bounds)
             }

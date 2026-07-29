@@ -563,18 +563,19 @@ nonisolated enum ProjectBackupManager {
 
     private static let timestampFormat = "yyyyMMdd-HHmmss"
 
-    private static func timestampString(_ date: Date = Date()) -> String {
+    private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = timestampFormat
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    private static func timestampString(_ date: Date = Date()) -> String {
+        timestampFormatter.string(from: date)
     }
 
     private static func parseTimestamp(_ string: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = timestampFormat
-        return formatter.date(from: string)
+        timestampFormatter.date(from: string)
     }
 
     private static func simulateNewestProjectCorruption() {

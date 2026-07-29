@@ -124,9 +124,7 @@ final class SelectionOverlayView: UIView {
     /// image.
     private static func makeHatchPattern() -> UIColor {
         let tile: CGFloat = 14
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = false
-        format.scale = UIScreen.main.scale
+        let format = PixelOps.transparentFormat(scale: UIScreen.main.scale)
         let image = UIGraphicsImageRenderer(size: CGSize(width: tile, height: tile), format: format).image { ctx in
             let path = UIBezierPath()
             path.move(to: CGPoint(x: -2, y: tile + 2))

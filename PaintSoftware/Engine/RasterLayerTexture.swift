@@ -59,7 +59,6 @@ final class RasterLayerTexture {
         return context != nil
     }
 
-    private static let colorSpace = CGColorSpaceCreateDeviceRGB()
     private static let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
 
     init(size: CGSize, image: UIImage? = nil, strokeCount: Int = 0) {
@@ -88,7 +87,7 @@ final class RasterLayerTexture {
         if let context { return context }
         guard let ctx = CGContext(data: nil, width: pixelWidth, height: pixelHeight,
                                   bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: Self.colorSpace, bitmapInfo: Self.bitmapInfo) else { return nil }
+                                  space: PixelOps.deviceRGBColorSpace, bitmapInfo: Self.bitmapInfo) else { return nil }
         // Flip to UIKit top-left coordinates: input points are in canvas point space (y-down,
         // top-left origin), and this also makes `makeImage()` produce a UIImage whose orientation
         // matches `UIGraphicsImageRenderer` output — the convention every other image in the app
@@ -128,10 +127,7 @@ final class RasterLayerTexture {
         if let context, let cg = context.makeImage() {
             image = UIImage(cgImage: cg, scale: 1, orientation: .up)
         } else {
-            let format = UIGraphicsImageRendererFormat()
-            format.opaque = false
-            format.scale = 1
-            image = UIGraphicsImageRenderer(size: size, format: format).image { _ in }
+            image = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in }
         }
         cachedImage = image
         return image
@@ -154,10 +150,7 @@ final class RasterLayerTexture {
     func flipped(horizontal: Bool) -> RasterLayerTexture {
         guard hasContent else { return RasterLayerTexture(size: size, strokeCount: strokeCount) }
         let current = renderToUIImage()
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = false
-        format.scale = 1
-        let flippedImage = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+        let flippedImage = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
             if horizontal {
                 ctx.cgContext.translateBy(x: size.width, y: 0)
                 ctx.cgContext.scaleBy(x: -1, y: 1)
@@ -179,10 +172,7 @@ final class RasterLayerTexture {
     func resized(to newSize: CGSize, offset: CGPoint) -> RasterLayerTexture {
         guard hasContent else { return RasterLayerTexture(size: newSize, strokeCount: strokeCount) }
         let current = renderToUIImage()
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = false
-        format.scale = 1
-        let placed = UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
+        let placed = UIGraphicsImageRenderer(size: newSize, format: PixelOps.transparentFormat()).image { _ in
             current.draw(in: CGRect(origin: offset, size: size))
         }
         return RasterLayerTexture(size: newSize, image: placed, strokeCount: strokeCount)
@@ -217,7 +207,7 @@ final class RasterLayerTexture {
             UIColor(red: r, green: g, blue: b, alpha: alpha).cgColor,
             UIColor(red: r, green: g, blue: b, alpha: 0).cgColor
         ] as CFArray
-        guard let gradient = CGGradient(colorsSpace: Self.colorSpace, colors: colors, locations: [0, coreFraction, 1]) else { return }
+        guard let gradient = CGGradient(colorsSpace: PixelOps.deviceRGBColorSpace, colors: colors, locations: [0, coreFraction, 1]) else { return }
 
         ctx.saveGState()
         ctx.setBlendMode(blendMode)

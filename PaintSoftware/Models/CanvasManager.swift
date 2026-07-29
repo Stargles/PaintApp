@@ -480,10 +480,7 @@ final class CanvasManager: ObservableObject {
     /// content behind on the wrong side.
     private static func flippedImage(_ image: UIImage, canvasSize: CGSize, horizontal: Bool) -> UIImage? {
         guard image.cgImage != nil else { return nil }
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = false
-        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
+        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: PixelOps.transparentFormat())
         return renderer.image { ctx in
             if horizontal {
                 ctx.cgContext.translateBy(x: canvasSize.width, y: 0)
@@ -1676,10 +1673,7 @@ final class CanvasManager: ObservableObject {
     /// (`fillImage`) but includes committed fills (now baked into `bakedImage`), so recolouring works.
     private static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], width: Int, height: Int) -> [UInt8]? {
         guard width > 0, height > 0 else { return nil }
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = false
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: PixelOps.transparentFormat())
         let composited = renderer.image { _ in
             let rect = CGRect(x: 0, y: 0, width: width, height: height)
             for source in references {
@@ -1693,7 +1687,7 @@ final class CanvasManager: ObservableObject {
         let bytesPerRow = width * 4
         let ok: Bool = bytes.withUnsafeMutableBytes { raw in
             guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
+                                      bytesPerRow: bytesPerRow, space: PixelOps.deviceRGBColorSpace,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
             ctx.interpolationQuality = .none
             // No flip: drawing a top-down UIImage's cgImage into a default bitmap context already lands
@@ -1713,7 +1707,7 @@ final class CanvasManager: ObservableObject {
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
         let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
         guard let cg = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
-                               bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                               bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
                                bitmapInfo: bitmapInfo, provider: provider, decode: nil,
                                shouldInterpolate: false, intent: .defaultIntent) else { return nil }
         return UIImage(cgImage: cg, scale: 1, orientation: .up)

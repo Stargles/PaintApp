@@ -10,24 +10,17 @@ enum ThumbnailRenderer {
         // `raster` is always at native resolution (unlike PKDrawing.image(from:scale:), which could
         // rasterize vector strokes directly at the target scale) — downscale via the same
         // UIGraphicsImageRenderer draw-and-shrink path the fillImage compositing below already uses.
-        let strokesImage = UIGraphicsImageRenderer(size: size, format: Self.format(scale: 1)).image { _ in
+        let strokesImage = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
             raster.renderToUIImage().draw(in: CGRect(origin: .zero, size: size))
         }
         guard let fillImage else { return strokesImage }
 
-        let renderer = UIGraphicsImageRenderer(size: strokesImage.size, format: Self.format(scale: strokesImage.scale))
+        let renderer = UIGraphicsImageRenderer(size: strokesImage.size, format: PixelOps.transparentFormat(scale: strokesImage.scale))
         return renderer.image { _ in
             let rect = CGRect(origin: .zero, size: strokesImage.size)
             fillImage.draw(in: rect)
             strokesImage.draw(in: rect)
         }
-    }
-
-    private static func format(scale: CGFloat) -> UIGraphicsImageRendererFormat {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = scale
-        format.opaque = false
-        return format
     }
 
     /// Same downscaling as the drawing-based overload, for a cel that's been rendered to a single
@@ -39,10 +32,7 @@ enum ThumbnailRenderer {
         }
         let renderScale = max(min(thumbnailSize.width / canvasSize.width, thumbnailSize.height / canvasSize.height), 0.01)
         let size = CGSize(width: canvasSize.width * renderScale, height: canvasSize.height * renderScale)
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = false
-        format.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        let renderer = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat())
         return renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: size))
         }
