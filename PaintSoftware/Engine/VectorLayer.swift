@@ -73,30 +73,83 @@ struct VectorImageElement: Identifiable {
 /// zoomed in (matching raster layers) even though the source is resolution-independent.
 final class VectorCanvas {
     let size: CGSize
-    var strokes: [VectorStroke]
-    var fills: [VectorFillElement]
-    var images: [VectorImageElement]
+
+    /// Guards `_strokes`/`_fills`/`_images`/`_transform` and `cachedImage`. Live drawing mutates this
+    /// canvas on the main thread, but `render()` is reached from a background queue — the interactive
+    /// fill's reference composite goes through `PixelOps.rasterize(cel:)`, which renders a vector
+    /// cel's content off-main exactly as it reads a raster cel's `RasterLayerTexture`. Without this,
+    /// a stroke landing on a layer mid-fill mutates the `strokes` array's buffer while the background
+    /// thread is concurrently iterating it — a real data race on a heap-allocated array, not a
+    /// hypothetical one.
+    ///
+    /// This deliberately mirrors `RasterLayerTexture`'s lock rather than making `VectorCanvas` an
+    /// actor: an actor turns every call site async, and the call sites are spread through
+    /// `CanvasView`/`CanvasManager`. Same trade-off, same lock type, same placement — taken at method
+    /// entry and released via `defer`.
+    ///
+    /// As there, the private helpers (`invalidate()`, `renderLocalContent()`, and the three static
+    /// geometry mappers) are only ever called from a method that already holds this lock, so they
+    /// don't lock themselves — otherwise this non-reentrant lock would deadlock. The stored-property
+    /// accessors below are the public seam: they lock, so every existing call site
+    /// (`canvas.strokes = snapshot`, `vector.images`, `cel.vector?.strokes.count`) stays unchanged
+    /// and becomes safe, while code inside the class uses the `_`-prefixed backing storage directly.
+    private let lock = NSLock()
+
+    private var _strokes: [VectorStroke]
+    private var _fills: [VectorFillElement]
+    private var _images: [VectorImageElement]
+    private var _transform: CGAffineTransform
+
+    var strokes: [VectorStroke] {
+        get { lock.lock(); defer { lock.unlock() }; return _strokes }
+        set { lock.lock(); defer { lock.unlock() }; _strokes = newValue }
+    }
+
+    var fills: [VectorFillElement] {
+        get { lock.lock(); defer { lock.unlock() }; return _fills }
+        set { lock.lock(); defer { lock.unlock() }; _fills = newValue }
+    }
+
+    var images: [VectorImageElement] {
+        get { lock.lock(); defer { lock.unlock() }; return _images }
+        set { lock.lock(); defer { lock.unlock() }; _images = newValue }
+    }
+
     /// Move/rotate/scale of the entire layer's content, applied at render time so it stays crisp at
     /// any transform (no resolution loss). Identity until the layer is transformed.
-    var transform: CGAffineTransform
+    var transform: CGAffineTransform {
+        get { lock.lock(); defer { lock.unlock() }; return _transform }
+        set { lock.lock(); defer { lock.unlock() }; _transform = newValue }
+    }
 
     private(set) var version: Int = 0
     private var cachedImage: UIImage?
 
     init(size: CGSize, strokes: [VectorStroke] = [], fills: [VectorFillElement] = [], images: [VectorImageElement] = [], transform: CGAffineTransform = .identity) {
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
-        self.strokes = strokes
-        self.fills = fills
-        self.images = images
-        self.transform = transform
+        // Assigns the backing storage directly: `init` runs before the instance is shared with any
+        // other thread, so there is nothing to lock against yet (as in `RasterLayerTexture.init`).
+        self._strokes = strokes
+        self._fills = fills
+        self._images = images
+        self._transform = transform
     }
 
     static func empty(size: CGSize) -> VectorCanvas { VectorCanvas(size: size) }
 
-    var isEmpty: Bool { strokes.isEmpty && fills.isEmpty && images.isEmpty }
+    var isEmpty: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _strokes.isEmpty && _fills.isEmpty && _images.isEmpty
+    }
 
     func makeCopy() -> VectorCanvas {
-        VectorCanvas(size: size, strokes: strokes, fills: fills, images: images, transform: transform)
+        lock.lock()
+        defer { lock.unlock() }
+        // The new instance has its own lock and isn't shared yet, so constructing it under this one
+        // can't deadlock — and taking the lock is what makes the copy a coherent snapshot of all
+        // four properties rather than a mix of pre- and post-mutation state.
+        return VectorCanvas(size: size, strokes: _strokes, fills: _fills, images: _images, transform: _transform)
     }
 
     /// A new canvas sized to `newSize` with all content shifted by `offset` (canvas point space),
@@ -106,10 +159,13 @@ final class VectorCanvas {
     /// the stored strokes/images (in local space) are untouched. `size` is immutable, so this returns
     /// a fresh instance.
     func resized(to newSize: CGSize, offset: CGPoint) -> VectorCanvas {
-        let shifted = transform.concatenating(CGAffineTransform(translationX: offset.x, y: offset.y))
-        return VectorCanvas(size: newSize, strokes: strokes, fills: fills, images: images, transform: shifted)
+        lock.lock()
+        defer { lock.unlock() }
+        let shifted = _transform.concatenating(CGAffineTransform(translationX: offset.x, y: offset.y))
+        return VectorCanvas(size: newSize, strokes: _strokes, fills: _fills, images: _images, transform: shifted)
     }
 
+    /// Caller must hold `lock`.
     private func invalidate() {
         version += 1
         cachedImage = nil
@@ -117,12 +173,18 @@ final class VectorCanvas {
 
     /// Invalidates the render cache after a direct mutation of `strokes`/`images` (e.g. undo/redo
     /// restoring a snapshot, which assigns the array wholesale rather than going through `addStroke`).
-    func bumpVersion() { invalidate() }
+    func bumpVersion() {
+        lock.lock()
+        defer { lock.unlock() }
+        invalidate()
+    }
 
     // MARK: - Mutation
 
     func addStroke(_ stroke: VectorStroke) {
-        strokes.append(stroke)
+        lock.lock()
+        defer { lock.unlock() }
+        _strokes.append(stroke)
         invalidate()
     }
 
@@ -132,39 +194,71 @@ final class VectorCanvas {
     /// applies `transform` on top, so storing canvas-space samples verbatim puts the stroke through
     /// the transform twice and lands it away from where it was drawn, again with every later move.
     func addStroke(canvasSpaceStroke stroke: VectorStroke) {
-        guard !transform.isIdentity else { return addStroke(stroke) }
+        lock.lock()
+        defer { lock.unlock() }
+        guard !_transform.isIdentity else {
+            _strokes.append(stroke)
+            return invalidate()
+        }
         var mapped = stroke
-        mapped.samples = localSamples(fromCanvas: stroke.samples)
+        mapped.samples = Self.localSamples(stroke.samples, through: _transform)
         // Width is a canvas-space measurement too: `render()` scales the stamped result by the
         // transform, so a stroke drawn at N points on a layer scaled by k must be stored at N/k to
         // come back out N points wide.
-        let scale = transformScale
+        let scale = Self.scale(of: _transform)
         if scale > 0 { mapped.size = stroke.size / scale }
-        addStroke(mapped)
+        _strokes.append(mapped)
+        invalidate()
     }
 
     /// Uniform scale factor of the overall `transform` (the overlay only ever produces
     /// translate·rotate·uniform-scale, so one number describes it).
-    var transformScale: CGFloat { hypot(transform.a, transform.b) }
+    var transformScale: CGFloat {
+        lock.lock()
+        defer { lock.unlock() }
+        return Self.scale(of: _transform)
+    }
 
     /// Maps canvas-space stroke samples into this canvas's local (pre-`transform`) space, preserving
     /// pressure. The point-wise counterpart of `localPath(fromCanvas:)`.
     func localSamples(fromCanvas samples: [VectorSample]) -> [VectorSample] {
-        guard !transform.isIdentity else { return samples }
-        let inverse = transform.inverted()
+        lock.lock()
+        defer { lock.unlock() }
+        return Self.localSamples(samples, through: _transform)
+    }
+
+    // The geometry mappers are static functions of the transform they're given rather than methods
+    // reading `_transform`, so a locked method can call them while holding the lock without any
+    // chance of re-entering it — the reason the public wrappers above are thin.
+
+    private static func scale(of t: CGAffineTransform) -> CGFloat { hypot(t.a, t.b) }
+
+    private static func localSamples(_ samples: [VectorSample], through t: CGAffineTransform) -> [VectorSample] {
+        guard !t.isIdentity else { return samples }
+        let inverse = t.inverted()
         return samples.map {
             let p = $0.point.applying(inverse)
             return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
         }
     }
 
+    private static func localPath(_ path: CGPath, through t: CGAffineTransform) -> CGPath {
+        guard !t.isIdentity else { return path }
+        var inverse = t.inverted()
+        return path.copy(using: &inverse) ?? path
+    }
+
     func addImage(_ element: VectorImageElement) {
-        images.append(element)
+        lock.lock()
+        defer { lock.unlock() }
+        _images.append(element)
         invalidate()
     }
 
     func addFill(_ element: VectorFillElement) {
-        fills.append(element)
+        lock.lock()
+        defer { lock.unlock() }
+        _fills.append(element)
         invalidate()
     }
 
@@ -178,20 +272,25 @@ final class VectorCanvas {
     /// was poured into, and shifts again with every subsequent move. `erase(alongPath:)` already
     /// maps its input the same way; this exists so the fill paths can't drift back out of step.
     func addFill(canvasSpacePath path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) {
-        addFill(VectorFillElement(path: localPath(fromCanvas: path), color: color,
-                                  opacity: opacity, evenOddFill: evenOddFill))
+        lock.lock()
+        defer { lock.unlock() }
+        _fills.append(VectorFillElement(path: Self.localPath(path, through: _transform), color: color,
+                                        opacity: opacity, evenOddFill: evenOddFill))
+        invalidate()
     }
 
     /// Maps a canvas-space path into this canvas's local (pre-`transform`) space — see
     /// `addFill(canvasSpacePath:...)` for why every stored path must be in local space.
     func localPath(fromCanvas path: CGPath) -> CGPath {
-        guard !transform.isIdentity else { return path }
-        var inverse = transform.inverted()
-        return path.copy(using: &inverse) ?? path
+        lock.lock()
+        defer { lock.unlock() }
+        return Self.localPath(path, through: _transform)
     }
 
     func setTransform(_ t: CGAffineTransform) {
-        transform = t
+        lock.lock()
+        defer { lock.unlock() }
+        _transform = t
         invalidate()
     }
 
@@ -201,9 +300,12 @@ final class VectorCanvas {
     /// tracks the actual content instead of the whole canvas. Assumes `transform` is a
     /// translate·rotate·uniform-scale (which is all the overlay can produce), so it decomposes cleanly.
     func layerTransform(pivot: CGPoint) -> LayerTransform {
-        LayerTransform(position: pivot.applying(transform),
-                       scale: transformScale == 0 ? 1 : transformScale,
-                       rotation: atan2(transform.b, transform.a))
+        lock.lock()
+        defer { lock.unlock() }
+        let scale = Self.scale(of: _transform)
+        return LayerTransform(position: pivot.applying(_transform),
+                              scale: scale == 0 ? 1 : scale,
+                              rotation: atan2(_transform.b, _transform.a))
     }
 
     /// Inverse of `layerTransform(pivot:)`: builds the affine that maps content drawn at `pivot` so
@@ -222,7 +324,9 @@ final class VectorCanvas {
     /// visible content. Used to size/pivot the Move tool's on-canvas box to the actual content
     /// rather than the whole canvas.
     func localContentBounds() -> CGRect? {
-        PixelOps.opaqueContentBounds(renderLocalContent())
+        lock.lock()
+        defer { lock.unlock() }
+        return PixelOps.opaqueContentBounds(renderLocalContent())
     }
 
     /// Splits/erases vector strokes along an eraser path: any stroke sample within `radius` of any
@@ -232,13 +336,15 @@ final class VectorCanvas {
     /// mapped back through the layer transform first to compare against stored (untransformed) samples.
     @discardableResult
     func erase(alongPath eraserPoints: [CGPoint], radius: CGFloat) -> Bool {
-        guard !eraserPoints.isEmpty, !strokes.isEmpty else { return false }
-        let inverse = transform.inverted()
+        lock.lock()
+        defer { lock.unlock() }
+        guard !eraserPoints.isEmpty, !_strokes.isEmpty else { return false }
+        let inverse = _transform.inverted()
         let localEraser = eraserPoints.map { $0.applying(inverse) }
         // The radius is a canvas-space measurement like the points, so it has to be brought into
         // local space alongside them — otherwise erasing a scaled-up layer cuts a nib-sized hole
         // where the user swept a wide one (or vice versa).
-        let scale = transformScale
+        let scale = Self.scale(of: _transform)
         let localRadius = scale > 0 ? radius / scale : radius
         let r2 = localRadius * localRadius
         func isErased(_ s: VectorSample) -> Bool {
@@ -252,7 +358,7 @@ final class VectorCanvas {
 
         var changed = false
         var result: [VectorStroke] = []
-        for stroke in strokes {
+        for stroke in _strokes {
             var runs: [[VectorSample]] = []
             var current: [VectorSample] = []
             for sample in stroke.samples {
@@ -276,7 +382,7 @@ final class VectorCanvas {
             }
         }
         if changed {
-            strokes = result
+            _strokes = result
             invalidate()
         }
         return changed
@@ -289,6 +395,8 @@ final class VectorCanvas {
     /// then the whole thing is drawn through the overall `transform`. Always native resolution — the
     /// displaying image view magnifies it nearest-neighbor, so it stays pixelated when zoomed.
     func render() -> UIImage {
+        lock.lock()
+        defer { lock.unlock() }
         if let cachedImage { return cachedImage }
         let bounds = CGRect(origin: .zero, size: size)
         let format = PixelOps.transparentFormat()
@@ -298,11 +406,11 @@ final class VectorCanvas {
 
         // 2. Apply the overall transform (identity → skip the extra pass).
         let final: UIImage
-        if transform.isIdentity {
+        if _transform.isIdentity {
             final = content
         } else {
             final = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
-                ctx.cgContext.concatenate(transform)
+                ctx.cgContext.concatenate(_transform)
                 content.draw(in: bounds)
             }
         }
@@ -313,11 +421,17 @@ final class VectorCanvas {
     /// Just step 1 of `render()`: the layer's own content stamped at native resolution, before the
     /// overall `transform` is applied. Not cached — only called from `render()` (once per
     /// invalidation) and `localContentBounds()` (once per Move-tool overlay refresh).
+    ///
+    /// Caller must hold `lock`. Note this means a rasterization holds the lock for its whole
+    /// duration, so a main-thread stroke can briefly block behind a background render — the same
+    /// trade-off `RasterLayerTexture.renderToUIImage()` already makes, and the cache means it happens
+    /// at most once per change. The nested `RasterLayerTexture` below is a fresh local instance with
+    /// its own lock, so stamping into it can't contend with this one.
     private func renderLocalContent() -> UIImage {
         let bounds = CGRect(origin: .zero, size: size)
         return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
             // Fills (flat color regions) — drawn first, underneath images and strokes.
-            for fill in fills {
+            for fill in _fills {
                 guard let path = fill.cgPath else { continue }
                 ctx.cgContext.setFillColor(fill.uiColor.cgColor)
                 ctx.cgContext.setAlpha(fill.opacity)
@@ -329,7 +443,7 @@ final class VectorCanvas {
                 }
             }
             ctx.cgContext.setAlpha(1.0)
-            for element in images {
+            for element in _images {
                 ctx.cgContext.saveGState()
                 let t = element.transform
                 ctx.cgContext.translateBy(x: t.position.x, y: t.position.y)
@@ -339,9 +453,9 @@ final class VectorCanvas {
                 element.image.draw(in: CGRect(x: -imgSize.width / 2, y: -imgSize.height / 2, width: imgSize.width, height: imgSize.height))
                 ctx.cgContext.restoreGState()
             }
-            if !strokes.isEmpty {
+            if !_strokes.isEmpty {
                 let raster = RasterLayerTexture.empty(size: size)
-                for stroke in strokes {
+                for stroke in _strokes {
                     let samples = stroke.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
                     BrushStamper.stampStroke(into: raster, samples: samples, brush: stroke.brush,
                                              color: stroke.uiColor, brushSize: stroke.size, brushOpacity: stroke.opacity)
