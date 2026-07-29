@@ -101,3 +101,6 @@ deploy/com.paintapp.resign.plist
 
 # Windows convenience script (contains SSH details)
 deploy.bat
+
+# graphify regenerable local cache (keep graph.json/graph.html/GRAPH_REPORT.md tracked)
+graphify-out/cache/
