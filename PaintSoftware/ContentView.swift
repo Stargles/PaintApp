@@ -44,19 +44,26 @@ struct ContentView: View {
         screen = .editor
     }
 
+    /// Shows the gallery only once the save has actually landed on disk. `GalleryView` lists projects
+    /// from disk in a one-shot `onAppear`, so switching screens while `ProjectStore.save`'s background
+    /// write was still in flight would list the project as missing (first save) or with stale content.
+    /// The wait doesn't freeze anything — the encode and write are off the main thread now, so the
+    /// editor stays responsive for the moment it takes.
     private func returnToGallery() {
-        saveIfNeeded()
-        screen = .gallery
+        saveIfNeeded { screen = .gallery }
     }
 
-    private func saveIfNeeded() {
-        guard screen == .editor, canvasManager.canvasSize != nil else { return }
+    private func saveIfNeeded(completion: (@MainActor () -> Void)? = nil) {
+        guard screen == .editor, canvasManager.canvasSize != nil else {
+            completion?()
+            return
+        }
         // An adjustable fill, an adjustable smart shape, and a mid-transform move/duplicate are all
         // UI-only state (see `CanvasManager.beginCanvasEdit`) — bake every one of them in before
         // saving, or backgrounding the app silently drops whichever was still pending.
         canvasManager.commitAllInteractiveState()
         let url = canvasManager.projectURL ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName)
         canvasManager.projectURL = url
-        ProjectStore.save(canvasManager, to: url)
+        ProjectStore.save(canvasManager, to: url, completion: completion)
     }
 }

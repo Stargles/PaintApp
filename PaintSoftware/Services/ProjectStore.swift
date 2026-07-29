@@ -121,18 +121,167 @@ enum ProjectStore {
         }
     }
 
+    // MARK: - Saving
+
+    /// Everything `writePackage` reads out of `@MainActor` state, captured as immutable values.
+    ///
+    /// This is what lets the encode-and-write half of a save run off the main thread while touching
+    /// no live app state at all: the background queue works from `UIImage`s already rendered on main,
+    /// value-type manifests, and `VectorCanvas` copies it owns outright. Nothing here is a view into
+    /// something the user can still be drawing on, so a stroke landing mid-save can neither race the
+    /// write nor contend with it for `RasterLayerTexture`'s lock.
+    private struct SaveSnapshot {
+        struct CelContent {
+            let id: UUID
+            let startFrame: Int
+            let frameCount: Int
+            /// Rendered on the main thread. `RasterLayerTexture` memoizes this per `version`, so for a
+            /// cel that hasn't changed since it was last displayed it's a cache read, not a re-render.
+            let rasterImage: UIImage
+            let fillImage: UIImage?
+            let bakedImage: UIImage?
+            /// A `makeCopy()`, so the write owns it and live drawing can't mutate it underneath.
+            let vector: VectorCanvas?
+        }
+
+        struct LayerContent {
+            let id: UUID
+            let name: String
+            let opacity: Double
+            let isVisible: Bool
+            let kind: LayerKind
+            let parentFolderID: UUID?
+            let cels: [CelContent]
+        }
+
+        let projectID: UUID
+        let projectName: String
+        let canvasSize: CGSize
+        let canvasPadding: Double
+        let fps: Int
+        let sceneFrameCount: Int
+        let backgroundColor: CodableColor
+        let isBackgroundVisible: Bool
+        let selectedBrush: Brush
+        let customBrushes: [Brush]
+        let folders: [FolderManifest]
+        let viewPresets: [ViewPresetManifest]
+        let layers: [LayerContent]
+        let thumbnail: UIImage?
+
+        /// Reads published state and renders the per-cel images; deliberately does no encoding, so it
+        /// stays the cheap half. The thumbnail composite stays here too rather than moving to the
+        /// background queue: it goes through `PixelOps.compositeCanvas`, which reads the live
+        /// `RasterLayerTexture`/`VectorCanvas` of every visible layer, and running it here keeps the
+        /// rule that the background queue sees no shared mutable state. It is a handful of
+        /// canvas-sized draws over caches this initialiser has just warmed — nothing like the
+        /// multi-second PNG encode that is being moved off main.
+        @MainActor
+        init(_ canvasManager: CanvasManager) {
+            projectID = canvasManager.projectID
+            projectName = canvasManager.projectName
+            canvasSize = canvasManager.canvasSize ?? .zero
+            canvasPadding = Double(canvasManager.canvasPadding)
+            fps = canvasManager.fps
+            sceneFrameCount = canvasManager.sceneFrameCount
+            backgroundColor = canvasManager.canvasBackgroundColor.codable
+            isBackgroundVisible = canvasManager.isCanvasBackgroundVisible
+            selectedBrush = canvasManager.selectedBrush
+            customBrushes = canvasManager.customBrushes
+            folders = canvasManager.folders.map { folder in
+                FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded,
+                               isVisible: folder.isVisible, parentFolderID: folder.parentFolderID)
+            }
+            viewPresets = canvasManager.viewPresets.map { preset in
+                var vis: [String: Bool] = [:]
+                for (key, value) in preset.layerVisibility { vis[key.uuidString] = value }
+                var folderVis: [String: Bool] = [:]
+                for (key, value) in preset.folderVisibility { folderVis[key.uuidString] = value }
+                return ViewPresetManifest(id: preset.id, name: preset.name, layerVisibility: vis, folderVisibility: folderVis)
+            }
+            layers = canvasManager.layers.map { layer in
+                LayerContent(id: layer.id, name: layer.name, opacity: layer.opacity,
+                             isVisible: layer.isVisible, kind: layer.kind,
+                             parentFolderID: layer.parentFolderID,
+                             cels: layer.cels.map { cel in
+                    CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
+                               rasterImage: cel.raster.renderToUIImage(),
+                               fillImage: cel.fillImage, bakedImage: cel.bakedImage,
+                               vector: cel.vector?.makeCopy())
+                })
+            }
+
+            // The composited stack of every visible layer (not just the bottom-most one) at the
+            // current frame, downscaled for the gallery tile.
+            if let size = canvasManager.canvasSize,
+               let composited = PixelOps.compositeCanvas(layers: canvasManager.layers, atFrame: canvasManager.currentFrame, canvasSize: size) {
+                thumbnail = ThumbnailRenderer.render(composited, canvasSize: size, thumbnailSize: CGSize(width: 320, height: 320))
+            } else {
+                thumbnail = nil
+            }
+        }
+    }
+
+    /// Serialises the encode-and-write half of every save. While that ran synchronously on the main
+    /// actor, two saves could not interleave; now that it runs off main, this queue is what preserves
+    /// that. Two overlapping saves — an autosave from `scenePhase` racing the user leaving the editor
+    /// — must not interleave their stage/validate/stash/rename steps, or one could rename its package
+    /// into place while the other is stashing what it believes is the live one.
+    private static let saveQueue = DispatchQueue(label: "com.paintapp.ProjectStore.save", qos: .userInitiated)
+
     /// Saves atomically: the new package is fully written and validated at a temp path before the
     /// live package is touched, the live package is stashed as a backup (never destroyed), and the
     /// swap is a same-volume rename — so a crash/kill at ANY point leaves either the complete old
     /// package or the complete new one, plus restore points in Backups/ either way.
+    ///
+    /// Only the `SaveSnapshot` read is synchronous on the main actor; the PNG encoding, the JSON
+    /// encoding and every file operation happen on `saveQueue`. Doing all of it on main blocked the
+    /// UI for multiple seconds on a multi-layer, multi-cel project.
+    ///
+    /// `completion` runs on the main actor once the package is on disk — or once the save has failed,
+    /// which it does not distinguish, matching the old signature's silence about failure. Callers that
+    /// read the package back immediately must wait for it instead of racing the write: the gallery
+    /// re-lists projects from disk in a one-shot `onAppear`, so navigating there before the rename
+    /// lands would show the project as missing or stale.
     @MainActor
-    static func save(_ canvasManager: CanvasManager, to url: URL) {
+    static func save(_ canvasManager: CanvasManager, to url: URL, completion: (@MainActor () -> Void)? = nil) {
+        let snapshot = SaveSnapshot(canvasManager)
+
+        // A save is usually triggered by the app being backgrounded (see ContentView's scenePhase
+        // handler). While it ran on main, iOS's "finish what you were doing" window covered it; work
+        // dispatched to a background queue has to ask for that time explicitly or the process can be
+        // suspended mid-write. The staged-then-renamed design means a suspended save loses the new
+        // package rather than damaging the old one, but losing the user's last edits is still worth
+        // avoiding. `.invalid` (assertion refused) is handled rather than assumed away.
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ProjectStore.save")
+
+        saveQueue.async {
+            writeAtomically(snapshot, to: url)
+            Task { @MainActor in
+                completion?()
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                }
+            }
+        }
+    }
+
+    /// The staged-write-then-atomic-swap half of `save`, run off the main thread on `saveQueue` and
+    /// working purely from `snapshot`.
+    ///
+    /// The step order here **is** the atomic-save guarantee built in session 34 and must not be
+    /// rearranged: write the whole package to a temp path, validate it, stash the live package as a
+    /// restore point rather than deleting it, then swap by same-volume rename. Moving this off the
+    /// main thread changes which thread executes the steps, not their order or their all-or-nothing
+    /// character — a crash or kill at any point still leaves either the complete old package or the
+    /// complete new one on disk, never a partial one.
+    private static func writeAtomically(_ snapshot: SaveSnapshot, to url: URL) {
         let fm = FileManager.default
 
         // Stage the new package beside the live one.
         let stageURL = projectsDirectory.appendingPathComponent(".saving-\(UUID().uuidString)", isDirectory: true)
         try? fm.removeItem(at: stageURL)
-        writePackage(canvasManager, to: stageURL)
+        writePackage(snapshot, to: stageURL)
 
         // Only replace the live package once the staged one is provably complete (e.g. a PNG that
         // failed to encode must not clobber the last-known-good save). The broken stage is kept
@@ -143,7 +292,7 @@ enum ProjectStore {
         }
 
         // Stash the live package as an autosave restore point, then swap in the new one.
-        guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: canvasManager.projectID) else {
+        guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: snapshot.projectID) else {
             try? fm.removeItem(at: stageURL)
             return
         }
@@ -157,14 +306,14 @@ enum ProjectStore {
         }
 
         // Restore points: `latest` = exact copy of this save; autos rotated by count.
-        ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: canvasManager.projectID)
-        ProjectBackupManager.pruneBackups(forProjectID: canvasManager.projectID)
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: snapshot.projectID)
+        ProjectBackupManager.pruneBackups(forProjectID: snapshot.projectID)
     }
 
-    /// Writes the complete project package at `url` (used by `save` to stage the package before
-    /// the atomic swap).
-    @MainActor
-    private static func writePackage(_ canvasManager: CanvasManager, to url: URL) {
+    /// Writes the complete project package at `url` (used by `writeAtomically` to stage the package
+    /// before the atomic swap). Runs on `saveQueue`, entirely from the snapshot — this is where the
+    /// PNG and JSON encoding that used to block the main thread actually happens.
+    private static func writePackage(_ snapshot: SaveSnapshot, to url: URL) {
         let fm = FileManager.default
         try? fm.createDirectory(at: url, withIntermediateDirectories: true)
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)
@@ -172,11 +321,11 @@ enum ProjectStore {
 
         var layerManifests: [LayerManifest] = []
 
-        for layer in canvasManager.layers {
+        for layer in snapshot.layers {
             var celManifests: [CelManifest] = []
             for cel in layer.cels {
                 let fileName = "\(cel.id.uuidString)_raster.png"
-                if let data = cel.raster.renderToUIImage().pngData() {
+                if let data = cel.rasterImage.pngData() {
                     try? data.write(to: imagesDir.appendingPathComponent(fileName))
                 }
 
@@ -195,6 +344,8 @@ enum ProjectStore {
                 // Vector content: write the placed images' PNGs, then a JSON of the strokes + image
                 // refs + overall transform (see VectorCanvasData).
                 var vectorFileName: String?
+                // `cel.vector` is this save's own copy (see `SaveSnapshot.CelContent`), so reading its
+                // strokes/fills/images here cannot race live drawing on the original.
                 if let vector = cel.vector, !vector.isEmpty {
                     var imageFileNames: [UUID: String] = [:]
                     for element in vector.images {
@@ -227,55 +378,33 @@ enum ProjectStore {
             ))
         }
 
-        // The composited stack of every visible layer (not just the bottom-most one) at the
-        // current frame, downscaled for the gallery tile.
-        var thumbnailImage: UIImage?
-        if let canvasSize = canvasManager.canvasSize,
-           let composited = PixelOps.compositeCanvas(layers: canvasManager.layers, atFrame: canvasManager.currentFrame, canvasSize: canvasSize) {
-            thumbnailImage = ThumbnailRenderer.render(composited, canvasSize: canvasSize, thumbnailSize: CGSize(width: 320, height: 320))
-        }
-
         // Persist the user's actual brush choice + imported custom brushes (Worker B's brush engine
         // owns these on CanvasManager) so they survive a save/reload, and copy any custom-brush
         // stamp textures into the project package for self-containment.
-        let selectedBrush = canvasManager.selectedBrush
-        let customBrushes = canvasManager.customBrushes
-        copyCustomBrushTexturesIntoProject([selectedBrush] + customBrushes, projectURL: url)
-
-        let folderManifests = canvasManager.folders.map { folder in
-            FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded,
-                           isVisible: folder.isVisible, parentFolderID: folder.parentFolderID)
-        }
-        let viewPresetManifests = canvasManager.viewPresets.map { preset in
-            var vis: [String: Bool] = [:]
-            for (key, value) in preset.layerVisibility { vis[key.uuidString] = value }
-            var folderVis: [String: Bool] = [:]
-            for (key, value) in preset.folderVisibility { folderVis[key.uuidString] = value }
-            return ViewPresetManifest(id: preset.id, name: preset.name, layerVisibility: vis, folderVisibility: folderVis)
-        }
+        copyCustomBrushTexturesIntoProject([snapshot.selectedBrush] + snapshot.customBrushes, projectURL: url)
 
         let manifest = ProjectManifest(
-            id: canvasManager.projectID,
-            name: canvasManager.projectName,
-            canvasWidth: Double(canvasManager.canvasSize?.width ?? 0),
-            canvasHeight: Double(canvasManager.canvasSize?.height ?? 0),
-            canvasPadding: Double(canvasManager.canvasPadding),
-            fps: canvasManager.fps,
-            sceneFrameCount: canvasManager.sceneFrameCount,
+            id: snapshot.projectID,
+            name: snapshot.projectName,
+            canvasWidth: Double(snapshot.canvasSize.width),
+            canvasHeight: Double(snapshot.canvasSize.height),
+            canvasPadding: snapshot.canvasPadding,
+            fps: snapshot.fps,
+            sceneFrameCount: snapshot.sceneFrameCount,
             layers: layerManifests,
             modifiedAt: Date(),
-            backgroundColor: canvasManager.canvasBackgroundColor.codable,
-            isBackgroundVisible: canvasManager.isCanvasBackgroundVisible,
-            selectedBrush: selectedBrush,
-            customBrushes: customBrushes,
-            folders: folderManifests,
-            viewPresets: viewPresetManifests
+            backgroundColor: snapshot.backgroundColor,
+            isBackgroundVisible: snapshot.isBackgroundVisible,
+            selectedBrush: snapshot.selectedBrush,
+            customBrushes: snapshot.customBrushes,
+            folders: snapshot.folders,
+            viewPresets: snapshot.viewPresets
         )
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: url.appendingPathComponent("manifest.json"))
         }
 
-        if let thumbnailImage, let data = thumbnailImage.pngData() {
+        if let thumbnailImage = snapshot.thumbnail, let data = thumbnailImage.pngData() {
             try? data.write(to: url.appendingPathComponent("thumbnail.png"))
         }
     }

@@ -10,6 +10,7 @@
 		4E03FE4A7BAA4323E6837013 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F624FB57490A92DFBDB344A /* Foundation.framework */; };
 		A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */; };
 		C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */; };
+		C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */; };
 		C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */; };
 		B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */; };
 		B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */; };
@@ -78,6 +79,7 @@
 		7F624FB57490A92DFBDB344A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushEngineLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackupManagerLogicTests.swift; sourceTree = "<group>"; };
+		C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectSaveLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectBackupManager.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Brush.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeStabilizer.swift; sourceTree = "<group>"; };
@@ -198,6 +200,7 @@
 			children = (
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
+				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
 				DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */,
 				DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */,
@@ -366,6 +369,7 @@
 			files = (
 				A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */,
+				C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */,
 				B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */,
 				B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */,
 				B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */,
