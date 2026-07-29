@@ -15,19 +15,29 @@ extension CanvasManager {
     }
 
     /// How long a new cel starting at `startFrame` may actually be: `maxLength`, cut short by the
-    /// nearest cel that begins after it so the two can't overlap. Nil when there's no room at all
-    /// (the caller then does nothing).
+    /// nearest cel that begins at or after it so the two can't overlap. Nil when there's no room at
+    /// all (the caller then does nothing).
     ///
     /// Shared by the three cel creators — `addCel`, `duplicateCel` and `pasteCel` — which each held
-    /// a byte-identical copy of this before. Note the filter is strictly `>`: a neighbour beginning
-    /// at exactly `startFrame` is not treated as a bound. That matters for `duplicateCel`, whose
-    /// start frame is the source's `endFrame`, i.e. precisely the value this excludes — see the
-    /// overlap issue recorded in BUGS.md and pinned by
-    /// `testDuplicatingIntoAnImmediatelyAdjacentNeighbourOverlapsIt`. Preserved deliberately: this
-    /// extraction is behaviour-preserving, and fixing that is a separate change.
+    /// a byte-identical copy of this before.
+    ///
+    /// The filter is `>=`, not `>`. It used to be strict, which made a neighbour beginning at
+    /// *exactly* `startFrame` invisible to the clamp — and that is precisely `duplicateCel`'s start
+    /// frame, since it copies to the source cel's `endFrame`. With no `activeCelIndex(...) == nil`
+    /// guard in front of it either (unlike the other two), duplicating a cel whose neighbour started
+    /// at its end frame produced two cels covering the same frames, one of them unreachable but
+    /// still rendered. See BUGS.md. Fixed here rather than by adding a fourth guard, so the single
+    /// shared chokepoint can no longer hand any caller an overlapping range.
+    ///
+    /// `>=` is a no-op for `addCel` and `pasteCel`: both are fronted by
+    /// `guard activeCelIndex(inLayer:atFrame: startFrame) == nil`, and `activeCelIndex` matches on
+    /// `frame >= cel.startFrame && frame < cel.endFrame`, so a cel starting exactly at `startFrame`
+    /// is always found by that guard (every cel has `frameCount >= 1` — the creators reject
+    /// non-positive lengths here, and `resizeCel*`/`splitCel` all clamp to at least one frame). They
+    /// return early and never reach this function with that value.
     func clampedCelLength(layerIndex: Int, startFrame: Int, maxLength: Int) -> Int? {
         var length = maxLength
-        let laterStarts = layers[layerIndex].cels.map(\.startFrame).filter { $0 > startFrame }
+        let laterStarts = layers[layerIndex].cels.map(\.startFrame).filter { $0 >= startFrame }
         if let nextStart = laterStarts.min() {
             length = min(length, nextStart - startFrame)
         }
@@ -51,6 +61,12 @@ extension CanvasManager {
         return true
     }
 
+    /// Copies a cel immediately after itself, at the source's `endFrame`, clamped to whatever room is
+    /// free before the next cel.
+    ///
+    /// When a neighbour begins at *exactly* the source's end frame there is no free space at all, so
+    /// `clampedCelLength` returns nil and this is a no-op. That is deliberate — see BUGS.md — and it
+    /// is currently silent; a UI affordance for it is logged there as a low-priority follow-up.
     func duplicateCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let source = layers[layerIndex].cels[celIndex]

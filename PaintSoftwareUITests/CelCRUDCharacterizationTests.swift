@@ -16,11 +16,13 @@ import UIKit
 /// past it, and the degenerate cases — so the dedup is provably behavior-preserving rather than
 /// merely plausible.
 ///
-/// One asymmetry is deliberately pinned as-is rather than fixed here: `addCel` and `pasteCel` both
-/// guard on `activeCelIndex(...) == nil` before clamping, and the clamp's `filter { $0 > startFrame }`
-/// is strict, so `duplicateCel` — whose start frame is the source cel's `endFrame` — does not see a
-/// neighbour that begins *exactly* there and can create an overlapping cel. See
-/// `testDuplicatingIntoAnImmediatelyAdjacentNeighbourOverlapsIt`.
+/// One asymmetry was originally pinned as-is rather than fixed at Stage 0: `addCel` and `pasteCel`
+/// both guard on `activeCelIndex(...) == nil` before clamping, and the clamp's filter was a strict
+/// `filter { $0 > startFrame }`, so `duplicateCel` — whose start frame is the source cel's
+/// `endFrame` — did not see a neighbour that begins *exactly* there and could create an overlapping
+/// cel. Stage 4.3 fixed that by relaxing the shared clamp to `>=`; the test that pinned the bug was
+/// replaced by `testDuplicatingIntoAnImmediatelyAdjacentNeighbourIsANoOpRatherThanOverlappingIt`,
+/// which pins the fix. Every other test in this file still pins existing behavior unchanged.
 ///
 /// See `CanvasManagerTestSupport.swift` for why these compile as plain unit tests inside the UI
 /// test target.
@@ -154,30 +156,52 @@ final class CelCRUDCharacterizationTests: XCTestCase {
 
     /// The one place the three clamps genuinely diverge, pinned as-is.
     ///
-    /// `duplicateCel`'s start frame is the source cel's `endFrame`. When a neighbour begins at
-    /// exactly that frame, the shared clamp's `filter { $0 > startFrame }` excludes it (strict `>`),
-    /// so nothing bounds the copy — and unlike `addCel`/`pasteCel` there is no
-    /// `activeCelIndex(...) == nil` guard in front to reject the position outright. The result is
-    /// two cels covering the same frames, which `activeCelIndex` (a `firstIndex(where:)`) resolves
-    /// arbitrarily.
+    /// **Supersedes `testDuplicatingIntoAnImmediatelyAdjacentNeighbourOverlapsIt`**, which pinned the
+    /// *bug* this now pins the *fix* for (Stage 4.3; see BUGS.md).
+    ///
+    /// `duplicateCel`'s start frame is the source cel's `endFrame`. The shared clamp's filter used to
+    /// be a strict `filter { $0 > startFrame }`, which made a neighbour beginning at exactly that
+    /// frame invisible to it — and unlike `addCel`/`pasteCel` there is no `activeCelIndex(...) == nil`
+    /// guard in front to reject the position outright. So nothing bounded the copy and two cels ended
+    /// up covering the same frames, which `activeCelIndex` (a `firstIndex(where:)`) resolves
+    /// arbitrarily: the layer draws into one and renders the other.
     ///
     /// This is reachable from the UI: "attach a new block to the end" (`addBlankCelAfter`) produces
     /// exactly this adjacency, and Duplicate is then available on the earlier block.
     ///
-    /// Asserting the overlap is the point — the dedup this suite guards must not quietly acquire
-    /// (or quietly lose) this behavior. Fixing it is a separate change that updates this test.
-    func testDuplicatingIntoAnImmediatelyAdjacentNeighbourOverlapsIt() {
+    /// The clamp is now `>=`, so this adjacency leaves zero free frames and Duplicate is a no-op.
+    /// Accepting the no-op is the deliberate choice: with a neighbour starting exactly at the
+    /// source's end frame, every fix that cannot overlap collapses to the same thing. The
+    /// alternatives that aren't a no-op (place the copy at the next free run, shift later cels
+    /// rightward) are timeline feature design, not a refactor. The no-op being *silent* is logged in
+    /// BUGS.md as a low-priority UI follow-up.
+    func testDuplicatingIntoAnImmediatelyAdjacentNeighbourIsANoOpRatherThanOverlappingIt() {
         let manager = CanvasFixture.manager()
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 2)])
 
         manager.duplicateCel(layerIndex: 0, celIndex: 0)
 
         let layout = CanvasFixture.celLayout(manager)
-        XCTAssertEqual(layout.count, 3, "The duplicate is created rather than rejected")
-        XCTAssertEqual(layout.filter { $0.start == 3 }.count, 2,
-                       "Two cels now start at frame 3 — current behavior, not desired behavior")
-        XCTAssertEqual(layout.map(\.length).sorted(), [2, 3, 3],
-                       "The copy keeps the source's full 3-frame length, unclamped by the neighbour at frame 3")
+        XCTAssertEqual(layout.count, 2, "There is no free frame at the source's end frame, so no cel should be created")
+        XCTAssertEqual(layout.map(\.start), [0, 3], "The existing layout must be left exactly as it was")
+        XCTAssertEqual(layout.map(\.length), [3, 2], "Neither the source nor the neighbour should be resized to make room")
+        assertNoOverlappingCels(manager)
+    }
+
+    /// The partial-room counterpart of the above: a *gap* before the neighbour still duplicates, and
+    /// the copy is clamped to exactly the free frames. This is what makes the `>=` clamp a real fix
+    /// rather than a blanket refusal to duplicate near a neighbour.
+    func testDuplicatingIntoAPartialGapClampsTheCopyToTheFreeFrames() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 4, length: 2)])
+
+        manager.duplicateCel(layerIndex: 0, celIndex: 0)
+
+        let layout = CanvasFixture.celLayout(manager)
+        XCTAssertEqual(layout.map(\.start), [0, 3, 4], "The copy should land in the one free frame at 3")
+        XCTAssertEqual(layout.map(\.length), [3, 1, 2],
+                       "The copy is clamped from the source's 3 frames down to the 1 frame actually free")
+        assertNoOverlappingCels(manager)
     }
 
     func testDuplicateCelWithNoLaterCelIsNotClamped() {

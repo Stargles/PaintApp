@@ -4,9 +4,9 @@ Format: one section per bug, newest first. See [CLAUDE.md](CLAUDE.md) for the mu
 
 ## `duplicateCel` can create a cel overlapping its immediate neighbour (2026-07-28)
 
-**Status:** open, found by the Stage 0 characterization pass. Not fixed there on purpose — that
-stage's job was to pin existing behavior, and a behavior fix does not belong in the same commit as
-the tests that establish the baseline.
+**Status:** fixed (Stage 4.3, 2026-07-29). Found by the Stage 0 characterization pass and not fixed
+there on purpose — that stage's job was to pin existing behavior, and a behavior fix does not belong
+in the same commit as the tests that establish the baseline.
 
 `addCel`, `duplicateCel` and `pasteCel` share a copy-pasted frame-length clamp:
 
@@ -32,12 +32,34 @@ may render the other — the same class of "content is there but unreachable" pr
 Reachable from the UI: "attach a new block to the end" (`addBlankCelAfter`) produces exactly this
 adjacency, and Duplicate is available on the earlier block.
 
-Current behavior is pinned by `CelCRUDCharacterizationTests.testDuplicatingIntoAnImmediatelyAdjacentNeighbourOverlapsIt`
-so a refactor cannot change it silently. Fixing it means updating that test in the same commit.
+### Fix (Stage 4.3)
 
-The likely fix is to give `duplicateCel` the same `activeCelIndex(...) == nil` guard the other two
-have — but note that changes Duplicate from "silently overlaps" to "silently does nothing", which
-may want a UI affordance rather than a bare no-op.
+The shared clamp's filter was relaxed from `> startFrame` to `>= startFrame`, so the single
+chokepoint all three creators go through can no longer hand any of them a range that overlaps an
+existing cel. Chosen over adding a fourth `activeCelIndex(...) == nil` guard to `duplicateCel`
+because it fixes the root cause where it lives instead of papering over it at one call site.
+
+`>=` is verifiably a no-op for `addCel` and `pasteCel`: both are fronted by
+`guard activeCelIndex(inLayer:atFrame: startFrame) == nil`, and `activeCelIndex` matches on
+`frame >= cel.startFrame && frame < cel.endFrame`, so a cel starting exactly at `startFrame` is
+always caught by that guard (every cel has `frameCount >= 1` — the creators reject non-positive
+lengths, and `resizeCelLeftEdge`/`resizeCelRightEdge`/`splitCel` all clamp to at least one frame).
+They return early and never reach the clamp with that value.
+
+The bug-pinning test was replaced in the same commit by
+`CelCRUDCharacterizationTests.testDuplicatingIntoAnImmediatelyAdjacentNeighbourIsANoOpRatherThanOverlappingIt`,
+plus `testDuplicatingIntoAPartialGapClampsTheCopyToTheFreeFrames` to show a real gap still
+duplicates (clamped) rather than the fix being a blanket refusal.
+
+### Follow-up: Duplicate is now a silent no-op in that adjacency (low priority, NOT part of Stage 4)
+
+When a neighbour starts at exactly the source's end frame there is zero free space, so Duplicate
+correctly does nothing — but it does so with no feedback at all. Worth a UI affordance: grey out the
+Duplicate control when `clampedCelLength` would return nil for the cel, or show a brief message.
+
+Explicitly out of scope for the refactor branch. The alternatives that aren't a no-op — place the
+copy at the next free run of frames, or shift subsequent cels rightward to make room — are timeline
+feature design with real product surface, and are a separate decision from this fix.
 
 ---
 
