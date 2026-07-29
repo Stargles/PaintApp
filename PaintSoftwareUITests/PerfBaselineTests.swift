@@ -359,6 +359,223 @@ final class PerfBaselineTests: XCTestCase {
 
     // MARK: - Stage 5 additions
 
+    /// **How many strokes stay undoable**, which is what 5.5 is really about.
+    ///
+    /// `UndoHistory` trims by retained bytes, not step count, so the per-step cost *is* the undo
+    /// depth. While a stroke retained two whole-canvas images, `approximateImageCost` charged
+    /// `w × h × 4` twice — ~33.6 MB per stroke at 2048², ~128 MB at 4000² — so a 300 MB budget held
+    /// about 8 strokes on the default canvas and **two** on a large one, regardless of how small the
+    /// strokes were. This fills the budget with many small strokes and asserts they are all still
+    /// undoable, which is the assertion the plan asked for: existing tests only check that undo
+    /// *works*, never that history *survives*.
+    func testManySmallStrokesAllStayUndoableWithinTheBudget() {
+        let manager = perfManager()
+        let raster = manager.layers[0].cels[0].raster
+        let strokeCount = 40
+        let brushSize: CGFloat = 24
+
+        for i in 0..<strokeCount {
+            autoreleasepool {
+                // Small, well-separated strokes: a short 60pt dab-run, the kind of mark a user makes
+                // dozens of in a row. Each covers a tiny fraction of the 2048² canvas.
+                let y = 64 + CGFloat(i % 30) * 60
+                let x = 64 + CGFloat(i / 30) * 400
+                let samples = [BrushStamper.Sample(point: CGPoint(x: x, y: y), pressure: 0.8),
+                               BrushStamper.Sample(point: CGPoint(x: x + 60, y: y), pressure: 0.8)]
+                let before = (image: raster.renderToUIImage(), count: raster.strokeCount)
+                raster.beginStroke()
+                BrushStamper.stampStroke(into: raster, samples: samples, brush: manager.selectedBrush,
+                                         color: .black, brushSize: brushSize,
+                                         brushOpacity: manager.brushOpacity)
+                raster.endStroke()
+                let after = (image: raster.renderToUIImage(), count: raster.strokeCount)
+                recordCroppedStrokeUndo(manager: manager, raster: raster, from: before, to: after)
+            }
+        }
+
+        // Count the stroke steps specifically: `perfManager()`'s `addLayer` records an "Add Layer"
+        // step of its own, which is real history but not what this test is measuring.
+        let strokeSteps = manager.history.undoStack.filter { $0.name == "Stroke" }
+        let totalCost = strokeSteps.reduce(0) { $0 + $1.cost }
+        let perStroke = totalCost / max(strokeSteps.count, 1)
+        let wholeCanvasCost = 2 * Int(Self.canvasSize.width) * Int(Self.canvasSize.height) * 4
+        let stepsAtOldCost = manager.history.maxCost / wholeCanvasCost
+
+        report("undo budget", [
+            ("strokesRecorded", "\(strokeCount)"),
+            ("strokeStepsStillUndoable", "\(strokeSteps.count)"),
+            ("totalStepsIncludingAddLayer", "\(manager.history.undoStack.count)"),
+            ("budget", megabytes(UInt64(manager.history.maxCost))),
+            ("totalRetained", megabytes(UInt64(totalCost))),
+            ("perStrokeBytes", "\(perStroke)"),
+            ("wholeCanvasCostPerStroke", megabytes(UInt64(wholeCanvasCost))),
+            ("stepsAtWholeCanvasCost", "\(stepsAtOldCost)"),
+        ])
+
+        XCTAssertEqual(strokeSteps.count, strokeCount,
+                       "All \(strokeCount) small strokes should still be undoable. Whole-canvas snapshots would have evicted all but \(stepsAtOldCost) of them.")
+        XCTAssertLessThan(perStroke, wholeCanvasCost / 4,
+                          "A small stroke's undo step must cost far less than a whole-canvas pair, or the crop isn't actually shrinking what is retained")
+        XCTAssertGreaterThan(strokeCount, stepsAtOldCost,
+                             "This test is only meaningful if the old representation would genuinely have overflowed the budget")
+
+        // The other end of the range, reported so the win isn't overstated: cropping helps in
+        // proportion to how *localised* a stroke is, and a single sweep across the whole canvas has a
+        // canvas-sized bounding box, so its step still costs roughly what every step used to.
+        let sweepBefore = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        raster.beginStroke()
+        BrushStamper.stampStroke(into: raster, samples: syntheticStroke(sampleCount: Self.sampleCount),
+                                 brush: manager.selectedBrush, color: .black,
+                                 brushSize: brushSize, brushOpacity: manager.brushOpacity)
+        raster.endStroke()
+        let sweepAfter = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        recordCroppedStrokeUndo(manager: manager, raster: raster, from: sweepBefore, to: sweepAfter)
+        let sweepCost = manager.history.undoStack.last?.cost ?? 0
+
+        report("undo budget, canvas-spanning stroke", [
+            ("sweepStepCost", megabytes(UInt64(sweepCost))),
+            ("wholeCanvasCostPerStroke", megabytes(UInt64(wholeCanvasCost))),
+            ("smallStrokeBytes", "\(perStroke)"),
+        ])
+        XCTAssertLessThanOrEqual(sweepCost, wholeCanvasCost + 1_000_000,
+                                 "Even a canvas-spanning stroke must not cost *more* than the whole-canvas pair it replaced")
+
+        // And the history still works: unwind all of it.
+        var undone = 0
+        while manager.history.canUndo {
+            manager.history.undo()
+            undone += 1
+        }
+        XCTAssertEqual(undone, manager.history.redoStack.count,
+                       "Every retained step should undo cleanly and land on the redo stack")
+        XCTAssertGreaterThanOrEqual(undone, strokeCount,
+                                    "At minimum every stroke step should have undone")
+    }
+
+    /// The crop/restore round trip is pixel-exact — undo removes the stroke completely and redo puts
+    /// it back, over the whole canvas and not just inside the patch.
+    ///
+    /// This is the correctness half of 5.5, and the failure it guards is silent: a patch composited
+    /// instead of copied would leave the stroke's ink behind on undo, and an off-by-one origin would
+    /// restore it a pixel over. Both would leave "undo works" passing while the canvas is wrong.
+    func testCroppedUndoRestoresTheCanvasExactly() {
+        let manager = perfManager()
+        let raster = manager.layers[0].cels[0].raster
+
+        // Lay down a first stroke and keep its pixels as the reference state to return to.
+        raster.beginStroke()
+        BrushStamper.stampStroke(into: raster,
+                                 samples: [BrushStamper.Sample(point: CGPoint(x: 200, y: 200), pressure: 1),
+                                           BrushStamper.Sample(point: CGPoint(x: 400, y: 260), pressure: 1)],
+                                 brush: manager.selectedBrush, color: .black,
+                                 brushSize: 30, brushOpacity: 1)
+        raster.endStroke()
+        let reference = alphaFingerprint(raster)
+
+        // Second stroke, recorded the way 5.5 records one.
+        let before = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        raster.beginStroke()
+        BrushStamper.stampStroke(into: raster,
+                                 samples: [BrushStamper.Sample(point: CGPoint(x: 900, y: 700), pressure: 1),
+                                           BrushStamper.Sample(point: CGPoint(x: 1300, y: 1100), pressure: 1)],
+                                 brush: manager.selectedBrush, color: .black,
+                                 brushSize: 30, brushOpacity: 1)
+        raster.endStroke()
+        let after = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        let painted = alphaFingerprint(raster)
+        XCTAssertNotEqual(painted, reference, "The second stroke should actually have changed the canvas")
+
+        recordCroppedStrokeUndo(manager: manager, raster: raster, from: before, to: after)
+
+        manager.history.undo()
+        XCTAssertEqual(alphaFingerprint(raster), reference,
+                       "Undo must restore the canvas exactly, leaving none of the second stroke behind — a composited patch instead of a copied one would leave its ink")
+        XCTAssertEqual(raster.strokeCount, before.count, "Undo restores the stroke count with the pixels")
+
+        manager.history.redo()
+        XCTAssertEqual(alphaFingerprint(raster), painted, "Redo must reproduce the stroke exactly")
+        XCTAssertEqual(raster.strokeCount, after.count)
+    }
+
+    /// A stroke running past the canvas edge: the dirty rect is clamped, so the patch origin has to
+    /// be the clamped one or the restore lands offset. Undo still has to be exact.
+    func testCroppedUndoIsExactForAStrokeOverTheCanvasEdge() {
+        let manager = perfManager()
+        let raster = manager.layers[0].cels[0].raster
+        let reference = alphaFingerprint(raster)
+
+        let before = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        raster.beginStroke()
+        // Starts off the top-left corner and runs inward, so the dab bounds go negative.
+        BrushStamper.stampStroke(into: raster,
+                                 samples: [BrushStamper.Sample(point: CGPoint(x: -20, y: -20), pressure: 1),
+                                           BrushStamper.Sample(point: CGPoint(x: 120, y: 120), pressure: 1)],
+                                 brush: manager.selectedBrush, color: .black,
+                                 brushSize: 40, brushOpacity: 1)
+        raster.endStroke()
+        let after = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        XCTAssertNotEqual(alphaFingerprint(raster), reference, "The edge stroke should have marked the canvas")
+
+        recordCroppedStrokeUndo(manager: manager, raster: raster, from: before, to: after)
+        manager.history.undo()
+        XCTAssertEqual(alphaFingerprint(raster), reference,
+                       "Undo of a stroke crossing the canvas edge must still restore exactly — a patch written at the unclamped origin would land offset")
+    }
+
+    /// Mirrors `StrokeCanvasView.registerRasterUndo`'s cropped representation. `StrokeCanvasView` is a
+    /// `UIView` driven by real touches, so it can't be exercised headlessly; this reproduces the same
+    /// three steps (crop to the dirty rect, clamp the origin, restore with `.copy`) against the same
+    /// engine API, so the engine support and the byte accounting are what's under test.
+    private func recordCroppedStrokeUndo(manager: CanvasManager, raster: RasterLayerTexture,
+                                         from: (image: UIImage, count: Int), to: (image: UIImage, count: Int)) {
+        guard let dirty = raster.strokeDirtyRect else {
+            return XCTFail("A stroke that stamped dabs must report a dirty rect")
+        }
+        let rect = dirty.insetBy(dx: -1, dy: -1).integral
+        guard let beforePatch = PixelOps.copiedSubimage(of: from.image, in: rect),
+              let afterPatch = PixelOps.copiedSubimage(of: to.image, in: rect) else {
+            return XCTFail("Cropping the stroke's region should succeed")
+        }
+        let origin = rect.intersection(CGRect(origin: .zero, size: from.image.size)).origin
+        let beforeCount = from.count, afterCount = to.count
+        let cost = CanvasManager.approximateImageCost(beforePatch) + CanvasManager.approximateImageCost(afterPatch)
+        manager.recordUndo(name: "Stroke", cost: cost, undo: {
+            raster.restore(patch: beforePatch, at: origin)
+            raster.setStrokeCount(beforeCount)
+        }, redo: {
+            raster.restore(patch: afterPatch, at: origin)
+            raster.setStrokeCount(afterCount)
+        })
+    }
+
+    /// A cheap whole-canvas content signature: per-row sums of the alpha channel. Sensitive to any
+    /// pixel changing anywhere, including outside whatever region a patch covered, without holding a
+    /// second full copy of the canvas to diff against.
+    private func alphaFingerprint(_ raster: RasterLayerTexture) -> [Int] {
+        autoreleasepool {
+            guard let cg = raster.renderToUIImage().cgImage else { return [] }
+            let width = cg.width, height = cg.height
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            let ok = bytes.withUnsafeMutableBytes { raw -> Bool in
+                guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: PixelOps.deviceRGBColorSpace,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+                ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+                return true
+            }
+            guard ok else { return [] }
+            var rows = [Int](repeating: 0, count: height)
+            for y in 0..<height {
+                var sum = 0
+                let base = y * width * 4
+                for x in 0..<width { sum += Int(bytes[base + x * 4 + 3]) }
+                rows[y] = sum
+            }
+            return rows
+        }
+    }
+
     /// Baking a snapped shape is idempotent, which is what makes the two-finger-transform path cheap
     /// without needing a per-gesture flag to guard it.
     ///

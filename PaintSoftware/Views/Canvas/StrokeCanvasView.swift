@@ -289,13 +289,65 @@ final class StrokeCanvasView: UIView {
         onStrokeCancelled?()
     }
 
-    /// Registers one step on the global `CanvasManager.history`. A whole-image snapshot per
-    /// stroke, not a dirty-rect crop; fine for a placeholder, but real bounded/cropped undo storage
-    /// (see BUGS.md's engine-rewrite notes) is real follow-up work, not done here. The `raster`
-    /// instance is captured by reference, not by index/ID — this cel's raster field never gets
-    /// reassigned to a different instance except by a structural edit (resize/clear/etc.), which
-    /// registers its own undo step and would itself be undone first.
+    /// Registers one step on the global `CanvasManager.history`, storing only the region the stroke
+    /// actually touched.
+    ///
+    /// This used to retain two whole-canvas images per stroke. `UndoHistory` budgets by retained
+    /// bytes, and `approximateImageCost` charges `width × height × 4`, so on a 4000×4000 canvas a
+    /// single stroke claimed ~128 MB of a 300 MB budget — **two undoable strokes**, whatever the
+    /// stroke actually drew. That is not a memory footnote; it is how much history the user gets to
+    /// keep. Cropping to `raster.strokeDirtyRect` makes the cost proportional to the stroke instead
+    /// of to the canvas, so a normal stroke costs a few MB and the same budget holds tens to hundreds
+    /// of them.
+    ///
+    /// Correctness rests on `strokeDirtyRect` being a superset of every pixel the stroke changed. It
+    /// is: every change goes through `stampCircle`, which unions each dab's exact bounds (the radial
+    /// gradient paints nothing past `radius`), and the selection-clipped `reset` in `handleEnd`
+    /// composites the pre-stroke image everywhere outside the clip path, so its net change is
+    /// contained in the same rect. The rect is outset by a pixel before cropping so nothing is lost
+    /// to fractional dab edges.
+    ///
+    /// The patches replace pixels via `restore(patch:at:)` (`.copy` blend), not composite them —
+    /// undoing has to be able to remove ink, which a source-over draw of a partly transparent patch
+    /// cannot do.
+    ///
+    /// Falls back to whole-image snapshots if the dirty rect is somehow unavailable, so a stroke is
+    /// never left un-undoable; that path costs what it always did. The `raster` instance is captured
+    /// by reference, not by index/ID — this cel's raster field never gets reassigned to a different
+    /// instance except by a structural edit (resize/clear/etc.), which registers its own undo step
+    /// and would itself be undone first.
     private func registerRasterUndo(raster: RasterLayerTexture, from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
+        guard let beforeImage = from.image, let afterImage = to.image,
+              let dirty = raster.strokeDirtyRect else {
+            registerWholeImageRasterUndo(raster: raster, from: from, to: to)
+            return
+        }
+        let rect = dirty.insetBy(dx: -1, dy: -1).integral
+        guard let beforePatch = PixelOps.copiedSubimage(of: beforeImage, in: rect),
+              let afterPatch = PixelOps.copiedSubimage(of: afterImage, in: rect) else {
+            registerWholeImageRasterUndo(raster: raster, from: from, to: to)
+            return
+        }
+        // Where the patches will be written back — the clamped rect the crops actually came from,
+        // not the unclamped one, or a stroke running off the canvas edge would restore offset.
+        let origin = rect.intersection(CGRect(origin: .zero, size: beforeImage.size)).origin
+        let beforeCount = from.count, afterCount = to.count
+        let cost = CanvasManager.approximateImageCost(beforePatch) + CanvasManager.approximateImageCost(afterPatch)
+        canvasManager?.recordUndo(name: "Stroke", cost: cost, undo: { [weak self] in
+            raster.restore(patch: beforePatch, at: origin)
+            raster.setStrokeCount(beforeCount)
+            self?.refreshDisplay()
+            self?.onStrokeEnded?()
+        }, redo: { [weak self] in
+            raster.restore(patch: afterPatch, at: origin)
+            raster.setStrokeCount(afterCount)
+            self?.refreshDisplay()
+            self?.onStrokeEnded?()
+        })
+    }
+
+    /// The pre-5.5 behaviour, kept as the fallback for the cases above.
+    private func registerWholeImageRasterUndo(raster: RasterLayerTexture, from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
         let cost = CanvasManager.approximateImageCost(from.image) + CanvasManager.approximateImageCost(to.image)
         canvasManager?.recordUndo(name: "Stroke", cost: cost, undo: { [weak self] in
             raster.reset(to: from.image, strokeCount: from.count)

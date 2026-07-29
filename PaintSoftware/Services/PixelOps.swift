@@ -16,6 +16,29 @@ enum PixelOps {
 
     static let deviceRGBColorSpace = CGColorSpaceCreateDeviceRGB()
 
+    /// A genuinely independent copy of `rect` out of `image`, in UIKit top-left coordinates.
+    ///
+    /// **Not** `CGImage.cropping(to:)`: that returns an image which keeps a reference to the original
+    /// image's pixel data, so the parent buffer stays alive and a "crop" retains just as much memory
+    /// as the whole thing. This renders into a fresh buffer of exactly `rect.size`, which is the
+    /// entire point when the caller is shrinking what an undo step holds on to.
+    ///
+    /// `preferredRange = .standard` matters for the same reason: left at `.automatic`, a wide-colour
+    /// device backs the new buffer with 16 bits per component and the patch costs twice what the
+    /// caller's byte accounting says it does.
+    ///
+    /// Returns nil for an empty or fully out-of-bounds rect.
+    static func copiedSubimage(of image: UIImage, in rect: CGRect) -> UIImage? {
+        let bounds = CGRect(origin: .zero, size: image.size)
+        let clamped = rect.integral.intersection(bounds)
+        guard !clamped.isNull, clamped.width >= 1, clamped.height >= 1 else { return nil }
+        let format = transparentFormat()
+        format.preferredRange = .standard
+        return UIGraphicsImageRenderer(size: clamped.size, format: format).image { _ in
+            image.draw(at: CGPoint(x: -clamped.origin.x, y: -clamped.origin.y))
+        }
+    }
+
     static func uiColor(from color: Color, opacity: Double = 1.0) -> UIColor {
         color.resolvedUIColor(opacity: opacity)
     }

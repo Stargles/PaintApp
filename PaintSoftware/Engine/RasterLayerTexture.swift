@@ -328,7 +328,26 @@ final class RasterLayerTexture: DabTarget {
 
     func beginStroke() {
         isMidStroke = true
+        lock.lock()
+        _strokeDirtyRect = nil
+        lock.unlock()
     }
+
+    /// Union of every dab laid down since `beginStroke()`, in canvas point space, or nil if nothing
+    /// has been stamped. This is what lets the undo system store a *crop* of the before/after state
+    /// instead of two whole canvases — see `StrokeCanvasView.registerRasterUndo`.
+    ///
+    /// Deliberately only cleared by `beginStroke()`, never by `reset(to:)`. `StrokeCanvasView`'s
+    /// selection-clipped path calls `reset` mid-stroke with a whole-canvas composite, but that
+    /// composite is the pre-stroke image everywhere outside the clip, so the net change is still
+    /// contained in this rect; clearing it there would lose the accumulated region and undo would
+    /// leave pixels behind.
+    var strokeDirtyRect: CGRect? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _strokeDirtyRect
+    }
+    private var _strokeDirtyRect: CGRect?
 
     /// Stamps a single round dot at `point` (canvas point space) directly into the persistent
     /// bitmap — the one shared primitive every built-in brush shape stamps with today. Per-shape
@@ -347,6 +366,38 @@ final class RasterLayerTexture: DabTarget {
         guard let ctx = ensureContext() else { return }
         dabGradients.stamp(into: ctx, at: point, radius: radius, color: color,
                            alpha: alpha, hardness: hardness, blendMode: blendMode)
+        // `options: []` on the radial gradient paints nothing past `radius`, so the dab's bounding
+        // box is exactly this — no need to pad for spill.
+        let dab = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+        _strokeDirtyRect = _strokeDirtyRect?.union(dab) ?? dab
+        cachedImage = nil
+        version += 1
+    }
+
+    /// Restores the stroke count on its own, for undo/redo paths that put pixels back with
+    /// `restore(patch:at:)` rather than replacing the whole bitmap through `reset(to:strokeCount:)`.
+    /// `strokeCount` is a display-only count, but it has to travel with the pixels or the layer
+    /// panel's "empty cel" state drifts out of step with what is actually drawn.
+    func setStrokeCount(_ count: Int) {
+        strokeCount = count
+    }
+
+    /// Writes `patch` back over the region starting at `origin`, replacing those pixels outright
+    /// rather than compositing onto them. Undo/redo of a stroke uses this to put back just the
+    /// region the stroke touched.
+    ///
+    /// `.copy` is essential, not a micro-optimisation: the patch carries alpha, and a source-over
+    /// draw would leave any existing ink showing through the patch's transparent pixels — so undoing
+    /// a stroke would fail to remove it. `.copy` makes the patch's alpha authoritative.
+    func restore(patch: UIImage, at origin: CGPoint) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let ctx = ensureContext() else { return }
+        let rect = CGRect(origin: origin, size: patch.size)
+        // ctx is flipped to top-left, so UIImage.draw lands right-side up (same as `setContents`).
+        UIGraphicsPushContext(ctx)
+        patch.draw(in: rect, blendMode: .copy, alpha: 1)
+        UIGraphicsPopContext()
         cachedImage = nil
         version += 1
     }
