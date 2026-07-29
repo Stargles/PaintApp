@@ -30,9 +30,9 @@
     "semantic_hash": "fb7b7651c96e8aab2155126f98463863"
   },
   "PaintSoftware/Engine/BrushStamper.swift": {
-    "mtime": 1785273607.6903558,
-    "ast_hash": "2bfd22ae8f419ff793d50cba2bbab36c",
-    "semantic_hash": "2bfd22ae8f419ff793d50cba2bbab36c"
+    "mtime": 1785306587.7403584,
+    "ast_hash": "5a810f0020fb0b00ccedf37cc15d9712",
+    "semantic_hash": ""
   },
   "PaintSoftware/Engine/Fill.metal": {
     "mtime": 1785273607.6907358,
@@ -45,9 +45,9 @@
     "semantic_hash": "306d2fd33e27e3fe079a3a92138ba81a"
   },
   "PaintSoftware/Engine/RasterLayerTexture.swift": {
-    "mtime": 1785283023.0667017,
-    "ast_hash": "4409cbaf0ee9f063b5771ba051d8613c",
-    "semantic_hash": "4409cbaf0ee9f063b5771ba051d8613c"
+    "mtime": 1785307964.7873292,
+    "ast_hash": "a35d46ef3cef84f1c02682c09456358f",
+    "semantic_hash": ""
   },
   "PaintSoftware/Engine/ShapeDetector.swift": {
     "mtime": 1785273607.6920748,
@@ -55,9 +55,9 @@
     "semantic_hash": "a5c59253db8cd29a48a0b1b4a6c01c8d"
   },
   "PaintSoftware/Engine/ShapeGeometry.swift": {
-    "mtime": 1785273607.692233,
-    "ast_hash": "4e34ed13222372c6eb97fe6062654b11",
-    "semantic_hash": "4e34ed13222372c6eb97fe6062654b11"
+    "mtime": 1785303582.238817,
+    "ast_hash": "09aa23d64931765b6f2405f65b3a55a0",
+    "semantic_hash": ""
   },
   "PaintSoftware/Engine/StrokeInput.swift": {
     "mtime": 1785273607.6926575,
@@ -75,9 +75,9 @@
     "semantic_hash": "011832d6c375c2bd14f7d3cc7fe2e72c"
   },
   "PaintSoftware/Models/CanvasManager.swift": {
-    "mtime": 1785282845.221117,
-    "ast_hash": "858a2bc4a0988438611ff0d1d147ca40",
-    "semantic_hash": "858a2bc4a0988438611ff0d1d147ca40"
+    "mtime": 1785298786.8174877,
+    "ast_hash": "f8e4e520c58a4bfbdd0330b7ff790f4e",
+    "semantic_hash": ""
   },
   "PaintSoftware/Models/Cel.swift": {
     "mtime": 1785279624.8190656,
@@ -205,9 +205,9 @@
     "semantic_hash": "973769b21ae0cd96b1546962621d9102"
   },
   "PaintSoftware/Views/CanvasView.swift": {
-    "mtime": 1785282927.8288062,
-    "ast_hash": "766dc4efc07b83dce7eea7d298beb1b1",
-    "semantic_hash": "766dc4efc07b83dce7eea7d298beb1b1"
+    "mtime": 1785305071.0169847,
+    "ast_hash": "ec97a922af75d0dd549cc2c731707771",
+    "semantic_hash": ""
   },
   "PaintSoftware/Views/ColorPickerPanel.swift": {
     "mtime": 1785273607.7004082,
@@ -290,9 +290,9 @@
     "semantic_hash": "a0f2976c9c785ba84d1d9a5a38d5410d"
   },
   "PaintSoftware/Views/ShapeOverlayView.swift": {
-    "mtime": 1785273607.70529,
-    "ast_hash": "7035ba2a3dc33e244a5c6dcebacbf529",
-    "semantic_hash": "7035ba2a3dc33e244a5c6dcebacbf529"
+    "mtime": 1785303582.2393687,
+    "ast_hash": "a77daa7920a2ef7dabdc186067094b72",
+    "semantic_hash": ""
   },
   "PaintSoftware/Views/SideToolbar.swift": {
     "mtime": 1785273607.7055736,
@@ -360,9 +360,9 @@
     "semantic_hash": "2c22e974ce71c2ba7ca491b99ba178d4"
   },
   "PaintSoftwareUITests/ShapeDetectorLogicTests.swift": {
-    "mtime": 1785273607.7081761,
-    "ast_hash": "937b2bbc8be09310aa4ec3175779c26b",
-    "semantic_hash": "937b2bbc8be09310aa4ec3175779c26b"
+    "mtime": 1785303582.2396207,
+    "ast_hash": "9136ef2bfcc9061661163e3af7d68f7f",
+    "semantic_hash": ""
   },
   "PaintSoftwareUITests/ViewPresetCharacterizationTests.swift": {
     "mtime": 1785274679.3156693,
@@ -398,5 +398,90 @@
     "mtime": 1785273607.7109556,
     "ast_hash": "2c8ed2cca9601b0f0c07842ccdf727de",
     "semantic_hash": "2c8ed2cca9601b0f0c07842ccdf727de"
+  },
+  "PaintSoftware/Models/CanvasManager+Document.swift": {
+    "mtime": 1785293003.7653055,
+    "ast_hash": "5ce3470a41b6e51e312b1bff1c7dd548",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Models/CanvasManager+Fill.swift": {
+    "mtime": 1785300208.9865663,
+    "ast_hash": "8238b1cfd81e0cb91b9172eb23c09e2e",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Models/CanvasManager+LayerTree.swift": {
+    "mtime": 1785294383.993662,
+    "ast_hash": "38fbde40ebd1a2267258166269e3a7a7",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Models/CanvasManager+Shape.swift": {
+    "mtime": 1785297325.3234582,
+    "ast_hash": "783cee677f834666b1b9074c6a4457e7",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Models/CanvasManager+Timeline.swift": {
+    "mtime": 1785290071.9475853,
+    "ast_hash": "93a64920817a1a1ce7aa60ba671a3fff",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Models/CanvasManager+Undo.swift": {
+    "mtime": 1785295784.6283326,
+    "ast_hash": "75f651331f61084b7bae596a4ee330b6",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Models/CanvasManager+ViewPresets.swift": {
+    "mtime": 1785291553.673453,
+    "ast_hash": "3d0a7f6930b4b00fde21f18a1e0eaec3",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Views/Canvas/CanvasHostView.swift": {
+    "mtime": 1785302062.006387,
+    "ast_hash": "af5a1ba5c115d8e8599af4878c59e16f",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Views/Canvas/LayerHostView.swift": {
+    "mtime": 1785302062.0031605,
+    "ast_hash": "6f01eac52d68eb5032643c6d1522dec9",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Views/Canvas/StrokeCanvasView.swift": {
+    "mtime": 1785307958.8563683,
+    "ast_hash": "26c04cfe985e0d8db5dbaa47289c24ec",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Views/Canvas/StrokeGestureRecognizer.swift": {
+    "mtime": 1785302061.9941719,
+    "ast_hash": "10a7f194a4467cf0629c4ae1bda18698",
+    "semantic_hash": ""
+  },
+  "PaintSoftware/Views/Canvas/TouchCountRecognizer.swift": {
+    "mtime": 1785302061.996958,
+    "ast_hash": "85d7bca86439c40fd18849edc80cc7b5",
+    "semantic_hash": ""
+  },
+  "BUGS.md": {
+    "mtime": 1785275596.4581094,
+    "ast_hash": "7823e645d58933d38e323b5369c1f89b",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1785273607.6868315,
+    "ast_hash": "daead7734331d9502a1b358c16be4e02",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1785273607.708779,
+    "ast_hash": "443a673f4d62bc41fe99c5a0b018339d",
+    "semantic_hash": ""
+  },
+  "REFACTOR_BASELINE.md": {
+    "mtime": 1785278884.6849244,
+    "ast_hash": "0c19086e585c859cf87c57701f15c8af",
+    "semantic_hash": ""
+  },
+  "SESSION_LOG.md": {
+    "mtime": 1785310524.7404249,
+    "ast_hash": "8588b26ae4aaf7beb12de37fc5693dc5",
+    "semantic_hash": ""
   }
 }
