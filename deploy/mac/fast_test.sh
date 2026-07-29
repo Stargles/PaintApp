@@ -34,6 +34,10 @@ ONLY=()
 for filter in "$@"; do
   ONLY+=("-only-testing:PaintSoftwareUITests/$filter")
 done
+# Expanded below as ${ONLY[@]+"${ONLY[@]}"}, not "${ONLY[@]}": macOS ships bash 3.2, where expanding
+# an empty array counts as an unbound variable under `set -u`. Plain "${ONLY[@]}" therefore aborted
+# the no-argument (whole suite) invocation before xcodebuild even started, while any filtered run
+# worked fine.
 
 # Worth knowing: the pure-logic suites (BrushEngineLogicTests, ShapeDetectorLogicTests,
 # BackupManagerLogicTests, the three *CharacterizationTests, PerfBaselineTests) are ~130 tests that
@@ -48,7 +52,7 @@ xcodebuild test \
   -derivedDataPath "$DD" \
   -parallel-testing-enabled YES \
   -maximum-parallel-testing-workers "$WORKERS" \
-  "${ONLY[@]}"
+  ${ONLY[@]+"${ONLY[@]}"}
 status=$?
 
 echo "elapsed: $(( $(date +%s) - start ))s"
