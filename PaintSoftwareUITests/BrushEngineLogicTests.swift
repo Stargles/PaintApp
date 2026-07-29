@@ -180,4 +180,108 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertEqual(last.x, target.x, accuracy: 0.5, "Even maximal stabilization should converge to a held-still point given enough updates, not stall short of it forever")
         XCTAssertEqual(last.y, target.y, accuracy: 0.5)
     }
+
+    // MARK: - stampCircle's alpha profile
+
+    /// `stampCircle` caches its radial gradient across dabs, which it can only do because the
+    /// per-dab alpha is *not* baked into the gradient's colour stops — it is applied separately with
+    /// `CGContext.setAlpha`. These tests pin the resulting alpha profile so that substitution can't
+    /// silently drift: if someone re-bakes alpha into the stops, or the two techniques turn out not
+    /// to compose the way `RasterLayerTexture.dabGradients` documents, the rendered dab changes and
+    /// these fail. Nothing else in the suite looks at stamped pixel values.
+
+    /// Reads a texture's pixels back as straight (un-premultiplied) RGBA bytes.
+    private func rgbaPixels(of texture: RasterLayerTexture) -> (bytes: [UInt8], width: Int, height: Int)? {
+        guard let cg = texture.renderToUIImage().cgImage else { return nil }
+        let width = cg.width, height = cg.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let ok = bytes.withUnsafeMutableBytes { raw -> Bool in
+            guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height,
+                                      bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return ok ? (bytes, width, height) : nil
+    }
+
+    private func alpha(_ pixels: (bytes: [UInt8], width: Int, height: Int), x: Int, y: Int) -> CGFloat {
+        CGFloat(pixels.bytes[(y * pixels.width + x) * 4 + 3]) / 255
+    }
+
+    /// A fully hard dab (hardness 1 puts the transparent stop at the very edge) stamped at alpha
+    /// `a` must land alpha `a` at its centre — i.e. the requested per-dab opacity survives the
+    /// gradient-plus-`setAlpha` composition exactly, not scaled or squared by it.
+    func testStampCircleCentreAlphaMatchesRequestedAlpha() {
+        for requested in [CGFloat(0.25), 0.5, 0.75, 1.0] {
+            let texture = RasterLayerTexture(size: CGSize(width: 64, height: 64))
+            texture.stampCircle(at: CGPoint(x: 32, y: 32), radius: 12, color: .black,
+                                alpha: requested, hardness: 1)
+            guard let pixels = rgbaPixels(of: texture) else {
+                return XCTFail("Could not read back the stamped texture")
+            }
+            // 1/255 for the 8-bit quantisation of the destination bitmap, plus a little slack for
+            // CG's gradient sampling right at the centre point.
+            XCTAssertEqual(alpha(pixels, x: 32, y: 32), requested, accuracy: 0.02,
+                           "A hardness-1 dab requested at alpha \(requested) should render that alpha at its centre")
+        }
+    }
+
+    /// The falloff shape: hardness sets where the opaque core ends, and alpha decays to nothing by
+    /// the dab's outer radius. Checked at hardness 0.5, where the core stop sits halfway out — the
+    /// midpoint stays at full requested alpha and the rim is clear.
+    func testStampCircleFalloffHoldsCoreThenFadesToTransparent() {
+        let texture = RasterLayerTexture(size: CGSize(width: 64, height: 64))
+        let requested: CGFloat = 0.8
+        texture.stampCircle(at: CGPoint(x: 32, y: 32), radius: 20, color: .black,
+                            alpha: requested, hardness: 0.5)
+        guard let pixels = rgbaPixels(of: texture) else {
+            return XCTFail("Could not read back the stamped texture")
+        }
+
+        XCTAssertEqual(alpha(pixels, x: 32, y: 32), requested, accuracy: 0.02,
+                       "The core of the dab carries the full requested alpha")
+        // Just inside the core boundary (hardness 0.5 of radius 20 = 10px out) is still full alpha.
+        XCTAssertEqual(alpha(pixels, x: 41, y: 32), requested, accuracy: 0.03,
+                       "Alpha should not start falling off until past the hardness-defined core")
+        // Halfway through the falloff band (15px out of 20) is about half the requested alpha.
+        XCTAssertEqual(alpha(pixels, x: 47, y: 32), requested * 0.5, accuracy: 0.08,
+                       "Alpha should fall off linearly through the band between the core and the rim")
+        // `options: []` means nothing is painted past endRadius at all.
+        XCTAssertEqual(alpha(pixels, x: 54, y: 32), 0, accuracy: 0.01,
+                       "Nothing should be painted beyond the dab's radius")
+    }
+
+    /// Erasing composites the same alpha profile through `.destinationOut`, so a half-alpha eraser
+    /// dab removes half of what was there. This is the case where `setAlpha` had to be verified
+    /// separately: it multiplies *source* alpha, which is what `.destinationOut` reads.
+    func testStampCircleErasesInProportionToRequestedAlpha() {
+        let texture = RasterLayerTexture(size: CGSize(width: 64, height: 64))
+        texture.stampCircle(at: CGPoint(x: 32, y: 32), radius: 20, color: .black, alpha: 1, hardness: 1)
+        texture.stampCircle(at: CGPoint(x: 32, y: 32), radius: 12, color: .black, alpha: 0.5,
+                            hardness: 1, blendMode: .destinationOut)
+        guard let pixels = rgbaPixels(of: texture) else {
+            return XCTFail("Could not read back the stamped texture")
+        }
+        XCTAssertEqual(alpha(pixels, x: 32, y: 32), 0.5, accuracy: 0.02,
+                       "A 0.5-alpha eraser dab over opaque ink should leave half of it behind")
+    }
+
+    /// The cache must not leak one dab's alpha into the next. Stamping full alpha *after* a faint
+    /// dab, at the same colour and hardness (so the second stamp is a cache hit), still has to paint
+    /// fully opaque — a stale baked-in alpha would show up here as a faint second dab.
+    func testStampCircleCacheHitDoesNotReuseThePreviousDabsAlpha() {
+        let texture = RasterLayerTexture(size: CGSize(width: 64, height: 64))
+        texture.stampCircle(at: CGPoint(x: 16, y: 32), radius: 8, color: .black, alpha: 0.1, hardness: 1)
+        texture.stampCircle(at: CGPoint(x: 48, y: 32), radius: 8, color: .black, alpha: 1.0, hardness: 1)
+        guard let pixels = rgbaPixels(of: texture) else {
+            return XCTFail("Could not read back the stamped texture")
+        }
+        XCTAssertEqual(texture.dabGradientCacheHits, 1,
+                       "Same colour and hardness: the second dab must be served from the cache, or this test isn't exercising the case it claims to")
+        XCTAssertEqual(alpha(pixels, x: 16, y: 32), 0.1, accuracy: 0.02, "The faint dab stays faint")
+        XCTAssertEqual(alpha(pixels, x: 48, y: 32), 1.0, accuracy: 0.02,
+                       "The opaque dab must be opaque despite reusing the faint dab's cached gradient")
+    }
 }

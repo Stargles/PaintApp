@@ -319,4 +319,49 @@ final class PerfBaselineTests: XCTestCase {
                        "`scheduleThumbnailRegen` is debounced onto the main run loop, so 50 synchronous calls rasterize nothing on the spot")
         XCTAssertLessThan(direct.seconds, 5.0, "One 2048x2048 thumbnail rasterize taking over 5s is a catastrophic regression")
     }
+
+    // MARK: - Stage 5 additions
+
+    /// `stampCircle` memoizes its radial gradient instead of building one per dab. A cache is only
+    /// worth having if it actually hits, and the hit rate here is not self-evident: the naive key
+    /// (colour *and* per-dab alpha) would hit essentially never, because alpha is
+    /// `brushOpacity × flow × opacityFraction(pressure)` and pressure varies continuously along a
+    /// stroke. The implementation therefore keys on colour and hardness only and applies alpha via
+    /// `CGContext.setAlpha`. This test measures the rate rather than trusting that reasoning — a
+    /// future change that puts a per-dab term back into the key would leave every other test passing
+    /// and show up only as the number printed here collapsing.
+    func testDabGradientCacheHitRate() {
+        let manager = perfManager()
+        let texture = manager.layers[0].cels[0].raster
+        let samples = syntheticStroke(sampleCount: Self.sampleCount)
+
+        stamp(samples, into: manager)
+        let hitsAfterFirst = texture.dabGradientCacheHits
+        let missesAfterFirst = texture.dabGradientCacheMisses
+
+        // A second stroke at the same brush settings should be pure hits: the entry is already there.
+        stamp(samples, into: manager)
+        let secondStrokeHits = texture.dabGradientCacheHits - hitsAfterFirst
+        let secondStrokeMisses = texture.dabGradientCacheMisses - missesAfterFirst
+
+        let total = texture.dabGradientCacheHits + texture.dabGradientCacheMisses
+        let rate = total > 0 ? Double(texture.dabGradientCacheHits) / Double(total) : 0
+
+        report("dab gradient cache", [
+            ("dabsTotal", "\(total)"),
+            ("hits", "\(texture.dabGradientCacheHits)"),
+            ("misses", "\(texture.dabGradientCacheMisses)"),
+            ("hitRate", String(format: "%.1f%%", rate * 100)),
+            ("firstStrokeMisses", "\(missesAfterFirst)"),
+            ("secondStrokeHits", "\(secondStrokeHits)"),
+            ("secondStrokeMisses", "\(secondStrokeMisses)"),
+        ])
+
+        XCTAssertEqual(missesAfterFirst, 1,
+                       "A stroke is one colour at one hardness, so it should miss exactly once — on its first dab — and hit for every dab after that. More than one miss means a per-dab term (alpha, radius, position) has leaked into the cache key.")
+        XCTAssertEqual(secondStrokeMisses, 0,
+                       "A second stroke with identical brush settings must not rebuild the gradient at all")
+        XCTAssertGreaterThan(rate, 0.99,
+                             "The cache exists to serve the overwhelming majority of dabs; a rate this far below 100% means it is not doing its job")
+    }
 }
