@@ -94,14 +94,37 @@ enum VectorEraser {
         guard samples.count > 1 else {
             return sweep.contains(samples[0].point) ? [0...0] : []
         }
+        return coveredSpans(in: samples, clipTo: sweep.bounds, probeStep: sweep.probeStep) { parameter in
+            guard let point = StrokeGeometry.interpolatedSample(in: samples, at: parameter)?.point else {
+                return false
+            }
+            return sweep.contains(point)
+        }
+    }
+
+    /// The probe-and-bisect walk both `cutRanges` and `cleanCutRanges` are built from: the maximal
+    /// parametric spans of `samples` over which `predicate` holds, in the "sample index + fraction"
+    /// domain.
+    ///
+    /// The two differ only in what "covered" means — centreline under the footprint for Mode 2, the
+    /// stroke's whole width under it for Mode 1's clean-cut test — and getting the walk itself right
+    /// (the clip, the stalled-finger case, closing a run at a segment boundary so `mergedCuts` can
+    /// rejoin it) is the part that took the tests. One implementation, one set of edge cases.
+    ///
+    /// `rect` clips the walk: outside it the predicate is required to be false, which is what keeps a
+    /// small nib on a long stroke from probing thousands of positions that cannot match. Callers whose
+    /// predicate reaches beyond the eraser's own box — the clean-cut test does, by the stroke's
+    /// half-width — must grow the rect to match.
+    private static func coveredSpans(in samples: [VectorSample], clipTo rect: CGRect, probeStep: CGFloat,
+                                     predicate: (CGFloat) -> Bool) -> [ClosedRange<CGFloat>] {
+        guard !samples.isEmpty else { return [] }
+        guard samples.count > 1 else { return predicate(0) ? [0...0] : [] }
 
         var ranges: [ClosedRange<CGFloat>] = []
         for i in 0..<(samples.count - 1) {
             let a = samples[i].point, b = samples[i + 1].point
-            // Only the stretch of this segment that reaches the sweep's box can be inside the sweep,
-            // and outside the box `contains` is a guaranteed miss. Clipping first is what keeps a
-            // small nib on a long stroke from probing thousands of positions that cannot match.
-            guard let (clipLow, clipHigh) = clipParameters(of: a, b, to: sweep.bounds) else { continue }
+            guard let (clipLow, clipHigh) = clipParameters(of: a, b, to: rect) else { continue }
+            let base = CGFloat(i)
             let length = hypot(b.x - a.x, b.y - a.y)
             guard length > StrokeGeometry.epsilon else {
                 // Repeated samples (a stationary finger emits them) have no extent to walk: every
@@ -109,29 +132,30 @@ enum VectorEraser {
                 // none of it is. Claiming the full span rather than the single point `i...i` is what
                 // lets a cut spanning a stall abut its neighbours and merge into one range instead of
                 // fragmenting the stroke into slivers around every duplicated sample.
-                if sweep.contains(a) { ranges.append(CGFloat(i)...CGFloat(i + 1)) }
+                if predicate(base) { ranges.append(base...(base + 1)) }
                 continue
             }
 
             let span = clipHigh - clipLow
-            let steps = max(Int((span * length / sweep.probeStep).rounded(.up)), 1)
+            let steps = max(Int((span * length / probeStep).rounded(.up)), 1)
             var previousT = clipLow
-            var previousInside = sweep.contains(point(on: a, b, at: clipLow))
+            var previousInside = predicate(base + clipLow)
             // A run open at the clip's low end started at or before it — and before it is outside the
             // box, hence outside the sweep — so the clip boundary *is* the entry point.
             var runStart: CGFloat? = previousInside ? clipLow : nil
 
             for step in 1...steps {
                 let t = clipLow + span * CGFloat(step) / CGFloat(steps)
-                let inside = sweep.contains(point(on: a, b, at: t))
+                let inside = predicate(base + t)
                 if inside != previousInside {
-                    let crossing = refineCrossing(on: a, b, sweep: sweep,
+                    let crossing = refineCrossing(base: base,
                                                   outside: inside ? previousT : t,
-                                                  inside: inside ? t : previousT)
+                                                  inside: inside ? t : previousT,
+                                                  predicate: predicate)
                     if inside {
                         runStart = crossing
                     } else if let start = runStart {
-                        ranges.append((CGFloat(i) + start)...(CGFloat(i) + crossing))
+                        ranges.append((base + start)...(base + crossing))
                         runStart = nil
                     }
                 }
@@ -142,10 +166,197 @@ enum VectorEraser {
             // it, the next segment opens its own run at its own low clip and `mergedCuts` — which
             // merges abutting ranges — joins the two.
             if let start = runStart {
-                ranges.append((CGFloat(i) + start)...(CGFloat(i) + clipHigh))
+                ranges.append((base + start)...(base + clipHigh))
             }
         }
         return ranges
+    }
+
+    // MARK: - Mode 1 — the hybrid resolution
+    //
+    // ## What the measurement changed about plan §1
+    //
+    // §1 proposed: cut the spans the eraser fully covers, subtract those from the eraser's footprint,
+    // retain whatever is left as an alpha punch — and predicted that a hard round eraser swept across a
+    // line the way people normally erase would leave *nothing* to retain.
+    //
+    // The first half survives. The prediction does not, and `RasterVectorParityLogicTests` is why. Two
+    // measurements, both at zero tolerance against a raster layer erased identically:
+    //
+    // 1. **A retained punch is byte-identical to raster erasing.** Every pixel, across hard/soft
+    //    brushes, full/partial opacity, square/diagonal/shave gestures, over a stroke, a fill and a
+    //    placed image. §1's fallback is exactly as strong as it claimed.
+    // 2. **A geometric split is not, even in its most favourable case.** A hard round eraser at full
+    //    opacity cutting square across a line left 498 stray pixels at delta 255.
+    //
+    // The second is not a tuning failure, it is geometry. A cut stroke is re-rendered by stamping the
+    // brush along the surviving samples, so its end is a **round cap of the stroke's own half-width**,
+    // while the eraser removed ink along a **straight band edge**. Those two shapes differ by a lens of
+    // area ≈ 0.43·w² however the cut boundary is placed — pushing the boundary out past the footprint
+    // trades stray ink for missing ink and cannot reach zero. For a 2pt line that is sub-pixel; for the
+    // 24pt line in the parity matrix it is hundreds of pixels.
+    //
+    // So the two representations are not interchangeable-when-clean, and the resolution changes shape:
+    //
+    // - **The punch is always retained**, which makes Mode 1 pixel-exact by construction rather than by
+    //   a threshold nobody can defend.
+    // - **The split still happens**, because it is what gives real separation — the plan's "grab one
+    //   visual half with the Move tool" — but it is cut **conservatively**: each clean span is pulled
+    //   *in* by the stroke's own half-width, which is exactly the condition that makes the ink it
+    //   removes provably a subset of the ink the punch removes. Split-then-punch is therefore
+    //   pixel-identical to punch-alone, and the split is free of visual consequence.
+    // - **The growth §1 worried about is answered by trimming and GC instead.** The retained element
+    //   keeps only the spans of the gesture that still have something beneath them (`residueSpans`),
+    //   and `VectorCanvas` drops it entirely when nothing does. Scribbling a stroke out completely —
+    //   the common case §1 wanted to cost nothing — costs nothing: every span is resolved, so no
+    //   element is retained at all.
+
+    /// Plan §1's alpha gate: whether this eraser brush is capable of a clean cut *at all*, before any
+    /// geometry is considered.
+    ///
+    /// A clean cut asserts that the ink it deletes was going to be removed completely anyway. Anything
+    /// that makes the eraser's own alpha less than 1 inside its geometric footprint breaks that, and
+    /// the failure is asymmetric — a false "clean" is ink deleted that should have faded, a false
+    /// "residue" is only a retained element — so every condition below is checked in the strict
+    /// direction.
+    ///
+    /// `scatter` and `rotationJitter` are here because the capsule chain models the *un-scattered*
+    /// sweep. `BrushStamper.applyScatter` displaces each dab by up to `radius · 2 · scatter` off the
+    /// centreline, so the chain is wrong in both directions at once: it claims coverage where a
+    /// displaced dab left a gap, and misses coverage where one landed outside. Neither is a margin that
+    /// can be tuned away.
+    ///
+    /// `.square`/`.custom` are excluded because `BrushStamper.stampApproximateSquare` reaches
+    /// `diameter/2 · √2` at the corners while the chain models `diameter/2`. That errs toward retaining
+    /// a punch, which is the safe direction, and a square eraser therefore essentially never splits.
+    static func supportsCleanCut(brush: Brush, opacity: Double) -> Bool {
+        switch brush.shape {
+        case .square, .custom: return false
+        case .softRound, .hardRound, .pen, .pencil: break
+        }
+        guard brush.hardness >= 0.95 else { return false }
+        guard !brush.grain.isEnabled else { return false }
+        guard opacity * brush.flow >= 0.999 else { return false }
+        // A pressure-driven opacity fades the stroke wherever the touch was light, and the gesture's
+        // pressures are not known here — `opacityFraction` bottoms out at `1 - opacityPressure`, so
+        // requiring that to be 1 is the same as requiring the dynamic to be off.
+        guard brush.dynamics.opacityFraction(forPressure: 0) >= 0.999 else { return false }
+        guard brush.scatter <= 0, brush.rotationJitter <= 0 else { return false }
+        return true
+    }
+
+    /// Whether a *paint* stroke may be split, as opposed to left to the punch.
+    ///
+    /// Split pieces mint fresh ids, and `BrushStamper` seeds its dab RNG from the id, so splitting a
+    /// stroke whose brush scatters or jitters re-rolls where every one of its dabs lands — the two
+    /// halves would visibly reshuffle at the moment of the cut, and the punch cannot put back ink that
+    /// moved *outside* the erased region. Such a stroke is left whole and erased by the punch alone,
+    /// which is exact.
+    static func supportsSplitting(strokeBrush: Brush) -> Bool {
+        strokeBrush.scatter <= 0 && strokeBrush.rotationJitter <= 0
+    }
+
+    /// The eraser footprint the clean-cut test is allowed to rely on: the sweep's capsules with every
+    /// radius pulled in by the deepest gap between consecutive dabs.
+    ///
+    /// A capsule chain is the region the eraser sweeps only if its dabs actually overlap. `BrushStamper`
+    /// spaces them `max(size · spacingFraction, 1)` apart, so a wide-spacing brush paints a row of
+    /// beads whose union falls short of the capsule by the scallop depth `r - √(r² - (s/2)²)`. Pulling
+    /// the radii in by exactly that is what stops such a brush claiming a clean cut through the gaps it
+    /// left. Capsules that vanish entirely are dropped — that eraser cannot cleanly cut anything.
+    static func cleanCutCapsules(_ capsules: [StrokeGeometry.Capsule], brush: Brush,
+                                 size: CGFloat) -> [StrokeGeometry.Capsule] {
+        let spacing = BrushStamper.stampSpacing(brushSize: size, brush: brush)
+        var result: [StrokeGeometry.Capsule] = []
+        result.reserveCapacity(capsules.count)
+        for capsule in capsules {
+            let ra = scalloped(capsule.ra, spacing: spacing)
+            let rb = scalloped(capsule.rb, spacing: spacing)
+            guard ra > StrokeGeometry.epsilon, rb > StrokeGeometry.epsilon else { continue }
+            result.append(StrokeGeometry.Capsule(a: capsule.a, b: capsule.b, ra: ra, rb: rb))
+        }
+        return result
+    }
+
+    private static func scalloped(_ radius: CGFloat, spacing: CGFloat) -> CGFloat {
+        let half = spacing / 2
+        guard half < radius else { return 0 }
+        return sqrt(radius * radius - half * half)
+    }
+
+    /// How far past the stroke's geometric half-width the eraser must reach before a span counts as
+    /// cleanly cut. Plan §1's margin, for anti-aliased fringe at the very edge of the ink.
+    static let cleanCutMargin: CGFloat = 0.05
+
+    /// Parametric spans of `samples` where the eraser covers the stroke's **entire width** — §1's
+    /// clean-cut test, as opposed to `cutRanges`, which only asks whether the centreline is under the
+    /// footprint.
+    ///
+    /// The walk is `cutRanges`', with a different predicate; the clip rect is grown by the stroke's
+    /// widest half-width because a centreline outside the sweep's box can still have ink inside it.
+    static func cleanCutRanges(in samples: [VectorSample], brush: Brush, size: CGFloat,
+                               by erasers: [StrokeGeometry.Capsule], sweep: Sweep) -> [ClosedRange<CGFloat>] {
+        guard !erasers.isEmpty, !samples.isEmpty else { return [] }
+        let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: brush, size: size) * (1 + cleanCutMargin)
+        var scratch: [ClosedRange<CGFloat>] = []
+        scratch.reserveCapacity(erasers.count)
+        return coveredSpans(in: samples, clipTo: sweep.bounds.insetBy(dx: -reach, dy: -reach),
+                            probeStep: sweep.probeStep) { parameter in
+            StrokeGeometry.coverage(atParameter: parameter, in: samples, brush: brush, size: size,
+                                    by: erasers, margin: cleanCutMargin, scratch: &scratch) >= 1
+        }
+    }
+
+    /// `ranges` pulled in by the stroke's own half-width at each end — the step that makes a split
+    /// safe to combine with a retained punch.
+    ///
+    /// Deleting samples over `[c0, c1]` does not delete the ink over `[c0, c1]`: the surviving pieces
+    /// end in round caps, so the ink actually lost runs from `c0 - w` to `c1 + w`, spilling half a
+    /// stroke-width past the span that was measured as covered and out of the eraser's footprint
+    /// entirely. That is ink the eraser never touched, and no punch can put it back. Insetting by `w`
+    /// makes the lost ink a subset of the covered span instead, so the split is invisible and the punch
+    /// remains the sole author of the result.
+    ///
+    /// A span shorter than the two insets disappears: the eraser is narrower than the line it crossed,
+    /// so there is no separation to be had geometrically and the punch handles it alone.
+    static func conservativeCuts(_ ranges: [ClosedRange<CGFloat>], in samples: [VectorSample],
+                                 brush: Brush, size: CGFloat) -> [ClosedRange<CGFloat>] {
+        guard samples.count > 1 else { return ranges }
+        var result: [ClosedRange<CGFloat>] = []
+        for range in ranges {
+            let lowWidth = halfWidth(at: range.lowerBound, in: samples, brush: brush, size: size)
+            let highWidth = halfWidth(at: range.upperBound, in: samples, brush: brush, size: size)
+            let low = StrokeGeometry.offsetParameter(range.lowerBound, by: lowWidth, in: samples)
+            let high = StrokeGeometry.offsetParameter(range.upperBound, by: -highWidth, in: samples)
+            guard high - low > StrokeGeometry.epsilon else { continue }
+            result.append(low...high)
+        }
+        return result
+    }
+
+    private static func halfWidth(at parameter: CGFloat, in samples: [VectorSample], brush: Brush,
+                                  size: CGFloat) -> CGFloat {
+        let pressure = StrokeGeometry.interpolatedSample(in: samples, at: parameter)?.pressure ?? 1
+        return StrokeGeometry.stampRadius(forPressure: pressure, brush: brush, size: size)
+    }
+
+    /// The spans of the eraser's *own* gesture that still have something under them, given
+    /// `hasBackdrop` — plan §1's "subtract the resolved span from the eraser's footprint", applied to
+    /// the eraser's parametric domain.
+    ///
+    /// This is what keeps Mode 1 from growing the display list on every stroke. The dabs of a long drag
+    /// that passed over nothing, or over ink the split has since removed entirely, have nothing left to
+    /// punch, so they are trimmed away; only the stretches still sitting over surviving ink, a fill or
+    /// an image are retained. An erase that resolved completely returns no spans at all, and no element
+    /// is kept.
+    ///
+    /// `hasBackdrop` is asked at a parametric position along the gesture and answers "is there anything
+    /// beneath the dab there" — it needs the display list, so `VectorCanvas` supplies it.
+    static func residueSpans(in samples: [VectorSample], sweep: Sweep,
+                             hasBackdrop: (CGFloat) -> Bool) -> [ClosedRange<CGFloat>] {
+        guard !samples.isEmpty else { return [] }
+        return coveredSpans(in: samples, clipTo: sweep.bounds, probeStep: sweep.probeStep,
+                            predicate: hasBackdrop)
     }
 
     // MARK: - Mode 3 — cut to intersection
@@ -258,12 +469,12 @@ enum VectorEraser {
     /// visibly lagging the eraser. Bisecting the actual footprint boundary — and letting
     /// `splitStroke` interpolate a real sample there, pressure included — is what makes the cut land
     /// where the user swept.
-    private static func refineCrossing(on a: CGPoint, _ b: CGPoint, sweep: Sweep,
-                                       outside: CGFloat, inside: CGFloat) -> CGFloat {
+    private static func refineCrossing(base: CGFloat, outside: CGFloat, inside: CGFloat,
+                                       predicate: (CGFloat) -> Bool) -> CGFloat {
         var outside = outside, inside = inside
         for _ in 0..<refinementSteps {
             let mid = (outside + inside) / 2
-            if sweep.contains(point(on: a, b, at: mid)) { inside = mid } else { outside = mid }
+            if predicate(base + mid) { inside = mid } else { outside = mid }
         }
         return inside
     }

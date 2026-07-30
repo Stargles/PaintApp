@@ -537,7 +537,7 @@ final class StrokeCanvasView: UIView {
                 // the eraser's diameter here (see `updateActiveLayerAndTool`'s `activeSize`); the canvas
                 // maps both it and the samples into layer-local space.
                 if vectorCanvas.erase(alongPath: currentVectorSamples, brush: brush, size: brushSize,
-                                      mode: vectorEraserMode) {
+                                      opacity: brushOpacity, mode: vectorEraserMode) {
                     vectorContentChanged = true
                 }
             }

@@ -389,6 +389,87 @@ enum StrokeGeometry {
                         by: erasers, scratch: &scratch)
     }
 
+    /// Coverage at an arbitrary **parametric position** rather than at a stored sample.
+    ///
+    /// Mode 1's clean-cut decision needs this for the same reason Mode 2's cut boundaries did (plan
+    /// §4, defect 2): judging coverage only at stored samples puts the verdict — and therefore the cut
+    /// — wherever the touch sampler happened to drop a point, which on a fast drag is tens of points
+    /// away from where the eraser's edge actually falls. Probing the parametric domain and bisecting
+    /// the crossing puts it within a fraction of a pixel instead.
+    ///
+    /// `margin` inflates the half-width the eraser has to cover before this reports 1. Plan §1 asks
+    /// for exactly that: anti-aliased fringe means a stroke whose geometric half-width is *just*
+    /// covered still leaves a visible edge, so a clean cut requires the eraser to overshoot slightly.
+    static func coverage(atParameter parameter: CGFloat, in samples: [VectorSample], brush: Brush,
+                         size: CGFloat, by erasers: [Capsule], margin: CGFloat = 0,
+                         scratch: inout [ClosedRange<CGFloat>]) -> CGFloat {
+        guard let sample = interpolatedSample(in: samples, at: parameter) else { return 0 }
+        let radius = stampRadius(forPressure: sample.pressure, brush: brush, size: size) * (1 + margin)
+        let t = tangent(atParameter: parameter, in: samples)
+        return crossSectionCoverage(center: sample.point, normal: CGPoint(x: -t.y, y: t.x),
+                                    halfWidth: radius, by: erasers, scratch: &scratch)
+    }
+
+    /// Unit tangent at a parametric position: the direction of the segment the position falls inside,
+    /// which is what the renderer actually walks between two samples, falling back to the neighbouring
+    /// sample's tangent when that segment is degenerate (a stationary finger emits coincident samples).
+    static func tangent(atParameter parameter: CGFloat, in samples: [VectorSample]) -> CGPoint {
+        guard samples.count > 1 else { return CGPoint(x: 1, y: 0) }
+        let domainEnd = CGFloat(samples.count - 1)
+        let clamped = min(max(parameter, 0), domainEnd)
+        let index = min(Int(clamped.rounded(.down)), samples.count - 2)
+        let a = samples[index].point, b = samples[index + 1].point
+        if let unit = normalized(CGPoint(x: b.x - a.x, y: b.y - a.y)) { return unit }
+        return tangent(ofSampleAt: index, in: samples)
+    }
+
+    /// `parameter` moved `distance` along the polyline — forward for positive, backward for negative —
+    /// clamped to the run's domain.
+    ///
+    /// The parametric domain is "sample index + fraction", which is *not* proportional to arclength
+    /// when samples are unevenly spaced, so Mode 1 cannot place a cut boundary "half a stroke-width
+    /// further out" by adding a constant to a parameter. This is the conversion. It walks rather than
+    /// building a cumulative-length table because it runs a couple of times per cut boundary, not once
+    /// per probe.
+    static func offsetParameter(_ parameter: CGFloat, by distance: CGFloat,
+                                in samples: [VectorSample]) -> CGFloat {
+        guard samples.count > 1 else { return 0 }
+        let domainEnd = CGFloat(samples.count - 1)
+        var position = min(max(parameter, 0), domainEnd)
+        var remaining = abs(distance)
+        guard remaining > epsilon else { return position }
+        let forward = distance > 0
+
+        while remaining > epsilon {
+            if forward {
+                guard position < domainEnd else { return domainEnd }
+                let index = min(Int(position.rounded(.down)), samples.count - 2)
+                let a = samples[index].point, b = samples[index + 1].point
+                let length = hypot(b.x - a.x, b.y - a.y)
+                let available = length * (CGFloat(index + 1) - position)
+                if available > remaining {
+                    return position + remaining / length
+                }
+                remaining -= available
+                position = CGFloat(index + 1)
+            } else {
+                guard position > 0 else { return 0 }
+                // `rounded(.up) - 1` rather than `rounded(.down)` so a position sitting exactly on a
+                // sample walks back into the segment *before* it, not the one after.
+                let index = min(max(Int(position.rounded(.up)) - 1, 0), samples.count - 2)
+                let a = samples[index].point, b = samples[index + 1].point
+                let length = hypot(b.x - a.x, b.y - a.y)
+                let available = length * (position - CGFloat(index))
+                if available > remaining {
+                    return position - remaining / length
+                }
+                remaining -= available
+                position = CGFloat(index)
+            }
+        }
+        return position
+    }
+
     /// Unit tangent at `samples[index]`: a central difference in the interior, a forward/backward
     /// difference at the ends, and the nearest non-coincident neighbour when the immediate one
     /// duplicates the sample (a stationary finger emits repeats, and a zero tangent would collapse
@@ -708,6 +789,25 @@ enum StrokeGeometry {
     // MARK: - Small helpers
 
     /// Linear blend of two samples — position **and** pressure.
+    /// What `spans` leaves out of `domain` — merged, clamped, and in ascending order.
+    ///
+    /// Mode 1's residue trimming has the spans it wants to **keep** (where the eraser still has
+    /// something beneath it) and `splitStroke` takes the spans to **remove**, so this is the bridge
+    /// between them. Same shape as `mergedCuts`, from the other side.
+    static func complementOfSpans(_ spans: [ClosedRange<CGFloat>],
+                                  over domain: ClosedRange<CGFloat>) -> [ClosedRange<CGFloat>] {
+        let merged = mergedCuts(spans, clampedTo: domain)
+        guard !merged.isEmpty else { return [domain] }
+        var result: [ClosedRange<CGFloat>] = []
+        var cursor = domain.lowerBound
+        for span in merged {
+            if span.lowerBound > cursor { result.append(cursor...span.lowerBound) }
+            cursor = max(cursor, span.upperBound)
+        }
+        if cursor < domain.upperBound { result.append(cursor...domain.upperBound) }
+        return result
+    }
+
     static func lerp(_ from: VectorSample, _ to: VectorSample, _ t: CGFloat) -> VectorSample {
         VectorSample(x: from.x + (to.x - from.x) * t,
                      y: from.y + (to.y - from.y) * t,

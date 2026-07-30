@@ -605,10 +605,13 @@ final class VectorCanvas {
     /// `.erase` elements, garbage-collects them instead (plan §1).
     @discardableResult
     func erase(alongPath canvasSpaceSamples: [VectorSample], brush: Brush, size: CGFloat,
-               mode: VectorEraserMode) -> Bool {
+               opacity: Double = 1, mode: VectorEraserMode) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !canvasSpaceSamples.isEmpty, _elements.contains(where: { $0.stroke != nil }) else { return false }
+        guard !canvasSpaceSamples.isEmpty else { return false }
+        // Mode 1 can leave a punch over a fill or a placed image, so unlike Modes 2 and 3 it has work
+        // to do on a layer with no strokes at all.
+        guard mode == .erase || _elements.contains(where: { $0.stroke != nil }) else { return false }
 
         let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
         let scale = Self.scale(of: _transform)
@@ -618,9 +621,10 @@ final class VectorCanvas {
 
         let changed: Bool
         switch mode {
-        // Mode 1 shares Mode 2's geometry until Phase 4 adds the hybrid resolution — see
-        // `VectorEraserMode.erase`. This is the one branch that changes then.
-        case .erase, .cutPoints:
+        case .erase:
+            changed = eraseHybrid(sweep: sweep, samples: localSamples, brush: brush, size: localSize,
+                                  opacity: opacity)
+        case .cutPoints:
             changed = cutAlongFootprint(sweep: sweep)
         case .cutToIntersection:
             // Whole-gesture form, resolved once against the first sample. The live gesture driver
@@ -666,8 +670,211 @@ final class VectorCanvas {
         return outcome
     }
 
-    /// Modes 1 and 2: every paint stroke loses the spans its geometry shares with the eraser's
-    /// footprint. Caller must hold `lock`.
+    // MARK: - Mode 1 — the hybrid
+    //
+    // The rules and the measurement that shaped them are documented on `VectorEraser`'s Mode 1
+    // section; this is the adapter that applies them to a display list. Two steps, in this order:
+    //
+    // 1. **Separate** what the eraser provably severed, by splitting those strokes. Conservatively
+    //    inset, so the ink it removes is a subset of the ink step 2 removes and it changes no pixels.
+    // 2. **Punch**, always, so the result is byte-identical to erasing the same content on a raster
+    //    layer — trimmed to the stretches of the gesture that still have something beneath them, then
+    //    dropped entirely if none do.
+    //
+    // Step 2 is why Mode 1 is not just a better Mode 2, and step 1 is why it is not just a punch.
+
+    /// Caller must hold `lock`.
+    private func eraseHybrid(sweep: VectorEraser.Sweep, samples localSamples: [VectorSample],
+                             brush: Brush, size: CGFloat, opacity: Double) -> Bool {
+        var changed = false
+
+        if VectorEraser.supportsCleanCut(brush: brush, opacity: opacity) {
+            let erasers = VectorEraser.cleanCutCapsules(sweep.capsules, brush: brush, size: size)
+            if !erasers.isEmpty, splitCleanlySeveredStrokes(sweep: sweep, erasers: erasers) {
+                changed = true
+                // Bumps `version`, so the residue query below rebuilds the index against the
+                // *survivors*. Without this it would ask a stale index and retain punch over strokes
+                // the split just removed.
+                invalidate()
+            }
+        }
+
+        let residue = VectorEraser.residueSpans(in: localSamples, sweep: sweep) { parameter in
+            hasContentBeneath(atParameter: parameter, in: localSamples, brush: brush, size: size)
+        }
+        if !residue.isEmpty {
+            let domain = 0...CGFloat(max(localSamples.count - 1, 0))
+            let discarded = StrokeGeometry.complementOfSpans(residue, over: domain)
+            for run in StrokeGeometry.splitStroke(localSamples, removing: discarded) {
+                // The eraser *is* a stroke (plan §2.1): same brush, same size, same pressure-driven
+                // dab chain, composited `.destinationOut` at render. Appended last, so it punches
+                // everything already in the list and nothing drawn after it. The colour is arbitrary —
+                // `.destinationOut` reads only the stamp's alpha coverage.
+                let punch = VectorStroke(brush: brush,
+                                         color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                         size: size, opacity: opacity, samples: run, composite: .erase)
+                _elements.append(.stroke(punch))
+                changed = true
+            }
+        }
+
+        if collectResidueGarbage() { changed = true }
+        return changed
+    }
+
+    /// Splits every candidate paint stroke the eraser severs across its whole width. Caller must hold
+    /// `lock`.
+    private func splitCleanlySeveredStrokes(sweep: VectorEraser.Sweep,
+                                            erasers: [StrokeGeometry.Capsule]) -> Bool {
+        // The index holds centrelines, so a stroke whose centreline sits outside the sweep's box can
+        // still have ink inside it. Grow the query by the widest half-width on the layer or the
+        // clean-cut test never gets asked about the strokes at the edge of the gesture.
+        let reach = maxPaintReach()
+        let candidates = Set(strokeIndex().segments(near: sweep.bounds.insetBy(dx: -reach, dy: -reach))
+            .map(\.elementIndex))
+        guard !candidates.isEmpty else { return false }
+
+        var changed = false
+        var result: [VectorElement] = []
+        result.reserveCapacity(_elements.count)
+        for (index, element) in _elements.enumerated() {
+            guard candidates.contains(index), let stroke = element.stroke,
+                  stroke.composite == .paint, VectorEraser.supportsSplitting(strokeBrush: stroke.brush) else {
+                result.append(element)
+                continue
+            }
+            let clean = VectorEraser.cleanCutRanges(in: stroke.samples, brush: stroke.brush,
+                                                    size: stroke.size, by: erasers, sweep: sweep)
+            let cuts = Self.effectiveCuts(VectorEraser.conservativeCuts(clean, in: stroke.samples,
+                                                                        brush: stroke.brush, size: stroke.size),
+                                          in: stroke.samples)
+            guard !cuts.isEmpty else { result.append(element); continue }
+            changed = true
+            for run in StrokeGeometry.splitStroke(stroke.samples, removing: cuts) {
+                var piece = stroke
+                piece.id = UUID()
+                piece.samples = run
+                result.append(.stroke(piece))
+            }
+        }
+        if changed { _elements = result }
+        return changed
+    }
+
+    /// Whether the eraser's dab at a parametric position along the gesture still has anything under it
+    /// — the predicate behind residue trimming. Caller must hold `lock`.
+    private func hasContentBeneath(atParameter parameter: CGFloat, in samples: [VectorSample],
+                                   brush: Brush, size: CGFloat) -> Bool {
+        guard let dab = StrokeGeometry.interpolatedSample(in: samples, at: parameter) else { return false }
+        let radius = StrokeGeometry.stampRadius(forPressure: dab.pressure, brush: brush, size: size)
+        let box = CGRect(x: dab.x - radius, y: dab.y - radius, width: radius * 2, height: radius * 2)
+
+        // Fills and images have no geometry the split could have removed, so any overlap at all means
+        // the punch is still doing work. Bounding boxes rather than exact paths: conservative in the
+        // safe direction (an unnecessary punch is a retained element, a missing one is a visible
+        // artefact), and a fill's exact containment test per probe is not worth its cost here.
+        for element in _elements {
+            switch element {
+            case .fill(let fill):
+                if let path = fill.cgPath, path.boundingBoxOfPath.intersects(box) { return true }
+            case .image(let image):
+                if Self.bounds(of: image).intersects(box) { return true }
+            case .stroke:
+                continue
+            }
+        }
+
+        let reach = maxPaintReach()
+        guard reach > 0 else { return false }
+        for ref in strokeIndex().segments(near: box.insetBy(dx: -reach, dy: -reach)) {
+            guard let stroke = _elements[ref.elementIndex].stroke, stroke.composite == .paint,
+                  stroke.samples.indices.contains(ref.sampleIndex) else { continue }
+            let a = stroke.samples[ref.sampleIndex].point
+            let b = stroke.samples[min(ref.sampleIndex + 1, stroke.samples.count - 1)].point
+            let limit = radius + StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
+                                                            size: stroke.size)
+            if StrokeGeometry.distanceSquared(from: dab.point, toSegment: a, b) <= limit * limit {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Plan §1's garbage collection: a retained `.erase` element is dropped once nothing *beneath it*
+    /// in the display list still reaches its bounding box. Caller must hold `lock`.
+    ///
+    /// Beneath, not anywhere — an element added after the punch is above it and was never affected by
+    /// it, so its presence is no reason to keep one. Run on commit rather than per frame, which is why
+    /// a punch whose backdrop was deleted survives until the next erase; it renders as a hole in
+    /// nothing, so nothing is visibly wrong in the meantime.
+    private func collectResidueGarbage() -> Bool {
+        guard _elements.contains(where: { $0.stroke?.composite == .erase }) else { return false }
+        let reach = maxPaintReach()
+        var kept: [VectorElement] = []
+        kept.reserveCapacity(_elements.count)
+        var dropped = false
+        for element in _elements {
+            guard let stroke = element.stroke, stroke.composite == .erase else {
+                kept.append(element)
+                continue
+            }
+            let punchReach = StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush, size: stroke.size)
+            guard let box = StrokeGeometry.bounds(of: stroke.samples, padding: punchReach + reach) else {
+                dropped = true
+                continue
+            }
+            if Self.anyContent(in: kept, reaching: box) {
+                kept.append(element)
+            } else {
+                dropped = true
+            }
+        }
+        if dropped { _elements = kept }
+        return dropped
+    }
+
+    /// Whether any paint stroke, fill or image in `elements` reaches `box`. Static, so it cannot
+    /// re-enter `lock`; `box` is already padded by the caller for stroke width.
+    private static func anyContent(in elements: [VectorElement], reaching box: CGRect) -> Bool {
+        for element in elements {
+            switch element {
+            case .stroke(let stroke):
+                guard stroke.composite == .paint,
+                      let strokeBox = StrokeGeometry.bounds(of: stroke.samples) else { continue }
+                if strokeBox.intersects(box) { return true }
+            case .fill(let fill):
+                if let path = fill.cgPath, path.boundingBoxOfPath.intersects(box) { return true }
+            case .image(let image):
+                if bounds(of: image).intersects(box) { return true }
+            }
+        }
+        return false
+    }
+
+    /// A placed image's local-space bounding box, taken as the circumscribing circle of its scaled
+    /// size so the answer is rotation-independent — conservative, and rotation is stored as a free
+    /// angle rather than a quadrant.
+    private static func bounds(of element: VectorImageElement) -> CGRect {
+        let size = element.image.size
+        let radius = hypot(size.width, size.height) / 2 * abs(element.transform.scale)
+        return CGRect(x: element.transform.position.x - radius, y: element.transform.position.y - radius,
+                      width: radius * 2, height: radius * 2)
+    }
+
+    /// The widest half-width any paint stroke on the layer renders at, i.e. how far ink can extend
+    /// beyond a centreline the spatial index stores. Caller must hold `lock`.
+    private func maxPaintReach() -> CGFloat {
+        var reach: CGFloat = 0
+        for element in _elements {
+            guard let stroke = element.stroke, stroke.composite == .paint else { continue }
+            reach = max(reach, StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
+                                                          size: stroke.size))
+        }
+        return reach
+    }
+
+    /// Mode 2: every paint stroke loses the spans its geometry shares with the eraser's footprint.
+    /// Caller must hold `lock`.
     private func cutAlongFootprint(sweep: VectorEraser.Sweep) -> Bool {
         let candidates = Set(strokeIndex().segments(near: sweep.bounds).map(\.elementIndex))
         guard !candidates.isEmpty else { return false }
