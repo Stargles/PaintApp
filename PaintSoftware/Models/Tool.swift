@@ -17,14 +17,14 @@ enum Tool: Hashable {
 /// engine-side files that consume this mode need it to be.
 enum VectorEraserMode: String, Codable, CaseIterable, Identifiable {
     /// Mode 1 — *erase touched parts*. Indistinguishable from raster erasing: partial-width shaves,
-    /// soft edges and `< 1` opacity all reproduce, via the hybrid geometric-split/alpha-punch
-    /// resolution in plan §1.
+    /// soft edges and `< 1` opacity all reproduce.
     ///
-    /// **Phase 2 status:** the hybrid resolution is Phase 4. Until then this routes to the same
-    /// geometry as `.cutPoints`, which is strictly better than the pre-Phase-2 behaviour it replaces
-    /// (exact cut boundaries instead of whole-sample deletion) but still cannot shave a side off a
-    /// stroke or leave a soft edge. `VectorEraser.resolve` is the single place that decides this, so
-    /// Phase 4 changes one branch.
+    /// It gets there by retaining the eraser's gesture whole as an `.erase` punch rather than by
+    /// cutting geometry: a stroke it covers end to end is deleted outright, and a stroke it only
+    /// crosses is left intact under the punch. It never cuts a stroke partway — a cut piece is
+    /// re-stamped as a new stroke, which re-anchors `BrushStamper`'s dab lattice and lands ink
+    /// outside anything the punch covers. Plan §1 has the measurements; `RasterVectorParityLogicTests`
+    /// is the standing proof that the punch is byte-identical to raster erasing.
     case erase
 
     /// Mode 2 — deletes the stroke geometry the eraser's footprint covers, with the cut landing at

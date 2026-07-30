@@ -251,7 +251,7 @@ final class LayerStackCell: UITableViewCell {
             bakedMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).hasBaked"
             bakedMarker.accessibilityValue = model.hasBakedImage ? "1" : "0"
             vectorMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).vector"
-            vectorMarker.accessibilityValue = "\(model.isVector ? 1 : 0),\(model.vectorStrokeCount)"
+            vectorMarker.accessibilityValue = "\(model.isVector ? 1 : 0),\(model.vectorStrokeCount),\(model.vectorEraseCount)"
             folderMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).folder"
             folderMarker.accessibilityValue = model.folderName ?? ""
         }

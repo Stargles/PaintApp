@@ -147,8 +147,41 @@ final class StrokeCanvasView: UIView {
         /// case rather than an empty `.overlay` skips a canvas-sized allocation and a full-canvas
         /// composite *per touch sample*, which the eraser was paying for nothing.
         case none
+
+        /// Name used in `lastVectorGestureTrace`.
+        var traceName: String {
+            switch self {
+            case .overlay: return "overlay"
+            case .replacement: return "replacement"
+            case .none: return "none"
+            }
+        }
     }
     private var vectorScratchRole: VectorScratchRole = .overlay
+
+    /// How many times this gesture has published the scratch to `imageView` as the display — i.e.
+    /// how many live preview frames the user was shown before lifting. Only `.replacement` counts;
+    /// `.overlay` composites the scratch over the canvas render and `.none` never draws it at all.
+    private var livePreviewFrames = 0
+
+    /// What the last finished vector gesture did about live preview, as `"<role>,<frames>"` — read
+    /// back through `CanvasHostView.accessibilityValue` by `VectorEraserUITests`.
+    ///
+    /// It exists because a live preview is observable *only* while a finger is down, and an
+    /// XCUITest cannot look: `XCUIElement.press(forDuration:thenDragTo:)` asserts it is on the main
+    /// thread, so the test thread is blocked inside the gesture for its whole duration and any
+    /// screenshot it takes is necessarily post-lift — by which point the commit has erased the same
+    /// pixels and proves nothing. Moving the gesture to a background queue does not work either;
+    /// that is what the main-thread assertion is there to stop.
+    ///
+    /// So the app records what the test cannot watch. `frames > 1` means the punched copy reached
+    /// the image view repeatedly *during* the drag rather than once at lift. Note what that does and
+    /// does not establish: it shows the live path ran and published, not that any particular pixel
+    /// was clear — the pixels are `RasterVectorParityLogicTests`' job, and this shares
+    /// `stampPath`/`isEraser` with the raster eraser precisely so they can be.
+    ///
+    /// Static because exactly one gesture is ever in flight, across every layer's stroke view.
+    static private(set) var lastVectorGestureTrace = "none,0"
 
     /// Mode 3's cut-on-entry latch, reset at touch-down. The rule it encodes lives in
     /// `VectorEraser.IntersectionDriver` rather than here so it is covered by the headless logic
@@ -213,6 +246,7 @@ final class StrokeCanvasView: UIView {
             // copy of that render with this stroke's holes punched in it, and it *is* the display.
             if case .replacement = vectorScratchRole, let scratch = vectorScratch {
                 imageView.image = scratch.renderToUIImage()
+                livePreviewFrames += 1
                 return
             }
             let base = vectorCanvas.render()
@@ -468,6 +502,7 @@ final class StrokeCanvasView: UIView {
         }()
         currentVectorSamples = []
         lastStampPoint = nil
+        livePreviewFrames = 0
         let input = StrokeInput(touch: touch, in: self)
         stabilizer.reset(to: input.position)
         recordVectorSample(at: input.position, pressure: input.pressure)
@@ -558,6 +593,10 @@ final class StrokeCanvasView: UIView {
             vectorCanvas.addStroke(canvasSpaceStroke: stroke)
             vectorContentChanged = true
         }
+
+        // Recorded before `endVectorScratch` resets the role, and before the `refreshDisplay` below —
+        // which runs as `.overlay` and so cannot inflate the count.
+        Self.lastVectorGestureTrace = "\(vectorScratchRole.traceName),\(livePreviewFrames)"
 
         endVectorScratch()
         currentVectorSamples = []

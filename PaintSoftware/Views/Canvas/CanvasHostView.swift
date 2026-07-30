@@ -12,6 +12,15 @@ final class CanvasHostView: UIView {
 
     override var canBecomeFirstResponder: Bool { true }
 
+    /// Surfaces `StrokeCanvasView.lastVectorGestureTrace` on the `canvas.host` element, where
+    /// `VectorEraserUITests` can read it. Computed rather than pushed so it is always current at
+    /// query time without any code having to remember to announce it — the value only changes at
+    /// the end of a gesture, and the accessibility client asks for it whenever it asks.
+    override var accessibilityValue: String? {
+        get { StrokeCanvasView.lastVectorGestureTrace }
+        set { }
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil { becomeFirstResponder() }

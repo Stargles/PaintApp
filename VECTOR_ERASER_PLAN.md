@@ -331,8 +331,8 @@ expensive mode depends on exists first.
 | **0** | `StrokeGeometry` + `StrokeSpatialIndex` + cached stroke bounds. Pure, headless-testable. | None | **Done** (S2) |
 | **1** | `VectorElement` display list, `StrokeComposite`, compatibility accessors, persistence migration. | None (render output byte-identical) | **Done** (S2) |
 | **2** | `VectorEraserMode` enum + UI + plumbing. Rewrite Mode 2 on §3 primitives. | Mode 2 becomes accurate | **Done** (S3) |
-| **3** | Mode 3, cut-to-intersection. | New mode | Geometry done (S3); needs touch-down driver |
-| **4** | Mode 1: live preview, hybrid commit, residue elements, GC. | New default mode | |
+| **3** | Mode 3, cut-to-intersection. | New mode | **Done** (geometry S3, touch-down driver S3) |
+| **4** | Mode 1: live preview, punch commit, GC. | New default mode | **Done** (S4–S5); driven through the real UI S6 |
 | **5** | Dirty-rect cache, decimation, delta undo; refresh perf baseline. | Faster | |
 | **6** | GPU rasterizer for both tiers — see §11. | Faster; scales past ~500 strokes/layer | |
 
@@ -340,12 +340,11 @@ Phase 1 is the risky one — it touches every `VectorCanvas` call site — which
 with byte-identical render output as its acceptance criterion.
 
 Phase 3 was partly pulled into Phase 2: the geometry (`VectorEraser.cutToIntersection`, plus the
-canvas-level driver that finds the target stroke and its neighbours) is written and tested, because
-otherwise Phase 2 shipped a three-way segmented control with a dead third option. What Phase 3 still
-owns is the *gesture* semantics — cut on touch-**down** and re-query per crossing, so one drag across
-three lines cuts three spans, under a single undo entry. Today's version resolves once on lift
-against the gesture's first sample: right for a tap or a short stroke on one line, short of the plan
-for a long sweep.
+canvas-level driver that finds the target stroke and its neighbours) was written and tested there,
+because otherwise Phase 2 would have shipped a three-way segmented control with a dead third option.
+Phase 3 proper added the *gesture* semantics — cut on touch-**down** and re-query per crossing
+(`VectorEraser.IntersectionDriver`), so one drag across three lines cuts three spans under a single
+undo entry.
 
 ## 8. Testing
 
@@ -367,6 +366,27 @@ for a long sweep.
   Two files, deliberately: `RasterVectorParityLogicTests` builds display lists by hand and tests the
   *representation*; `VectorEraserHybridLogicTests` drives the real `VectorCanvas.erase` and tests
   the *decision*. The first passing does not imply the second — for three sessions it did not.
+- **Through the real UI** (`VectorEraserUITests`, XCUITest). The two tiers above both call the
+  engine directly, so between them they cannot see any of the plumbing between a finger and
+  `VectorCanvas.erase` — the segmented control, `CanvasManager.vectorEraserMode`,
+  `CanvasView.updateActiveLayerAndTool`, `StrokeCanvasView`'s scratch role and its Mode 3 driver.
+  For three sessions that plumbing had never been run at all. What this tier covers: the picker is
+  hidden on raster layers and offers three segments on vector ones; the segment you tap is the mode
+  that commits (Mode 2 cuts and retains nothing where Mode 1 punches and keeps the stroke whole);
+  Mode 1 leaves ink either side of the gesture and blank paper under it; a stroke covered end to end
+  is deleted with nothing retained; Mode 3 acts on every line one drag crosses, under one undo, and
+  otherwise removes only the span between the two nearest crossings.
+
+  Two things this tier needed that did not exist. **`LayerRowModel` now reports paint strokes and
+  `.erase` punches as separate counts** — against a single total, "cut in two" and "punched over"
+  are the same number, and telling those apart is the whole point. (One older test had been asserting
+  `strokes == 2` after a Mode 1 erase and passing on the punch.) And **`StrokeCanvasView` records
+  `lastVectorGestureTrace`**, surfaced on `canvas.host`, because a live preview is observable only
+  while a finger is down and an XCUITest cannot look: `press(forDuration:thenDragTo:)` asserts
+  main-thread, so the test thread is blocked inside the gesture and every screenshot it can take is
+  post-lift, where the commit has erased the same pixels. Moving the gesture to a background queue
+  crashes the runner — that assertion is there to stop exactly this. The app therefore counts the
+  preview frames it published and the test reads the count afterwards.
 - **Perf**: extend `testVectorLayerRenderCostAndMemory` with an erase-heavy scenario (200 strokes,
   50 erase gestures) and record before/after in `REFACTOR_BASELINE.md`.
 

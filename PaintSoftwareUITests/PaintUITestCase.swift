@@ -309,13 +309,39 @@ class PaintUITestCase: XCTestCase {
         start.press(forDuration: 0.05, thenDragTo: end)
     }
 
-    /// Reads a layer row's ".vector" marker, formatted "isVector,vectorStrokeCount" (see LayerRow).
-    func readVectorMarker(_ app: XCUIApplication, layerIndex: Int) -> (isVector: Bool, strokes: Int)? {
+    /// Reads a layer row's ".vector" marker, formatted "isVector,paintStrokes,erasePunches" (see
+    /// `LayerRowModel`). `strokes` counts `.paint` strokes only: Mode 1 commits by *appending* an
+    /// `.erase` punch (VECTOR_ERASER_PLAN.md §1), so against a single combined total "the stroke was
+    /// cut in two" and "a punch was added over it" are the same number, and the distinction is the
+    /// entire thing the vector-eraser tests are checking.
+    func readVectorMarker(_ app: XCUIApplication, layerIndex: Int) -> (isVector: Bool, strokes: Int, erases: Int)? {
         let marker = app.otherElements["layerPanel.row.\(layerIndex).vector"]
         guard marker.waitForExistence(timeout: 5), let value = marker.value as? String else { return nil }
         let parts = value.split(separator: ",")
-        guard parts.count == 2, let v = Int(parts[0]), let n = Int(parts[1]) else { return nil }
-        return (v == 1, n)
+        guard parts.count == 3, let v = Int(parts[0]), let n = Int(parts[1]), let e = Int(parts[2]) else { return nil }
+        return (v == 1, n, e)
+    }
+
+    /// Adds a vector layer through the layer panel's add menu (a long-press opens the kind menu) and
+    /// closes the panel again, leaving the new layer active at array index 1.
+    func addVectorLayer(_ app: XCUIApplication) {
+        app.buttons["toolbar.layersButton"].tap()
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.2)
+        let vectorItem = app.buttons["Vector Layer"]
+        XCTAssertTrue(vectorItem.waitForExistence(timeout: 5), "The add menu should offer a Vector Layer option")
+        vectorItem.tap()
+        app.buttons["toolbar.layersButton"].tap()
+    }
+
+    /// Opens the layer panel, reads the vector marker, and closes it again — the panel overlays the
+    /// canvas, so tests that alternate between drawing and counting need it shut in between.
+    func vectorMarkerViaPanel(_ app: XCUIApplication, layerIndex: Int) -> (isVector: Bool, strokes: Int, erases: Int)? {
+        app.buttons["toolbar.layersButton"].tap()
+        let marker = readVectorMarker(app, layerIndex: layerIndex)
+        app.buttons["toolbar.layersButton"].tap()
+        return marker
     }
 
     /// Clears the hex field and types a new value, submitting with Return. Factored out because the

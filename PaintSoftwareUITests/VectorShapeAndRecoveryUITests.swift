@@ -256,9 +256,16 @@ final class VectorShapeAndRecoveryUITests: PaintUITestCase {
     }
 
     /// The vector-layer path: the same gesture must produce an ordinary `VectorStroke` — not a shape
-    /// object, and not a raster stamp — so the vector eraser splits it in two the way it splits any
+    /// object, and not a raster stamp — so the vector eraser acts on it exactly as it acts on any
     /// freehand stroke drawn through the middle.
-    func testHeldStrokeOnVectorLayerBecomesAVectorStrokeTheEraserSplits() throws {
+    ///
+    /// What "acts on it" means changed in Phase 4c and this test's assertion changed with it: Mode 1
+    /// no longer cuts a stroke partway (VECTOR_ERASER_PLAN.md §1 — a cut piece re-phases its own dab
+    /// lattice and lands ink outside what the punch covers), it retains the gesture as an `.erase`
+    /// punch over the intact stroke. The old assertion was `strokes == 2`, which the shipped
+    /// behaviour also satisfies — one paint stroke plus one punch — so it kept passing while
+    /// measuring nothing. Counting the two kinds separately is what makes it mean something again.
+    func testHeldStrokeOnVectorLayerBecomesAVectorStrokeTheEraserActsOn() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
@@ -283,13 +290,16 @@ final class VectorShapeAndRecoveryUITests: PaintUITestCase {
                        "A shape on a vector layer must not be stamped into the raster tier")
         app.buttons["toolbar.layersButton"].tap()
 
-        // Erase straight down through the middle of the shape: the stroke should be cut in two.
+        // Erase straight down through the middle of the shape, in the default mode (Mode 1).
         app.buttons["toolbar.eraserButton"].tap()
         drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.42), to: CGVector(dx: 0.5, dy: 0.58))
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 2,
-                       "Erasing through the middle of a shape should split it into two strokes, "
+        let after = readVectorMarker(app, layerIndex: 1)
+        XCTAssertEqual(after?.strokes, 1,
+                       "Mode 1 must not cut the shape's stroke partway — it stays one paint stroke")
+        XCTAssertEqual(after?.erases, 1,
+                       "Erasing across a shape should retain the gesture as one .erase punch, "
                        + "exactly as it does for a freehand stroke")
     }
 

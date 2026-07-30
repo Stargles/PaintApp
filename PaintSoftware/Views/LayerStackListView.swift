@@ -572,7 +572,12 @@ struct LayerRowModel: Equatable {
     var isFillReference: Bool
     var strokeCount: Int
     var hasBakedImage: Bool
+    /// `.paint` strokes only — see `vectorEraseCount` for why the two are reported separately.
     var vectorStrokeCount: Int
+    /// Retained `.erase` punches (VECTOR_ERASER_PLAN.md §1). Counted apart from `vectorStrokeCount`
+    /// because Mode 1's whole point is that it *adds* an element rather than cutting one in two, and
+    /// a single total cannot tell those two outcomes apart — both read as "one more".
+    var vectorEraseCount: Int
     var folderName: String?
     var thumbnail: UIImage?
 
@@ -598,6 +603,7 @@ struct LayerRowModel: Equatable {
             strokeCount = 0
             hasBakedImage = false
             vectorStrokeCount = 0
+            vectorEraseCount = 0
             folderName = nil
             thumbnail = nil
 
@@ -620,7 +626,9 @@ struct LayerRowModel: Equatable {
             let cel = celIndex.flatMap { layer?.cels.indices.contains($0) == true ? layer?.cels[$0] : nil }
             strokeCount = cel?.raster.strokeCount ?? 0
             hasBakedImage = cel?.bakedImage != nil
-            vectorStrokeCount = cel?.vector?.strokes.count ?? 0
+            let vectorStrokes = cel?.vector?.strokes ?? []
+            vectorStrokeCount = vectorStrokes.filter { $0.composite == .paint }.count
+            vectorEraseCount = vectorStrokes.count - vectorStrokeCount
         }
     }
 }
