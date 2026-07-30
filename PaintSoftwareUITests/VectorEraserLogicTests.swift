@@ -241,4 +241,141 @@ final class VectorEraserLogicTests: XCTestCase {
         let far = ([CGPoint(x: 30, y: -20), CGPoint(x: 30, y: -2)], CGFloat(1))
         assertCut(VectorEraser.cutToIntersection(in: horizontalRun, at: 5, others: [far]), 0, 10)
     }
+
+    // MARK: - Mode 3: the gesture driver (Phase 3)
+    //
+    // Phase 2 shipped the geometry above and resolved it once, on lift, against the gesture's first
+    // sample. Phase 3 is the gesture semantics on top: cut on touch-**down**, re-query per crossing so
+    // one drag across three lines cuts three spans, and one undo entry for the whole drag.
+    //
+    // These drive a real `VectorCanvas` through exactly the loop `StrokeCanvasView` runs — resolve at
+    // `cutting: driver.isArmed`, feed the outcome back — so what is under test is the shipped rule
+    // rather than a paraphrase of it. The view itself is not in this target; the latch was factored
+    // into `VectorEraser.IntersectionDriver` precisely so this could be checked here.
+
+    /// A vertical line at `x`, running well past both rails so a cut leaves a stub at each end.
+    private func verticalLine(atX x: CGFloat) -> VectorStroke {
+        VectorStroke(brush: fixedBrush(size: 4), color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                     size: 4, opacity: 1, samples: samples([(x, 20), (x, 180)], pressure: 1))
+    }
+
+    /// A horizontal rail at `y`, spanning the whole width, so it crosses every vertical line.
+    private func rail(atY y: CGFloat) -> VectorStroke {
+        VectorStroke(brush: fixedBrush(size: 4), color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                     size: 4, opacity: 1, samples: samples([(0, y), (200, y)], pressure: 1))
+    }
+
+    /// Three vertical lines at x = 30/60/90, each crossed by rails at y = 40 and y = 140. An eraser at
+    /// y = 90 is squarely between the rails, so a cut on any vertical removes its middle and leaves
+    /// two stubs — 5 strokes to start, 8 once all three are cut.
+    private func laddersCanvas() -> VectorCanvas {
+        VectorCanvas(size: CGSize(width: 200, height: 200),
+                     strokes: [verticalLine(atX: 30), verticalLine(atX: 60), verticalLine(atX: 90),
+                               rail(atY: 40), rail(atY: 140)])
+    }
+
+    /// One position pumped through the canvas and the driver, exactly as `StrokeCanvasView
+    /// .resolveIntersectionCut` does.
+    @discardableResult
+    private func pump(_ canvas: VectorCanvas, _ driver: inout VectorEraser.IntersectionDriver,
+                      to point: CGPoint, nib: CGFloat = 6) -> VectorEraser.CutOutcome {
+        let outcome = canvas.cutToIntersection(atCanvasPoint: point, pressure: 1,
+                                               brush: fixedBrush(size: nib), size: nib,
+                                               cutting: driver.isArmed)
+        driver.accept(outcome)
+        return outcome
+    }
+
+    /// The headline Phase 3 behaviour. One drag across three lines cuts three spans — which the
+    /// lift-time implementation could not do at all, since it resolved a single target against the
+    /// gesture's first sample and ignored everything the drag went on to touch.
+    func testOneDragAcrossThreeLinesCutsThreeSpans() {
+        let canvas = laddersCanvas()
+        var driver = VectorEraser.IntersectionDriver()
+        XCTAssertEqual(canvas.strokes.count, 5)
+
+        for x in stride(from: CGFloat(10), through: 110, by: 5) {
+            pump(canvas, &driver, to: CGPoint(x: x, y: 90))
+        }
+
+        // Each vertical lost its middle span and became two stubs; both rails are untouched.
+        XCTAssertEqual(canvas.strokes.count, 8)
+        XCTAssertTrue(driver.didCut)
+        for x in [CGFloat(30), 60, 90] {
+            let stubs = canvas.strokes.filter { $0.samples.allSatisfy { abs($0.x - x) < 0.001 } }
+            XCTAssertEqual(stubs.count, 2, "the line at x = \(x) should be in two pieces")
+        }
+    }
+
+    /// Touch-**down**, not lift: the very first position of the gesture has already cut.
+    func testTheFirstPositionOfTheGestureCuts() {
+        let canvas = laddersCanvas()
+        var driver = VectorEraser.IntersectionDriver()
+        XCTAssertEqual(pump(canvas, &driver, to: CGPoint(x: 30, y: 90)), .cut)
+        XCTAssertEqual(canvas.strokes.count, 6)
+    }
+
+    /// The reason the driver latches at all, stated as a test.
+    ///
+    /// Mode 3 removes the span between the target's *neighbouring crossings*, and those can sit right
+    /// under the finger — here the tip is 2 points below the rail it just cut back to. Resolving again
+    /// at the same position finds the surviving stub, whose only crossing is at its own endpoint and
+    /// therefore brackets nothing, so the stub is deleted whole. Repeat per touch sample and a
+    /// stationary finger eats the line. The second half of this test is that exact runaway, which is
+    /// what makes the first half evidence rather than a coincidence.
+    func testTheLatchStopsAStationaryTipFromEatingTheSurvivingStub() {
+        let tip = CGPoint(x: 30, y: 42)
+
+        let latched = VectorCanvas(size: CGSize(width: 200, height: 200),
+                                   strokes: [verticalLine(atX: 30), rail(atY: 40), rail(atY: 140)])
+        var driver = VectorEraser.IntersectionDriver()
+        XCTAssertEqual(pump(latched, &driver, to: tip), .cut)
+        // Still over the stub, so the driver stays disarmed and the second resolve reports rather
+        // than removes.
+        XCTAssertEqual(pump(latched, &driver, to: tip), .unchanged)
+        XCTAssertFalse(driver.isArmed)
+        XCTAssertEqual(latched.strokes.count, 4, "cut vertical (2 stubs) + 2 rails")
+
+        // Same two positions with the latch defeated: the stub goes too.
+        let unlatched = VectorCanvas(size: CGSize(width: 200, height: 200),
+                                     strokes: [verticalLine(atX: 30), rail(atY: 40), rail(atY: 140)])
+        let nib = fixedBrush(size: 6)
+        unlatched.cutToIntersection(atCanvasPoint: tip, pressure: 1, brush: nib, size: 6)
+        unlatched.cutToIntersection(atCanvasPoint: tip, pressure: 1, brush: nib, size: 6)
+        XCTAssertEqual(unlatched.strokes.count, 3, "the stub under the tip was deleted whole")
+    }
+
+    /// Leaving the ink re-arms, which is what makes "per crossing" mean per crossing rather than per
+    /// touch sample.
+    func testLeavingTheInkRearmsTheDriver() {
+        let canvas = laddersCanvas()
+        var driver = VectorEraser.IntersectionDriver()
+        XCTAssertEqual(pump(canvas, &driver, to: CGPoint(x: 30, y: 90)), .cut)
+        XCTAssertFalse(driver.isArmed)
+        XCTAssertEqual(pump(canvas, &driver, to: CGPoint(x: 45, y: 90)), .missed)
+        XCTAssertTrue(driver.isArmed)
+    }
+
+    /// `cutting: false` has to be a pure query — the driver uses it on every disarmed sample, so if it
+    /// mutated, the latch would be worse than useless.
+    func testResolvingWithCuttingFalseNeverMutates() {
+        let canvas = laddersCanvas()
+        let before = canvas.strokes.map(\.id)
+        let outcome = canvas.cutToIntersection(atCanvasPoint: CGPoint(x: 30, y: 90), pressure: 1,
+                                               brush: fixedBrush(size: 6), size: 6, cutting: false)
+        XCTAssertEqual(outcome, .unchanged)
+        XCTAssertEqual(canvas.strokes.map(\.id), before)
+    }
+
+    /// A gesture that never touches anything reports so, so its owner can skip registering an undo
+    /// step that would undo nothing.
+    func testADragOverEmptySpaceCutsNothing() {
+        let canvas = laddersCanvas()
+        var driver = VectorEraser.IntersectionDriver()
+        for y in stride(from: CGFloat(80), through: 100, by: 5) {
+            XCTAssertEqual(pump(canvas, &driver, to: CGPoint(x: 150, y: y)), .missed)
+        }
+        XCTAssertFalse(driver.didCut)
+        XCTAssertEqual(canvas.strokes.count, 5)
+    }
 }

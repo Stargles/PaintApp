@@ -85,11 +85,11 @@ final class StrokeCanvasView: UIView {
     /// Discards the in-progress vector stroke scratch so the shape overlay replaces it.
     func revertVectorStrokeToSnapshot() {
         guard vectorCanvas != nil else { return }
-        vectorScratch = nil
+        endVectorScratch()
         currentVectorSamples = []
         lastStampPoint = nil
         refreshDisplay()
-        vectorStrokesBeforeSnapshot = nil
+        vectorElementsBeforeSnapshot = nil
         shapeFollowingTouch = true
     }
 
@@ -129,8 +129,44 @@ final class StrokeCanvasView: UIView {
     private var displayedRasterVersion: Int = -1
     /// Live-preview raster for the in-progress vector stroke (nil except mid-stroke).
     private var vectorScratch: RasterLayerTexture?
+
+    /// How `vectorScratch` relates to the canvas's own render, which differs per tool and — for the
+    /// eraser — per mode. Set once in `beginVectorStroke` and read by `refreshDisplay`.
+    private enum VectorScratchRole {
+        /// A paint stroke: the scratch holds only this stroke's ink, composited *over* the canvas
+        /// render. The canvas itself is untouched until lift.
+        case overlay
+        /// Mode 1: the scratch starts as a **copy** of the canvas render and dabs punch
+        /// `.destinationOut` into that copy, so it *replaces* the canvas render for the duration of the
+        /// stroke. This is literally the raster eraser's code path applied to the vector layer's
+        /// pixels, which is what makes the live feedback raster-identical by construction rather than
+        /// by a second approximation of it (VECTOR_ERASER_PLAN.md §4, Mode 1).
+        case replacement
+        /// Modes 2 and 3: nothing is ever drawn into the scratch. Mode 3 commits during the drag and
+        /// Mode 2 on lift, so the canvas render alone is always the truth — and going through this
+        /// case rather than an empty `.overlay` skips a canvas-sized allocation and a full-canvas
+        /// composite *per touch sample*, which the eraser was paying for nothing.
+        case none
+    }
+    private var vectorScratchRole: VectorScratchRole = .overlay
+
+    /// Mode 3's cut-on-entry latch, reset at touch-down. The rule it encodes lives in
+    /// `VectorEraser.IntersectionDriver` rather than here so it is covered by the headless logic
+    /// tests; this view only pumps positions through it.
+    private var intersectionDriver = VectorEraser.IntersectionDriver()
+
+    /// Whether this vector gesture actually changed the display list, so a drag that cut nothing (a
+    /// Mode 3 tap on empty canvas, an eraser sweep that missed) doesn't register an undo step that
+    /// undoes nothing. Mode 3 needs this in particular: it commits during the drag, so "did anything
+    /// happen" can no longer be inferred at lift from the samples alone.
+    private var vectorContentChanged = false
+
     private var currentVectorSamples: [VectorSample] = []
-    private var vectorStrokesBeforeSnapshot: [VectorStroke]?
+    /// The whole display list as it stood before this gesture — `[VectorElement]`, not `[VectorStroke]`,
+    /// so undo restores z-position exactly rather than round-tripping through the kind-filtered
+    /// `strokes` accessor (which collapses each kind into one contiguous run). Phase 4's retained
+    /// `.erase` elements make that distinction load-bearing.
+    private var vectorElementsBeforeSnapshot: [VectorElement]?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -173,8 +209,17 @@ final class StrokeCanvasView: UIView {
         displayedRasterVersion = raster?.version ?? -1
         if let vectorCanvas {
             displayedVectorVersion = vectorCanvas.version
+            // `.replacement` deliberately never asks the canvas to render: the scratch already holds a
+            // copy of that render with this stroke's holes punched in it, and it *is* the display.
+            if case .replacement = vectorScratchRole, let scratch = vectorScratch {
+                imageView.image = scratch.renderToUIImage()
+                return
+            }
             let base = vectorCanvas.render()
-            guard let scratch = vectorScratch else { imageView.image = base; return }
+            guard case .overlay = vectorScratchRole, let scratch = vectorScratch else {
+                imageView.image = base
+                return
+            }
             // Mid vector stroke: composite the live scratch preview over the committed content.
             let bounds = CGRect(origin: .zero, size: vectorCanvas.size)
             imageView.image = UIGraphicsImageRenderer(size: vectorCanvas.size, format: PixelOps.transparentFormat()).image { _ in
@@ -279,10 +324,19 @@ final class StrokeCanvasView: UIView {
             onStrokeEnded?()
             return
         }
-        if vectorCanvas != nil {
-            vectorScratch = nil
+        if let vectorCanvas {
+            // Mode 3 commits *during* the drag, so unlike every other vector gesture this one can
+            // already have changed the document by the time the second finger lands. Roll the display
+            // list back to the touch-down snapshot, or a cancelled pan would silently leave those cuts
+            // behind with no undo step covering them.
+            if vectorContentChanged, let before = vectorElementsBeforeSnapshot {
+                vectorCanvas.elements = before
+                vectorCanvas.bumpVersion()
+            }
+            endVectorScratch()
             currentVectorSamples = []
-            vectorStrokesBeforeSnapshot = nil
+            vectorElementsBeforeSnapshot = nil
+            vectorContentChanged = false
         } else if let raster, let snapshot = strokeBeforeSnapshot {
             // `reset` restores the stroke count too, so deliberately no `endStroke()` here — that
             // would count a stroke that is being thrown away.
@@ -398,14 +452,32 @@ final class StrokeCanvasView: UIView {
     /// eraser, split existing strokes), and the display switches back to the canvas's own render.
     private func beginVectorStroke(_ touch: UITouch) {
         guard let vectorCanvas else { return }
-        vectorStrokesBeforeSnapshot = vectorCanvas.strokes
-        vectorScratch = RasterLayerTexture.empty(size: vectorCanvas.size)
+        vectorElementsBeforeSnapshot = vectorCanvas.elements
+        vectorContentChanged = false
+        // A fresh driver is armed, so Mode 3's very first sample cuts — the plan's "CSP cuts
+        // immediately" (§4, Mode 3), as opposed to the Phase 2 behaviour of resolving once on lift.
+        intersectionDriver = VectorEraser.IntersectionDriver()
+        vectorScratchRole = Self.scratchRole(isEraser: isEraser, mode: vectorEraserMode)
+        // Mode 1 previews by punching into a *copy of what is already on screen*, so the scratch is
+        // seeded with the canvas's own render instead of starting transparent.
+        vectorScratch = {
+            if case .replacement = vectorScratchRole {
+                return RasterLayerTexture.load(from: vectorCanvas.render(), size: vectorCanvas.size)
+            }
+            return RasterLayerTexture.empty(size: vectorCanvas.size)
+        }()
         currentVectorSamples = []
         lastStampPoint = nil
         let input = StrokeInput(touch: touch, in: self)
         stabilizer.reset(to: input.position)
         recordVectorSample(at: input.position, pressure: input.pressure)
         refreshDisplay()
+    }
+
+    /// Which preview strategy a gesture on a vector layer uses — see `VectorScratchRole`.
+    private static func scratchRole(isEraser: Bool, mode: VectorEraserMode) -> VectorScratchRole {
+        guard isEraser else { return .overlay }
+        return mode == .erase ? .replacement : .none
     }
 
     private func moveVectorStroke(_ touch: UITouch, _ event: UIEvent) {
@@ -424,6 +496,16 @@ final class StrokeCanvasView: UIView {
         refreshDisplay()
     }
 
+    /// Mode 3's incremental commit, called once per touch sample (touch-down included). The cut-on-
+    /// entry rule is `VectorEraser.IntersectionDriver`'s; this resolves one position against the canvas
+    /// and feeds the outcome back to it.
+    private func resolveIntersectionCut(at point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas) {
+        let outcome = canvas.cutToIntersection(atCanvasPoint: point, pressure: pressure, brush: brush,
+                                               size: brushSize, cutting: intersectionDriver.isArmed)
+        intersectionDriver.accept(outcome)
+        if case .cut = outcome { vectorContentChanged = true }
+    }
+
     private func endVectorStroke(_ touch: UITouch) {
         if shapeFollowingTouch {
             shapeFollowingTouch = false
@@ -433,7 +515,7 @@ final class StrokeCanvasView: UIView {
         guard let vectorCanvas, vectorScratch != nil else { return }
         let input = StrokeInput(touch: touch, in: self)
         recordVectorSample(at: input.position, pressure: input.pressure)
-        let before = vectorStrokesBeforeSnapshot ?? vectorCanvas.strokes
+        let before = vectorElementsBeforeSnapshot ?? vectorCanvas.elements
 
         // Best-effort selection clip for vector strokes: drop samples outside the selection so the
         // committed geometry never places ink there. Unlike the raster path this can't crisply clip a
@@ -445,13 +527,20 @@ final class StrokeCanvasView: UIView {
         }
 
         if isEraser {
-            // Samples rather than bare points, and the brush rather than a bare radius: the eraser's
-            // footprint is the same pressure-driven capsule chain `BrushStamper` would stamp, so the
-            // geometry that gets cut is the geometry that would have been rubbed out. `brushSize` is
-            // the eraser's diameter here (see `updateActiveLayerAndTool`'s `activeSize`); the canvas
-            // maps both it and the samples into layer-local space.
-            vectorCanvas.erase(alongPath: currentVectorSamples, brush: brush, size: brushSize,
-                               mode: vectorEraserMode)
+            // Mode 3 has already committed, incrementally, during the drag — see
+            // `resolveIntersectionCut`. Re-running the whole-gesture form here would cut a second time
+            // against the post-cut geometry.
+            if vectorEraserMode != .cutToIntersection {
+                // Samples rather than bare points, and the brush rather than a bare radius: the eraser's
+                // footprint is the same pressure-driven capsule chain `BrushStamper` would stamp, so the
+                // geometry that gets cut is the geometry that would have been rubbed out. `brushSize` is
+                // the eraser's diameter here (see `updateActiveLayerAndTool`'s `activeSize`); the canvas
+                // maps both it and the samples into layer-local space.
+                if vectorCanvas.erase(alongPath: currentVectorSamples, brush: brush, size: brushSize,
+                                      mode: vectorEraserMode) {
+                    vectorContentChanged = true
+                }
+            }
         } else if !currentVectorSamples.isEmpty {
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
             // Contract: `brushColor` is always an already-resolved color by the time it reaches
@@ -467,35 +556,64 @@ final class StrokeCanvasView: UIView {
             // the layer's local space so a stroke drawn on an already-moved layer lands under the
             // finger instead of being put through the layer transform a second time.
             vectorCanvas.addStroke(canvasSpaceStroke: stroke)
+            vectorContentChanged = true
         }
 
-        vectorScratch = nil
+        endVectorScratch()
         currentVectorSamples = []
         lastStampPoint = nil
         refreshDisplay()
-        registerVectorUndo(canvas: vectorCanvas, from: before, to: vectorCanvas.strokes)
-        vectorStrokesBeforeSnapshot = nil
+        // One undo entry for the whole gesture — which for Mode 3 covers however many spans the drag
+        // cut, because `before` was snapshotted at touch-down and every incremental cut since has
+        // landed on the same canvas. And none at all when the gesture changed nothing: Mode 3 commits
+        // during the drag, so a tap on empty canvas would otherwise leave an undo step that undoes
+        // nothing and the user has to press twice.
+        if vectorContentChanged {
+            registerVectorUndo(canvas: vectorCanvas, from: before, to: vectorCanvas.elements)
+        }
+        vectorElementsBeforeSnapshot = nil
         onStrokeEnded?()
+    }
+
+    /// Releases the live-preview scratch. Mode 1's is a full canvas-sized copy of the layer's render
+    /// (see `VectorScratchRole.replacement`), so dropping it promptly is what keeps that allocation
+    /// per-stroke rather than per-layer, and resetting the role is what stops `refreshDisplay` looking
+    /// for a texture that is no longer there.
+    private func endVectorScratch() {
+        vectorScratch = nil
+        vectorScratchRole = .overlay
     }
 
     private func recordVectorSample(at point: CGPoint, pressure: CGFloat) {
         currentVectorSamples.append(VectorSample(x: point.x, y: point.y, pressure: pressure))
-        // Live preview into the scratch raster (skipped for the eraser, whose result shows on lift).
-        if let scratch = vectorScratch, !isEraser {
+        if let vectorCanvas, isEraser, vectorEraserMode == .cutToIntersection {
+            resolveIntersectionCut(at: point, pressure: pressure, in: vectorCanvas)
+            return
+        }
+        // Live preview into the scratch raster. For a paint stroke that is this stroke's ink on an
+        // otherwise empty overlay; for Mode 1 it is a `.destinationOut` punch into a copy of the whole
+        // layer (`stampPath` passes `isEraser` straight through, so the dab pipeline is identical to
+        // the raster eraser's). Modes 2 and 3 have no scratch content at all.
+        if let scratch = vectorScratch, !isNoScratchRole {
             stampPath(to: point, pressure: pressure, into: scratch)
         }
     }
 
-    private func registerVectorUndo(canvas: VectorCanvas, from: [VectorStroke], to: [VectorStroke]) {
+    private var isNoScratchRole: Bool {
+        if case .none = vectorScratchRole { return true }
+        return false
+    }
+
+    private func registerVectorUndo(canvas: VectorCanvas, from: [VectorElement], to: [VectorElement]) {
         let actionName = isEraser ? "Erase" : "Stroke"
         let cost = (from.count + to.count) * 512
         canvasManager?.recordUndo(name: actionName, cost: cost, undo: { [weak self] in
-            canvas.strokes = from
+            canvas.elements = from
             canvas.bumpVersion()
             self?.refreshDisplay()
             self?.onStrokeEnded?()
         }, redo: { [weak self] in
-            canvas.strokes = to
+            canvas.elements = to
             canvas.bumpVersion()
             self?.refreshDisplay()
             self?.onStrokeEnded?()

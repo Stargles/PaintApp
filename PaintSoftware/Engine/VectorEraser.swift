@@ -187,6 +187,58 @@ enum VectorEraser {
         return [low...high]
     }
 
+    /// What one Mode-3 resolve did. `.missed` and `.unchanged` differ only in whether the eraser tip
+    /// was over ink at all, which is the entire input to `IntersectionDriver`'s re-arming rule.
+    enum CutOutcome: Equatable {
+        /// No paint stroke's footprint reaches the tip.
+        case missed
+        /// A stroke is under the tip, but nothing came off it — either the caller asked not to cut, or
+        /// the span between its neighbouring crossings was already gone.
+        case unchanged
+        /// Geometry was removed.
+        case cut
+    }
+
+    /// Turns a stream of eraser positions into Mode 3 cuts: cut on entering a stroke, then stay quiet
+    /// until the tip is over nothing again.
+    ///
+    /// The plan (§4, Mode 3) asks for a cut on touch-**down** and a re-query per crossing, so one drag
+    /// across three lines cuts three spans. Cutting on *every* sample instead gets the three-line case
+    /// right and everything else wrong: the span Mode 3 removes runs between the target's neighbouring
+    /// crossings, which can be anywhere — including a few points from the finger — so a tip left
+    /// sitting on a line would chew it away span by span, one per touch sample, from a stationary
+    /// finger. Latching on "the tip has left ink" is what makes "per crossing" mean per *crossing*
+    /// rather than per sample.
+    ///
+    /// A `struct` here rather than the three lines of state inlined into `StrokeCanvasView` for one
+    /// reason: this file compiles into the test target and that view does not, and the rule above is
+    /// exactly the kind of thing that is easy to get subtly wrong and impossible to notice without a
+    /// test. `StrokeCanvasView` owns an instance and feeds it outcomes.
+    struct IntersectionDriver {
+        /// Whether the next position should cut. True at touch-down, so Mode 3 fires immediately.
+        private(set) var isArmed = true
+        /// Whether this gesture has removed anything, so the driver's owner can register exactly one
+        /// undo entry for the drag — and none at all when the drag cut nothing.
+        private(set) var didCut = false
+
+        init() {}
+
+        /// Feeds back the result of resolving at one position. Call with the outcome of a resolve made
+        /// with `cutting: isArmed`.
+        mutating func accept(_ outcome: CutOutcome) {
+            switch outcome {
+            case .missed:
+                // Over nothing: the next stroke entered is a new crossing and gets its own cut.
+                isArmed = true
+            case .unchanged:
+                isArmed = false
+            case .cut:
+                isArmed = false
+                didCut = true
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private static func point(on a: CGPoint, _ b: CGPoint, at t: CGFloat) -> CGPoint {

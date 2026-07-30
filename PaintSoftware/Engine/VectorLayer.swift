@@ -623,10 +623,47 @@ final class VectorCanvas {
         case .erase, .cutPoints:
             changed = cutAlongFootprint(sweep: sweep)
         case .cutToIntersection:
-            changed = cutToIntersection(sweep: sweep, near: localSamples[0].point)
+            // Whole-gesture form, resolved once against the first sample. The live gesture driver
+            // uses `cutToIntersection(atCanvasPoint:…)` below instead, because Mode 3 cuts on
+            // touch-down and re-resolves per crossing; this stays as the one-shot API that the
+            // canvas offers for all three modes uniformly.
+            changed = cutToIntersection(sweep: sweep, near: localSamples[0].point) == .cut
         }
         if changed { invalidate() }
         return changed
+    }
+
+    /// Mode 3 resolved against a **single** eraser position, which is what the plan means by cutting
+    /// on touch-down and re-querying per crossing (§4, Mode 3): one drag across three lines cuts three
+    /// spans, because the driver calls this once per touch sample rather than once per gesture.
+    ///
+    /// `cutting` is the driver's re-arming latch, not an optimisation. After a cut the eraser is still
+    /// sitting on the stroke it just cut — right next to the surviving pieces if the crossing was
+    /// nearby — so cutting again on the very next touch sample would walk down the line deleting span
+    /// after span from one stationary finger. The driver therefore disarms after a cut and re-arms only
+    /// once this reports `.missed`, i.e. once the tip has left ink entirely. Passing `cutting: false`
+    /// runs the same target search and reports the same outcome **without mutating the display list**,
+    /// so the driver learns it has left the ink from the query it was making anyway rather than from a
+    /// second one.
+    @discardableResult
+    func cutToIntersection(atCanvasPoint canvasPoint: CGPoint, pressure: CGFloat, brush: Brush,
+                           size: CGFloat, cutting: Bool = true) -> VectorEraser.CutOutcome {
+        lock.lock()
+        defer { lock.unlock() }
+        guard _elements.contains(where: { $0.stroke != nil }) else { return .missed }
+
+        let localSamples = Self.localSamples([VectorSample(x: canvasPoint.x, y: canvasPoint.y, pressure: pressure)],
+                                             through: _transform)
+        let scale = Self.scale(of: _transform)
+        let localSize = scale > 0 ? size / scale : size
+        // A one-sample sweep is the single dab the eraser has stamped so far: `capsuleChain` yields one
+        // zero-length capsule for it, so the footprint test below is the nib itself.
+        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: localSize,
+                                             mode: .cutToIntersection) else { return .missed }
+
+        let outcome = cutToIntersection(sweep: sweep, near: localSamples[0].point, cutting: cutting)
+        if outcome == .cut { invalidate() }
+        return outcome
     }
 
     /// Modes 1 and 2: every paint stroke loses the spans its geometry shares with the eraser's
@@ -664,16 +701,13 @@ final class VectorCanvas {
     /// Mode 3: the one stroke the eraser came down on loses the span between its two neighbouring
     /// crossings. Caller must hold `lock`.
     ///
-    /// **Phase 2 scope.** The plan has this firing on touch-*down* and re-querying per crossing, so a
-    /// single drag across three lines cuts three spans. This runs once, on lift, against the
-    /// gesture's first sample — correct for a tap or a short stroke on one line, which is how the
-    /// mode is actually used, and short of the plan for a long sweep. Phase 3 owns the upgrade; it is
-    /// plumbing in `StrokeCanvasView` (call per touch-down, accumulate one undo entry for the drag)
-    /// rather than geometry, which is why the geometry is finished here.
-    private func cutToIntersection(sweep: VectorEraser.Sweep, near hitPoint: CGPoint) -> Bool {
+    /// `cutting: false` stops short of mutating anything and only reports whether a target was found —
+    /// see `cutToIntersection(atCanvasPoint:…)` for why the gesture driver needs that distinction.
+    private func cutToIntersection(sweep: VectorEraser.Sweep, near hitPoint: CGPoint,
+                                   cutting: Bool = true) -> VectorEraser.CutOutcome {
         let index = strokeIndex()
         let candidates = Set(index.segments(near: sweep.bounds).map(\.elementIndex))
-        guard !candidates.isEmpty else { return false }
+        guard !candidates.isEmpty else { return .missed }
 
         // The stroke the eraser came down on: nearest centreline among the candidates, and only if
         // the eraser's footprint actually reaches it (a near miss should cut nothing, not cut the
@@ -688,14 +722,17 @@ final class VectorCanvas {
             bestDistanceSquared = hit.distanceSquared
             target = (elementIndex, stroke, hit.parameter)
         }
-        guard let target else { return false }
+        guard let target else { return .missed }
+        // Past this point the tip *is* over ink, so every remaining exit says `.unchanged` rather than
+        // `.missed` — the driver must stay disarmed until the finger actually leaves the stroke.
+        guard cutting else { return .unchanged }
 
         // Everything that could cross it, with a width-aware tolerance per pair: two lines whose ink
         // visibly touches read as crossed even when the centrelines miss (plan §4, Mode 3).
         let targetReach = StrokeGeometry.stampRadius(forPressure: 1, brush: target.stroke.brush,
                                                      size: target.stroke.size)
         guard let targetBounds = StrokeGeometry.bounds(of: target.stroke.samples,
-                                                       padding: targetReach) else { return false }
+                                                       padding: targetReach) else { return .unchanged }
         var others: [(points: [CGPoint], tolerance: CGFloat)] = []
         for elementIndex in Set(index.segments(near: targetBounds).map(\.elementIndex)).sorted()
         where elementIndex != target.index {
@@ -708,7 +745,7 @@ final class VectorCanvas {
         let cuts = Self.effectiveCuts(VectorEraser.cutToIntersection(in: target.stroke.samples,
                                                                      at: target.parameter, others: others),
                                       in: target.stroke.samples)
-        guard !cuts.isEmpty else { return false }
+        guard !cuts.isEmpty else { return .unchanged }
 
         var pieces: [VectorElement] = []
         for run in StrokeGeometry.splitStroke(target.stroke.samples, removing: cuts) {
@@ -718,7 +755,7 @@ final class VectorCanvas {
             pieces.append(.stroke(piece))
         }
         _elements.replaceSubrange(target.index...target.index, with: pieces)
-        return true
+        return .cut
     }
 
     /// `cuts` reduced to what actually removes something, so a graze that merely touches a stroke's
