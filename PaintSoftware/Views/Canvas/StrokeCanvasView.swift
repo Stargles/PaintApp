@@ -37,6 +37,11 @@ final class StrokeCanvasView: UIView {
         didSet { stabilizer.stabilization = brush.stabilization }
     }
     var isEraser: Bool = false
+    /// Which of the three vector-eraser behaviours a completed eraser stroke commits with. Only
+    /// consulted when `isEraser` is true *and* this view is driving a `vectorCanvas`; a raster
+    /// layer's eraser is a `.destinationOut` brush and has no modes. Pushed in by
+    /// `CanvasView.Coordinator.updateActiveLayerAndTool` alongside `isEraser`.
+    var vectorEraserMode: VectorEraserMode = .erase
     var pencilOnlyDrawing: Bool = false {
         didSet { strokeRecognizer.requiresPencilOnly = pencilOnlyDrawing }
     }
@@ -407,8 +412,12 @@ final class StrokeCanvasView: UIView {
         guard vectorScratch != nil else { return }
         for sample in event.coalescedTouches(for: touch) ?? [touch] {
             let input = StrokeInput(touch: sample, in: self)
-            // The eraser isn't smoothed (it should cut exactly where the finger passes).
-            let point = isEraser ? input.position : stabilizer.update(rawPoint: input.position)
+            // Smoothing is per *mode*, not per tool. A cut belongs exactly where the finger passed —
+            // stabilizing it would move the cut off the line the user aimed at — but Mode 1 is a
+            // brush stroke, and jitter in an eraser's path shows up directly in the erased edge, so
+            // it wants the same smoothing a paint stroke gets. See `VectorEraserMode.isStabilized`.
+            let raw = isEraser && !vectorEraserMode.isStabilized
+            let point = raw ? input.position : stabilizer.update(rawPoint: input.position)
             recordVectorSample(at: point, pressure: input.pressure)
             onStrokeMoved?(VectorSample(x: point.x, y: point.y, pressure: input.pressure))
         }
@@ -436,7 +445,13 @@ final class StrokeCanvasView: UIView {
         }
 
         if isEraser {
-            vectorCanvas.erase(alongPath: currentVectorSamples.map { $0.point }, radius: brushSize / 2)
+            // Samples rather than bare points, and the brush rather than a bare radius: the eraser's
+            // footprint is the same pressure-driven capsule chain `BrushStamper` would stamp, so the
+            // geometry that gets cut is the geometry that would have been rubbed out. `brushSize` is
+            // the eraser's diameter here (see `updateActiveLayerAndTool`'s `activeSize`); the canvas
+            // maps both it and the samples into layer-local space.
+            vectorCanvas.erase(alongPath: currentVectorSamples, brush: brush, size: brushSize,
+                               mode: vectorEraserMode)
         } else if !currentVectorSamples.isEmpty {
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
             // Contract: `brushColor` is always an already-resolved color by the time it reaches

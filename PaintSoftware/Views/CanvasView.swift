@@ -286,6 +286,11 @@ struct CanvasView: UIViewRepresentable {
             let size: CGFloat
             let opacity: Double
             let brush: Brush
+            /// Part of the cache key, not just something pushed alongside it: without it, changing
+            /// the vector eraser mode leaves every other field equal, the guard below decides nothing
+            /// tool-relevant changed, and the picker silently does nothing until some unrelated
+            /// setting moves.
+            let vectorEraserMode: VectorEraserMode
         }
         private var lastAppliedTool: [UUID: AppliedTool] = [:]
         private var lastOrderedLayerIDs: [UUID] = []
@@ -708,7 +713,7 @@ struct CanvasView: UIViewRepresentable {
 
             // Only push new tool settings into the view when something tool-relevant actually
             // changed, same caching reason as before (this method runs on every SwiftUI re-render).
-            let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, size: activeSize, opacity: activeOpacity, brush: activeBrush)
+            let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, size: activeSize, opacity: activeOpacity, brush: activeBrush, vectorEraserMode: canvasManager.vectorEraserMode)
             guard lastAppliedTool[layer.id] != desired else { return }
             lastAppliedTool[layer.id] = desired
 
@@ -717,6 +722,7 @@ struct CanvasView: UIViewRepresentable {
             host.strokeView.brushOpacity = activeOpacity
             host.strokeView.brush = activeBrush
             host.strokeView.isEraser = isEraser
+            host.strokeView.vectorEraserMode = canvasManager.vectorEraserMode
             // .fill is handled by fillTapRecognizer, not the stroke view — the canvas is
             // non-interactive there (see reconcileLayers' shouldInteract).
         }

@@ -164,6 +164,7 @@ enum ProjectStore {
         let isBackgroundVisible: Bool
         let selectedBrush: Brush
         let customBrushes: [Brush]
+        let vectorEraserMode: VectorEraserMode
         let folders: [FolderManifest]
         let viewPresets: [ViewPresetManifest]
         let layers: [LayerContent]
@@ -188,6 +189,7 @@ enum ProjectStore {
             isBackgroundVisible = canvasManager.isCanvasBackgroundVisible
             selectedBrush = canvasManager.selectedBrush
             customBrushes = canvasManager.customBrushes
+            vectorEraserMode = canvasManager.vectorEraserMode
             folders = canvasManager.folders.map { folder in
                 FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded,
                                isVisible: folder.isVisible, parentFolderID: folder.parentFolderID)
@@ -397,6 +399,7 @@ enum ProjectStore {
             isBackgroundVisible: snapshot.isBackgroundVisible,
             selectedBrush: snapshot.selectedBrush,
             customBrushes: snapshot.customBrushes,
+            vectorEraserMode: snapshot.vectorEraserMode,
             folders: snapshot.folders,
             viewPresets: snapshot.viewPresets
         )
@@ -432,6 +435,9 @@ enum ProjectStore {
         restoreCustomBrushTexturesFromProject([manifest.selectedBrush] + manifest.customBrushes, projectURL: url)
         manager.customBrushes = manifest.customBrushes
         manager.selectBrush(manifest.selectedBrush)
+        // Assigned directly rather than through a `select…` helper: unlike a brush, the vector-eraser
+        // mode carries no size/opacity to re-baseline, so there is nothing for such a helper to do.
+        manager.vectorEraserMode = manifest.vectorEraserMode
 
         // Restore folders.
         manager.folders = manifest.folders.map { f in

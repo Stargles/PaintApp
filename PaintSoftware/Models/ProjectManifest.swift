@@ -24,6 +24,13 @@ struct ProjectManifest: Codable {
     /// renamed/deleted, or the project is moved to another device.
     var selectedBrush: Brush
     var customBrushes: [Brush]
+    /// The vector-eraser behaviour active when the project was last saved (see
+    /// `CanvasManager.vectorEraserMode` and VECTOR_ERASER_PLAN.md §5). Persisted per project rather
+    /// than app-wide because it is bound up with the artwork: a project drawn on vector layers with
+    /// `.cutToIntersection` should reopen still cutting to intersections, without the mode leaking
+    /// into the next project you open. Meaningless for all-raster projects, which simply save and
+    /// reload the default.
+    var vectorEraserMode: VectorEraserMode
     var folders: [FolderManifest] = []
     var viewPresets: [ViewPresetManifest] = []
 
@@ -31,6 +38,7 @@ struct ProjectManifest: Codable {
          layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
          selectedBrush: Brush = BrushLibrary.softRound, customBrushes: [Brush] = [],
+         vectorEraserMode: VectorEraserMode = .erase,
          folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = []) {
         self.id = id
         self.name = name
@@ -45,13 +53,14 @@ struct ProjectManifest: Codable {
         self.isBackgroundVisible = isBackgroundVisible
         self.selectedBrush = selectedBrush
         self.customBrushes = customBrushes
+        self.vectorEraserMode = vectorEraserMode
         self.folders = folders
         self.viewPresets = viewPresets
     }
 
     // Custom decoding so projects saved before backgroundColor/isBackgroundVisible (or, more
-    // recently, selectedBrush/customBrushes) existed — missing those keys entirely — still load
-    // instead of failing to decode.
+    // recently, selectedBrush/customBrushes and vectorEraserMode) existed — missing those keys
+    // entirely — still load instead of failing to decode.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -68,6 +77,7 @@ struct ProjectManifest: Codable {
         isBackgroundVisible = try container.decodeIfPresent(Bool.self, forKey: .isBackgroundVisible) ?? true
         selectedBrush = try container.decodeIfPresent(Brush.self, forKey: .selectedBrush) ?? BrushLibrary.softRound
         customBrushes = try container.decodeIfPresent([Brush].self, forKey: .customBrushes) ?? []
+        vectorEraserMode = try container.decodeIfPresent(VectorEraserMode.self, forKey: .vectorEraserMode) ?? .erase
         folders = try container.decodeIfPresent([FolderManifest].self, forKey: .folders) ?? []
         viewPresets = try container.decodeIfPresent([ViewPresetManifest].self, forKey: .viewPresets) ?? []
     }
@@ -75,7 +85,7 @@ struct ProjectManifest: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, canvasWidth, canvasHeight, canvasPadding, fps, sceneFrameCount, layers,
              modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
-             folders, viewPresets
+             vectorEraserMode, folders, viewPresets
     }
 }
 

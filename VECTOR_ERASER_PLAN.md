@@ -284,17 +284,26 @@ later phase — the existing snapshot approach is correct, just heavy.
 Ordered so each phase is independently mergeable and testable, and so the cheap machinery that the
 expensive mode depends on exists first.
 
-| Phase | Content | Behaviour change |
-|---|---|---|
-| **0** | `StrokeGeometry` + `StrokeSpatialIndex` + cached stroke bounds. Pure, headless-testable. | None |
-| **1** | `VectorElement` display list, `StrokeComposite`, compatibility accessors, persistence migration. | None (render output byte-identical) |
-| **2** | `VectorEraserMode` enum + UI + plumbing. Rewrite Mode 2 on §3 primitives. | Mode 2 becomes accurate |
-| **3** | Mode 3, cut-to-intersection. | New mode |
-| **4** | Mode 1: live preview, hybrid commit, residue elements, GC. | New default mode |
-| **5** | Dirty-rect cache, decimation, delta undo; refresh perf baseline. | Faster |
+| Phase | Content | Behaviour change | Status |
+|---|---|---|---|
+| **0** | `StrokeGeometry` + `StrokeSpatialIndex` + cached stroke bounds. Pure, headless-testable. | None | **Done** (S2) |
+| **1** | `VectorElement` display list, `StrokeComposite`, compatibility accessors, persistence migration. | None (render output byte-identical) | **Done** (S2) |
+| **2** | `VectorEraserMode` enum + UI + plumbing. Rewrite Mode 2 on §3 primitives. | Mode 2 becomes accurate | **Done** (S3) |
+| **3** | Mode 3, cut-to-intersection. | New mode | Geometry done (S3); needs touch-down driver |
+| **4** | Mode 1: live preview, hybrid commit, residue elements, GC. | New default mode | |
+| **5** | Dirty-rect cache, decimation, delta undo; refresh perf baseline. | Faster | |
+| **6** | GPU rasterizer for both tiers — see §11. | Faster; scales past ~500 strokes/layer | |
 
 Phase 1 is the risky one — it touches every `VectorCanvas` call site — which is why it ships alone,
 with byte-identical render output as its acceptance criterion.
+
+Phase 3 was partly pulled into Phase 2: the geometry (`VectorEraser.cutToIntersection`, plus the
+canvas-level driver that finds the target stroke and its neighbours) is written and tested, because
+otherwise Phase 2 shipped a three-way segmented control with a dead third option. What Phase 3 still
+owns is the *gesture* semantics — cut on touch-**down** and re-query per crossing, so one drag across
+three lines cuts three spans, under a single undo entry. Today's version resolves once on lift
+against the gesture's first sample: right for a tap or a short stroke on one line, short of the plan
+for a long sweep.
 
 ## 8. Testing
 
@@ -345,3 +354,83 @@ Phase 5.
   interpolation force a resolve-to-geometry pass first? Leaning toward forcing the resolve — decide
   when building interpolate.
 - SVG/PDF export of a residue punch has no clean representation; would need a mask or a flatten.
+
+---
+
+## 11. Moving vector rendering to the GPU
+
+Raised while Phase 2 was in flight: thousands of strokes per layer, several layers, several
+animation blocks — does the vector tier need a GPU renderer, and should raster layers or the whole
+canvas composite go with it?
+
+### What is already on the GPU
+
+The per-frame layer composite is. Layers are `UIImageView`s inside `LayerHostView`; Core Animation
+blends them, with their opacity and blend modes, on the GPU every frame. A frame in which nothing
+changes costs the CPU nothing at all, whatever the stroke count, and adding layers or animation
+blocks does not add per-frame CPU work.
+
+So the "recalculating an insane number of layers each frame" cost is not the one to worry about. The
+cost that is real is narrower and worse: **re-rasterizing one layer's content when that layer
+changes.** `VectorCanvas.render()` caches by `version`, and any mutation nulls the cache and
+re-stamps every element on the layer through `BrushStamper` into a Core Graphics context.
+
+### The number
+
+`REFACTOR_BASELINE.md` measures `testVectorLayerRenderCostAndMemory` at **63.6 ms for a 20-stroke
+vector layer** — about 3.2 ms per stroke, essentially all of it Core Graphics radial-gradient fills,
+one per dab. Linear in stroke count, so extrapolating:
+
+| Strokes on the layer | Full re-render |
+|---|---|
+| 20 | 64 ms |
+| 500 | ~1.6 s |
+| 2000 | ~6.4 s |
+
+A GPU rasterizer stamping dabs as instanced quads with the hardness falloff in the fragment shader
+is the difference between "milliseconds" and "seconds" here — two to three orders of magnitude, not
+a tuning win. **At the target scale the vector tier does need one.** The question is only when, and
+what else moves with it.
+
+### Why not now
+
+1. **It would break the acceptance test the eraser is being built against.** §8's Mode 1 criterion is
+   that an identical stroke, erased identically, produces the same pixels on a raster layer and a
+   vector layer. That is only meaningful while both go through one `BrushStamper`. Port the vector
+   tier alone and the criterion becomes "a Metal shader matches Core Graphics' gradient
+   interpolation per pixel", which is a different and much nastier project — and it would be blocking
+   the eraser rather than being verified by it.
+2. **Which means "only the vector layer" is the wrong scope.** Both tiers have to move together, or
+   they drift. That is a large project on its own, and it is not the eraser's.
+3. **Sequencing it after Phase 4 makes the pixel test the port's regression net.** That is exactly the
+   safety a rasterizer rewrite wants, and it does not exist yet. Doing the port first throws it away.
+4. **Some of the win is available much more cheaply.** Phase 5's dirty-rect cache removes the
+   dominant case — appending a stroke re-stamping the whole layer — without touching the renderer.
+   Two smaller ones sit next to it: `renderLocalContent()`'s result could be cached separately from
+   the transformed output, so moving a layer stops re-stamping it; and `cachedImage` currently has no
+   eviction, so N cels each retain a canvas-sized bitmap forever.
+
+### What Phase 2 did to keep the door open
+
+- **The geometry never touches Core Graphics.** `StrokeGeometry`, `StrokeSpatialIndex` and
+  `VectorEraser` are `CoreGraphics`-types-only, no drawing, no UIKit — so the eraser's decisions
+  survive a renderer swap untouched. `VectorCanvas.erase` is a thin adapter over them.
+- **The display list stays a pure data model.** Nothing in Phase 2 assumes how it is drawn.
+- **The spatial index is the shape a GPU renderer wants anyway** — it answers "what is in this rect",
+  which is tile binning under a different name.
+
+### The z-order optimisation, when it is needed
+
+Worth writing down now because it is renderer-agnostic and it is the real answer to "don't
+recompute the whole stack":
+
+Source-over is associative, so a **run of consecutive `.normal` paint elements can be flattened into
+one texture and re-composited as a unit**. Only two things force an ordered boundary: an element with
+a non-`.normal` blend mode (already isolated in a transparency layer today) and an `.erase` element,
+which by definition must see everything beneath it. Everything else is free to batch.
+
+That gives a prefix/suffix cache: for the element being edited, keep "everything below it" and
+"everything above it" as two flattened textures and only redraw the one element between them. Editing
+cost stops scaling with layer content, on either backend — and on the GPU each run is one draw call.
+This is the thing to build with Phase 5's dirty-rect cache, and it is why the `.erase` composite flag
+is worth tracking as an explicit boundary rather than as just another element.

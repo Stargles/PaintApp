@@ -4,7 +4,8 @@ import SwiftUI
 /// `selectedEraserBrush`/`eraserSize`/`eraserOpacity` state instead of the paint brush's, so
 /// adjusting the eraser never disturbs whatever brush you paint with (see `BrushStamper.stampDab`:
 /// an eraser dab is the same stamp, just composited with `.destinationOut` instead of painting
-/// color). No custom-texture import here — that's a paint-brush-only feature.
+/// color). No custom-texture import here — that's a paint-brush-only feature; the eraser spends the
+/// shared panel's accessory slot on its vector-mode picker instead.
 struct EraserSettingsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
 
@@ -22,9 +23,38 @@ struct EraserSettingsPanel: View {
         StrokeSettingsPanel(
             canvasManager: canvasManager,
             spec: Self.spec,
-            accessory: { EmptyView() },
+            accessory: { vectorModePicker },
             preview: { preview }
         )
+    }
+
+    // MARK: - Vector mode
+
+    /// The three-way vector-eraser mode control (VECTOR_ERASER_PLAN.md §5), occupying the accessory
+    /// slot the brush panel uses for custom-texture import.
+    ///
+    /// Shown only on a `.vector` layer: on a raster layer the eraser is a plain `.destinationOut`
+    /// brush with no modes to pick between, and the panel stays exactly as it was before this
+    /// existed. The layer kind comes from `CanvasManager.activeLayerKind`, which returns nil when
+    /// `currentLayerIndex` points at nothing (it legitimately does mid-edit — see `deleteLayer`), so
+    /// nil correctly falls through to hiding the control.
+    @ViewBuilder
+    private var vectorModePicker: some View {
+        if canvasManager.activeLayerKind == .vector {
+            VStack(alignment: .leading) {
+                Text("Vector Eraser")
+                    .foregroundColor(.white)
+
+                Picker("Vector Eraser Mode", selection: $canvasManager.vectorEraserMode) {
+                    ForEach(VectorEraserMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("\(Self.spec.idPrefix).vectorModePicker")
+            }
+            .padding(.horizontal)
+        }
     }
 
     // MARK: - Preview

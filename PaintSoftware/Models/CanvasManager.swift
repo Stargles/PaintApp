@@ -60,6 +60,21 @@ final class CanvasManager: ObservableObject {
         return layers[currentLayerIndex].cels[celIdx].vector != nil
     }
 
+    /// The active layer's `LayerKind`, or nil when `currentLayerIndex` points at nothing — which it
+    /// legitimately does mid-edit, e.g. `deleteLayer` parks it at -1 while removing the layer that was
+    /// active. Views deciding what to show for the active layer should ask this rather than indexing
+    /// `layers` themselves, so that bounds check lives in one place.
+    ///
+    /// Deliberately weaker than `activeLayerIsVector` above: this reports only what *kind* of layer is
+    /// selected, and says nothing about whether a `VectorCanvas` exists on the current frame. That is
+    /// what UI affordances want — `EraserSettingsPanel`'s mode picker should be visible on a vector
+    /// layer whose current frame is still empty, since the mode governs the erase you are about to
+    /// make. Operations that need geometry to actually be there still want `activeLayerIsVector`.
+    var activeLayerKind: LayerKind? {
+        guard layers.indices.contains(currentLayerIndex) else { return nil }
+        return layers[currentLayerIndex].kind
+    }
+
     /// Imports an image onto the active vector layer as a movable element (centered, scaled to fit),
     /// participating in the layer's overall transform. Returns false if the active layer isn't a
     /// vector layer (`insertImage` below falls back to creating one). Shapes and video slot in here
@@ -227,6 +242,20 @@ final class CanvasManager: ObservableObject {
     /// than the paint brush's default — erasers are typically used broader than the pen/pencil.
     @Published var eraserSize: CGFloat = 20
     @Published var eraserOpacity: Double = 1.0
+
+    /// Which of the three vector-eraser behaviours (see `VectorEraserMode` in Tool.swift, and
+    /// VECTOR_ERASER_PLAN.md §4) the eraser uses. Only consulted while the active layer is `.vector`:
+    /// on a raster layer the eraser is a plain `.destinationOut` brush and there is nothing to choose
+    /// between, so `EraserSettingsPanel` hides its picker there entirely (plan §5).
+    ///
+    /// Lives alongside the shape/size/opacity state rather than inside `selectedEraserBrush` because
+    /// it is not a property of the *stamp* — the same eraser preset cuts or shaves depending on this,
+    /// and switching eraser presets (which re-baselines size/opacity via `selectEraserBrush`) must not
+    /// silently change which mode you are erasing in. It is also what `VectorEraserMode.isStabilized`
+    /// is read off, so `StrokeCanvasView` can decide per-mode whether to smooth the input path.
+    ///
+    /// Defaults to `.erase`, the mode that behaves like the raster eraser users already know.
+    @Published var vectorEraserMode: VectorEraserMode = .erase
 
     /// Every shape offered in the eraser's picker — the same built-in shapes as the brush picker
     /// (custom imported textures are a paint-brush-only feature for now, not offered here).

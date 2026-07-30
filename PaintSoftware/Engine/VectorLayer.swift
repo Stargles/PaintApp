@@ -274,6 +274,19 @@ final class VectorCanvas {
     private(set) var version: Int = 0
     private var cachedImage: UIImage?
 
+    /// Broad phase for every geometric query against this canvas's strokes, rebuilt lazily — see
+    /// `strokeIndex()`. Version-keyed rather than cleared by `invalidate()`, because `version` only
+    /// ever increases, so a stale index can never be mistaken for a current one.
+    ///
+    /// This is also the answer to the plan's §3.2 "cached `bounds: CGRect` per stroke". A stored
+    /// per-stroke box would exist to reject strokes before testing their segments; the index rejects
+    /// them *without visiting them at all*, which strictly dominates, and it does so without adding a
+    /// derived stored property to a `Codable` struct whose `samples` are assigned from a dozen call
+    /// sites with no mutator to hang the invalidation off. That mutator seam is worth building when
+    /// Phase 5's decimation needs it anyway; until then this is the cache.
+    private var cachedIndex: StrokeSpatialIndex?
+    private var cachedIndexVersion: Int = -1
+
     init(size: CGSize, elements: [VectorElement], transform: CGAffineTransform = .identity) {
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
         // Assigns the backing storage directly: `init` runs before the instance is shared with any
@@ -549,78 +562,211 @@ final class VectorCanvas {
         return PixelOps.opaqueContentBounds(renderLocalContent())
     }
 
-    /// Splits/erases vector strokes along an eraser path: any stroke sample within `radius` of any
-    /// eraser point is cut, and each surviving contiguous run of samples becomes its own stroke — so
-    /// erasing through the middle of a stroke leaves two strokes, exactly like a vector eraser (not a
-    /// raster hole). Returns true if anything changed. Eraser input is in canvas space, so points are
-    /// mapped back through the layer transform first to compare against stored (untransformed) samples.
+    // MARK: - Erasing
+    //
+    // The adapter layer between a gesture in canvas space and `VectorEraser`'s pure geometry: map
+    // into local space, ask the spatial index which strokes are even candidates, delegate the actual
+    // "which spans go away" decision, splice the survivors back at their parent's z-position.
+    //
+    // Nothing below decides geometry itself. That is the point of the split — every rule about what
+    // an eraser covers lives in `VectorEraser`/`StrokeGeometry`, where it is compiled into the test
+    // target and checked headlessly, rather than in here behind a lock and a render cache.
+
+    /// Removes stroke geometry along an eraser gesture, according to `mode`. Returns true if anything
+    /// changed.
     ///
-    /// Rebuilds each stroke **in place** in the display list rather than reassembling one flat stroke
-    /// array, so the surviving pieces keep the z-position their parent held relative to fills, images
-    /// and (later) other strokes.
+    /// Eraser input is in **canvas** space (that is where touches are measured), so both the samples
+    /// and the brush diameter are mapped through the inverse layer transform before they meet the
+    /// stored, local-space geometry — otherwise erasing a scaled-up layer cuts a nib-sized hole where
+    /// the user swept a wide one.
     ///
-    /// Applies to every stroke regardless of `composite`, which is what the pre-display-list code did
-    /// and therefore what keeps this byte-identical. Nothing constructs an `.erase` stroke yet, so the
-    /// two readings ("cut points out of an eraser too" vs. "leave erase elements alone") are
-    /// indistinguishable today — Phase 2, which rewrites this whole method onto `StrokeGeometry`, is
-    /// where that gets decided.
+    /// Surviving pieces are spliced back **in place**, so they keep the z-position their parent held
+    /// relative to fills, images and other strokes. Id semantics match the pre-Phase-2 behaviour and
+    /// are load-bearing now that `BrushStamper`'s dab RNG is seeded from `stroke.id`: an untouched
+    /// stroke keeps its id and therefore its exact scatter/jitter pattern, while a split mints fresh
+    /// ids and re-rolls the pattern for both pieces (which is unavoidable — two strokes cannot share
+    /// one seed without sharing one dab sequence).
+    ///
+    /// ## What this replaced
+    ///
+    /// The pre-Phase-2 implementation compared every stroke sample against every raw eraser *touch
+    /// point* and dropped whole samples. All four of its defects (plan §4) are gone: a small nib no
+    /// longer passes between two coarse touches without erasing (the eraser is a continuous capsule
+    /// chain), cuts land at the footprint's edge instead of at the nearest stored sample, a coarse
+    /// stroke is probed along its segments instead of judged at its vertices, and the traversal is
+    /// bounded by the spatial index instead of being O(all samples × all touch points) over every
+    /// stroke on the layer.
+    ///
+    /// ## `composite`
+    ///
+    /// `.erase` strokes are skipped — the carry-over the display-list phase deliberately left open.
+    /// An eraser element is not ink; cutting a span out of one would *restore* the ink beneath it,
+    /// which is not what any of the three modes mean by erasing. Phase 4, which starts producing
+    /// `.erase` elements, garbage-collects them instead (plan §1).
     @discardableResult
-    func erase(alongPath eraserPoints: [CGPoint], radius: CGFloat) -> Bool {
+    func erase(alongPath canvasSpaceSamples: [VectorSample], brush: Brush, size: CGFloat,
+               mode: VectorEraserMode) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !eraserPoints.isEmpty, _elements.contains(where: { $0.stroke != nil }) else { return false }
-        let inverse = _transform.inverted()
-        let localEraser = eraserPoints.map { $0.applying(inverse) }
-        // The radius is a canvas-space measurement like the points, so it has to be brought into
-        // local space alongside them — otherwise erasing a scaled-up layer cuts a nib-sized hole
-        // where the user swept a wide one (or vice versa).
+        guard !canvasSpaceSamples.isEmpty, _elements.contains(where: { $0.stroke != nil }) else { return false }
+
+        let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
         let scale = Self.scale(of: _transform)
-        let localRadius = scale > 0 ? radius / scale : radius
-        let r2 = localRadius * localRadius
-        func isErased(_ s: VectorSample) -> Bool {
-            let p = s.point
-            for e in localEraser {
-                let dx = p.x - e.x, dy = p.y - e.y
-                if dx * dx + dy * dy <= r2 { return true }
-            }
-            return false
+        let localSize = scale > 0 ? size / scale : size
+        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: localSize,
+                                             mode: mode) else { return false }
+
+        let changed: Bool
+        switch mode {
+        // Mode 1 shares Mode 2's geometry until Phase 4 adds the hybrid resolution — see
+        // `VectorEraserMode.erase`. This is the one branch that changes then.
+        case .erase, .cutPoints:
+            changed = cutAlongFootprint(sweep: sweep)
+        case .cutToIntersection:
+            changed = cutToIntersection(sweep: sweep, near: localSamples[0].point)
         }
+        if changed { invalidate() }
+        return changed
+    }
+
+    /// Modes 1 and 2: every paint stroke loses the spans its geometry shares with the eraser's
+    /// footprint. Caller must hold `lock`.
+    private func cutAlongFootprint(sweep: VectorEraser.Sweep) -> Bool {
+        let candidates = Set(strokeIndex().segments(near: sweep.bounds).map(\.elementIndex))
+        guard !candidates.isEmpty else { return false }
 
         var changed = false
         var result: [VectorElement] = []
         result.reserveCapacity(_elements.count)
-        for element in _elements {
-            guard let stroke = element.stroke else {
-                result.append(element) // fills and images are untouched by a vector eraser
+        for (index, element) in _elements.enumerated() {
+            guard candidates.contains(index), let stroke = element.stroke,
+                  stroke.composite == .paint else {
+                // Fills and images are untouched by a geometric eraser, and so is anything the
+                // eraser's swept box never reached.
+                result.append(element)
                 continue
             }
-            var runs: [[VectorSample]] = []
-            var current: [VectorSample] = []
-            for sample in stroke.samples {
-                if isErased(sample) {
-                    if !current.isEmpty { runs.append(current); current = [] }
-                    changed = true
-                } else {
-                    current.append(sample)
-                }
-            }
-            if !current.isEmpty { runs.append(current) }
-            if runs.count == 1 && runs[0].count == stroke.samples.count {
-                result.append(element) // untouched
-            } else {
-                for run in runs where run.count >= 1 {
-                    var piece = stroke
-                    piece.id = UUID()
-                    piece.samples = run
-                    result.append(.stroke(piece))
-                }
+            let cuts = Self.effectiveCuts(VectorEraser.cutRanges(in: stroke.samples, sweep: sweep),
+                                          in: stroke.samples)
+            guard !cuts.isEmpty else { result.append(element); continue }
+            changed = true
+            for run in StrokeGeometry.splitStroke(stroke.samples, removing: cuts) {
+                var piece = stroke
+                piece.id = UUID()
+                piece.samples = run
+                result.append(.stroke(piece))
             }
         }
-        if changed {
-            _elements = result
-            invalidate()
-        }
+        if changed { _elements = result }
         return changed
+    }
+
+    /// Mode 3: the one stroke the eraser came down on loses the span between its two neighbouring
+    /// crossings. Caller must hold `lock`.
+    ///
+    /// **Phase 2 scope.** The plan has this firing on touch-*down* and re-querying per crossing, so a
+    /// single drag across three lines cuts three spans. This runs once, on lift, against the
+    /// gesture's first sample — correct for a tap or a short stroke on one line, which is how the
+    /// mode is actually used, and short of the plan for a long sweep. Phase 3 owns the upgrade; it is
+    /// plumbing in `StrokeCanvasView` (call per touch-down, accumulate one undo entry for the drag)
+    /// rather than geometry, which is why the geometry is finished here.
+    private func cutToIntersection(sweep: VectorEraser.Sweep, near hitPoint: CGPoint) -> Bool {
+        let index = strokeIndex()
+        let candidates = Set(index.segments(near: sweep.bounds).map(\.elementIndex))
+        guard !candidates.isEmpty else { return false }
+
+        // The stroke the eraser came down on: nearest centreline among the candidates, and only if
+        // the eraser's footprint actually reaches it (a near miss should cut nothing, not cut the
+        // nearest thing on the layer).
+        var target: (index: Int, stroke: VectorStroke, parameter: CGFloat)?
+        var bestDistanceSquared = CGFloat.infinity
+        for elementIndex in candidates.sorted() {
+            guard let stroke = _elements[elementIndex].stroke, stroke.composite == .paint,
+                  !stroke.samples.isEmpty else { continue }
+            guard let hit = StrokeGeometry.closestPoint(onPolyline: stroke.samples, to: hitPoint),
+                  hit.distanceSquared < bestDistanceSquared, sweep.contains(hit.point) else { continue }
+            bestDistanceSquared = hit.distanceSquared
+            target = (elementIndex, stroke, hit.parameter)
+        }
+        guard let target else { return false }
+
+        // Everything that could cross it, with a width-aware tolerance per pair: two lines whose ink
+        // visibly touches read as crossed even when the centrelines miss (plan §4, Mode 3).
+        let targetReach = StrokeGeometry.stampRadius(forPressure: 1, brush: target.stroke.brush,
+                                                     size: target.stroke.size)
+        guard let targetBounds = StrokeGeometry.bounds(of: target.stroke.samples,
+                                                       padding: targetReach) else { return false }
+        var others: [(points: [CGPoint], tolerance: CGFloat)] = []
+        for elementIndex in Set(index.segments(near: targetBounds).map(\.elementIndex)).sorted()
+        where elementIndex != target.index {
+            guard let other = _elements[elementIndex].stroke, other.composite == .paint,
+                  other.samples.count > 1 else { continue }
+            let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: other.brush, size: other.size)
+            others.append((other.samples.map(\.point), targetReach + reach))
+        }
+
+        let cuts = Self.effectiveCuts(VectorEraser.cutToIntersection(in: target.stroke.samples,
+                                                                     at: target.parameter, others: others),
+                                      in: target.stroke.samples)
+        guard !cuts.isEmpty else { return false }
+
+        var pieces: [VectorElement] = []
+        for run in StrokeGeometry.splitStroke(target.stroke.samples, removing: cuts) {
+            var piece = target.stroke
+            piece.id = UUID()
+            piece.samples = run
+            pieces.append(.stroke(piece))
+        }
+        _elements.replaceSubrange(target.index...target.index, with: pieces)
+        return true
+    }
+
+    /// `cuts` reduced to what actually removes something, so a graze that merely touches a stroke's
+    /// geometry doesn't churn it.
+    ///
+    /// Two filters. Ranges are merged and clamped to the run's domain first, so cuts that fall
+    /// entirely outside it disappear rather than being handed to `splitStroke` only to be dropped
+    /// there — the caller needs to know "nothing happened" to keep the stroke's id and skip the
+    /// invalidation. Then zero-width ranges go: on a multi-sample run they arise from a repeated
+    /// sample or a boundary graze and would otherwise rebuild the stroke, with a fresh id and a
+    /// re-rolled dab pattern, without deleting a thing. A single-sample run is exempt — its whole
+    /// domain *is* the zero-width range `0...0`, and removing that is how a lone dab gets erased.
+    private static func effectiveCuts(_ cuts: [ClosedRange<CGFloat>],
+                                      in samples: [VectorSample]) -> [ClosedRange<CGFloat>] {
+        guard !samples.isEmpty else { return [] }
+        let domainEnd = CGFloat(samples.count - 1)
+        let merged = StrokeGeometry.mergedCuts(cuts, clampedTo: 0...domainEnd)
+        guard samples.count > 1 else { return merged }
+        return merged.filter { $0.upperBound - $0.lowerBound > StrokeGeometry.epsilon }
+    }
+
+    /// A uniform grid over every stroke's segments, keyed by `version` so it survives as long as the
+    /// display list does and is rebuilt the first time anything asks after a mutation.
+    ///
+    /// This is what takes the eraser off the "test everything against everything" path: a query
+    /// returns only the segments in the eraser's swept box, so the cost scales with what the gesture
+    /// touched rather than with how much is on the layer. Mode 3's intersection search and Phase 4's
+    /// coverage test and residue GC all query the same structure.
+    ///
+    /// Caller must hold `lock` — and that is not just the usual convention here. `segments(near:)`
+    /// stamps a per-query visit marker into the index to de-duplicate refs across cells, so it
+    /// mutates during a *read*: two concurrent queries would interleave their markers and drop
+    /// results. The lock is what makes that safe; a future off-main reader needs its own index.
+    ///
+    /// Segment boxes are inserted with **no padding**, i.e. the index answers questions about stroke
+    /// *centrelines*. That is exactly what Modes 2 and 3 ask (does the footprint cover this point?).
+    /// Phase 4's coverage test asks about a stroke's own *width*, so it must expand its query rect by
+    /// the widest half-width on the layer rather than assume this rejects nothing it needed.
+    private func strokeIndex() -> StrokeSpatialIndex {
+        if let cachedIndex, cachedIndexVersion == version { return cachedIndex }
+        let index = StrokeSpatialIndex()
+        for (elementIndex, element) in _elements.enumerated() {
+            guard let stroke = element.stroke else { continue }
+            index.insert(samples: stroke.samples, elementIndex: elementIndex)
+        }
+        cachedIndex = index
+        cachedIndexVersion = version
+        return index
     }
 
     // MARK: - Rendering
