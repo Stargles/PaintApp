@@ -620,4 +620,68 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                           "The punch mints its own id, so its dab scatter cannot be compared against a raster tier seeded from the gesture")
         XCTAssertEqual(strokes(canvas, .paint).count, 1, "…and it must not delete")
     }
+
+    // MARK: - 5. Display-list ordering, now that a phase finally interleaves
+
+    /// `VectorCanvas`'s `strokes`/`fills`/`images` setters splice: they remove every element of that
+    /// kind and reinsert the new list where the *first* removed one sat. That round-trips exactly
+    /// only while each kind occupies one contiguous run — and the accessors' own comment flagged a
+    /// phase that starts interleaving as the thing that would break it. Phase 4 is the first phase
+    /// that appends an `.erase` element after the paint strokes, so this was the phase to check.
+    ///
+    /// It does not break, and the reason is worth pinning rather than re-deriving: **every**
+    /// insertion goes through `insertionIndex(forKind:)`, which orders by `Kind.rawValue`
+    /// (`fill` 0 < `image` 1 < `stroke` 2), and the punch's `append` lands exactly where that would
+    /// have put it because `stroke` is the highest kind. So the list is sorted by kind as an
+    /// invariant, not as a coincidence, and each kind is contiguous by construction. Which means
+    /// `CanvasManager+Shape.registerVectorStrokeUndo` and `CanvasManager+Fill.registerVectorFillUndo`
+    /// — both of which assign wholesale through those accessors — are correct as they stand.
+    func testAPunchLeavesEachKindContiguousSoTheUndoAccessorsStillRoundTrip() {
+        let scene = scenario(brush: BrushLibrary.hardRound,
+                             backdrop: .fill(CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1),
+                                             CGRect(x: 20, y: 20, width: 88, height: 88)))
+        let (canvas, _, changed) = erased(scene)
+        XCTAssertTrue(changed, "Setup: the gesture should have retained a punch over the fill")
+
+        let kinds = canvas.elements.map { element -> Int in
+            if element.fill != nil { return 0 }
+            if element.image != nil { return 1 }
+            return 2
+        }
+        XCTAssertEqual(kinds, kinds.sorted(),
+                       "The display list must stay sorted by kind — a punch appended out of that "
+                       + "order would split the stroke run in two and make the splice lossy")
+        XCTAssertEqual(canvas.elements.last?.stroke?.composite, .erase,
+                       "Setup: the punch should be the last element")
+
+        // Exactly what the two registerVector*Undo paths do: snapshot through the kind accessor,
+        // then assign the snapshot straight back.
+        let before = canvas.elements
+        canvas.strokes = canvas.strokes
+        canvas.fills = canvas.fills
+        XCTAssertEqual(canvas.elements.map(\.id), before.map(\.id),
+                       "A get→set round trip through the kind accessors must be the identity, "
+                       + "punch included — otherwise every shape or fill undo reshuffles z-order")
+    }
+
+    /// The consequence of that same invariant, stated so it is a decision rather than a surprise: the
+    /// list *cannot* express a fill above a stroke, so a flood fill made after an erase gesture is
+    /// inserted beneath that gesture and is punched by it. This is the open `addFill` ordering
+    /// question (plan §1 carry-overs), and it is the behaviour that question is about — recorded here
+    /// so whoever settles it changes this assertion deliberately.
+    func testAFillAddedAfterAnErasePunchLandsBeneathItAndIsPunched() {
+        let scene = scenario(brush: BrushLibrary.hardRound)
+        let (canvas, _, _) = erased(scene)
+        XCTAssertEqual(canvas.elements.last?.stroke?.composite, .erase, "Setup: a punch is on top")
+
+        canvas.addFill(canvasSpacePath: CGPath(rect: CGRect(origin: .zero, size: scene.canvasSize),
+                                               transform: nil),
+                       color: CodableColor(red: 0.1, green: 0.4, blue: 0.9, alpha: 1))
+
+        XCTAssertEqual(canvas.elements.first?.fill != nil, true,
+                       "addFill inserts beneath everything, so a fill drawn after an erase goes "
+                       + "under it and the erase eats it — not above it as drawing order would suggest")
+        XCTAssertEqual(canvas.elements.last?.stroke?.composite, .erase,
+                       "…and the punch stays on top")
+    }
 }

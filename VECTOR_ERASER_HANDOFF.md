@@ -1,8 +1,7 @@
 # Vector Eraser — Resume Here
 
-Working state as of **Session 5 (2026-07-30)**. Read [VECTOR_ERASER_PLAN.md](VECTOR_ERASER_PLAN.md)
-first — it is the spec, and §1/§4/§8 have been rewritten to match what actually shipped. This file is
-only the bookmark.
+Working state as of **Session 6 (2026-07-30)**. Read [VECTOR_ERASER_PLAN.md](VECTOR_ERASER_PLAN.md)
+first — it is the spec, and §1/§4/§7/§8 match what actually shipped. This file is only the bookmark.
 
 ## Environment correction (important, saves 10 minutes)
 
@@ -14,11 +13,15 @@ local, no SSH, no `parallel_test.sh`. Build directly, ~20s:
 xcodebuild build -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,id=2AE27426-4D30-465F-9B93-A759CAEA8456' -derivedDataPath /tmp/dd-veraser
 ```
 
-Logic tests (**169** currently green — this is the regression net):
+Logic tests (**171** currently green — this is the regression net):
 
 ```bash
 xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,id=2AE27426-4D30-465F-9B93-A759CAEA8456' -derivedDataPath /tmp/dd-veraser -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/VectorEraserHybridLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/RasterVectorParityLogicTests
 ```
+
+UI tests (`VectorEraserUITests`, 8 tests; `VectorShapeAndRecoveryUITests`) — same command with those
+suites added. They are slow: **~35–45 s each**, so budget several minutes and run them in the
+background. The full green run at Session 6's end was **190 tests, 0 failures**.
 
 **xcodebuild does not print assertion messages to stdout.** A failure line names the test and nothing
 else. To read the actual message:
@@ -115,47 +118,102 @@ nothing is re-stamped and nothing can land anywhere new. It is exact, and it is 
 
 ---
 
+## What Session 6 did
+
+**The last handoff's item 1 is closed: the eraser has now been run through the real UI.**
+`PaintSoftwareUITests/VectorEraserUITests.swift`, 8 XCUITests, commit `b51ef79`. Nothing was
+invalidated — the picker, Mode 1's punch and whole-stroke delete, the live preview, and Mode 3's
+per-crossing sweep all behave as the logic tests said they would. Two supporting changes were needed,
+worth knowing before writing more UI tests:
+
+- **`LayerRowModel` reports paint strokes and `.erase` punches as separate counts**, surfaced as
+  `layerPanel.row.N.vector` = `"isVector,paintStrokes,erasePunches"`. Against a single total, "the
+  stroke was cut in two" and "a punch was added over it" are the same number.
+  `testHeldStrokeOnVectorLayerBecomesAVectorStrokeTheEraserSplits` had been asserting `strokes == 2`
+  after a Mode 1 erase and passing on 1 paint + 1 punch — i.e. measuring nothing since Phase 4c. It
+  is renamed and now asserts the shipped semantics.
+- **`StrokeCanvasView.lastVectorGestureTrace`** (`"<scratchRole>,<livePreviewFrames>"`), surfaced on
+  `canvas.host`'s `accessibilityValue`. **A live preview cannot be observed by an XCUITest
+  directly.** `press(forDuration:thenDragTo:)` asserts main-thread, so the test thread is blocked
+  inside the gesture for its whole duration and every screenshot it can take is post-lift — where
+  the commit has erased the same pixels and a sighting proves nothing. Running the gesture on a
+  background queue is exactly what that assertion exists to prevent: it crashes the runner (it did,
+  and took the next test in the class down with it). So the app counts the frames it published and
+  the test reads the count afterwards. **Don't re-attempt the background-queue approach.**
+
+Two more things learned about the UI harness:
+
+- **`drawLine`'s fast flick delivers too few touch samples for Mode 3.** A sweep across three lines
+  acted on only two of them, because Mode 3 resolves at the tip and needs a sample to land within
+  the nib's footprint of each line. Use `dragOnCanvas` (slow velocity) and a wider eraser. This is a
+  property of XCUITest's synthesized input, not of `IntersectionDriver` — which is covered
+  sample-by-sample in `VectorEraserLogicTests` and is correct.
+- **The eraser panel overlays the right of the canvas**, so close it before any canvas gesture.
+  `selectVectorEraserMode` / `setEraserSize` in the test file both do open→act→close for this reason.
+
+**Carry-over 2(b) is resolved, and it was not a bug.** The last handoff flagged
+`CanvasManager+Shape.registerVectorStrokeUndo` and `CanvasManager+Fill.registerVectorFillUndo` as
+unaudited wholesale assignments through the kind-filtered accessors. They are correct. **Every**
+insertion into `_elements` goes through `insertionIndex(forKind:)`, which orders by `Kind.rawValue`
+(`fill` 0 < `image` 1 < `stroke` 2), and the punch's `_elements.append` lands exactly where that
+would have put it because `stroke` is the highest kind. So the display list is sorted by kind as an
+*invariant*, each kind is contiguous by construction, and the splice round-trips exactly.
+`testAPunchLeavesEachKindContiguousSoTheUndoAccessorsStillRoundTrip` pins this.
+
+The real consequence of that invariant, which *is* still open: **the list cannot express a fill or
+image above a stroke at all**, so a flood fill made after an erase gesture is inserted beneath that
+gesture and gets punched by it. That is carry-over 2(a) seen from the eraser's side;
+`testAFillAddedAfterAnErasePunchLandsBeneathItAndIsPunched` records the current behaviour so whoever
+settles the question changes it deliberately.
+
+---
+
 ## Next session: start here
 
-### 1. Nothing has ever been run in the simulator UI
+### 1. Give the dab lattice a reproducible anchor — the unlock
 
-All 169 tests are headless. The segmented mode picker has never been tapped, Mode 1's live preview
-has never been seen, and Mode 3's cut-on-touch-down has never been felt. This is now the largest
-untested surface by a wide margin, and the only remaining item that could invalidate a whole phase.
-
-### 2. Give the dab lattice a reproducible anchor — the unlock
-
-This is what buys back the geometric split, and with it plan §1's "grab one visual half with the Move
-tool". Two candidate shapes:
+Unchanged from the last handoff and now the top item. This is what buys back the geometric split,
+and with it plan §1's "grab one visual half with the Move tool". Two candidate shapes:
 
 - **Arclength-anchored dabs.** Place dabs at absolute multiples of `stampSpacing` measured from the
   stroke's origin, and give a piece its start arclength. Changes `BrushStamper` for every stroke.
 - **A parametric visible range on `VectorStroke`.** A piece keeps the original samples and renders
-  only the dabs inside its range, reusing the original lattice outright. Cleaner in principle;
-  ripples into bounds, hit-testing, the spatial index, persistence and the Move tool.
+  only the dabs inside its range, reusing the original lattice outright. Cleaner in principle —
+  `stampStroke`'s inner `advance` closure already receives each dab's `t` along its segment, so the
+  skip is local to that loop — but it ripples into bounds, hit-testing, the spatial index,
+  persistence and the Move tool.
 
 Either one makes `testAPartialSplitDivergesOutsideThePunchWhichIsWhyItIsNotWired` fail, which is the
 signal to re-wire `conservativeCuts` into `VectorCanvas.eraseHybrid`.
 
-### 3. Then
+Budget it as a **whole session** — Session 6 deliberately did not start it rather than leave it
+half-done.
+
+### 2. Then
 
 - **Perf is unmeasured for Mode 1.** `hasResidue` probes the eraser's parametric domain and each
   probe does a spatial-index query — a per-erase cost nobody has timed. Plan §6/§8 want
-  `PerfBaselineTests.testVectorLayerRenderCostAndMemory` extended with an erase-heavy scenario.
+  `PerfBaselineTests.testVectorLayerRenderCostAndMemory` extended with an erase-heavy scenario
+  (200 strokes, 50 erase gestures) and the numbers recorded in `REFACTOR_BASELINE.md`.
 - **GPU rendering** — plan §11. Unblocked: §8's parity test exists and is its regression net.
 
 ### Carry-overs still open
 
 1. **Two sub-spacing biases at stroke ends** (`advance` carries a remainder so the last dab falls
    short; the chain tapers where `stampStroke` ramps pressure). Mattered for the clean-cut margin;
-   less critical now that the punch guarantees exactness regardless. Same root cause as §2 above.
-2. **Two ordering decisions still unowned:** (a) `addFill` inserts *beneath* existing strokes — still
-   right? (b) the `strokes`/`fills`/`images` setters collapse each kind into one contiguous run.
-   Phase 4 is the first phase that interleaves — an `.erase` stroke is appended after the paint
-   strokes and a later paint stroke lands above it — which is why the vector undo path moved to
-   `elements`. Any *remaining* wholesale assignment through `strokes` is a latent bug;
-   `CanvasManager+Shape.registerVectorStrokeUndo` and `CanvasManager+Fill.registerVectorFillUndo`
-   were **not audited**.
+   less critical now that the punch guarantees exactness regardless. Same root cause as §1 above.
+2. **`addFill` inserts beneath existing strokes — still right?** Now sharpened by the finding above:
+   this is not a local choice about fills, it is a property of the kind-sorted display list.
+   Changing it means letting `_elements` hold an arbitrary order and dropping the kind accessors'
+   splice contract — the `strokes`/`fills`/`images` setters and both `registerVector*Undo` paths
+   would have to move to `elements`. What depends on the invariant is now pinned by
+   `testAPunchLeavesEachKindContiguousSoTheUndoAccessorsStillRoundTrip`.
+3. **The live-preview trace measures publication, not pixels.** `lastVectorGestureTrace` proves the
+   punched copy reached the image view repeatedly during the drag; it does not prove a particular
+   pixel was clear at that moment. Closing that gap needs a pixel read off the scratch texture,
+   recorded in-app (`RasterLayerTexture` has a private `CGContext` whose `data` would serve). Low
+   priority — the pixels themselves are `RasterVectorParityLogicTests`' job, and the preview shares
+   `stampPath`/`isEraser` with the raster eraser precisely so they can be.
 
 ## Multi-session protocol reminder
 
