@@ -170,22 +170,39 @@ LaunchAgent `com.paintapp.resign` auto-resigns every 6 days (518400s) to bypass 
 - Status: `sudo launchctl list | grep paintapp`
 - Reload: `sudo launchctl unload /Library/LaunchDaemons/com.paintapp.resign.plist && sudo launchctl load /Library/LaunchDaemons/com.paintapp.resign.plist`
 
-## graphify (optional local tooling)
+## graphify
 
-`graphify` builds a queryable knowledge graph of the codebase — god nodes, community structure,
-cross-file relationships. It is **optional and local**: the output under `graphify-out/` is
-gitignored because `graph.json` alone is ~11 MB and rewrites wholesale on every refresh.
-
-If you have `graphify` installed, generate the graph first (a few seconds, AST-only, no API cost):
+`graphify` builds a queryable knowledge graph of this codebase — god nodes, community structure,
+cross-file relationships. Prefer it over raw grep when orienting yourself.
 
 ```bash
-graphify update .
+graphify update .                      # build/refresh the graph (seconds, AST-only, no API cost)
+graphify query "<question>"            # scoped subgraph — usually far smaller than grep output
+graphify path "<A>" "<B>"              # how two symbols relate
+graphify explain "<concept>"           # one focused concept
 ```
 
-Then `graphify query "<question>"` for scoped subgraphs, `graphify path "<A>" "<B>"` for
-relationships, `graphify explain "<concept>"` for one concept, and `graphify-out/GRAPH_REPORT.md`
-for a broad architecture read. Re-run `graphify update .` after code changes to keep it current.
+`graphify-out/GRAPH_REPORT.md` is the broad architecture read; use it when query/path/explain don't
+surface enough. **Re-run `graphify update .` after changing code** — a stale graph describes files
+that no longer exist (it went stale twice during the 2026-07 refactor).
 
-Do not commit `graphify-out/`, and do not add graphify hooks to a tracked `.claude/settings.json` —
-the binary lives at a per-machine path, and the Windows machine described above has no graphify at
-all, so a tracked hook would break every `Read`/`Grep`/`Bash` call there.
+### How it's wired
+
+A `PreToolUse` hook in [.claude/settings.json](.claude/settings.json) reminds sessions to consult
+the graph before grepping or reading source. It runs
+[.claude/hooks/graphify-guard.sh](.claude/hooks/graphify-guard.sh), which exists because three
+things have to hold for a tracked hook in front of every `Bash`/`Grep`/`Read`/`Glob` call:
+
+- **Portable.** `graphify` installs per-user and is usually not on `PATH`, so the hook resolves it
+  from `PATH` first, then the known per-user install paths. Never hardcode one absolute path — the
+  Windows machine described above has no graphify at all.
+- **Fail-open.** If graphify is missing or errors, the hook is a silent no-op and exits 0. It must
+  never block a tool call.
+- **Self-bootstrapping.** `graphify-out/` is gitignored (`graph.json` is ~11 MB and rewrites
+  wholesale on every refresh, so committing it is pure history churn). A fresh clone therefore has
+  no graph, and bare `graphify hook-guard` is *silent* in that state — so the wrapper emits its own
+  "run `graphify update .`" nudge instead, and sessions self-bootstrap in one command.
+
+Do not commit `graphify-out/`. If the hook's reminders prove too noisy for focused editing work,
+narrow the second matcher from `Read|Glob` to `Glob` — that keeps the nudge on discovery (searching
+for something) and drops it from targeted access (opening a file you already know you need).
