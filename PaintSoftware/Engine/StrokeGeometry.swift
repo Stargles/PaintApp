@@ -743,17 +743,34 @@ enum StrokeGeometry {
     /// point decimation exists it must not move them, or the cut edge drifts away from where the user
     /// erased.
     static func splitStroke(_ samples: [VectorSample], removing cuts: [ClosedRange<CGFloat>]) -> [[VectorSample]] {
+        splitStrokeRuns(samples, removing: cuts).map(\.samples)
+    }
+
+    /// One surviving piece of a split: its samples, and where each of them sits in the **input's**
+    /// parametric domain.
+    ///
+    /// The parameters are what lets a piece keep rendering on the original's dab lattice instead of
+    /// starting its own — see `DabLattice`, which stores exactly this alongside the parent's samples.
+    /// They are free here and unrecoverable afterwards: a boundary sample is interpolated at a
+    /// fractional parameter, and nothing about the resulting point says where it came from once the run
+    /// has been handed back on its own.
+    typealias SplitRun = (samples: [VectorSample], parameters: [CGFloat])
+
+    /// `splitStroke`, reporting each run's source parameters as well as its samples. Same walk, same
+    /// edge cases; `splitStroke` is this with the parameters dropped.
+    static func splitStrokeRuns(_ samples: [VectorSample],
+                                removing cuts: [ClosedRange<CGFloat>]) -> [SplitRun] {
         guard !samples.isEmpty else { return [] }
         let domainEnd = CGFloat(samples.count - 1)
         let merged = mergedCuts(cuts, clampedTo: 0...domainEnd)
-        guard !merged.isEmpty else { return [samples] }
+        guard !merged.isEmpty else { return [(samples, identityParameters(count: samples.count))] }
 
         // A single sample has no extent to survive inside, so the only question is whether it was hit.
         guard samples.count > 1 else {
-            return merged.contains { $0.lowerBound <= 0 && $0.upperBound >= 0 } ? [] : [samples]
+            return merged.contains { $0.lowerBound <= 0 && $0.upperBound >= 0 } ? [] : [(samples, [0])]
         }
 
-        var runs: [[VectorSample]] = []
+        var runs: [SplitRun] = []
         var cursor: CGFloat = 0
         for cut in merged {
             appendRun(from: cursor, to: cut.lowerBound, of: samples, into: &runs)
@@ -763,29 +780,36 @@ enum StrokeGeometry {
         return runs
     }
 
+    private static func identityParameters(count: Int) -> [CGFloat] {
+        (0..<count).map(CGFloat.init)
+    }
+
     /// Emits the samples of the surviving span `low...high` — boundaries interpolated, interior
-    /// samples copied verbatim.
+    /// samples copied verbatim — with the parameter each one came from.
     ///
     /// Spans thinner than `epsilon` are dropped rather than emitted as a lone dab: they arise only
     /// where two cuts meet, where the "survivor" is a rounding artefact of the cut edges rather than
     /// ink the user left behind, and emitting one would stamp a visible dab in the middle of the hole
     /// they just erased.
     private static func appendRun(from low: CGFloat, to high: CGFloat, of samples: [VectorSample],
-                                  into runs: inout [[VectorSample]]) {
+                                  into runs: inout [SplitRun]) {
         guard high - low > epsilon else { return }
         var run: [VectorSample] = []
+        var parameters: [CGFloat] = []
         // Interior integer indices, plus the two interpolated ends.
         let firstInterior = Int(low.rounded(.down)) + 1
         let lastInterior = Int(high.rounded(.up)) - 1
         run.reserveCapacity(max(lastInterior - firstInterior + 1, 0) + 2)
-        if let start = interpolatedSample(in: samples, at: low) { run.append(start) }
+        parameters.reserveCapacity(run.capacity)
+        if let start = interpolatedSample(in: samples, at: low) { run.append(start); parameters.append(low) }
         if firstInterior <= lastInterior {
             for i in firstInterior...lastInterior where CGFloat(i) > low && CGFloat(i) < high {
                 run.append(samples[i])
+                parameters.append(CGFloat(i))
             }
         }
-        if let end = interpolatedSample(in: samples, at: high) { run.append(end) }
-        if !run.isEmpty { runs.append(run) }
+        if let end = interpolatedSample(in: samples, at: high) { run.append(end); parameters.append(high) }
+        if !run.isEmpty { runs.append((run, parameters)) }
     }
 
     /// `cuts` clamped to `domain`, sorted, and merged where they overlap or abut — so the split walk

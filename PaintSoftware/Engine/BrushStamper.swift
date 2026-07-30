@@ -111,22 +111,59 @@ enum BrushStamper {
     /// Pass `seed` (from `seed(for:)`, i.e. the stroke's own id) whenever the stroke can be replayed —
     /// which for stored vector geometry is every render. Without it, scatter and rotation jitter are
     /// re-rolled per render and the stroke's pixels change under the user; see `DabRNG`.
+    ///
+    /// ## `visibleRange` — showing a sub-run without re-phasing it
+    ///
+    /// The dab lattice this walk lays down is anchored at `samples[0]`: dabs land every `spacing`
+    /// along the path, with the leftover carried across segments. Hand it a *sub-run* of a stroke —
+    /// which is what cutting a stroke and re-stamping the surviving piece does — and the anchor moves
+    /// to the cut, so the piece's ink lands somewhere new along its **whole length**, most visibly at
+    /// the far tip. That is the measurement that unwired Mode 1's geometric split (see
+    /// `VectorEraser`'s Mode 1 notes and VECTOR_ERASER_PLAN.md §1).
+    ///
+    /// `visibleRange` is the fix, and it is deliberately a *filter over the original walk* rather than
+    /// a re-derivation of it: the caller passes the **whole** stroke's samples, this walks all of them
+    /// exactly as before — same spacing arithmetic, same carry, same floating-point — and simply routes
+    /// the dabs outside the range to a sink that draws nothing. The dabs that do land are therefore not
+    /// approximately where the uncut stroke put them, they are bit-for-bit the same call with the same
+    /// arguments. Nothing else reproduces the lattice that exactly, which matters because §8's
+    /// acceptance criterion is asserted at *zero* tolerance.
+    ///
+    /// The range is in `StrokeGeometry`'s "sample index + fraction" domain, and a dab exactly on a
+    /// boundary is drawn — so two pieces cut at `low`/`high` render, between them, every dab of the
+    /// original except those strictly inside `(low, high)`.
+    ///
+    /// The skipped dabs still go through `stampDab`, so they consume the RNG exactly as they would
+    /// have. Without that a piece of a scattering stroke would re-roll every dab after the first
+    /// skipped one — the same class of bug in a different place.
     static func stampStroke(into raster: DabTarget, samples: [Sample], brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false,
-                            seed: UInt64? = nil) {
+                            seed: UInt64? = nil, visibleRange: ClosedRange<CGFloat>? = nil) {
         guard !samples.isEmpty else { return }
         raster.beginStroke()
         let spacing = stampSpacing(brushSize: brushSize, brush: brush)
         var rng = seed.map { DabRNG(seed: $0) } ?? DabRNG()
         var last: CGPoint?
         var lastPressure: CGFloat = samples[0].pressure
-        for sample in samples {
+        // The parameter of the *carry point* — which is a dab position, not a sample, whenever the
+        // previous segment placed one. Tracked alongside `last` so a dab's parameter is exact rather
+        // than inferred from its position: within a segment, position is affine in parameter, so the
+        // same `t` that ramps pressure maps the parameter too.
+        var lastParameter: CGFloat = 0
+
+        func sink(at parameter: CGFloat) -> DabTarget {
+            guard let visibleRange else { return raster }
+            return visibleRange.contains(parameter) ? raster : DiscardedDabTarget.shared
+        }
+
+        for (index, sample) in samples.enumerated() {
             let point = sample.point
             guard let lastPoint = last else {
-                stampDab(into: raster, at: point, pressure: sample.pressure, brush: brush, color: color,
+                stampDab(into: sink(at: 0), at: point, pressure: sample.pressure, brush: brush, color: color,
                          brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser, rng: &rng)
                 last = point
                 lastPressure = sample.pressure
+                lastParameter = 0
                 continue
             }
             // Pressure ramps across the dabs bridging two input samples rather than every one of them
@@ -134,10 +171,18 @@ enum BrushStamper {
             // segment can span many dabs, and holding pressure flat across them turned a smooth press
             // into a visible staircase in both width and opacity.
             let p0 = lastPressure, p1 = sample.pressure
+            let q0 = lastParameter, q1 = CGFloat(index)
+            var finalT: CGFloat?
             last = advance(from: lastPoint, to: point, spacing: spacing) { dab, t in
-                stampDab(into: raster, at: dab, pressure: p0 + (p1 - p0) * t, brush: brush, color: color,
-                         brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser, rng: &rng)
+                finalT = t
+                let parameter = q0 + (q1 - q0) * t
+                stampDab(into: sink(at: parameter), at: dab, pressure: p0 + (p1 - p0) * t, brush: brush,
+                         color: color, brushSize: brushSize, brushOpacity: brushOpacity,
+                         isEraser: isEraser, rng: &rng)
             }
+            // `advance` returns the last dab's position, or `lastPoint` unchanged when the segment was
+            // too short to place one — in which case the carry point, and so its parameter, is unmoved.
+            if let finalT { lastParameter = q0 + (q1 - q0) * finalT }
             lastPressure = sample.pressure
         }
         raster.endStroke()
@@ -224,4 +269,19 @@ enum BrushStamper {
             y += step
         }
     }
+}
+
+/// Where `stampStroke` sends the dabs outside a `visibleRange`.
+///
+/// The dab is still *computed* — same size, same alpha, same RNG draws — and then dropped, which is
+/// the point: skipping the call instead would desynchronise the dab RNG for every dab after it, and
+/// branching before the call would put the visibility test in the middle of the arithmetic that has
+/// to stay bit-identical. Stateless, so one shared instance serves every caller on every thread.
+final class DiscardedDabTarget: DabTarget {
+    static let shared = DiscardedDabTarget()
+    private init() {}
+    func beginStroke() {}
+    func endStroke() {}
+    func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
+                     alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {}
 }

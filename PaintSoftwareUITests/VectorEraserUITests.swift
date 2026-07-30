@@ -8,10 +8,12 @@ import XCTest
 /// — the segmented control, `CanvasManager.vectorEraserMode`, `CanvasView.updateActiveLayerAndTool`,
 /// `StrokeCanvasView`'s scratch role and its Mode 3 driver.
 ///
-/// The behaviour being asserted is VECTOR_ERASER_PLAN.md §1 *as shipped*, not as originally
-/// designed: Mode 1 retains the gesture whole as an `.erase` punch and never cuts a stroke partway,
-/// deleting only strokes it covers end to end. `readVectorMarker` reports paint strokes and erase
-/// punches as separate counts precisely so these tests can tell those outcomes apart.
+/// The behaviour being asserted is VECTOR_ERASER_PLAN.md §1 *as shipped*: Mode 1 retains the
+/// gesture whole as an `.erase` punch, deletes strokes it covers end to end, and cuts the ones it
+/// covers full-width over a stretch into pieces that keep rendering on the original's dab lattice.
+/// `readVectorMarker` reports paint strokes and erase punches as separate counts precisely so these
+/// tests can tell those three outcomes apart — against one total, "cut in two" and "punched over"
+/// are the same number.
 final class VectorEraserUITests: PaintUITestCase {
 
     // MARK: - Helpers
@@ -103,9 +105,12 @@ final class VectorEraserUITests: PaintUITestCase {
     /// The picker is only worth having if the segment you tap is the mode that commits. This drives
     /// the whole chain — segmented control -> `CanvasManager.vectorEraserMode` ->
     /// `CanvasView.updateActiveLayerAndTool` -> `StrokeCanvasView.vectorEraserMode` ->
-    /// `VectorCanvas.erase(mode:)` — by picking the one mode whose result is structurally different
-    /// from the default's: Mode 2 cuts the stroke in two and retains nothing, where Mode 1 leaves
-    /// the stroke whole and retains a punch.
+    /// `VectorCanvas.erase(mode:)` — by picking the mode whose result is structurally different from
+    /// the default's. Both modes cut this stroke in two; what tells them apart is the punch. Mode 2 is
+    /// a pure geometric split and retains nothing, where Mode 1 always keeps the gesture as an
+    /// `.erase` element — so `erases == 0` is the assertion that proves the picker's selection reached
+    /// the commit. (Until Phase 4d the piece *count* distinguished them too. It no longer does, which
+    /// is exactly the sort of thing that turns a test into a formality if nobody notices.)
     func testPickingCutModeMakesTheGestureCutInsteadOfPunch() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -120,20 +125,27 @@ final class VectorEraserUITests: PaintUITestCase {
         drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.40), to: CGVector(dx: 0.5, dy: 0.60))
 
         let after = vectorMarkerViaPanel(app, layerIndex: 1)
-        XCTAssertEqual(after?.strokes, 2,
-                       "Mode 2 cuts the stroke into two surviving pieces — if this reads 1 the "
-                       + "picker's selection never reached the commit and Mode 1 ran instead")
+        XCTAssertEqual(after?.strokes, 2, "Mode 2 cuts the stroke into two surviving pieces")
         XCTAssertEqual(after?.erases, 0,
-                       "Mode 2 is a pure geometric split: it must never retain an .erase punch")
+                       "Mode 2 is a pure geometric split: it must never retain an .erase punch. This "
+                       + "is the assertion that proves the picker reached the commit — if it reads 1, "
+                       + "Mode 1 ran instead and the segment tap went nowhere")
     }
 
     // MARK: - Mode 1
 
-    /// Mode 1 as shipped (plan §1): the stroke stays whole, the gesture is retained as one `.erase`
-    /// punch, and the visible result is a hole — ink either side of the gesture, blank paper under
-    /// it. The pixel probes are what make this a claim about what the user sees rather than about
-    /// element bookkeeping, and they are the part no logic test can make.
-    func testMode1PunchesAHoleWithoutCuttingTheStroke() throws {
+    /// Mode 1 as shipped (plan §1): a gesture that covers the line's full width cuts it into two
+    /// pieces *and* retains the gesture as one `.erase` punch, and the visible result is a hole — ink
+    /// either side of the gesture, blank paper under it. The pixel probes are what make this a claim
+    /// about what the user sees rather than about element bookkeeping, and they are the part no logic
+    /// test can make.
+    ///
+    /// Both halves matter and they are easy to confuse. The **cut** is what gives two independently
+    /// addressable halves; it is inset by the stroke's own half-width, so it is not what makes the
+    /// visible edge. The **punch** is what makes the edge, and it is why the result is byte-identical
+    /// to erasing the same content on a raster layer. Dropping either one is a regression that the
+    /// other's assertions would not catch.
+    func testMode1CutsTheStrokeAndPunchesTheGap() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         addVectorLayer(app)
@@ -155,10 +167,13 @@ final class VectorEraserUITests: PaintUITestCase {
                        "Ink to the right of the gesture must survive")
 
         let after = vectorMarkerViaPanel(app, layerIndex: 1)
-        XCTAssertEqual(after?.strokes, 1,
-                       "Mode 1 must not cut the stroke partway — a cut piece re-phases its own dab "
-                       + "lattice and lands ink outside what the punch covers (plan §1)")
-        XCTAssertEqual(after?.erases, 1, "The gesture should be retained as exactly one .erase punch")
+        XCTAssertEqual(after?.strokes, 2,
+                       "Mode 1 cuts where the eraser covers the line's full width, into pieces that "
+                       + "render on the original's dab lattice (plan §1) — reading 1 means the split "
+                       + "never fired, and the two halves cannot be moved apart")
+        XCTAssertEqual(after?.erases, 1,
+                       "…and the gesture is still retained as exactly one .erase punch: the cut is "
+                       + "inset inside the footprint, so the punch is what makes the visible edge")
     }
 
     /// The exemption that keeps "scribble a stroke out and it costs nothing" true: a stroke the

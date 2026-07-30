@@ -259,12 +259,16 @@ final class VectorShapeAndRecoveryUITests: PaintUITestCase {
     /// object, and not a raster stamp — so the vector eraser acts on it exactly as it acts on any
     /// freehand stroke drawn through the middle.
     ///
-    /// What "acts on it" means changed in Phase 4c and this test's assertion changed with it: Mode 1
-    /// no longer cuts a stroke partway (VECTOR_ERASER_PLAN.md §1 — a cut piece re-phases its own dab
-    /// lattice and lands ink outside what the punch covers), it retains the gesture as an `.erase`
-    /// punch over the intact stroke. The old assertion was `strokes == 2`, which the shipped
-    /// behaviour also satisfies — one paint stroke plus one punch — so it kept passing while
-    /// measuring nothing. Counting the two kinds separately is what makes it mean something again.
+    /// What "acts on it" means has moved twice. Phase 4c stopped cutting partway at all (a cut piece
+    /// re-phased its own dab lattice and landed ink outside what the punch covered), and Phase 4d
+    /// brought the cut back once `DabLattice` let a piece render on its parent's dabs — so a gesture
+    /// wide enough to cover the line's full width both cuts it *and* retains the punch.
+    ///
+    /// The counts are read per kind rather than as one total, and that is the part worth keeping: the
+    /// original assertion here was `strokes == 2`, which one paint stroke plus one punch also
+    /// satisfies, so it passed through the whole of Phase 4c while measuring nothing. Two paint pieces
+    /// plus one punch is a different statement from one stroke plus one punch, and only the split
+    /// counts say which happened.
     func testHeldStrokeOnVectorLayerBecomesAVectorStrokeTheEraserActsOn() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -296,11 +300,13 @@ final class VectorShapeAndRecoveryUITests: PaintUITestCase {
 
         app.buttons["toolbar.layersButton"].tap()
         let after = readVectorMarker(app, layerIndex: 1)
-        XCTAssertEqual(after?.strokes, 1,
-                       "Mode 1 must not cut the shape's stroke partway — it stays one paint stroke")
+        XCTAssertEqual(after?.strokes, 2,
+                       "A gesture covering the shape's line full-width cuts it into two paint pieces "
+                       + "(VECTOR_ERASER_PLAN.md §1) — reading 1 means the split never fired")
         XCTAssertEqual(after?.erases, 1,
                        "Erasing across a shape should retain the gesture as one .erase punch, "
-                       + "exactly as it does for a freehand stroke")
+                       + "exactly as it does for a freehand stroke — the cut is inset inside the "
+                       + "punch's footprint, so the punch is still what makes the edge")
     }
 
     /// The reported bug in its exact user-visible form: make a shape, then tap the eraser — and the

@@ -40,13 +40,88 @@ struct VectorStroke: Identifiable, Codable {
     /// existed fail to load.
     var composite: StrokeComposite = .paint
 
+    /// Set on a stroke that is a **piece of another stroke**: the lattice its dabs belong to. Nil for
+    /// a stroke drawn as itself, which is every stroke the app creates directly.
+    ///
+    /// `samples` stays the truth about this stroke's *geometry* — its bounds, what the spatial index
+    /// holds, what the eraser measures coverage against, what a later cut operates on — so every
+    /// geometric consumer works on a piece without knowing pieces exist. The lattice is consulted by
+    /// exactly one thing, `VectorCanvas.stamp(stroke:into:isEraser:)`, and only to answer "where did
+    /// the dabs go", which is the one question `samples` cannot answer for a piece. See `DabLattice`.
+    var lattice: DabLattice?
+
     var uiColor: UIColor { color.uiColor }
 
     /// Spelled out rather than left to synthesis so the hand-written `init(from:)` below can name the
     /// keys. A nested type in the body is fine — unlike an `init`, it does not suppress the
     /// synthesized memberwise initialiser that every construction site here uses.
     enum CodingKeys: String, CodingKey {
-        case id, brush, color, size, opacity, samples, composite
+        case id, brush, color, size, opacity, samples, composite, lattice
+    }
+}
+
+/// How a stroke that was cut out of another one reproduces the original's dabs instead of starting a
+/// lattice of its own.
+///
+/// ## Why this exists
+///
+/// `BrushStamper.stampStroke` anchors its dab lattice at `samples[0]` — dabs every `stampSpacing`
+/// along the path, remainder carried across segments. Re-stamping a *sub-run* therefore re-phases
+/// every dab in it, not merely the ones near the cut, and the divergence is worst at the piece's far
+/// tip: the end furthest from the eraser and so the one an erase punch cannot cover. Measured on a
+/// 24pt line cut by a 48pt nib, that was 118 stray pixels at up to 183/255. That measurement is what
+/// kept Mode 1 from cutting anything, and this type is what takes it back.
+///
+/// ## The representation
+///
+/// A piece stores the **parent's** samples and, for each of its own samples, the parameter it sits at
+/// in the parent's domain. Rendering then walks the parent whole and draws only the dabs inside
+/// `range` (`BrushStamper.stampStroke(…, visibleRange:)`), so the piece's dabs are not a
+/// reconstruction of the original's — they are the same calls with the same arguments, which is the
+/// only thing that survives a zero-tolerance pixel comparison.
+///
+/// `parameters` is aligned with the piece's own `samples`, and both a piece's boundary samples and the
+/// parent's interior samples it kept are points *on* parent segments, so mapping a parameter from the
+/// piece's domain into the parent's is a linear interpolation of this array (`parentParameter(of:)`).
+/// That is what lets a piece be cut again: the second cut composes with the first instead of being
+/// forbidden.
+///
+/// `seedID` is the parent's id rather than the piece's, so the dab RNG replays the parent's sequence.
+/// It only matters for a brush with `scatter`/`rotationJitter` — which `VectorEraser.supportsSplitting`
+/// currently refuses to split for a separate reason (a scattering stroke's ink is not bounded by the
+/// capsule chain the coverage test measures) — but storing the parent's seed is what makes the
+/// *rendering* side of that restriction unnecessary, so relaxing the gate later is a coverage question
+/// alone.
+///
+/// Two pieces of one parent hold the same parent array, and Swift's copy-on-write means they share its
+/// storage until something mutates one. A decode gives each piece its own copy; deduplicating that is
+/// a persistence-size question, not a correctness one.
+struct DabLattice: Codable, Equatable {
+    /// The parent stroke's samples, whole — the walk that defines the lattice.
+    var samples: [VectorSample]
+    /// Parameter in the parent's domain for each of the owning stroke's own samples, ascending.
+    var parameters: [CGFloat]
+    /// The parent's id, so `BrushStamper.seed(for:)` replays the parent's dab RNG.
+    var seedID: UUID
+
+    /// The parent parameters this piece shows. Empty `parameters` cannot occur for a stroke that has
+    /// samples, but the nil-return keeps the renderer honest rather than crashing on a decoded file.
+    var range: ClosedRange<CGFloat>? {
+        guard let low = parameters.first, let high = parameters.last, high >= low else { return nil }
+        return low...high
+    }
+
+    /// `parameter`, given in the owning stroke's own domain, mapped into the parent's.
+    ///
+    /// Linear between neighbouring entries, which is exact: a piece's segment lies inside one parent
+    /// segment, and position is affine in parameter along a segment, so parameter is affine in the
+    /// piece's parameter too.
+    func parentParameter(of parameter: CGFloat) -> CGFloat {
+        guard parameters.count > 1 else { return parameters.first ?? parameter }
+        let clamped = min(max(parameter, 0), CGFloat(parameters.count - 1))
+        let i = min(Int(clamped.rounded(.down)), parameters.count - 2)
+        let f = clamped - CGFloat(i)
+        return parameters[i] + (parameters[i + 1] - parameters[i]) * f
     }
 }
 
@@ -66,6 +141,9 @@ extension VectorStroke {
         samples = try c.decode([VectorSample].self, forKey: .samples)
         // The whole point of the hand-written decoder: absent key → `.paint`, so legacy files load.
         composite = try c.decodeIfPresent(StrokeComposite.self, forKey: .composite) ?? .paint
+        // Same reasoning, and additionally: absent is the *normal* case. Only a stroke cut out of
+        // another one carries a lattice.
+        lattice = try c.decodeIfPresent(DabLattice.self, forKey: .lattice)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -77,6 +155,9 @@ extension VectorStroke {
         try c.encode(opacity, forKey: .opacity)
         try c.encode(samples, forKey: .samples)
         try c.encode(composite, forKey: .composite)
+        // Written only when present, so an ordinary stroke's payload is byte-for-byte what it was
+        // before pieces existed.
+        try c.encodeIfPresent(lattice, forKey: .lattice)
     }
 }
 
@@ -673,15 +754,20 @@ final class VectorCanvas {
     // MARK: - Mode 1 — the hybrid
     //
     // The rules and the measurement that shaped them are documented on `VectorEraser`'s Mode 1
-    // section; this is the adapter that applies them to a display list. Two steps, in this order:
+    // section; this is the adapter that applies them to a display list. Three steps, in this order:
     //
-    // 1. **Delete** every stroke the eraser covers outright, so scribbling something out leaves
-    //    nothing behind. Whole strokes only — see `VectorEraser`'s Mode 1 notes for why a *partial*
-    //    geometric cut cannot be combined with step 2.
-    // 2. **Punch**, always, so the result is byte-identical to erasing the same content on a raster
+    // 1. **Delete** every stroke the eraser covers end to end, so scribbling something out leaves
+    //    nothing behind.
+    // 2. **Split** every stroke it covers full-width over a stretch, at that stretch inset by the
+    //    stroke's own half-width, into pieces that keep rendering on the parent's dab lattice.
+    // 3. **Punch**, always, so the result is byte-identical to erasing the same content on a raster
     //    layer — the gesture kept whole, and dropped entirely when no part of it has anything beneath.
     //
-    // Step 2 is why Mode 1 is not just a better Mode 2, and step 1 is why it does not grow forever.
+    // Step 3 is why Mode 1 is not just a better Mode 2 — it is what expresses a soft edge, a
+    // partial-width shave and an eraser opacity below 1, none of which geometry can. Steps 1 and 2 are
+    // why the list does not grow forever, and step 2 is what gives the user two halves they can move
+    // apart. Every step is invisible in the pixels by construction: 1 and 2 only ever remove ink that
+    // 3 was going to remove anyway.
 
     /// Caller must hold `lock`.
     private func eraseHybrid(sweep: VectorEraser.Sweep, samples localSamples: [VectorSample],
@@ -693,12 +779,18 @@ final class VectorCanvas {
         let minPressure = localSamples.map(\.pressure).min() ?? 1
         if VectorEraser.supportsCleanCut(brush: brush, opacity: opacity, minPressure: minPressure) {
             let erasers = VectorEraser.cleanCutCapsules(sweep.capsules, brush: brush, size: size)
-            if !erasers.isEmpty, removeFullyErasedStrokes(sweep: sweep, erasers: erasers) {
-                changed = true
-                // Bumps `version`, so the residue query below rebuilds the index against the
-                // *survivors*. Without this it would ask a stale index and retain punch over strokes
-                // the deletion just removed.
-                invalidate()
+            if !erasers.isEmpty {
+                if removeFullyErasedStrokes(sweep: sweep, erasers: erasers) {
+                    changed = true
+                    // Bumps `version`, so everything downstream rebuilds its index against the
+                    // *survivors*. Without this the split below, and the residue query after it, would
+                    // ask a stale index whose element indices no longer address the same strokes.
+                    invalidate()
+                }
+                if splitCleanlyErasedStrokes(sweep: sweep, erasers: erasers) {
+                    changed = true
+                    invalidate()
+                }
             }
         }
 
@@ -763,6 +855,98 @@ final class VectorCanvas {
         }
         if changed { _elements = result }
         return changed
+    }
+
+    /// Cuts every candidate paint stroke at the spans the eraser covers **full width at full alpha**,
+    /// inset by the stroke's own half-width. Caller must hold `lock`.
+    ///
+    /// This is plan §1's geometric split, and it is wired up because `DabLattice` made it exact. The
+    /// two things that stood in its way were separate:
+    ///
+    /// 1. A surviving piece re-stamped as a fresh stroke re-anchors its dab lattice at the cut, moving
+    ///    its ink along its whole length. `splitPreservingLattice` is the answer — the pieces render on
+    ///    the parent's lattice, so their dabs are the parent's dabs.
+    /// 2. A cut end is a round cap of the stroke's half-width while the eraser removed ink along a
+    ///    straight band edge, so the ink a cut actually loses spills half a width past the span that
+    ///    was measured as covered. `VectorEraser.conservativeCuts` is the answer, and it is why it was
+    ///    written and kept unwired until now: insetting makes the lost ink a subset of the covered
+    ///    span, which the punch removes anyway, so the split changes nothing outside the punch.
+    ///
+    /// Both are needed. Either alone leaves stray ink outside the gesture, which is the thing §8 asserts
+    /// at zero tolerance.
+    ///
+    /// A span too short to survive its own two insets disappears — the eraser was narrower than the
+    /// line it crossed, so there is no separation to be had and the punch handles it alone.
+    private func splitCleanlyErasedStrokes(sweep: VectorEraser.Sweep,
+                                           erasers: [StrokeGeometry.Capsule]) -> Bool {
+        // Same widened query as the deletion pass, and for the same reason: the index holds
+        // centrelines, and the coverage test asks about a stroke's whole width.
+        let reach = maxPaintReach()
+        let candidates = Set(strokeIndex().segments(near: sweep.bounds.insetBy(dx: -reach, dy: -reach))
+            .map(\.elementIndex))
+        guard !candidates.isEmpty else { return false }
+
+        var changed = false
+        var result: [VectorElement] = []
+        result.reserveCapacity(_elements.count)
+        for (index, element) in _elements.enumerated() {
+            guard candidates.contains(index), let stroke = element.stroke,
+                  stroke.composite == .paint,
+                  // A lone dab has no length to cut, and letting it through would make this pass a
+                  // second, *weaker* deletion path for it: its whole domain is the single parameter
+                  // `0`, so a covered cross-section there removes it without anyone having checked
+                  // that the eraser also covers its round cap. That check is `isEntirelyCovered`'s,
+                  // in the deletion pass above, and it stays the only way a single-sample stroke goes.
+                  stroke.samples.count > 1,
+                  // As in the deletion pass: a scattering stroke's ink is not bounded by the capsule
+                  // chain the coverage test measures, so "covered" would be a claim about the wrong
+                  // shape. The lattice would now carry such a stroke's dabs correctly; the coverage
+                  // test still cannot see where they landed.
+                  VectorEraser.supportsSplitting(strokeBrush: stroke.brush) else {
+                result.append(element)
+                continue
+            }
+            let clean = VectorEraser.cleanCutRanges(in: stroke.samples, brush: stroke.brush,
+                                                    size: stroke.size, by: erasers, sweep: sweep)
+            let inset = VectorEraser.conservativeCuts(clean, in: stroke.samples, brush: stroke.brush,
+                                                      size: stroke.size, by: erasers)
+            let cuts = Self.effectiveCuts(inset, in: stroke.samples)
+            guard !cuts.isEmpty else {
+                result.append(element)
+                continue
+            }
+            changed = true
+            for piece in Self.splitPreservingLattice(stroke, removing: cuts) {
+                result.append(.stroke(piece))
+            }
+        }
+        if changed { _elements = result }
+        return changed
+    }
+
+    /// `stroke` cut into the pieces left by removing `cuts`, each rendering on the same dab lattice the
+    /// original did. Static, so it cannot re-enter `lock`.
+    ///
+    /// A piece's `samples` are its own geometry — interpolated at the cut, exactly as `splitStroke`
+    /// has always produced — and its `lattice` says where in the parent's walk those samples came
+    /// from. Cutting a piece *again* composes rather than being forbidden: the new run's parameters
+    /// are in the piece's domain, so they are mapped back through the piece's own lattice before being
+    /// stored, and the grandchild ends up pointing at the original ancestor's samples directly.
+    private static func splitPreservingLattice(_ stroke: VectorStroke,
+                                               removing cuts: [ClosedRange<CGFloat>]) -> [VectorStroke] {
+        let parentSamples = stroke.lattice?.samples ?? stroke.samples
+        let seedID = stroke.lattice?.seedID ?? stroke.id
+        return StrokeGeometry.splitStrokeRuns(stroke.samples, removing: cuts).map { run in
+            var piece = stroke
+            // A fresh id, as every other split does: two pieces cannot share one. The dab seed no
+            // longer travels with the id for a piece — that is what `DabLattice.seedID` is for.
+            piece.id = UUID()
+            piece.samples = run.samples
+            let parameters = stroke.lattice.map { run.parameters.map($0.parentParameter(of:)) }
+                ?? run.parameters
+            piece.lattice = DabLattice(samples: parentSamples, parameters: parameters, seedID: seedID)
+            return piece
+        }
     }
 
     /// Whether the eraser's dab at a parametric position along the gesture still has anything under it
@@ -902,6 +1086,10 @@ final class VectorCanvas {
                 var piece = stroke
                 piece.id = UUID()
                 piece.samples = run
+                // Mode 2 removes geometry rather than hiding it, so a piece is a stroke in its own
+                // right and re-stamps from its own first sample. Inheriting the parent's lattice would
+                // be worse than wrong — it would keep drawing dabs the user just cut away.
+                piece.lattice = nil
                 result.append(.stroke(piece))
             }
         }
@@ -963,6 +1151,8 @@ final class VectorCanvas {
             var piece = target.stroke
             piece.id = UUID()
             piece.samples = run
+            // As in Mode 2: this deletes geometry, so the piece is its own stroke from here on.
+            piece.lattice = nil
             pieces.append(.stroke(piece))
         }
         _elements.replaceSubrange(target.index...target.index, with: pieces)
@@ -1202,12 +1392,22 @@ final class VectorCanvas {
     /// randomness a brush carrying `scatter`/`rotationJitter` re-scattered its dabs each time and the
     /// user watched finished artwork crawl. Deriving the seed from the stroke's own id keeps it stable
     /// across save/load and gives two strokes different scatter patterns. See `BrushStamper.DabRNG`.
+    /// The one place a stroke's `lattice` is read. A piece is stamped by replaying its **parent's**
+    /// walk under the parent's seed and drawing only the dabs in the piece's range, so its ink is the
+    /// parent's ink restricted rather than a fresh lattice laid down from the cut — see `DabLattice`
+    /// for the measurement that makes the distinction load-bearing. A stroke with no lattice takes the
+    /// path it always took.
     private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
-        let samples = stroke.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+        // A lattice without a usable range would otherwise stamp the *parent* whole, which is worse
+        // than either option — so an unreadable one falls back to the stroke's own geometry.
+        let lattice = stroke.lattice.flatMap { $0.range == nil ? nil : $0 }
+        let source = lattice?.samples ?? stroke.samples
+        let samples = source.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
         BrushStamper.stampStroke(into: target, samples: samples, brush: stroke.brush,
                                  color: stroke.uiColor, brushSize: stroke.size,
                                  brushOpacity: stroke.opacity, isEraser: isEraser,
-                                 seed: BrushStamper.seed(for: stroke.id))
+                                 seed: BrushStamper.seed(for: lattice?.seedID ?? stroke.id),
+                                 visibleRange: lattice?.range)
     }
 }
 

@@ -16,8 +16,9 @@ import CoreGraphics
 ///    the result is byte-identical to the raster ground truth, over the same §8 matrix, at tolerance
 ///    zero. This is the design's whole justification and the one test that can falsify it.
 /// 2. **Whole-stroke deletion** fires where the eraser covers a stroke completely, and nowhere else.
-/// 3. **No partial split**, plus the divergence that is the reason for it — so that anyone re-wiring
-///    `conservativeCuts` finds out immediately rather than from a bug report about shifted stroke tips.
+/// 3. **The partial split**, which ships now that `DabLattice` lets a piece render on its parent's
+///    dabs — together with the measurement that says a split *without* that still diverges, so the
+///    reason the lattice exists is pinned rather than remembered.
 /// 4. **The list does not grow.** A fully resolved erase retains nothing, and GC drops a punch whose
 ///    backdrop is gone.
 ///
@@ -234,9 +235,22 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertTrue(report.isExact, "Deleting a covered stroke must not move a pixel: \(report.diagnostic)")
     }
 
-    /// Partial coverage never deletes, however inviting it looks. Each row is a different way of being
-    /// partial, and each must leave the stroke whole, keeping its id — and therefore its dab seed.
-    func testPartialCoverageNeverDeletesTheStroke() {
+    /// Partial coverage never *deletes*, however inviting it looks — deletion needs the eraser to cover
+    /// the stroke end to end, caps included.
+    ///
+    /// What partial coverage does now depends on which kind of partial it is, and the two are worth
+    /// keeping in one test because they were one case until `DabLattice` existed:
+    ///
+    /// - Covered **full width** over a stretch, and only there: the stroke is *cut*, into pieces that
+    ///   render on the parent's lattice. That is plan §1's geometric split, and
+    ///   `testTheSplitIsExactOnlyBecauseThePiecesShareTheParentsLattice` is why it is allowed to happen.
+    /// - Never covered full width anywhere — a shave along one edge, a nib narrower than the line —
+    ///   there is nothing to cut and the punch is the whole answer, so the stroke stays whole and keeps
+    ///   its id.
+    ///
+    /// Every row still has to be pixel-exact against raster, which is the only thing that makes the
+    /// difference between the two an implementation detail rather than a visible one.
+    func testPartialCoverageSplitsOrPunchesButNeverDeletes() {
         // Squarely across the middle: the classic "cut in two" gesture, which is exactly the one Mode 1
         // no longer acts on. See `VectorEraser`'s Mode 1 notes.
         let across = Gesture.squareCut.samples
@@ -248,21 +262,37 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let thin = Self.ramp(from: CGPoint(x: 8, y: 64), to: CGPoint(x: 120, y: 64), count: 15,
                              from: 1, to: 1)
 
-        let cases: [(String, ParityScenario)] = [
-            ("a square crossing", scenario(brush: BrushLibrary.hardRound, eraserSize: Self.wideNib,
-                                           eraserSamples: across)),
-            ("a partial-width shave", scenario(brush: BrushLibrary.hardRound, eraserSize: Self.wideNib,
-                                               eraserSamples: shave)),
-            ("a nib narrower than the line", scenario(brush: BrushLibrary.hardRound, eraserSize: 6,
-                                                      eraserSamples: thin))
+        let cases: [(name: String, pieces: Int, scene: ParityScenario)] = [
+            ("a square crossing", 2, scenario(brush: BrushLibrary.hardRound, eraserSize: Self.wideNib,
+                                              eraserSamples: across)),
+            ("a partial-width shave", 1, scenario(brush: BrushLibrary.hardRound, eraserSize: Self.wideNib,
+                                                  eraserSamples: shave)),
+            ("a nib narrower than the line", 1, scenario(brush: BrushLibrary.hardRound, eraserSize: 6,
+                                                         eraserSamples: thin))
         ]
 
-        for (name, scene) in cases {
+        for (name, expectedPieces, scene) in cases {
             XCTContext.runActivity(named: name) { _ in
                 let (canvas, _, _) = erased(scene)
-                XCTAssertEqual(strokes(canvas, .paint).count, 1, "\(name) must leave the stroke whole")
-                XCTAssertEqual(strokes(canvas, .paint).first?.id, Self.paintID,
-                               "\(name) changed nothing about the stroke, so it must keep its id and dab seed")
+                let paint = strokes(canvas, .paint)
+                XCTAssertEqual(paint.count, expectedPieces,
+                               "\(name) should leave \(expectedPieces) piece(s) — and never zero, which would be deletion")
+                if expectedPieces == 1 {
+                    XCTAssertEqual(paint.first?.id, Self.paintID,
+                                   "\(name) changed nothing about the stroke, so it must keep its id and dab seed")
+                    XCTAssertNil(paint.first?.lattice,
+                                 "\(name) never cut the stroke, so it is still its own lattice")
+                } else {
+                    for piece in paint {
+                        XCTAssertNotEqual(piece.id, Self.paintID, "\(name): a piece is a new stroke")
+                        XCTAssertEqual(piece.lattice?.seedID, Self.paintID,
+                                       "\(name): a piece must replay the parent's dab RNG")
+                        XCTAssertEqual(piece.lattice?.samples.count, Self.paintSamples.count,
+                                       "\(name): a piece must carry the parent's whole walk, not its own samples")
+                        XCTAssertLessThan(piece.samples.count, Self.paintSamples.count,
+                                          "\(name): a piece's own geometry is shorter than the parent's")
+                    }
+                }
                 XCTAssertEqual(strokes(canvas, .erase).count, 1,
                                "\(name) still has to retain a punch, or the ink is simply not erased")
                 guard let report = parityOfHybrid(scene) else {
@@ -328,23 +358,29 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertEqual(strokes(canvas, .paint).first?.id, Self.paintID)
     }
 
-    // MARK: - 3. Why there is no partial split
+    // MARK: - 3. The partial split, and the one thing that makes it exact
 
-    /// The measurement that unwired the split, kept as a test so re-wiring it fails loudly.
+    /// The split works because the pieces keep the parent's dab lattice, and this measures both halves
+    /// of that sentence in one scene.
     ///
-    /// Cut the stroke at the span `conservativeCuts` says is safe — the most favourable case there is,
-    /// a hard round eraser at full opacity crossing squarely — and compare the pieces plus the punch
-    /// against the whole stroke plus the same punch. The design's original claim was that these are
-    /// identical. They are not, and the reason is not the cut: a surviving piece is re-stamped as a new
-    /// stroke, so `BrushStamper` re-anchors its dab lattice and its pressure ramp at the piece's first
-    /// sample and its ink lands somewhere new along its whole length — including the far tip, which is
-    /// the part of it the punch cannot cover.
+    /// Cut the stroke at the span `conservativeCuts` says is safe — a hard round eraser at full opacity
+    /// crossing squarely — then render the pieces plus the punch twice: once with the pieces re-stamped
+    /// as fresh strokes, the way every split did before `DabLattice`, and once with the pieces sharing
+    /// the parent's walk. Compare each against the whole stroke plus the same punch.
     ///
-    /// Fixing that means anchoring the lattice to arclength from the stroke's origin, or giving
-    /// `VectorStroke` a parametric visible range so a piece reuses the original lattice. Until one of
-    /// those exists, this test should keep failing for anyone who reconnects `conservativeCuts` to
-    /// `VectorCanvas.eraseHybrid`.
-    func testAPartialSplitDivergesOutsideThePunchWhichIsWhyItIsNotWired() {
+    /// The naive pieces **diverge**, and outside the punch, which is what made the split unshippable
+    /// for three sessions: a fresh stroke re-anchors `BrushStamper`'s lattice at its own first sample,
+    /// so its ink lands somewhere new along its entire length — most visibly at the far tip, the end
+    /// furthest from the eraser and therefore the one the punch cannot cover.
+    ///
+    /// The lattice-sharing pieces are **exact**, because their dabs are not a reconstruction of the
+    /// parent's; `stampStroke` makes the identical calls and drops the ones outside the range.
+    ///
+    /// If the first assertion ever starts passing — i.e. a naive split becomes exact by itself — the
+    /// stamper's anchoring has changed and `DabLattice` may no longer be earning its keep. If the
+    /// second fails, the split is putting ink outside the gesture and must come back out of
+    /// `eraseHybrid`.
+    func testTheSplitIsExactOnlyBecauseThePiecesShareTheParentsLattice() {
         let scene = scenario(brush: BrushLibrary.hardRound, eraserSize: Self.wideNib)
         let paint = RasterVectorParity.paintStroke(scene)
         let erase = RasterVectorParity.eraseStroke(scene)
@@ -362,23 +398,96 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertFalse(cuts.isEmpty,
                        "The inset must leave something to cut here, or this test is not measuring the split")
 
-        let pieces: [VectorElement] = StrokeGeometry.splitStroke(paint.samples, removing: cuts).map { run in
+        let runs = StrokeGeometry.splitStrokeRuns(paint.samples, removing: cuts)
+        XCTAssertEqual(runs.count, 2, "A square crossing should yield two pieces")
+
+        // (a) The old way: each piece is a stroke unto itself, re-stamped from its own first sample.
+        let naive: [VectorElement] = runs.map { run in
             var piece = paint
             piece.id = UUID()
-            piece.samples = run
+            piece.samples = run.samples
             return .stroke(piece)
         }
-        XCTAssertEqual(pieces.count, 2, "A square crossing should yield two pieces")
-
-        guard let report = RasterVectorParity.report(
-            raster: VectorCanvas(size: scene.canvasSize,
-                                 elements: [.stroke(paint), .stroke(erase)]).render(),
-            vector: VectorCanvas(size: scene.canvasSize, elements: pieces + [.stroke(erase)]).render(),
-            size: scene.canvasSize) else {
-            return XCTFail("Could not read back the two renders")
+        // (b) The shipped way: same geometry, but the dabs come from the parent's walk.
+        let shared: [VectorElement] = runs.map { run in
+            var piece = paint
+            piece.id = UUID()
+            piece.samples = run.samples
+            piece.lattice = DabLattice(samples: paint.samples, parameters: run.parameters,
+                                       seedID: paint.id)
+            return .stroke(piece)
         }
-        XCTAssertFalse(report.isExact,
-                       "If a conservatively inset split has become pixel-exact, the stamper's lattice anchoring must have changed — re-read VectorEraser's Mode 1 notes and consider re-wiring the split. Measured: \(report.diagnostic)")
+
+        let whole = VectorCanvas(size: scene.canvasSize,
+                                 elements: [.stroke(paint), .stroke(erase)]).render()
+        guard let naiveReport = RasterVectorParity.report(
+                raster: whole,
+                vector: VectorCanvas(size: scene.canvasSize, elements: naive + [.stroke(erase)]).render(),
+                size: scene.canvasSize),
+              let sharedReport = RasterVectorParity.report(
+                raster: whole,
+                vector: VectorCanvas(size: scene.canvasSize, elements: shared + [.stroke(erase)]).render(),
+                size: scene.canvasSize) else {
+            return XCTFail("Could not read back the renders")
+        }
+        XCTAssertFalse(naiveReport.isExact,
+                       "Re-stamping the pieces as fresh strokes is supposed to move ink — if it no longer does, the stamper's lattice anchoring has changed and DabLattice needs re-justifying. Measured: \(naiveReport.diagnostic)")
+        XCTAssertTrue(sharedReport.isExact,
+                      "Pieces sharing the parent's lattice must be pixel-identical to the uncut stroke under the same punch: \(sharedReport.diagnostic)")
+    }
+
+    /// The pieces the *real commit* produces, cut again by a second gesture.
+    ///
+    /// A piece's cut parameters are in its own domain, not the parent's, so composing a second split
+    /// onto the first is the one place the mapping in `DabLattice.parentParameter(of:)` is exercised.
+    /// Get it wrong and the grandchild shows the wrong stretch of the parent's dabs — which looks like
+    /// ink jumping on the second erase, not on the first.
+    func testCuttingAPieceAgainStaysOnTheOriginalLattice() {
+        // First gesture: squarely across the middle at x = 64, which splits the line in two.
+        let first = Self.ramp(from: CGPoint(x: 64, y: 24), to: CGPoint(x: 64, y: 104), count: 9,
+                              from: 1, to: 1)
+        // Second: across the left-hand piece at x = 40.
+        let second = Self.ramp(from: CGPoint(x: 40, y: 24), to: CGPoint(x: 40, y: 104), count: 9,
+                               from: 1, to: 1)
+        let scene = scenario(brush: BrushLibrary.hardRound, eraserSize: Self.wideNib,
+                             eraserSamples: first)
+        let paint = RasterVectorParity.paintStroke(scene)
+        let canvas = VectorCanvas(size: scene.canvasSize, elements: [.stroke(paint)])
+        canvas.erase(alongPath: first, brush: scene.eraserBrush, size: scene.eraserSize,
+                     opacity: 1, mode: .erase)
+        XCTAssertEqual(strokes(canvas, .paint).count, 2, "The first gesture should have split the line")
+        canvas.erase(alongPath: second, brush: scene.eraserBrush, size: scene.eraserSize,
+                     opacity: 1, mode: .erase)
+
+        let pieces = strokes(canvas, .paint)
+        XCTAssertGreaterThanOrEqual(pieces.count, 2, "The second gesture should have cut again")
+        for piece in pieces {
+            XCTAssertEqual(piece.lattice?.seedID, Self.paintID,
+                           "A grandchild still belongs to the original stroke's lattice")
+            XCTAssertEqual(piece.lattice?.samples.count, Self.paintSamples.count,
+                           "…and points at the original's samples, not its parent piece's")
+            guard let range = piece.lattice?.range else {
+                return XCTFail("A piece must have a readable range")
+            }
+            XCTAssertTrue(range.lowerBound >= 0 && range.upperBound <= CGFloat(Self.paintSamples.count - 1),
+                          "A grandchild's range must live in the original's domain, not a piece's: \(range)")
+        }
+
+        // The whole point: two erases in, the surviving ink is still the original's dabs, so the result
+        // matches raster erasing the same line with the same two gestures.
+        let texture = RasterVectorParity.rasterBase(scene, backdrop: nil)
+        RasterVectorParity.stamp(paint, into: texture, isEraser: false)
+        for gesture in [first, second] {
+            var punch = RasterVectorParity.eraseStroke(scene)
+            punch.samples = gesture
+            RasterVectorParity.stamp(punch, into: texture, isEraser: true)
+        }
+        guard let report = RasterVectorParity.report(raster: texture.renderToUIImage(),
+                                                     vector: canvas.render(),
+                                                     size: scene.canvasSize) else {
+            return XCTFail("Could not read back both tiers")
+        }
+        XCTAssertTrue(report.isExact, "Two erases must still be raster-exact: \(report.diagnostic)")
     }
 
     /// Deletion, by contrast, *is* exact — the property that lets Mode 1 keep it. Same shape of

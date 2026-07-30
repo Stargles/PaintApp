@@ -591,6 +591,82 @@ final class BrushEngineLogicTests: XCTestCase {
                        "The reconstructed display list must render identically to the fixed fills→images→strokes order it replaces")
     }
 
+    // MARK: - stampStroke's visible range
+
+    /// `visibleRange` has to be a *filter over the original walk*, not a re-derivation of it — that is
+    /// the entire reason a cut stroke can now be pixel-exact (see `DabLattice`). Stamping two
+    /// complementary ranges of one stroke into one texture must therefore reproduce stamping it whole,
+    /// byte for byte.
+    ///
+    /// The cut is deliberately at a fractional parameter and off any dab position, so nothing about the
+    /// result is an artefact of the boundary landing on a sample or on a lattice step.
+    func testComplementaryVisibleRangesReproduceTheWholeStrokeExactly() {
+        let brush = BrushLibrary.hardRound
+        // Curved, with a pressure ramp: both the dab spacing carry across segments and the pressure
+        // interpolation have to survive the filter, not just the positions.
+        let samples = (0..<9).map { i -> BrushStamper.Sample in
+            let t = CGFloat(i) / 8
+            return BrushStamper.Sample(point: CGPoint(x: 6 + 52 * t, y: 30 + 12 * sin(t * .pi)),
+                                       pressure: 0.35 + 0.65 * t)
+        }
+        let cut: CGFloat = 3.37
+
+        func stamp(into texture: RasterLayerTexture, visibleRange: ClosedRange<CGFloat>?) {
+            BrushStamper.stampStroke(into: texture, samples: samples, brush: brush, color: .black,
+                                     brushSize: 9, brushOpacity: 1, seed: 99, visibleRange: visibleRange)
+        }
+
+        let whole = RasterLayerTexture(size: Self.canvasSize)
+        stamp(into: whole, visibleRange: nil)
+        let head = RasterLayerTexture(size: Self.canvasSize)
+        stamp(into: head, visibleRange: 0...cut)
+        let pieces = RasterLayerTexture(size: Self.canvasSize)
+        stamp(into: pieces, visibleRange: 0...cut)
+        stamp(into: pieces, visibleRange: cut...8)
+
+        guard let wholeBytes = rgbaPixels(of: whole)?.bytes,
+              let headBytes = rgbaPixels(of: head)?.bytes,
+              let pieceBytes = rgbaPixels(of: pieces)?.bytes else {
+            return XCTFail("Could not read back the stamped textures")
+        }
+        XCTAssertEqual(pieceBytes, wholeBytes,
+                       "Two complementary visible ranges must lay exactly the dabs the uncut stroke laid")
+        XCTAssertNotEqual(headBytes, wholeBytes,
+                          "Setup: half the range alone should be visibly less ink, or this test compares nothing")
+    }
+
+    /// A piece's lattice has to survive a save. It is the only record of where that piece's dabs go, so
+    /// a project reopened without it would show every cut stroke re-phased on its own first sample —
+    /// precisely the artefact the split exists to avoid, arriving a day later than the cut. And an
+    /// ordinary stroke must not start writing the key, so files that contain no pieces are unchanged.
+    func testAPieceLatticeSurvivesEncodingAndAnOrdinaryStrokeDoesNotCarryOne() throws {
+        let parent = VectorStroke(brush: BrushLibrary.hardRound,
+                                  color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                  size: 9, opacity: 1,
+                                  samples: (0..<5).map { VectorSample(x: 8 + CGFloat($0) * 12, y: 32,
+                                                                      pressure: 0.5 + CGFloat($0) * 0.1) })
+        guard let run = StrokeGeometry.splitStrokeRuns(parent.samples, removing: [2.5...3.5]).first else {
+            return XCTFail("Setup: cutting the middle out should leave a head run")
+        }
+        var piece = parent
+        piece.id = UUID()
+        piece.samples = run.samples
+        piece.lattice = DabLattice(samples: parent.samples, parameters: run.parameters, seedID: parent.id)
+
+        let decoded = try JSONDecoder().decode(VectorStroke.self,
+                                               from: try JSONEncoder().encode(piece))
+        XCTAssertEqual(decoded.lattice, piece.lattice, "The lattice must round-trip intact")
+        XCTAssertEqual(renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(decoded)])),
+                       renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(piece)])),
+                       "A reloaded piece must render exactly as the one that was saved")
+
+        let plain = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(parent)) as? [String: Any]
+        XCTAssertNil(plain?["lattice"],
+                     "A stroke that is nobody's piece writes no lattice key")
+        XCTAssertNil(try JSONDecoder().decode(VectorStroke.self, from: try JSONEncoder().encode(parent)).lattice,
+                     "…and decodes back without one")
+    }
+
     // MARK: - Display list: eraser z-order semantics
 
     /// "The eraser lowers the alpha of everything beneath it" — fills included, which three parallel

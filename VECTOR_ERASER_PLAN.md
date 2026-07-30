@@ -36,20 +36,19 @@ spans covered full-width at full alpha, split those out as *clean cuts*, and ret
 eraser footprint is left over as a `.erase` element. The expectation was that a hard-round eraser
 at full opacity would produce **only** clean cuts and retain nothing.
 
-### What shipped instead, and why (Phase 4c, measured)
+### What shipped instead, and why (Phase 4c, measured; split restored in Phase 4d)
 
-Both halves of that expectation are false, and `RasterVectorParityLogicTests` /
+Both halves of that expectation were false, and `RasterVectorParityLogicTests` /
 `VectorEraserHybridLogicTests` are the measurements. Against a raster layer erased identically, at
 zero tolerance:
 
 1. **A retained punch is byte-identical to raster erasing** — every pixel, across hard/soft
    brushes, full/partial opacity, three gesture shapes, over a stroke, a fill and a placed image.
    The fallback is exactly as strong as this section claimed.
-2. **A geometric split is not, and cannot be made so with the current stamper.** Two independent
-   reasons, both traced to `BrushStamper.stampStroke` anchoring its **dab lattice** and its
-   **pressure ramp** at `samples[0]`:
-   - A cut stroke's surviving piece is re-stamped as a *new* stroke, so both anchors move to the
-     cut and its ink lands somewhere new along its **whole length** — most visibly at its far tip,
+2. **A geometric split was not**, for two independent reasons, both traced to
+   `BrushStamper.stampStroke` anchoring its **dab lattice** at `samples[0]`:
+   - A cut stroke's surviving piece was re-stamped as a *new* stroke, so the anchor moved to the
+     cut and its ink landed somewhere new along its **whole length** — most visibly at its far tip,
      which is the end the punch cannot cover. Measured on a 24pt line cut by a 48pt nib:
      divergence across x ∈ [41, 115] where the punch covers only x ∈ [40, 88], leaving 118 stray
      pixels at up to 183/255. A wider eraser moves the artefact further away rather than covering
@@ -57,6 +56,13 @@ zero tolerance:
    - Separately, a cut end is a round cap of the stroke's half-width while the eraser removed ink
      along a straight band edge. Those differ by a lens of area ≈ `0.43·w²` however the boundary is
      placed. `conservativeCuts` solves *this* one by insetting; it does not touch the first.
+
+   Phase 4c shipped without any partial cutting on the strength of that. Phase 4d fixed the first
+   reason — `DabLattice`, below — and with both fixed the split is exact and is wired in.
+3. **The pressure ramp, anchored at `samples[0]` alongside the lattice, was never a problem.**
+   `splitStroke` interpolates the boundary sample's pressure and pressure interpolates linearly, so
+   a piece already reported the parent's pressure at every position. Only the lattice moved. Worth
+   recording because two sessions of notes name both anchors as defects.
 
 So the resolution that ships is:
 
@@ -69,20 +75,55 @@ So the resolution that ships is:
    cross-section, *plus* both round end caps, which no cross-section test can see). This produces
    no new geometry, so nothing re-stamps and nothing can move — it is exact — and it is what keeps
    "scribble a stroke out and it costs nothing" true.
-3. **Never cut a stroke partway.** Geometric separation is Mode 2's job, where changing the pixels
-   is the point.
+3. **Cut a stroke where the eraser covers its full width**, at that span inset by the stroke's own
+   half-width (`conservativeCuts`), into pieces that render on the parent's dab lattice
+   (`DabLattice`). Both parts are required and neither is sufficient: the inset keeps the ink a cut
+   loses inside the span the punch removes, and the shared lattice keeps the surviving dabs where
+   they already were. `testTheSplitIsExactOnlyBecauseThePiecesShareTheParentsLattice` pins both.
+
+### `DabLattice` — how a piece reproduces its parent's dabs
+
+The two candidate shapes were arclength-anchored dab positions and a parametric visible range on
+`VectorStroke`. **The visible range shipped**, and the deciding argument is exactness rather than
+elegance: arclength anchoring *recomputes* where each dab goes, through a different sequence of
+floating-point operations from the one that placed the original dabs, and §8 is asserted at zero
+tolerance. The visible range does not recompute anything — the renderer walks the **parent's**
+samples with the same spacing arithmetic and the same carry, and routes the dabs outside the range
+to a sink that draws nothing (`BrushStamper.stampStroke(…, visibleRange:)`,
+`DiscardedDabTarget`). The dabs that land are the same calls with the same arguments.
+
+Two details that make it hold up:
+
+- A piece stores the parent's samples **and** the parameter each of its own samples sits at, not
+  just a range. That is what lets a piece be cut *again*: the second cut's parameters are in the
+  piece's domain and are mapped back through `DabLattice.parentParameter(of:)`, so a grandchild
+  points at the original ancestor rather than at a chain of parents.
+- `samples` remains the truth about a piece's **geometry** — bounds, spatial index, coverage,
+  later cuts, hit-testing. The lattice is read in exactly one place, `VectorCanvas.stamp(stroke:…)`,
+  and only to answer "where did the dabs go". That is what kept this change small: no geometric
+  consumer needs to know pieces exist.
+- Skipped dabs still run through `stampDab`, so the dab RNG stays in phase, and the lattice carries
+  the parent's `seedID`. A piece is therefore replayable even for a scattering brush;
+  `supportsSplitting` still refuses those, but now for the one remaining reason — the coverage test
+  measures against a capsule chain that scattered ink does not respect.
 
 Consequences worth stating plainly:
 
 - Growth is one element per eraser gesture that touched something, exactly as N paint gestures cost
   N elements — plus GC, which drops a punch once nothing beneath it remains. A gesture over nothing
   costs nothing; a gesture that wholly resolves costs nothing.
-- Mode 1 does **not** give you two independently movable halves. That was this section's other
-  goal and it is deferred, not abandoned: it needs a dab lattice a sub-run can reproduce —
-  arclength-anchored dab positions, or a parametric visible-range on `VectorStroke` so a piece
-  reuses the original lattice instead of starting its own. `conservativeCuts` is kept, tested and
-  unwired for that work, and `testAPartialSplitDivergesOutsideThePunchWhichIsWhyItIsNotWired` fails
-  loudly for anyone who reconnects it first.
+- A cut *does* now give two independently addressable halves, which is what "grab one visual half
+  with the Move tool" was waiting for. The Move tool itself is untouched by this phase: a layer-level
+  transform moves everything, and per-element move is still to be built. Translating a piece will
+  work without further changes, because translation does not change arclength and so does not move
+  the lattice.
+- A piece holds its parent's sample array. Two pieces of one parent share that storage (arrays are
+  copy-on-write) until something mutates it, but a decoded project gives each its own copy. That is
+  a persistence-size question, not a correctness one, and it is the natural thing for point
+  decimation to clean up.
+- Modes 2 and 3 clear the lattice on the pieces they produce. They delete geometry rather than
+  hiding it, so a piece there really is a new stroke, and inheriting the lattice would keep drawing
+  the dabs the user just cut away.
 
 ### Coverage test
 
@@ -332,7 +373,7 @@ expensive mode depends on exists first.
 | **1** | `VectorElement` display list, `StrokeComposite`, compatibility accessors, persistence migration. | None (render output byte-identical) | **Done** (S2) |
 | **2** | `VectorEraserMode` enum + UI + plumbing. Rewrite Mode 2 on §3 primitives. | Mode 2 becomes accurate | **Done** (S3) |
 | **3** | Mode 3, cut-to-intersection. | New mode | **Done** (geometry S3, touch-down driver S3) |
-| **4** | Mode 1: live preview, punch commit, GC. | New default mode | **Done** (S4–S5); driven through the real UI S6 |
+| **4** | Mode 1: live preview, punch commit, GC. | New default mode | **Done** (S4–S5); driven through the real UI S6; geometric split restored S7 (`DabLattice`) |
 | **5** | Dirty-rect cache, decimation, delta undo; refresh perf baseline. | Faster | |
 | **6** | GPU rasterizer for both tiers — see §11. | Faster; scales past ~500 strokes/layer | |
 
@@ -366,6 +407,12 @@ undo entry.
   Two files, deliberately: `RasterVectorParityLogicTests` builds display lists by hand and tests the
   *representation*; `VectorEraserHybridLogicTests` drives the real `VectorCanvas.erase` and tests
   the *decision*. The first passing does not imply the second — for three sessions it did not.
+
+  A third thing the split needs pinned, because it is a claim about the *stamper* rather than about
+  the eraser: two complementary `visibleRange`s of one stroke must lay exactly the dabs the uncut
+  stroke laid (`BrushEngineLogicTests.testComplementaryVisibleRangesReproduceTheWholeStrokeExactly`).
+  That is the property `DabLattice` is built on, and it is worth failing on its own rather than only
+  as a pixel delta three layers away.
 - **Through the real UI** (`VectorEraserUITests`, XCUITest). The two tiers above both call the
   engine directly, so between them they cannot see any of the plumbing between a finger and
   `VectorCanvas.erase` — the segmented control, `CanvasManager.vectorEraserMode`,

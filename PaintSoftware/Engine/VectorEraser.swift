@@ -202,34 +202,46 @@ enum VectorEraser {
     //   a threshold nobody can defend.
     // - **A stroke the eraser wholly covers is deleted** (`isEntirelyCovered`). No new geometry, so
     //   nothing re-stamps and nothing can move; every pixel it contributed was under the punch.
-    // - **A stroke the eraser partly covers is not cut.** This is the reversal, and it is the second
-    //   thing measurement took away — see below.
+    // - **A stroke the eraser covers full-width over a stretch is cut there**, inset by its own
+    //   half-width (`conservativeCuts`), into pieces that render on the parent's dab lattice
+    //   (`DabLattice`). That is the plan's geometric split, and it took two things to make exact — see
+    //   below.
     //
-    // ## Why there is no partial split
+    // ## What the split needed, and why it was unwired for three sessions
     //
     // The obvious reading is that a cut hidden under the eraser cannot be seen, so a conservatively
-    // inset cut (`conservativeCuts`, still here, still tested) is free. That is true of the ink *at*
-    // the cut and false of the stroke as a whole, because a surviving piece is not edited — it is
-    // **re-stamped from scratch as a new stroke**, and `BrushStamper.stampStroke` anchors two things at
-    // `samples[0]`:
+    // inset cut is free. That is true of the ink *at* the cut and was false of the stroke as a whole,
+    // because a surviving piece used not to be edited — it was **re-stamped from scratch as a new
+    // stroke**, and `BrushStamper.stampStroke` anchors its **dab lattice** at `samples[0]`: dabs every
+    // `stampSpacing` from the first sample, remainder carried across segments.
     //
-    // 1. the **dab lattice** — dabs are laid every `stampSpacing` starting from the first sample, and
-    // 2. the **pressure ramp** — `lastPressure` starts there and interpolates onward.
+    // A piece that began at the cut re-anchored that, so its dabs landed somewhere new along its
+    // *entire length*, most visibly at its far tip — the end furthest from the eraser and therefore the
+    // one the punch cannot cover. Measured on the parity harness, a 24pt line cut by a 48pt hard round
+    // nib: split-versus-whole differed across x ∈ [41, 115] while the punch covered only x ∈ [40, 88],
+    // leaving 118 stray pixels at up to 183/255 after the punch. Widening the eraser did not help; it
+    // moves the artefact further away rather than covering it, because the artefact's size is set by the
+    // *stroke's* spacing and width.
     //
-    // A piece that begins at the cut re-anchors both, so its dabs land somewhere new along its *entire
-    // length*, most visibly at its far tip — which is the end furthest from the eraser and therefore
-    // the one the punch cannot cover. Measured on the parity harness, a 24pt line cut by a 48pt hard
-    // round nib: split-versus-whole differs across x ∈ [41, 115] while the punch covers only x ∈
-    // [40, 88], leaving 118 stray pixels at up to 183/255 after the punch. Widening the eraser does not
-    // help; it moves the artefact further away rather than covering it, because the artefact's size is
-    // set by the *stroke's* spacing and width.
+    // `DabLattice` is the fix and it is deliberately not a re-derivation: a piece stores the parent's
+    // samples and the parameters its own samples sit at, and the renderer walks the *parent* whole,
+    // drawing only the dabs inside the piece's range. The dabs that land are the same calls with the
+    // same arguments, which is the only thing that survives a comparison asserted at zero tolerance.
     //
-    // So splitting and exactness are incompatible **given this stamper**, and exactness won. Making
-    // them compatible means giving the lattice and the ramp an anchor a sub-run can reproduce — dab
-    // positions keyed to arclength from the stroke's origin, or a parametric visible-range on
-    // `VectorStroke` so a piece reuses the original lattice instead of starting its own. Either is a
-    // real change to `BrushStamper` and to what a stroke stores, which is why it is not in this phase.
-    // Until then, geometric separation is Mode 2's job, where changing the pixels is the point.
+    // Two problems, not one, and both have to be solved together:
+    //
+    // 1. the re-phased lattice above — `DabLattice`;
+    // 2. a cut end is a round cap of the stroke's half-width while the eraser removed ink along a
+    //    straight band edge, so a cut loses ink up to half a width *past* the span measured as covered
+    //    — `conservativeCuts`, by insetting until the lost ink is a subset of the covered span, which
+    //    the punch removes anyway.
+    //
+    // `testTheSplitIsExactOnlyBecauseThePiecesShareTheParentsLattice` pins both halves: pieces without
+    // the lattice still diverge, pieces with it are exact.
+    //
+    // The **pressure ramp** is anchored at `samples[0]` too, and it needed nothing: `splitStroke`
+    // interpolates the boundary sample's pressure, and pressure interpolates linearly, so a piece
+    // already reported the parent's pressure at every position. Only the lattice moved.
     // - **The growth §1 worried about is answered by retain-or-drop and GC instead.** An element is
     //   kept only when some part of the gesture still has something beneath it (`hasResidue`), and
     //   `VectorCanvas` collects it later once nothing does. Scribbling a stroke out completely — the
@@ -281,13 +293,19 @@ enum VectorEraser {
         return true
     }
 
-    /// Whether a *paint* stroke may be split, as opposed to left to the punch.
+    /// Whether a *paint* stroke may be split or deleted, as opposed to left to the punch.
     ///
-    /// Split pieces mint fresh ids, and `BrushStamper` seeds its dab RNG from the id, so splitting a
-    /// stroke whose brush scatters or jitters re-rolls where every one of its dabs lands — the two
-    /// halves would visibly reshuffle at the moment of the cut, and the punch cannot put back ink that
-    /// moved *outside* the erased region. Such a stroke is left whole and erased by the punch alone,
-    /// which is exact.
+    /// A scattering or jittering brush throws its dabs up to `radius · 2 · scatter` off the centreline,
+    /// so the capsule chain the coverage test measures against does not bound the stroke's ink: both
+    /// "the eraser covers this cross-section" and "the eraser covers this stroke entirely" become claims
+    /// about the wrong shape. Such a stroke is left whole and erased by the punch alone, which is exact
+    /// whatever the dabs did.
+    ///
+    /// The *other* reason this used to exist is gone. Pieces mint fresh ids and `BrushStamper` seeds its
+    /// dab RNG from the id, so a split once re-rolled where every dab landed — `DabLattice.seedID`
+    /// carries the parent's seed now, and `stampStroke` runs the skipped dabs through the RNG so the
+    /// sequence stays in phase. Relaxing this gate is therefore purely a question of teaching the
+    /// coverage test about scattered ink.
     static func supportsSplitting(strokeBrush: Brush) -> Bool {
         strokeBrush.scatter <= 0 && strokeBrush.rotationJitter <= 0
     }
@@ -376,13 +394,12 @@ enum VectorEraser {
             && span.upperBound >= domainEnd - StrokeGeometry.epsilon
     }
 
-    /// `ranges` pulled in by the stroke's own half-width at each end — the step that would make a
-    /// *partial* split safe to combine with a retained punch, if a partial split were safe at all.
+    /// `ranges` pulled in by the stroke's own half-width at each end — the step that makes a *partial*
+    /// split safe to combine with a retained punch.
     ///
-    /// **Not currently wired into `VectorCanvas.eraseHybrid`.** It is correct as far as it goes, it is
-    /// tested, and the future fix described in the Mode 1 notes needs it — but insetting solves only
-    /// the ink lost to the *new* cap a split creates, and that is not the whole problem. See those
-    /// notes. Reachable through the tests, which pin the divergence that unwired it.
+    /// **Wired into `VectorCanvas.splitCleanlyErasedStrokes`.** It solves the ink lost to the *new* cap
+    /// a split creates; `DabLattice` solves the other half — the piece's remaining dabs re-phasing — and
+    /// neither is sufficient alone. See the Mode 1 notes above.
     ///
     /// Deleting samples over `[c0, c1]` does not delete the ink over `[c0, c1]`: the surviving pieces
     /// end in round caps, so the ink actually lost runs from `c0 - w` to `c1 + w`, spilling half a
