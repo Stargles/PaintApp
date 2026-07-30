@@ -170,12 +170,22 @@ LaunchAgent `com.paintapp.resign` auto-resigns every 6 days (518400s) to bypass 
 - Status: `sudo launchctl list | grep paintapp`
 - Reload: `sudo launchctl unload /Library/LaunchDaemons/com.paintapp.resign.plist && sudo launchctl load /Library/LaunchDaemons/com.paintapp.resign.plist`
 
-## graphify
+## graphify (optional local tooling)
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+`graphify` builds a queryable knowledge graph of the codebase — god nodes, community structure,
+cross-file relationships. It is **optional and local**: the output under `graphify-out/` is
+gitignored because `graph.json` alone is ~11 MB and rewrites wholesale on every refresh.
 
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+If you have `graphify` installed, generate the graph first (a few seconds, AST-only, no API cost):
+
+```bash
+graphify update .
+```
+
+Then `graphify query "<question>"` for scoped subgraphs, `graphify path "<A>" "<B>"` for
+relationships, `graphify explain "<concept>"` for one concept, and `graphify-out/GRAPH_REPORT.md`
+for a broad architecture read. Re-run `graphify update .` after code changes to keep it current.
+
+Do not commit `graphify-out/`, and do not add graphify hooks to a tracked `.claude/settings.json` —
+the binary lives at a per-machine path, and the Windows machine described above has no graphify at
+all, so a tracked hook would break every `Read`/`Grep`/`Bash` call there.

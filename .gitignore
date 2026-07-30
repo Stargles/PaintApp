@@ -102,5 +102,7 @@ deploy/com.paintapp.resign.plist
 # Windows convenience script (contains SSH details)
 deploy.bat
 
-# graphify regenerable local cache (keep graph.json/graph.html/GRAPH_REPORT.md tracked)
-graphify-out/cache/
+# graphify output is generated locally and regenerates in seconds (`graphify update .`).
+# Not tracked: graph.json alone is ~78k lines / 11 MB and rewrites wholesale on every refresh,
+# so committing it churns the repo without telling anyone anything the source doesn't.
+graphify-out/
