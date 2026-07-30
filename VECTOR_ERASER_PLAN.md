@@ -309,7 +309,35 @@ with byte-identical render output as its acceptance criterion.
 - **Perf**: extend `testVectorLayerRenderCostAndMemory` with an erase-heavy scenario (200 strokes,
   50 erase gestures) and record before/after in `REFACTOR_BASELINE.md`.
 
-## 9. Open items (not blocking Phase 0–1)
+## 9. Brush-side findings
+
+The eraser *is* a brush (same `BrushStamper` pipeline, `.destinationOut` instead of the brush's own
+blend mode), so defects on the brush side land in the eraser too. Found while auditing:
+
+**Fixed — non-replayable dab randomness.** `applyScatter` and rotation jitter called `CGFloat.random`
+inside `stampDab`, while `VectorCanvas.renderLocalContent` re-runs `stampStroke` over every stored
+stroke on every invalidation. Any brush with `scatter > 0` or `rotationJitter > 0` therefore landed
+its dabs somewhere new on each render — draw a second stroke and the first visibly jumps. This
+contradicts `VectorStroke`'s own contract (geometry re-rasterized losslessly on demand), applies to
+an eraser stroke identically (its hole would crawl), and makes §8's raster-vs-vector pixel comparison
+impossible. Replaced with a seeded splitmix64 `DabRNG`; replayable callers pass `seed(for: stroke.id)`,
+live raster drawing correctly stays unseeded. **Remaining:** wire the seed at the `VectorCanvas`
+render site once Phase 1 lands.
+
+**Fixed — pressure staircase.** Every dab bridging two input samples took the *destination* sample's
+pressure. One segment spans many dabs at the sample rate a fast drag produces, so a smooth press came
+out as visible steps in width and opacity. `advance()` now reports each dab's position along the
+segment and `stampStroke` interpolates.
+
+**Candidate, not taken — square/custom brush cost.** `stampApproximateSquare` approximates one square
+dab with a grid of ~16 circles, so a square brush does ~16× the gradient-fill work per stamp of a
+round one. `DabGradientCache` memoizes the gradients (measured 2635 hits / 1 miss), so this is fill
+cost rather than allocation cost — moderate, not pathological. A real rotated-rect fill with a
+hardness gradient would be strictly better, but it changes the `DabTarget` protocol and this
+codebase's perf decisions are measured rather than assumed. Wants a measurement first; deferred to
+Phase 5.
+
+## 10. Open items (not blocking Phase 0–1)
 
 - Mode 1 over a **placed image**: the punch works at render time, but a later liquify or transform of
   that image won't carry the hole with it. Probably acceptable; revisit with liquify.
