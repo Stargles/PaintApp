@@ -365,6 +365,302 @@ final class BrushEngineLogicTests: XCTestCase {
                 CGFloat(pixels.bytes[i + 2]) / 255 / a)
     }
 
+    // MARK: - Display list: `VectorElement`
+
+    private static let canvasSide = 64
+    private static let canvasSize = CGSize(width: 64, height: 64)
+
+    private func opaqueFill(_ color: CodableColor) -> VectorFillElement {
+        VectorFillElement(path: CGPath(rect: CGRect(origin: .zero, size: Self.canvasSize), transform: nil),
+                          color: color)
+    }
+
+    /// A stroke that lands as one hard, opaque blob at the centre of the canvas. Two identical samples
+    /// so `stampStroke` lays exactly one dab, which keeps single-pixel assertions exact.
+    private func centreStroke(_ color: CodableColor, blendMode: BrushBlendMode = .normal,
+                              composite: StrokeComposite = .paint) -> VectorStroke {
+        VectorStroke(brush: Self.opaqueTestBrush(blendMode: blendMode), color: color,
+                     size: 20, opacity: 1,
+                     samples: [VectorSample(x: 32, y: 32, pressure: 1),
+                               VectorSample(x: 32, y: 32, pressure: 1)],
+                     composite: composite)
+    }
+
+    private func solidImage(_ color: UIColor, side: CGFloat = 16) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { ctx in
+            color.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }
+    }
+
+    private func placedImage(_ color: UIColor) -> VectorImageElement {
+        VectorImageElement(image: solidImage(color),
+                           transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0),
+                           fileName: "placed.png")
+    }
+
+    private func renderedBytes(_ canvas: VectorCanvas) -> [UInt8]? {
+        rgbaPixels(of: canvas.render(), width: Self.canvasSide, height: Self.canvasSide)?.bytes
+    }
+
+    private func alphaAtCentre(_ canvas: VectorCanvas) -> CGFloat? {
+        guard let pixels = rgbaPixels(of: canvas.render(), width: Self.canvasSide, height: Self.canvasSide) else { return nil }
+        return alpha(pixels, x: 32, y: 32)
+    }
+
+    /// One-word tag per element kind, so an expected z-order reads as a literal in the assertions.
+    private func kinds(_ elements: [VectorElement]) -> [String] {
+        elements.map {
+            switch $0 {
+            case .fill: return "fill"
+            case .image: return "image"
+            case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
+            }
+        }
+    }
+
+    private func kinds(_ elements: [VectorCanvasData.ElementData]) -> [String] {
+        elements.map {
+            switch $0 {
+            case .fill: return "fill"
+            case .image: return "image"
+            case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
+            }
+        }
+    }
+
+    /// The compatibility accessors are the whole reason this refactor stayed small: ~30 call sites read
+    /// and assign `.strokes`/`.fills`/`.images` as if the three arrays were still there. The undo/redo
+    /// path is the one that assigns wholesale (`StrokeCanvasView.registerVectorUndo` snapshots
+    /// `canvas.strokes` and later puts it straight back), so a get→set round trip must be an identity on
+    /// the display list — otherwise every undo would drift a stroke above or below a fill.
+    func testKindAccessorGetSetRoundTripPreservesElementOrder() {
+        let fill = opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let image = placedImage(.green)
+        let first = centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
+        let second = centreStroke(CodableColor(red: 1, green: 1, blue: 0, alpha: 1))
+        let original: [VectorElement] = [.fill(fill), .image(image), .stroke(first), .stroke(second)]
+
+        for label in ["strokes", "fills", "images"] {
+            let canvas = VectorCanvas(size: Self.canvasSize, elements: original)
+            switch label {
+            case "strokes": canvas.strokes = canvas.strokes
+            case "fills": canvas.fills = canvas.fills
+            default: canvas.images = canvas.images
+            }
+            XCTAssertEqual(canvas.elements.map(\.id), original.map(\.id),
+                           "Reading and re-assigning .\(label) must leave the display list exactly as it was")
+        }
+    }
+
+    /// The setter contract on an empty bucket. `registerVectorFillUndo`'s redo does
+    /// `canvas.fills = newFills` on a canvas whose fills the matching undo just removed, so "there were
+    /// none of this kind" cannot mean "append at the end" — that would put a redone flood fill *above*
+    /// the strokes it originally went under.
+    func testAssigningFillsToACanvasWithNoneKeepsThemBeneathTheStrokes() {
+        let stroke = centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stroke(stroke)])
+        canvas.fills = [opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))]
+
+        XCTAssertEqual(kinds(canvas.elements), ["fill", "stroke"],
+                       "A fill assigned back onto a canvas that currently has none belongs under the strokes, matching addFill")
+    }
+
+    /// Every `add…` keeps the legacy fills→images→strokes z-order, which is what makes Phase 1 free of
+    /// visible change: flood-filling after drawing a line still puts the fill *under* the line. A naive
+    /// append into one list would cover the line up.
+    func testAddingElementsPreservesTheLegacyFillsThenImagesThenStrokesOrder() {
+        let canvas = VectorCanvas(size: Self.canvasSize)
+        canvas.addStroke(centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1)))
+        canvas.addFill(opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1)))
+        canvas.addImage(placedImage(.green))
+        canvas.addStroke(centreStroke(CodableColor(red: 1, green: 1, blue: 0, alpha: 1)))
+
+        XCTAssertEqual(kinds(canvas.elements), ["fill", "image", "stroke", "stroke"],
+                       "Adds are sorted by kind, so content built through the public API renders in the pre-display-list order")
+    }
+
+    // MARK: - Display list: `StrokeComposite` decoding
+
+    /// Encodes `value`, drops `keys` from the resulting JSON object, and hands back the JSON — the way
+    /// to build an authentic "saved by an older build" payload without checking a blob into the suite.
+    private func jsonObject<T: Encodable>(_ value: T, removing keys: [String] = []) throws -> [String: Any] {
+        let data = try JSONEncoder().encode(value)
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "test", code: 1)
+        }
+        for key in keys { object.removeValue(forKey: key) }
+        return object
+    }
+
+    /// The migration hinge. A `Codable` struct's *synthesized* decoder ignores property defaults and
+    /// throws `keyNotFound`, so without the hand-written `init(from:)` on `VectorStroke` every project
+    /// saved before `composite` existed would fail to load. This is the test that would catch that.
+    func testVectorStrokeDecodesAsPaintWhenTheCompositeKeyIsAbsent() throws {
+        let legacy = try jsonObject(centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1)),
+                                    removing: ["composite"])
+        XCTAssertNil(legacy["composite"], "Setup: the key must actually be missing for this to test anything")
+
+        let data = try JSONSerialization.data(withJSONObject: legacy)
+        let decoded = try JSONDecoder().decode(VectorStroke.self, from: data)
+        XCTAssertEqual(decoded.composite, .paint, "A stroke saved before the field existed is a paint stroke")
+    }
+
+    func testVectorStrokeRoundTripsTheEraseComposite() throws {
+        let eraser = centreStroke(CodableColor(red: 0, green: 0, blue: 0, alpha: 1), composite: .erase)
+        let decoded = try JSONDecoder().decode(VectorStroke.self, from: JSONEncoder().encode(eraser))
+        XCTAssertEqual(decoded.composite, .erase)
+        XCTAssertEqual(decoded.id, eraser.id)
+        XCTAssertEqual(decoded.samples, eraser.samples)
+    }
+
+    // MARK: - Display list: persistence migration
+
+    /// Builds a pre-display-list `VectorCanvasData` payload: three parallel arrays, no `elements` key.
+    private func legacyCanvasJSON(strokes: [VectorStroke], fills: [VectorFillElement],
+                                  images: [VectorCanvasData.ImageRef],
+                                  transform: [Double] = [1, 0, 0, 1, 0, 0]) throws -> Data {
+        let root: [String: Any] = [
+            "strokes": try strokes.map { try jsonObject($0) },
+            "fills": try fills.map { try jsonObject($0) },
+            "images": try images.map { try jsonObject($0) },
+            "transform": transform
+        ]
+        return try JSONSerialization.data(withJSONObject: root)
+    }
+
+    /// A legacy file carries no z-order at all, so decoding has to *reconstruct* the order the old
+    /// renderer hard-coded — all fills, then all images, then all strokes. Get this wrong and every
+    /// existing project opens with its fills on top of its linework.
+    func testLegacyVectorCanvasDataDecodesAsFillsThenImagesThenStrokes() throws {
+        let data = try legacyCanvasJSON(
+            strokes: [centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1)),
+                      centreStroke(CodableColor(red: 1, green: 1, blue: 0, alpha: 1))],
+            fills: [opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1)),
+                    opaqueFill(CodableColor(red: 0, green: 1, blue: 1, alpha: 1))],
+            images: [VectorCanvasData.ImageRef(fileName: "a.png", x: 32, y: 32, scale: 1, rotation: 0)])
+
+        let payload = try JSONDecoder().decode(VectorCanvasData.self, from: data)
+        XCTAssertEqual(kinds(payload.elements), ["fill", "fill", "image", "stroke", "stroke"])
+        XCTAssertTrue(payload.affineTransform.isIdentity)
+        // The kind-filtered reads still work for callers that only want one bucket.
+        XCTAssertEqual(payload.strokes.count, 2)
+        XCTAssertEqual(payload.fills.count, 2)
+        XCTAssertEqual(payload.images.map(\.fileName), ["a.png"])
+    }
+
+    /// legacy JSON → decode → encode → decode must be stable, and must render the same both times.
+    /// The second decode goes through the *new* `elements` branch, so this is what proves the migration
+    /// is a fixed point rather than a one-way reshuffle.
+    func testLegacyPayloadReEncodesAndRendersIdenticallyAfterMigration() throws {
+        let stroke = centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
+        let fill = opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let ref = VectorCanvasData.ImageRef(fileName: "a.png", x: 20, y: 20, scale: 1, rotation: 0)
+        let legacy = try legacyCanvasJSON(strokes: [stroke], fills: [fill], images: [ref])
+
+        let first = try JSONDecoder().decode(VectorCanvasData.self, from: legacy)
+        let migrated = try JSONEncoder().encode(first)
+        let second = try JSONDecoder().decode(VectorCanvasData.self, from: migrated)
+
+        XCTAssertNotNil(try JSONSerialization.jsonObject(with: migrated) as? [String: Any],
+                        "Setup: the migrated payload should be a JSON object")
+        let object = try JSONSerialization.jsonObject(with: migrated) as! [String: Any]
+        XCTAssertNotNil(object["elements"], "The re-encoded payload writes the ordered display list")
+        XCTAssertNil(object["strokes"], "The legacy parallel arrays are not mirrored back out")
+
+        XCTAssertEqual(kinds(second.elements), kinds(first.elements))
+        XCTAssertEqual(second.elements.compactMap { if case .stroke(let s) = $0 { return s.id } else { return nil } },
+                       first.elements.compactMap { if case .stroke(let s) = $0 { return s.id } else { return nil } })
+
+        // …and the pixels. One resolver for both so the placed image is byte-identical either way.
+        let resolve: (VectorCanvasData.ImageRef) -> UIImage? = { [weak self] _ in self?.solidImage(.green) }
+        let before = VectorCanvas(size: Self.canvasSize, elements: first.elements(resolvingImages: resolve),
+                                  transform: first.affineTransform)
+        let after = VectorCanvas(size: Self.canvasSize, elements: second.elements(resolvingImages: resolve),
+                                 transform: second.affineTransform)
+        XCTAssertEqual(renderedBytes(before), renderedBytes(after),
+                       "A migrated payload must render exactly as the legacy one it came from")
+
+        // And both must match what the pre-change three-array construction produced, which is the
+        // actual acceptance criterion for this phase.
+        let legacyShaped = VectorCanvas(size: Self.canvasSize, strokes: [stroke], fills: [fill],
+                                        images: [VectorImageElement(image: solidImage(.green),
+                                                                    transform: LayerTransform(position: CGPoint(x: 20, y: 20), scale: 1, rotation: 0),
+                                                                    fileName: "a.png")])
+        XCTAssertEqual(renderedBytes(before), renderedBytes(legacyShaped),
+                       "The reconstructed display list must render identically to the fixed fills→images→strokes order it replaces")
+    }
+
+    // MARK: - Display list: eraser z-order semantics
+
+    /// "The eraser lowers the alpha of everything beneath it" — fills included, which three parallel
+    /// arrays could never express because strokes were always drawn last but erasing was a *destructive*
+    /// sample edit that never touched a fill.
+    func testEraseStrokeAfterAFillRemovesAlphaFromThatFill() {
+        let canvas = VectorCanvas(size: Self.canvasSize,
+                                  elements: [.fill(opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))),
+                                             .stroke(centreStroke(CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                                                  composite: .erase))])
+        guard let pixels = rgbaPixels(of: canvas.render(), width: Self.canvasSide, height: Self.canvasSide) else {
+            return XCTFail("Could not read back the rendered vector canvas")
+        }
+        XCTAssertEqual(alpha(pixels, x: 32, y: 32), 0, accuracy: 0.02,
+                       "The erase stroke should punch through the fill beneath it, not just through other strokes")
+        XCTAssertEqual(alpha(pixels, x: 4, y: 4), 1, accuracy: 0.02,
+                       "Away from the eraser the fill is untouched")
+    }
+
+    /// The bug this whole refactor exists to prevent. With erasers pinned to the end of a fixed render
+    /// order, a stroke drawn *after* an erase would be eaten by it. Position in the display list is what
+    /// decides, and it has to decide in both directions.
+    func testStrokeDrawnAfterAnEraseElementIsNotEatenByIt() {
+        let blue = CodableColor(red: 0, green: 0, blue: 1, alpha: 1)
+        let eraser = centreStroke(CodableColor(red: 0, green: 0, blue: 0, alpha: 1), composite: .erase)
+        let fill = opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+
+        let strokeAfter = VectorCanvas(size: Self.canvasSize,
+                                       elements: [.fill(fill), .stroke(eraser), .stroke(centreStroke(blue))])
+        guard let pixels = rgbaPixels(of: strokeAfter.render(), width: Self.canvasSide, height: Self.canvasSide) else {
+            return XCTFail("Could not read back the rendered vector canvas")
+        }
+        XCTAssertEqual(alpha(pixels, x: 32, y: 32), 1, accuracy: 0.02,
+                       "A stroke later in the display list than the erase element must survive it")
+        let (r, _, b) = rgb(pixels, x: 32, y: 32)
+        XCTAssertGreaterThan(b, 0.8, "…and it must be the stroke's own colour")
+        XCTAssertLessThan(r, 0.2)
+
+        // The mirror image: same three elements, eraser last, and now the stroke *is* erased. Same
+        // content, different z-order, opposite result — which is the point.
+        let strokeBefore = VectorCanvas(size: Self.canvasSize,
+                                        elements: [.fill(fill), .stroke(centreStroke(blue)), .stroke(eraser)])
+        XCTAssertEqual(alphaAtCentre(strokeBefore) ?? -1, 0, accuracy: 0.02,
+                       "An erase element after the stroke removes it, so order is genuinely what decides")
+    }
+
+    /// Group boundaries. An `.erase` element ends the current paint run, and the next run has to get its
+    /// own transparency layer if it needs one — otherwise a non-normal brush drawn after an erase would
+    /// start blending with the fill beneath it, the exact regression
+    /// `testVectorMultiplyStrokeDoesNotBlendWithTheFillBeneathIt` pins for the simple case.
+    func testANonNormalRunAfterAnEraseElementIsStillIsolated() {
+        // The eraser sits in a corner so it doesn't overlap the assertion point.
+        var eraser = centreStroke(CodableColor(red: 0, green: 0, blue: 0, alpha: 1), composite: .erase)
+        eraser.samples = [VectorSample(x: 4, y: 4, pressure: 1), VectorSample(x: 4, y: 4, pressure: 1)]
+        let canvas = VectorCanvas(size: Self.canvasSize,
+                                  elements: [.fill(opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))),
+                                             .stroke(eraser),
+                                             .stroke(centreStroke(CodableColor(red: 0, green: 1, blue: 0, alpha: 1),
+                                                                  blendMode: .multiply))])
+        guard let pixels = rgbaPixels(of: canvas.render(), width: Self.canvasSide, height: Self.canvasSide) else {
+            return XCTFail("Could not read back the rendered vector canvas")
+        }
+        let (r, g, b) = rgb(pixels, x: 32, y: 32)
+        XCTAssertGreaterThan(g, 0.8, "The multiply run after the erase element is still isolated, so it stays green")
+        XCTAssertLessThan(r, 0.2, "A red component means the run blended with the fill beneath it")
+        XCTAssertLessThan(b, 0.2)
+        XCTAssertEqual(alpha(pixels, x: 4, y: 4), 0, accuracy: 0.02,
+                       "…and the erase element still punched its own hole in the fill")
+    }
+
     /// The cache must not leak one dab's alpha into the next. Stamping full alpha *after* a faint
     /// dab, at the same colour and hardness (so the second stamp is a cache hit), still has to paint
     /// fully opaque — a stale baked-in alpha would show up here as a faint second dab.

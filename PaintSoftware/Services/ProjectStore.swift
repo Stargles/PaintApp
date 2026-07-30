@@ -471,20 +471,22 @@ enum ProjectStore {
                     bakedImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(bakedFileName).path)
                 }
 
-                // Vector content: decode the JSON (strokes + image refs + transform) and reload each
-                // placed image's PNG. A `.vector` layer with no saved payload (never drawn) still gets
-                // an empty VectorCanvas so it stays a working vector layer.
+                // Vector content: decode the JSON (the ordered display list + image refs + transform)
+                // and reload each placed image's PNG. A `.vector` layer with no saved payload (never
+                // drawn) still gets an empty VectorCanvas so it stays a working vector layer.
+                //
+                // The list is restored in its saved order, which is what preserves z-position between
+                // strokes, fills, images and erase elements. A legacy payload that predates the display
+                // list has no order to restore, so `VectorCanvasData.init(from:)` reconstructs the one
+                // the old renderer used (fills, then images, then strokes) while decoding.
                 var vector: VectorCanvas?
                 if let vectorFileName = celManifest.vectorFileName,
                    let data = try? Data(contentsOf: imagesDir.appendingPathComponent(vectorFileName)),
                    let payload = try? JSONDecoder().decode(VectorCanvasData.self, from: data) {
-                    let images: [VectorImageElement] = payload.images.compactMap { ref in
-                        guard let img = UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path) else { return nil }
-                        return VectorImageElement(image: img,
-                                                  transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y), scale: ref.scale, rotation: ref.rotation),
-                                                  fileName: ref.fileName)
+                    let elements = payload.elements { ref in
+                        UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path)
                     }
-                    vector = VectorCanvas(size: canvasSize, strokes: payload.strokes, fills: payload.fills, images: images, transform: payload.affineTransform)
+                    vector = VectorCanvas(size: canvasSize, elements: elements, transform: payload.affineTransform)
                 } else if layerManifest.kind == .vector {
                     vector = .empty(size: canvasSize)
                 }
