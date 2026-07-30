@@ -102,7 +102,11 @@ deploy/com.paintapp.resign.plist
 # Windows convenience script (contains SSH details)
 deploy.bat
 
-# graphify output is generated locally and regenerates in seconds (`graphify update .`).
-# Not tracked: graph.json alone is ~78k lines / 11 MB and rewrites wholesale on every refresh,
-# so committing it churns the repo without telling anyone anything the source doesn't.
-graphify-out/
+# graphify output. GRAPH_REPORT.md (19 KB of readable markdown) is tracked on purpose: it is the
+# one artifact useful WITHOUT the graphify binary installed, which is the case on the Windows
+# machine. Everything else is a generated blob that rewrites wholesale on each refresh —
+# graph.json is 3.1 MB / ~78k lines, graph.html 2.5 MB — so committing those is pure history
+# churn, and any session with graphify installed regenerates them in seconds via
+# `graphify update .` (the PreToolUse hook prompts for exactly that when they're missing).
+graphify-out/*
+!graphify-out/GRAPH_REPORT.md

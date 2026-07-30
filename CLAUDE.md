@@ -198,11 +198,16 @@ things have to hold for a tracked hook in front of every `Bash`/`Grep`/`Read`/`G
   Windows machine described above has no graphify at all.
 - **Fail-open.** If graphify is missing or errors, the hook is a silent no-op and exits 0. It must
   never block a tool call.
-- **Self-bootstrapping.** `graphify-out/` is gitignored (`graph.json` is ~11 MB and rewrites
-  wholesale on every refresh, so committing it is pure history churn). A fresh clone therefore has
-  no graph, and bare `graphify hook-guard` is *silent* in that state — so the wrapper emits its own
-  "run `graphify update .`" nudge instead, and sessions self-bootstrap in one command.
+- **Self-bootstrapping.** The generated blobs under `graphify-out/` are gitignored (`graph.json` is
+  3.1 MB / ~78k lines and `graph.html` 2.5 MB, both rewritten wholesale on every refresh), so a
+  fresh clone has no queryable graph — and bare `graphify hook-guard` is *silent* in that state.
+  The wrapper emits its own "run `graphify update .`" nudge instead, so sessions self-bootstrap in
+  one command.
 
-Do not commit `graphify-out/`. If the hook's reminders prove too noisy for focused editing work,
-narrow the second matcher from `Read|Glob` to `Glob` — that keeps the nudge on discovery (searching
-for something) and drops it from targeted access (opening a file you already know you need).
+`graphify-out/GRAPH_REPORT.md` **is** tracked, deliberately: at 19 KB of plain markdown it is the
+one artifact that's useful without the binary installed, which is the situation on the Windows
+machine. Commit a refreshed copy when you refresh the graph; leave the rest ignored.
+
+If the hook's reminders prove too noisy for focused editing work, narrow the second matcher from
+`Read|Glob` to `Glob` — that keeps the nudge on discovery (searching for something) and drops it
+from targeted access (opening a file you already know you need).
