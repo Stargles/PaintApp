@@ -30,27 +30,59 @@ Two representations are each right half the time:
   clean input for interpolate/liquify/decimation — but cannot express a half-width shave or a
   feathered edge at all.
 
-**Resolution: decide per erase, at commit time, by measuring coverage.** For each paint stroke
-the eraser touched:
+**Resolution as originally planned — superseded, kept because the phasing below refers to it.**
+Decide per erase, at commit time, by measuring coverage: walk each touched stroke, find maximal
+spans covered full-width at full alpha, split those out as *clean cuts*, and retain whatever
+eraser footprint is left over as a `.erase` element. The expectation was that a hard-round eraser
+at full opacity would produce **only** clean cuts and retain nothing.
 
-1. Walk the stroke's samples. For each one, compute how much of the *stroke's own width* at that
-   point is covered by the eraser's capsule chain, and at what alpha.
-2. A maximal contiguous span where coverage is **full width at full alpha** is a *clean cut*:
-   delete those samples, interpolate exact boundary samples at both ends, split into two strokes.
-   Subtract that span from the eraser's footprint.
-3. Whatever eraser footprint remains — partial-width, feathered, `< 1` opacity, or overlapping a
-   fill/image — is retained as a `.erase` element in the display list at the z-position where it
-   was drawn.
+### What shipped instead, and why (Phase 4c, measured)
+
+Both halves of that expectation are false, and `RasterVectorParityLogicTests` /
+`VectorEraserHybridLogicTests` are the measurements. Against a raster layer erased identically, at
+zero tolerance:
+
+1. **A retained punch is byte-identical to raster erasing** — every pixel, across hard/soft
+   brushes, full/partial opacity, three gesture shapes, over a stroke, a fill and a placed image.
+   The fallback is exactly as strong as this section claimed.
+2. **A geometric split is not, and cannot be made so with the current stamper.** Two independent
+   reasons, both traced to `BrushStamper.stampStroke` anchoring its **dab lattice** and its
+   **pressure ramp** at `samples[0]`:
+   - A cut stroke's surviving piece is re-stamped as a *new* stroke, so both anchors move to the
+     cut and its ink lands somewhere new along its **whole length** — most visibly at its far tip,
+     which is the end the punch cannot cover. Measured on a 24pt line cut by a 48pt nib:
+     divergence across x ∈ [41, 115] where the punch covers only x ∈ [40, 88], leaving 118 stray
+     pixels at up to 183/255. A wider eraser moves the artefact further away rather than covering
+     it, because its size is set by the *stroke's* spacing and width.
+   - Separately, a cut end is a round cap of the stroke's half-width while the eraser removed ink
+     along a straight band edge. Those differ by a lens of area ≈ `0.43·w²` however the boundary is
+     placed. `conservativeCuts` solves *this* one by insetting; it does not touch the first.
+
+So the resolution that ships is:
+
+1. **Punch, always.** The eraser's gesture is retained whole as a `.erase` element at the
+   z-position where it was drawn. Mode 1 is pixel-exact by construction rather than by a threshold.
+   The decision to retain is a **bit** — is there anything under any part of the gesture — not a
+   set of spans: trimming the punch to the spans that have a backdrop re-phases the same lattice
+   and costs 4–27/255 over tens of pixels.
+2. **Delete a stroke the eraser covers end to end** (`VectorEraser.isEntirelyCovered`: every
+   cross-section, *plus* both round end caps, which no cross-section test can see). This produces
+   no new geometry, so nothing re-stamps and nothing can move — it is exact — and it is what keeps
+   "scribble a stroke out and it costs nothing" true.
+3. **Never cut a stroke partway.** Geometric separation is Mode 2's job, where changing the pixels
+   is the point.
 
 Consequences worth stating plainly:
 
-- A hard-round eraser at full opacity, used the way people normally erase (sweeping across a
-  line), produces **only clean cuts**. Zero retained elements, zero growth, and Mode 1 collapses
-  to something as cheap as Mode 2 but with exact cut boundaries.
-- A soft-round eraser, or a grazing shave, or `opacity 0.4`, retains a punch. That's the price of
-  the fidelity, and it's the user's own brush choice that sets it.
-- The alpha-punch path is the fallback that guarantees the "indistinguishable from raster"
-  promise; the geometric path is the optimisation that keeps files small. Neither alone works.
+- Growth is one element per eraser gesture that touched something, exactly as N paint gestures cost
+  N elements — plus GC, which drops a punch once nothing beneath it remains. A gesture over nothing
+  costs nothing; a gesture that wholly resolves costs nothing.
+- Mode 1 does **not** give you two independently movable halves. That was this section's other
+  goal and it is deferred, not abandoned: it needs a dab lattice a sub-run can reproduce —
+  arclength-anchored dab positions, or a parametric visible-range on `VectorStroke` so a piece
+  reuses the original lattice instead of starting its own. `conservativeCuts` is kept, tested and
+  unwired for that work, and `testAPartialSplitDivergesOutsideThePunchWhichIsWhyItIsNotWired` fails
+  loudly for anyone who reconnects it first.
 
 ### Coverage test
 
@@ -61,12 +93,21 @@ is the fraction of its cross-section interval `[-r, +r]` (perpendicular to the l
 covered by the union of nearby eraser capsules. Cheap, closed-form, and pure `CGFloat` maths.
 
 Two guards keep this honest rather than approximately-honest:
-- **Alpha gate.** A soft eraser's edge alpha is `< 1` even at full geometric coverage, so a clean
-  cut additionally requires `hardness ≥ ~0.95`, `grain.isEnabled == false`, and
-  `eraserOpacity × flow ≈ 1`. Below that, everything is residue. Conservative on purpose: a false
-  "clean" claim is a visible artefact, a false "residue" claim is only a retained element.
+- **Alpha gate.** A soft eraser's edge alpha is `< 1` even at full geometric coverage, so removing
+  ink outright additionally requires `hardness ≥ ~0.95`, `grain.isEnabled == false`,
+  `eraserOpacity × flow ≈ 1`, `scatter == 0`, `rotationJitter == 0`, and a non-square shape. Below
+  that, everything is residue. Conservative on purpose: a false "clean" claim is a visible
+  artefact, a false "residue" claim is only a retained element.
+  **`opacityPressure` is judged against the gesture's own minimum pressure, not against zero.**
+  Against zero, `opacityFraction` bottoms out at `1 - opacityPressure` and the gate rejects every
+  brush that reacts to pressure at all — `hardRound` ships with `0.1`, `pen` with `0.05`, so no
+  built-in brush could pass and the whole geometric path was unreachable. That was a real bug, not
+  conservatism.
 - **Margin.** Require coverage to exceed the stroke's half-width by a small epsilon before
   calling it clean, so anti-aliased fringe isn't left behind at the cut.
+- **Scallop.** Pull each eraser capsule's radii in by the deepest gap between consecutive dabs,
+  `r − √(r² − (s/2)²)`, or a wide-spacing brush claims coverage through the gaps it left
+  (`cleanCutCapsules`).
 
 ### Garbage collection
 
@@ -224,8 +265,9 @@ copy live through the existing `stampPath` path, and display it. This is literal
 eraser's code path, so live feedback is raster-identical by construction. One canvas-sized
 allocation per eraser stroke, released on lift.
 
-**Commit.** Run the §1 hybrid resolution: clean spans → `splitStroke`, residue → retained `.erase`
-element inserted at the end of the display list. Then GC.
+**Commit.** Run the §1 resolution *as shipped*: strokes the eraser covers end to end are deleted
+outright, the gesture is retained whole as a `.erase` element appended to the display list whenever
+anything is still under any part of it, and then GC. No partial cutting — see §1.
 
 **Undo.** Snapshot the element list as today (`registerVectorUndo`), extended from `[VectorStroke]`
 to `[VectorElement]`. Note this gets heavy — see §6.
@@ -311,10 +353,20 @@ for a long sweep.
   every `StrokeGeometry` primitive, spatial-index correctness against brute force, split/boundary
   interpolation, RDP with pinned samples, persistence round-trip and legacy decode.
 - **The acceptance test for Mode 1:** draw an identical stroke on a raster layer and a vector layer,
-  erase both with an identical gesture, compare the rendered images within a small per-pixel
-  tolerance. This is what "indistinguishable from raster" means operationally, and it's the only
-  test that can actually prove it. Run it across the matrix: hard/soft brush, full/partial opacity,
-  square cut / diagonal cut / partial-width shave, over a stroke / over a fill / over an image.
+  erase both with an identical gesture, compare the rendered images **at zero tolerance**. This is
+  what "indistinguishable from raster" means operationally, and it's the only test that can actually
+  prove it. Run it across the matrix: hard/soft brush, full/partial opacity, square cut / diagonal
+  cut / partial-width shave, over a stroke / over a fill / over an image.
+
+  Zero, not "a small per-pixel tolerance" as this said first: both tiers rasterize through the same
+  `BrushStamper`, so they agree byte for byte, and the harness demonstrates it. Any tolerance here
+  would hide a regression rather than absorb noise — every defect Phase 4c found showed up as a
+  delta of 4–27/255 over tens of pixels, which is exactly the band a "small" tolerance would have
+  swallowed.
+
+  Two files, deliberately: `RasterVectorParityLogicTests` builds display lists by hand and tests the
+  *representation*; `VectorEraserHybridLogicTests` drives the real `VectorCanvas.erase` and tests
+  the *decision*. The first passing does not imply the second — for three sessions it did not.
 - **Perf**: extend `testVectorLayerRenderCostAndMemory` with an erase-heavy scenario (200 strokes,
   50 erase gestures) and record before/after in `REFACTOR_BASELINE.md`.
 

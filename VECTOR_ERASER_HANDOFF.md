@@ -1,128 +1,162 @@
 # Vector Eraser — Resume Here
 
-Working state as of Session 3 (2026-07-30). Read [VECTOR_ERASER_PLAN.md](VECTOR_ERASER_PLAN.md)
-first — it is the spec; this file is only the bookmark.
+Working state as of **Session 5 (2026-07-30)**. Read [VECTOR_ERASER_PLAN.md](VECTOR_ERASER_PLAN.md)
+first — it is the spec, and §1/§4/§8 have been rewritten to match what actually shipped. This file is
+only the bookmark.
 
 ## Environment correction (important, saves 10 minutes)
 
 CLAUDE.md's "Remote testing (Tailscale → Mac, no Xcode on this machine)" section was written for the
-**Windows** machine. If your session is on `Julias-MacBook-Pro` (darwin, Tailscale
-`100.70.148.78`), you *are* the Mac: Xcode 26.6 is local, no SSH, no `parallel_test.sh`. Build
-directly, ~15s:
+**Windows** machine. If your session is on `Julias-MacBook-Pro` (darwin), you *are* the Mac: Xcode is
+local, no SSH, no `parallel_test.sh`. Build directly, ~20s:
 
 ```bash
 xcodebuild build -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,id=2AE27426-4D30-465F-9B93-A759CAEA8456' -derivedDataPath /tmp/dd-veraser
 ```
 
-Logic tests (**136** currently green — this is the regression net):
+Logic tests (**169** currently green — this is the regression net):
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,id=2AE27426-4D30-465F-9B93-A759CAEA8456' -derivedDataPath /tmp/dd-veraser -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,id=2AE27426-4D30-465F-9B93-A759CAEA8456' -derivedDataPath /tmp/dd-veraser -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/VectorEraserHybridLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/RasterVectorParityLogicTests
 ```
 
-## Done
+**xcodebuild does not print assertion messages to stdout.** A failure line names the test and nothing
+else. To read the actual message:
 
-**Phase 0** — `Engine/StrokeGeometry.swift` (741 lines) and `StrokeSpatialIndex.swift` (220). Pure
-`CoreGraphics`, dual app+test target membership. Capsule-chain coverage, polyline intersection
-(exact + width-tolerant), sample interpolation, subdivision, `splitStroke(_:removing:)`, uniform-grid
-broad phase. 43 tests including a brute-force march validating the closed-form coverage.
+```bash
+xcrun xcresulttool get test-results test-details --test-id "SuiteName/testName()" --path /tmp/dd-veraser/Logs/Test/<newest>.xcresult
+```
 
-**Phase 1** — `VectorCanvas` holds one ordered `[VectorElement]` (`.stroke`/`.fill`/`.image`);
-`VectorStroke` gained `composite: StrokeComposite` (decodes to `.paint` on legacy files).
-Compatibility accessors `strokes`/`fills`/`images` meant only one of ~160 call sites changed.
-Persistence stores the ordered list with a legacy fills→images→strokes fallback.
+`print()` from a test does not reach stdout either — it goes to the simulator's console. To get a
+value out of a running test, put it in an `XCTFail` message.
 
-**Brush-side fixes** (plan §9) — seeded splitmix64 `BrushStamper.DabRNG`, so replayed strokes stopped
-crawling; pressure now ramps across the dabs bridging two input samples.
+Expect one or two `FBSOpenApplicationServiceErrorDomain` / `(ipc/mig) server died` launch failures
+per run. xcodebuild retries and the run completes; they are not a broken simulator and do not need a
+restart.
 
-**Phase 2** (this session) —
+Phases 0–3 are described in the git history (`b6d8ede` and its parents) and have not changed.
 
-- `VectorEraserMode` in [Tool.swift](PaintSoftware/Models/Tool.swift): `.erase` / `.cutPoints` /
-  `.cutToIntersection`, with `displayName` and `isStabilized`.
-- `CanvasManager.vectorEraserMode` (`@Published`, default `.erase`), persisted in `ProjectManifest`
-  via `decodeIfPresent` and round-tripped through `ProjectStore` save **and** load.
-- `CanvasManager.activeLayerKind` — new, deliberately weaker than the existing `activeLayerIsVector`
-  (it does not require a `VectorCanvas` on the current frame, so the picker shows on an empty vector
-  layer).
-- `EraserSettingsPanel` spends the shared panel's `accessory` slot on a segmented picker, shown only
-  when `activeLayerKind == .vector`. Identifier `eraserPanel.vectorModePicker`.
-- `StrokeCanvasView.vectorEraserMode`, pushed from `CanvasView.updateActiveLayerAndTool`. **It is
-  also a field of `AppliedTool`** — that struct is the change-detection cache, so without it a mode
-  change compares equal and the picker silently does nothing.
-- Stabilization is now per mode, not per tool: `isEraser && !mode.isStabilized` takes the raw point.
-- New [Engine/VectorEraser.swift](PaintSoftware/Engine/VectorEraser.swift) — pure geometry, dual
-  target membership (pbxproj entries added by hand, ids `9A7B…D01/D02` and `…E01/E02`).
-- `VectorCanvas.erase(alongPath:brush:size:mode:)` rewritten onto it. The old signature
-  (`alongPath: [CGPoint], radius:`) is gone; there was one caller.
-- 24 new tests in `VectorEraserLogicTests`, four named `…regressionOfDefectN` for the four plan §4
-  defects.
+---
 
-### Design notes worth not re-deriving
+## Mode 1, as it actually is
 
-- **Probing, not `subdivided`.** `VectorEraser.cutRanges` walks inside/outside probes along each
-  *original* segment (step = the sweep's smallest radius, clipped to the sweep's bbox by
-  Liang–Barsky) and bisects each crossing 16 times. Same resolution as densifying the samples, but
-  nothing is inserted into the surviving pieces and the parameters come out in the original domain.
-  `StrokeGeometry.subdivided` stays for liquify, where the extra samples are the point.
-- **A zero-length segment claims `i...(i+1)`, not `i...i`.** A stalled finger emits coincident
-  samples; claiming only the point fragments a cut into slivers around each of them. Test:
-  `testRepeatedSamplesDoNotFragmentTheCut`.
-- **`.erase` strokes are skipped** (old carry-over #4). Cutting a span out of an eraser would
-  *restore* the ink beneath it. Phase 4 GCs them instead.
-- **Per-stroke cached `bounds` was not added** (old carry-over #7) — deliberately. It would exist to
-  reject a stroke before testing its segments; `VectorCanvas.strokeIndex()` rejects it without
-  visiting it at all, which strictly dominates. Adding a derived stored field to a `Codable` struct
-  whose `samples` are assigned from a dozen sites needs a mutator seam; build that with Phase 5's
-  decimation, which needs the same seam.
-- **`strokeIndex()` is version-keyed and lock-guarded.** `segments(near:)` mutates a visit stamp
-  during a *read* (old carry-over #8), so concurrent queries would drop results. Segments are
-  inserted with **no padding** — the index answers centreline questions, which is what Modes 2 and 3
-  ask. Phase 4's coverage test asks about stroke *width* and must expand its query rect.
-- **Id semantics preserved** (old carry-over #5): an untouched stroke keeps its `id`, and therefore
-  its dab scatter pattern; split pieces mint fresh ones and re-roll.
+One sentence: **the eraser gesture is retained whole as an `.erase` punch, a stroke it covers end to
+end is deleted outright, and nothing is ever cut partway.**
 
-## Next: Phase 4 (Mode 1), or finish Phase 3
+That is not what plan §1 originally proposed, and the difference is the most valuable thing in this
+file. Two sessions of measurement produced it.
 
-**Phase 3 remainder** is small, and it is *gesture* work rather than geometry: cut on touch-**down**,
-re-query per crossing so one drag across three lines cuts three spans, one undo entry for the whole
-drag. Today `.cutToIntersection` resolves once on lift against the gesture's first sample. All the
-geometry it needs exists and is tested.
+**Session 4** built `RasterVectorParityLogicTests` — plan §8's acceptance test — which renders a
+scene twice, once by stamping into a `RasterLayerTexture` and erasing it and once as a `VectorCanvas`
+display list, and compares premultiplied RGBA bytes. It established that **a retained `.erase`
+element is byte-identical to raster erasing**: `maxChannelDelta == 0` across all 36 matrix cases. The
+feared 1–2 LSB colour-space drift between `RasterLayerTexture`'s 8-bit deviceRGB context and
+`renderLocalContent`'s renderer does not exist. Session 4 then wrote the hybrid commit on that
+foundation.
 
-**Phase 4** is the real one: live preview (copy the cel's cached render into a scratch
-`RasterLayerTexture` and punch `.destinationOut` into it), the §1 hybrid commit, residue `.erase`
-elements, GC, and — the acceptance test that actually matters — §8's raster-vs-vector pixel
-comparison, which still does not exist.
+**Session 5** wrote `VectorEraserHybridLogicTests`, which drives the real `VectorCanvas.erase` rather
+than hand-built display lists, and found the commit did not do what it claimed. Four defects, all
+fixed in `fd7c258`:
+
+1. **Trimming the punch to the spans with a backdrop is not pixel-exact.** `residueSpans` is now
+   `hasResidue` — a bit, not a set of spans — and the punch carries the gesture whole.
+2. **The alpha gate was dead.** It judged `opacityPressure` at pressure 0, which no shipped brush
+   survives. It now takes the gesture's own minimum pressure.
+3. **`cleanCutRanges` returned per-segment fragments**, so the inset collapsed every one and the
+   geometric path silently never fired.
+4. **The partial split cannot be made pixel-exact at all**, and is gone.
+
+### The one thing to understand before touching any of this
+
+`BrushStamper.stampStroke` anchors **two** things at `samples[0]`: the **dab lattice** (dabs every
+`stampSpacing`, carrying the remainder across segments) and the **pressure ramp** (`lastPressure`
+starts there). So *any* sub-run of a stroke, re-stamped on its own, puts its ink somewhere new along
+its entire length — not merely near where it was cut.
+
+Defects 1 and 4 are both that fact, arriving from different directions:
+
+- Retaining only part of the eraser's gesture re-phases the punch's own dabs, including the ones over
+  the ink that justified retaining it. Measured: 4/255 over 22 px for a hard round eraser crossing
+  diagonally; 27/255 over 81 px for the same gesture at opacity 0.4.
+- Cutting a stroke re-phases the surviving piece's dabs, most visibly at its **far tip** — the end
+  furthest from the eraser, and therefore the one the punch cannot cover. Measured on a 24pt line
+  with a 48pt nib: divergence across x ∈ [41, 115] where the punch covers only x ∈ [40, 88], leaving
+  118 stray pixels at up to 183/255.
+
+The intuition that says "the cut is hidden under the eraser, so it cannot be seen" is right about the
+ink *at* the cut and wrong about the piece as a whole. Widening the eraser does not help: it moves
+the artefact further away rather than covering it, because the artefact's size is set by the
+*stroke's* spacing and width, not the eraser's.
+
+**Whole-stroke deletion is exempt**, which is why it survived. Deleting produces no new geometry, so
+nothing is re-stamped and nothing can land anywhere new. It is exact, and it is what keeps §1's
+"scribble a stroke out and it costs nothing" true.
+
+### Notes worth not re-deriving
+
+- **`isEntirelyCovered` checks the end caps separately.** A stroke's round cap sticks out half a
+  width past its last parameter, so every cross-section can be covered while the caps are not.
+  `StrokeGeometry.capsules(_:contain:radius:)` is the disc-in-capsule test; it is sufficient rather
+  than necessary (a disc straddling two capsules reads as uncovered), which errs toward keeping a
+  stroke — the recoverable direction.
+- **The alpha gate takes the gesture's minimum pressure.** `opacityFraction` bottoms out at
+  `1 - opacityPressure`; `hardRound` ships with `0.1` and `pen` with `0.05`, so judging at pressure 0
+  rejected every built-in brush. The call site has the pressures, and dab pressure interpolates
+  linearly, so the minimum over samples is the minimum over dabs.
+- **`coveredSpans` closes a run at every segment boundary** and leaves rejoining to a downstream
+  `mergedCuts`. Mode 2 does that in `effectiveCuts`. Anything consuming spans *before* that merge
+  must merge first — `cleanCutRanges` now does it itself.
+- **Re-erasing the same place stacks punches**, deliberately: an eraser *is* a stroke, so N gestures
+  cost N elements exactly as N paint strokes do. `hasContentBeneath` asks about stroke geometry, not
+  about ink still visible after earlier punches. §1 asked that an erase which *fully resolves* cost
+  nothing, which it does.
+- **`conservativeCuts` is kept, tested, and unwired.** It correctly solves the round-cap-versus-band-
+  edge lens (≈ `0.43·w²`), which is a real second problem — just not the one blocking splitting.
+
+---
+
+## Next session: start here
+
+### 1. Nothing has ever been run in the simulator UI
+
+All 169 tests are headless. The segmented mode picker has never been tapped, Mode 1's live preview
+has never been seen, and Mode 3's cut-on-touch-down has never been felt. This is now the largest
+untested surface by a wide margin, and the only remaining item that could invalidate a whole phase.
+
+### 2. Give the dab lattice a reproducible anchor — the unlock
+
+This is what buys back the geometric split, and with it plan §1's "grab one visual half with the Move
+tool". Two candidate shapes:
+
+- **Arclength-anchored dabs.** Place dabs at absolute multiples of `stampSpacing` measured from the
+  stroke's origin, and give a piece its start arclength. Changes `BrushStamper` for every stroke.
+- **A parametric visible range on `VectorStroke`.** A piece keeps the original samples and renders
+  only the dabs inside its range, reusing the original lattice outright. Cleaner in principle;
+  ripples into bounds, hit-testing, the spatial index, persistence and the Move tool.
+
+Either one makes `testAPartialSplitDivergesOutsideThePunchWhichIsWhyItIsNotWired` fail, which is the
+signal to re-wire `conservativeCuts` into `VectorCanvas.eraseHybrid`.
+
+### 3. Then
+
+- **Perf is unmeasured for Mode 1.** `hasResidue` probes the eraser's parametric domain and each
+  probe does a spatial-index query — a per-erase cost nobody has timed. Plan §6/§8 want
+  `PerfBaselineTests.testVectorLayerRenderCostAndMemory` extended with an erase-heavy scenario.
+- **GPU rendering** — plan §11. Unblocked: §8's parity test exists and is its regression net.
 
 ### Carry-overs still open
 
-1. **The clean-cut alpha gate needs `scatter == 0` and `rotationJitter == 0`** on top of hardness /
-   grain / opacity×flow. The capsule chain models the un-scattered sweep, while scatter displaces
-   each dab up to `radius * 2 * scatter` off the centreline, so a clean-cut verdict is unsound in
-   both directions. Plan §1's gate must add these.
-2. **Square/custom erasers will essentially never clean-cut.** `stampApproximateSquare` reaches
-   `diameter/2 · √2` at the corners; the chain models `diameter/2`. Errs toward retaining a punch,
-   which is the safe direction. Accept it.
-3. **Two sub-spacing biases at stroke ends** (`advance` carries a remainder so the last dab falls
-   short; the chain tapers where `stampStroke` ramps pressure). This is why plan §1's coverage margin
-   epsilon is not optional.
-4. **Two ordering decisions still unowned:** (a) `addFill` inserts *beneath* existing strokes — still
-   right now that z-order is real? (b) the `strokes`/`fills`/`images` setters collapse each kind into
-   one contiguous run, so the first phase that deliberately interleaves must assign through
-   `elements`. Documented at the accessors; Phase 2 did not need to interleave.
-5. **`graphify-out/GRAPH_REPORT.md` is stale** — deliberately not regenerated while phases are in
-   flight. Run `graphify update .` and commit the refreshed report once Phase 4 lands.
-6. **Nothing has been exercised in the simulator UI.** All 136 tests are headless logic tests. In
-   particular the segmented picker has never been tapped.
-7. **GPU rendering** — see the new plan §11 for the full argument. Short version: the per-frame layer
-   composite is already GPU (Core Animation over `UIImageView`s); the cost is re-rasterizing one
-   layer on mutation, at ~3.2 ms/stroke, which does not scale past a few hundred strokes. A GPU
-   rasterizer is needed eventually, must cover **both** tiers (or §8's pixel test degenerates into
-   shader-vs-Core-Graphics), and should land *after* Phase 4 so that test can be its regression net.
+1. **Two sub-spacing biases at stroke ends** (`advance` carries a remainder so the last dab falls
+   short; the chain tapers where `stampStroke` ramps pressure). Mattered for the clean-cut margin;
+   less critical now that the punch guarantees exactness regardless. Same root cause as §2 above.
+2. **Two ordering decisions still unowned:** (a) `addFill` inserts *beneath* existing strokes — still
+   right? (b) the `strokes`/`fills`/`images` setters collapse each kind into one contiguous run.
+   Phase 4 is the first phase that interleaves — an `.erase` stroke is appended after the paint
+   strokes and a later paint stroke lands above it — which is why the vector undo path moved to
+   `elements`. Any *remaining* wholesale assignment through `strokes` is a latent bug;
+   `CanvasManager+Shape.registerVectorStrokeUndo` and `CanvasManager+Fill.registerVectorFillUndo`
+   were **not audited**.
 
 ## Multi-session protocol reminder
 
-Work in a worktree off `origin/main`, never edit `main` directly:
-
-```bash
-git fetch origin && git worktree add ../PaintApp-<id> -b tmp/<id> origin/main
-```
+Work in a worktree off `origin/main`, never edit `main` directly.
