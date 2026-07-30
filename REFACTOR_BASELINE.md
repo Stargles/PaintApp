@@ -262,3 +262,112 @@ the first row would overstate it.
 +15 over Stage 4 is exactly the 15 tests this stage added. **Counts read from the `.xcresult`
 bundle, never from the text log** — parallel workers tear each other's lines and grepping undercounts
 (the caveat above reported 189 for a run that passed 192).
+
+---
+
+## Vector eraser, Phase 4d (2026-07-30) — the erase-heavy scenario
+
+`VECTOR_ERASER_PLAN.md` §6/§8 asked for an erase-heavy scenario measured and recorded here, and
+Phase 4d made it overdue by adding a second full pass over the candidate strokes
+(`VectorCanvas.splitCleanlyErasedStrokes`, which runs right after `removeFullyErasedStrokes`).
+`PerfBaselineTests.testEraseHeavyVectorLayerCostAndMemory` is that scenario.
+
+**The scene.** 200 hard-round 24pt strokes on a 2048² vector layer, in 4 columns of 50 rows 40pt
+apart; 50 vertical 32pt eraser gestures, each crossing about four rows squarely, committed through
+the real `VectorCanvas.erase(…, mode: .erase)`. Gesture 0 is a warm-up, so the measured run is 49.
+The gesture bands abut rather than overlap, so the eraser reaches most of the layer instead of
+re-erasing one place — which would have measured stacked punches and GC rather than the split.
+
+It is a genuinely erase-heavy end state: **200 strokes become 376 paint strokes, 352 of them split
+pieces, plus 50 retained punches — 426 elements.**
+
+### Where a gesture's time goes
+
+| Term | Cost |
+|---|---|
+| Segments on the layer | 11,800 |
+| Candidate strokes the index returns for one gesture | **7** |
+| One `StrokeSpatialIndex` build over the layer | **7.2 ms** |
+| `isEntirelyCovered` over all candidates (the deletion pass's geometry) | **0.3 ms** |
+| `cleanCutRanges` over all candidates (the split pass's geometry) | **1.0 ms** |
+
+**This is the measurement the handoff asked for before deciding whether to merge the two passes, and
+it says not to.** The duplicated work is at most that 1.0 ms out of a ~38 ms gesture — under 3% —
+and usually far less, because `isEntirelyCovered` short-circuits on two cheap cap tests *before* it
+reaches `cleanCutRanges`. So for a stroke being **split** rather than deleted — which is every
+stroke in this scenario — the clean-cut walk only ever ran once to begin with. The passes look
+redundant and are not. Set against that, merging them is a behaviour change and not a refactor
+(`isEntirelyCovered` demands one span covering the domain where the split path would accept two
+abutting ones), so it would be spending real risk to buy noise. **Left as two passes, deliberately.**
+
+The two terms that *do* matter are both about scale rather than duplication: one index build costs
+7.2 ms to answer a query that returns 7 strokes, and it is thrown away and rebuilt on every
+`invalidate()`; and the cost of a gesture was rising with how much erasing had already been done.
+
+### Garbage collection was the accumulating term — fixed
+
+`collectResidueGarbage` asked `anyContent(in: kept, reaching:)` once per retained punch, and that
+helper re-derived **every** element's bounding box each time it was asked — walking a stroke's
+samples, and for a fill running `NSKeyedUnarchiver` over its archived `UIBezierPath`. With `p`
+punches over `n` elements that is `O(p · n)` box derivations per erase, and an erase-heavy layer
+grows both. Deriving each box once per GC call and testing each punch against the accumulated list
+is the same verdict by the same rule, at `O(n)`.
+
+Medians over 12 runs — 5 before, 7 after. Rows marked *(clean runs)* exclude the start-up artifact
+described below; `meanOfLastTen` is quoted over **every** run because it is immune to it.
+
+| Measurement | before | after | |
+|---|---|---|---|
+| Mean of the **last** ten gestures (all runs) | 52.5 ms | **30.2 ms** | **1.74×** |
+| Per erase gesture, mean over 49 *(clean runs)* | 38.1 ms | **26.8 ms** | 1.42× |
+| Mean of the **first** ten gestures *(clean runs)* | 24.9 ms | 23.3 ms | 1.07× |
+| Last ten ÷ first ten — the trend itself *(clean runs)* | 2.13× | **1.27×** | |
+| 49 gestures, total *(clean runs)* | 1872.6 ms | **1311.6 ms** | 1.43× |
+| Peak footprint delta over the 49 | 0.2 MB | 0.2 MB | — |
+| Render of the erased 426-element layer | 146.2 ms | 149.3 ms | — |
+
+The first-ten figure barely moves while the last-ten figure nearly halves. That is the signature of
+removing a term that scales with what the layer has accumulated rather than a constant one, and it is
+the reason to read `meanOfLastTen` as the headline: it is the steady state a real erase-heavy session
+converges to. The residual 1.27× trend is the element count itself growing 200 → 426 as the splits
+land — real work, not a defect.
+
+Separation is total. Across all 12 runs, `meanOfLastTen` is 51.9–56.7 ms before and 29.4–35.1 ms
+after, with no overlap, so the change is far outside the noise floor.
+
+**One artifact to know about when re-measuring.** 5 of the 12 runs started slow — the first ten
+gestures at 56–154 ms instead of 23–26 ms — and reported a 4.0–5.4 MB peak delta instead of 0.2 MB.
+It happens **on both sides** (1 of 5 before runs, 4 of 7 after), and those runs also *begin* at a
+higher footprint (27.8–29.9 MB vs 26.6–26.9 MB), i.e. the test process inherited a different memory
+state. It is host/simulator variance during warm-up, not the code under test, and it decays: even the
+worst-affected run's last ten gestures land on the same steady-state number as the clean ones. Judge
+by `meanOfLastTen`, and treat a run whose `footprintBefore` is out of line as warm-up-contaminated in
+its `meanOfFirstTen` and `perGesture` figures.
+
+### Reading the numbers out of a run
+
+`print` from a test goes to the **simulator's** console, not to `xcodebuild`'s stdout, and under
+parallel testing the run happens on a throwaway clone device that is deleted when the run ends — so
+every `PERF BASELINE` line above was, until now, unreadable after the fact. `report(_:_:)` now also
+emits each line as an `XCTAttachment` with `.keepAlways` (the default lifetime discards attachments
+from *passing* tests, which is exactly the case a perf baseline is measured in):
+
+```bash
+xcrun xcresulttool export attachments --path /tmp/dd/Logs/Test/<newest>.xcresult --output-path /tmp/att
+```
+
+Then `cat /tmp/att/*.txt`. This replaces "attach Xcode to the run while it happens", which is why
+earlier stages' tables have gaps.
+
+### Still open
+
+1. **The spatial index is rebuilt from scratch on every `invalidate()`** — 7.2 ms over 11,800
+   segments to answer a query that returns 7 strokes, two to three times per gesture (the deletion
+   pass, then the split pass if the deletion changed anything, then `hasResidue`'s backdrop probe).
+   It is the largest single term left, and it is fixable without touching any eraser decision: the
+   passes append and remove at known indices, so the index could be patched rather than rebuilt.
+   That is a bigger change than this session's, and it belongs with Phase 5's dirty-rect cache,
+   which wants the same "what changed where" information.
+2. **`maxPaintReach()` is O(elements) and is called three times per gesture** — small next to the
+   above, and it becomes free the moment stroke bounds are cached (plan §3 asks for that and it does
+   not exist yet).

@@ -156,8 +156,30 @@ final class PerfBaselineTests: XCTestCase {
         }
     }
 
+    /// Emits one measurement line, **twice**: to the console, and as an `XCTAttachment` on the running
+    /// test.
+    ///
+    /// The attachment is the one that actually works. `print` from a test goes to the *simulator's*
+    /// console, not to `xcodebuild`'s stdout, and under parallel testing the run happens on a throwaway
+    /// clone device that is deleted when the run ends — so by the time anyone looks, the log and the
+    /// device that held it are both gone. Every number this file produces was previously readable only
+    /// by attaching Xcode to the run while it happened, which is why the recorded baselines have gaps.
+    ///
+    /// An attachment lands in the `.xcresult` bundle, which survives the run, and comes back out with:
+    ///
+    /// ```
+    /// xcrun xcresulttool export attachments --path <bundle>.xcresult --output-path <dir>
+    /// ```
+    ///
+    /// `.keepAlways` matters — the default lifetime deletes attachments from passing tests, which is
+    /// exactly the case a perf baseline is measured in.
     private func report(_ label: String, _ pairs: [(String, String)]) {
-        print("PERF BASELINE | \(label) | " + pairs.map { "\($0.0)=\($0.1)" }.joined(separator: "  "))
+        let line = "PERF BASELINE | \(label) | " + pairs.map { "\($0.0)=\($0.1)" }.joined(separator: "  ")
+        print(line)
+        let attachment = XCTAttachment(string: line)
+        attachment.name = "PERF BASELINE — \(label)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func megabytes(_ bytes: UInt64) -> String {
@@ -690,6 +712,206 @@ final class PerfBaselineTests: XCTestCase {
                           "Rendering 20 vector strokes taking over 10s is a catastrophic regression, not slowness")
         XCTAssertLessThan(cached.seconds, measured.seconds,
                           "The second render must come from the version cache, not re-stamp every stroke")
+    }
+
+    // MARK: - Vector eraser (plan §6/§8)
+
+    /// The erase-heavy half of the measurement above: **200 strokes on a layer, 50 erase gestures**,
+    /// committed through the real `VectorCanvas.erase(…, mode: .erase)`.
+    ///
+    /// A sibling of `testVectorLayerRenderCostAndMemory` rather than more code inside it, deliberately.
+    /// That test's "20 strokes, first render" figure is a cross-stage series — Stage 0 through 5.3 are
+    /// all recorded against it in `REFACTOR_BASELINE.md` — and folding a second, much heavier scene into
+    /// the same method would change what that number means. This one measures a different thing (commit
+    /// cost, not render cost) and gets its own row.
+    ///
+    /// What the numbers are *for*: Phase 4d added `splitCleanlyErasedStrokes`, which runs immediately
+    /// after `removeFullyErasedStrokes` over the same candidate strokes. Whether those two passes should
+    /// become one is a live question, and it was never going to be answerable by reading them. So the
+    /// second `report` line below breaks the gesture down into the pieces a merge would and would not
+    /// remove — the spatial-index rebuild each `invalidate()` forces, versus the clean-cut probe walk —
+    /// because those two have very different sizes and the obvious guess about which dominates is wrong.
+    func testEraseHeavyVectorLayerCostAndMemory() {
+        let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.eraseScenePaintStrokes())
+        let elementsBefore = canvas.elements.count
+
+        // Warm-up: the first erase on a fresh canvas builds the spatial index from cold and faults in
+        // the geometry, which would otherwise be charged entirely to gesture 0.
+        _ = autoreleasepool {
+            canvas.erase(alongPath: Self.eraseSceneGesture(0), brush: Self.eraseSceneEraserBrush,
+                         size: Self.eraseSceneEraserSize, mode: .erase)
+        }
+
+        let baseline = residentBytes()
+        var committed = 0
+        var perGesture: [Double] = []
+        let measured = measuringPeakMemory {
+            for g in 1..<Self.eraseSceneGestureCount {
+                autoreleasepool {
+                    let start = CFAbsoluteTimeGetCurrent()
+                    let changed = canvas.erase(alongPath: Self.eraseSceneGesture(g),
+                                               brush: Self.eraseSceneEraserBrush,
+                                               size: Self.eraseSceneEraserSize, mode: .erase)
+                    perGesture.append(CFAbsoluteTimeGetCurrent() - start)
+                    if changed { committed += 1 }
+                }
+            }
+        }
+        let gestures = Self.eraseSceneGestureCount - 1
+
+        // The *trend*, which is what separates a fixed per-gesture cost from one that scales with what
+        // the layer has accumulated. Every pass in `eraseHybrid` except `collectResidueGarbage` is
+        // bounded by the spatial index and so should not care how many gestures came before; GC is not
+        // — it rescans every retained punch against every element beneath it, on every erase. If the
+        // last ten gestures cost markedly more than the first ten, that is where it is going.
+        let firstTen = perGesture.prefix(10).reduce(0, +) / 10
+        let lastTen = perGesture.suffix(10).reduce(0, +) / 10
+
+        let strokes = canvas.strokes
+        let paintPieces = strokes.filter { $0.composite == .paint }.count
+        let punches = strokes.filter { $0.composite == .erase }.count
+        let pieces = strokes.filter { $0.composite == .paint && $0.lattice != nil }.count
+
+        // The layer the user is now looking at: 200 strokes cut into pieces, plus the punches. Rendering
+        // it is the cost every later invalidation pays, so it is the number that says whether the split
+        // made the layer more expensive to draw.
+        let renderAfter = measuringPeakMemory { autoreleasepool { _ = canvas.render() } }
+
+        report("erase-heavy vector layer", [
+            ("paintStrokesBefore", "\(elementsBefore)"),
+            ("gestures", "\(gestures)"),
+            ("gesturesThatChangedTheList", "\(committed)"),
+            ("totalEraseTime", milliseconds(measured.seconds)),
+            ("perGesture", milliseconds(measured.seconds / Double(max(gestures, 1)))),
+            ("meanOfFirstTen", milliseconds(firstTen)),
+            ("meanOfLastTen", milliseconds(lastTen)),
+            ("lastTenOverFirstTen", String(format: "%.2fx", lastTen / max(firstTen, 0.000_001))),
+            ("elementsAfter", "\(canvas.elements.count)"),
+            ("paintStrokesAfter", "\(paintPieces)"),
+            ("ofWhichAreSplitPieces", "\(pieces)"),
+            ("retainedPunches", "\(punches)"),
+            ("renderAfterErasing", milliseconds(renderAfter.seconds)),
+            ("footprintBefore", megabytes(baseline)),
+            ("peakFootprint", megabytes(measured.peakBytes)),
+            ("peakDelta", megabytes(measured.peakBytes > baseline ? measured.peakBytes - baseline : 0)),
+        ])
+
+        reportEraseGestureBreakdown()
+
+        XCTAssertGreaterThan(pieces, 0,
+                             "This scenario is only measuring what it claims to if the split actually fires — a 32pt eraser crossing a 24pt line squarely is the case `splitCleanlyErasedStrokes` exists for")
+        XCTAssertLessThan(measured.seconds, 120.0,
+                          "50 erase gestures over a 200-stroke layer taking minutes means an accidental quadratic, not slowness")
+        XCTAssertLessThan(renderAfter.seconds, 30.0,
+                          "Rendering the erased layer taking over 30s is a catastrophic regression, not slowness")
+    }
+
+    /// Where one gesture's time goes, in the two terms that decide whether the deletion and split
+    /// passes should be merged into one.
+    ///
+    /// `eraseHybrid` calls `invalidate()` between the two passes, which bumps `version` and so throws
+    /// away `VectorCanvas`'s cached `StrokeSpatialIndex`; the split pass then rebuilds it over every
+    /// segment on the layer, and `hasResidue`'s backdrop probe rebuilds it a third time after the
+    /// split's own `invalidate()`. That rebuild is the cost a merge removes. The clean-cut probe walk
+    /// is the cost it does *not* remove, because `isEntirelyCovered` short-circuits on two cheap cap
+    /// tests before it ever reaches `cleanCutRanges` — so for a stroke being **split** rather than
+    /// deleted, the walk only ever ran once to begin with.
+    private func reportEraseGestureBreakdown() {
+        let strokes = Self.eraseScenePaintStrokes()
+        let eraserSamples = Self.eraseSceneGesture(7)
+        guard let sweep = VectorEraser.Sweep(samples: eraserSamples, brush: Self.eraseSceneEraserBrush,
+                                             size: Self.eraseSceneEraserSize, mode: .erase) else {
+            return XCTFail("The scenario's eraser gesture must have a footprint")
+        }
+        let erasers = VectorEraser.cleanCutCapsules(sweep.capsules, brush: Self.eraseSceneEraserBrush,
+                                                    size: Self.eraseSceneEraserSize)
+
+        // One index build over the whole layer — the unit `invalidate()` makes the eraser pay again.
+        let indexBuild = measuringPeakMemory {
+            let index = StrokeSpatialIndex()
+            for (elementIndex, stroke) in strokes.enumerated() {
+                index.insert(samples: stroke.samples, elementIndex: elementIndex)
+            }
+            _ = index.segments(near: sweep.bounds)
+        }.seconds
+
+        let index = StrokeSpatialIndex()
+        for (elementIndex, stroke) in strokes.enumerated() {
+            index.insert(samples: stroke.samples, elementIndex: elementIndex)
+        }
+        let reach = strokes.map {
+            StrokeGeometry.stampRadius(forPressure: 1, brush: $0.brush, size: $0.size)
+        }.max() ?? 0
+        let candidates = Set(index.segments(near: sweep.bounds.insetBy(dx: -reach, dy: -reach))
+            .map(\.elementIndex)).sorted()
+
+        // What one pass over the candidates costs, split into the two things the passes actually do.
+        let coverageTest = measuringPeakMemory {
+            for i in candidates {
+                _ = VectorEraser.isEntirelyCovered(strokes[i].samples, brush: strokes[i].brush,
+                                                   size: strokes[i].size, by: erasers, sweep: sweep)
+            }
+        }.seconds
+        let cleanWalk = measuringPeakMemory {
+            for i in candidates {
+                _ = VectorEraser.cleanCutRanges(in: strokes[i].samples, brush: strokes[i].brush,
+                                                size: strokes[i].size, by: erasers, sweep: sweep)
+            }
+        }.seconds
+
+        report("erase gesture breakdown", [
+            ("layerSegments", "\(strokes.reduce(0) { $0 + max($1.samples.count - 1, 0) })"),
+            ("candidateStrokes", "\(candidates.count)"),
+            ("oneSpatialIndexBuild", milliseconds(indexBuild)),
+            ("isEntirelyCoveredOverCandidates", milliseconds(coverageTest)),
+            ("cleanCutRangesOverCandidates", milliseconds(cleanWalk)),
+        ])
+    }
+
+    // MARK: - The erase-heavy scene
+
+    private static let eraseSceneStrokeCount = 200
+    private static let eraseSceneGestureCount = 50
+    private static let eraseSceneEraserSize: CGFloat = 32
+
+    /// Hard, opaque, unjittered — the gate `VectorEraser.supportsCleanCut` requires before any
+    /// geometry is removed at all. A soft or partial-opacity eraser would exercise only the punch and
+    /// measure none of what this test is about.
+    private static let eraseSceneEraserBrush = Brush(name: "PerfEraser", shape: .hardRound, size: 32,
+                                                     hardness: 1)
+
+    /// 200 horizontal 24pt lines, in 4 columns of 50 rows 40pt apart. Wider than the rows are tall,
+    /// so a vertical gesture crosses several of them squarely — the full-width crossing that
+    /// `splitCleanlyErasedStrokes` cuts, rather than the shave that only the punch can express.
+    private static func eraseScenePaintStrokes() -> [VectorStroke] {
+        let brush = Brush(name: "PerfPaint", shape: .hardRound, size: 24, hardness: 1)
+        var strokes: [VectorStroke] = []
+        strokes.reserveCapacity(eraseSceneStrokeCount)
+        for i in 0..<eraseSceneStrokeCount {
+            let x0 = 100 + CGFloat(i / 50) * 480
+            let y = 60 + CGFloat(i % 50) * 40
+            var samples: [VectorSample] = []
+            samples.reserveCapacity(60)
+            for step in 0..<60 {
+                samples.append(VectorSample(x: x0 + CGFloat(step) / 59 * 400, y: y, pressure: 1))
+            }
+            strokes.append(VectorStroke(brush: brush,
+                                        color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                        size: 24, opacity: 1, samples: samples))
+        }
+        return strokes
+    }
+
+    /// Gesture `g`: a 150pt vertical drag down the middle of one column, crossing about four rows.
+    /// Consecutive bands in a column abut rather than overlap, so the 50 gestures between them reach
+    /// most of the layer instead of re-erasing one place — which would measure garbage collection and
+    /// stacked punches rather than the split.
+    private static func eraseSceneGesture(_ g: Int) -> [VectorSample] {
+        let x = 100 + CGFloat(g % 4) * 480 + 200
+        let y0 = 40 + CGFloat(g / 4) * 150
+        return (0..<9).map { step in
+            VectorSample(x: x, y: y0 + CGFloat(step) / 8 * 150, pressure: 1)
+        }
     }
 
     /// The debounce coalesces per *cel*, not down to a single cel.

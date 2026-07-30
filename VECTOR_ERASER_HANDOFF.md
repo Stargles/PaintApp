@@ -1,6 +1,6 @@
 # Vector Eraser — Resume Here
 
-Working state as of **Session 7 (2026-07-30)**. Read [VECTOR_ERASER_PLAN.md](VECTOR_ERASER_PLAN.md)
+Working state as of **Session 8 (2026-07-30)**. Read [VECTOR_ERASER_PLAN.md](VECTOR_ERASER_PLAN.md)
 first — it is the spec, and §1/§4/§7/§8 match what actually shipped. This file is only the bookmark.
 
 ## Environment correction (important, saves 10 minutes)
@@ -22,8 +22,16 @@ xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destinat
 UI tests (`VectorEraserUITests`, 8 tests; `VectorShapeAndRecoveryUITests`) — same command with those
 suites added. They are slow: **~35–45 s each**, and xcodebuild does not flush per-test results until
 the whole run finishes, so a log that still looks empty ten minutes in is normal rather than a hang.
-Budget several minutes and run them in the background. The full green run at Session 7's end was
-**195 tests, 0 failures**.
+Budget several minutes and run them in the background.
+
+**The whole suite** (no `-only-testing:`) takes ~12.6 min and at Session 8's end is **336 passed, 1
+skipped** (the same long-standing skip), plus **one flake**:
+`VectorShapeAndRecoveryUITests.testPaletteBuilderAddAndSelectSwatch` failed once under parallel load
+("Tapping the saved swatch should reload it into the picker, got Optional(\"000000\")") and passes on
+its own. It is a colour-picker timing assertion with no connection to the eraser — if you see it,
+re-run it in isolation before believing it. **Read counts from the `.xcresult`, never from the text
+log** (`xcresulttool get test-results summary --path <newest>.xcresult`); parallel workers tear each
+other's stdout lines and grepping undercounts.
 
 **xcodebuild does not print assertion messages to stdout.** A failure line names the test and nothing
 else. To read the actual message:
@@ -32,8 +40,20 @@ else. To read the actual message:
 xcrun xcresulttool get test-results test-details --test-id "SuiteName/testName()" --path /tmp/dd-veraser/Logs/Test/<newest>.xcresult
 ```
 
-`print()` from a test does not reach stdout either — it goes to the simulator's console. To get a
-value out of a running test, put it in an `XCTFail` message.
+**`print()` from a test does not reach stdout either** — it goes to the *simulator's* console, and
+under parallel testing that is a throwaway clone device (`Clone 1 of iPad Pro 11-inch (M5)`) which is
+deleted when the run ends, so the log and the machine that held it are both gone by the time you look.
+Earlier sessions worked around this with `XCTFail`. **Session 8 replaced that with attachments** —
+`PerfBaselineTests.report(_:_:)` emits every line as an `XCTAttachment` with `.keepAlways` (the
+default lifetime discards attachments from *passing* tests, which is the case that matters), and they
+survive in the `.xcresult`:
+
+```bash
+xcrun xcresulttool export attachments --path /tmp/dd-veraser/Logs/Test/<newest>.xcresult --output-path /tmp/att && cat /tmp/att/*.txt
+```
+
+That is the general recipe for getting a value out of a passing test — three lines in a helper, and it
+beats failing a test on purpose.
 
 Expect one or two `FBSOpenApplicationServiceErrorDomain` / `(ipc/mig) server died` launch failures
 per run. xcodebuild retries and the run completes; they are not a broken simulator and do not need a
@@ -190,34 +210,98 @@ Two things deliberately left alone:
 
 ---
 
+## What Session 8 did
+
+**The last handoff's item 1 is closed: the erase-heavy scenario is measured and recorded, and the
+answer to "merge the two passes?" is _no_, on the numbers.** Full detail in
+[REFACTOR_BASELINE.md](REFACTOR_BASELINE.md) under *Vector eraser, Phase 4d*; the short version:
+
+`PerfBaselineTests.testEraseHeavyVectorLayerCostAndMemory` builds plan §6/§8's scene — 200 strokes on
+a 2048² layer, 50 eraser gestures through the real `VectorCanvas.erase(…, mode: .erase)` — and ends at
+376 paint strokes (352 of them split pieces) plus 50 punches.
+
+**Why not to merge the passes.** One gesture's clean-cut walk over all candidates costs **1.0 ms** out
+of a ~38 ms gesture, and `isEntirelyCovered` **short-circuits on two cheap cap tests before it ever
+calls `cleanCutRanges`** — so for a stroke being *split* rather than deleted, which is every stroke in
+this scenario, the walk was only running once to begin with. The two passes look redundant and are
+not. Set against a behaviour change (`isEntirelyCovered` demands one span covering the domain where
+the split path would accept two abutting ones), merging spends real risk to buy under 3%. Left alone,
+deliberately — and now for a measured reason rather than a cautious one.
+
+**What the measurement found instead.** The cost of a gesture was *rising with how much erasing had
+already been done* — the last ten gestures cost 2.11× the first ten. That was `collectResidueGarbage`:
+it asked `anyContent(in: kept, reaching:)` once per retained punch, and that helper re-derived **every**
+element's bounding box each time (walking a stroke's samples; for a fill, running `NSKeyedUnarchiver`
+over its archived `UIBezierPath`) — `O(punches × elements)` box derivations per erase, on a layer where
+both grow with use. Now the boxes are derived once per GC call and each punch is tested against the
+accumulated list: same verdict, same rule, `O(elements)`.
+
+| | before | after |
+|---|---|---|
+| Mean of the last ten gestures | 52.5 ms | **30.2 ms** (1.74×) |
+| Trend (last ten ÷ first ten) | 2.11× | **1.27×** |
+
+No overlap across 12 runs. The residual 1.27× is the element count itself growing 200 → 426 as the
+splits land, which is real work.
+
+Also here: `report(_:_:)` now attaches its lines to the `.xcresult` (see the environment section — this
+is how you read a passing test's numbers now), and `VectorEraserMode.erase`'s doc comment in
+`Tool.swift`, which still said Mode 1 "never cuts a stroke partway", is corrected to Session 7's truth.
+
+`BRUSH_ENGINE_EXTENSIBILITY.md` is new and unrelated to the eraser: an assessment of whether the brush
+engine could take `.ABR` / Procreate imports, written because that overhaul is on the horizon. Its one
+load-bearing finding is that `DabTarget` can only draw a circle, and its one warning for *this* project
+is that any future per-dab random draw must keep `DabRNG` in phase or `DabLattice` breaks.
+
+---
+
 ## Next session: start here
 
-### 1. Perf — now genuinely overdue
+### 1. Per-element Move
 
-Two costs, both unmeasured, and the split just added the second:
+What the split was the unlock for — plan §1's "grab one visual half with the Move tool". Nothing in
+`DabLattice` obstructs it: translation does not change arclength, so a translated piece keeps its
+lattice unchanged.
 
-- `hasResidue` probes the eraser's parametric domain and each probe does a spatial-index query.
-- `splitCleanlyErasedStrokes` runs a full `cleanCutRanges` probe walk over **every** candidate stroke,
-  and `removeFullyErasedStrokes` has just run one over the same strokes. Deletion is arithmetically a
-  special case of the split — a whole-domain cut with both caps covered is exactly what
-  `conservativeCuts` produces when it declines to inset — so the two passes could be one loop that
-  computes the clean ranges once. They were kept separate this session because merging them is a
-  behaviour change rather than a refactor: `isEntirelyCovered` requires *one* span covering the
-  domain, where the split path would accept two abutting ones.
+**Not started, and it is a bigger job than it sounds**, so scope it before writing code:
 
-Plan §6/§8 want `PerfBaselineTests.testVectorLayerRenderCostAndMemory` extended with an erase-heavy
-scenario (200 strokes, 50 erase gestures) and the numbers recorded in `REFACTOR_BASELINE.md`. Measure
-first, then decide whether merging the passes is worth its risk.
+- There is **no per-element move today at all.** Moving is either a layer-level `LayerTransform`, or
+  `FloatingPiece` in `SelectionModels.swift` — and `FloatingPiece` is *pixel*-based (`pieceImage:
+  UIImage`, lifted and re-baked). Neither is a vector-element move, so this is a new subsystem rather
+  than a new case in an existing one.
+- The `Tool` enum has no `move` case (`pen`/`pencil`/`eraser`/`fill`), so there is UI plumbing as well
+  as engine work.
+- The engine half is small and testable headlessly, and is the right first commit: hit-test a point to
+  an element, and translate that element's samples. Both belong next to `StrokeGeometry`/`VectorEraser`
+  — pure `CGPoint`/`CGFloat`, compiled into the test target, no lock and no render cache — matching how
+  every eraser decision is built and tested.
+- Watch the display-list invariant: `testAPunchLeavesEachKindContiguousSoTheUndoAccessorsStillRoundTrip`
+  pins that each kind occupies one contiguous run. Moving an element must not reorder the list, so a
+  move is a mutation in place, never a remove-and-append.
 
-### 2. Then
+### 2. The spatial index is rebuilt from scratch on every `invalidate()`
 
-- **Per-element Move**, which is what the split was the unlock for — plan §1's "grab one visual half
-  with the Move tool". Nothing in `DabLattice` obstructs it: translation does not change arclength, so
-  a translated piece keeps its lattice unchanged. There is no per-element move today (moves are a
-  layer-level `LayerTransform`), so this is a new feature rather than a fix.
-- **GPU rendering** — plan §11. Unblocked: §8's parity test exists and is its regression net. One
-  constraint it adds: the visible range is a *filter over a walk*, so a GPU rasterizer has to
-  reproduce it as one — bin the dabs and drop those outside the range, never re-derive positions.
+The largest single term left in an erase, and now measured: **7.2 ms to walk 11,800 segments and
+answer a query that returns 7 strokes**, paid two to three times per gesture (the deletion pass, then
+the split pass if the deletion changed anything, then `hasResidue`'s backdrop probe). Both passes
+append and remove at known indices, so the index could be patched rather than rebuilt.
+
+This is a bigger change than Session 8's and it wants company: Phase 5's dirty-rect render cache needs
+exactly the same "what changed where" information. Do them together or the second one re-derives the
+first.
+
+Smaller and adjacent: `maxPaintReach()` is O(elements) and runs three times per gesture. It becomes
+free the moment stroke bounds are cached, which plan §3 asks for and which still does not exist.
+
+### 3. GPU rendering
+
+Plan §11. Unblocked: §8's parity test exists and is its regression net. One constraint it adds: the
+visible range is a *filter over a walk*, so a GPU rasterizer has to reproduce it as one — bin the dabs
+and drop those outside the range, never re-derive positions.
+
+Note the interaction with `BRUSH_ENGINE_EXTENSIBILITY.md`: the parity test is the safety net for the
+GPU port **and** for the brush-format overhaul, and it only holds while both tiers share one
+`BrushStamper`. Doing both at once leaves neither with a net.
 
 ### Carry-overs still open
 

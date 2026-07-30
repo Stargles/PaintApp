@@ -19,12 +19,14 @@ enum VectorEraserMode: String, Codable, CaseIterable, Identifiable {
     /// Mode 1 — *erase touched parts*. Indistinguishable from raster erasing: partial-width shaves,
     /// soft edges and `< 1` opacity all reproduce.
     ///
-    /// It gets there by retaining the eraser's gesture whole as an `.erase` punch rather than by
-    /// cutting geometry: a stroke it covers end to end is deleted outright, and a stroke it only
-    /// crosses is left intact under the punch. It never cuts a stroke partway — a cut piece is
-    /// re-stamped as a new stroke, which re-anchors `BrushStamper`'s dab lattice and lands ink
-    /// outside anything the punch covers. Plan §1 has the measurements; `RasterVectorParityLogicTests`
-    /// is the standing proof that the punch is byte-identical to raster erasing.
+    /// It gets there by retaining the eraser's gesture whole as an `.erase` punch, and only then
+    /// removing geometry the punch was going to hide anyway: a stroke it covers end to end is deleted
+    /// outright, and a stroke it covers full-width over a stretch is cut there into pieces that keep
+    /// rendering on the original's dab lattice (`DabLattice`). Cutting was unsafe until that type
+    /// existed — a piece re-stamped as a stroke of its own re-anchors `BrushStamper`'s dab lattice and
+    /// lands ink outside anything the punch covers. Plan §1 has the measurements;
+    /// `RasterVectorParityLogicTests` is the standing proof that the punch is byte-identical to raster
+    /// erasing.
     case erase
 
     /// Mode 2 — deletes the stroke geometry the eraser's footprint covers, with the cut landing at

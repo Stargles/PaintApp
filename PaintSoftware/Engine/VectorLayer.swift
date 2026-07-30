@@ -995,15 +995,36 @@ final class VectorCanvas {
     /// it, so its presence is no reason to keep one. Run on commit rather than per frame, which is why
     /// a punch whose backdrop was deleted survives until the next erase; it renders as a hole in
     /// nothing, so nothing is visibly wrong in the meantime.
+    ///
+    /// ## Why the boxes are computed up front
+    ///
+    /// This used to ask `anyContent(in: kept, reaching:)` per punch, and that helper derived every
+    /// element's bounding box from scratch each time it was asked — walking a stroke's samples, and
+    /// for a fill running `NSKeyedUnarchiver` over its archived `UIBezierPath`. With `p` punches over
+    /// `n` elements that is `O(p · n)` box derivations per erase, and since an erase-heavy layer
+    /// accumulates punches, `p` and `n` both grow with use: the cost of a gesture rose with how much
+    /// erasing had already been done. Measured over 200 strokes and 50 gestures, that trend was the
+    /// single largest term in the commit — the last ten gestures cost 2.05x the first ten while every
+    /// spatial-index-bounded pass around it stayed flat (`REFACTOR_BASELINE.md`, Phase 4d).
+    ///
+    /// Deriving each box once and testing the punch against the accumulated list is the same verdict
+    /// by the same rule — a punch is kept exactly when some element **beneath it** reaches its box —
+    /// for `O(n)` derivations instead of `O(p · n)`.
     private func collectResidueGarbage() -> Bool {
         guard _elements.contains(where: { $0.stroke?.composite == .erase }) else { return false }
         let reach = maxPaintReach()
         var kept: [VectorElement] = []
         kept.reserveCapacity(_elements.count)
+        // Boxes of the content already passed over, i.e. everything *beneath* the punch under
+        // consideration. Grows alongside `kept` and holds one entry per element that can be a
+        // backdrop, so `.erase` elements contribute nothing — a punch is not content for another punch.
+        var boxesBeneath: [CGRect] = []
+        boxesBeneath.reserveCapacity(_elements.count)
         var dropped = false
         for element in _elements {
             guard let stroke = element.stroke, stroke.composite == .erase else {
                 kept.append(element)
+                if let box = Self.contentBounds(of: element) { boxesBeneath.append(box) }
                 continue
             }
             let punchReach = StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush, size: stroke.size)
@@ -1011,7 +1032,7 @@ final class VectorCanvas {
                 dropped = true
                 continue
             }
-            if Self.anyContent(in: kept, reaching: box) {
+            if boxesBeneath.contains(where: { $0.intersects(box) }) {
                 kept.append(element)
             } else {
                 dropped = true
@@ -1021,22 +1042,19 @@ final class VectorCanvas {
         return dropped
     }
 
-    /// Whether any paint stroke, fill or image in `elements` reaches `box`. Static, so it cannot
-    /// re-enter `lock`; `box` is already padded by the caller for stroke width.
-    private static func anyContent(in elements: [VectorElement], reaching box: CGRect) -> Bool {
-        for element in elements {
-            switch element {
-            case .stroke(let stroke):
-                guard stroke.composite == .paint,
-                      let strokeBox = StrokeGeometry.bounds(of: stroke.samples) else { continue }
-                if strokeBox.intersects(box) { return true }
-            case .fill(let fill):
-                if let path = fill.cgPath, path.boundingBoxOfPath.intersects(box) { return true }
-            case .image(let image):
-                if bounds(of: image).intersects(box) { return true }
-            }
+    /// An element's local-space bounding box as a *backdrop* — what a punch above it can be keeping
+    /// alive. Nil for anything that is not content: an `.erase` element punches ink, it never is any.
+    /// Static, so it cannot re-enter `lock`.
+    private static func contentBounds(of element: VectorElement) -> CGRect? {
+        switch element {
+        case .stroke(let stroke):
+            guard stroke.composite == .paint else { return nil }
+            return StrokeGeometry.bounds(of: stroke.samples)
+        case .fill(let fill):
+            return fill.cgPath?.boundingBoxOfPath
+        case .image(let image):
+            return bounds(of: image)
         }
-        return false
     }
 
     /// A placed image's local-space bounding box, taken as the circumscribing circle of its scaled
