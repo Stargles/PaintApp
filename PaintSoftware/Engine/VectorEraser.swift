@@ -200,16 +200,46 @@ enum VectorEraser {
     //
     // - **The punch is always retained**, which makes Mode 1 pixel-exact by construction rather than by
     //   a threshold nobody can defend.
-    // - **The split still happens**, because it is what gives real separation — the plan's "grab one
-    //   visual half with the Move tool" — but it is cut **conservatively**: each clean span is pulled
-    //   *in* by the stroke's own half-width, which is exactly the condition that makes the ink it
-    //   removes provably a subset of the ink the punch removes. Split-then-punch is therefore
-    //   pixel-identical to punch-alone, and the split is free of visual consequence.
-    // - **The growth §1 worried about is answered by trimming and GC instead.** The retained element
-    //   keeps only the spans of the gesture that still have something beneath them (`residueSpans`),
-    //   and `VectorCanvas` drops it entirely when nothing does. Scribbling a stroke out completely —
-    //   the common case §1 wanted to cost nothing — costs nothing: every span is resolved, so no
-    //   element is retained at all.
+    // - **A stroke the eraser wholly covers is deleted** (`isEntirelyCovered`). No new geometry, so
+    //   nothing re-stamps and nothing can move; every pixel it contributed was under the punch.
+    // - **A stroke the eraser partly covers is not cut.** This is the reversal, and it is the second
+    //   thing measurement took away — see below.
+    //
+    // ## Why there is no partial split
+    //
+    // The obvious reading is that a cut hidden under the eraser cannot be seen, so a conservatively
+    // inset cut (`conservativeCuts`, still here, still tested) is free. That is true of the ink *at*
+    // the cut and false of the stroke as a whole, because a surviving piece is not edited — it is
+    // **re-stamped from scratch as a new stroke**, and `BrushStamper.stampStroke` anchors two things at
+    // `samples[0]`:
+    //
+    // 1. the **dab lattice** — dabs are laid every `stampSpacing` starting from the first sample, and
+    // 2. the **pressure ramp** — `lastPressure` starts there and interpolates onward.
+    //
+    // A piece that begins at the cut re-anchors both, so its dabs land somewhere new along its *entire
+    // length*, most visibly at its far tip — which is the end furthest from the eraser and therefore
+    // the one the punch cannot cover. Measured on the parity harness, a 24pt line cut by a 48pt hard
+    // round nib: split-versus-whole differs across x ∈ [41, 115] while the punch covers only x ∈
+    // [40, 88], leaving 118 stray pixels at up to 183/255 after the punch. Widening the eraser does not
+    // help; it moves the artefact further away rather than covering it, because the artefact's size is
+    // set by the *stroke's* spacing and width.
+    //
+    // So splitting and exactness are incompatible **given this stamper**, and exactness won. Making
+    // them compatible means giving the lattice and the ramp an anchor a sub-run can reproduce — dab
+    // positions keyed to arclength from the stroke's origin, or a parametric visible-range on
+    // `VectorStroke` so a piece reuses the original lattice instead of starting its own. Either is a
+    // real change to `BrushStamper` and to what a stroke stores, which is why it is not in this phase.
+    // Until then, geometric separation is Mode 2's job, where changing the pixels is the point.
+    // - **The growth §1 worried about is answered by retain-or-drop and GC instead.** An element is
+    //   kept only when some part of the gesture still has something beneath it (`hasResidue`), and
+    //   `VectorCanvas` collects it later once nothing does. Scribbling a stroke out completely — the
+    //   common case §1 wanted to cost nothing — costs nothing: the stroke is deleted outright, so
+    //   nothing is left to punch and no element is retained at all.
+    //
+    //   The decision is a *bit*, not a set of spans, and the retained punch carries the gesture whole.
+    //   Keeping only the stretches that had a backdrop moves every dab after the first retained one
+    //   onto a different lattice and is measurably not pixel-exact; `hasResidue` carries the numbers.
+    //   That is the same defect as the one that unwired the split, reached from the other side.
 
     /// Plan §1's alpha gate: whether this eraser brush is capable of a clean cut *at all*, before any
     /// geometry is considered.
@@ -229,7 +259,16 @@ enum VectorEraser {
     /// `.square`/`.custom` are excluded because `BrushStamper.stampApproximateSquare` reaches
     /// `diameter/2 · √2` at the corners while the chain models `diameter/2`. That errs toward retaining
     /// a punch, which is the safe direction, and a square eraser therefore essentially never splits.
-    static func supportsCleanCut(brush: Brush, opacity: Double) -> Bool {
+    /// `minPressure` is the **lightest pressure the gesture actually carried**, not a property of the
+    /// brush. Judging `opacityPressure` against pressure 0 instead — which is what this did first —
+    /// bottoms `opacityFraction` out at `1 - opacityPressure` and rejects every brush that reacts to
+    /// pressure at all. That is not a conservative gate, it is a dead one: `hardRound` ships with
+    /// `opacityPressure: 0.1` and `pen` with `0.05`, so no built-in brush could ever clean-cut and the
+    /// entire split path was unreachable. The gesture's pressures are known at the call site, dab
+    /// pressure interpolates linearly between samples so the minimum over the dabs is the minimum over
+    /// the samples, and a drag from a finger or a mouse reports full pressure throughout — which is
+    /// the common case the split exists for.
+    static func supportsCleanCut(brush: Brush, opacity: Double, minPressure: CGFloat) -> Bool {
         switch brush.shape {
         case .square, .custom: return false
         case .softRound, .hardRound, .pen, .pencil: break
@@ -237,10 +276,7 @@ enum VectorEraser {
         guard brush.hardness >= 0.95 else { return false }
         guard !brush.grain.isEnabled else { return false }
         guard opacity * brush.flow >= 0.999 else { return false }
-        // A pressure-driven opacity fades the stroke wherever the touch was light, and the gesture's
-        // pressures are not known here — `opacityFraction` bottoms out at `1 - opacityPressure`, so
-        // requiring that to be 1 is the same as requiring the dynamic to be off.
-        guard brush.dynamics.opacityFraction(forPressure: 0) >= 0.999 else { return false }
+        guard brush.dynamics.opacityFraction(forPressure: Double(minPressure)) >= 0.999 else { return false }
         guard brush.scatter <= 0, brush.rotationJitter <= 0 else { return false }
         return true
     }
@@ -294,21 +330,59 @@ enum VectorEraser {
     ///
     /// The walk is `cutRanges`', with a different predicate; the clip rect is grown by the stroke's
     /// widest half-width because a centreline outside the sweep's box can still have ink inside it.
+    ///
+    /// **Merged before returning**, unlike `cutRanges`. `coveredSpans` closes a run at every segment
+    /// boundary it is still inside and leaves the rejoining to a downstream `mergedCuts` — which is
+    /// exactly what Mode 2 does, in `VectorCanvas.effectiveCuts`, at the end. Mode 1 cannot wait: it
+    /// insets each span by the stroke's half-width first, and insetting the *fragments* insets at
+    /// segment joins that are not coverage boundaries at all. A 24pt line sampled every 10pt turns one
+    /// genuine 48pt clean span into six 10pt fragments, each of which then collapses under a 12pt
+    /// inset, and the split silently never happens — which is precisely what it did.
     static func cleanCutRanges(in samples: [VectorSample], brush: Brush, size: CGFloat,
                                by erasers: [StrokeGeometry.Capsule], sweep: Sweep) -> [ClosedRange<CGFloat>] {
         guard !erasers.isEmpty, !samples.isEmpty else { return [] }
         let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: brush, size: size) * (1 + cleanCutMargin)
         var scratch: [ClosedRange<CGFloat>] = []
         scratch.reserveCapacity(erasers.count)
-        return coveredSpans(in: samples, clipTo: sweep.bounds.insetBy(dx: -reach, dy: -reach),
-                            probeStep: sweep.probeStep) { parameter in
+        let spans = coveredSpans(in: samples, clipTo: sweep.bounds.insetBy(dx: -reach, dy: -reach),
+                                 probeStep: sweep.probeStep) { parameter in
             StrokeGeometry.coverage(atParameter: parameter, in: samples, brush: brush, size: size,
                                     by: erasers, margin: cleanCutMargin, scratch: &scratch) >= 1
         }
+        return StrokeGeometry.mergedCuts(spans, clampedTo: 0...CGFloat(max(samples.count - 1, 0)))
     }
 
-    /// `ranges` pulled in by the stroke's own half-width at each end — the step that makes a split
-    /// safe to combine with a retained punch.
+    /// Whether the eraser covers **every part** of the stroke — each cross-section along it, and both
+    /// round end caps. The one geometric verdict Mode 1 acts on.
+    ///
+    /// Deleting a stroke on this verdict is pixel-neutral in the strongest sense available: it produces
+    /// no new geometry at all, so unlike a partial cut there is nothing to re-stamp and nothing that can
+    /// land anywhere new. Every pixel the stroke contributed was inside the eraser's footprint, and the
+    /// retained punch removes exactly that footprint.
+    ///
+    /// A single covered span reaching both ends, rather than a union of spans that happens to add up:
+    /// `cleanCutRanges` merges before returning, so anything short of one full-domain span means there
+    /// is a gap the eraser missed.
+    static func isEntirelyCovered(_ samples: [VectorSample], brush: Brush, size: CGFloat,
+                                  by erasers: [StrokeGeometry.Capsule], sweep: Sweep) -> Bool {
+        guard !samples.isEmpty, !erasers.isEmpty else { return false }
+        let domainEnd = CGFloat(samples.count - 1)
+        guard capIsCovered(atParameter: 0, in: samples, brush: brush, size: size, by: erasers),
+              capIsCovered(atParameter: domainEnd, in: samples, brush: brush, size: size, by: erasers)
+        else { return false }
+        let spans = cleanCutRanges(in: samples, brush: brush, size: size, by: erasers, sweep: sweep)
+        guard spans.count == 1, let span = spans.first else { return false }
+        return span.lowerBound <= StrokeGeometry.epsilon
+            && span.upperBound >= domainEnd - StrokeGeometry.epsilon
+    }
+
+    /// `ranges` pulled in by the stroke's own half-width at each end — the step that would make a
+    /// *partial* split safe to combine with a retained punch, if a partial split were safe at all.
+    ///
+    /// **Not currently wired into `VectorCanvas.eraseHybrid`.** It is correct as far as it goes, it is
+    /// tested, and the future fix described in the Mode 1 notes needs it — but insetting solves only
+    /// the ink lost to the *new* cap a split creates, and that is not the whole problem. See those
+    /// notes. Reachable through the tests, which pin the divergence that unwired it.
     ///
     /// Deleting samples over `[c0, c1]` does not delete the ink over `[c0, c1]`: the surviving pieces
     /// end in round caps, so the ink actually lost runs from `c0 - w` to `c1 + w`, spilling half a
@@ -319,19 +393,46 @@ enum VectorEraser {
     ///
     /// A span shorter than the two insets disappears: the eraser is narrower than the line it crossed,
     /// so there is no separation to be had geometrically and the punch handles it alone.
+    ///
+    /// **A stroke's own end is not inset** when `erasers` already covers the cap there. The inset pays
+    /// for a cap the split *creates*; at the stroke's own end no new cap appears, because that end is
+    /// being deleted rather than moved, and the only ink at stake is the existing cap — which
+    /// `StrokeGeometry.capsules(_:contain:radius:)` has just confirmed the eraser removes anyway.
+    /// Without this a stroke scribbled out from end to end can never be deleted: both boundaries are
+    /// pushed half a width inward, so two invisible stubs survive under the punch, they keep the punch
+    /// alive through garbage collection, and plan §1's "erasing a stroke away completely costs
+    /// nothing" is false for the one gesture it was written about.
     static func conservativeCuts(_ ranges: [ClosedRange<CGFloat>], in samples: [VectorSample],
-                                 brush: Brush, size: CGFloat) -> [ClosedRange<CGFloat>] {
+                                 brush: Brush, size: CGFloat,
+                                 by erasers: [StrokeGeometry.Capsule]) -> [ClosedRange<CGFloat>] {
         guard samples.count > 1 else { return ranges }
+        let domainEnd = CGFloat(samples.count - 1)
         var result: [ClosedRange<CGFloat>] = []
         for range in ranges {
             let lowWidth = halfWidth(at: range.lowerBound, in: samples, brush: brush, size: size)
             let highWidth = halfWidth(at: range.upperBound, in: samples, brush: brush, size: size)
-            let low = StrokeGeometry.offsetParameter(range.lowerBound, by: lowWidth, in: samples)
-            let high = StrokeGeometry.offsetParameter(range.upperBound, by: -highWidth, in: samples)
+            let low = range.lowerBound <= StrokeGeometry.epsilon
+                && capIsCovered(atParameter: 0, in: samples, brush: brush, size: size, by: erasers)
+                ? 0
+                : StrokeGeometry.offsetParameter(range.lowerBound, by: lowWidth, in: samples)
+            let high = range.upperBound >= domainEnd - StrokeGeometry.epsilon
+                && capIsCovered(atParameter: domainEnd, in: samples, brush: brush, size: size, by: erasers)
+                ? domainEnd
+                : StrokeGeometry.offsetParameter(range.upperBound, by: -highWidth, in: samples)
             guard high - low > StrokeGeometry.epsilon else { continue }
             result.append(low...high)
         }
         return result
+    }
+
+    /// Whether the round cap the stroke renders at `parameter` is inside the eraser's footprint. The
+    /// same `cleanCutMargin` the cross-section test uses, for the same anti-aliased fringe.
+    private static func capIsCovered(atParameter parameter: CGFloat, in samples: [VectorSample],
+                                     brush: Brush, size: CGFloat,
+                                     by erasers: [StrokeGeometry.Capsule]) -> Bool {
+        guard let sample = StrokeGeometry.interpolatedSample(in: samples, at: parameter) else { return false }
+        let radius = halfWidth(at: parameter, in: samples, brush: brush, size: size) * (1 + cleanCutMargin)
+        return StrokeGeometry.capsules(erasers, contain: sample.point, radius: radius)
     }
 
     private static func halfWidth(at parameter: CGFloat, in samples: [VectorSample], brush: Brush,
@@ -340,23 +441,38 @@ enum VectorEraser {
         return StrokeGeometry.stampRadius(forPressure: pressure, brush: brush, size: size)
     }
 
-    /// The spans of the eraser's *own* gesture that still have something under them, given
-    /// `hasBackdrop` — plan §1's "subtract the resolved span from the eraser's footprint", applied to
-    /// the eraser's parametric domain.
+    /// Whether *any* of the eraser's gesture still has something under it, given `hasBackdrop` — plan
+    /// §1's "subtract the resolved span from the eraser's footprint", reduced to the one bit
+    /// `VectorCanvas` is allowed to act on.
     ///
-    /// This is what keeps Mode 1 from growing the display list on every stroke. The dabs of a long drag
-    /// that passed over nothing, or over ink the split has since removed entirely, have nothing left to
-    /// punch, so they are trimmed away; only the stretches still sitting over surviving ink, a fill or
-    /// an image are retained. An erase that resolved completely returns no spans at all, and no element
-    /// is kept.
+    /// This is what keeps Mode 1 from growing the display list on every stroke. A drag that passed over
+    /// nothing at all, or over ink the split has since removed entirely, has nothing left to punch and
+    /// no element is kept; an erase that resolved completely retains nothing.
+    ///
+    /// **It reports a bit rather than the spans, and the punch keeps the whole gesture.** Retaining a
+    /// sub-run instead was measurably wrong, which is worth stating plainly because the spans are right
+    /// there and re-deriving the reason costs a day. `BrushStamper.stampStroke` lays its dabs on a
+    /// lattice that starts at `samples[0]` and steps one `stampSpacing` at a time, carrying the
+    /// remainder across segments. Start the run somewhere else and *every* dab after that point moves,
+    /// including the ones over the ink that justified retaining the punch at all. The union of full-alpha
+    /// dabs is unchanged in its interior, so this is invisible in the easy case — but at an
+    /// anti-aliased edge, and at any eraser opacity below 1 where alpha never saturates, it is not:
+    /// measured against the raster tier, trimming cost 4/255 over 22 pixels for a hard round eraser
+    /// crossing diagonally and 27/255 over 81 pixels for the same gesture at opacity 0.4. Snapping the
+    /// span boundary to a lattice position would fix the phase in exact arithmetic and not in
+    /// floating-point, and §8 is asserted at *zero* tolerance.
+    ///
+    /// The cost of keeping the whole gesture is dabs that punch nothing, which is render time and no
+    /// pixels. It is also not obviously a cost at all in display-list terms: trimming *split* a gesture
+    /// that crossed two separated strokes into two retained elements, where this keeps one.
     ///
     /// `hasBackdrop` is asked at a parametric position along the gesture and answers "is there anything
     /// beneath the dab there" — it needs the display list, so `VectorCanvas` supplies it.
-    static func residueSpans(in samples: [VectorSample], sweep: Sweep,
-                             hasBackdrop: (CGFloat) -> Bool) -> [ClosedRange<CGFloat>] {
-        guard !samples.isEmpty else { return [] }
-        return coveredSpans(in: samples, clipTo: sweep.bounds, probeStep: sweep.probeStep,
-                            predicate: hasBackdrop)
+    static func hasResidue(in samples: [VectorSample], sweep: Sweep,
+                           hasBackdrop: (CGFloat) -> Bool) -> Bool {
+        guard !samples.isEmpty else { return false }
+        return !coveredSpans(in: samples, clipTo: sweep.bounds, probeStep: sweep.probeStep,
+                             predicate: hasBackdrop).isEmpty
     }
 
     // MARK: - Mode 3 — cut to intersection

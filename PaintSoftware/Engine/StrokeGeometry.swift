@@ -389,6 +389,34 @@ enum StrokeGeometry {
                         by: erasers, scratch: &scratch)
     }
 
+    /// Whether the disc of `radius` at `center` lies **wholly inside a single** capsule of `capsules`.
+    ///
+    /// Mode 1 needs this for the one piece of a stroke that has no cross-section: its round end cap.
+    /// `coverage(atParameter:…)` answers about the segment across the stroke at a parameter, and the
+    /// cap sticks out half a width *past* the last parameter there is, so a stroke whose every
+    /// cross-section is covered can still have two uncovered blobs at its ends.
+    ///
+    /// Deliberately sufficient rather than necessary: a disc straddling two capsules that only cover
+    /// it together is reported uncovered. Tightening that would mean unioning the boundary arcs, and
+    /// the payoff would be small — the caller uses this to decide whether a stroke end may be deleted
+    /// outright instead of being trimmed back, so a false negative costs a retained stub of geometry
+    /// hidden under the punch, and a false positive would delete ink the eraser never touched. Only
+    /// one of those is recoverable.
+    ///
+    /// `min(ra, rb)` rather than the radius interpolated at the closest point, for the same reason: a
+    /// capsule's radius varies affinely along its axis, so the minimum is a lower bound everywhere on
+    /// it and using it can only under-report.
+    static func capsules(_ capsules: [Capsule], contain center: CGPoint, radius: CGFloat) -> Bool {
+        for capsule in capsules {
+            let inner = min(capsule.ra, capsule.rb) - radius
+            guard inner >= 0 else { continue }
+            if distanceSquared(from: center, toSegment: capsule.a, capsule.b) <= inner * inner {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Coverage at an arbitrary **parametric position** rather than at a stored sample.
     ///
     /// Mode 1's clean-cut decision needs this for the same reason Mode 2's cut boundaries did (plan

@@ -152,7 +152,11 @@ enum RasterVectorParity {
     /// the same way in two different contexts" into the same number, which is a different question
     /// and not the one §8 asks. The load is lossless: same size, scale 1, source-over onto a cleared
     /// context, so the bytes survive the transfer.
-    private static func rasterBase(_ scenario: ParityScenario, backdrop: VectorElement?) -> RasterLayerTexture {
+    ///
+    /// Internal rather than private because Phase 4c's tests build the same ground truth against a
+    /// display list they mutate through `VectorCanvas.erase` — they need this half without the vector
+    /// half `tiers(_:)` builds alongside it, and they must share the *same* backdrop element.
+    static func rasterBase(_ scenario: ParityScenario, backdrop: VectorElement?) -> RasterLayerTexture {
         guard let backdrop else { return RasterLayerTexture.empty(size: scenario.canvasSize) }
         let image = VectorCanvas(size: scenario.canvasSize, elements: [backdrop]).render()
         return RasterLayerTexture.load(from: image, size: scenario.canvasSize)

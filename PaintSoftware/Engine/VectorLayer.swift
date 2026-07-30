@@ -675,60 +675,70 @@ final class VectorCanvas {
     // The rules and the measurement that shaped them are documented on `VectorEraser`'s Mode 1
     // section; this is the adapter that applies them to a display list. Two steps, in this order:
     //
-    // 1. **Separate** what the eraser provably severed, by splitting those strokes. Conservatively
-    //    inset, so the ink it removes is a subset of the ink step 2 removes and it changes no pixels.
+    // 1. **Delete** every stroke the eraser covers outright, so scribbling something out leaves
+    //    nothing behind. Whole strokes only — see `VectorEraser`'s Mode 1 notes for why a *partial*
+    //    geometric cut cannot be combined with step 2.
     // 2. **Punch**, always, so the result is byte-identical to erasing the same content on a raster
-    //    layer — trimmed to the stretches of the gesture that still have something beneath them, then
-    //    dropped entirely if none do.
+    //    layer — the gesture kept whole, and dropped entirely when no part of it has anything beneath.
     //
-    // Step 2 is why Mode 1 is not just a better Mode 2, and step 1 is why it is not just a punch.
+    // Step 2 is why Mode 1 is not just a better Mode 2, and step 1 is why it does not grow forever.
 
     /// Caller must hold `lock`.
     private func eraseHybrid(sweep: VectorEraser.Sweep, samples localSamples: [VectorSample],
                              brush: Brush, size: CGFloat, opacity: Double) -> Bool {
         var changed = false
 
-        if VectorEraser.supportsCleanCut(brush: brush, opacity: opacity) {
+        // The lightest dab in the gesture: pressure interpolates linearly between samples, so the
+        // minimum over the samples is the minimum over every dab the eraser stamped.
+        let minPressure = localSamples.map(\.pressure).min() ?? 1
+        if VectorEraser.supportsCleanCut(brush: brush, opacity: opacity, minPressure: minPressure) {
             let erasers = VectorEraser.cleanCutCapsules(sweep.capsules, brush: brush, size: size)
-            if !erasers.isEmpty, splitCleanlySeveredStrokes(sweep: sweep, erasers: erasers) {
+            if !erasers.isEmpty, removeFullyErasedStrokes(sweep: sweep, erasers: erasers) {
                 changed = true
                 // Bumps `version`, so the residue query below rebuilds the index against the
                 // *survivors*. Without this it would ask a stale index and retain punch over strokes
-                // the split just removed.
+                // the deletion just removed.
                 invalidate()
             }
         }
 
-        let residue = VectorEraser.residueSpans(in: localSamples, sweep: sweep) { parameter in
+        let hasResidue = VectorEraser.hasResidue(in: localSamples, sweep: sweep) { parameter in
             hasContentBeneath(atParameter: parameter, in: localSamples, brush: brush, size: size)
         }
-        if !residue.isEmpty {
-            let domain = 0...CGFloat(max(localSamples.count - 1, 0))
-            let discarded = StrokeGeometry.complementOfSpans(residue, over: domain)
-            for run in StrokeGeometry.splitStroke(localSamples, removing: discarded) {
-                // The eraser *is* a stroke (plan §2.1): same brush, same size, same pressure-driven
-                // dab chain, composited `.destinationOut` at render. Appended last, so it punches
-                // everything already in the list and nothing drawn after it. The colour is arbitrary —
-                // `.destinationOut` reads only the stamp's alpha coverage.
-                let punch = VectorStroke(brush: brush,
-                                         color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                                         size: size, opacity: opacity, samples: run, composite: .erase)
-                _elements.append(.stroke(punch))
-                changed = true
-            }
+        if hasResidue {
+            // The eraser *is* a stroke (plan §2.1): same brush, same size, same samples, same
+            // pressure-driven dab chain, composited `.destinationOut` at render. Appended last, so it
+            // punches everything already in the list and nothing drawn after it. The colour is
+            // arbitrary — `.destinationOut` reads only the stamp's alpha coverage.
+            //
+            // The samples are the gesture's, whole and unmodified, which is what makes this render the
+            // identical dab sequence the raster eraser would have stamped. See `hasResidue` for the
+            // measurement that ruled out retaining only the stretches that had a backdrop.
+            let punch = VectorStroke(brush: brush,
+                                     color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                     size: size, opacity: opacity, samples: localSamples,
+                                     composite: .erase)
+            _elements.append(.stroke(punch))
+            changed = true
         }
 
         if collectResidueGarbage() { changed = true }
         return changed
     }
 
-    /// Splits every candidate paint stroke the eraser severs across its whole width. Caller must hold
-    /// `lock`.
-    private func splitCleanlySeveredStrokes(sweep: VectorEraser.Sweep,
-                                            erasers: [StrokeGeometry.Capsule]) -> Bool {
+    /// Drops every candidate paint stroke the eraser covers **completely**. Caller must hold `lock`.
+    ///
+    /// Whole strokes only, and that restriction is the load-bearing part — `VectorEraser`'s Mode 1
+    /// notes carry the measurement. Deleting a stroke the eraser wholly covers is exactly pixel-neutral
+    /// because no new geometry is produced: nothing is re-stamped, so nothing can land anywhere new,
+    /// and every pixel the stroke contributed was under the punch anyway. Cutting a *piece* out of it
+    /// is not, because the surviving remainder is re-stamped as a fresh stroke and re-anchors its dab
+    /// lattice and its pressure ramp at the cut.
+    private func removeFullyErasedStrokes(sweep: VectorEraser.Sweep,
+                                          erasers: [StrokeGeometry.Capsule]) -> Bool {
         // The index holds centrelines, so a stroke whose centreline sits outside the sweep's box can
         // still have ink inside it. Grow the query by the widest half-width on the layer or the
-        // clean-cut test never gets asked about the strokes at the edge of the gesture.
+        // coverage test never gets asked about the strokes at the edge of the gesture.
         let reach = maxPaintReach()
         let candidates = Set(strokeIndex().segments(near: sweep.bounds.insetBy(dx: -reach, dy: -reach))
             .map(\.elementIndex))
@@ -739,23 +749,17 @@ final class VectorCanvas {
         result.reserveCapacity(_elements.count)
         for (index, element) in _elements.enumerated() {
             guard candidates.contains(index), let stroke = element.stroke,
-                  stroke.composite == .paint, VectorEraser.supportsSplitting(strokeBrush: stroke.brush) else {
+                  stroke.composite == .paint,
+                  // A scattering stroke throws dabs up to `radius · 2 · scatter` off its centreline, so
+                  // the capsule chain the coverage test uses does not bound its ink and "covered" would
+                  // be a claim about the wrong shape.
+                  VectorEraser.supportsSplitting(strokeBrush: stroke.brush),
+                  VectorEraser.isEntirelyCovered(stroke.samples, brush: stroke.brush, size: stroke.size,
+                                                 by: erasers, sweep: sweep) else {
                 result.append(element)
                 continue
             }
-            let clean = VectorEraser.cleanCutRanges(in: stroke.samples, brush: stroke.brush,
-                                                    size: stroke.size, by: erasers, sweep: sweep)
-            let cuts = Self.effectiveCuts(VectorEraser.conservativeCuts(clean, in: stroke.samples,
-                                                                        brush: stroke.brush, size: stroke.size),
-                                          in: stroke.samples)
-            guard !cuts.isEmpty else { result.append(element); continue }
             changed = true
-            for run in StrokeGeometry.splitStroke(stroke.samples, removing: cuts) {
-                var piece = stroke
-                piece.id = UUID()
-                piece.samples = run
-                result.append(.stroke(piece))
-            }
         }
         if changed { _elements = result }
         return changed
