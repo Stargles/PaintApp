@@ -803,11 +803,17 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
+    /// Replays one stored stroke. `seed:` is what makes that a *replay* rather than a fresh roll:
+    /// this method runs again for every stroke on the layer on every invalidation, so with unseeded
+    /// randomness a brush carrying `scatter`/`rotationJitter` re-scattered its dabs each time and the
+    /// user watched finished artwork crawl. Deriving the seed from the stroke's own id keeps it stable
+    /// across save/load and gives two strokes different scatter patterns. See `BrushStamper.DabRNG`.
     private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
         let samples = stroke.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
         BrushStamper.stampStroke(into: target, samples: samples, brush: stroke.brush,
                                  color: stroke.uiColor, brushSize: stroke.size,
-                                 brushOpacity: stroke.opacity, isEraser: isEraser)
+                                 brushOpacity: stroke.opacity, isEraser: isEraser,
+                                 seed: BrushStamper.seed(for: stroke.id))
     }
 }
 
