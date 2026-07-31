@@ -7,6 +7,12 @@ This is the *live* document. [VECTOR_INTERPOLATION_PLAN.md](VECTOR_INTERPOLATION
 stable references. This file is state: where the work actually is, what tripped over what, and what
 to do next.
 
+[VECTOR_ERASER_PLAN.md](VECTOR_ERASER_PLAN.md) is the fourth document you may end up in. The eraser
+feature is finished, but that plan is cited from ~20 source files as the authority for decisions this
+work depends on — "the eraser is a stroke" (§2.1), the display-list z-order (§2.2), erasing through
+everything (§1) — and §12 holds its unstarted backlog. Its session-state handoff was deleted on
+2026-07-31; the plan is the one eraser document now.
+
 ---
 
 ## 1. Start-of-session checklist
@@ -501,7 +507,11 @@ What Phase 2 decided that Phase 3 inherits:
   Defaulting it on would be wrong: thinning is right for a stroke with no counterpart at the other
   keyframe, and without correspondence *every* stroke looks like that, so both sets would thin and
   every mid-frame would be thin as well as washed out. Turning it on is one line the moment a matcher
-  can identify unmatched strokes. Flagged per §3.5 — the product owner may want it on anyway.
+  can identify unmatched strokes.
+
+  **Product owner's steer (2026-07-31): ship it as a toggle in the Phase 4 panel** so both behaviours
+  can be judged on real drawings. That is now `IMPLEMENTATION.md` Phase 4 item 5. The default stays
+  `.none` until the comparison says otherwise.
 
 - **`withStructureUndo` is still the trap §5's Phase 2 entry describes, and Phase 4 will meet it.**
   The `t` slider is genuinely fine on `beginStructureGesture`/`commitStructureGesture` because `t`
@@ -687,6 +697,14 @@ definition of done is met, and suggest rather than implement anything out of sco
     coloured fills currently go through a muddy half-transparent middle, which is exactly the worry
     §7.3 names. The evaluator already carries a fill's `id` across the warp so a matcher has
     something to key on.
+
+    **Product owner's steer (2026-07-31): cross-fading fills is acceptable for now, and instructions
+    will follow after user testing.** Two things that steer settles for whoever picks this up. First,
+    the *base* capability — interpolate handling a fill sensibly when both references have filled
+    sections — is considered valuable and in scope; it is the colour lerp between matched fills that
+    is deferred, not fill support. Second, "easy filling across multiple frames" may want to be an
+    **entirely separate tool** rather than something interpolation grows into, so do not widen the
+    recipe to chase it. Do not build the matcher speculatively — wait for the testing result.
 
 11. **A fill cannot belong to a motion group.** `motionGroupID` is a field on `VectorStroke` only, so
     every fill and every placed image rides the recipe's first binding. Fine for Phase 4's single

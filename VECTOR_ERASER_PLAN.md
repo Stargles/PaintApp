@@ -553,3 +553,70 @@ That gives a prefix/suffix cache: for the element being edited, keep "everything
 cost stops scaling with layer content, on either backend — and on the GPU each run is one draw call.
 This is the thing to build with Phase 5's dirty-rect cache, and it is why the `.erase` composite flag
 is worth tracking as an explicit boundary rather than as just another element.
+
+---
+
+## 12. Open work
+
+> Rescued from `VECTOR_ERASER_HANDOFF.md` when that file was deleted (2026-07-31). The eraser feature
+> is finished and its session state was dead, but this backlog was not — it is unstarted work with
+> measurements attached, and nothing else records it. §10 above is the older, smaller list; this is
+> what the last eraser session left.
+
+### Per-element Move
+
+What the split was the unlock for — §1's "grab one visual half with the Move tool". Nothing in
+`DabLattice` obstructs it: translation does not change arclength, so a translated piece keeps its
+lattice unchanged.
+
+**Not started, and bigger than it sounds** — scope it before writing code:
+
+- There is **no per-element move today at all.** Moving is either a layer-level `LayerTransform` or
+  `FloatingPiece` in `SelectionModels.swift`, and `FloatingPiece` is *pixel*-based (`pieceImage:
+  UIImage`, lifted and re-baked). Neither is a vector-element move, so this is a new subsystem.
+- The `Tool` enum has no `move` case, so there is UI plumbing as well as engine work.
+- The engine half is small and headlessly testable, and is the right first commit: hit-test a point to
+  an element, translate that element's samples. Both belong next to `StrokeGeometry`/`VectorEraser` —
+  pure `CGPoint`/`CGFloat`, in the test target, no lock and no render cache.
+- Watch the display-list invariant:
+  `testAPunchLeavesEachKindContiguousSoTheUndoAccessorsStillRoundTrip` pins that each kind occupies
+  one contiguous run. A move must be a mutation in place, never a remove-and-append.
+
+### The spatial index is rebuilt from scratch on every `invalidate()`
+
+The largest single term left in an erase, measured: **7.2 ms to walk 11,800 segments and answer a
+query returning 7 strokes**, paid two to three times per gesture. Both passes append and remove at
+known indices, so the index could be patched rather than rebuilt.
+
+This wants company: a dirty-rect render cache needs exactly the same "what changed where"
+information. Do them together or the second re-derives the first.
+
+Smaller and adjacent: `maxPaintReach()` is O(elements) and runs three times per gesture. It becomes
+free the moment stroke bounds are cached, which §3 asks for and which still does not exist.
+
+### GPU rendering
+
+§11. Unblocked — §8's parity test is its regression net. One constraint it adds: the visible range is
+a *filter over a walk*, so a GPU rasteriser has to reproduce it as one — bin the dabs and drop those
+outside the range, never re-derive positions.
+
+Note the interaction with `BRUSH_ENGINE_EXTENSIBILITY.md`: the parity test is the safety net for the
+GPU port **and** for the brush-format overhaul, and it holds only while both tiers share one
+`BrushStamper`. Doing both at once leaves neither with a net.
+
+### Still open
+
+1. **Two sub-spacing biases at stroke ends** (`advance` carries a remainder so the last dab falls
+   short; the chain tapers where `stampStroke` ramps pressure). Less pressing than it was: a piece
+   inherits the parent's biases rather than introducing its own.
+2. **`addFill` inserts beneath existing strokes — still right?** Not a local choice about fills: it is
+   a property of the kind-sorted display list. Changing it means letting `_elements` hold an arbitrary
+   order and dropping the kind accessors' splice contract — the `strokes`/`fills`/`images` setters and
+   both `registerVector*Undo` paths would move to `elements`. The invariant is pinned by
+   `testAPunchLeavesEachKindContiguousSoTheUndoAccessorsStillRoundTrip`.
+3. **The live-preview trace measures publication, not pixels.** `lastVectorGestureTrace` proves the
+   punched copy reached the image view repeatedly during the drag; it does not prove a given pixel was
+   clear at that moment. Low priority — the pixels are `RasterVectorParityLogicTests`' job.
+4. **A piece holds its parent's whole sample array.** Two pieces share it (copy-on-write) until one
+   mutates; a decoded project gives each its own copy. Point decimation is the natural place to settle
+   it — it can rewrite a piece as a stroke of its own once nobody needs the parent's phase.

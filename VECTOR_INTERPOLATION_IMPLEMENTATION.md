@@ -379,6 +379,13 @@ group**. Groups become artist-controllable in Phase 5.
    scope demands — say so in the handoff if you stub it.*
 4. **The `t` slider**, with live preview wired to `.preview` quality during drag and `.full` on
    release, and undo bracketed per drag.
+
+5. **A thickness-fade toggle in the panel.** `InterpolationEvaluator.Options.thicknessFade` is built
+   and defaults to `.none`; `.weighted(exponent: 1)` is the other setting. **Product owner's steer
+   (2026-07-31): expose it as a toggle so the ergonomics of each can be assessed on real drawings.**
+   It is not a persisted per-recipe setting yet — a view-level toggle feeding `Options` is enough to
+   judge it, and where it eventually lives (global preference, per-recipe, per-group) is a decision to
+   take after looking at it, not before.
 5. **Onion skin in interpolate mode** — supply an `OnionSkinSource` (Phase 0) that shows the two
    reference keyframes, tinted differently.
 
