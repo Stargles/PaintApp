@@ -195,7 +195,14 @@ enum ARAPRegistration {
     ///
     /// A source cloud with no spatial extent (one point, or all points coincident) has no defined
     /// rotation or scale, so it degrades to the pure translation between the centroids.
-    static func similarity(from source: [CGPoint], to target: [CGPoint]) -> Similarity {
+    ///
+    /// `allowScale: false` gives the rigid Procrustes fit instead — same rotation, scale pinned at
+    /// 1. That is not a nicety: a source→target fit with a free scale can drive the scale toward
+    /// zero and pile the whole source onto a handful of target points, which scores a near-perfect
+    /// residual while meaning nothing. Any fit whose source is only a *part* of the target should
+    /// lock the scale.
+    static func similarity(from source: [CGPoint], to target: [CGPoint],
+                           allowScale: Bool = true) -> Similarity {
         let n = min(source.count, target.count)
         guard n > 0 else { return .identity }
         var sx: CGFloat = 0, sy: CGFloat = 0, tx: CGFloat = 0, ty: CGFloat = 0
@@ -221,7 +228,7 @@ enum ARAPRegistration {
                                                    y: targetCentroid.y - sourceCentroid.y))
         }
         let angle = atan2(crs, dot)
-        let scale = (dot * dot + crs * crs).squareRoot() / norm
+        let scale = allowScale ? (dot * dot + crs * crs).squareRoot() / norm : 1
         let c = cos(angle) * scale, s = sin(angle) * scale
         return Similarity(angle: angle, scale: scale,
                           translation: CGPoint(x: targetCentroid.x - (c * sourceCentroid.x - s * sourceCentroid.y),
@@ -248,10 +255,13 @@ enum ARAPRegistration {
     static func similarityICP(source: [CGPoint], target: PointCloudIndex,
                               initial: Similarity? = nil,
                               iterations: Int = Options().icpIterations,
-                              restarts: Int = Options().icpRestarts) -> Similarity {
+                              restarts: Int = Options().icpRestarts,
+                              matching: Matching = .bidirectional,
+                              allowScale: Bool = true) -> Similarity {
         guard !source.isEmpty, !target.isEmpty else { return initial ?? .identity }
         if let initial {
-            return refine(initial, source: source, target: target, iterations: iterations)
+            return refine(initial, source: source, target: target, iterations: iterations,
+                          matching: matching, allowScale: allowScale)
         }
 
         // Every restart runs to convergence and the best *final* residual wins.
@@ -261,20 +271,33 @@ enum ARAPRegistration {
         // on six iterations chose a seed that settled at 24° when another seed reached the exact 20°.
         // `refine` exits as soon as a fit stops moving, so most restarts are cheap anyway, and this
         // runs once per registration — not per frame, and not per *t*.
-        var best = bootstrap(source: source, target: target.points)
+        var best = seed(angle: 0, source: source, target: target, matching: matching)
         var bestResidual = CGFloat.infinity
         for k in 0..<max(1, restarts) {
-            let seed = bootstrap(source: source, target: target.points,
-                                 angle: CGFloat(k) * 2 * .pi / CGFloat(max(1, restarts)))
-            let fit = refine(seed, source: source, target: target, iterations: iterations)
+            let seed = seed(angle: CGFloat(k) * 2 * .pi / CGFloat(max(1, restarts)),
+                            source: source, target: target, matching: matching)
+            let fit = refine(seed, source: source, target: target, iterations: iterations,
+                             matching: matching, allowScale: allowScale)
             let residual = meanDistance(source: source, target: target, under: fit)
             if residual < bestResidual { bestResidual = residual; best = fit }
         }
         return best
     }
 
+    /// Which direction correspondences are drawn in.
+    enum Matching {
+        /// Pair source→target *and* target→source. Correct when the two clouds are the same
+        /// content drawn twice, which is the keyframe A→C case, and what stops ICP sliding and
+        /// shrinking.
+        case bidirectional
+        /// Pair source→target only. Correct when the source is a *part* of what the target shows —
+        /// fitting one motion group against the whole target drawing. Matching backwards there
+        /// would drag every other group's geometry into this group's fit.
+        case sourceToTarget
+    }
+
     private static func refine(_ start: Similarity, source: [CGPoint], target: PointCloudIndex,
-                               iterations: Int) -> Similarity {
+                               iterations: Int, matching: Matching, allowScale: Bool) -> Similarity {
         var current = start
         var from: [CGPoint] = [], to: [CGPoint] = []
         from.reserveCapacity(source.count + target.points.count)
@@ -289,14 +312,16 @@ enum ARAPRegistration {
                 guard let hit = target.nearest(to: p) else { continue }
                 from.append(source[i]); to.append(hit.point)
             }
-            let warpedIndex = PointCloudIndex(warped)
-            for q in target.points {
-                guard let hit = warpedIndex.nearest(to: q) else { continue }
-                from.append(source[hit.index]); to.append(q)
+            if case .bidirectional = matching {
+                let warpedIndex = PointCloudIndex(warped)
+                for q in target.points {
+                    guard let hit = warpedIndex.nearest(to: q) else { continue }
+                    from.append(source[hit.index]); to.append(q)
+                }
             }
             guard !from.isEmpty else { break }
 
-            let next = similarity(from: from, to: to)
+            let next = similarity(from: from, to: to, allowScale: allowScale)
             guard next.isFinite else { break }
             let settled = abs(next.angle - current.angle) < 1e-9 && abs(next.scale - current.scale) < 1e-9
                 && abs(next.translation.x - current.translation.x) < 1e-9
@@ -316,6 +341,32 @@ enum ARAPRegistration {
             total += target.nearest(to: fit.applied(to: p))?.distanceSquared.squareRoot() ?? 0
         }
         return total / CGFloat(source.count)
+    }
+
+    /// Where a restart begins, which depends on what the target is assumed to contain.
+    ///
+    /// Under `.bidirectional` the two clouds are the same content, so centroid-and-radius alignment
+    /// is the right opening move. Under `.sourceToTarget` the source is only a *part* of the target,
+    /// and the target's global centroid and radius describe the whole drawing rather than this
+    /// part — aligning to them throws the fit into the middle of the picture at several times its
+    /// own size. Starting where the source already is, and letting ICP walk it to whatever content
+    /// is nearest, is both better conditioned and a truer prior: between adjacent keyframes, a part
+    /// has usually moved a little.
+    private static func seed(angle: CGFloat, source: [CGPoint], target: PointCloudIndex,
+                             matching: Matching) -> Similarity {
+        switch matching {
+        case .bidirectional:
+            return bootstrap(source: source, target: target.points, angle: angle)
+        case .sourceToTarget:
+            var cx: CGFloat = 0, cy: CGFloat = 0
+            for p in source { cx += p.x; cy += p.y }
+            let n = CGFloat(max(1, source.count))
+            let centre = CGPoint(x: cx / n, y: cy / n)
+            let c = cos(angle), s = sin(angle)
+            return Similarity(angle: angle, scale: 1,
+                              translation: CGPoint(x: centre.x - (c * centre.x - s * centre.y),
+                                                   y: centre.y - (s * centre.x + c * centre.y)))
+        }
     }
 
     /// Centroid and RMS-radius alignment at a given rotation: the right neighbourhood and the right

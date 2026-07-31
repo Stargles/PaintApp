@@ -457,6 +457,159 @@ final class ARAPLogicTests: XCTestCase {
                           "a heavily weighted constraint should drag its point most of the way")
     }
 
+    // MARK: - Motion grouping
+
+    /// A closed rectangle outline as four strokes. A closed, unequal-sided outline pins its own
+    /// position, orientation and scale — which is what makes it a usable stand-in for a drawn body
+    /// part. Loose parallel strokes do not: point-to-point matching slides along them freely, and an
+    /// earlier version of these tests using them let ICP explain two separately-moving bodies as a
+    /// single 153° rotation to within 2.6 points. The grouping was right not to split that; the
+    /// fixture was wrong.
+    private func rectangleBody(at origin: CGPoint, width: CGFloat = 60, height: CGFloat = 30) -> [[CGPoint]] {
+        let a = origin
+        let b = CGPoint(x: origin.x + width, y: origin.y)
+        let c = CGPoint(x: origin.x + width, y: origin.y + height)
+        let d = CGPoint(x: origin.x, y: origin.y + height)
+        return [bar(from: a, to: b, count: 11), bar(from: b, to: c, count: 7),
+                bar(from: c, to: d, count: 11), bar(from: d, to: a, count: 7)]
+    }
+
+    /// A closed triangle outline as three strokes — a body the rectangle cannot be confused with.
+    private func triangleBody(at origin: CGPoint, size: CGFloat = 44) -> [[CGPoint]] {
+        let a = origin
+        let b = CGPoint(x: origin.x + size, y: origin.y + 6)
+        let c = CGPoint(x: origin.x + size * 0.35, y: origin.y + size * 0.8)
+        return [bar(from: a, to: b, count: 11), bar(from: b, to: c, count: 9), bar(from: c, to: a, count: 9)]
+    }
+
+    private func moved(_ strokes: [[CGPoint]], by delta: CGPoint) -> [[CGPoint]] {
+        strokes.map { $0.map { CGPoint(x: $0.x + delta.x, y: $0.y + delta.y) } }
+    }
+
+    func testTwoBodiesMovingDifferentlySplitIntoExactlyTwoGroups() {
+        // One body moves *along the line joining them*, the other stays. Both parts of that matter:
+        //
+        // - "the two move opposite ways" is a rigid rotation of the pair, which one similarity
+        //   explains perfectly and which the algorithm is right to call one motion group;
+        // - "one moves sideways, one stays" is *nearly* a rotation about the still one, and at a
+        //   displacement small against the separation the leftover error is only a few points —
+        //   measured at 4.1 for a 70-point sideways move across a 180-point gap, which is inside any
+        //   sane residual threshold.
+        //
+        // Motion along the joining line changes the distance between the two bodies, and no rigid
+        // motion can do that, so the best global fit has to split the difference and both bodies end
+        // up with a residual of about half the displacement. This is the honest shape of "two
+        // motions", and worth stating plainly: a great many two-body scenarios really are
+        // explainable as one rigid motion, and grouping them together is the right answer, not a miss.
+        //
+        // The displacement is kept to two thirds of the body's own width for a second reason: ICP
+        // needs the source and its target to still overlap to converge on a subgroup, and a body
+        // shifted clear of itself has no overlap to start from.
+        let rect = rectangleBody(at: CGPoint(x: 40, y: 60))
+        let tri = triangleBody(at: CGPoint(x: 220, y: 60))
+        let source = rect + tri
+        let target = PointCloudIndex((moved(rect, by: CGPoint(x: 40, y: 0)) + tri).flatMap { $0 })
+
+        let groups = MotionGrouping.group(strokes: source, target: target)
+
+        XCTAssertEqual(groups.count, 2, "one body moving and one still are two motion groups")
+        XCTAssertEqual(Set(groups.map { Set($0.strokes) }), [Set(0..<4), Set(4..<7)],
+                       "the split should fall exactly on the body boundary")
+    }
+
+    func testAnAttachedLimbIsSeparatedWhenTheArtistTagsIt() {
+        // Characterisation of a known limitation, not an aspiration.
+        //
+        // A limb attached to a torso has no spatial gap to cut on, so splitting it has to come from
+        // the residuals — and residuals are a weak signal there, because the group's fitted motion
+        // is itself part rotation, which makes the residual position-dependent across the torso.
+        // Left to itself the algorithm cuts this fixture into three groups with the arm's base
+        // landing among torso strokes. `PLAN.md` §5.3 calls automatic grouping the highest-risk part
+        // of the project and designs for artist correction; this is the shape that correction takes,
+        // and the tag-seeded path — the one-tap-per-body-part workflow — handles it today.
+        let joint = CGPoint(x: 130, y: 120)
+        let torso = rectangleBody(at: CGPoint(x: 60, y: 100), width: 70, height: 40)
+        let arm = [bar(from: joint, to: CGPoint(x: 190, y: 120), count: 11),
+                   bar(from: CGPoint(x: 190, y: 120), to: CGPoint(x: 215, y: 148), count: 7)]
+        func swung(_ p: CGPoint) -> CGPoint {
+            let dx = p.x - joint.x, dy = p.y - joint.y
+            return CGPoint(x: joint.x + dx * cos(0.6) - dy * sin(0.6),
+                           y: joint.y + dx * sin(0.6) + dy * cos(0.6))
+        }
+        let target = PointCloudIndex((torso + arm.map { $0.map(swung) }).flatMap { $0 })
+
+        let groups = MotionGrouping.group(strokes: torso + arm, target: target,
+                                          seeds: [Array(0..<4), [4, 5]])
+
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups[0].strokes, Array(0..<4))
+        XCTAssertEqual(groups[1].strokes, [4, 5])
+        XCTAssertLessThan(groups[0].maxStrokeResidual, 3, "the tagged torso should fit its own motion")
+    }
+
+    func testOneRigidBodyDoesNotSplit() {
+        let source = rectangleBody(at: CGPoint(x: 80, y: 90))
+        let target = PointCloudIndex(moved(source, by: CGPoint(x: 55, y: -30)).flatMap { $0 })
+
+        let groups = MotionGrouping.group(strokes: source, target: target)
+
+        XCTAssertEqual(groups.count, 1, "one coherent motion is one group")
+        XCTAssertEqual(groups[0].strokes, Array(0..<4))
+        XCTAssertLessThan(groups[0].maxStrokeResidual, 3)
+    }
+
+    func testTaggedSeedsAreRefinedRatherThanRediscovered() {
+        // Same two bodies, but handed in pre-tagged: the result should be those groups, unchanged.
+        let rect = rectangleBody(at: CGPoint(x: 40, y: 60))
+        let tri = triangleBody(at: CGPoint(x: 220, y: 60))
+        let target = PointCloudIndex((moved(rect, by: CGPoint(x: 40, y: 0)) + tri).flatMap { $0 })
+
+        let groups = MotionGrouping.group(strokes: rect + tri, target: target,
+                                          seeds: [Array(0..<4), Array(4..<7)])
+
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups[0].strokes, Array(0..<4))
+        XCTAssertEqual(groups[1].strokes, Array(4..<7))
+    }
+
+    func testStrokesMissingFromTheSeedsAreStillGrouped() {
+        let source = rectangleBody(at: CGPoint(x: 80, y: 90))
+        let target = PointCloudIndex(moved(source, by: CGPoint(x: 40, y: 0)).flatMap { $0 })
+
+        let groups = MotionGrouping.group(strokes: source, target: target, seeds: [[0, 1]])
+
+        XCTAssertEqual(groups.flatMap(\.strokes).sorted(), Array(0..<4),
+                       "a partial tagging must still produce a complete partition")
+    }
+
+    func testGroupingRespectsTheGroupCap() {
+        // Four bodies each moving a different way, capped at two groups.
+        let bodies = [CGPoint(x: 40, y: 40), CGPoint(x: 240, y: 40),
+                      CGPoint(x: 40, y: 240), CGPoint(x: 240, y: 240)].map { rectangleBody(at: $0) }
+        let deltas = [CGPoint(x: 0, y: -40), CGPoint(x: 0, y: 40),
+                      CGPoint(x: -40, y: 0), CGPoint(x: 40, y: 0)]
+        let source = bodies.flatMap { $0 }
+        let target = PointCloudIndex(zip(bodies, deltas).flatMap { moved($0, by: $1) }.flatMap { $0 })
+        var options = MotionGrouping.Options()
+        options.maxGroups = 2
+
+        let groups = MotionGrouping.group(strokes: source, target: target, options: options)
+
+        XCTAssertLessThanOrEqual(groups.count, 2)
+        XCTAssertEqual(groups.flatMap(\.strokes).sorted(), Array(0..<source.count))
+    }
+
+    func testGroupingEmptyOrDegenerateInputIsSane() {
+        XCTAssertTrue(MotionGrouping.group(strokes: [], target: PointCloudIndex([])).isEmpty)
+        XCTAssertTrue(MotionGrouping.group(strokes: [[]], target: PointCloudIndex([])).isEmpty,
+                      "a stroke with no points is not a group")
+
+        let single = [[CGPoint(x: 10, y: 10), CGPoint(x: 20, y: 20)]]
+        let groups = MotionGrouping.group(strokes: single, target: PointCloudIndex([]))
+        XCTAssertEqual(groups.count, 1, "an empty target still yields one group, not a crash")
+        XCTAssertEqual(groups[0].meanResidual, 0)
+    }
+
     // MARK: - Degenerate registration input
 
     func testFittingWithAnEmptyTargetProducesTheRestLatticeAndNoNaN() {
