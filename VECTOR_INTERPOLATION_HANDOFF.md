@@ -40,14 +40,15 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Phase 3 — done.** Phase 4 (interpolate mode UI, references, slider, Generate) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `f6986df`. **Full suite green: 433 tests, 432 passed, 0 failed, 1 skipped, `xcodebuild` exit 0** (the skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`). Wide pure-logic tier: 364 tests, 0 failures. |
+| **Last known-green commit** | `f6986df`. **Full suite green with Phase 3 in: 450 tests, 449 passed, 0 failed, 1 skipped, `xcodebuild` exit 0**, no harness errors. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. Wide pure-logic tier: 364 tests, 0 failures. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
 **The XCUITest flakiness that cost Session 5 hours was the simulator, and erasing it fixed it.**
-Session 6 opened by resetting `interp-ipad` (`simctl shutdown` + `erase`, §5) and then got a clean
-433-test run first time — better than Session 5's best of 428 passed / 1 failed after five attempts.
-Do the reset *before* the phase-boundary run, not after it starts failing.
+Session 6 opened by resetting `interp-ipad` (`simctl shutdown` + `erase`, §5) and then ran the full
+suite **twice, both clean first time**: 433/433 on the unchanged Phase 2 tree, and 450/450 with
+Phase 3 in. Session 5 never got a clean run in five attempts on effectively the same code. Do the
+reset *before* the phase-boundary run, not after it starts failing.
 
 ### What is done
 
@@ -563,8 +564,8 @@ What Phase 3 decided that Phase 4 inherits:
   Commits `49906ea`, `49ef0cb`, `3c2d119`.
 - **Session 6 (Phase 3) — 2026-07-31:** Built the evaluator, the isolated composite and the polyline
   preview tier — all five work items, one new file, 17 new logic tests, one commit (`f6986df`).
-  Opened by erasing `interp-ipad`, which turned Session 5's five-attempt XCUITest flakiness into a
-  clean 433-test full suite first time (§5). `t = 0`/`t = 1` reproduce their keyframes at zero pixel
+  Opened by erasing `interp-ipad`, which turned Session 5's five-attempt XCUITest flakiness into two
+  clean full-suite runs, both first time — 433/433 before the phase and 450/450 after it (§5). `t = 0`/`t = 1` reproduce their keyframes at zero pixel
   tolerance through the general path. Built thickness cross-fade but defaulted it off, with the
   reason recorded, rather than shipping a default that thins every mid-frame (§5, §3.5). No
   subagents.
