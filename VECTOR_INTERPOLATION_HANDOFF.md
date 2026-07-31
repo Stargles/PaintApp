@@ -425,8 +425,20 @@ definition of done is met, and suggest rather than implement anything out of sco
    The tag-seeded path handles it today and is the same code, so the one-tap-per-body-part workflow
    is unaffected — this only limits how good "fully automatic" is on a jointed character. `PLAN.md`
    §5.3's bootstrap hints (a coarse optical-flow field between rasterised A and C, matching-tag
-   alignment) are the designed route to fixing it, and none are built. **Worth deciding before
-   Phase 5**, which is where automatic grouping becomes user-visible.
+   alignment) are the designed route to fixing it, and none are built.
+
+   **Product owner's steer (2026-07-31): this is expected, not a defect to chase.** The boundary
+   between limbs is genuinely vague, and two reference frames is the minimum possible information —
+   it is reasonable that it is hard. The intended mitigation is that the artist distinguishes limbs
+   by colour in both reference frames, either as the paint colour itself or as the group attribute,
+   which is **already `PLAN.md` §10 decision 4 and §5.1.1** ("Tag by stroke colour" as a one-shot
+   populate action into `groupID`, not a live binding). So the fix for this limitation is work that
+   was already planned rather than anything new, and Phase 5 should build the tagging path first and
+   treat improving the automatic split as optional on top.
+
+   The product owner also expects there are better approaches in the literature and in other
+   software that they have not read yet, and may revisit this. Treat the above as the current
+   position, not a closed decision.
 
 2. **No turn-count control for rotations past 180°.** `ARAPInterpolation` unwraps angles across
    triangle *neighbours*, so the lattice cannot tear — but the global branch always takes the short
