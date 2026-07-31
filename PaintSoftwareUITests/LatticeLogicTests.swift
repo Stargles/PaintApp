@@ -282,6 +282,99 @@ final class LatticeLogicTests: XCTestCase {
         assertPoint(round[0], far, accuracy: 1e-4, "extrapolation must still reproduce the point")
     }
 
+    // MARK: - Expansion
+
+    func testExpandingARestLatticeJustExtendsTheRegularGrid() {
+        // The strongest available check on the extrapolation *and* the relax: with nothing deformed,
+        // the affine map of every neighbour is the identity, so the ring must land exactly on the
+        // grid it would have had if it were built that size to begin with.
+        let lattice = restLattice(cols: 3, rows: 3, cellSize: 20, origin: CGPoint(x: 100, y: 100))
+        let expected = Lattice(cols: 5, rows: 5, restOrigin: CGPoint(x: 80, y: 80), restCellSize: 20)
+
+        let grown = lattice.addingRing()
+
+        XCTAssertEqual(grown.cols, 5)
+        XCTAssertEqual(grown.rows, 5)
+        for i in 0..<grown.vertexCount {
+            assertPoint(grown.vertices[i], expected.vertices[i], accuracy: 1e-7, "vertex \(i)")
+        }
+    }
+
+    func testExpansionLeavesTheOriginalVerticesUntouched() {
+        let deformed = twisted(restLattice())
+
+        let expansion = deformed.expanded(toContain: [CGPoint(x: -200, y: -200)])
+
+        XCTAssertTrue(expansion.didExpand)
+        for row in 0...deformed.rows {
+            for col in 0...deformed.cols {
+                let old = deformed.vertices[deformed.vertexIndex(col: col, row: row)]
+                let moved = expansion.lattice.vertices[expansion.remapVertex(deformed.vertexIndex(col: col, row: row))]
+                assertPoint(moved, old, accuracy: 0, "vertex (\(col), \(row)) must not move")
+            }
+        }
+    }
+
+    func testExpansionContainsTheRequestedPoints() {
+        let deformed = twisted(restLattice())
+        let outside = [CGPoint(x: 60, y: 20), CGPoint(x: 300, y: 190), CGPoint(x: 175, y: 10)]
+        XCTAssertFalse(outside.allSatisfy { deformed.containsInCurrent($0) })
+
+        let expansion = deformed.expanded(toContain: outside)
+
+        XCTAssertTrue(expansion.containsPoints)
+        for p in outside {
+            XCTAssertTrue(expansion.lattice.containsInCurrent(p), "\(p) should be inside after expansion")
+        }
+    }
+
+    func testExpansionIsANoOpWhenThePointsAreAlreadyInside() {
+        let deformed = twisted(restLattice())
+        let inside = deformed.warp(deformed.restConfiguration.embedInRest([CGPoint(x: 175, y: 100)]))
+
+        let expansion = deformed.expanded(toContain: inside)
+
+        XCTAssertEqual(expansion.rings, 0)
+        XCTAssertFalse(expansion.didExpand)
+        XCTAssertEqual(expansion.lattice, deformed)
+    }
+
+    func testRemappingAnEmbeddingKeepsGeometryWhereItWas() {
+        // The reason `LatticeExpansion` hands back a translation at all: an embedding taken against
+        // the old lattice must warp to the same place against the new one.
+        let deformed = twisted(restLattice())
+        let stroke = [CGPoint(x: 120, y: 70), CGPoint(x: 175, y: 100), CGPoint(x: 220, y: 130)]
+        let embedding = deformed.restConfiguration.embedInRest(stroke)
+        let before = deformed.warp(embedding)
+
+        let expansion = deformed.expanded(toContain: [CGPoint(x: -100, y: -100)])
+        let after = expansion.lattice.warp(expansion.remap(embedding))
+
+        XCTAssertTrue(expansion.didExpand)
+        for (a, b) in zip(after, before) { assertPoint(a, b, accuracy: 1e-9) }
+    }
+
+    func testExpansionCarriesActiveCellsAcross() {
+        var lattice = restLattice(cols: 3, rows: 3)
+        lattice.activeCells = [0, 4, 8]
+
+        let grown = lattice.addingRing()
+
+        XCTAssertEqual(grown.activeCells.count, 3)
+        // Cell 4 is (col 1, row 1) of a 3-wide grid; in the 5-wide grid that is (2, 2) = 12.
+        XCTAssertTrue(grown.activeCells.contains(12))
+    }
+
+    func testExpansionGivesUpGracefullyOnAnUnreachablePoint() {
+        let lattice = restLattice()
+
+        let expansion = lattice.expanded(toContain: [CGPoint(x: 1e6, y: 1e6)], maxRings: 2)
+
+        XCTAssertEqual(expansion.rings, 2)
+        XCTAssertFalse(expansion.containsPoints, "it should report honestly rather than loop forever")
+        assertNoNaN(expansion.lattice.vertices)
+    }
+
     // MARK: - Degenerate input
 
     func testACollapsedLatticeProducesFiniteOutputRatherThanNaN() {

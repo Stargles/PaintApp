@@ -309,6 +309,164 @@ struct Lattice: Equatable {
         DeformedCellIndex(lattice: self).locate(point, in: self).isInside(tolerance: tolerance)
     }
 
+    // MARK: - Expansion
+
+    /// The least-squares affine map taking `cell`'s rest corners onto its current ones, as a linear
+    /// part plus the two centroids it acts between.
+    ///
+    /// A deformed cell is generally *not* affine — that is why the energy is written over triangles
+    /// — so this is the best affine summary of it, which is exactly what extrapolating past the
+    /// lattice's edge wants: the neighbour's overall motion, not one of its triangles' motions.
+    ///
+    /// Closed form because the rest cell is a square: centred, `Σ r rᵀ` is `h²·I`, so the fit is one
+    /// sum divided by `h²`.
+    func cellAffine(_ cell: Int) -> (matrix: Matrix2x2, restCentre: CGPoint, currentCentre: CGPoint) {
+        let (i00, i10, i11, i01) = corners(ofCell: cell)
+        let indices = [i00, i10, i11, i01]
+        var rx: CGFloat = 0, ry: CGFloat = 0, px: CGFloat = 0, py: CGFloat = 0
+        for i in indices {
+            let r = restVertex(at: i)
+            rx += r.x; ry += r.y
+            px += vertices[i].x; py += vertices[i].y
+        }
+        let restCentre = CGPoint(x: rx / 4, y: ry / 4)
+        let currentCentre = CGPoint(x: px / 4, y: py / 4)
+        var m = Matrix2x2.zero
+        for i in indices {
+            let r = restVertex(at: i)
+            let dx = r.x - restCentre.x, dy = r.y - restCentre.y
+            let ex = vertices[i].x - currentCentre.x, ey = vertices[i].y - currentCentre.y
+            m.a += ex * dx; m.b += ex * dy
+            m.c += ey * dx; m.d += ey * dy
+        }
+        let h2 = restCellSize * restCellSize
+        m.a /= h2; m.b /= h2; m.c /= h2; m.d /= h2
+        return (m.isFinite ? m : .identity, restCentre, currentCentre)
+    }
+
+    /// Grow the lattice by whole rings of cells until `points` all fall inside its current
+    /// configuration.
+    ///
+    /// Each new ring is placed by pushing its rest positions through the best affine map of the
+    /// neighbouring cell, so the ring continues the existing deformation rather than snapping back
+    /// to the rest grid. A vertex with more than one neighbouring cell — every corner — averages
+    /// their answers, which is what stops the ring tearing where two edges meet. The result is then
+    /// ARAP-relaxed with the original vertices pinned, and those vertices are written back exactly
+    /// afterwards, so an expansion is guaranteed not to move any geometry that was already embedded.
+    ///
+    /// This is the routine `PLAN.md` §5.4 needs when the artist draws at an in-between frame and the
+    /// stroke lands outside the group's lattice. Cell and vertex indices all shift when a ring is
+    /// added, so an existing embedding must be carried across with `LatticeExpansion.remap`.
+    func expanded(toContain points: [CGPoint], maxRings: Int = 8,
+                  relaxIterations: Int = 2) -> LatticeExpansion {
+        var current = self
+        var rings = 0
+        func containsAll() -> Bool {
+            guard !points.isEmpty else { return true }
+            return current.embedInCurrent(points).allInside()
+        }
+        while rings < max(0, maxRings), !containsAll() {
+            current = current.addingRing(relaxIterations: relaxIterations)
+            rings += 1
+        }
+        return LatticeExpansion(lattice: current, rings: rings, containsPoints: containsAll(),
+                                originalCols: cols, originalRows: rows)
+    }
+
+    /// One ring of cells on every side. Factored out of `expanded(toContain:)` because the loop
+    /// there has to re-test containment after each ring — a deformed lattice gives no closed-form
+    /// answer to "how many rings would reach this point".
+    func addingRing(relaxIterations: Int = 2) -> Lattice {
+        let newCols = cols + 2, newRows = rows + 2
+        let newOrigin = CGPoint(x: restOrigin.x - restCellSize, y: restOrigin.y - restCellSize)
+        var grown = Lattice(cols: newCols, rows: newRows, restOrigin: newOrigin, restCellSize: restCellSize)
+
+        var affines = [(matrix: Matrix2x2, restCentre: CGPoint, currentCentre: CGPoint)?](
+            repeating: nil, count: cellCount)
+        func affine(_ cell: Int) -> (matrix: Matrix2x2, restCentre: CGPoint, currentCentre: CGPoint) {
+            if let cached = affines[cell] { return cached }
+            let computed = cellAffine(cell)
+            affines[cell] = computed
+            return computed
+        }
+
+        for row in 0...newRows {
+            for col in 0...newCols {
+                let index = row * (newCols + 1) + col
+                let oldCol = col - 1, oldRow = row - 1
+                if oldCol >= 0, oldCol <= cols, oldRow >= 0, oldRow <= rows {
+                    grown.vertices[index] = vertices[vertexIndex(col: oldCol, row: oldRow)]
+                    continue
+                }
+                // The cells this vertex would have belonged to, clamped back onto the old grid. A
+                // vertex one step off an edge clamps onto the two cells along that edge; a corner
+                // clamps all four onto the single diagonal cell, which is the degenerate case that
+                // averaging handles without a branch.
+                var seen = Set<Int>()
+                var sumX: CGFloat = 0, sumY: CGFloat = 0, count: CGFloat = 0
+                let rest = grown.restVertex(at: index)
+                for (dc, dr) in [(-1, -1), (0, -1), (-1, 0), (0, 0)] {
+                    let cc = min(max(oldCol + dc, 0), cols - 1)
+                    let cr = min(max(oldRow + dr, 0), rows - 1)
+                    let cell = cr * cols + cc
+                    guard seen.insert(cell).inserted else { continue }
+                    let a = affine(cell)
+                    let p = a.matrix.applied(to: CGPoint(x: rest.x - a.restCentre.x,
+                                                         y: rest.y - a.restCentre.y))
+                    sumX += a.currentCentre.x + p.x
+                    sumY += a.currentCentre.y + p.y
+                    count += 1
+                }
+                grown.vertices[index] = count > 0 ? CGPoint(x: sumX / count, y: sumY / count) : rest
+            }
+        }
+
+        grown.activeCells = Set(activeCells.map { cell -> Int in
+            let c = cell % cols, r = cell / cols
+            return (r + 1) * newCols + (c + 1)
+        })
+
+        return grown.relaxingNewRing(pinning: self, iterations: relaxIterations)
+    }
+
+    /// Smooth the freshly extrapolated ring with the interior held in place.
+    ///
+    /// Averaging two neighbours' affine maps at a corner can leave a slight kink; a couple of ARAP
+    /// iterations take it out. The pinned vertices are written back verbatim at the end rather than
+    /// trusted to a heavy anchor weight, because "expansion never moves existing geometry" is a
+    /// property callers should be able to rely on exactly, not approximately.
+    private func relaxingNewRing(pinning original: Lattice, iterations: Int) -> Lattice {
+        guard iterations > 0 else { return self }
+        let restVertices = (0..<vertexCount).map { restVertex(at: $0) }
+        var pinnedWeights = [CGFloat](repeating: 1e-6, count: vertexCount)
+        for row in 0...original.rows {
+            for col in 0...original.cols {
+                pinnedWeights[(row + 1) * (cols + 1) + (col + 1)] = 1e3
+            }
+        }
+        guard let factorization = DeformFactorization(
+            vertexCount: vertexCount,
+            edges: DeformFactorization.edgeTerms(topology: self, source: restVertices),
+            dataRows: [], anchorWeights: pinnedWeights) else { return self }
+
+        var out = self
+        for _ in 0..<iterations {
+            let transforms = DeformFactorization
+                .triangleTransforms(topology: self, source: restVertices, target: out.vertices)
+                .map { $0.polar.rotation }
+            guard let solved = factorization.solve(transforms: transforms, dataTargets: [],
+                                                   anchors: out.vertices) else { break }
+            out.vertices = solved
+        }
+        for row in 0...original.rows {
+            for col in 0...original.cols {
+                out.vertices[(row + 1) * (cols + 1) + (col + 1)] =
+                    original.vertices[original.vertexIndex(col: col, row: row)]
+            }
+        }
+        return out
+    }
+
     // MARK: - Bilinear arithmetic
 
     /// The bilinear blend of a quad's four corners at `(u, v)`.
@@ -399,6 +557,50 @@ struct Lattice: Equatable {
 
     /// 2D cross product (the z of the 3D one) — the signed area of the parallelogram on `a` and `b`.
     static func cross(_ a: CGPoint, _ b: CGPoint) -> CGFloat { a.x * b.y - a.y * b.x }
+}
+
+/// The result of growing a lattice, and the index translation that growth implies.
+///
+/// Adding a ring shifts every cell and vertex index, so an embedding computed against the original
+/// lattice is meaningless against the expanded one until it is carried across. Returning the
+/// translation alongside the lattice — rather than leaving callers to work out the offset — is what
+/// keeps that from being a silent, hard-to-see class of bug.
+struct LatticeExpansion {
+
+    /// The expanded lattice. Identical to the original wherever the two overlap.
+    let lattice: Lattice
+
+    /// Rings added on each side. Zero when the points were already inside.
+    let rings: Int
+
+    /// Whether the points ended up inside. `false` means `maxRings` ran out first, which a caller
+    /// should treat as "this stroke is too far outside to embed" rather than as a hard failure.
+    let containsPoints: Bool
+
+    let originalCols: Int
+    let originalRows: Int
+
+    var didExpand: Bool { rings > 0 }
+
+    func remapCell(_ cell: Int) -> Int {
+        guard rings > 0, originalCols > 0 else { return cell }
+        let c = cell % originalCols, r = cell / originalCols
+        return (r + rings) * lattice.cols + (c + rings)
+    }
+
+    func remapVertex(_ index: Int) -> Int {
+        guard rings > 0, originalCols > 0 else { return index }
+        let c = index % (originalCols + 1), r = index / (originalCols + 1)
+        return (r + rings) * (lattice.cols + 1) + (c + rings)
+    }
+
+    /// The same points, addressed against the expanded lattice. Bilinear coordinates are unchanged —
+    /// only the cell each point names has moved.
+    func remap(_ embedding: LatticeEmbedding) -> LatticeEmbedding {
+        guard rings > 0 else { return embedding }
+        return LatticeEmbedding(cellIndex: embedding.cellIndex.map(remapCell),
+                                u: embedding.u, v: embedding.v)
+    }
 }
 
 /// Three vertex indices of a lattice, plus the cell they came from.
