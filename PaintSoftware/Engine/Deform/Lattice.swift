@@ -146,6 +146,19 @@ struct Lattice: Equatable {
                 vertices: (0..<vertexCount).map { restVertex(at: $0) }, activeCells: activeCells)
     }
 
+    /// The same lattice in a different configuration. Traps on a vertex-count mismatch, because a
+    /// silently truncated configuration would show up much later as geometry in the wrong place.
+    func withVertices(_ newVertices: [CGPoint]) -> Lattice {
+        Lattice(cols: cols, rows: rows, restOrigin: restOrigin, restCellSize: restCellSize,
+                vertices: newVertices, activeCells: activeCells)
+    }
+
+    /// True when `other` has the same grid — the precondition for interpolating between two
+    /// configurations, or for any operation that indexes one lattice's vertices with another's.
+    func sharesTopology(with other: Lattice) -> Bool {
+        cols == other.cols && rows == other.rows && vertices.count == other.vertices.count
+    }
+
     /// True when no vertex has moved from its rest position by more than `tolerance`.
     func isRest(tolerance: CGFloat = Lattice.epsilon) -> Bool {
         for i in 0..<vertexCount {
