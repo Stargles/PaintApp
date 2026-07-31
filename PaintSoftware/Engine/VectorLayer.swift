@@ -286,6 +286,26 @@ enum VectorElement: Identifiable {
     }
 }
 
+/// How much fidelity a render is asked for.
+///
+/// `.preview` exists because rasterisation, not the interpolation maths, is what makes scrubbing
+/// unusable: a dab is a Core Graphics radial-gradient fill and a stroke is hundreds of them, measured
+/// at ~3.2 ms per stroke ([REFACTOR_BASELINE.md](REFACTOR_BASELINE.md)). A 16 ms frame therefore
+/// affords five strokes, and an interpolated frame renders *two* canvases. Stroking each warped
+/// polyline as one `CGPath` instead is roughly two orders of magnitude cheaper and is what a rough
+/// animation preview should look like anyway — the artist scrubbing a slider is judging motion and
+/// spacing, not brush texture. See `VECTOR_INTERPOLATION_PLAN.md` §8.
+///
+/// What `.preview` gives up, stated plainly: per-dab pressure ramping (one width per stroke, taken at
+/// the mean pressure), grain, scatter and rotation jitter, and the alpha build-up that overlapping
+/// dabs produce for a translucent brush — so a low-opacity stroke previews lighter than it renders.
+/// Shape, position, colour, blend mode and the eraser's punch are all preserved, which is what
+/// judging motion needs.
+enum RenderQuality {
+    case full
+    case preview
+}
+
 /// The vector content of one cel on a `.vector` layer: strokes + placed images, plus one overall
 /// affine transform applied to the whole set. A class (like `RasterLayerTexture`) because it's a
 /// persistent mutable buffer the drawing surface stamps into; renders on demand to a canvas-native
@@ -397,6 +417,15 @@ final class VectorCanvas {
 
     private(set) var version: Int = 0
     private var cachedImage: UIImage?
+
+    /// The `.preview` render, memoized separately from `cachedImage`.
+    ///
+    /// Separately and not in one slot keyed by quality, because the two are wanted at different
+    /// moments and evicting one to make the other is exactly the thrash to avoid: releasing the
+    /// slider renders `.full` and must not discard the `.preview` the next drag will want, and
+    /// starting a drag must not discard the `.full` image the canvas is still displaying. Two slots
+    /// cost one pointer.
+    private var cachedPreviewImage: UIImage?
 
     /// Broad phase for every geometric query against this canvas's strokes, rebuilt lazily — see
     /// `strokeIndex()`. Version-keyed rather than cleared by `invalidate()`, because `version` only
@@ -521,6 +550,7 @@ final class VectorCanvas {
     private func invalidate() {
         version += 1
         cachedImage = nil
+        cachedPreviewImage = nil
     }
 
     /// Invalidates the render cache after a direct mutation of `strokes`/`fills`/`images`/`elements`
@@ -532,12 +562,15 @@ final class VectorCanvas {
         invalidate()
     }
 
-    /// True when a rendered image is currently memoized. What a cache-eviction policy counts, and
-    /// the only way to observe the cache from outside.
+    /// True when a rendered image of **either** quality is currently memoized. What a cache-eviction
+    /// policy counts, and the only way to observe the cache from outside.
+    ///
+    /// Either, because both slots hold a canvas-sized image and the policy is about memory. A cel
+    /// holding only a `.preview` render is just as much of a claim on it.
     var hasCachedImage: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return cachedImage != nil
+        return cachedImage != nil || cachedPreviewImage != nil
     }
 
     /// Frees the memoized render without touching the content.
@@ -554,6 +587,7 @@ final class VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
         cachedImage = nil
+        cachedPreviewImage = nil
     }
 
     // MARK: - Mutation
@@ -1294,19 +1328,26 @@ final class VectorCanvas {
 
     // MARK: - Rendering
 
-    /// Rasterizes all content to a canvas-native `UIImage` (cached by `version`). Strokes are stamped
-    /// via `BrushStamper` (identical to how they'd draw live); images are drawn with their transforms;
-    /// then the whole thing is drawn through the overall `transform`. Always native resolution — the
-    /// displaying image view magnifies it nearest-neighbor, so it stays pixelated when zoomed.
-    func render() -> UIImage {
+    /// Rasterizes all content to a canvas-native `UIImage` (cached by `version`, one slot per
+    /// quality). Strokes are stamped via `BrushStamper` (identical to how they'd draw live); images
+    /// are drawn with their transforms; then the whole thing is drawn through the overall
+    /// `transform`. Always native resolution — the displaying image view magnifies it
+    /// nearest-neighbor, so it stays pixelated when zoomed.
+    ///
+    /// `quality` changes only how a *stroke* is put down — see `RenderQuality`. Everything else about
+    /// the walk, including the isolation rules that make an eraser correct, is identical for both.
+    func render(quality: RenderQuality = .full) -> UIImage {
         lock.lock()
         defer { lock.unlock() }
-        if let cachedImage { return cachedImage }
+        switch quality {
+        case .full: if let cachedImage { return cachedImage }
+        case .preview: if let cachedPreviewImage { return cachedPreviewImage }
+        }
         let bounds = CGRect(origin: .zero, size: size)
         let format = PixelOps.transparentFormat()
 
         // 1. Content in local (untransformed) space.
-        let content = renderLocalContent()
+        let content = renderLocalContent(quality: quality)
 
         // 2. Apply the overall transform (identity → skip the extra pass).
         let final: UIImage
@@ -1318,7 +1359,10 @@ final class VectorCanvas {
                 content.draw(in: bounds)
             }
         }
-        cachedImage = final
+        switch quality {
+        case .full: cachedImage = final
+        case .preview: cachedPreviewImage = final
+        }
         return final
     }
 
@@ -1371,7 +1415,13 @@ final class VectorCanvas {
     /// and images all sorted ahead of the strokes means there is precisely one paint run, spanning
     /// every stroke, and "any stroke non-normal → one layer around all of them" is what rule 2 reduces
     /// to. `insertionIndex(forKind:in:)` is what keeps that sorting true.
-    private func renderLocalContent() -> UIImage {
+    ///
+    /// **`quality` does not reach this method's logic.** The run scan, the transparency-layer
+    /// decision and the index advance below are the same code for both qualities; the only thing that
+    /// branches is `Self.draw(stroke:…)`, which chooses between stamping dabs and stroking a
+    /// polyline. That separation is deliberate — the rules above are what make an eraser correct, and
+    /// a preview that got them wrong would be worse than no preview.
+    private func renderLocalContent(quality: RenderQuality = .full) -> UIImage {
         // `.standard` is not a detail — it is load-bearing, and measuring 5.3 is what found it.
         // `UIGraphicsImageRendererFormat.preferredRange` defaults to `.automatic`, which on a
         // wide-colour iPad backs the context with an extended-range 16-bit-per-component bitmap.
@@ -1409,7 +1459,7 @@ final class VectorCanvas {
                     index += 1
                 case .stroke(let stroke) where stroke.composite == .erase:
                     // Never inside a transparency layer — see rule 3 on `renderLocalContent`.
-                    Self.stamp(stroke: stroke, into: target, isEraser: true)
+                    Self.draw(stroke: stroke, into: cg, target: target, isEraser: true, quality: quality)
                     index += 1
                 case .stroke:
                     // Scan the maximal run of consecutive `.paint` strokes, deciding up front whether
@@ -1423,7 +1473,7 @@ final class VectorCanvas {
                     if needsIsolation { cg.beginTransparencyLayer(auxiliaryInfo: nil) }
                     for i in index..<end {
                         guard let stroke = Self.paintStroke(at: i, in: elements) else { continue }
-                        Self.stamp(stroke: stroke, into: target, isEraser: false)
+                        Self.draw(stroke: stroke, into: cg, target: target, isEraser: false, quality: quality)
                     }
                     if needsIsolation { cg.endTransparencyLayer() }
                     index = end
@@ -1482,6 +1532,63 @@ final class VectorCanvas {
     /// parent's ink restricted rather than a fresh lattice laid down from the cut — see `DabLattice`
     /// for the measurement that makes the distinction load-bearing. A stroke with no lattice takes the
     /// path it always took.
+    /// The one place `quality` branches. `target` is the dab sink for `.full`; `cg` is the context
+    /// `.preview` strokes its polyline into — the same context `target` wraps, so both qualities put
+    /// ink in the same place and under the same transparency layer.
+    private static func draw(stroke: VectorStroke, into cg: CGContext, target: DabTarget,
+                             isEraser: Bool, quality: RenderQuality) {
+        switch quality {
+        case .full: stamp(stroke: stroke, into: target, isEraser: isEraser)
+        case .preview: strokePolyline(stroke: stroke, into: cg, isEraser: isEraser)
+        }
+    }
+
+    /// One stroked `CGPath` in place of the stroke's hundreds of dabs — the `.preview` tier.
+    ///
+    /// Uses the stroke's **own** samples even for a piece carrying a `DabLattice`. That lattice
+    /// exists to reproduce the parent's dab *phase*, and there are no dabs here; the piece's samples
+    /// are its geometry and its geometry is all a polyline needs.
+    ///
+    /// Width and opacity are taken once, at the mean pressure, rather than ramped per dab. A varying
+    /// width would need one stroked path per segment, which gives most of the cost back for detail
+    /// nobody is judging mid-scrub.
+    private static func strokePolyline(stroke: VectorStroke, into cg: CGContext, isEraser: Bool) {
+        guard let first = stroke.samples.first else { return }
+        let meanPressure = Double(stroke.samples.reduce(0) { $0 + $1.pressure })
+            / Double(stroke.samples.count)
+        let width = max(stroke.size * CGFloat(stroke.brush.dynamics.sizeFraction(forPressure: meanPressure)), 0.5)
+
+        let path = CGMutablePath()
+        path.move(to: first.point)
+        for sample in stroke.samples.dropFirst() {
+            path.addLine(to: sample.point)
+        }
+        // A one-sample stroke is a dot: a zero-length path under a round cap draws the cap, which is
+        // the same disc a single dab would have left.
+        if stroke.samples.count == 1 {
+            path.addLine(to: first.point)
+        }
+
+        cg.saveGState()
+        cg.setLineWidth(width)
+        cg.setLineCap(.round)
+        cg.setLineJoin(.round)
+        if isEraser {
+            // `.destinationOut` with an opaque stroke colour punches at full coverage, matching the
+            // eraser dab path where `color` is ignored and only the stamp's alpha counts.
+            cg.setBlendMode(.destinationOut)
+            cg.setStrokeColor(UIColor.black.cgColor)
+        } else {
+            cg.setBlendMode(stroke.brush.blendMode.cgBlendMode)
+            cg.setStrokeColor(stroke.uiColor.cgColor)
+            cg.setAlpha(CGFloat(stroke.opacity
+                                * stroke.brush.dynamics.opacityFraction(forPressure: meanPressure)))
+        }
+        cg.addPath(path)
+        cg.strokePath()
+        cg.restoreGState()
+    }
+
     private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
         // A lattice without a usable range would otherwise stamp the *parent* whole, which is worse
         // than either option — so an unreadable one falls back to the stroke's own geometry.

@@ -78,6 +78,8 @@
 		DEC0DE2F0000000000000004 /* PaintSoftware/Models/MotionGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE2F0000000000000003 /* PaintSoftware/Models/MotionGroup.swift */; };
 		DEC0DE2F0000000000000006 /* PaintSoftware/Models/GuideStroke.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE2F0000000000000005 /* PaintSoftware/Models/GuideStroke.swift */; };
 		DEC0DE2F0000000000000008 /* InterpolationModelLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE2F0000000000000007 /* InterpolationModelLogicTests.swift */; };
+		DEC0DE3F0000000000000002 /* PaintSoftware/Engine/InterpolationEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE3F0000000000000001 /* PaintSoftware/Engine/InterpolationEvaluator.swift */; };
+		DEC0DE3F0000000000000004 /* InterpolationRenderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE3F0000000000000003 /* InterpolationRenderLogicTests.swift */; };
 		DEC0DE2F000000000000000A /* PaintSoftware/Models/CanvasManager+Interpolation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE2F0000000000000009 /* PaintSoftware/Models/CanvasManager+Interpolation.swift */; };
 		DEC0DE00000000000000004C /* PaintSoftware/Engine/Deform/DeformFactorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000004B /* PaintSoftware/Engine/Deform/DeformFactorization.swift */; };
 		DEC0DE00000000000000004E /* PaintSoftware/Engine/Deform/ARAPInterpolation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000004D /* PaintSoftware/Engine/Deform/ARAPInterpolation.swift */; };
@@ -170,6 +172,8 @@
 		DEC0DE2F0000000000000003 /* PaintSoftware/Models/MotionGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/MotionGroup.swift; sourceTree = "<group>"; };
 		DEC0DE2F0000000000000005 /* PaintSoftware/Models/GuideStroke.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/GuideStroke.swift; sourceTree = "<group>"; };
 		DEC0DE2F0000000000000007 /* InterpolationModelLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolationModelLogicTests.swift; sourceTree = "<group>"; };
+		DEC0DE3F0000000000000001 /* PaintSoftware/Engine/InterpolationEvaluator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/InterpolationEvaluator.swift; sourceTree = "<group>"; };
+		DEC0DE3F0000000000000003 /* InterpolationRenderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolationRenderLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE2F0000000000000009 /* PaintSoftware/Models/CanvasManager+Interpolation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Interpolation.swift"; sourceTree = "<group>"; };
 		DEC0DE00000000000000004B /* PaintSoftware/Engine/Deform/DeformFactorization.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/DeformFactorization.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000004D /* PaintSoftware/Engine/Deform/ARAPInterpolation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/ARAPInterpolation.swift; sourceTree = "<group>"; };
@@ -254,6 +258,7 @@
 				DEC0DE000000000000000049 /* LatticeLogicTests.swift */,
 				DEC0DE00000000000000004F /* ARAPLogicTests.swift */,
 				DEC0DE2F0000000000000007 /* InterpolationModelLogicTests.swift */,
+				DEC0DE3F0000000000000003 /* InterpolationRenderLogicTests.swift */,
 				7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */,
 				7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */,
 				7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */,
@@ -327,6 +332,7 @@
 				DEC0DE2F0000000000000003 /* PaintSoftware/Models/MotionGroup.swift */,
 				DEC0DE2F0000000000000005 /* PaintSoftware/Models/GuideStroke.swift */,
 				DEC0DE2F0000000000000009 /* PaintSoftware/Models/CanvasManager+Interpolation.swift */,
+				DEC0DE3F0000000000000001 /* PaintSoftware/Engine/InterpolationEvaluator.swift */,
 			);
 			name = "App sources shared with PaintSoftwareUITests";
 			sourceTree = "<group>";
@@ -512,6 +518,8 @@
 				DEC0DE2F0000000000000006 /* PaintSoftware/Models/GuideStroke.swift in Sources */,
 				DEC0DE2F000000000000000A /* PaintSoftware/Models/CanvasManager+Interpolation.swift in Sources */,
 				DEC0DE2F0000000000000008 /* InterpolationModelLogicTests.swift in Sources */,
+				DEC0DE3F0000000000000002 /* PaintSoftware/Engine/InterpolationEvaluator.swift in Sources */,
+				DEC0DE3F0000000000000004 /* InterpolationRenderLogicTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
