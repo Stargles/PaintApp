@@ -199,6 +199,7 @@ struct CanvasView: UIViewRepresentable {
         weak var hostView: CanvasHostView?
         weak var containerView: UIView?
         weak var onionSkinView: UIImageView?
+        var onionSkinSource: OnionSkinSource = PreviousCelOnionSkinSource()
         weak var paperView: UIView?
         /// The four constraints pinning the white paper to the container, whose constants are the
         /// `canvasPadding` inset on each side (see `updatePaper`).
@@ -728,16 +729,15 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func updateOnionSkin() {
-            guard let onionSkinView, canvasManager.canvasSize != nil else { return }
+            guard let onionSkinView else { return }
             guard canvasManager.isOnionSkinEnabled,
-                  canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
-                  let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame - 1) else {
+                  let frame = onionSkinSource.frames(for: canvasManager).first else {
                 onionSkinView.isHidden = true
                 return
             }
 
-            onionSkinView.image = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].raster.renderToUIImage()
-            onionSkinView.alpha = CGFloat(canvasManager.onionSkinOpacity)
+            onionSkinView.image = frame.image
+            onionSkinView.alpha = frame.opacity
             onionSkinView.isHidden = false
         }
 
