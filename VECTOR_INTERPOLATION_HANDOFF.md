@@ -40,7 +40,7 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Phase 1 — done.** Phase 2 (data model, persistence, undo) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `5e5785e` — `interp(phase 1): motion-residual grouping`. Fast suite green (134 tests). |
+| **Last known-green commit** | `320b68d`. Fast suite green (134 tests); **full suite run at the phase boundary: 405 tests, 404 passed, 0 failed, 1 skipped** (`FillUITests.testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, a pre-existing `XCTSkip` pending `BUGS.md` — not related to this work). |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
