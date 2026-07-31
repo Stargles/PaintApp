@@ -578,7 +578,9 @@ What Phase 3 decided that Phase 4 inherits:
   clean full-suite runs, both first time — 433/433 before the phase and 450/450 after it (§5). `t = 0`/`t = 1` reproduce their keyframes at zero pixel
   tolerance through the general path. Built thickness cross-fade but defaulted it off, with the
   reason recorded, rather than shipping a default that thins every mid-frame (§5, §3.5). No
-  subagents.
+  subagents. Also compacted §5 (eight facts that duplicated a code comment became a pointer table)
+  and, on the product owner's ask, deleted `VECTOR_ERASER_HANDOFF.md` after moving its unstarted
+  backlog into `VECTOR_ERASER_PLAN.md` §12 — the plan stays, it is cited from ~20 source files.
 
 ---
 
