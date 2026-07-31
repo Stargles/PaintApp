@@ -38,10 +38,10 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 0 — not started.** Design is complete; implementation has not begun. |
+| **Current phase** | **Phase 0 — done.** Phase 1 (lattice/ARAP engine) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | Docs-only. No feature code exists, so the tree is trivially green. |
-| **Tree state** | Clean. All three design docs written and committed. |
+| **Last known-green commit** | `3ecd1e2` — `interp(phase 0): fix vector onion-skin blank bug, add OnionSkinSource seam`. Fast suite green. |
+| **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
 ### What is done
@@ -55,11 +55,18 @@ need. Read what §1 says to read; consult the rest on demand.
 - **This file** — the session protocol.
 - Environment verified end to end: Xcode 26.6, dedicated simulator `interp-ipad` created, baseline
   pure-logic suite green (exit 0), Accelerate sparse solver confirmed present on iOS (§5).
+- **Phase 0 — Onion-skin seam and the vector onion-skin bug.** `CanvasView`'s onion skin now routes
+  through `PixelOps.rasterize(cel:canvasSize:)` instead of reading `cel.raster` directly, so a
+  `.vector` cel onion-skins correctly instead of blank. Added `OnionSkinSource`/`OnionSkinFrame`
+  ([OnionSkinSource.swift](PaintSoftware/Views/OnionSkinSource.swift)) — the coordinator now asks a
+  pluggable source what to show; `PreviousCelOnionSkinSource` reproduces today's "previous cel on the
+  current layer" behaviour. New `OnionSkinLogicTests` (3 tests, all green). Definition of done met.
 
 ### What is next
 
-**Phase 0** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — the vector onion-skin bug fix plus the
-onion-skin seam. Small, self-contained, and a good way to warm up on the codebase.
+**Phase 1** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — the lattice + ARAP deformation engine, pure
+logic, no knowledge of keyframes/cels/interpolation. The project's main technical risk; escalate to
+Opus 5 per §3.4 if the numerics get hard.
 
 ### History note
 
@@ -222,6 +229,25 @@ Pre-existing constraints inherited from the design phase are in `PLAN.md` §2 ("
   `xcrun simctl create "interp-ipad" "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB"`
   if it goes missing. Note the device-type identifier has a RAM suffix (`-12GB`); the bare
   `iPad-Pro-13-inch-M5` is rejected.
+- **The project file has no file-system-synchronized group for the app target's Sources phase** — that
+  phase (`3FC5E351300DBDA400401D35`) is empty in `project.pbxproj`; Xcode auto-includes anything under
+  `PaintSoftware/` by folder, so a new app source file needs no pbxproj edit. The **UITests target**
+  (`8F45156FC43DA86204566A6D`) is still old-style and explicit: a new file that must compile into
+  `PaintSoftwareUITests` (a pure-logic test, or an app source a logic test depends on) needs a
+  `PBXFileReference` + `PBXBuildFile` pair added by hand, plus an entry in that Sources build phase's
+  `files` list — see how `OnionSkinSource.swift`/`OnionSkinLogicTests.swift` were added for the
+  pattern. `plutil -lint project.pbxproj` after editing it catches a malformed edit before you waste a
+  build on it.
+- **`PixelOps.rasterize(cel:canvasSize:)` composites more than the old onion-skin code showed for a
+  raster layer.** The old code read `cel.raster.renderToUIImage()` only — live strokes, nothing else.
+  `rasterize(cel:)` also draws `fillImage` and `bakedImage` underneath. For a plain cel (no fill/bake
+  ops applied) these are nil and it's a no-op, so it's identical in the common case, but a raster cel
+  that has had select-move/fill/clear applied will now onion-skin *more* content than before — a
+  strict superset, not a regression, but worth knowing about since `IMPLEMENTATION.md`'s Phase 0
+  definition of done says "behaviour-identical to today for raster layers" and this is not quite that
+  in the fill/bake case. Work item 1 explicitly names `PixelOps.rasterize(cel:)` as the mechanism, so
+  this was taken as the intended tradeoff rather than a bug — flagging per §3.5 in case the product
+  owner disagrees.
 
 ---
 
@@ -239,6 +265,10 @@ Pre-existing constraints inherited from the design phase are in `PLAN.md` §2 ("
   agent reached structured output). Wrote `IMPLEMENTATION.md` directly — eight phases with acceptance
   criteria, feature definition of done, and the deferred list. Added the subagent budget policy (§3.4)
   after the previous session's overrun. No feature code.
+- **Session 3 (Phase 0) — 2026-07-31:** Fixed the vector onion-skin blank bug and added the
+  `OnionSkinSource` seam (commit `3ecd1e2`). Added `OnionSkinLogicTests` (3 tests, green). Learned the
+  UITests target's pbxproj Sources phase is still hand-maintained (§5). Phase 0 definition of done met;
+  stopped there per §3.3 rather than starting Phase 1.
 
 ---
 
