@@ -373,6 +373,155 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         XCTAssertEqual(pasteManager.layers[0].cels.first { $0.startFrame == 4 }?.frameCount, 9)
     }
 
+    // MARK: - Edge resizing pushes into the neighbour
+
+    /// `resizeCelRightEdge` used to hard-clamp at the next block's `startFrame`. It now pushes: the
+    /// neighbour gives up frames from its leading edge instead of stopping the drag dead. These pin
+    /// the push, its one-frame floor, and the "already one frame long is an immovable wall" case,
+    /// none of which had coverage.
+    func testDraggingTheRightEdgeIntoTheNextCelPushesItRatherThanStopping() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 5)])
+
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 5)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 5])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [5, 3],
+                       "The neighbour keeps its end frame (8) and gives up its first two frames")
+        assertNoOverlappingCels(manager)
+    }
+
+    func testDraggingTheRightEdgeStopsOneFrameShortOfConsumingTheNeighbour() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 5)])
+
+        // The neighbour ends at 8; asking to run right through it must leave it one frame long.
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 40)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 7])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [7, 1],
+                       "A block can't be squeezed out of existence — its floor is one frame")
+        assertNoOverlappingCels(manager)
+    }
+
+    func testANeighbourAlreadyOneFrameLongIsAnImmovableWall() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 1)])
+
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 9)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 3])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [3, 1],
+                       "There is nothing left to give, so the drag can't advance at all")
+        assertNoOverlappingCels(manager)
+    }
+
+    /// The push is an edit to the neighbour, not a temporary displacement: pulling the dragged block
+    /// back afterwards opens a gap rather than restoring the neighbour.
+    func testPullingTheRightEdgeBackAfterAPushLeavesAGapRatherThanRestoringTheNeighbour() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 5)])
+
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 6)
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 3)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 6])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [3, 2],
+                       "Frames 3..<6 are now empty; the neighbour stays where the push put it")
+        assertNoOverlappingCels(manager)
+    }
+
+    func testDraggingTheRightEdgeWithNoNeighbourIsUnboundedAndGrowsTheScene() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 30)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [30])
+        XCTAssertEqual(manager.sceneFrameCount, 30)
+    }
+
+    func testTheDraggedBlockItselfCannotBeShrunkBelowOneFrame() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 2, length: 4)])
+
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 0)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [2])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [1])
+    }
+
+    /// The mirror image on the left edge: dragging back into the previous block shrinks it from its
+    /// *trailing* edge, floored at one frame.
+    func testDraggingTheLeftEdgeIntoThePreviousCelPushesItRatherThanStopping() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 5), (start: 5, length: 3)])
+
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 3)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 3])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [3, 5],
+                       "The previous block keeps its start frame and loses its last two frames")
+        assertNoOverlappingCels(manager)
+    }
+
+    func testDraggingTheLeftEdgeStopsOneFrameShortOfConsumingThePreviousCel() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 2, length: 5), (start: 7, length: 3)])
+
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 0)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [2, 3])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [1, 7],
+                       "The previous block starts at 2 and keeps one frame, so the floor is 3")
+        assertNoOverlappingCels(manager)
+    }
+
+    func testAPreviousCelAlreadyOneFrameLongIsAnImmovableWall() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 4, length: 1), (start: 5, length: 3)])
+
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 0)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [4, 5])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [1, 3])
+        assertNoOverlappingCels(manager)
+    }
+
+    func testDraggingTheLeftEdgeWithNoPreviousCelIsFlooredAtFrameZero() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 4, length: 3)])
+
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 0, newStartFrame: -5)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [7], "The right edge is held fixed at 7")
+    }
+
+    func testDraggingTheLeftEdgePastItsOwnRightEdgeLeavesOneFrame() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 5)])
+
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 0, newStartFrame: 99)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [4])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [1])
+    }
+
+    /// `extendCelToEnd` deliberately does *not* inherit the push — a menu item that promises "fill
+    /// the space after this" must stop at the next block, not eat into it.
+    func testExtendCelToEndStopsAtTheNeighbourInsteadOfPushingIt() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 2), (start: 6, length: 3)])
+
+        manager.extendCelToEnd(layerIndex: 0, celIndex: 0)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 6])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [6, 3],
+                       "Fills 0..<6 exactly and leaves the neighbour alone")
+        assertNoOverlappingCels(manager)
+    }
+
     // MARK: - Undo bracketing
 
     /// All three creators run inside `withStructureUndo`, so each is exactly one undo step. Pinned

@@ -27,6 +27,7 @@
 		7C4A9E1B0D5F000000000302 /* VectorEraserUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */; };
 		DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */; };
 		DEC0DE000000000000000004 /* CelCRUDCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */; };
+		DEC0DE000000000000000061 /* PlaybackBoundsCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000060 /* PlaybackBoundsCharacterizationTests.swift */; };
 		DEC0DE0000000000000000FE /* VectorShapeAndRecoveryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000FD /* VectorShapeAndRecoveryUITests.swift */; };
 		DEC0DE0000000000000000FC /* ToolsAndSelectionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */; };
 		DEC0DE0000000000000000FA /* FillUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F9 /* FillUITests.swift */; };
@@ -104,6 +105,7 @@
 		7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserUITests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasManagerTestSupport.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelCRUDCharacterizationTests.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000060 /* PlaybackBoundsCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlaybackBoundsCharacterizationTests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000FD /* VectorShapeAndRecoveryUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorShapeAndRecoveryUITests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolsAndSelectionUITests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000F9 /* FillUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FillUITests.swift; sourceTree = "<group>"; };
@@ -225,6 +227,7 @@
 				7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */,
 				DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */,
 				DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */,
+				DEC0DE000000000000000060 /* PlaybackBoundsCharacterizationTests.swift */,
 				DEC0DE0000000000000000FD /* VectorShapeAndRecoveryUITests.swift */,
 				DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */,
 				DEC0DE0000000000000000F9 /* FillUITests.swift */,
@@ -410,6 +413,7 @@
 				C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */,
 				DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */,
 				DEC0DE000000000000000004 /* CelCRUDCharacterizationTests.swift in Sources */,
+				DEC0DE000000000000000061 /* PlaybackBoundsCharacterizationTests.swift in Sources */,
 				DEC0DE0000000000000000FE /* VectorShapeAndRecoveryUITests.swift in Sources */,
 				DEC0DE0000000000000000FC /* ToolsAndSelectionUITests.swift in Sources */,
 				DEC0DE0000000000000000FA /* FillUITests.swift in Sources */,
