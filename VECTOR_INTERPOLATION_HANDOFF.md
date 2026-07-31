@@ -40,7 +40,7 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Phase 2 — done.** Phase 3 (evaluation, isolated compositing, preview tier) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `49906ea`. Fast suite green; **every pure-logic class green (347 tests)**. Full suite running at the phase boundary — result not yet recorded. |
+| **Last known-green commit** | `3c2d119`. Fast suite green; **every pure-logic class green (347 tests)**. Full suite at the phase boundary: **433 tests, 431 passed, 1 skipped, 1 failed** — see the flake note below. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -95,6 +95,14 @@ need. Read what §1 says to read; consult the rest on demand.
     `guideStrokes` on `CanvasManager` and in `StructureSnapshot`; manifest + store; `CodableColor`
     gained `Equatable`; `VectorCanvas.dropCachedImage()` / `hasCachedImage`.
   - Tests: `InterpolationModelLogicTests` (28).
+  - **Full-suite flake, not a regression.** The phase-boundary run failed
+    `TimelineAndUndoUITests.testDraggingRightEdgeHandleShrinksCel` on a bare `XCTAssertTrue` — which
+    in that test is either `launchIntoEditor` or the handle's `waitForExistence`, i.e. the app never
+    got far enough to exercise a resize at all. The whole class then passed in isolation, including
+    `testCelResizeDragUndoesInOneStep`, which is the test most exposed to this phase's
+    `StructureSnapshot` change. Read as a launch flake under four parallel simulator clones. A
+    confirming re-run was started and its result is not recorded here — **if you need certainty,
+    re-run the full suite before building on this** (§4).
 
 ### What is next
 
@@ -478,6 +486,7 @@ What Phase 2 decided that Phase 3 inherits:
   §5.7 left open (rest configuration never written; no indices persisted at all, which is what makes
   it expansion-proof). Found that `withStructureUndo` cannot cover a group retag and wrote the
   bracket that does — the one place `IMPLEMENTATION.md`'s undo mapping is wrong (§5). No subagents.
+  Commits `49906ea`, `49ef0cb`, `3c2d119`.
 
 ---
 
