@@ -48,9 +48,14 @@ extension CanvasManager {
         let layersBefore = layers
         let elementsBefore = canvases.map { $0.elements }
 
-        structureUndoDepth += 1
-        body()
-        structureUndoDepth -= 1
+        // Bracketed with `defer` for the same reason `withStructureUndo` does it: `body` is where a
+        // future caller will put something that can exit early, and a depth that never comes back
+        // down silently disables undo for everything after it.
+        do {
+            structureUndoDepth += 1
+            defer { structureUndoDepth -= 1 }
+            body()
+        }
 
         let groupsAfter = motionGroups
         let guidesAfter = guideStrokes
