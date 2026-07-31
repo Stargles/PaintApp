@@ -40,7 +40,7 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Phase 2 — done.** Phase 3 (evaluation, isolated compositing, preview tier) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `5d01eb3`. **Every pure-logic class green — 346 tests, `xcodebuild` exit 0.** That tier is what exercises every Phase 2 change. The XCUITest tier could **not** be run to completion: the machine's CoreSimulator wedged (§5) — diagnosed, not a code fault, but it means the phase-boundary full run is unverified. **Re-run the full suite first thing.** |
+| **Last known-green commit** | `5d01eb3`. **Every pure-logic class green — 346 tests, `xcodebuild` exit 0**, deterministically and repeatedly; that tier exercises every line Phase 2 changed. Best full-suite run: **428 passed, 1 failed, 0 harness errors**, and that one failure passes on re-run. The XCUITest tier is **flaky on this machine right now** — see below — not regressed. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -95,17 +95,31 @@ need. Read what §1 says to read; consult the rest on demand.
     `guideStrokes` on `CanvasManager` and in `StructureSnapshot`; manifest + store; `CodableColor`
     gained `Equatable`; `VectorCanvas.dropCachedImage()` / `hasCachedImage`.
   - Tests: `InterpolationModelLogicTests` (28).
-  - **The XCUITest tier is unverified for this phase, and that is an environment fault, not a
-    known-good result.** Four full-suite attempts: the first failed one test, the second failed eight
-    *different* ones, and the last two hung outright before running anything. Every failure was a
-    bare `XCTAssertTrue(launchIntoEditor(app))`. The cause is in §5 — CoreSimulator could not launch
-    the xctrunner harness — and erasing/rebooting the device bought only one more run each time.
+  - **The XCUITest tier is flaky on this machine, and it cost this session hours.** Five attempts,
+    and the decisive fact is that **no test ever failed twice**:
 
-    What *is* verified: the whole pure-logic tier, 346 tests, exit 0, on the same machine after the
-    reset. That tier covers every line this phase changed; the XCUITest tier exercises app paths this
-    phase leaves alone. So the risk is low but **not** discharged. **Re-run the full suite before
-    building on Phase 2**, and if it wedges again, reset the device per §5 before concluding
-    anything about the code.
+    | Run | Failed |
+    |---|---|
+    | full #1 | `TimelineAndUndoUITests.testDraggingRightEdgeHandleShrinksCel` |
+    | full #2 | 8 different tests in `ToolsAndSelectionUITests` / `FillUITests` |
+    | full #3, #4 | hung before running anything (harness never launched) |
+    | full #5 | `LayerUITests.testViewSelectorDropdownAddsSelectsAndDeletesViews` |
+    | `LayerUITests` alone | the two `testMergeDown…` tests — *and #5's failure passed* |
+
+    Every one of them passed on re-run. Runs #1–#4 were the CoreSimulator harness fault above
+    (`failed to launch …xctrunner`); #5 had **no** harness error, so that tier is simply flaky here
+    on synthetic gestures too.
+
+    The one failure that looked behavioural rather than gestural —
+    `testMergeDownFlattensTwoLayersIntoOne`, "the merged artwork should still be on the canvas" — is
+    on two **raster** layers, where this phase's code provably does nothing: eviction early-returns
+    at zero vector cels, and the two fields added to `StructureSnapshot` are empty arrays. It passed
+    on re-run.
+
+    So: not a regression, but **not a clean full-suite run either**. Best result was 428 passed / 1
+    failed / 0 harness errors. If you need a green full suite for a phase boundary, budget for
+    re-running the stragglers individually, and reset the device per §5 at the first
+    `failed to launch`.
 
 ### What is next
 
