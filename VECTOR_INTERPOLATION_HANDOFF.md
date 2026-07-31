@@ -38,11 +38,16 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 2 — done.** Phase 3 (evaluation, isolated compositing, preview tier) not started. |
+| **Current phase** | **Phase 3 — done.** Phase 4 (interpolate mode UI, references, slider, Generate) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `5d01eb3`. **Every pure-logic class green — 346 tests, `xcodebuild` exit 0**, deterministically and repeatedly; that tier exercises every line Phase 2 changed. Best full-suite run: **428 passed, 1 failed, 0 harness errors**, and that one failure passes on re-run. The XCUITest tier is **flaky on this machine right now** — see below — not regressed. |
+| **Last known-green commit** | `f6986df`. **Full suite green: 433 tests, 432 passed, 0 failed, 1 skipped, `xcodebuild` exit 0** (the skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`). Wide pure-logic tier: 364 tests, 0 failures. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
+
+**The XCUITest flakiness that cost Session 5 hours was the simulator, and erasing it fixed it.**
+Session 6 opened by resetting `interp-ipad` (`simctl shutdown` + `erase`, §5) and then got a clean
+433-test run first time — better than Session 5's best of 428 passed / 1 failed after five attempts.
+Do the reset *before* the phase-boundary run, not after it starts failing.
 
 ### What is done
 
@@ -95,40 +100,30 @@ need. Read what §1 says to read; consult the rest on demand.
     `guideStrokes` on `CanvasManager` and in `StructureSnapshot`; manifest + store; `CodableColor`
     gained `Equatable`; `VectorCanvas.dropCachedImage()` / `hasCachedImage`.
   - Tests: `InterpolationModelLogicTests` (28).
-  - **The XCUITest tier is flaky on this machine, and it cost this session hours.** Five attempts,
-    and the decisive fact is that **no test ever failed twice**:
+  - Five full-suite attempts never produced a clean run, with a *different* set of tests failing each
+    time and none failing twice. Session 6 established this was the simulator, not the code: one
+    `simctl erase` and the same tree ran 433/433. See §2's note and §5's `failed to launch` entry.
 
-    | Run | Failed |
-    |---|---|
-    | full #1 | `TimelineAndUndoUITests.testDraggingRightEdgeHandleShrinksCel` |
-    | full #2 | 8 different tests in `ToolsAndSelectionUITests` / `FillUITests` |
-    | full #3, #4 | hung before running anything (harness never launched) |
-    | full #5 | `LayerUITests.testViewSelectorDropdownAddsSelectsAndDeletesViews` |
-    | `LayerUITests` alone | the two `testMergeDown…` tests — *and #5's failure passed* |
-
-    Every one of them passed on re-run. Runs #1–#4 were the CoreSimulator harness fault above
-    (`failed to launch …xctrunner`); #5 had **no** harness error, so that tier is simply flaky here
-    on synthetic gestures too.
-
-    The one failure that looked behavioural rather than gestural —
-    `testMergeDownFlattensTwoLayersIntoOne`, "the merged artwork should still be on the canvas" — is
-    on two **raster** layers, where this phase's code provably does nothing: eviction early-returns
-    at zero vector cels, and the two fields added to `StructureSnapshot` are empty arrays. It passed
-    on re-run.
-
-    So: not a regression, but **not a clean full-suite run either**. Best result was 428 passed / 1
-    failed / 0 harness errors. If you need a green full suite for a phase boundary, budget for
-    re-running the stragglers individually, and reset the device per §5 at the first
-    `failed to launch`.
+- **Phase 3 — evaluation, isolated compositing and the preview tier.** All five work items; the
+  feature is still inert. One commit, `f6986df`.
+  - New: [InterpolationEvaluator.swift](PaintSoftware/Engine/InterpolationEvaluator.swift) —
+    `evaluate(recipe:at:content:)` → forward/backward/localEdit display lists plus the two blend
+    weights, and `composite(_:size:quality:)` / `render(recipe:at:size:…)` on top of it.
+  - Changed: `RenderQuality`, `VectorCanvas.render(quality:)` and a second cache slot; the polyline
+    preview drawing helper. **`renderLocalContent`'s element-walking logic is untouched** — only the
+    per-stroke draw call branches on quality.
+  - Tests: `InterpolationRenderLogicTests` (17). `t = 0` reproduces keyframe A and `t = 1` reproduces
+    keyframe C at **zero** pixel tolerance, through the general path.
 
 ### What is next
 
-**Phase 3** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — evaluation, isolated compositing and the
-preview tier, headless. This is where the recipe becomes pixels.
+**Phase 4** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — interpolate mode UI, references, the `t`
+slider and Generate. The first phase where any of this is reachable from the app, and the first
+usable milestone.
 
-**Read §5.8 before starting** — what Phase 2 decided that Phase 3 inherits, in particular that no
-embeddings are persisted (so the evaluator derives them) and that `.reproject` is recorded on the
-recipe rather than inferred.
+**Read §5.9 before starting** — what Phase 3 decided that Phase 4 inherits, in particular that the
+evaluator needs a `ContentProvider` and never touches `CanvasManager` itself, and that the two
+render qualities are what the slider drag/release should switch between.
 
 ### History note
 
@@ -237,17 +232,17 @@ than a shared one, so concurrent sessions do not contend.
 ### Fast run — pure logic only (~1–2 min). Use this constantly.
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests
 ```
 
-162 tests, all green as of `49906ea`. Add your own logic-test class to that filter as you create it.
+179 tests, all green as of `f6986df`. Add your own logic-test class to that filter as you create it.
 
-**Wider, still fast (~3 min).** Every pure-logic class in the suite — 347 tests as of `49906ea`.
-Worth running before a commit that touches persistence or `CanvasManager`, since the fast filter
-above misses `ProjectSaveLogicTests`, the eraser classes and the characterisation tests:
+**Wider, still fast (~4 min).** Every pure-logic class in the suite — 364 tests as of `f6986df`.
+Worth running before a commit that touches persistence, rendering or `CanvasManager`, since the fast
+filter above misses `ProjectSaveLogicTests`, the eraser classes and the characterisation tests:
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/VectorEraserHybridLogicTests -only-testing:PaintSoftwareUITests/RasterVectorParityLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/BackupManagerLogicTests -only-testing:PaintSoftwareUITests/CelCRUDCharacterizationTests -only-testing:PaintSoftwareUITests/LayerTreeCharacterizationTests -only-testing:PaintSoftwareUITests/ViewPresetCharacterizationTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/VectorEraserHybridLogicTests -only-testing:PaintSoftwareUITests/RasterVectorParityLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/BackupManagerLogicTests -only-testing:PaintSoftwareUITests/CelCRUDCharacterizationTests -only-testing:PaintSoftwareUITests/LayerTreeCharacterizationTests -only-testing:PaintSoftwareUITests/ViewPresetCharacterizationTests
 ```
 
 ### Reading a failure
@@ -495,6 +490,74 @@ What Phase 2 decided that Phase 3 inherits:
   `sampleVisibilityThresholds`. A sample with no entry uses the whole-stroke value; nil means always
   visible. Erasers carry these like any other stroke, which is what §7.1 needs.
 
+### From Phase 3
+
+- **The simulator was the flakiness, and `simctl erase` is the fix — do it first, not last.** Session
+  5 spent hours on five full-suite runs that failed differently every time. Session 6 shut down and
+  erased `interp-ipad` before running anything and got 433 tests / 0 failures on the first attempt,
+  on a tree that differed from Session 5's only in docs. Reset the device at the *start* of any
+  phase-boundary full run.
+
+- **`xcodebuild` printed no per-test output at all on the clean run.** No `Test Case '…' passed`
+  lines, no `Executed N tests` summary — just `** TEST SUCCEEDED **`. Counting `Test Case` in the log
+  to watch progress therefore reports zero for the entire run and looks like a hang. The result
+  bundle is the source of truth for counts as well as for messages:
+
+  ```bash
+  B=$(ls -dt /tmp/interp-dd/Logs/Test/*.xcresult | head -1)
+  xcrun xcresulttool get test-results summary --path "$B" --format json
+  ```
+  That gives `totalTestCount` / `passedTests` / `failedTests` / `skippedTests` directly. **One test is
+  skipped by design** — `testFillToolBridgesOpenContourGapWhenGapClosingEnabled` — so 432/433 with one
+  skip *is* a clean run, not a near miss.
+
+- **Content that exists at one keyframe and not the other is invisible at the far endpoint, and that
+  is the endpoint invariant, not a bug.** Three of this phase's tests were written asserting that a
+  fill or a stroke present only in A was still visible at `t = 1`. It is not: at `t = 1` the frame *is*
+  keyframe C, so the forward set's weight is 0. Read such content at `t = 0.9`, or assert on the
+  evaluation rather than on pixels. Expect to trip over this once per phase that writes render tests.
+
+- **Cross-fading two coincident opaque drawings gives 75% alpha at the midpoint, not 100%** —
+  `½ + ½·½`. Mid-frames are visibly washed out relative to either keyframe. This is the known cost of
+  engine C and precisely what engine D (correspondence) exists to fix (`PLAN.md` §3); it is not a
+  compositing bug and no test should assert 255 at an interior `t`.
+
+- **Thickness cross-fade is built but off by default, and the reason is a real gap.**
+  `IMPLEMENTATION.md` Phase 3 item 1 asks for it and `PLAN.md` §7.1 wants fading content to *thin*
+  rather than ghost. The mechanism is `InterpolationEvaluator.Options.thicknessFade` and it works.
+  Defaulting it on would be wrong: thinning is right for a stroke with no counterpart at the other
+  keyframe, and without correspondence *every* stroke looks like that, so both sets would thin and
+  every mid-frame would be thin as well as washed out. Turning it on is one line the moment a matcher
+  can identify unmatched strokes. Flagged per §3.5 — the product owner may want it on anyway.
+
+- **`withStructureUndo` is still the trap §5's Phase 2 entry describes, and Phase 4 will meet it.**
+  The `t` slider is genuinely fine on `beginStructureGesture`/`commitStructureGesture` because `t`
+  lives in the `Cel` struct. Anything that writes *strokes* — Generate committing an in-between,
+  Reproject re-posing one — needs `withInterpolationUndo(name:touching:)`.
+
+### 5.9 For Phase 4's UI
+
+What Phase 3 decided that Phase 4 inherits:
+
+- **The evaluator never touches `CanvasManager`.** It takes a
+  `ContentProvider = (CelRef) -> [VectorElement]` and asks for each reference's display list. Phase 4
+  supplies the closure that resolves a `CelRef` against the layer tree. Keep it that way — it is what
+  lets every render test run without a document.
+- **`.preview` during the drag, `.full` on release**, and the two cache in separate slots on
+  `VectorCanvas`, so switching between them does not throw the other away. That is the whole reason
+  scrubbing is affordable; wiring the slider to `.full` would make it ~4x more expensive per tick on
+  a 24-stroke fixture and much worse on real art.
+- **Untagged content rides the recipe's *first* group binding.** Phase 4 creates one automatic
+  whole-layer group and does not need to tag anything for the warp to reach every stroke. Phase 5,
+  which creates several groups, is the phase that has to actually tag.
+- **`evaluate` returns nil for a malformed recipe.** The UI should read that as "not yet" — show the
+  cel's own content or nothing — rather than treating it as an error.
+- **`t` outside `0...1` extrapolates rather than clamping**, because `ARAPInterpolation` does. If the
+  slider should not overshoot, clamp it in the UI.
+- **The blend weights are frame-wide.** A per-group `spacing` retimes that group's *motion* only; the
+  cross-fade weight comes from the recipe-level curve, because the two sets are composited as whole
+  canvases and a canvas has one alpha.
+
 ---
 
 ## 6. Session log
@@ -526,6 +589,13 @@ What Phase 2 decided that Phase 3 inherits:
   it expansion-proof). Found that `withStructureUndo` cannot cover a group retag and wrote the
   bracket that does — the one place `IMPLEMENTATION.md`'s undo mapping is wrong (§5). No subagents.
   Commits `49906ea`, `49ef0cb`, `3c2d119`.
+- **Session 6 (Phase 3) — 2026-07-31:** Built the evaluator, the isolated composite and the polyline
+  preview tier — all five work items, one new file, 17 new logic tests, one commit (`f6986df`).
+  Opened by erasing `interp-ipad`, which turned Session 5's five-attempt XCUITest flakiness into a
+  clean 433-test full suite first time (§5). `t = 0`/`t = 1` reproduce their keyframes at zero pixel
+  tolerance through the general path. Built thickness cross-fade but defaulted it off, with the
+  reason recorded, rather than shipping a default that thins every mid-frame (§5, §3.5). No
+  subagents.
 
 ---
 
@@ -631,3 +701,43 @@ definition of done is met, and suggest rather than implement anything out of sco
    so it is the right primary hook — but a session that renders many cels without changing the active
    context (an export, a thumbnail sweep) never triggers it. A second call site after any bulk render
    would close that.
+
+### From Phase 3
+
+10. **Fills are not corresponded, so their colours cross-fade instead of lerping.** `PLAN.md` §7.3
+    makes the case that fills are the one place correspondence is *reliable* — there are few of them
+    and colour is highly discriminative — and asks for a 1:1 match by colour+overlap with a
+    cross-fade fallback. `IMPLEMENTATION.md` Phase 3 item 4 asks for the colour lerp specifically.
+    Only the warping half is built. The matcher is engine D work that `MotionGroup.mode`'s doc
+    already defers ("`.clean` degrades to `.crossFade` until the matcher lands"), so building it
+    inside Phase 3 would have been a later phase's design decision taken early. Two differently
+    coloured fills currently go through a muddy half-transparent middle, which is exactly the worry
+    §7.3 names. The evaluator already carries a fill's `id` across the warp so a matcher has
+    something to key on.
+
+11. **A fill cannot belong to a motion group.** `motionGroupID` is a field on `VectorStroke` only, so
+    every fill and every placed image rides the recipe's first binding. Fine for Phase 4's single
+    whole-layer group; wrong the moment a character's flats and its background are separate groups,
+    which is Phase 5. The fix is either the same field on `VectorFillElement` or a group lookup by
+    geometry; the first is cheaper and matches how strokes already do it.
+
+12. **A placed image only travels — it does not deform.** `VectorImageElement` is a bitmap under one
+    affine transform, so the evaluator warps its centre and leaves scale and rotation alone. A
+    lattice that rotates or shears will visibly slide past the image sitting inside it. A mesh draw
+    (`CGContext.drawImage` has no such thing; this would want Core Image or Metal) is the real fix,
+    and it is only worth it if placed images turn out to matter inside an interpolated span.
+
+13. **`.preview` under-inks a translucent brush.** Overlapping dabs accumulate alpha along a stroke,
+    so a stroke at `opacity 0.4` renders much closer to opaque than one stroked path at alpha 0.4
+    does. Preview therefore reads lighter than full for low-opacity brushes — shape and position are
+    right, weight is not. A saturation curve (`1 − (1 − a)^k` for a k derived from spacing) would fix
+    it cheaply if it bothers anyone; it is invisible for the opaque brushes most linework uses.
+
+14. **Nothing caches the evaluation across slider ticks.** Every tick re-embeds each keyframe's
+    geometry in its lattice, which is the expensive half of the warp (`embedInCurrent` builds a
+    deformed-cell index), and re-runs the ARAP factorisation via a fresh `Interpolator`. Both are
+    per-drag constants: the embeddings depend only on the keyframe lattices and the factorisation
+    only on topology. `ARAPInterpolation.Interpolator` exists precisely to be held across ticks
+    ("build one and hold it for the lifetime of a slider drag"), and this phase does not hold it.
+    Phase 4 owns the drag, so Phase 4 is where a `ScrubSession` holding both belongs — worth doing
+    there rather than retrofitting into the evaluator, which is stateless on purpose.

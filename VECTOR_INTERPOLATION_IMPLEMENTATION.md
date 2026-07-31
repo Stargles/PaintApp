@@ -285,6 +285,16 @@ exactly as before, because nothing reads the recipe yet.
    Warps A's elements forward and C's elements backward through each group's interpolated lattice,
    applies visibility thresholds, and applies thickness cross-fade.
 
+   > **Two corrections, found while building this (see `HANDOFF.md` §5).**
+   >
+   > (a) The result is **three** lists, not two: `localEdits` joins neither set. A stroke drawn *at*
+   > the in-between is not a keyframe's content being faded in or out, and an `.erase` local edit has
+   > to reach both keyframes' ink — which only works if it is drawn after they are blended.
+   >
+   > (b) **Thickness cross-fade is implemented but off by default.** Thinning is right for a stroke
+   > with no counterpart at the other keyframe; without correspondence every stroke looks like that,
+   > so defaulting it on thins every mid-frame. It is one option away once a matcher lands.
+
 2. **The isolation requirement (`PLAN.md` §5.6) — the most important correctness item in the phase.**
    Forward and backward sets **must not** be concatenated into one display list: an `.erase` stroke
    lowers the alpha of everything beneath it, so A's eraser would punch holes in C's strokes.
@@ -315,6 +325,11 @@ exactly as before, because nothing reads the recipe yet.
 
 4. **Fill warping.** `VectorFillElement`'s path is archived `Data`. Extract control points
    (`CGPath.applyWithBlock`), warp, rebuild. Colour lerps between matched fills.
+
+   > **Partially deferred (see `HANDOFF.md` §8 item 10).** The warping is built; the colour lerp is
+   > not, because "matched" needs a correspondence matcher and that is engine D, which
+   > `MotionGroup.mode` already defers to a later phase. Fills cross-fade meanwhile. The warp carries
+   > each fill's `id` across so a matcher has something to key on.
 
 5. Respect `VectorCanvas`'s lock discipline — private helpers never take the lock; `static` is how
    that is enforced. Read the comment at [VectorLayer.swift:276](PaintSoftware/Engine/VectorLayer.swift:276).
