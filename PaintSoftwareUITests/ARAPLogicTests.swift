@@ -319,4 +319,177 @@ final class ARAPLogicTests: XCTestCase {
         XCTAssertNil(Matrix2x2.mapping(from: CGPoint(x: 1, y: 0), CGPoint(x: 2, y: 0),
                                        to: CGPoint(x: 0, y: 1), CGPoint(x: 0, y: 2)))
     }
+
+    // MARK: - Nearest-point index
+
+    func testTheCloudIndexAgreesWithBruteForce() {
+        // Deterministic pseudo-random cloud — a fixed recurrence rather than a seeded RNG, so the
+        // test cannot start behaving differently on a different platform.
+        var seed: CGFloat = 0.37
+        let cloud = (0..<400).map { _ -> CGPoint in
+            seed = (seed * 7.13).truncatingRemainder(dividingBy: 1)
+            let x = seed * 300
+            seed = (seed * 11.7 + 0.13).truncatingRemainder(dividingBy: 1)
+            return CGPoint(x: x, y: seed * 200)
+        }
+        let index = PointCloudIndex(cloud)
+
+        for q in [CGPoint(x: 12, y: 180), CGPoint(x: 150, y: 100), CGPoint(x: 299, y: 1),
+                  CGPoint(x: -400, y: -400), CGPoint(x: 900, y: 900)] {
+            let brute = cloud.enumerated().min { a, b in
+                let da = (a.element.x - q.x) * (a.element.x - q.x) + (a.element.y - q.y) * (a.element.y - q.y)
+                let db = (b.element.x - q.x) * (b.element.x - q.x) + (b.element.y - q.y) * (b.element.y - q.y)
+                return da < db
+            }!
+            guard let hit = index.nearest(to: q) else { return XCTFail("no hit for \(q)") }
+            assertPoint(hit.point, brute.element, accuracy: 1e-12, "query \(q)")
+        }
+    }
+
+    func testAnEmptyCloudHasNoNearestPoint() {
+        XCTAssertNil(PointCloudIndex([]).nearest(to: .zero))
+        XCTAssertTrue(PointCloudIndex([]).isEmpty)
+    }
+
+    // MARK: - Tier 1: similarity
+
+    func testSimilarityRecoversAKnownRotationScaleAndTranslation() {
+        let source = [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0), CGPoint(x: 10, y: 4), CGPoint(x: 3, y: 9)]
+        let truth = Similarity(angle: 0.8, scale: 1.7, translation: CGPoint(x: 40, y: -12))
+        let target = source.map(truth.applied(to:))
+
+        let fit = ARAPRegistration.similarity(from: source, to: target)
+
+        XCTAssertEqual(fit.angle, truth.angle, accuracy: 1e-9)
+        XCTAssertEqual(fit.scale, truth.scale, accuracy: 1e-9)
+        assertPoint(fit.translation, truth.translation, accuracy: 1e-8)
+    }
+
+    func testSimilarityOfACloudWithNoExtentDegradesToTranslation() {
+        let source = [CGPoint(x: 5, y: 5), CGPoint(x: 5, y: 5)]
+        let target = [CGPoint(x: 9, y: 2), CGPoint(x: 9, y: 2)]
+
+        let fit = ARAPRegistration.similarity(from: source, to: target)
+
+        XCTAssertEqual(fit.scale, 1, accuracy: 1e-12)
+        XCTAssertEqual(fit.angle, 0, accuracy: 1e-12)
+        assertPoint(fit.translation, CGPoint(x: 4, y: -3), accuracy: 1e-12)
+    }
+
+    func testICPRecoversARigidMotionWithoutAnyCorrespondence() {
+        // An asymmetric L, so there is only one way it can sit on its own image.
+        let source = (0..<12).map { CGPoint(x: CGFloat($0) * 5, y: 0) }
+            + (1..<8).map { CGPoint(x: 0, y: CGFloat($0) * 5) }
+        let truth = Similarity(angle: 0.35, scale: 1, translation: CGPoint(x: 22, y: 17))
+        let target = PointCloudIndex(source.map(truth.applied(to:)))
+
+        let fit = ARAPRegistration.similarityICP(source: source, target: target)
+
+        XCTAssertEqual(fit.angle, truth.angle, accuracy: 1e-6)
+        XCTAssertEqual(fit.scale, 1, accuracy: 1e-6, "one-directional ICP shrinks here; two-directional must not")
+        for p in source {
+            assertPoint(fit.applied(to: p), truth.applied(to: p), accuracy: 1e-4,
+                        "ICP should recover an exactly-reproducible rigid motion exactly")
+        }
+    }
+
+    // MARK: - Tier 2: ARAP fit
+
+    /// A stroke-like row of points, the kind of thing a real group's samples look like.
+    private func bar(from a: CGPoint, to b: CGPoint, count: Int) -> [CGPoint] {
+        (0..<count).map { i in
+            let t = CGFloat(i) / CGFloat(max(1, count - 1))
+            return CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
+        }
+    }
+
+    func testFittingARigidlyMovedDrawingLandsOnIt() {
+        let source = bar(from: CGPoint(x: 60, y: 60), to: CGPoint(x: 160, y: 60), count: 24)
+            + bar(from: CGPoint(x: 60, y: 60), to: CGPoint(x: 60, y: 110), count: 12)
+        let truth = Similarity(angle: 0.3, scale: 1, translation: CGPoint(x: 25, y: 20))
+        let target = source.map(truth.applied(to:))
+        let lattice = Lattice(covering: source, targetCellSize: 30)
+
+        let result = ARAPRegistration.fit(lattice: lattice, source: source,
+                                          target: PointCloudIndex(target))
+
+        XCTAssertTrue(result.refined)
+        XCTAssertLessThan(result.meanResidual, 1.0, "a rigid move should be fitted almost exactly")
+        for v in result.lattice.vertices { XCTAssertTrue(v.x.isFinite && v.y.isFinite) }
+    }
+
+    func testTheARAPFitBeatsTheSimilarityFitOnANonRigidTarget() {
+        // A bar that bends: no similarity can explain it, so tier 2 has to earn its cost.
+        let source = bar(from: CGPoint(x: 40, y: 100), to: CGPoint(x: 200, y: 100), count: 40)
+        let target = source.map { p -> CGPoint in
+            let t = (p.x - 40) / 160
+            return CGPoint(x: p.x, y: p.y + 55 * t * t)
+        }
+        let cloud = PointCloudIndex(target)
+        let lattice = Lattice(covering: source, targetCellSize: 30)
+
+        let result = ARAPRegistration.fit(lattice: lattice, source: source, target: cloud)
+
+        // Residual of the similarity fit alone, for comparison.
+        let similarityOnly = ARAPRegistration.similarityICP(source: source, target: cloud, iterations: 20)
+        let similarityResidual = source
+            .map { cloud.nearest(to: similarityOnly.applied(to: $0))?.distanceSquared.squareRoot() ?? 0 }
+            .reduce(0, +) / CGFloat(source.count)
+
+        XCTAssertLessThan(result.meanResidual, similarityResidual * 0.5,
+                          "ARAP refinement should at least halve the similarity fit's residual")
+        XCTAssertLessThan(result.meanResidual, 1.5)
+    }
+
+    func testAConstraintPullsItsPointTowardItsTarget() {
+        let source = bar(from: CGPoint(x: 40, y: 100), to: CGPoint(x: 200, y: 100), count: 40)
+        let lattice = Lattice(covering: source, targetCellSize: 30)
+        let pinnedSource = CGPoint(x: 200, y: 100)
+        let pinnedTarget = CGPoint(x: 200, y: 160)
+
+        // No target cloud at all, so the constraint is the only thing asking for motion.
+        let result = ARAPRegistration.fit(
+            lattice: lattice, source: [], target: PointCloudIndex([]),
+            constraints: [ARAPRegistration.Constraint(source: pinnedSource, target: pinnedTarget, weight: 1000)])
+
+        let landed = result.lattice.warp(lattice.restConfiguration.embedInRest([pinnedSource]))[0]
+        XCTAssertLessThan(abs(landed.y - pinnedTarget.y), 6,
+                          "a heavily weighted constraint should drag its point most of the way")
+    }
+
+    // MARK: - Degenerate registration input
+
+    func testFittingWithAnEmptyTargetProducesTheRestLatticeAndNoNaN() {
+        let source = bar(from: CGPoint(x: 40, y: 100), to: CGPoint(x: 200, y: 100), count: 10)
+        let lattice = Lattice(covering: source, targetCellSize: 30)
+
+        let result = ARAPRegistration.fit(lattice: lattice, source: source, target: PointCloudIndex([]))
+
+        assertNoNaN(result.lattice, "empty target cloud")
+        XCTAssertEqual(result.meanResidual, 0)
+    }
+
+    func testFittingFewerThanThreePointsIsSaneRatherThanCrashing() {
+        for count in [0, 1, 2] {
+            let source = Array(bar(from: CGPoint(x: 40, y: 40), to: CGPoint(x: 80, y: 80), count: 3).prefix(count))
+            let lattice = Lattice(covering: source.isEmpty ? [CGPoint(x: 40, y: 40)] : source,
+                                  targetCellSize: 20)
+            let target = PointCloudIndex(source.map { CGPoint(x: $0.x + 30, y: $0.y) })
+
+            let result = ARAPRegistration.fit(lattice: lattice, source: source, target: target)
+
+            assertNoNaN(result.lattice, "\(count) source points")
+            XCTAssertEqual(result.residuals.count, count)
+        }
+    }
+
+    func testFittingACollapsedSourceProducesNoNaN() {
+        let source = [CGPoint](repeating: CGPoint(x: 70, y: 70), count: 8)
+        let lattice = Lattice(cols: 3, rows: 3, restOrigin: CGPoint(x: 40, y: 40), restCellSize: 20)
+
+        let result = ARAPRegistration.fit(lattice: lattice, source: source,
+                                          target: PointCloudIndex([CGPoint(x: 120, y: 90)]))
+
+        assertNoNaN(result.lattice, "collapsed source cloud")
+    }
 }
