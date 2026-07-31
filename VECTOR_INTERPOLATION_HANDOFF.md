@@ -40,7 +40,7 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Phase 2 — done.** Phase 3 (evaluation, isolated compositing, preview tier) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `3c2d119`. Fast suite green; **every pure-logic class green (347 tests)**. Full suite at the phase boundary: **433 tests, 431 passed, 1 skipped, 1 failed** — see the flake note below. |
+| **Last known-green commit** | `5d01eb3`. **Every pure-logic class green — 346 tests, `xcodebuild` exit 0.** That tier is what exercises every Phase 2 change. The XCUITest tier could **not** be run to completion: the machine's CoreSimulator wedged (§5) — diagnosed, not a code fault, but it means the phase-boundary full run is unverified. **Re-run the full suite first thing.** |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -95,14 +95,17 @@ need. Read what §1 says to read; consult the rest on demand.
     `guideStrokes` on `CanvasManager` and in `StructureSnapshot`; manifest + store; `CodableColor`
     gained `Equatable`; `VectorCanvas.dropCachedImage()` / `hasCachedImage`.
   - Tests: `InterpolationModelLogicTests` (28).
-  - **Full-suite flake, not a regression.** The phase-boundary run failed
-    `TimelineAndUndoUITests.testDraggingRightEdgeHandleShrinksCel` on a bare `XCTAssertTrue` — which
-    in that test is either `launchIntoEditor` or the handle's `waitForExistence`, i.e. the app never
-    got far enough to exercise a resize at all. The whole class then passed in isolation, including
-    `testCelResizeDragUndoesInOneStep`, which is the test most exposed to this phase's
-    `StructureSnapshot` change. Read as a launch flake under four parallel simulator clones. A
-    confirming re-run was started and its result is not recorded here — **if you need certainty,
-    re-run the full suite before building on this** (§4).
+  - **The XCUITest tier is unverified for this phase, and that is an environment fault, not a
+    known-good result.** Four full-suite attempts: the first failed one test, the second failed eight
+    *different* ones, and the last two hung outright before running anything. Every failure was a
+    bare `XCTAssertTrue(launchIntoEditor(app))`. The cause is in §5 — CoreSimulator could not launch
+    the xctrunner harness — and erasing/rebooting the device bought only one more run each time.
+
+    What *is* verified: the whole pure-logic tier, 346 tests, exit 0, on the same machine after the
+    reset. That tier covers every line this phase changed; the XCUITest tier exercises app paths this
+    phase leaves alone. So the risk is low but **not** discharged. **Re-run the full suite before
+    building on Phase 2**, and if it wedges again, reset the device per §5 before concluding
+    anything about the code.
 
 ### What is next
 
