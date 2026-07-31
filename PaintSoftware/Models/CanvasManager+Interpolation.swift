@@ -228,6 +228,15 @@ extension CanvasManager {
     /// caches are actually reached — scrubbing and onion skin both work outward from the current
     /// frame. Dropping a cache is never a correctness question; the next render recomputes it.
     func evictDistantVectorRenderCaches(limit: Int = CanvasManager.vectorRenderCacheLimit) {
+        // Counted before anything is locked, because this runs on **every** frame tick (see the call
+        // site in `handleActiveContextChanged`) and `hasCachedImage` takes each canvas's lock — which
+        // a background `render()` holds for its entire rasterization, tens of milliseconds. Reading
+        // `cel.vector` is a struct field access and locks nothing, so a document with fewer vector
+        // cels than the limit — which is every raster project, and most others — cannot have
+        // anything to evict and gets out without touching a lock at all.
+        let vectorCels = layers.reduce(0) { $0 + $1.cels.lazy.filter { $0.vector != nil }.count }
+        guard vectorCels > max(0, limit) else { return }
+
         var cached: [(distance: Int, canvas: VectorCanvas)] = []
         for layer in layers {
             for cel in layer.cels {

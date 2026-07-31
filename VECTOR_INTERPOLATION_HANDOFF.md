@@ -426,6 +426,28 @@ choosing one:
   whole-frame one. `removeMotionGroup` leaves the id dangling instead, which makes the guide drive
   nothing, which is what deleting its group means.
 
+- **A degraded simulator fails XCUITests as a bare `XCTAssertTrue`, which looks exactly like a
+  regression you just caused.** Two consecutive full runs failed differently — one test, then eight
+  unrelated ones — every failure being `XCTAssertTrue(launchIntoEditor(app))` with no message, and
+  `launchIntoEditor`'s own doc comment says it doubles as the launch-freeze regression test. It was
+  neither. The log said so, well below the test output:
+
+  ```
+  Simulator device failed to launch Starg.PaintSoftwareUITests.xctrunner
+    RequestDenied by SBMainWorkspace / FBProcessExit Code=64 "The process failed to launch."
+  ```
+
+  The **test runner harness** could not start, so the app under test never launched. It builds up
+  over repeated runs that spawn parallel clones. **Check for `failed to launch` in the raw log before
+  investigating a launch-assertion failure**, and reset the device rather than bisecting:
+
+  ```bash
+  pkill -f "xcodebuild test"; xcrun simctl shutdown 16B39106-1805-425B-BB75-02D436D36533; xcrun simctl erase 16B39106-1805-425B-BB75-02D436D36533
+  ```
+
+  The tell that it is environmental rather than a real regression: a *different* set of tests fails
+  each run, and every failure is at launch rather than at an assertion about behaviour.
+
 - **Do not build the timeline in a test with `addCel`.** `CanvasFixture.manager` gives each layer one
   cel spanning the whole 12-frame scene, so every `addCel` in frames 0–11 collides and returns
   `false`. Assign `layers[i].cels` directly (or use `CanvasFixture.setCelLayout`, which does not
