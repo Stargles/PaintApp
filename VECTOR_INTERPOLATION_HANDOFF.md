@@ -38,9 +38,9 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 1 — done.** Phase 2 (data model, persistence, undo) not started. |
+| **Current phase** | **Phase 2 — done.** Phase 3 (evaluation, isolated compositing, preview tier) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `320b68d`. Fast suite green (134 tests); **full suite run at the phase boundary: 405 tests, 404 passed, 0 failed, 1 skipped** (`FillUITests.testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, a pre-existing `XCTSkip` pending `BUGS.md` — not related to this work). |
+| **Last known-green commit** | `49906ea`. Fast suite green; **every pure-logic class green (347 tests)**. Full suite running at the phase boundary — result not yet recorded. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -81,14 +81,29 @@ need. Read what §1 says to read; consult the rest on demand.
   - Tests: `LatticeLogicTests` (29) and `ARAPLogicTests` (39). Fast suite 134 green.
   - Commits: `bae6a9c`, `20008a1`, `2f9fa1e`, `131e0d1`, `5e5785e`.
 
+- **Phase 2 — data model, persistence and undo.** All nine work items; the feature is still inert
+  (nothing in the app reads any of it). One commit, `49906ea`.
+  - New: [InterpolationRecipe.swift](PaintSoftware/Models/InterpolationRecipe.swift) (`CelRef`,
+    `InterpolationReference`, `InterpolationMode`, `SpacingCurve`, `MotionGroupBinding`, `LocalEdit`,
+    `InterpolationRecipe`), [MotionGroup.swift](PaintSoftware/Models/MotionGroup.swift),
+    [GuideStroke.swift](PaintSoftware/Models/GuideStroke.swift) (`TimedSample`, `GuideRole`,
+    `KeyframeInterval`, `GuideStroke`),
+    [CanvasManager+Interpolation.swift](PaintSoftware/Models/CanvasManager+Interpolation.swift)
+    (every mutation, with its undo bracket; plus render-cache eviction).
+  - Changed: `Cel.interpolation`; three optional fields on `VectorStroke` (`motionGroupID`,
+    `visibilityThreshold`, `sampleVisibilityThresholds`); `Lattice: Codable`; `motionGroups` /
+    `guideStrokes` on `CanvasManager` and in `StructureSnapshot`; manifest + store; `CodableColor`
+    gained `Equatable`; `VectorCanvas.dropCachedImage()` / `hasCachedImage`.
+  - Tests: `InterpolationModelLogicTests` (28).
+
 ### What is next
 
-**Phase 2** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — the data model, persistence and undo, with
-the feature still inert. Pattern-following work against `VectorStroke`'s established
-`init(from:)` + `decodeIfPresent` shape; §3.4's table says Sonnet 5 at medium is the right call for
-most of it.
+**Phase 3** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — evaluation, isolated compositing and the
+preview tier, headless. This is where the recipe becomes pixels.
 
-**Read §5.7 before starting** — the one thing Phase 1 learned that constrains Phase 2's data model.
+**Read §5.8 before starting** — what Phase 2 decided that Phase 3 inherits, in particular that no
+embeddings are persisted (so the evaluator derives them) and that `.reproject` is recorded on the
+recipe rather than inferred.
 
 ### History note
 
@@ -197,10 +212,18 @@ than a shared one, so concurrent sessions do not contend.
 ### Fast run — pure logic only (~1–2 min). Use this constantly.
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests
 ```
 
-134 tests, all green as of `5e5785e`. Add your own logic-test class to that filter as you create it.
+162 tests, all green as of `49906ea`. Add your own logic-test class to that filter as you create it.
+
+**Wider, still fast (~3 min).** Every pure-logic class in the suite — 347 tests as of `49906ea`.
+Worth running before a commit that touches persistence or `CanvasManager`, since the fast filter
+above misses `ProjectSaveLogicTests`, the eraser classes and the characterisation tests:
+
+```bash
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/VectorEraserHybridLogicTests -only-testing:PaintSoftwareUITests/RasterVectorParityLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/BackupManagerLogicTests -only-testing:PaintSoftwareUITests/CelCRUDCharacterizationTests -only-testing:PaintSoftwareUITests/LayerTreeCharacterizationTests -only-testing:PaintSoftwareUITests/ViewPresetCharacterizationTests
+```
 
 ### Reading a failure
 
@@ -355,6 +378,76 @@ choosing one:
   to be re-mapped when the lattice grows, or version-stamped so a stale index is detected rather
   than silently misread.
 
+### From Phase 2
+
+- **`withStructureUndo` does not cover a stroke edit, and `IMPLEMENTATION.md` item 8 reads as if it
+  does.** `StructureSnapshot` copies `[Layer]`, but `Cel.vector` is a *class reference*, so the
+  snapshot shares each `VectorCanvas` rather than copying it: restoring it restores frame ranges,
+  folder membership and recipes, and nothing whatsoever about the strokes inside. That is exactly
+  right for a timeline edit and exactly wrong for a **group retag**, because the tag is a field on
+  `VectorStroke`. Item 8 says "group retag → `withStructureUndo`"; taken literally that produces an
+  undo step that silently does nothing.
+
+  `CanvasManager.withInterpolationUndo(name:touching:)` is the fix — it snapshots the registries,
+  the layer tree *and* the named canvases' display lists into one step. **Any later phase that edits
+  stroke content from `CanvasManager` needs the same treatment**; the structure bracket alone is a
+  trap. The slider drag is genuinely fine on `beginStructureGesture`/`commitStructureGesture`,
+  because `t` lives in the `Cel` struct.
+
+- **`isRest()`'s default tolerance is wrong for persistence.** `Lattice`'s encoder omits `vertices`
+  when the lattice is at rest and rebuilds them on decode. Gating that on the default
+  `tolerance: Lattice.epsilon` would let a lattice within `1e-9` of rest be written as rest, moving
+  its vertices on every save/load cycle — a slow drift with no visible cause. It is gated on
+  `tolerance: 0`, and the omission is then exactly reversible because a rest lattice's vertices come
+  from the same `restVertex` function the decoder calls.
+
+- **A decoder must not reach a trapping initialiser.** `Lattice`'s designated initialiser has
+  `precondition`s on cols/rows/cell size/vertex count. A truncated or hand-edited file would take the
+  app down rather than report a bad project, so `init(from:)` validates all four and throws
+  `DecodingError` first. Worth copying for any engine type made `Codable` later — the Deform module
+  is full of preconditions.
+
+- **Swift's memberwise initialiser survives new stored properties only if they have defaults.**
+  `VectorStroke` gained three, all `= nil` and all declared after the existing ones, so the dozen-odd
+  memberwise construction sites compile untouched. Declaring one without a default, or before an
+  existing property, breaks every call site at once.
+
+- **Empty-means-everything is a trap when the thing can be emptied.** `GuideStroke.boundGroups` uses
+  empty to mean "every group" (PLAN §10 decision 6). Deleting a motion group therefore must *not*
+  strip its id out of guides bound only to it — that would silently promote a one-group guide to a
+  whole-frame one. `removeMotionGroup` leaves the id dangling instead, which makes the guide drive
+  nothing, which is what deleting its group means.
+
+- **Do not build the timeline in a test with `addCel`.** `CanvasFixture.manager` gives each layer one
+  cel spanning the whole 12-frame scene, so every `addCel` in frames 0–11 collides and returns
+  `false`. Assign `layers[i].cels` directly (or use `CanvasFixture.setCelLayout`, which does not
+  create `VectorCanvas`es) when the timeline is the premise rather than the subject.
+
+### 5.8 For Phase 3's evaluator
+
+What Phase 2 decided that Phase 3 inherits:
+
+- **No embeddings are persisted, anywhere.** A `LatticeEmbedding` is derivable from geometry plus its
+  lattice, and expansion invalidates every index in one — so the recipe stores geometry only, and the
+  evaluator embeds on load. Do not "optimise" this by caching embeddings into the recipe without
+  answering §5.7's re-map-or-version-stamp question first.
+- **`t` is normalised across the *whole* reference span**, `0` at the first reference and `1` at the
+  last — not per segment. With today's two references that is exactly the slider. Which segment a
+  `t` between interior references lands in is the evaluator's choice (uniform is the obvious one),
+  but note that once a spline ships, changing that mapping changes what an already-saved `t` means.
+- **`InterpolationRecipe.mode` records Generate vs Reproject explicitly** rather than inferring it
+  from whether the cel has content. §5.5 wants them to be two commands that are never conflated, and
+  a cel can hold content under either (a `.generate` cel's content is derived; a `.reproject` cel's
+  is the artist's own).
+- **`isWellFormed` is the guard to check before evaluating.** A recipe can be malformed by editing
+  *around* it — deleting a referenced cel, adding a reference without re-registering groups — and
+  the evaluator should answer "not yet" rather than index off the end of `lattices`.
+- **A recipe with no group bindings is legal**, and means "warp the whole frame as one group". It is
+  the honest degenerate case (PLAN §10 decision 2), not an error.
+- **Visibility is on the stroke**, as `visibilityThreshold` (whole-stroke τ) plus the sparse
+  `sampleVisibilityThresholds`. A sample with no entry uses the whole-stroke value; nil means always
+  visible. Erasers carry these like any other stroke, which is what §7.1 needs.
+
 ---
 
 ## 6. Session log
@@ -380,6 +473,11 @@ choosing one:
   endpoint invariant holds to the last bits, and it took a change of variables to get there (§5). No
   subagents; done inline on Opus 5 per §3.4. Recorded a real limitation in automatic motion grouping
   (attached limbs) rather than weakening a test to hide it — see §8.
+- **Session 5 (Phase 2) — 2026-07-31:** Built the data model, persistence and undo — all nine work
+  items, four new files, 28 new logic tests, one commit (`49906ea`). Chose the `Lattice` encoding
+  §5.7 left open (rest configuration never written; no indices persisted at all, which is what makes
+  it expansion-proof). Found that `withStructureUndo` cannot cover a group retag and wrote the
+  bracket that does — the one place `IMPLEMENTATION.md`'s undo mapping is wrong (§5). No subagents.
 
 ---
 
@@ -459,3 +557,29 @@ definition of done is met, and suggest rather than implement anything out of sco
    can over-split a drawing whose parts genuinely move together but are disconnected. The result
    still animates correctly and merging is one tap, so this is the safe direction — but a final
    "merge groups whose fitted motions agree" pass would make the automatic result tidier.
+
+### From Phase 2
+
+6. **A local edit can only be a stroke.** `LocalEdit` carries a `VectorStroke`, so drawing and
+   erasing at an in-between are covered but a *fill* made there is not. Fills have their own
+   unresolved question (`PLAN.md` §7.3) and `VectorFillElement` is fully `Codable` inline, so
+   widening `LocalEdit` to an element enum later costs one `decodeIfPresent` — but it is a real gap
+   in what "edit at the in-between" currently means, and Phase 6 is where it will be felt. Placed
+   images at an in-between are a further step again, since those need file management.
+
+7. **Nothing prunes a recipe whose referenced cel has been deleted.** `referencedCels` and
+   `isWellFormed` make a stale recipe *detectable*, and the evaluator is meant to answer "not yet"
+   rather than crash — but no cel-deletion path clears the recipes that pointed at it, so a document
+   can accumulate recipes that can never evaluate. The right moment to fix it is when Phase 4 gives
+   the artist a way to see interpolated cels; doing it now would be housekeeping for state nothing
+   can create.
+
+8. **`evictDistantVectorRenderCaches` counts cels, not bytes.** A limit of 12 canvas-sized images is
+   ~190 MB at 2048² and ~770 MB at 4000², so the bound means very different things at different
+   canvas sizes. A byte budget would be the honest version. Cheap to change (the policy is one
+   function); worth doing if memory pressure shows up on a large canvas.
+
+9. **Eviction only runs on a frame or layer change.** That is where the working set actually moves,
+   so it is the right primary hook — but a session that renders many cels without changing the active
+   context (an export, a thumbnail sweep) never triggers it. A second call site after any bulk render
+   would close that.

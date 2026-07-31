@@ -243,6 +243,14 @@ interpolation + tests, (d) grouping + tests. **Commit at each.**
    Group retag, mode change, reference set, guide edit → `withStructureUndo`. Strokes drawn at *t* →
    existing `registerVectorUndo`.
 
+   > **Correction, found while building this (see `HANDOFF.md` §5).** `withStructureUndo` is right
+   > for the mode change, the reference set and the guide edit, but **not** for the group retag:
+   > `StructureSnapshot` copies `[Layer]`, and `Cel.vector` is a class reference, so the snapshot
+   > shares each `VectorCanvas` and restoring it restores nothing about the strokes inside — while
+   > the tag is a field on `VectorStroke`. Retagging needs the display list snapshotted too.
+   > `CanvasManager.withInterpolationUndo(name:touching:)` does both tiers in one step; the slider
+   > drag's structure bracket is unaffected, because `t` lives in the `Cel` struct.
+
 9. **Cache eviction.** `VectorCanvas.cachedImage` has no eviction and interpolation multiplies live
    cels. Add a simple bound (evict non-visible cels' cached images beyond N).
 
