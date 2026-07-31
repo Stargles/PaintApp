@@ -559,6 +559,89 @@ struct Lattice: Equatable {
     static func cross(_ a: CGPoint, _ b: CGPoint) -> CGFloat { a.x * b.y - a.y * b.x }
 }
 
+// MARK: - Persistence
+
+/// Hand-written coding, for one reason worth stating plainly: **the rest configuration is never
+/// written.**
+///
+/// The rest grid is fully described by `cols`, `rows`, `restOrigin` and `restCellSize`, and
+/// `restVertex(at:)` reconstructs any of it in closed form — so storing it would be storing a copy
+/// that can go stale. Only `vertices` (the current configuration) and `activeCells` carry
+/// information that cannot be derived, and a lattice still *at* rest does not even need `vertices`:
+/// they are omitted entirely and rebuilt on decode. A rest lattice therefore costs four numbers plus
+/// its active set, rather than `(cols+1)(rows+1)` points.
+///
+/// Two details are deliberate:
+///
+/// - **Vertices are a flat `[x, y, x, y, …]`**, not an array of `CGPoint`, which halves the JSON
+///   (`{"x":1,"y":2}` per point becomes two numbers) for no loss. `VectorCanvasData.transform`
+///   already stores its matrix the same way.
+/// - **Everything is validated before `init` sees it.** The designated initialiser has
+///   preconditions that *trap* on a malformed topology, which is right for code but wrong for a
+///   decoder: a truncated or hand-edited file should throw and be reported, not take the app down.
+///   `activeCells` is written sorted so the same lattice always produces the same bytes.
+extension Lattice: Codable {
+
+    private enum CodingKeys: String, CodingKey {
+        case cols, rows, originX, originY, cellSize, vertices, activeCells
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let cols = try c.decode(Int.self, forKey: .cols)
+        let rows = try c.decode(Int.self, forKey: .rows)
+        let cellSize = try c.decode(CGFloat.self, forKey: .cellSize)
+        guard cols > 0, rows > 0, cellSize > Lattice.epsilon else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .cols, in: c,
+                debugDescription: "lattice needs cols/rows > 0 and a positive cell size, got \(cols)×\(rows) at \(cellSize)")
+        }
+        let origin = CGPoint(x: try c.decode(CGFloat.self, forKey: .originX),
+                             y: try c.decode(CGFloat.self, forKey: .originY))
+        let active = Set(try c.decodeIfPresent([Int].self, forKey: .activeCells) ?? [])
+
+        guard let flat = try c.decodeIfPresent([CGFloat].self, forKey: .vertices) else {
+            // Absent means "at rest", which the rest-grid initialiser reproduces exactly.
+            self.init(cols: cols, rows: rows, restOrigin: origin, restCellSize: cellSize,
+                      activeCells: active)
+            return
+        }
+        guard flat.count == 2 * (cols + 1) * (rows + 1) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .vertices, in: c,
+                debugDescription: "expected \(2 * (cols + 1) * (rows + 1)) coordinates for a \(cols)×\(rows) lattice, got \(flat.count)")
+        }
+        var points = [CGPoint]()
+        points.reserveCapacity(flat.count / 2)
+        for i in stride(from: 0, to: flat.count, by: 2) {
+            points.append(CGPoint(x: flat[i], y: flat[i + 1]))
+        }
+        self.init(cols: cols, rows: rows, restOrigin: origin, restCellSize: cellSize,
+                  vertices: points, activeCells: active)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(cols, forKey: .cols)
+        try c.encode(rows, forKey: .rows)
+        try c.encode(restOrigin.x, forKey: .originX)
+        try c.encode(restOrigin.y, forKey: .originY)
+        try c.encode(restCellSize, forKey: .cellSize)
+        try c.encode(activeCells.sorted(), forKey: .activeCells)
+        // `tolerance: 0` rather than the default: the omission has to be *exactly* reversible, and a
+        // lattice within `epsilon` of rest is not at rest — writing it as one would silently move
+        // its vertices by up to `epsilon` on every save/load cycle.
+        guard !isRest(tolerance: 0) else { return }
+        var flat = [CGFloat]()
+        flat.reserveCapacity(vertices.count * 2)
+        for v in vertices {
+            flat.append(v.x)
+            flat.append(v.y)
+        }
+        try c.encode(flat, forKey: .vertices)
+    }
+}
+
 /// The result of growing a lattice, and the index translation that growth implies.
 ///
 /// Adding a ring shifts every cell and vertex index, so an embedding computed against the original

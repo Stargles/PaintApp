@@ -30,12 +30,20 @@ extension CanvasManager {
         var activeViewPresetIndex: Int
         var currentLayerIndex: Int
         var sceneFrameCount: Int
+        /// The two document-level interpolation registries. Here rather than given undo machinery of
+        /// their own because a single artist action routinely spans both them and `layers` — deleting
+        /// a motion group also clears the tag off every stroke carrying it — and one snapshot is what
+        /// makes that one undo step. They are arrays of small value types, so they cost the same
+        /// almost-nothing the rest of this snapshot does.
+        var motionGroups: [MotionGroup]
+        var guideStrokes: [GuideStroke]
     }
 
     private func captureStructure() -> StructureSnapshot {
         StructureSnapshot(layers: layers, folders: folders, viewPresets: viewPresets,
                           activeViewPresetIndex: activeViewPresetIndex,
-                          currentLayerIndex: currentLayerIndex, sceneFrameCount: sceneFrameCount)
+                          currentLayerIndex: currentLayerIndex, sceneFrameCount: sceneFrameCount,
+                          motionGroups: motionGroups, guideStrokes: guideStrokes)
     }
 
     private func restoreStructure(_ snapshot: StructureSnapshot) {
@@ -50,6 +58,8 @@ extension CanvasManager {
         // "Frame 14/12". Adding a drawing out beyond the last frame (the timeline scrolls on
         // forever, so that is an ordinary thing to do now) is exactly such an edit.
         currentFrame = min(currentFrame, max(sceneFrameCount - 1, 0))
+        motionGroups = snapshot.motionGroups
+        guideStrokes = snapshot.guideStrokes
     }
 
     /// Registers one undo step for a discrete (non-gesture) structural edit — call after the

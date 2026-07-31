@@ -33,13 +33,22 @@ struct ProjectManifest: Codable {
     var vectorEraserMode: VectorEraserMode
     var folders: [FolderManifest] = []
     var viewPresets: [ViewPresetManifest] = []
+    /// The document-level interpolation registries (see `CanvasManager.motionGroups` /
+    /// `.guideStrokes`). They live in the manifest rather than beside a cel precisely because they
+    /// are *not* owned by one: a motion group spans layers and a guide is referenced by several
+    /// intervals. Both are small — a group is four fields, a guide a polyline — so keeping them
+    /// inline here costs the gallery's manifest read nothing, unlike the per-cel recipes, which are
+    /// written to their own files.
+    var motionGroups: [MotionGroup] = []
+    var guideStrokes: [GuideStroke] = []
 
     init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int, sceneFrameCount: Int,
          layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
          selectedBrush: Brush = BrushLibrary.softRound, customBrushes: [Brush] = [],
          vectorEraserMode: VectorEraserMode = .erase,
-         folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = []) {
+         folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = [],
+         motionGroups: [MotionGroup] = [], guideStrokes: [GuideStroke] = []) {
         self.id = id
         self.name = name
         self.canvasWidth = canvasWidth
@@ -56,6 +65,8 @@ struct ProjectManifest: Codable {
         self.vectorEraserMode = vectorEraserMode
         self.folders = folders
         self.viewPresets = viewPresets
+        self.motionGroups = motionGroups
+        self.guideStrokes = guideStrokes
     }
 
     // Custom decoding so projects saved before backgroundColor/isBackgroundVisible (or, more
@@ -80,16 +91,45 @@ struct ProjectManifest: Codable {
         vectorEraserMode = try container.decodeIfPresent(VectorEraserMode.self, forKey: .vectorEraserMode) ?? .erase
         folders = try container.decodeIfPresent([FolderManifest].self, forKey: .folders) ?? []
         viewPresets = try container.decodeIfPresent([ViewPresetManifest].self, forKey: .viewPresets) ?? []
+        // Absent for every project saved before interpolation existed, which is all of them — and
+        // absent for every project that never uses it, since an empty registry is not written.
+        motionGroups = try container.decodeIfPresent([MotionGroup].self, forKey: .motionGroups) ?? []
+        guideStrokes = try container.decodeIfPresent([GuideStroke].self, forKey: .guideStrokes) ?? []
+    }
+
+    /// Written explicitly so the two interpolation registries can be *omitted* when empty: a project
+    /// that never interpolates must encode exactly as it did before this existed, and a synthesized
+    /// encoder would write `"motionGroups":[]` into every manifest in the world.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(canvasWidth, forKey: .canvasWidth)
+        try container.encode(canvasHeight, forKey: .canvasHeight)
+        try container.encode(canvasPadding, forKey: .canvasPadding)
+        try container.encode(fps, forKey: .fps)
+        try container.encode(sceneFrameCount, forKey: .sceneFrameCount)
+        try container.encode(layers, forKey: .layers)
+        try container.encode(modifiedAt, forKey: .modifiedAt)
+        try container.encode(backgroundColor, forKey: .backgroundColor)
+        try container.encode(isBackgroundVisible, forKey: .isBackgroundVisible)
+        try container.encode(selectedBrush, forKey: .selectedBrush)
+        try container.encode(customBrushes, forKey: .customBrushes)
+        try container.encode(vectorEraserMode, forKey: .vectorEraserMode)
+        try container.encode(folders, forKey: .folders)
+        try container.encode(viewPresets, forKey: .viewPresets)
+        if !motionGroups.isEmpty { try container.encode(motionGroups, forKey: .motionGroups) }
+        if !guideStrokes.isEmpty { try container.encode(guideStrokes, forKey: .guideStrokes) }
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, canvasWidth, canvasHeight, canvasPadding, fps, sceneFrameCount, layers,
              modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
-             vectorEraserMode, folders, viewPresets
+             vectorEraserMode, folders, viewPresets, motionGroups, guideStrokes
     }
 }
 
-struct CodableColor: Codable {
+struct CodableColor: Codable, Equatable {
     var red: Double
     var green: Double
     var blue: Double
@@ -177,4 +217,9 @@ struct CelManifest: Codable {
     /// image element refs, and the overall transform) for `.vector` layers. Optional/decodeIfPresent-
     /// friendly so raster-only projects (and pre-vector saves) load unchanged.
     var vectorFileName: String? = nil
+    /// JSON file holding this cel's `InterpolationRecipe`, when it has one. Its own file rather than
+    /// inline in the manifest because a recipe carries lattices — one array of vertices per motion
+    /// group per keyframe — and `manifest.json` is read in full for every tile in the gallery. A
+    /// plain optional: a missing key decodes as `nil`, i.e. "an ordinary, non-interpolated cel".
+    var interpolationFileName: String? = nil
 }

@@ -142,6 +142,9 @@ enum ProjectStore {
             let bakedImage: UIImage?
             /// A `makeCopy()`, so the write owns it and live drawing can't mutate it underneath.
             let vector: VectorCanvas?
+            /// The cel's interpolation recipe, if it is a derived cel. A value type all the way
+            /// down, so unlike `vector` it needs no defensive copy.
+            let interpolation: InterpolationRecipe?
         }
 
         struct LayerContent {
@@ -167,6 +170,8 @@ enum ProjectStore {
         let vectorEraserMode: VectorEraserMode
         let folders: [FolderManifest]
         let viewPresets: [ViewPresetManifest]
+        let motionGroups: [MotionGroup]
+        let guideStrokes: [GuideStroke]
         let layers: [LayerContent]
         let thumbnail: UIImage?
 
@@ -201,6 +206,8 @@ enum ProjectStore {
                 for (key, value) in preset.folderVisibility { folderVis[key.uuidString] = value }
                 return ViewPresetManifest(id: preset.id, name: preset.name, layerVisibility: vis, folderVisibility: folderVis)
             }
+            motionGroups = canvasManager.motionGroups
+            guideStrokes = canvasManager.guideStrokes
             layers = canvasManager.layers.map { layer in
                 LayerContent(id: layer.id, name: layer.name, opacity: layer.opacity,
                              isVisible: layer.isVisible, kind: layer.kind,
@@ -209,7 +216,8 @@ enum ProjectStore {
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                rasterImage: cel.raster.renderToUIImage(),
                                fillImage: cel.fillImage, bakedImage: cel.bakedImage,
-                               vector: cel.vector?.makeCopy())
+                               vector: cel.vector?.makeCopy(),
+                               interpolation: cel.interpolation)
                 })
             }
 
@@ -364,9 +372,19 @@ enum ProjectStore {
                     }
                 }
 
+                // The interpolation recipe, when this cel is a derived one. Its own JSON file for the
+                // same reason the vector payload has one: it is unbounded in size (lattices) and the
+                // gallery reads every manifest in full.
+                var interpolationFileName: String?
+                if let recipe = cel.interpolation, let data = try? JSONEncoder().encode(recipe) {
+                    interpolationFileName = "\(cel.id.uuidString)_interp.json"
+                    try? data.write(to: imagesDir.appendingPathComponent(interpolationFileName!))
+                }
+
                 celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                                  rasterFileName: fileName, fillImageFileName: fillFileName, bakedImageFileName: bakedFileName,
-                                                 vectorFileName: vectorFileName))
+                                                 vectorFileName: vectorFileName,
+                                                 interpolationFileName: interpolationFileName))
             }
 
             layerManifests.append(LayerManifest(
@@ -401,7 +419,9 @@ enum ProjectStore {
             customBrushes: snapshot.customBrushes,
             vectorEraserMode: snapshot.vectorEraserMode,
             folders: snapshot.folders,
-            viewPresets: snapshot.viewPresets
+            viewPresets: snapshot.viewPresets,
+            motionGroups: snapshot.motionGroups,
+            guideStrokes: snapshot.guideStrokes
         )
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: url.appendingPathComponent("manifest.json"))
@@ -438,6 +458,10 @@ enum ProjectStore {
         // Assigned directly rather than through a `select…` helper: unlike a brush, the vector-eraser
         // mode carries no size/opacity to re-baseline, so there is nothing for such a helper to do.
         manager.vectorEraserMode = manifest.vectorEraserMode
+        // Document-level interpolation state. Both default to empty for every project that predates
+        // the feature or simply never used it.
+        manager.motionGroups = manifest.motionGroups
+        manager.guideStrokes = manifest.guideStrokes
 
         // Restore folders.
         manager.folders = manifest.folders.map { f in
@@ -497,8 +521,18 @@ enum ProjectStore {
                     vector = .empty(size: canvasSize)
                 }
 
+                // The interpolation recipe. A cel whose recipe file is missing or unreadable loads as
+                // an ordinary cel rather than failing the whole project: the recipe *derives*
+                // content, so losing it costs the link, not the drawing.
+                var interpolation: InterpolationRecipe?
+                if let interpolationFileName = celManifest.interpolationFileName,
+                   let data = try? Data(contentsOf: imagesDir.appendingPathComponent(interpolationFileName)) {
+                    interpolation = try? JSONDecoder().decode(InterpolationRecipe.self, from: data)
+                }
+
                 cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
-                                 raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector))
+                                 raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector,
+                                 interpolation: interpolation))
             }
 
             let parentID = layerManifest.parentFolderID.flatMap { UUID(uuidString: $0) }

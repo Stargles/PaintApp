@@ -42,6 +42,19 @@ final class CanvasManager: ObservableObject {
     @Published var viewPresets: [ViewPreset] = []
     /// -1 means no view preset is active (all layers visible in their natural state).
     @Published var activeViewPresetIndex: Int = -1
+
+    /// Every motion group in the document, in creation order. Strokes reference these by id
+    /// (`VectorStroke.motionGroupID`); a recipe binds geometry to them (`MotionGroupBinding`).
+    ///
+    /// Document-level rather than per-layer so a group can span layers, which is what stops a
+    /// lineart arm and its flat colour drifting apart — see `MotionGroup` and PLAN §5.1. Empty until
+    /// the artist tags something, so this costs nothing for a project that never interpolates.
+    @Published var motionGroups: [MotionGroup] = []
+
+    /// Every guide stroke in the document. Document-level for the same reason and one more: a guide
+    /// is meant to be *referenced* by several intervals rather than copied into each (requirement 7,
+    /// PLAN §6.4), which only works if it has one home and a stable id.
+    @Published var guideStrokes: [GuideStroke] = []
     @Published var currentLayerIndex: Int = 0 {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }

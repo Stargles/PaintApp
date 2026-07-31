@@ -164,6 +164,9 @@ extension CanvasManager {
         }
         // Leaving the layer/frame ends any in-progress vector-layer transform.
         if isVectorTransforming { isVectorTransforming = false }
+        // The working set of vector cels has just moved, so this is the moment the ones left behind
+        // stop being worth a cached render. See `evictDistantVectorRenderCaches`.
+        evictDistantVectorRenderCaches()
     }
 
     // MARK: Making a selection

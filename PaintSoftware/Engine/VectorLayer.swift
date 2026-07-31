@@ -50,6 +50,36 @@ struct VectorStroke: Identifiable, Codable {
     /// the dabs go", which is the one question `samples` cannot answer for a piece. See `DabLattice`.
     var lattice: DabLattice?
 
+    /// The motion group this stroke belongs to while a keyframe interval is being interpolated —
+    /// nil, which is every stroke the app creates, meaning "not tagged".
+    ///
+    /// **A field rather than a side table**, which is the decision worth defending: membership has
+    /// to survive copy, duplicate, split and every undo snapshot. A side table keyed by stroke id
+    /// would have to be mirrored at each of those sites, and the eraser work is a standing
+    /// demonstration that mirroring an invariant across many call sites is exactly where the bugs
+    /// live. A piece cut out of a tagged stroke keeps the tag for free this way. The cost is a nil
+    /// `UUID?` on strokes that have none, which `encodeIfPresent` keeps off disk entirely.
+    ///
+    /// Independent of `color` on purpose — see `MotionGroup.tagColor` and PLAN §5.1.1.
+    var motionGroupID: UUID? = nil
+
+    /// The interpolation parameter below which this stroke is not drawn at all — the τ of PLAN §5.4.
+    ///
+    /// Set on a stroke drawn *at* an in-between so it does not appear before the frame it was drawn
+    /// at, and on content that exists at one keyframe but not the other, which is how "an eraser
+    /// exists on KF1 and is gone by KF2" needs no eraser-specific code (§7.1). Nil means "always
+    /// visible", which is every ordinary stroke.
+    var visibilityThreshold: CGFloat? = nil
+
+    /// Per-sample overrides of `visibilityThreshold`, keyed by index into `samples`.
+    ///
+    /// Sparse, and absent in the overwhelmingly common case: a stroke that appears or vanishes all
+    /// at once needs only the scalar above. This is what lets a stroke vanish *progressively* along
+    /// its length instead of popping — a sample with no entry uses the whole-stroke threshold. Kept
+    /// as a dictionary rather than an array parallel to `samples` because the entries are few and
+    /// because an array would have to be resized in lockstep by every operation that edits samples.
+    var sampleVisibilityThresholds: [Int: CGFloat]? = nil
+
     var uiColor: UIColor { color.uiColor }
 
     /// Spelled out rather than left to synthesis so the hand-written `init(from:)` below can name the
@@ -57,6 +87,7 @@ struct VectorStroke: Identifiable, Codable {
     /// synthesized memberwise initialiser that every construction site here uses.
     enum CodingKeys: String, CodingKey {
         case id, brush, color, size, opacity, samples, composite, lattice
+        case motionGroupID, visibilityThreshold, sampleVisibilityThresholds
     }
 }
 
@@ -144,6 +175,12 @@ extension VectorStroke {
         // Same reasoning, and additionally: absent is the *normal* case. Only a stroke cut out of
         // another one carries a lattice.
         lattice = try c.decodeIfPresent(DabLattice.self, forKey: .lattice)
+        // Likewise absent for every stroke that is not part of an interpolated frame, which is all
+        // of them until the artist tags one.
+        motionGroupID = try c.decodeIfPresent(UUID.self, forKey: .motionGroupID)
+        visibilityThreshold = try c.decodeIfPresent(CGFloat.self, forKey: .visibilityThreshold)
+        sampleVisibilityThresholds = try c.decodeIfPresent([Int: CGFloat].self,
+                                                           forKey: .sampleVisibilityThresholds)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -158,6 +195,12 @@ extension VectorStroke {
         // Written only when present, so an ordinary stroke's payload is byte-for-byte what it was
         // before pieces existed.
         try c.encodeIfPresent(lattice, forKey: .lattice)
+        // The same contract for the interpolation fields, and it is the one Phase 2 is measured on:
+        // a project with no interpolation data must encode byte-identically to before these
+        // existed. `encodeIfPresent` on three nil optionals writes nothing at all.
+        try c.encodeIfPresent(motionGroupID, forKey: .motionGroupID)
+        try c.encodeIfPresent(visibilityThreshold, forKey: .visibilityThreshold)
+        try c.encodeIfPresent(sampleVisibilityThresholds, forKey: .sampleVisibilityThresholds)
     }
 }
 
@@ -487,6 +530,30 @@ final class VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
         invalidate()
+    }
+
+    /// True when a rendered image is currently memoized. What a cache-eviction policy counts, and
+    /// the only way to observe the cache from outside.
+    var hasCachedImage: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cachedImage != nil
+    }
+
+    /// Frees the memoized render without touching the content.
+    ///
+    /// Deliberately **not** `invalidate()`: `version` means "the content changed", and bumping it
+    /// here would throw away the spatial index too and make every version-keyed consumer believe an
+    /// edit had happened. Nothing has — the next `render()` simply recomputes the same image. That
+    /// distinction is what lets a memory policy drop caches freely.
+    ///
+    /// See `CanvasManager.evictDistantVectorRenderCaches`, which is the policy; this is only the
+    /// mechanism. Existing behaviour without a caller is unchanged, since nothing ever dropped a
+    /// cached image before.
+    func dropCachedImage() {
+        lock.lock()
+        defer { lock.unlock() }
+        cachedImage = nil
     }
 
     // MARK: - Mutation
