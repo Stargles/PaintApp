@@ -344,27 +344,6 @@ Pre-existing constraints inherited from the design phase are in `PLAN.md` §2 ("
   and read the `Test Case Run` nodes' `name` fields. A `XCTFail(report)` with an interpolated string
   is the quickest way to probe numbers from inside a test.
 
-- **The ARAP solve must be performed as a correction to the anchor frame, not in absolute
-  coordinates.** The anchor weight is deliberately tiny (it exists only to pin the translation the
-  edge energy cannot see), which puts the condition number near 1e7 — so an absolute solve loses
-  nine digits and left `t = 0` reproducing keyframe A only to ~1.7e-8, all of it in the translation
-  mode. `x = anchors + y` leaves the matrix untouched, and at the endpoints the right-hand side
-  collapses to zero. Do not "simplify" this away.
-
-- **The deformation energy is over triangles, not quads, and that is load-bearing.** A triangle's
-  rest→deformed map is exactly affine; a quad's is bilinear and no single affine map reproduces a
-  non-parallelogram one. Write the energy per quad and `t = 1` silently stops reproducing keyframe C.
-
-- **ICP needed two non-textbook changes, both measured, both easy to undo by accident.** Matching
-  runs *both* ways (one-directional ICP converged permanently — 600 iterations was no better than 8 —
-  to 13° for a 20° rotation, with the scale shrunk to 0.96), and restarts each run to convergence
-  rather than being screened cheaply and refined (partial residual does not rank basins). Both are
-  commented at the site; see the `interp(phase 1): similarity + ARAP registration` commit message.
-
-- **A source→target fit with a free scale can collapse.** It shrinks the whole source onto a handful
-  of target points and scores a near-perfect residual for a meaningless answer. Any fit whose source
-  is only a *part* of the target must lock the scale — `allowScale: false`.
-
 - **Writing test fixtures for registration is harder than writing the registration.** Three separate
   fixtures asserted things that were simply not true of the geometry, and each looked obviously
   correct:
@@ -384,19 +363,18 @@ Pre-existing constraints inherited from the design phase are in `PLAN.md` §2 ("
   makes each stroke's residual depend on where it sits. Tag-seeded grouping handles it and is
   characterised by a test. This is a known limitation, documented on `MotionGrouping` — see §8.
 
-### 5.7 For Phase 2's data model
+### 5.7 The lattice encoding — *answered, kept for the constraint*
 
-`Lattice` is **not** `Codable` and deliberately was not made so in Phase 1 — persistence is Phase 2's
-call, and inventing an encoding early would have pre-empted it. Two things Phase 2 should know before
-choosing one:
+Phase 1 left `Lattice`'s encoding to Phase 2, which chose it: the rest configuration is never written
+(it is `cols`/`rows`/`restOrigin`/`restCellSize`, four numbers, so `vertices` is omitted entirely for
+a rest lattice and rebuilt on decode) and **no indices are persisted at all**.
 
-- The rest configuration is fully described by `cols`, `rows`, `restOrigin` and `restCellSize`; only
-  `vertices` and `activeCells` carry real information. A rest lattice therefore costs four numbers,
-  not `(cols+1)(rows+1)` points.
-- `LatticeExpansion` exists because adding a ring shifts every cell and vertex index. Anything
-  persisted that indexes into a lattice — an embedding, a per-cell attribute, a pinned vertex — has
-  to be re-mapped when the lattice grows, or version-stamped so a stale index is detected rather
-  than silently misread.
+The second half of that is the part still worth knowing, because it constrains every later phase:
+`LatticeExpansion` exists because adding a ring shifts every cell and vertex index, so anything
+persisted that indexes into a lattice — an embedding, a per-cell attribute, a pinned vertex — must be
+re-mapped when the lattice grows, or version-stamped so a stale index is detected rather than
+silently misread. Storing no indices is what makes the current encoding expansion-proof, and it is
+why the evaluator derives embeddings instead of caching them (§5.8).
 
 ### From Phase 2
 
@@ -413,30 +391,6 @@ choosing one:
   stroke content from `CanvasManager` needs the same treatment**; the structure bracket alone is a
   trap. The slider drag is genuinely fine on `beginStructureGesture`/`commitStructureGesture`,
   because `t` lives in the `Cel` struct.
-
-- **`isRest()`'s default tolerance is wrong for persistence.** `Lattice`'s encoder omits `vertices`
-  when the lattice is at rest and rebuilds them on decode. Gating that on the default
-  `tolerance: Lattice.epsilon` would let a lattice within `1e-9` of rest be written as rest, moving
-  its vertices on every save/load cycle — a slow drift with no visible cause. It is gated on
-  `tolerance: 0`, and the omission is then exactly reversible because a rest lattice's vertices come
-  from the same `restVertex` function the decoder calls.
-
-- **A decoder must not reach a trapping initialiser.** `Lattice`'s designated initialiser has
-  `precondition`s on cols/rows/cell size/vertex count. A truncated or hand-edited file would take the
-  app down rather than report a bad project, so `init(from:)` validates all four and throws
-  `DecodingError` first. Worth copying for any engine type made `Codable` later — the Deform module
-  is full of preconditions.
-
-- **Swift's memberwise initialiser survives new stored properties only if they have defaults.**
-  `VectorStroke` gained three, all `= nil` and all declared after the existing ones, so the dozen-odd
-  memberwise construction sites compile untouched. Declaring one without a default, or before an
-  existing property, breaks every call site at once.
-
-- **Empty-means-everything is a trap when the thing can be emptied.** `GuideStroke.boundGroups` uses
-  empty to mean "every group" (PLAN §10 decision 6). Deleting a motion group therefore must *not*
-  strip its id out of guides bound only to it — that would silently promote a one-group guide to a
-  whole-frame one. `removeMotionGroup` leaves the id dangling instead, which makes the guide drive
-  nothing, which is what deleting its group means.
 
 - **A degraded simulator fails XCUITests as a bare `XCTAssertTrue`, which looks exactly like a
   regression you just caused.** Two consecutive full runs failed differently — one test, then eight
@@ -464,6 +418,24 @@ choosing one:
   cel spanning the whole 12-frame scene, so every `addCel` in frames 0–11 collides and returns
   `false`. Assign `layers[i].cels` directly (or use `CanvasFixture.setCelLayout`, which does not
   create `VectorCanvas`es) when the timeline is the premise rather than the subject.
+
+### Settled — the reasoning now lives in the code
+
+Eight engine facts from Phases 1–2 whose full explanation is commented at the site, often at more
+length than it ever was here. Kept as one-liners so this section stays readable and so there is one
+copy to keep true rather than two. **Read the linked comment before changing any of them** — each
+records a measurement, and each is easy to undo by accident.
+
+| Fact | Where the reasoning is |
+|---|---|
+| The ARAP solve is a correction to the anchor frame, not an absolute solve — the tiny anchor weight puts the condition number near 1e7 | [DeformFactorization.swift](PaintSoftware/Engine/Deform/DeformFactorization.swift) `solve`'s `anchors:` |
+| The deformation energy is over **triangles**, not quads; a quad's map is bilinear and `t = 1` silently stops reproducing keyframe C | [Lattice.swift](PaintSoftware/Engine/Deform/Lattice.swift) `triangles` |
+| ICP matches **both** ways, and restarts run to convergence rather than being screened cheaply | [ARAPRegistration.swift](PaintSoftware/Engine/Deform/ARAPRegistration.swift) `similarityICP` |
+| A source→target fit with a free scale collapses when the source is only *part* of the target — `allowScale: false` | [ARAPRegistration.swift](PaintSoftware/Engine/Deform/ARAPRegistration.swift) `similarity` |
+| `Lattice`'s encoder gates its rest-omission on `tolerance: 0`, not the default epsilon, or a save/load cycle drifts | [Lattice.swift](PaintSoftware/Engine/Deform/Lattice.swift) `encode(to:)` |
+| A decoder must validate rather than reach a trapping initialiser — worth copying for any engine type made `Codable` later | [Lattice.swift](PaintSoftware/Engine/Deform/Lattice.swift) `init(from:)` |
+| New stored properties keep the memberwise initialiser only if they have defaults *and* come last | [VectorLayer.swift](PaintSoftware/Engine/VectorLayer.swift) `VectorStroke` |
+| Empty-means-everything is a trap when the thing can be emptied: deleting a motion group leaves its id dangling in guides rather than stripping it | [GuideStroke.swift](PaintSoftware/Models/GuideStroke.swift) `boundGroups`, `removeMotionGroup` |
 
 ### 5.8 For Phase 3's evaluator
 
