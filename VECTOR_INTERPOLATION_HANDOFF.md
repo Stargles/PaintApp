@@ -38,9 +38,9 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 0 — done.** Phase 1 (lattice/ARAP engine) not started. |
+| **Current phase** | **Phase 1 — done.** Phase 2 (data model, persistence, undo) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `3ecd1e2` — `interp(phase 0): fix vector onion-skin blank bug, add OnionSkinSource seam`. Fast suite green. |
+| **Last known-green commit** | `5e5785e` — `interp(phase 1): motion-residual grouping`. Fast suite green (134 tests). |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -62,11 +62,33 @@ need. Read what §1 says to read; consult the rest on demand.
   pluggable source what to show; `PreviousCelOnionSkinSource` reproduces today's "previous cel on the
   current layer" behaviour. New `OnionSkinLogicTests` (3 tests, all green). Definition of done met.
 
+- **Phase 1 — the lattice + ARAP deformation engine.** New module `PaintSoftware/Engine/Deform/`,
+  five files, importing only `Accelerate`, `CoreGraphics` and `Foundation` — no app type appears
+  anywhere in it (standing constraint A). All eight work items done; definition of done met.
+  - [Lattice.swift](PaintSoftware/Engine/Deform/Lattice.swift) — rest vs current configuration,
+    `embedInRest`/`warp` (closed form), `embedInCurrent` (the inverse map, via inverse bilinear),
+    and `expanded(toContain:)` with `LatticeExpansion`'s index translation.
+  - [DeformFactorization.swift](PaintSoftware/Engine/Deform/DeformFactorization.swift) —
+    `Matrix2x2` + polar decomposition, the Accelerate sparse Cholesky wrapper, and the ARAP normal
+    equations. One factorisation per topology; every *t* is two back-substitutions.
+  - [ARAPInterpolation.swift](PaintSoftware/Engine/Deform/ARAPInterpolation.swift) — per-triangle
+    polar interpolation plus one global reconciling solve. **`t = 0` reproduces A and `t = 1`
+    reproduces C to the last bits, through the general path.**
+  - [ARAPRegistration.swift](PaintSoftware/Engine/Deform/ARAPRegistration.swift) — `PointCloudIndex`,
+    `Similarity`, bidirectional multi-start ICP, and the ARAP fit with positional constraints.
+  - [MotionGrouping.swift](PaintSoftware/Engine/Deform/MotionGrouping.swift) — coarse-to-fine
+    splitting, one algorithm with two seeds.
+  - Tests: `LatticeLogicTests` (29) and `ARAPLogicTests` (39). Fast suite 134 green.
+  - Commits: `bae6a9c`, `20008a1`, `2f9fa1e`, `131e0d1`, `5e5785e`.
+
 ### What is next
 
-**Phase 1** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — the lattice + ARAP deformation engine, pure
-logic, no knowledge of keyframes/cels/interpolation. The project's main technical risk; escalate to
-Opus 5 per §3.4 if the numerics get hard.
+**Phase 2** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — the data model, persistence and undo, with
+the feature still inert. Pattern-following work against `VectorStroke`'s established
+`init(from:)` + `decodeIfPresent` shape; §3.4's table says Sonnet 5 at medium is the right call for
+most of it.
+
+**Read §5.7 before starting** — the one thing Phase 1 learned that constrains Phase 2's data model.
 
 ### History note
 
@@ -175,11 +197,20 @@ than a shared one, so concurrent sessions do not contend.
 ### Fast run — pure logic only (~1–2 min). Use this constantly.
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests
 ```
 
-Add your own logic-test class to that filter as you create it, e.g.
-`-only-testing:PaintSoftwareUITests/LatticeLogicTests`.
+134 tests, all green as of `5e5785e`. Add your own logic-test class to that filter as you create it.
+
+### Reading a failure
+
+`xcodebuild` prints `Test case '…' failed` and **not the assertion message** (§5). To see why:
+
+```bash
+xcrun xcresulttool get test-results test-details --test-id 'ARAPLogicTests/testTZeroReproducesLatticeAExactly()' --path "$(ls -dt /tmp/interp-dd/Logs/Test/*.xcresult | head -1)" --format json
+```
+
+The messages are the `name` fields of the `Test Case Run` nodes.
 
 ### Build only — fastest possible check that it compiles
 
@@ -249,6 +280,81 @@ Pre-existing constraints inherited from the design phase are in `PLAN.md` §2 ("
   this was taken as the intended tradeoff rather than a bug — flagging per §3.5 in case the product
   owner disagrees.
 
+### From Phase 1
+
+- **`plutil -lint` does not catch a duplicate object ID in `project.pbxproj`.** It only checks plist
+  syntax. Reusing an ID that was already taken (`DEC0DE…50`, which belonged to
+  `CanvasManager+Timeline.swift`) linted clean and then made Xcode refuse the whole project with
+  `-[PBXFileReference buildPhase]: unrecognized selector`, which points nowhere near the real cause.
+  **After editing the pbxproj, check for collisions as well as lint**, and prefer a fresh ID prefix:
+
+  ```bash
+  grep -oE "DEC0DE[0-9A-F]{18}" PaintSoftware.xcodeproj/project.pbxproj | sort | uniq -c | awk '$1>3'
+  ```
+  A file reference legitimately appears 3 times and a build file 2, so anything above 3 is a
+  collision. `xcodebuild -list` is the cheap end-to-end confirmation.
+
+- **XCTest assertion messages do not appear in `xcodebuild`'s console output** in this project's
+  configuration — you get `Test case '…' failed` and nothing else, which makes numeric debugging
+  impossible. Pull them out of the result bundle instead:
+  `xcrun xcresulttool get test-results test-details --test-id '<Class>/<test>()' --path <newest .xcresult> --format json`,
+  and read the `Test Case Run` nodes' `name` fields. A `XCTFail(report)` with an interpolated string
+  is the quickest way to probe numbers from inside a test.
+
+- **The ARAP solve must be performed as a correction to the anchor frame, not in absolute
+  coordinates.** The anchor weight is deliberately tiny (it exists only to pin the translation the
+  edge energy cannot see), which puts the condition number near 1e7 — so an absolute solve loses
+  nine digits and left `t = 0` reproducing keyframe A only to ~1.7e-8, all of it in the translation
+  mode. `x = anchors + y` leaves the matrix untouched, and at the endpoints the right-hand side
+  collapses to zero. Do not "simplify" this away.
+
+- **The deformation energy is over triangles, not quads, and that is load-bearing.** A triangle's
+  rest→deformed map is exactly affine; a quad's is bilinear and no single affine map reproduces a
+  non-parallelogram one. Write the energy per quad and `t = 1` silently stops reproducing keyframe C.
+
+- **ICP needed two non-textbook changes, both measured, both easy to undo by accident.** Matching
+  runs *both* ways (one-directional ICP converged permanently — 600 iterations was no better than 8 —
+  to 13° for a 20° rotation, with the scale shrunk to 0.96), and restarts each run to convergence
+  rather than being screened cheaply and refined (partial residual does not rank basins). Both are
+  commented at the site; see the `interp(phase 1): similarity + ARAP registration` commit message.
+
+- **A source→target fit with a free scale can collapse.** It shrinks the whole source onto a handful
+  of target points and scores a near-perfect residual for a meaningless answer. Any fit whose source
+  is only a *part* of the target must lock the scale — `allowScale: false`.
+
+- **Writing test fixtures for registration is harder than writing the registration.** Three separate
+  fixtures asserted things that were simply not true of the geometry, and each looked obviously
+  correct:
+  - Bodies made of parallel strokes pin neither orientation nor position — point matching slides
+    freely along them — so ICP explained two separately-moving bodies as one 153° rotation to within
+    2.6 points.
+  - "Two bodies move opposite ways" **is** a rigid rotation of the pair. One motion group is correct.
+  - "One body moves sideways, the other stays" is *nearly* a rotation about the still one; at a
+    70-point move across a 180-point gap the leftover error was 4.1 points, inside any sane
+    threshold. Only motion **along the line joining the bodies** changes their separation, which no
+    rigid motion can do.
+  - Evenly spaced identical strokes alias: every stroke finds a neighbour's target nearer than its
+    own. Use closed, unequal-sided outlines and irregular arrangements.
+
+- **Automatic grouping does not reliably separate an attached limb from its torso.** There is no
+  spatial gap to cut on, and residuals are a weak signal precisely there, because a fitted rotation
+  makes each stroke's residual depend on where it sits. Tag-seeded grouping handles it and is
+  characterised by a test. This is a known limitation, documented on `MotionGrouping` — see §8.
+
+### 5.7 For Phase 2's data model
+
+`Lattice` is **not** `Codable` and deliberately was not made so in Phase 1 — persistence is Phase 2's
+call, and inventing an encoding early would have pre-empted it. Two things Phase 2 should know before
+choosing one:
+
+- The rest configuration is fully described by `cols`, `rows`, `restOrigin` and `restCellSize`; only
+  `vertices` and `activeCells` carry real information. A rest lattice therefore costs four numbers,
+  not `(cols+1)(rows+1)` points.
+- `LatticeExpansion` exists because adding a ring shifts every cell and vertex index. Anything
+  persisted that indexes into a lattice — an embedding, a per-cell attribute, a pinned vertex — has
+  to be re-mapped when the lattice grows, or version-stamped so a stale index is detected rather
+  than silently misread.
+
 ---
 
 ## 6. Session log
@@ -269,6 +375,11 @@ Pre-existing constraints inherited from the design phase are in `PLAN.md` §2 ("
   `OnionSkinSource` seam (commit `3ecd1e2`). Added `OnionSkinLogicTests` (3 tests, green). Learned the
   UITests target's pbxproj Sources phase is still hand-maintained (§5). Phase 0 definition of done met;
   stopped there per §3.3 rather than starting Phase 1.
+- **Session 4 (Phase 1) — 2026-07-31:** Built the whole lattice + ARAP engine — all eight work items,
+  five files under `Engine/Deform/`, 68 new logic tests, five commits (`bae6a9c` … `5e5785e`). The
+  endpoint invariant holds to the last bits, and it took a change of variables to get there (§5). No
+  subagents; done inline on Opus 5 per §3.4. Recorded a real limitation in automatic motion grouping
+  (attached limbs) rather than weakening a test to hide it — see §8.
 
 ---
 
@@ -303,4 +414,36 @@ definition of done is met, and suggest rather than implement anything out of sco
 > Improvements noticed during implementation but deliberately **not** done. The product owner decides
 > whether any of these become work. Do not implement from this list without being asked.
 
-*(Empty — nothing suggested yet.)*
+### From Phase 1
+
+1. **Automatic grouping cannot separate an attached limb from its torso.** The most substantive gap
+   found. Splitting a spatially connected group has to come from residuals, and a stroke's residual
+   is its true motion minus the group's fitted motion — so as soon as that fit contains a rotation,
+   residuals inside one rigid part vary systematically across it and clustering on them cuts in the
+   wrong place. Spatially *separate* bodies split reliably; a swinging arm does not.
+
+   The tag-seeded path handles it today and is the same code, so the one-tap-per-body-part workflow
+   is unaffected — this only limits how good "fully automatic" is on a jointed character. `PLAN.md`
+   §5.3's bootstrap hints (a coarse optical-flow field between rasterised A and C, matching-tag
+   alignment) are the designed route to fixing it, and none are built. **Worth deciding before
+   Phase 5**, which is where automatic grouping becomes user-visible.
+
+2. **No turn-count control for rotations past 180°.** `ARAPInterpolation` unwraps angles across
+   triangle *neighbours*, so the lattice cannot tear — but the global branch always takes the short
+   way round, because nothing in two keyframes distinguishes a 200° turn from a −160° one. The
+   standard remedy is an artist-set turn count per group. Cheap to add (the per-triangle angles are
+   already computed and exposed); worth it only once someone hits it.
+
+3. **`ARAPRegistration.fit` has no early-out on a converged ICP tier.** It always runs `iterations`
+   alternations. Harmless now — registration happens once per keyframe pair, not per frame — but if
+   Phase 5 ends up re-registering interactively while the artist edits tags, this is the first place
+   to look.
+
+4. **Grouping's pairwise "furthest residual poles" search is O(n²) in strokes per group.** Fine at a
+   few hundred; the product owner's >1000-object vector layers (standing constraint C) would notice.
+   A bounding-volume or sampled search would fix it if it ever matters.
+
+5. **`MotionGrouping` never re-merges.** Splitting a badly-fitted group along its spatial components
+   can over-split a drawing whose parts genuinely move together but are disconnected. The result
+   still animates correctly and merging is one tap, so this is the safe direction — but a final
+   "merge groups whose fitted motions agree" pass would make the automatic result tidier.
