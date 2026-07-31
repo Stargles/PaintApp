@@ -192,11 +192,15 @@ enum MotionGrouping {
         return (fit, residuals, totalCount > 0 ? total / CGFloat(totalCount) : 0)
     }
 
-    /// Grow a splinter group from the worst-fitting stroke outward, taking in strokes whose residual
-    /// agrees in direction and which are spatially connected to what has already been taken.
+    /// Carve the part built around the worst-fitting stroke out of `members`.
     ///
-    /// `nil` when nothing splits off — which is the answer for a group that genuinely moves as one,
-    /// however badly it happens to be fitted.
+    /// Two mechanisms, in order of how much they can be trusted: a spatial cut when the group falls
+    /// into disconnected pieces, and otherwise a two-way split on residual vectors. Whichever fires,
+    /// the piece containing the worst-fitting stroke comes back and the rest becomes the remainder,
+    /// which the caller re-fits and may split again.
+    ///
+    /// `nil` when nothing splits off — the answer for a group that genuinely moves as one, however
+    /// badly it happens to be fitted.
     private static func splinter(from members: [Int], strokes: [[CGPoint]], residuals: [CGPoint],
                                  options: Options) -> [Int]? {
         guard members.count > 1 else { return nil }
@@ -229,7 +233,7 @@ enum MotionGrouping {
         // contains any rotation the difference is position-dependent, so residuals *within* one
         // rigid part vary systematically across it. Clustering on them alone put one edge of a
         // rectangle in with a triangle 120 points away.
-        let components = spatialComponents(members.indices.map { $0 }, centroids: centroids, radius: radius)
+        let components = spatialComponents(Array(members.indices), centroids: centroids, radius: radius)
         if components.count > 1, let piece = components.first(where: { $0.contains(worst) }),
            piece.count < members.count {
             return piece.map { members[$0] }.sorted()
