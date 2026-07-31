@@ -64,6 +64,10 @@ struct LayerStackListView: UIViewRepresentable {
         var dragTouchOffset: CGFloat = 0
         var dropLine: UIView?
         var dropTarget: DropTarget?
+        /// Set for the one `reload()` that immediately follows a drop. The rows are already sitting
+        /// in their post-drop positions (the drag left their preview transforms in place), so that
+        /// diff must be applied without animation — see `handleReorderDrag`'s `.ended` case.
+        var isSettlingDrop = false
 
         init(canvasManager: CanvasManager) {
             self.canvasManager = canvasManager
@@ -136,7 +140,7 @@ struct LayerStackListView: UIViewRepresentable {
                 snapshot.appendSections([0])
                 snapshot.appendItems(newIDs)
                 if !changed.isEmpty { snapshot.reconfigureItems(changed) }
-                dataSource.apply(snapshot, animatingDifferences: !oldIDs.isEmpty)
+                dataSource.apply(snapshot, animatingDifferences: !oldIDs.isEmpty && !isSettlingDrop)
             } else if !changed.isEmpty {
                 // Same rows in the same order — refresh contents in place so an opacity drag or a
                 // visibility toggle doesn't tear down cells mid-interaction.
@@ -384,8 +388,15 @@ extension LayerStackListView.Coordinator {
 
         case .ended:
             let target = dropTarget
-            finishDrag()
-            guard let draggedID = pendingDragID, let target else { pendingDragID = nil; return }
+            // The rows are already shifted into the arrangement the drop produces, so those
+            // transforms stay put across the restack. Clearing them here (as this used to) sent
+            // every row snapping back to its pre-drag position for one frame before the animated
+            // diff slid it out again — the "shuffle" the drop appeared to do on release.
+            finishDrag(keepingRowShifts: target != nil)
+            guard let draggedID = pendingDragID, let target else {
+                pendingDragID = nil
+                return
+            }
             pendingDragID = nil
             switch target {
             case .onto(let rowIndex):
@@ -393,9 +404,16 @@ extension LayerStackListView.Coordinator {
             case .between(let insertionIndex):
                 dropBetween(draggedID: draggedID, insertionIndex: insertionIndex)
             }
+            // Re-diff straight away rather than waiting for SwiftUI's own `updateUIView`, so the
+            // shifted rows and the new row order land in the same frame; then drop the shifts, now
+            // that each cell's untransformed position is where the finger left it.
+            isSettlingDrop = true
+            reload()
+            isSettlingDrop = false
+            clearRowShifts()
 
         default:
-            finishDrag()
+            finishDrag(keepingRowShifts: false)
             pendingDragID = nil
         }
     }
@@ -528,7 +546,10 @@ extension LayerStackListView.Coordinator {
         }
     }
 
-    private func finishDrag() {
+    /// Tears down the drag's chrome. `keepingRowShifts` leaves the preview translations on the cells
+    /// so a committed drop can hand them straight to the re-diffed layout; a cancelled drag clears
+    /// them here instead, since nothing is going to move.
+    private func finishDrag(keepingRowShifts: Bool) {
         guard let tableView else { return }
         pendingDragID = dragRowID
         dragSnapshot?.removeFromSuperview()
@@ -537,11 +558,20 @@ extension LayerStackListView.Coordinator {
         for case let cell as LayerStackCell in tableView.visibleCells {
             cell.contentView.alpha = 1
             cell.setDropHighlight(false)
-            cell.transform = .identity
+            if !keepingRowShifts { cell.transform = .identity }
         }
         tableView.isScrollEnabled = true
         dragRowID = nil
         dropTarget = nil
+    }
+
+    /// Returns every cell to its untransformed position — called once the model has caught up, so
+    /// "untransformed" and "where the row visually sits" are already the same place.
+    private func clearRowShifts() {
+        guard let tableView else { return }
+        for cell in tableView.visibleCells where cell.transform != .identity {
+            cell.transform = .identity
+        }
     }
 }
 

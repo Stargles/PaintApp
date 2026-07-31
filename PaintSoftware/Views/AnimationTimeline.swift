@@ -30,26 +30,36 @@ struct AnimationTimeline: View {
         timelineHeight <= collapsedHeight + 2
     }
 
+    /// Vertical distance between two track rows — the row plus the `VStack` spacing between them.
+    private var rowPitch: CGFloat { rowHeight + 2 }
+
+    // Every one of the three menus is a popover hung off the thing that was tapped rather than a
+    // confirmation dialog centred on the panel: `menuAnchor` is that thing's rect in window
+    // coordinates, reported up by `TimelineTrackView`. A dialog was appearing over the timeline
+    // itself, covering the very block or column it was about to act on.
+
     // Tapping a frame that's already the current playhead position opens the block's options menu
     // (ToonSquid-style: first tap moves the cursor there, a second tap on the same spot opens it).
-    // Set by TimelineTrackView via onRequestBlockMenu.
     @State private var showBlockMenu = false
     @State private var menuLayerIndex: Int?
     @State private var menuCelIndex: Int?
+    @State private var blockMenuAnchor: CGRect = .zero
 
     // Tapping an empty slot opens an "Add Drawing" / "Paste" menu instead of directly creating a
-    // cel that extends to the end of the gap. Set by TimelineTrackView via onRequestGapMenu.
+    // cel that extends to the end of the gap.
     @State private var showGapMenu = false
     @State private var gapLayerIndex: Int?
     @State private var gapFrame: Int?
+    @State private var gapMenuAnchor: CGRect = .zero
 
     // Tapping the already-selected frame's number on the ruler opens the start/end loop menu.
-    // Set by TimelineTrackView via onRequestLoopMenu.
     @State private var showLoopMenu = false
     @State private var loopMenuFrame: Int?
+    @State private var loopMenuAnchor: CGRect = .zero
 
     // Press-and-hold reorder state for the pinned name column.
     @State private var draggingRowID: UUID?
+    @State private var dragTranslation: CGFloat = 0
     @State private var dragOffsetRows: Int = 0
 
     var body: some View {
@@ -73,18 +83,21 @@ struct AnimationTimeline: View {
                             canvasManager: canvasManager,
                             rowHeight: rowHeight,
                             rulerHeight: rulerHeight,
-                            onRequestBlockMenu: { layerIndex, celIndex in
+                            onRequestBlockMenu: { layerIndex, celIndex, anchor in
                                 menuLayerIndex = layerIndex
                                 menuCelIndex = celIndex
+                                blockMenuAnchor = anchor
                                 showBlockMenu = true
                             },
-                            onRequestGapMenu: { layerIndex, frame in
+                            onRequestGapMenu: { layerIndex, frame, anchor in
                                 gapLayerIndex = layerIndex
                                 gapFrame = frame
+                                gapMenuAnchor = anchor
                                 showGapMenu = true
                             },
-                            onRequestLoopMenu: { frame in
+                            onRequestLoopMenu: { frame, anchor in
                                 loopMenuFrame = frame
+                                loopMenuAnchor = anchor
                                 showLoopMenu = true
                             }
                         )
@@ -96,44 +109,8 @@ struct AnimationTimeline: View {
         }
         .frame(height: timelineHeight)
         .background(Color.black)
-        .onDisappear { playbackTimer?.invalidate() }
-        .confirmationDialog("Block Options", isPresented: $showBlockMenu, titleVisibility: .hidden) {
-            if let layerIndex = menuLayerIndex, let celIndex = menuCelIndex {
-                // Copy only snapshots the block's content onto the clipboard — it doesn't touch the
-                // timeline. Pasting it somewhere else happens from the target empty slot's own menu.
-                Button("Copy") { canvasManager.copyCel(layerIndex: layerIndex, celIndex: celIndex) }
-                Button("Select Multiple") { }.disabled(true)
-                Button("Extend to End") { canvasManager.extendCelToEnd(layerIndex: layerIndex, celIndex: celIndex) }
-                Button("Clear") { canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex) }
-                Button("Delete", role: .destructive) { canvasManager.deleteCel(layerIndex: layerIndex, celIndex: celIndex) }
-                    .disabled(canvasManager.layers[layerIndex].cels.count <= 1)
-            }
-        }
-        .confirmationDialog("Empty Frame", isPresented: $showGapMenu, titleVisibility: .hidden) {
-            if let layerIndex = gapLayerIndex, let frame = gapFrame {
-                Button("Add Drawing") {
-                    canvasManager.currentLayerIndex = layerIndex
-                    canvasManager.addCel(layerIndex: layerIndex, startFrame: frame, frameCount: 1)
-                    canvasManager.goToFrame(frame)
-                }
-                if canvasManager.copiedCel != nil {
-                    Button("Paste") {
-                        canvasManager.currentLayerIndex = layerIndex
-                        canvasManager.pasteCel(layerIndex: layerIndex, startFrame: frame)
-                        canvasManager.goToFrame(frame)
-                    }
-                }
-            }
-        }
-        .confirmationDialog("Loop Range", isPresented: $showLoopMenu, titleVisibility: .hidden) {
-            if let frame = loopMenuFrame {
-                Button("Set Loop Start") { canvasManager.setLoopStart(frame) }
-                Button("Set Loop End") { canvasManager.setLoopEnd(frame) }
-                if canvasManager.loopStartFrame != nil || canvasManager.loopEndFrame != nil {
-                    Button("Clear Loop Range", role: .destructive) { canvasManager.clearLoopRange() }
-                }
-            }
-        }
+        .overlay(alignment: .topLeading) { menuAnchorLayer }
+        .onDisappear { stopPlayback() }
     }
 
     /// Height of the grab handle plus whichever bar is showing — the fixed chrome above the tracks.
@@ -142,7 +119,135 @@ struct AnimationTimeline: View {
     }
 
     private var contentHeight: CGFloat {
-        rulerHeight + CGFloat(max(canvasManager.layerStackRows.count, 1)) * (rowHeight + 2) + 8
+        rulerHeight + CGFloat(max(canvasManager.layerStackRows.count, 1)) * rowPitch + 8
+    }
+
+    // MARK: - Menus
+
+    /// Three zero-content views parked exactly where the tapped block / slot / ruler column is, each
+    /// carrying one popover. SwiftUI can only anchor a popover to a view, so the anchor has to exist
+    /// as a view; these are transparent and take no touches, so nothing about the timeline changes
+    /// while no menu is up.
+    private var menuAnchorLayer: some View {
+        GeometryReader { proxy in
+            let origin = proxy.frame(in: .global).origin
+            ZStack(alignment: .topLeading) {
+                menuAnchor(blockMenuAnchor, relativeTo: origin, isPresented: $showBlockMenu) { blockMenu }
+                menuAnchor(gapMenuAnchor, relativeTo: origin, isPresented: $showGapMenu) { gapMenu }
+                menuAnchor(loopMenuAnchor, relativeTo: origin, isPresented: $showLoopMenu) { loopMenu }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Two things about this order are load-bearing.
+    ///
+    /// `.position`, not `.offset`: a popover attaches to its anchor view's *layout* frame, and
+    /// `.offset` is a render-time translation that leaves that frame where it started — every menu
+    /// came up in the panel's top-left corner regardless of what had been tapped.
+    ///
+    /// And `.popover` goes *before* `.position`, because `.position` returns a view that fills all
+    /// the space offered to it. Attaching the popover after it anchors the menu to the whole overlay
+    /// and it comes up centred on the timeline — the very thing being fixed here.
+    private func menuAnchor<Content: View>(_ rect: CGRect,
+                                           relativeTo origin: CGPoint,
+                                           isPresented: Binding<Bool>,
+                                           @ViewBuilder content: @escaping () -> Content) -> some View {
+        Color.clear
+            .frame(width: max(rect.width, 1), height: max(rect.height, 1))
+            .popover(isPresented: isPresented, content: content)
+            .position(x: rect.midX - origin.x, y: rect.midY - origin.y)
+    }
+
+    @ViewBuilder
+    private var blockMenu: some View {
+        if let layerIndex = menuLayerIndex, let celIndex = menuCelIndex,
+           canvasManager.layers.indices.contains(layerIndex) {
+            menuList {
+                // Copy only snapshots the block's content onto the clipboard — it doesn't touch the
+                // timeline. Pasting it somewhere else happens from the target empty slot's own menu.
+                menuButton("Copy", icon: "doc.on.doc") {
+                    canvasManager.copyCel(layerIndex: layerIndex, celIndex: celIndex)
+                }
+                menuButton("Select Multiple", icon: "square.on.square.dashed") { }
+                    .disabled(true)
+                menuButton("Extend to End", icon: "arrow.right.to.line") {
+                    canvasManager.extendCelToEnd(layerIndex: layerIndex, celIndex: celIndex)
+                }
+                menuButton("Clear", icon: "eraser") {
+                    canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex)
+                }
+                if canvasManager.layers[layerIndex].cels.count > 1 {
+                    menuButton("Delete", icon: "trash", role: .destructive) {
+                        canvasManager.deleteCel(layerIndex: layerIndex, celIndex: celIndex)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var gapMenu: some View {
+        if let layerIndex = gapLayerIndex, let frame = gapFrame {
+            menuList {
+                menuButton("Add Drawing", icon: "plus.square") {
+                    canvasManager.currentLayerIndex = layerIndex
+                    canvasManager.addCel(layerIndex: layerIndex, startFrame: frame, frameCount: 1)
+                    canvasManager.goToFrame(frame)
+                }
+                if canvasManager.copiedCel != nil {
+                    menuButton("Paste", icon: "doc.on.clipboard") {
+                        canvasManager.currentLayerIndex = layerIndex
+                        canvasManager.pasteCel(layerIndex: layerIndex, startFrame: frame)
+                        canvasManager.goToFrame(frame)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var loopMenu: some View {
+        if let frame = loopMenuFrame {
+            menuList {
+                menuButton("Set Loop Start", icon: "arrow.right.to.line") { canvasManager.setLoopStart(frame) }
+                menuButton("Set Loop End", icon: "arrow.left.to.line") { canvasManager.setLoopEnd(frame) }
+                if canvasManager.hasLoopBoundary {
+                    menuButton("Clear Loop Range", icon: "xmark", role: .destructive) {
+                        canvasManager.clearLoopRange()
+                    }
+                }
+            }
+        }
+    }
+
+    private func menuList<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) { content() }
+            .padding(.vertical, 6)
+            .frame(minWidth: 190)
+            .presentationCompactAdaptation(.popover)
+    }
+
+    private func menuButton(_ title: String, icon: String, role: ButtonRole? = nil,
+                            action: @escaping () -> Void) -> some View {
+        Button(role: role) {
+            action()
+            showBlockMenu = false
+            showGapMenu = false
+            showLoopMenu = false
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: icon).frame(width: 20)
+                Text(title)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(role == .destructive ? .red : .primary)
+        .accessibilityIdentifier("timeline.menu.\(title)")
     }
 
     // MARK: - Resizing
@@ -157,8 +262,9 @@ struct AnimationTimeline: View {
     }
 
     /// Drag up to grow the timeline, down to shrink it — continuous all the way into the collapsed
-    /// bar, so hiding it is the bottom of the same motion rather than a separate mode. The chevron
-    /// buttons jump to the same two ends, which is what makes them feel like part of this.
+    /// bar, so hiding it is the bottom of the same motion rather than a separate mode. This is also
+    /// why the collapsed bar carries no "expand" chevron: the same swipe that shrank the panel is
+    /// what brings it back, from anywhere on the bar.
     private var resizeGesture: some Gesture {
         // `.global` coordinate space, not the default `.local`: the drag handle's own view moves
         // upward as the panel grows, so measuring translation in its local frame creates a feedback
@@ -191,46 +297,75 @@ struct AnimationTimeline: View {
         max(availableHeight - 64, minExpandedHeight)
     }
 
-    /// The height the timeline expands to when the chevron is used: enough for every row, capped.
-    private var fittedHeight: CGFloat {
-        clampedHeight((contentHeight + topBarHeight + dividerHeight).rounded())
+    // MARK: - Transport
+
+    /// Play / step / jump, as one group. Both bars centre this group in the panel rather than
+    /// stacking it against the leading edge, so the controls sit under the thumb of a hand holding
+    /// the iPad rather than off in a corner.
+    private var transportControls: some View {
+        HStack(spacing: 20) {
+            Button(action: { canvasManager.goToFrame(0) }) {
+                Image(systemName: "backward.end.fill")
+            }
+            .accessibilityIdentifier("timeline.toStartButton")
+
+            Button(action: { canvasManager.stepFrame(by: -1) }) {
+                Image(systemName: "backward.frame.fill")
+            }
+            .accessibilityIdentifier("timeline.stepBackButton")
+
+            Button(action: togglePlayback) {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+            }
+            .accessibilityIdentifier("timeline.playButton")
+
+            Button(action: { canvasManager.stepFrame(by: 1) }) {
+                Image(systemName: "forward.frame.fill")
+            }
+            .accessibilityIdentifier("timeline.stepForwardButton")
+
+            Button(action: { canvasManager.goToFrame(canvasManager.sceneFrameCount - 1) }) {
+                Image(systemName: "forward.end.fill")
+            }
+            .accessibilityIdentifier("timeline.toEndButton")
+        }
+    }
+
+    private var onionSkinButton: some View {
+        Button(action: { canvasManager.isOnionSkinEnabled.toggle() }) {
+            Image(systemName: canvasManager.isOnionSkinEnabled
+                  ? "square.stack.3d.forward.dottedline.fill"
+                  : "square.stack.3d.forward.dottedline")
+        }
+        .foregroundColor(canvasManager.isOnionSkinEnabled ? .blue : .white)
+    }
+
+    private var loopButton: some View {
+        Button(action: { canvasManager.isLoopEnabled.toggle() }) {
+            Image(systemName: "repeat")
+        }
+        .foregroundColor(canvasManager.isLoopEnabled ? .blue : .white)
+        .accessibilityIdentifier("timeline.loopButton")
+    }
+
+    private var frameLabel: some View {
+        Text("Frame \(canvasManager.currentFrame + 1)/\(canvasManager.sceneFrameCount)")
+            .font(.caption)
+            .foregroundColor(.gray)
+            .accessibilityIdentifier("timeline.frameLabel")
     }
 
     // MARK: - Collapsed
 
     private var collapsedBar: some View {
-        HStack(spacing: 16) {
-            Button(action: togglePlayback) {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+        ZStack {
+            HStack(spacing: 16) {
+                onionSkinButton
+                loopButton
+                Spacer()
+                frameLabel
             }
-            Button(action: { canvasManager.stepFrame(by: -1) }) {
-                Image(systemName: "backward.frame.fill")
-            }
-            Button(action: { canvasManager.stepFrame(by: 1) }) {
-                Image(systemName: "forward.frame.fill")
-            }
-            Button(action: { canvasManager.goToFrame(0) }) {
-                Image(systemName: "backward.end.fill")
-            }
-            Button(action: { canvasManager.goToFrame(canvasManager.sceneFrameCount - 1) }) {
-                Image(systemName: "forward.end.fill")
-            }
-            Button(action: { canvasManager.isOnionSkinEnabled.toggle() }) {
-                Image(systemName: canvasManager.isOnionSkinEnabled ? "square.stack.3d.forward.dottedline.fill" : "square.stack.3d.forward.dottedline")
-            }
-            .foregroundColor(canvasManager.isOnionSkinEnabled ? .blue : .white)
-
-            Spacer()
-
-            Text("Frame \(canvasManager.currentFrame + 1)/\(canvasManager.sceneFrameCount)")
-                .font(.caption)
-                .foregroundColor(.gray)
-                .accessibilityIdentifier("timeline.frameLabel")
-
-            Button(action: { withAnimation(.easeOut(duration: 0.2)) { timelineHeight = fittedHeight } }) {
-                Image(systemName: "chevron.up")
-            }
-            .accessibilityIdentifier("timeline.expandButton")
+            transportControls
         }
         .foregroundColor(.white)
         .font(.title3)
@@ -241,53 +376,30 @@ struct AnimationTimeline: View {
     // MARK: - Expanded mini toolbar
 
     private var miniToolbar: some View {
-        HStack(spacing: 14) {
-            Button(action: { canvasManager.goToFrame(0) }) {
-                Image(systemName: "backward.end.fill")
-            }
-            Button(action: { canvasManager.isOnionSkinEnabled.toggle() }) {
-                Image(systemName: canvasManager.isOnionSkinEnabled ? "square.stack.3d.forward.dottedline.fill" : "square.stack.3d.forward.dottedline")
-            }
-            .foregroundColor(canvasManager.isOnionSkinEnabled ? .blue : .white)
+        ZStack {
+            HStack(spacing: 14) {
+                onionSkinButton
+                loopButton
 
-            Button(action: { canvasManager.isLoopEnabled.toggle() }) {
-                Image(systemName: "repeat")
-            }
-            .foregroundColor(canvasManager.isLoopEnabled ? .blue : .white)
+                Spacer()
 
-            Button(action: { canvasManager.stepFrame(by: -1) }) {
-                Image(systemName: "backward.fill")
-            }
-            Button(action: togglePlayback) {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-            }
-            Button(action: { canvasManager.stepFrame(by: 1) }) {
-                Image(systemName: "forward.fill")
-            }
-            Button(action: { canvasManager.goToFrame(canvasManager.sceneFrameCount - 1) }) {
-                Image(systemName: "forward.end.fill")
-            }
+                TextField("Scene", text: $canvasManager.projectName)
+                    .textFieldStyle(.plain)
+                    .foregroundColor(.white)
+                    .frame(width: 110)
 
-            Spacer()
+                frameLabel
 
-            TextField("Scene", text: $canvasManager.projectName)
-                .textFieldStyle(.plain)
-                .foregroundColor(.white)
-                .frame(width: 110)
+                Text("\(canvasManager.fps) fps")
+                    .font(.caption)
+                    .foregroundColor(.gray)
 
-            Text("Frame \(canvasManager.currentFrame + 1)/\(canvasManager.sceneFrameCount)")
-                .font(.caption)
-                .foregroundColor(.gray)
-                .accessibilityIdentifier("timeline.frameLabel")
-
-            Text("\(canvasManager.fps) fps")
-                .font(.caption)
-                .foregroundColor(.gray)
-
-            Button(action: { withAnimation(.easeOut(duration: 0.2)) { timelineHeight = collapsedHeight } }) {
-                Image(systemName: "chevron.down")
+                Button(action: { withAnimation(.easeOut(duration: 0.2)) { timelineHeight = collapsedHeight } }) {
+                    Image(systemName: "chevron.down")
+                }
+                .accessibilityIdentifier("timeline.collapseButton")
             }
-            .accessibilityIdentifier("timeline.collapseButton")
+            transportControls
         }
         .foregroundColor(.white)
         .padding(.horizontal, 12)
@@ -302,17 +414,51 @@ struct AnimationTimeline: View {
     private var layerNameColumn: some View {
         VStack(alignment: .leading, spacing: 2) {
             Color.clear.frame(height: rulerHeight)
-            ForEach(canvasManager.layerStackRows) { row in
+            ForEach(Array(canvasManager.layerStackRows.enumerated()), id: \.element.id) { position, row in
+                let isLifted = draggingRowID == row.id
                 nameRow(row)
                     .frame(height: rowHeight, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(liftedBackground(isLifted: isLifted))
                     .contentShape(Rectangle())
-                    .opacity(draggingRowID == row.id ? 0.4 : 1)
+                    .scaleEffect(isLifted ? 1.06 : 1, anchor: .leading)
+                    .shadow(color: .black.opacity(isLifted ? 0.6 : 0), radius: 6, y: 3)
+                    .offset(y: rowOffset(at: position))
+                    .zIndex(isLifted ? 1 : 0)
+                    // The rows opening the gap ease into place; the lifted one must not, or it lags
+                    // behind the finger by the animation's duration.
+                    .animation(isLifted ? nil : .easeOut(duration: 0.18), value: dragOffsetRows)
                     .gesture(reorderGesture(for: row))
             }
         }
         .frame(width: 110)
         .padding(.vertical, 4)
+    }
+
+    /// The picked-up row gets a card of its own — dark fill, blue rim — so it reads as detached from
+    /// the column and floating over it, the same lift the layer panel's drag snapshot has.
+    @ViewBuilder
+    private func liftedBackground(isLifted: Bool) -> some View {
+        if isLifted {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.black.opacity(0.9))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue, lineWidth: 1))
+                .padding(.trailing, 4)
+        }
+    }
+
+    /// Where a row sits while a drag is in progress: the lifted one follows the finger, and the rows
+    /// it is passing over slide one slot the other way to open the gap it would drop into.
+    private func rowOffset(at position: Int) -> CGFloat {
+        guard let draggingRowID else { return 0 }
+        let rows = canvasManager.layerStackRows
+        guard let from = rows.firstIndex(where: { $0.id == draggingRowID }) else { return 0 }
+        if position == from { return dragTranslation }
+
+        let to = min(max(from + dragOffsetRows, 0), max(rows.count - 1, 0))
+        if from < to, position > from, position <= to { return -rowPitch }
+        if from > to, position >= to, position < from { return rowPitch }
+        return 0
     }
 
     @ViewBuilder
@@ -354,16 +500,30 @@ struct AnimationTimeline: View {
     /// resolved here by counting how many fixed-height rows the finger travelled.
     private func reorderGesture(for row: LayerStackRow) -> some Gesture {
         LongPressGesture(minimumDuration: 0.5)
-            .onEnded { _ in draggingRowID = row.id }
+            .onEnded { _ in
+                draggingRowID = row.id
+                dragTranslation = 0
+                dragOffsetRows = 0
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
             .sequenced(before: DragGesture(minimumDistance: 0))
             .onChanged { value in
                 guard case .second(_, let drag?) = value, draggingRowID == row.id else { return }
-                dragOffsetRows = Int((drag.translation.height / (rowHeight + 2)).rounded())
+                dragTranslation = drag.translation.height
+                dragOffsetRows = Int((drag.translation.height / rowPitch).rounded())
             }
             .onEnded { _ in
-                defer { draggingRowID = nil; dragOffsetRows = 0 }
-                guard draggingRowID == row.id, dragOffsetRows != 0 else { return }
-                commitReorder(of: row, byRows: dragOffsetRows)
+                let delta = dragOffsetRows
+                let wasDragging = draggingRowID == row.id
+                // Settle the lift before the restack so the card visibly drops into the gap the
+                // other rows opened, rather than blinking out and reappearing somewhere new.
+                withAnimation(.easeOut(duration: 0.15)) {
+                    draggingRowID = nil
+                    dragTranslation = 0
+                    dragOffsetRows = 0
+                }
+                guard wasDragging, delta != 0 else { return }
+                commitReorder(of: row, byRows: delta)
             }
     }
 
@@ -405,18 +565,28 @@ struct AnimationTimeline: View {
 
     // MARK: - Playback
 
+    /// Play/pause. Where playback stops or wraps is `CanvasManager`'s call (`advancePlayback`), which
+    /// treats a missing loop marker as the first/last frame: looping on wraps at the end back to the
+    /// start, looping off runs to the end and stops there instead of sitting on the last frame with
+    /// the timer still ticking.
     private func togglePlayback() {
-        isPlaying.toggle()
         if isPlaying {
-            let interval = 1.0 / Double(max(canvasManager.fps, 1))
-            playbackTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-                DispatchQueue.main.async {
-                    canvasManager.stepFrame(by: 1)
-                }
-            }
-        } else {
-            playbackTimer?.invalidate()
-            playbackTimer = nil
+            stopPlayback()
+            return
         }
+        canvasManager.goToFrame(canvasManager.playbackEntryFrame())
+        isPlaying = true
+        let interval = 1.0 / Double(max(canvasManager.fps, 1))
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            DispatchQueue.main.async {
+                if !canvasManager.advancePlayback() { stopPlayback() }
+            }
+        }
+    }
+
+    private func stopPlayback() {
+        playbackTimer?.invalidate()
+        playbackTimer = nil
+        isPlaying = false
     }
 }

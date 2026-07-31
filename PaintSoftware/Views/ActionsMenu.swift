@@ -11,6 +11,18 @@ struct ActionsMenu: View {
     @State private var paddingDraft: Double = 0
 
     var body: some View {
+        // Scrolled, not just stacked: the panel that hosts this is capped at a fixed height, and a
+        // plain VStack taller than that cap doesn't clip — it overflows symmetrically, pushing the
+        // title off the top and leaving rows drawn outside the panel's own rounded bounds.
+        ScrollView {
+            content
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.black.opacity(0.9))
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Actions")
                 .font(.headline)
@@ -44,6 +56,13 @@ struct ActionsMenu: View {
                 .frame(height: 1)
                 .padding(.vertical, 4)
 
+            pencilOnlyToggle
+
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(height: 1)
+                .padding(.vertical, 4)
+
             Button { notice = "Cut isn't available yet" } label: {
                 row(icon: "scissors", title: "Cut")
             }
@@ -64,11 +83,26 @@ struct ActionsMenu: View {
                     .padding(.horizontal)
                     .padding(.top, 4)
             }
-
-            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color.black.opacity(0.9))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Whether a finger may draw, or only an Apple Pencil. Phrased as "fingers can paint" — the
+    /// state the user is actually choosing between — rather than as the `pencilOnlyDrawing` flag it
+    /// sets, which is inverted and reads backwards on a toggle. Persists across launches.
+    private var pencilOnlyToggle: some View {
+        Toggle(isOn: Binding(get: { !canvasManager.pencilOnlyDrawing },
+                             set: { canvasManager.pencilOnlyDrawing = !$0 })) {
+            HStack {
+                Image(systemName: "hand.draw").frame(width: 24)
+                Text("Fingers Can Paint")
+            }
+            .foregroundColor(.white)
+        }
+        .tint(.blue)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .accessibilityIdentifier("actions.fingersCanPaintToggle")
     }
 
     /// Adjustable light-grey drawable margin around the canvas (see `CanvasManager.setCanvasPadding`).

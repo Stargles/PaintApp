@@ -42,6 +42,9 @@ final class LayerStackCell: UITableViewCell {
 
     private var contentLeading: NSLayoutConstraint!
     private var isFolderRow = false
+    private var isCurrentRow = false
+    private var isMergeHighlighted = false
+    private var isDropHighlighted = false
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -97,8 +100,10 @@ final class LayerStackCell: UITableViewCell {
         opacitySlider.addTarget(self, action: #selector(opacityDragEnded),
                                 for: [.touchUpInside, .touchUpOutside, .touchCancel])
 
-        currentMarker.image = UIImage(systemName: "checkmark.circle.fill")
-        currentMarker.tintColor = .systemBlue
+        // Deliberately image-less: which layer is active is shown by tinting the whole row blue
+        // (`setCurrentRow`), which reads at a glance where a small checkmark tucked against the
+        // trailing edge did not. The view stays in the hierarchy as an accessibility probe so
+        // `layerPanel.row.<n>.current` remains queryable from UI tests.
         currentMarker.contentMode = .scaleAspectFit
         currentMarker.isAccessibilityElement = true
         currentMarker.accessibilityTraits = .image
@@ -209,6 +214,7 @@ final class LayerStackCell: UITableViewCell {
             layerNameCenterY.isActive = false
             folderNameLeading.isActive = true
             folderNameCenterY.isActive = true
+            setCurrentRow(false)
             nameLabel.textColor = model.isVisible ? .white : .gray
             nameLabel.accessibilityIdentifier = "layerPanel.folder.\(model.name)"
             nameLabel.accessibilityValue = "\(model.depth)"
@@ -240,6 +246,7 @@ final class LayerStackCell: UITableViewCell {
             }
             currentMarker.isHidden = !model.isCurrent
             currentMarker.isAccessibilityElement = model.isCurrent
+            setCurrentRow(model.isCurrent)
 
             subtitleLabel.text = model.isFillReference ? "Fill Reference" : "Fill Excluded"
 
@@ -256,7 +263,9 @@ final class LayerStackCell: UITableViewCell {
             folderMarker.accessibilityValue = model.folderName ?? ""
         }
 
-        setMergeHighlight(false)
+        isMergeHighlighted = false
+        isDropHighlighted = false
+        refreshBackground()
     }
 
     /// Vertical guide lines, one per enclosing folder, so nesting depth reads at a glance.
@@ -284,16 +293,48 @@ final class LayerStackCell: UITableViewCell {
 
     /// Tints both rows of a live pinch so it's clear which two are about to merge.
     func setMergeHighlight(_ on: Bool) {
-        contentView.backgroundColor = on ? UIColor.systemBlue.withAlphaComponent(0.28) : .clear
+        isMergeHighlighted = on
+        refreshBackground()
     }
 
     /// Outlines the row a drag would drop *into* — a folder to move inside it, a layer to wrap the
     /// pair in a new folder.
     func setDropHighlight(_ on: Bool) {
-        contentView.layer.borderWidth = on ? 2 : 0
+        isDropHighlighted = on
+        refreshBackground()
+    }
+
+    /// The active layer, shown as a filled blue row.
+    private func setCurrentRow(_ on: Bool) {
+        isCurrentRow = on
+        refreshBackground()
+    }
+
+    /// All three row states paint the same surface, so they're resolved in one place with a fixed
+    /// precedence — a transient drag/pinch state has to win over the standing selection tint, or the
+    /// row you are dropping onto stops being distinguishable while it happens to be the active one.
+    private func refreshBackground() {
+        let fill: UIColor
+        if isDropHighlighted {
+            fill = UIColor.systemBlue.withAlphaComponent(0.18)
+        } else if isMergeHighlighted {
+            fill = UIColor.systemBlue.withAlphaComponent(0.28)
+        } else if isCurrentRow {
+            fill = UIColor.systemBlue.withAlphaComponent(0.32)
+        } else {
+            fill = .clear
+        }
+        contentView.backgroundColor = fill
+        contentView.layer.borderWidth = isDropHighlighted ? 2 : 0
         contentView.layer.borderColor = UIColor.systemBlue.cgColor
-        contentView.layer.cornerRadius = on ? 8 : 0
-        contentView.backgroundColor = on ? UIColor.systemBlue.withAlphaComponent(0.18) : .clear
+        contentView.layer.cornerRadius = (isDropHighlighted || isCurrentRow) ? 8 : 0
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        // A reorder drag leaves preview translations on the cells it shifted; a cell recycled while
+        // one is still applied would otherwise render its new row at the old row's offset.
+        transform = .identity
     }
 
     // MARK: - Actions

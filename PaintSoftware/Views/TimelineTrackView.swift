@@ -19,17 +19,26 @@ struct TimelineTrackView: UIViewRepresentable {
     @ObservedObject var canvasManager: CanvasManager
     var rowHeight: CGFloat
     var rulerHeight: CGFloat
-    var onRequestBlockMenu: (Int, Int) -> Void
-    var onRequestGapMenu: (Int, Int) -> Void
-    var onRequestLoopMenu: (Int) -> Void
+    /// Each menu callback carries the on-screen rect of the thing that was tapped — the block, the
+    /// empty slot, the ruler column — in window coordinates, so `AnimationTimeline` can hang its
+    /// popover off that rect instead of off the timeline panel as a whole.
+    var onRequestBlockMenu: (Int, Int, CGRect) -> Void
+    var onRequestGapMenu: (Int, Int, CGRect) -> Void
+    var onRequestLoopMenu: (Int, CGRect) -> Void
 
     func makeUIView(context: Context) -> UIScrollView {
-        let scrollView = UIScrollView()
+        let scrollView = TimelineScrollView()
+        // How far the track has to reach depends on how wide it is, and on the first `relayout` it
+        // has no width yet — so re-lay-out the moment one arrives (and again on rotation or a Split
+        // View resize), or the timeline would stop dead at the last frame until something else
+        // happened to trigger an update.
+        scrollView.onWidthChange = { [weak coordinator = context.coordinator] in coordinator?.relayout() }
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.showsVerticalScrollIndicator = false
         scrollView.alwaysBounceVertical = false
         scrollView.isDirectionalLockEnabled = true
         scrollView.delaysContentTouches = false
+        scrollView.delegate = context.coordinator
 
         let content = UIView()
         scrollView.addSubview(content)
@@ -63,9 +72,9 @@ struct TimelineTrackView: UIViewRepresentable {
         var canvasManager: CanvasManager
         var rowHeight: CGFloat = 34
         var rulerHeight: CGFloat = 18
-        var onRequestBlockMenu: ((Int, Int) -> Void)?
-        var onRequestGapMenu: ((Int, Int) -> Void)?
-        var onRequestLoopMenu: ((Int) -> Void)?
+        var onRequestBlockMenu: ((Int, Int, CGRect) -> Void)?
+        var onRequestGapMenu: ((Int, Int, CGRect) -> Void)?
+        var onRequestLoopMenu: ((Int, CGRect) -> Void)?
 
         weak var scrollView: UIScrollView?
         weak var contentView: UIView?
@@ -110,10 +119,27 @@ struct TimelineTrackView: UIViewRepresentable {
             }
         }
 
+        /// How many frames the track lays out, which is deliberately more than the scene holds: at
+        /// least the scene's own length, and always a further screenful past the right edge of
+        /// whatever is currently scrolled into view. The timeline therefore has no end to run into —
+        /// scroll right and empty slots keep arriving, so a drawing can be added out beyond the last
+        /// one and the scene grows to meet it (`addCel` raises `sceneFrameCount`).
+        private func displayedFrameCount(for scrollView: UIScrollView) -> Int {
+            let width = max(scrollView.bounds.width, 1)
+            let reach = scrollView.contentOffset.x + width * 2
+            let needed = Int((reach / pixelsPerFrame).rounded(.up)) + 1
+            return max(max(canvasManager.sceneFrameCount, 1), needed)
+        }
+
+        /// The frame count the current subview layout was built for, so scrolling only re-lays-out
+        /// when the track actually has to grow rather than on every delegate callback.
+        private var laidOutFrameCount = 0
+
         func relayout() {
             guard let scrollView, let contentView else { return }
 
-            let sceneFrameCount = max(canvasManager.sceneFrameCount, 1)
+            let sceneFrameCount = displayedFrameCount(for: scrollView)
+            laidOutFrameCount = sceneFrameCount
             let totalWidth = max(CGFloat(sceneFrameCount) * pixelsPerFrame, scrollView.bounds.width)
             let layers = canvasManager.layers
             // Same row order the layer panel and the pinned name column use — folder headers
@@ -130,12 +156,14 @@ struct TimelineTrackView: UIViewRepresentable {
                 rulerView.isAccessibilityElement = true
                 rulerView.accessibilityIdentifier = "timeline.ruler"
                 rulerView.onScrub = { [weak self] frame in self?.canvasManager.goToFrame(frame) }
-                rulerView.onNumberTap = { [weak self] frame in self?.onRequestLoopMenu?(frame) }
+                rulerView.onNumberTap = { [weak self] frame, columnRect in
+                    self?.onRequestLoopMenu?(frame, columnRect)
+                }
                 contentView.addSubview(rulerView)
                 scrollView.panGestureRecognizer.require(toFail: rulerView.panRecognizer)
             }
             rulerView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: rulerHeight)
-            rulerView.sceneFrameCount = sceneFrameCount
+            rulerView.frameCount = sceneFrameCount
             rulerView.pixelsPerFrame = pixelsPerFrame
             rulerView.currentFrame = canvasManager.currentFrame
             rulerView.loopRange = (canvasManager.loopStartFrame != nil || canvasManager.loopEndFrame != nil) ? canvasManager.effectiveLoopRange : nil
@@ -227,13 +255,13 @@ struct TimelineTrackView: UIViewRepresentable {
 
         /// Tapping a frame that's already the current playhead position opens the block's options
         /// menu (ToonSquid-style: first tap moves the cursor there, a second tap opens it).
-        func handleTapOnCel(layerIndex: Int, celIndex: Int, tappedFrame: Int) {
+        func handleTapOnCel(layerIndex: Int, celIndex: Int, tappedFrame: Int, anchor: CGRect) {
             guard canvasManager.layers.indices.contains(layerIndex),
                   canvasManager.layers[layerIndex].cels.indices.contains(celIndex) else { return }
             let cel = canvasManager.layers[layerIndex].cels[celIndex]
             let clamped = max(cel.startFrame, min(tappedFrame, cel.endFrame - 1))
             if layerIndex == canvasManager.currentLayerIndex, clamped == canvasManager.currentFrame {
-                onRequestBlockMenu?(layerIndex, celIndex)
+                onRequestBlockMenu?(layerIndex, celIndex, anchor)
             } else {
                 canvasManager.currentLayerIndex = layerIndex
                 canvasManager.goToFrame(clamped)
@@ -244,10 +272,41 @@ struct TimelineTrackView: UIViewRepresentable {
         /// the end of the gap, which was never what a single tap meant) — it opens a small menu
         /// ("Add Drawing" / "Paste") at the tapped frame instead, same as tapping an existing block
         /// opens its options menu.
-        func handleTapOnGap(layerIndex: Int, start: Int, length: Int, tappedFrame: Int) {
+        ///
+        /// The tap also *selects* what it landed on — that layer, that frame — before the menu goes
+        /// up. Opening the menu used to be the whole of it, so the playhead stayed wherever it was
+        /// and the empty slot you were pointing at was never the one that got selected.
+        func handleTapOnGap(layerIndex: Int, start: Int, length: Int, tappedFrame: Int, anchor: CGRect) {
             let clamped = max(start, min(tappedFrame, start + length - 1))
-            onRequestGapMenu?(layerIndex, clamped)
+            canvasManager.currentLayerIndex = layerIndex
+            // Slots past the end of the scene have no frame to move to yet; "Add Drawing" extends
+            // the scene and lands the playhead there itself.
+            if clamped < canvasManager.sceneFrameCount { canvasManager.goToFrame(clamped) }
+            onRequestGapMenu?(layerIndex, clamped, anchor)
         }
+    }
+}
+
+extension TimelineTrackView.Coordinator: UIScrollViewDelegate {
+    /// Grows the laid-out track as the user scrolls toward its right edge, which is what makes the
+    /// timeline read as endless rather than stopping at the last drawing.
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard displayedFrameCount(for: scrollView) > laidOutFrameCount else { return }
+        relayout()
+    }
+}
+
+/// A scroll view that reports when its width changes, which is what the endless track's extent is
+/// computed from.
+private final class TimelineScrollView: UIScrollView {
+    var onWidthChange: (() -> Void)?
+    private var lastWidth: CGFloat = 0
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width != lastWidth else { return }
+        lastWidth = bounds.width
+        onWidthChange?()
     }
 }
 
@@ -255,12 +314,15 @@ struct TimelineTrackView: UIViewRepresentable {
 /// long-press recognizer rather than a pan so it responds on first touch, not after ~10pt of
 /// movement — matching how a scrub bar should feel.
 private final class TimelineRulerView: UIView {
-    var sceneFrameCount: Int = 12
+    /// How many frame columns are drawn. More than the scene holds — see the coordinator's
+    /// `displayedFrameCount`.
+    var frameCount: Int = 12
     var pixelsPerFrame: CGFloat = 30
     var onScrub: ((Int) -> Void)?
     /// Fired when a tap (not a scrub drag) lands on the frame number that was *already* the current
     /// playhead position before this touch began — ToonSquid-style start/end loop menu trigger.
-    var onNumberTap: ((Int) -> Void)?
+    /// Carries that column's rect in window coordinates so the menu can be anchored to it.
+    var onNumberTap: ((Int, CGRect) -> Void)?
     /// The playhead frame as of the last `relayout`, used only to recognize "tapped the already-
     /// selected frame's number" at touch-down, before this touch's own scrub moves it.
     var currentFrame: Int = 0
@@ -304,11 +366,18 @@ private final class TimelineRulerView: UIView {
             onScrub?(Int(loc.x / pixelsPerFrame))
         case .ended, .cancelled:
             if !touchMoved, tappedFrameWasCurrent {
-                onNumberTap?(currentFrame)
+                onNumberTap?(currentFrame, columnRectInWindow(frame: currentFrame))
             }
         default:
             break
         }
+    }
+
+    /// The tapped frame's column, in window coordinates — the anchor the loop menu hangs off, so it
+    /// appears over that column rather than centred on the timeline panel.
+    private func columnRectInWindow(frame: Int) -> CGRect {
+        let rect = CGRect(x: CGFloat(frame) * pixelsPerFrame, y: 0, width: pixelsPerFrame, height: bounds.height)
+        return convert(rect, to: nil)
     }
 
     override func draw(_ rect: CGRect) {
@@ -324,7 +393,7 @@ private final class TimelineRulerView: UIView {
             .font: UIFont.systemFont(ofSize: 9),
             .foregroundColor: UIColor.gray
         ]
-        for frame in 0..<sceneFrameCount {
+        for frame in 0..<frameCount {
             let x = CGFloat(frame) * pixelsPerFrame + 2
             let text = "\(frame + 1)" as NSString
             text.draw(at: CGPoint(x: x, y: 2), withAttributes: attrs)
@@ -642,11 +711,32 @@ private final class TimelineRowView: UIView {
         guard let z = zone(at: point) else { return }
         let tappedFrame = Int(point.x / pixelsPerFrame)
         switch z {
-        case .leftHandle(let celIndex, _, _), .rightHandle(let celIndex, _, _), .body(let celIndex, _):
-            coordinator.handleTapOnCel(layerIndex: layerIndex, celIndex: celIndex, tappedFrame: tappedFrame)
+        case .leftHandle(let celIndex, let start, let end), .rightHandle(let celIndex, let start, let end):
+            coordinator.handleTapOnCel(layerIndex: layerIndex, celIndex: celIndex, tappedFrame: tappedFrame,
+                                       anchor: rectInWindow(fromFrame: start, toFrame: end))
+        case .body(let celIndex, let start):
+            let end = coordinator.canvasManager.layers.indices.contains(layerIndex)
+                && coordinator.canvasManager.layers[layerIndex].cels.indices.contains(celIndex)
+                ? coordinator.canvasManager.layers[layerIndex].cels[celIndex].endFrame
+                : start + 1
+            coordinator.handleTapOnCel(layerIndex: layerIndex, celIndex: celIndex, tappedFrame: tappedFrame,
+                                       anchor: rectInWindow(fromFrame: start, toFrame: end))
         case .gap(let start, let length):
-            coordinator.handleTapOnGap(layerIndex: layerIndex, start: start, length: length, tappedFrame: tappedFrame)
+            // Anchored to the single tapped slot, not the whole run of empty frames — a gap can be
+            // hundreds of frames wide, and a popover centred on all of it would point nowhere near
+            // the finger.
+            let slot = max(start, min(tappedFrame, start + length - 1))
+            coordinator.handleTapOnGap(layerIndex: layerIndex, start: start, length: length,
+                                       tappedFrame: tappedFrame,
+                                       anchor: rectInWindow(fromFrame: slot, toFrame: slot + 1))
         }
+    }
+
+    /// A frame span of this row, in window coordinates — what a menu popover anchors to.
+    private func rectInWindow(fromFrame start: Int, toFrame end: Int) -> CGRect {
+        let x = CGFloat(start) * pixelsPerFrame
+        let width = max(CGFloat(end - start) * pixelsPerFrame, 1)
+        return convert(CGRect(x: x, y: 0, width: width, height: bounds.height), to: nil)
     }
 }
 

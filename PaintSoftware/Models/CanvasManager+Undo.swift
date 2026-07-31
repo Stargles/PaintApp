@@ -45,6 +45,11 @@ extension CanvasManager {
         activeViewPresetIndex = snapshot.activeViewPresetIndex
         currentLayerIndex = snapshot.currentLayerIndex
         sceneFrameCount = snapshot.sceneFrameCount
+        // The scene may have been longer when the playhead was last moved — undoing the edit that
+        // lengthened it would otherwise leave the playhead parked past the new end, reading as
+        // "Frame 14/12". Adding a drawing out beyond the last frame (the timeline scrolls on
+        // forever, so that is an ordinary thing to do now) is exactly such an edit.
+        currentFrame = min(currentFrame, max(sceneFrameCount - 1, 0))
     }
 
     /// Registers one undo step for a discrete (non-gesture) structural edit — call after the

@@ -185,11 +185,21 @@ final class CanvasManager: ObservableObject {
     @Published var brushOpacity: Double = 1.0
     @Published var brushColor: Color = .black
     @Published var selectedTool: Tool = .pen
-    // Defaults to false: on a device/simulator with no Apple Pencil, an ON-by-default gate silently
-    // swallows every finger touch on the canvas with no feedback, reading as "drawing is broken"
-    // until the user finds this toggle in the SideToolbar. Users with a Pencil who want to rest a
-    // palm on the canvas can still switch it on.
-    @Published var pencilOnlyDrawing: Bool = false
+    /// Defaults key for `pencilOnlyDrawing`. This one setting is about the user's *hardware* — do
+    /// they have a Pencil and rest a palm on the glass — not about any one drawing, so it belongs to
+    /// the app rather than to a project's manifest, and it has to survive reopening both.
+    static let pencilOnlyDefaultsKey = "paintapp.pencilOnlyDrawing"
+
+    // Absent a stored preference this is false: on a device/simulator with no Apple Pencil, an
+    // ON-by-default gate silently swallows every finger touch on the canvas with no feedback,
+    // reading as "drawing is broken" until the user finds the toggle in the Actions menu. Users with
+    // a Pencil who want to rest a palm on the canvas switch it on, and it stays on from then on.
+    @Published var pencilOnlyDrawing: Bool = UserDefaults.standard.bool(forKey: CanvasManager.pencilOnlyDefaultsKey) {
+        didSet {
+            guard oldValue != pencilOnlyDrawing else { return }
+            UserDefaults.standard.set(pencilOnlyDrawing, forKey: Self.pencilOnlyDefaultsKey)
+        }
+    }
 
     /// The full brush preset currently active (shape, hardness, spacing, stabilization, dynamics,
     /// scatter/rotation jitter, grain, blend mode) — everything `StrokeCanvasView.stampOne` reads
@@ -509,6 +519,43 @@ final class CanvasManager: ObservableObject {
             next = max(0, min(next, sceneFrameCount - 1))
         }
         currentFrame = next
+    }
+
+    // MARK: - Playback bounds
+    //
+    // An unset loop marker means "the end of the scene", not "no boundary": the first frame stands
+    // in for a missing loop start and the last frame for a missing loop end. That single
+    // substitution is what lets both modes share one rule — loop mode wraps at the end boundary back
+    // to the start boundary, normal mode stops there — instead of each needing its own special case
+    // for whether markers happen to be set.
+
+    /// Whether the user has placed either loop marker.
+    var hasLoopBoundary: Bool { loopStartFrame != nil || loopEndFrame != nil }
+
+    /// The frame playback runs from: the loop start, or the first frame.
+    var playbackStartFrame: Int { hasLoopBoundary ? effectiveLoopRange.lowerBound : 0 }
+
+    /// The last frame playback shows: the loop end, or the last frame of the scene.
+    var playbackEndFrame: Int { hasLoopBoundary ? effectiveLoopRange.upperBound : max(sceneFrameCount - 1, 0) }
+
+    /// Where the playhead should sit when the play button is pressed. Pressing play while parked at
+    /// (or past) the end replays from the start rather than stopping on the spot.
+    func playbackEntryFrame() -> Int {
+        (currentFrame < playbackStartFrame || currentFrame >= playbackEndFrame) ? playbackStartFrame : currentFrame
+    }
+
+    /// Advances the playhead one frame of playback. Returns false when playback has run off the end
+    /// and should stop — which only ever happens with looping off.
+    @discardableResult
+    func advancePlayback() -> Bool {
+        let end = playbackEndFrame
+        guard currentFrame < end else {
+            guard isLoopEnabled else { return false }
+            currentFrame = playbackStartFrame
+            return true
+        }
+        currentFrame += 1
+        return true
     }
 
     // MARK: - Drawing updates

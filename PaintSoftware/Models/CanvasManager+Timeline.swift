@@ -136,8 +136,13 @@ extension CanvasManager {
     func extendCelToEnd(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
+        // Clamped at the next block's start rather than left to `resizeCelRightEdge`'s own ceiling:
+        // that one pushes into the neighbour, which is right for a deliberate edge drag but not for
+        // a menu item whose whole promise is "fill the empty space after this".
+        let stop = neighborBounds(layerIndex: layerIndex, celIndex: celIndex).upperBound
         withStructureUndo(name: "Extend Frame") {
-            resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex, newEndFrame: max(sceneFrameCount, cel.endFrame))
+            resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex,
+                               newEndFrame: min(stop, max(sceneFrameCount, cel.endFrame)))
         }
     }
 
@@ -164,28 +169,70 @@ extension CanvasManager {
         return (lower, upper ?? Int.max)
     }
 
+    /// The block immediately after `celIndex` on the same layer, if any. Cels never overlap, so
+    /// "after" is just the smallest start frame among the ones that don't begin before this cel.
+    private func nextCelIndex(layerIndex: Int, after celIndex: Int) -> Int? {
+        let cel = layers[layerIndex].cels[celIndex]
+        return layers[layerIndex].cels.indices
+            .filter { $0 != celIndex && layers[layerIndex].cels[$0].startFrame >= cel.startFrame }
+            .min { layers[layerIndex].cels[$0].startFrame < layers[layerIndex].cels[$1].startFrame }
+    }
+
+    /// The block immediately before `celIndex` on the same layer, if any.
+    private func previousCelIndex(layerIndex: Int, before celIndex: Int) -> Int? {
+        let cel = layers[layerIndex].cels[celIndex]
+        return layers[layerIndex].cels.indices
+            .filter { $0 != celIndex && layers[layerIndex].cels[$0].endFrame <= cel.startFrame }
+            .max { layers[layerIndex].cels[$0].endFrame < layers[layerIndex].cels[$1].endFrame }
+    }
+
     /// Drag the block's left edge: keeps the right edge fixed, changes startFrame/frameCount.
     /// Deliberately NOT wrapped in `withStructureUndo` here — `TimelineTrackView`'s pan handler
     /// calls this on every `.changed` event of the drag, so it brackets the whole gesture itself
     /// with `beginStructureGesture()`/`commitStructureGesture(name:)` instead of one step per call.
+    ///
+    /// Dragging past the block before it doesn't stop at that block — it pushes into it, and the
+    /// neighbour gives up frames from its trailing edge. See `resizeCelRightEdge` for the floor.
     func resizeCelLeftEdge(layerIndex: Int, celIndex: Int, newStartFrame: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
-        let bounds = neighborBounds(layerIndex: layerIndex, celIndex: celIndex)
-        let clampedStart = max(bounds.lowerBound, min(newStartFrame, cel.endFrame - 1))
+        let previous = previousCelIndex(layerIndex: layerIndex, before: celIndex)
+        let floor = previous.map { layers[layerIndex].cels[$0].startFrame + 1 } ?? 0
+        let clampedStart = max(floor, min(newStartFrame, cel.endFrame - 1))
+
         layers[layerIndex].cels[celIndex].startFrame = clampedStart
         layers[layerIndex].cels[celIndex].frameCount = cel.endFrame - clampedStart
+
+        if let previous, layers[layerIndex].cels[previous].endFrame > clampedStart {
+            layers[layerIndex].cels[previous].frameCount =
+                clampedStart - layers[layerIndex].cels[previous].startFrame
+        }
     }
 
     /// Drag the block's right edge: keeps the left edge fixed, changes frameCount only. Also used
     /// (as a one-shot call, not a gesture) by `extendCelToEnd`, which supplies its own undo wrap
     /// since this method doesn't register one itself — see `resizeCelLeftEdge`'s comment.
+    ///
+    /// Extending block A into block B shrinks B from its leading edge rather than stopping A dead at
+    /// B's start. B's floor is one frame — a block can't be squeezed out of existence, so A stops at
+    /// `B.endFrame - 1`, and a B that is *already* one frame long is an immovable wall. Pulling A
+    /// back afterwards leaves B where the push put it (a gap opens instead), which is how timeline
+    /// editors generally behave: the push is an edit to B, not a temporary displacement.
     func resizeCelRightEdge(layerIndex: Int, celIndex: Int, newEndFrame: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
-        let bounds = neighborBounds(layerIndex: layerIndex, celIndex: celIndex)
-        let clampedEnd = min(bounds.upperBound, max(newEndFrame, cel.startFrame + 1))
+        let next = nextCelIndex(layerIndex: layerIndex, after: celIndex)
+        let ceiling = next.map { layers[layerIndex].cels[$0].endFrame - 1 } ?? Int.max
+        let clampedEnd = min(ceiling, max(newEndFrame, cel.startFrame + 1))
+
         layers[layerIndex].cels[celIndex].frameCount = clampedEnd - cel.startFrame
+
+        if let next, layers[layerIndex].cels[next].startFrame < clampedEnd {
+            let neighbour = layers[layerIndex].cels[next]
+            layers[layerIndex].cels[next].startFrame = clampedEnd
+            layers[layerIndex].cels[next].frameCount = neighbour.endFrame - clampedEnd
+        }
+
         sceneFrameCount = max(sceneFrameCount, clampedEnd)
     }
 

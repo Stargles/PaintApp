@@ -84,17 +84,9 @@ struct SideToolbar: View {
                         identifier: "sideToolbar.brushOpacitySlider"
                     )
                 }
-
-                Button(action: { canvasManager.pencilOnlyDrawing.toggle() }) {
-                    Image(systemName: canvasManager.pencilOnlyDrawing ? "pencil.tip" : "pencil.tip.crop.circle")
-                        .font(.footnote)
-                        .foregroundColor(canvasManager.pencilOnlyDrawing ? .blue : .white)
-                        .frame(width: 30, height: 30)
-                        .background(canvasManager.pencilOnlyDrawing ? Color.white.opacity(0.3) : Color.white.opacity(0.15))
-                        .cornerRadius(6)
-                }
-                .accessibilityLabel(canvasManager.pencilOnlyDrawing ? "Apple Pencil only: on" : "Apple Pencil only: off")
-                .accessibilityIdentifier("sideToolbar.pencilOnlyToggle")
+                // The Apple Pencil / finger-drawing gate used to live here. It moved to the Actions
+                // menu: it's a set-once preference about the user's hardware, not a per-stroke dial
+                // like the sliders it was sitting among.
             }
 
             Spacer()
