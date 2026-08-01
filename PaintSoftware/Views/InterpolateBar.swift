@@ -45,7 +45,9 @@ struct InterpolateBar: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.white.opacity(0.15)).frame(height: 1)
         }
-        .accessibilityIdentifier("interpolate.bar")
+        // No identifier on this container on purpose: an accessibility modifier on a SwiftUI
+        // container can promote it to a single element and take its children out of the tree, which
+        // is exactly what made the bar's own buttons unreachable from XCUITest.
     }
 
     // MARK: - Commands

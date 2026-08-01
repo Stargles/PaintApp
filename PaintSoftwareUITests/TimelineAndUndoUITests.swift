@@ -295,9 +295,9 @@ final class TimelineAndUndoUITests: PaintUITestCase {
     /// XCUITests are 99.3% of this suite's runtime (REFACTOR_BASELINE.md), so everything about
     /// interpolation that can be asserted without a simulator gesture is in
     /// `InterpolationWorkflowLogicTests` instead. What is left here is exactly what a logic test
-    /// cannot reach: that the *gestures* are wired up — that press-and-hold on a timeline block
-    /// means "set as reference" once the mode is on, that Generate is reachable from the panel, and
-    /// that dragging the slider changes what is on the canvas.
+    /// cannot reach: that the mode's controls are wired up — that Set as Reference on the
+    /// interpolate bar flags the block under the playhead, that Generate is reachable from that same
+    /// bar, and that dragging the timing slider changes what is on the canvas.
     ///
     /// Structure: two keyframes on one vector layer, and the in-between generated on a *second*
     /// vector layer whose single cel spans the scene. That avoids splitting one layer into three
@@ -348,18 +348,23 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         XCTAssertEqual(modeToggle.value as? String, "1", "The mode toggle should read on after one tap")
         interpolateButton.tap() // close the panel; the mode stays on
 
-        // The gesture under test. Outside interpolate mode this same press-and-hold picks the block
-        // up to drag it along the timeline.
+        // The controls under test. Set as Reference acts on the block under the playhead, so each
+        // reference is "tap the block to go there, then press the button" — and the bar is on screen
+        // the whole time, which is the point of it living above the timeline rather than in a panel.
+        let setReference = app.buttons["interpolate.setReference"]
+        XCTAssertTrue(setReference.waitForExistence(timeout: 5),
+                      "The interpolate bar appears above the timeline once the mode is on")
         XCTAssertFalse(readCelIsReference(app, layerIndex: 1, celIndex: 0),
                        "Setup: nothing is a reference yet")
-        app.otherElements["timeline.cel.1.0"].press(forDuration: 0.9)
-        app.otherElements["timeline.cel.1.1"].press(forDuration: 0.9)
+        app.otherElements["timeline.cel.1.0"].tap()
+        setReference.tap()
+        app.otherElements["timeline.cel.1.1"].tap()
+        setReference.tap()
         XCTAssertTrue(readCelIsReference(app, layerIndex: 1, celIndex: 0),
-                      "Press-and-hold in interpolate mode should flag the block as a reference")
+                      "Set as Reference should flag the block under the playhead")
         XCTAssertTrue(readCelIsReference(app, layerIndex: 1, celIndex: 1), "second block flagged as reference")
 
-        // Make the second vector layer's block the target — a plain tap still means "go here",
-        // which is the other half of the gesture split.
+        // Make the second vector layer's block the target — a plain tap still means "go here".
         app.otherElements["timeline.cel.2.0"].tap()
 
         // Interpolate mode's onion skin draws *both* references, so leaving it on would put ink at
@@ -373,12 +378,10 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)),
                       "Setup: the middle of the canvas is blank before the in-between exists")
 
-        interpolateButton.tap()
         let generate = app.buttons["interpolate.generate"]
         XCTAssertTrue(generate.waitForExistence(timeout: 5), "interpolate.generate exists")
         XCTAssertTrue(generate.isEnabled, "Two references and an empty target cel — Generate should be live")
         generate.tap()
-        interpolateButton.tap()
 
         // Built only on failure — it costs ~20 element screenshots, and "no ink at one point" is
         // almost impossible to diagnose from a bare assertion. Where the ink actually landed, and what
@@ -402,11 +405,9 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         }
 
         // Scrub to t = 0, where the frame *is* keyframe A — so the midpoint goes back to blank.
-        interpolateButton.tap()
         let slider = app.sliders["interpolate.tSlider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5), "interpolate.tSlider exists")
         slider.adjust(toNormalizedSliderPosition: 0)
-        interpolateButton.tap()
 
         if !isWhitish(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)) {
             XCTFail("Dragging the slider to 0 should move the drawing back onto keyframe A. \(inkReport())")
