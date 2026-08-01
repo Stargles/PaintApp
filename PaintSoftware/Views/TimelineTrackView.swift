@@ -254,18 +254,6 @@ struct TimelineTrackView: UIViewRepresentable {
             canvasManager.moveCel(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: newStartFrame)
         }
 
-        /// Flags or unflags a block as an interpolation reference — interpolate mode's reading of
-        /// press-and-hold. Relayout immediately so the yellow highlight lands with the gesture
-        /// rather than on SwiftUI's next pass.
-        func toggleReference(layerIndex: Int, celIndex: Int) {
-            guard canvasManager.layers.indices.contains(layerIndex),
-                  canvasManager.layers[layerIndex].cels.indices.contains(celIndex) else { return }
-            let cel = canvasManager.layers[layerIndex].cels[celIndex]
-            canvasManager.toggleInterpolationReference(celID: cel.id,
-                                                       inLayer: canvasManager.layers[layerIndex].id)
-            relayout()
-        }
-
         /// Tapping a frame that's already the current playhead position opens the block's options
         /// menu (ToonSquid-style: first tap moves the cursor there, a second tap opens it).
         func handleTapOnCel(layerIndex: Int, celIndex: Int, tappedFrame: Int, anchor: CGRect) {
@@ -686,18 +674,9 @@ private final class TimelineRowView: UIView {
     /// The pan recognizer deliberately declines body touches (see `shouldReceive`) so a plain swipe
     /// there scrolls the timeline instead of dragging blocks.
     ///
-    /// **In interpolate mode the same press-and-hold sets the block as a reference instead**, and
-    /// that is a deliberate resolution of a real conflict rather than an oversight. The brief (step 2)
-    /// asks for press-and-hold → "Set as reference"; this recognizer already owned press-and-hold on
-    /// a block body for drag-reorder. Adding a second recognizer for the same touch on the same view
-    /// is how you get the two fighting — one wins non-deterministically, and `require(toFail:)`
-    /// between two long presses of equal duration has no stable answer.
-    ///
-    /// Reinterpreting the one recognizer by mode is the same shape as `VectorEraserMode`: one gesture,
-    /// whose meaning the current mode decides. It costs the artist the ability to re-time blocks
-    /// without leaving interpolate mode — which is the right trade, because re-timing an in-between is
-    /// what the `t` slider is *for*, and dragging a keyframe while picking keyframes is not a thing
-    /// anyone is doing. Every other timeline gesture (tap, scrub, edge-resize) is untouched.
+    /// This means drag-reorder in every mode, interpolate included. Setting a block as an
+    /// interpolation reference is `InterpolateBar`'s button, not a gesture here — overloading this
+    /// recognizer by mode would take re-timing away exactly while the artist is working on timing.
     @objc private func handleLongPress(_ gr: UILongPressGestureRecognizer) {
         guard let coordinator else { return }
         switch gr.state {
@@ -706,13 +685,6 @@ private final class TimelineRowView: UIView {
             guard let z = zone(at: point), case .body(let celIndex, let baselineStart) = z,
                   coordinator.canvasManager.layers.indices.contains(layerIndex),
                   coordinator.canvasManager.layers[layerIndex].cels.indices.contains(celIndex) else {
-                gr.isEnabled = false; gr.isEnabled = true
-                return
-            }
-            if coordinator.canvasManager.isInterpolateMode {
-                coordinator.toggleReference(layerIndex: layerIndex, celIndex: celIndex)
-                // Cancel rather than fall through: there is no drag after this, and leaving the
-                // recognizer tracking would send `.changed` into the reorder path below.
                 gr.isEnabled = false; gr.isEnabled = true
                 return
             }

@@ -263,12 +263,6 @@ extension CanvasManager {
     // MARK: - Interpolate mode
 
     /// Enters interpolate mode with a clean reference selection.
-    ///
-    /// `IMPLEMENTATION.md` Phase 4 item 1 says mode entry is where registration runs. It is not, and
-    /// the reason is ordering rather than disagreement: at mode entry no references have been picked
-    /// yet (that is step 2 of the brief's workflow), so there is nothing registered *to*. Registration
-    /// runs at `interpolate(...)`, the first moment both keyframes are known. `isRegisteringInterpolation`
-    /// is published from there.
     func enterInterpolateMode() {
         interpolationReferences.removeAll()
         isInterpolateMode = true
@@ -288,7 +282,7 @@ extension CanvasManager {
         interpolationReferences.contains(CelRef(layerID: layerID, celID: celID))
     }
 
-    /// Flags or unflags a cel as a keyframe. The timeline's press-and-hold in interpolate mode.
+    /// Flags or unflags a cel as a keyframe — `InterpolateBar`'s Set as Reference.
     ///
     /// Not undoable, deliberately: this is a selection, like which layer is current, and filling the
     /// undo stack with selection steps is what makes undo useless. The recipe that *results* from a

@@ -63,6 +63,17 @@ struct AnimationTimeline: View {
     @State private var dragOffsetRows: Int = 0
 
     var body: some View {
+        // The interpolate bar sits *outside* the height-constrained timeline rather than inside it,
+        // so turning the mode on adds a strip above the panel instead of eating rows out of it.
+        VStack(spacing: 0) {
+            if canvasManager.isInterpolateMode {
+                InterpolateBar(canvasManager: canvasManager)
+            }
+            timelinePanel
+        }
+    }
+
+    private var timelinePanel: some View {
         VStack(spacing: 0) {
             // The whole top bar resizes the timeline, not just the grab handle: a drag anywhere on
             // it (including across the buttons — `simultaneousGesture` with a minimum distance lets
