@@ -66,7 +66,22 @@ enum MotionGrouping {
         var proximityMultiple: CGFloat = 2.5
 
         var icpIterations: Int = ARAPRegistration.Options().icpIterations
-        var icpRestarts: Int = ARAPRegistration.Options().icpRestarts
+
+        /// **Deliberately not `ARAPRegistration.Options().icpRestarts`, which is now 1.**
+        ///
+        /// Grouping asks a different question from registration and the trade comes out the other
+        /// way. Registration dropped the multi-start because a *symmetric* source — a straight line
+        /// above all — ties exactly with its own 180° turn, so the extra seeds only ever added a
+        /// coin toss (`HANDOFF.md` §8 items 27 and 32). Here the fit is `.sourceToTarget` from a
+        /// *part* seeded where it already sits, and the whole point is to discover that some part
+        /// moved differently from the rest; without the extra seeds a body that turns is scored as
+        /// though it did not move, and the split it should have caused never happens
+        /// (`testTwoBodiesMovingDifferentlySplitIntoExactlyTwoGroups` is exactly that).
+        ///
+        /// Phase 4.7 measured registration, not grouping. Leaving this at 8 keeps Phase 5's
+        /// starting point the one Phase 1 tested, rather than moving it as a side effect of someone
+        /// else's decision. Phase 5 owns this dial.
+        var icpRestarts: Int = 8
 
         init() {}
     }

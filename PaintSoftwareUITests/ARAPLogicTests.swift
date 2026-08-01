@@ -376,22 +376,47 @@ final class ARAPLogicTests: XCTestCase {
         assertPoint(fit.translation, CGPoint(x: 4, y: -3), accuracy: 1e-12)
     }
 
-    func testICPRecoversARigidMotionWithoutAnyCorrespondence() {
-        // An asymmetric L, so there is only one way it can sit on its own image.
-        let source = (0..<12).map { CGPoint(x: CGFloat($0) * 5, y: 0) }
+    /// An asymmetric L, so there is only one way it can sit on its own image.
+    private var rigidMotionL: [CGPoint] {
+        (0..<12).map { CGPoint(x: CGFloat($0) * 5, y: 0) }
             + (1..<8).map { CGPoint(x: 0, y: CGFloat($0) * 5) }
+    }
+
+    /// **This test used to demand an exact recovery, and that is the price of `icpRestarts: 1`.**
+    ///
+    /// It passed because the 8-way multi-start happened to seed a restart that landed on the exact
+    /// 20°. Dropping the multi-start was `HANDOFF.md` §8 item 32's decision — it is what stops a
+    /// straight line being offered the 180° solution it ties with — and this is the bill. Measured
+    /// worst-point displacement on this L, over the whole flag matrix:
+    ///
+    /// | restarts | 20° | 45° | 90° | 120° | 180° |
+    /// |---|---|---|---|---|---|
+    /// | 1 | 3.47 | 5.55 | 78.3 | 78.2 | 74.3 |
+    /// | 8 (the old default) | 3.47 | 0.00 | 0.00 | 3.47 | 0.00 |
+    ///
+    /// Note what the table also says: even eight restarts missed 20° and 120°, so "exact" was never
+    /// a property of the method — it was a property of which seeds happened to be tried. What ICP
+    /// without a correspondence can honestly be held to is *close*, and that is what this asserts.
+    /// The exact recovery is now the job of the 1:1 arc-length correspondence, which the companion
+    /// test below holds to a far tighter bar than this one ever did.
+    ///
+    /// Do not "fix" this by restoring `icpRestarts: 8` — that reintroduces §8 item 27. §8 item 37
+    /// is the way back to large rotations: escalate the search only when a *coverage* test fails.
+    func testICPWithoutACorrespondenceRecoversARigidMotionOnlyApproximately() {
+        let source = rigidMotionL
         let truth = Similarity(angle: 0.35, scale: 1, translation: CGPoint(x: 22, y: 17))
         let target = PointCloudIndex(source.map(truth.applied(to:)))
 
         let fit = ARAPRegistration.similarityICP(source: source, target: target)
 
-        XCTAssertEqual(fit.angle, truth.angle, accuracy: 1e-6)
-        XCTAssertEqual(fit.scale, 1, accuracy: 1e-6, "one-directional ICP shrinks here; two-directional must not")
-        for p in source {
-            assertPoint(fit.applied(to: p), truth.applied(to: p), accuracy: 1e-4,
-                        "ICP should recover an exactly-reproducible rigid motion exactly")
-        }
+        XCTAssertEqual(fit.scale, 1, accuracy: 1e-6, "the scale is locked, so it cannot drift")
+        let worst = source
+            .map { hypot(fit.applied(to: $0).x - truth.applied(to: $0).x,
+                         fit.applied(to: $0).y - truth.applied(to: $0).y) }
+            .max() ?? 0
+        XCTAssertLessThan(worst, 5, "off by \(worst) on an L 55 across — near, but no longer exact")
     }
+
 
     // MARK: - Tier 2: ARAP fit
 

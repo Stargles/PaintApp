@@ -152,7 +152,37 @@ enum ARAPRegistration {
         /// left a 20° rotation visibly short. Converged fits exit early, so this is a ceiling.
         var icpIterations: Int = 20
         /// Starting rotations the tier-1 ICP is tried from. See `similarityICP`.
-        var icpRestarts: Int = 8
+        ///
+        /// **One, deliberately** (`HANDOFF.md` §8 item 32, decided 2026-08-01). A multi-start buys
+        /// genuinely large rotations and pays for them with a spurious 180° on any content with a
+        /// symmetry — and a straight line has one, exactly: a line segment maps onto itself under a
+        /// half turn, so upright and flipped score *identically* and the multi-start picks between
+        /// them on arithmetic noise. That is the "a line rotates 180° instead of bending" report
+        /// (§8 item 27). No rotation penalty can fix a tie; not offering the flipped seed can.
+        /// frite's registration has no multi-start at all (§5.11), which is the evidence that this
+        /// is the mainstream choice rather than a retreat.
+        ///
+        /// The cost is real and was accepted with the decision: a drawing that genuinely turns more
+        /// than ICP's basin reaches now registers approximately rather than exactly — see
+        /// `ARAPLogicTests.testICPWithoutACorrespondenceRecoversARigidMotionOnlyApproximately`.
+        /// §8 item 37 records the way back (widen the search only when a *coverage* test fails)
+        /// without reintroducing the tie.
+        var icpRestarts: Int = 1
+
+        /// Whether tier 1 may fit a uniform scale as well as a rotation and translation.
+        ///
+        /// **False, deliberately** (`HANDOFF.md` §8 item 32, decided 2026-08-01). A free scale can
+        /// drive itself toward zero and pile the whole source onto a handful of target points, which
+        /// scores a near-perfect *mean residual* while meaning nothing — two vertical lines fitted to
+        /// one between them collapsed to scale 0.15 and covered a quarter of the target's span
+        /// (§8 item 30). Locking it takes that span from 36.5 to 194.6 against the target's 200.
+        ///
+        /// This flag and `icpRestarts` only work **together**: locking the scale while the
+        /// multi-start is still in place trades the collapse for a 90° turn at triple the residual,
+        /// which `testLockingTheScaleAloneTradesTheCollapseForADifferentWrongAnswer` pins so the
+        /// half-fix cannot be applied by accident. frite likewise factors scale out of registration
+        /// rather than fitting it (§5.11).
+        var allowScale: Bool = false
         /// Pull toward the matched target, per source point.
         var dataWeight: CGFloat = 1
         /// How much total rigidity to buy for the total data pull — the fit-versus-smoothness dial.
@@ -267,9 +297,12 @@ enum ARAPRegistration {
     ///   source as well puts the target's extremities back into the fit, which cancels both. On an
     ///   L rotated 20°, one-directional ICP converged — permanently, more iterations did not help —
     ///   to 13° and a scale of 0.96.
-    /// - **Several starting rotations.** ICP's basin of convergence is narrow, so the seed is tried
-    ///   at `restarts` rotations spread around the circle and the lowest-residual fit wins. Without
-    ///   it, any motion whose rotation exceeds the basin silently registers as something else.
+    /// - **Several starting rotations, *off* by default.** ICP's basin of convergence is narrow, so
+    ///   the seed can be tried at `restarts` rotations spread around the circle with the
+    ///   lowest-residual fit winning. That buys large rotations and costs a spurious 180° on
+    ///   symmetric content, which is why `Options.icpRestarts` is now 1 — see its comment for the
+    ///   whole trade. The machinery stays because §8 item 37's coverage-gated escalation will want
+    ///   it back, conditionally.
     ///
     /// Pass `initial` to skip the multi-start and refine one specific guess — that is the hook for
     /// `PLAN.md` §5.3's bootstrap hints (matching tags, a coarse flow field) once they exist.
@@ -278,7 +311,7 @@ enum ARAPRegistration {
                               iterations: Int = Options().icpIterations,
                               restarts: Int = Options().icpRestarts,
                               matching: Matching = .bidirectional,
-                              allowScale: Bool = true) -> Similarity {
+                              allowScale: Bool = Options().allowScale) -> Similarity {
         guard !source.isEmpty, !target.isEmpty else { return initial ?? .identity }
         if let initial {
             return refine(initial, source: source, target: target, iterations: iterations,
@@ -429,7 +462,7 @@ enum ARAPRegistration {
                     constraints: [Constraint] = [], options: Options = Options()) -> Result {
         let rest = lattice.restConfiguration
         let fitted = similarityICP(source: source, target: target, iterations: options.icpIterations,
-                                   restarts: options.icpRestarts)
+                                   restarts: options.icpRestarts, allowScale: options.allowScale)
         let initialVertices = rest.vertices.map(fitted.applied(to:))
         var current = rest.withVertices(initialVertices)
 

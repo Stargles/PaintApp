@@ -168,9 +168,12 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
     /// The animator's requirement is that the pair arrives *on* the single line and still spans it.
     /// Measured today: the fit collapses the source to scale 0.15, so at t = 1 the drawing covers 51
     /// points of the target's 200 — a quarter-height smudge sitting on the middle of the line.
+    /// **Fixed by `allowScale: false` + `icpRestarts: 1`** (§8 item 32). Nothing about the *merge*
+    /// was solved — this is a 2:1 pairing, so it takes the point-cloud path, not the 1:1
+    /// correspondence path — but the collapse that made it unwatchable is gone: the span went from
+    /// 51 to 194.6 of the target's 200. Honest merging of unmatched content is §8 item 34's
+    /// per-vertex visibility thresholds, still unbuilt.
     func testCase30_TwoLinesMergeOntoTheSingleLineAndStillSpanIt() {
-        XCTExpectFailure("Phase 4.7: a free scale collapses the source onto the target's centre")
-
         let target = polyline(CGPoint(x: 400, y: 200), CGPoint(x: 400, y: 400))
         let registration = register(
             source: polyline(CGPoint(x: 300, y: 200), CGPoint(x: 300, y: 400))
@@ -226,47 +229,64 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
     /// grow-and-fade as the evaluator degrading to a cross-fade. It is not — the ARAP solve runs and
     /// reports `refined`. The motion is wrong inside the warp path, which needs a different fix from
     /// a fallback that fired too eagerly.
-    func testTheGrowAndFadeCaseIsNotTheCrossFadeFallback() {
+    ///
+    /// Locking the scale (§8 item 32) took the *grow* half away — the stroke used to triple in
+    /// length, and now reaches 265 of its own 160 — but it left the failure that mattered: at the
+    /// point-cloud tier it still barely bends. That is what the correspondence path fixes, and it is
+    /// why the two changes had to land in that order rather than either alone.
+    func testTheGrowAndFadeCaseNoLongerGrowsButStillWillNotBend() {
+        let target = cShape(centre: CGPoint(x: 400, y: 400), radius: 200)
         let registration = register(
             source: polyline(CGPoint(x: 400, y: 320), CGPoint(x: 400, y: 480)),
-            target: cShape(centre: CGPoint(x: 400, y: 400), radius: 200))
+            target: target)
 
         XCTAssertTrue(registration.result.refined,
                       "the elastic solve ran — this is the warp path, not the degenerate fallback")
-        XCTAssertGreaterThan(arcLength(warp(registration, at: 1)),
-                             arcLength(registration.source) * 2,
-                             "and what it spent the motion on was growth")
+        XCTAssertLessThan(arcLength(warp(registration, at: 1)),
+                          arcLength(registration.source) * 2,
+                          "the scale is locked, so it no longer buys its residual with growth")
+        XCTAssertLessThan(bendRatio(warp(registration, at: 1)), 0.3,
+                          "and with no correspondence it is still nearly straight")
     }
 
-    /// **Mean residual does not detect the collapse, which is why nothing caught this earlier.**
-    /// The two-lines-into-one fit scores a mean residual of a few points — by that measure an
-    /// excellent fit — while covering a quarter of the target. Any future gate on registration
-    /// quality has to measure *coverage*, not distance-to-nearest: piling the source onto the middle
-    /// of the target is exactly how you win on distance-to-nearest.
-    func testMeanResidualLooksGoodOnTheCollapsedFit() {
-        let target = polyline(CGPoint(x: 400, y: 200), CGPoint(x: 400, y: 400))
-        let registration = register(
-            source: polyline(CGPoint(x: 300, y: 200), CGPoint(x: 300, y: 400))
-                  + polyline(CGPoint(x: 500, y: 200), CGPoint(x: 500, y: 400)),
-            target: target)
-
-        XCTAssertLessThan(registration.result.meanResidual, 10,
-                          "the residual reports a good fit")
-        XCTAssertLessThan(registration.result.similarity.scale, 0.5,
-                          "while the similarity has shrunk the drawing to a fraction of its size")
-    }
-
-    /// **Locking the scale is not the fix.** `ARAPRegistration.similarity`'s own comment warns that a
-    /// free scale can collapse a partial match, and `fit` does not pass `allowScale: false`. Passing
-    /// it does not rescue item 30 — it trades a collapse for a 90° turn at more than triple the
-    /// residual. Recorded so the next session does not spend time on the one-line version of the fix.
-    func testLockingTheScaleTradesTheCollapseForADifferentWrongAnswer() {
+    /// **Mean residual is a lying metric, which is why nothing caught this earlier.** Fitted with a
+    /// free scale, two vertical lines onto one between them score a mean residual of a few points —
+    /// by that measure an excellent fit — while shrinking to a seventh of their size. Piling the
+    /// source onto the middle of the target is precisely how you win on distance-to-nearest.
+    ///
+    /// The fit itself no longer does this (`allowScale: false`), so this drives the free-scale path
+    /// directly. **Any future gate on registration quality has to measure coverage**, not
+    /// distance-to-nearest — §8 items 32, 36 and 37 all need the same metric.
+    func testMeanResidualStillLooksGoodOnAFitThatHasCollapsed() {
         let source = polyline(CGPoint(x: 300, y: 200), CGPoint(x: 300, y: 400))
                    + polyline(CGPoint(x: 500, y: 200), CGPoint(x: 500, y: 400))
         let target = PointCloudIndex(polyline(CGPoint(x: 400, y: 200), CGPoint(x: 400, y: 400)))
 
-        let free = ARAPRegistration.similarityICP(source: source, target: target, allowScale: true)
-        let rigid = ARAPRegistration.similarityICP(source: source, target: target, allowScale: false)
+        let collapsed = ARAPRegistration.similarityICP(source: source, target: target,
+                                                       allowScale: true)
+
+        XCTAssertLessThan(collapsed.scale, 0.5, "the free fit shrinks the drawing to a fraction")
+        XCTAssertLessThan(ARAPRegistration.meanDistance(source: source, target: target,
+                                                        under: collapsed), 20,
+                          "and the residual calls that a good fit anyway")
+    }
+
+    /// **Locking the scale *alone* is not the fix.** `ARAPRegistration.similarity`'s own comment
+    /// warns that a free scale can collapse a partial match, and taking the warning on its own —
+    /// without also dropping the multi-start — trades the collapse for a different wrong answer at
+    /// more than triple the residual. That is why §8 item 32 is one decision about two flags, and
+    /// this pins the half-fix so it cannot be applied by accident in either direction.
+    func testLockingTheScaleAloneTradesTheCollapseForADifferentWrongAnswer() {
+        let source = polyline(CGPoint(x: 300, y: 200), CGPoint(x: 300, y: 400))
+                   + polyline(CGPoint(x: 500, y: 200), CGPoint(x: 500, y: 400))
+        let target = PointCloudIndex(polyline(CGPoint(x: 400, y: 200), CGPoint(x: 400, y: 400)))
+
+        // Explicitly eight restarts: this pins the *half*-fix — the old multi-start still in place,
+        // only the scale locked — so it keeps meaning what it says after the defaults moved to one.
+        let free = ARAPRegistration.similarityICP(source: source, target: target, restarts: 8,
+                                                  allowScale: true)
+        let rigid = ARAPRegistration.similarityICP(source: source, target: target, restarts: 8,
+                                                   allowScale: false)
 
         XCTAssertLessThan(free.scale, 0.5, "the free fit collapses")
         XCTAssertGreaterThan(
