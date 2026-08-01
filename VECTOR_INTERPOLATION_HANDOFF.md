@@ -46,7 +46,7 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Phase 4.5 — done.** A UI-only pass on Phase 4's layout, from the product owner's first real iPad session. Phase 5 (motion groups: tagging, auto-grouping, visualisation) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, **rebased onto `origin/main`** (Session 9's timeline work: infinite scroll, popover menus, the `onionSkinButton`/`transportControls` refactor). No upstream — ask before pushing. |
-| **Last known-green commit** | See §6's Session 8 line. Full suite green at the 4.5 boundary. The one skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. |
+| **Last known-green commit** | `5047bb6`. **Full suite green at the 4.5 boundary, on the rebased tree: 507 tests, 506 passed, 0 failed, 1 skipped, `xcodebuild` exit 0**, first attempt after a `simctl erase` — four phase boundaries in a row. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. §8 items 21–24 are the product owner's own follow-on list and 21/23 are the natural next UI work. |
 
