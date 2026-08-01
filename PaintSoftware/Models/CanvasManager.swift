@@ -55,6 +55,42 @@ final class CanvasManager: ObservableObject {
     /// is meant to be *referenced* by several intervals rather than copied into each (requirement 7,
     /// PLAN §6.4), which only works if it has one home and a stable id.
     @Published var guideStrokes: [GuideStroke] = []
+
+    /// Whether the artist is in interpolate mode — the mode the whole interpolation workflow lives
+    /// inside (PLAN §5.0 step 1).
+    ///
+    /// A mode on the manager rather than a `Tool` case, and the precedent is `vectorEraserMode`:
+    /// interpolating is not a thing you *draw with*, it is a state the timeline and the canvas are
+    /// in while you keep using whatever tool you had. Making it a tool would evict the brush every
+    /// time the artist set a reference.
+    ///
+    /// Leaving the mode clears `interpolationReferences` (see `exitInterpolateMode`) but never
+    /// touches a recipe already attached to a cel — the recipe is document content, the selection is
+    /// a transient.
+    @Published var isInterpolateMode: Bool = false
+
+    /// The cels the artist has flagged as keyframes, in the order they were flagged — which is the
+    /// order they become `InterpolationRecipe.references`, so it is time order only because the
+    /// artist picks them that way. Highlighted yellow on the timeline (brief step 2).
+    ///
+    /// Several cels on *different layers* may be flagged for one keyframe (requirement 5: lineart
+    /// and flats interpolate together). `interpolationKeyframes` is what groups them back into
+    /// `InterpolationReference`s, by frame.
+    @Published var interpolationReferences: [CelRef] = []
+
+    /// View-level toggle for `InterpolationEvaluator.Options.thicknessFade`, so the two behaviours
+    /// can be compared on real drawings (`IMPLEMENTATION.md` Phase 4 item 5).
+    ///
+    /// Deliberately **not** persisted and **not** per-recipe: where it eventually belongs is a
+    /// decision to take after looking at it. Off matches the evaluator's default, and the reason it
+    /// is off is in `InterpolationEvaluator.ThicknessFade`.
+    @Published var interpolationThicknessFade: Bool = false
+
+    /// True while a registration is running. Registration is the expensive step of the whole feature
+    /// (PLAN §5.0 step 1, §8) — an ARAP fit over the keyframes' point clouds — and it is synchronous,
+    /// so this exists for the UI to show that something is happening rather than to gate anything.
+    @Published var isRegisteringInterpolation: Bool = false
+
     @Published var currentLayerIndex: Int = 0 {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }

@@ -258,6 +258,268 @@ extension CanvasManager {
         return frame < cel.startFrame ? cel.startFrame - frame : frame - (cel.endFrame - 1)
     }
 
+    // MARK: - Interpolate mode
+
+    /// Enters interpolate mode with a clean reference selection.
+    ///
+    /// `IMPLEMENTATION.md` Phase 4 item 1 says mode entry is where registration runs. It is not, and
+    /// the reason is ordering rather than disagreement: at mode entry no references have been picked
+    /// yet (that is step 2 of the brief's workflow), so there is nothing registered *to*. Registration
+    /// runs at `interpolate(...)`, the first moment both keyframes are known. `isRegisteringInterpolation`
+    /// is published from there.
+    func enterInterpolateMode() {
+        interpolationReferences.removeAll()
+        isInterpolateMode = true
+    }
+
+    /// Leaves the mode and drops the reference selection.
+    ///
+    /// Recipes already attached to cels are untouched: the selection is a transient, the recipe is
+    /// document content. Leaving and re-entering the mode therefore keeps every in-between working
+    /// and only asks the artist to re-pick references if they want to build a *new* one.
+    func exitInterpolateMode() {
+        isInterpolateMode = false
+        interpolationReferences.removeAll()
+    }
+
+    func isInterpolationReference(celID: UUID, inLayer layerID: UUID) -> Bool {
+        interpolationReferences.contains(CelRef(layerID: layerID, celID: celID))
+    }
+
+    /// Flags or unflags a cel as a keyframe. The timeline's press-and-hold in interpolate mode.
+    ///
+    /// Not undoable, deliberately: this is a selection, like which layer is current, and filling the
+    /// undo stack with selection steps is what makes undo useless. The recipe that *results* from a
+    /// selection is undoable, in one step (`interpolate(...)`).
+    func toggleInterpolationReference(celID: UUID, inLayer layerID: UUID) {
+        let ref = CelRef(layerID: layerID, celID: celID)
+        if let existing = interpolationReferences.firstIndex(of: ref) {
+            interpolationReferences.remove(at: existing)
+        } else {
+            interpolationReferences.append(ref)
+        }
+    }
+
+    /// The flagged cels grouped into keyframes, in time order.
+    ///
+    /// Cels that start on the same frame are one keyframe, which is what makes requirement 5 work
+    /// without a second gesture: flagging a lineart cel and the flats cel underneath it produces one
+    /// reference holding both, so they warp through one lattice instead of drifting apart.
+    ///
+    /// Grouping is by `startFrame` rather than by overlap. Overlap would fold a long held cel in with
+    /// every short cel beside it, which is the wrong answer far more often than two same-length cels
+    /// starting a frame apart is.
+    var interpolationKeyframes: [InterpolationReference] {
+        var byFrame: [Int: [CelRef]] = [:]
+        for ref in interpolationReferences {
+            guard let at = celIndices(forCel: ref.celID, inLayer: ref.layerID) else { continue }
+            byFrame[layers[at.layer].cels[at.cel].startFrame, default: []].append(ref)
+        }
+        return byFrame.keys.sorted().map { InterpolationReference(cels: byFrame[$0] ?? []) }
+    }
+
+    /// Resolves a `CelRef` to the display list that cel holds — the evaluator's `ContentProvider`.
+    ///
+    /// The evaluator takes this as a closure rather than reaching for `CanvasManager` itself, which
+    /// is what lets every render test run without a document (`HANDOFF.md` §5.9). This is the one
+    /// place the two are joined.
+    var interpolationContentProvider: InterpolationEvaluator.ContentProvider {
+        { [weak self] ref in
+            guard let self, let at = self.celIndices(forCel: ref.celID, inLayer: ref.layerID) else {
+                return []
+            }
+            return self.layers[at.layer].cels[at.cel].vector?.elements ?? []
+        }
+    }
+
+    var interpolationOptions: InterpolationEvaluator.Options {
+        var options = InterpolationEvaluator.Options()
+        options.thicknessFade = interpolationThicknessFade ? .weighted(exponent: 1) : .none
+        return options
+    }
+
+    // MARK: - Creating a recipe
+
+    /// Why `interpolate(...)` declined, for a UI that has to say something more useful than nothing.
+    enum InterpolationRefusal: Equatable {
+        /// Fewer than two keyframes are flagged.
+        case notEnoughReferences
+        /// The target cel is itself one of the flagged keyframes.
+        case targetIsAReference
+        /// The target cel is not on a vector layer.
+        case notAVectorLayer
+        /// Every flagged keyframe is empty, so there is nothing to register.
+        case referencesAreEmpty
+        /// Reproject is not built yet — see `IMPLEMENTATION.md` Phase 6 item 1.
+        case reprojectNotImplemented
+
+        var message: String {
+            switch self {
+            case .notEnoughReferences: return "Set at least two reference frames first."
+            case .targetIsAReference: return "This frame is a reference. Pick a different frame."
+            case .notAVectorLayer: return "Interpolation works on vector layers."
+            case .referencesAreEmpty: return "The reference frames have nothing to interpolate."
+            case .reprojectNotImplemented: return "Reproject isn't available yet."
+            }
+        }
+    }
+
+    /// Whether `interpolate` would succeed for this cel, and why not if it would not.
+    func interpolationRefusal(mode: InterpolationMode, layerIndex: Int, celIndex: Int) -> InterpolationRefusal? {
+        if mode == .reproject { return .reprojectNotImplemented }
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex),
+              layers[layerIndex].cels[celIndex].vector != nil else { return .notAVectorLayer }
+        let keyframes = interpolationKeyframes
+        guard keyframes.count >= 2 else { return .notEnoughReferences }
+        let target = CelRef(layerID: layers[layerIndex].id, celID: layers[layerIndex].cels[celIndex].id)
+        guard !interpolationReferences.contains(target) else { return .targetIsAReference }
+        let provider = interpolationContentProvider
+        guard keyframes.contains(where: { !$0.cels.flatMap(provider).isEmpty }) else {
+            return .referencesAreEmpty
+        }
+        return nil
+    }
+
+    /// **Generate** — attach a recipe deriving this cel from the flagged keyframes (`PLAN.md` §5.5).
+    ///
+    /// Note what this does *not* do: it does not write a display list into the cel. An in-between is
+    /// derived, never stored (`PLAN.md` §4) — the recipe is the frame, and moving the slider is a
+    /// parameter change rather than a regeneration. Baking is a separate, later, explicitly one-way
+    /// **Commit** action.
+    ///
+    /// Registration happens here because this is the first moment both keyframes are known. It is
+    /// the expensive step — an ARAP fit per reference past the first — and it is synchronous, so the
+    /// caller sees `isRegisteringInterpolation` go true and back.
+    ///
+    /// Returns the refusal reason, or nil on success.
+    @discardableResult
+    func interpolate(mode: InterpolationMode, layerIndex: Int, celIndex: Int) -> InterpolationRefusal? {
+        if let refusal = interpolationRefusal(mode: mode, layerIndex: layerIndex, celIndex: celIndex) {
+            return refusal
+        }
+        let keyframes = interpolationKeyframes
+        isRegisteringInterpolation = true
+        defer { isRegisteringInterpolation = false }
+
+        let provider = interpolationContentProvider
+        let clouds = keyframes.map { Self.registrationPoints(of: $0.cels.flatMap(provider)) }
+        let binding = Self.registerWholeFrameGroup(clouds: clouds)
+
+        let recipe = InterpolationRecipe(references: keyframes, t: 0.5, mode: mode,
+                                         groups: binding.map { [$0] } ?? [])
+        // A structure bracket, not `withInterpolationUndo`: attaching a recipe writes a value type
+        // inside `Cel` and touches no stroke content, which is exactly the case `withStructureUndo`
+        // covers. The stroke-content bracket is what a future Commit will need (§5).
+        withStructureUndo(name: "Interpolate") {
+            layers[layerIndex].cels[celIndex].interpolation = recipe
+        }
+        return nil
+    }
+
+    /// Removes a cel's recipe, leaving whatever content it already had.
+    func removeInterpolation(layerIndex: Int, celIndex: Int) {
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex),
+              layers[layerIndex].cels[celIndex].interpolation != nil else { return }
+        withStructureUndo(name: "Remove Interpolation") {
+            layers[layerIndex].cels[celIndex].interpolation = nil
+        }
+    }
+
+    // MARK: - Registration
+
+    /// One binding covering the whole frame — Phase 4's single automatic motion group.
+    ///
+    /// The group id is fresh per recipe and **no** `MotionGroup` is registered for it. A registered
+    /// group is an artist-facing object (it has a name, a tag colour, a mode badge — Phase 5), and
+    /// inventing one per recipe would put document state in front of the artist that they never
+    /// asked for. The binding is all the evaluator needs: untagged content rides the recipe's first
+    /// binding (`HANDOFF.md` §5.9), and in Phase 4 every stroke is untagged.
+    ///
+    /// Nil when there is nothing to register, which leaves a recipe with no bindings — legal, and
+    /// meaning "warp nothing", which is the honest answer to two empty keyframes (`PLAN.md` §10
+    /// decision 2).
+    static func registerWholeFrameGroup(clouds: [[CGPoint]]) -> MotionGroupBinding? {
+        guard let first = clouds.first, !first.isEmpty, clouds.count >= 2 else { return nil }
+
+        // The lattice is built over the bounding region at the *first* keyframe (`PLAN.md` §5.2) and
+        // every later keyframe is a fit of it. Cell size is set from the content's own extent rather
+        // than fixed, so a thumbnail-sized doodle and a full-canvas drawing get comparable
+        // resolution; the floor keeps a tiny drawing from producing a needlessly huge grid.
+        let rest = Lattice(covering: first, targetCellSize: Self.latticeCellSize(covering: first),
+                           padding: 1)
+        var lattices: [Lattice] = [rest]
+        for cloud in clouds.dropFirst() {
+            guard !cloud.isEmpty else {
+                // A keyframe with no content has nothing to fit to, and "do not move" is the only
+                // answer that is not invented. Its set fades in or out on weight alone.
+                lattices.append(rest)
+                continue
+            }
+            let fit = ARAPRegistration.fit(lattice: rest, source: first,
+                                           target: PointCloudIndex(cloud))
+            lattices.append(fit.lattice)
+        }
+        return MotionGroupBinding(groupID: UUID(), lattices: lattices)
+    }
+
+    /// Roughly ten cells across the longer side, floored so a small drawing does not get a grid finer
+    /// than its own strokes. The ARAP factorisation is over lattice vertices, so this is the dial that
+    /// sets registration cost — see `PLAN.md` §8.
+    private static func latticeCellSize(covering points: [CGPoint]) -> CGFloat {
+        let xs = points.map(\.x), ys = points.map(\.y)
+        guard let minX = xs.min(), let maxX = xs.max(),
+              let minY = ys.min(), let maxY = ys.max() else { return 32 }
+        return max(max(maxX - minX, maxY - minY) / 10, 8)
+    }
+
+    /// Every point a display list contributes to registration.
+    ///
+    /// Strokes contribute their samples; a fill contributes its path's control points; a placed image
+    /// contributes its centre, which is all of it that can travel (`InterpolationEvaluator`'s note on
+    /// warping one). A stroke's `lattice` parent walk is deliberately skipped — it duplicates the
+    /// stroke's own path and would weight a split piece's parent more heavily than the drawing.
+    static func registrationPoints(of elements: [VectorElement]) -> [CGPoint] {
+        var points: [CGPoint] = []
+        for element in elements {
+            switch element {
+            case .stroke(let stroke):
+                points.append(contentsOf: stroke.samples.map(\.point))
+            case .fill(let fill):
+                guard let path = fill.cgPath else { continue }
+                path.applyWithBlock { element in
+                    let type = element.pointee.type
+                    let count = type == .addQuadCurveToPoint ? 2 : (type == .addCurveToPoint ? 3 : (type == .closeSubpath ? 0 : 1))
+                    for i in 0..<count { points.append(element.pointee.points[i]) }
+                }
+            case .image(let image):
+                points.append(image.transform.position)
+            }
+        }
+        return points
+    }
+
+    // MARK: - Evaluating for display
+
+    /// The interpolated frame's pixels, or nil when the cel has no recipe or the recipe is not yet
+    /// evaluable.
+    ///
+    /// Nil is "not yet", not an error (`HANDOFF.md` §5.9): a recipe can be broken by editing around
+    /// it, and the caller should fall back to the cel's own content rather than show a failure.
+    ///
+    /// `at` overrides the recipe's stored `t` so a live drag can render without writing to the
+    /// document on every tick.
+    func interpolatedImage(forCel celID: UUID, inLayer layerID: UUID, at t: CGFloat? = nil,
+                           quality: RenderQuality = .full) -> UIImage? {
+        guard let canvasSize,
+              let at = celIndices(forCel: celID, inLayer: layerID),
+              let recipe = layers[at.layer].cels[at.cel].interpolation else { return nil }
+        return InterpolationEvaluator.render(recipe: recipe, at: t ?? recipe.t, size: canvasSize,
+                                             content: interpolationContentProvider,
+                                             quality: quality, options: interpolationOptions)
+    }
+
     // MARK: - Guides
 
     @discardableResult

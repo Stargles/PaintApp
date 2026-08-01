@@ -196,6 +196,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 let row = rowViews[slot]
                 row.frame = CGRect(x: 0, y: rowY(entry.position), width: totalWidth, height: rowHeight)
                 row.layerIndex = entry.layerIndex
+                row.layerID = layers[entry.layerIndex].id
                 row.pixelsPerFrame = pixelsPerFrame
                 row.isCurrentLayer = (entry.layerIndex == canvasManager.currentLayerIndex)
                 row.update(cels: layers[entry.layerIndex].cels, sceneFrameCount: sceneFrameCount)
@@ -251,6 +252,18 @@ struct TimelineTrackView: UIViewRepresentable {
         func moveCel(layerIndex: Int, celIndex: Int, newStartFrame: Int) {
             canvasManager.currentLayerIndex = layerIndex
             canvasManager.moveCel(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: newStartFrame)
+        }
+
+        /// Flags or unflags a block as an interpolation reference — interpolate mode's reading of
+        /// press-and-hold. Relayout immediately so the yellow highlight lands with the gesture
+        /// rather than on SwiftUI's next pass.
+        func toggleReference(layerIndex: Int, celIndex: Int) {
+            guard canvasManager.layers.indices.contains(layerIndex),
+                  canvasManager.layers[layerIndex].cels.indices.contains(celIndex) else { return }
+            let cel = canvasManager.layers[layerIndex].cels[celIndex]
+            canvasManager.toggleInterpolationReference(celID: cel.id,
+                                                       inLayer: canvasManager.layers[layerIndex].id)
+            relayout()
         }
 
         /// Tapping a frame that's already the current playhead position opens the block's options
@@ -481,6 +494,9 @@ private final class TimelinePlayheadView: UIView {
 private final class TimelineRowView: UIView {
     weak var coordinator: TimelineTrackView.Coordinator?
     var layerIndex: Int = 0
+    /// The layer's identity as well as its slot, because a `CelRef` addresses a cel by id — and
+    /// `layerIndex` is a position that a layer reorder moves out from under it.
+    var layerID: UUID = UUID()
     var pixelsPerFrame: CGFloat = 30
     var isCurrentLayer: Bool = false
 
@@ -577,10 +593,17 @@ private final class TimelineRowView: UIView {
             }()
             let slotX = CGFloat(segment.start) * pixelsPerFrame
             let slotWidth = CGFloat(segment.length) * pixelsPerFrame
+            let isReference = coordinator.map {
+                $0.canvasManager.isInterpolateMode
+                    && $0.canvasManager.isInterpolationReference(celID: cel.id, inLayer: layerID)
+            } ?? false
             view.setUntransformedFrame(CGRect(x: slotX, y: 0, width: slotWidth, height: bounds.height).insetBy(dx: 2, dy: 2))
-            view.configure(isCurrent: isCurrentLayer, thumbnail: cel.thumbnail)
+            view.configure(isCurrent: isCurrentLayer, thumbnail: cel.thumbnail, isReference: isReference)
             view.setAccessibilityIdentifiers(base: "timeline.cel.\(layerIndex).\(arrayIndex)")
-            view.accessibilityValue = "\(cel.startFrame),\(cel.frameCount)"
+            // The `,ref` suffix is how a UI test reads the highlight: a border colour is not
+            // reachable from XCUITest, and the whole point of the yellow is that the artist can see
+            // which blocks are in play.
+            view.accessibilityValue = "\(cel.startFrame),\(cel.frameCount)" + (isReference ? ",ref" : "")
             view.updateHandlePositions(handleWidth: Self.handleWidth(for: view.bounds.width))
         }
     }
@@ -662,6 +685,19 @@ private final class TimelineRowView: UIView {
     /// Press and hold a block for half a second to pick it up, then slide it along the timeline.
     /// The pan recognizer deliberately declines body touches (see `shouldReceive`) so a plain swipe
     /// there scrolls the timeline instead of dragging blocks.
+    ///
+    /// **In interpolate mode the same press-and-hold sets the block as a reference instead**, and
+    /// that is a deliberate resolution of a real conflict rather than an oversight. The brief (step 2)
+    /// asks for press-and-hold → "Set as reference"; this recognizer already owned press-and-hold on
+    /// a block body for drag-reorder. Adding a second recognizer for the same touch on the same view
+    /// is how you get the two fighting — one wins non-deterministically, and `require(toFail:)`
+    /// between two long presses of equal duration has no stable answer.
+    ///
+    /// Reinterpreting the one recognizer by mode is the same shape as `VectorEraserMode`: one gesture,
+    /// whose meaning the current mode decides. It costs the artist the ability to re-time blocks
+    /// without leaving interpolate mode — which is the right trade, because re-timing an in-between is
+    /// what the `t` slider is *for*, and dragging a keyframe while picking keyframes is not a thing
+    /// anyone is doing. Every other timeline gesture (tap, scrub, edge-resize) is untouched.
     @objc private func handleLongPress(_ gr: UILongPressGestureRecognizer) {
         guard let coordinator else { return }
         switch gr.state {
@@ -670,6 +706,13 @@ private final class TimelineRowView: UIView {
             guard let z = zone(at: point), case .body(let celIndex, let baselineStart) = z,
                   coordinator.canvasManager.layers.indices.contains(layerIndex),
                   coordinator.canvasManager.layers[layerIndex].cels.indices.contains(celIndex) else {
+                gr.isEnabled = false; gr.isEnabled = true
+                return
+            }
+            if coordinator.canvasManager.isInterpolateMode {
+                coordinator.toggleReference(layerIndex: layerIndex, celIndex: celIndex)
+                // Cancel rather than fall through: there is no drag after this, and leaving the
+                // recognizer tracking would send `.changed` into the reorder path below.
                 gr.isEnabled = false; gr.isEnabled = true
                 return
             }
@@ -784,6 +827,7 @@ private final class CelBlockView: UIView {
     private let leftHandleMarker = UIView()
     private let rightHandleMarker = UIView()
     private let shadowView = UIView()
+    private let referenceWash = UIView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -796,6 +840,10 @@ private final class CelBlockView: UIView {
         thumbnailView.contentMode = .scaleAspectFill
         thumbnailView.clipsToBounds = true
         addSubview(thumbnailView)
+
+        referenceWash.backgroundColor = UIColor.systemYellow.withAlphaComponent(0.28)
+        referenceWash.isHidden = true
+        addSubview(referenceWash)
 
         for bar in [leftHandleBar, rightHandleBar] {
             bar.backgroundColor = UIColor.white.withAlphaComponent(0.5)
@@ -818,8 +866,20 @@ private final class CelBlockView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(isCurrent: Bool, thumbnail: UIImage?) {
-        layer.borderColor = (isCurrent ? UIColor.systemBlue : UIColor.white.withAlphaComponent(0.15)).cgColor
+    /// `isReference` wins over `isCurrent` for the border, and adds a wash over the thumbnail.
+    ///
+    /// Yellow is the brief's colour (step 2). It beats the current-layer blue because the two answer
+    /// different questions and only one of them is scarce: which layer is current is visible from the
+    /// playhead and the layer panel, whereas which blocks are feeding this interpolation is visible
+    /// nowhere else. The wash is what makes it readable at a glance across a row of thumbnails —
+    /// a border alone reads as "selected", which is the state it must not be confused with.
+    func configure(isCurrent: Bool, thumbnail: UIImage?, isReference: Bool = false) {
+        let border: UIColor = isReference
+            ? .systemYellow
+            : (isCurrent ? .systemBlue : UIColor.white.withAlphaComponent(0.15))
+        layer.borderColor = border.cgColor
+        layer.borderWidth = isReference ? 3 : 1.5
+        referenceWash.isHidden = !isReference
         thumbnailView.image = thumbnail
         thumbnailView.isHidden = thumbnail == nil
     }
@@ -871,6 +931,7 @@ private final class CelBlockView: UIView {
 
     func updateHandlePositions(handleWidth: CGFloat) {
         thumbnailView.frame = bounds
+        referenceWash.frame = bounds
         leftHandleBar.frame = CGRect(x: 4, y: 6, width: 3, height: max(bounds.height - 12, 0))
         rightHandleBar.frame = CGRect(x: bounds.width - 7, y: 6, width: 3, height: max(bounds.height - 12, 0))
         leftHandleMarker.frame = CGRect(x: 0, y: 0, width: handleWidth, height: bounds.height)
