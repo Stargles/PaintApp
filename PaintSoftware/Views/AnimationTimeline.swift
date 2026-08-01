@@ -57,6 +57,10 @@ struct AnimationTimeline: View {
     @State private var loopMenuFrame: Int?
     @State private var loopMenuAnchor: CGRect = .zero
 
+    // Interpolate mode's options popover, opened by a second tap on the timeline's interpolate
+    // button (the first tap enters the mode).
+    @State private var showInterpolateOptions = false
+
     // Press-and-hold reorder state for the pinned name column.
     @State private var draggingRowID: UUID?
     @State private var dragTranslation: CGFloat = 0
@@ -360,6 +364,37 @@ struct AnimationTimeline: View {
         .accessibilityIdentifier("timeline.loopButton")
     }
 
+    /// Interpolate mode's entry point, next to onion skin and loop rather than in the canvas's top
+    /// toolbar — the mode's whole subject is the timeline, and so is every control it puts on screen
+    /// (`InterpolateBar` right above this bar). Product owner, 2026-08-01.
+    ///
+    /// Two-stage like the paint tools: the first tap turns the mode on, and a tap once it is already
+    /// on opens the options popover. That is why there is no mode switch inside the popover — the
+    /// button *is* the switch, and the popover is only reachable from the on state.
+    private var interpolateButton: some View {
+        Button(action: {
+            if canvasManager.isInterpolateMode {
+                showInterpolateOptions.toggle()
+            } else {
+                canvasManager.enterInterpolateMode()
+            }
+        }) {
+            Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+        }
+        .foregroundColor(canvasManager.isInterpolateMode ? .blue : .white)
+        .accessibilityIdentifier("timeline.interpolateButton")
+        .popover(isPresented: $showInterpolateOptions) {
+            InterpolatePanel(canvasManager: canvasManager)
+                .frame(width: 260)
+                .presentationCompactAdaptation(.popover)
+        }
+        // Exit Interpolate Mode is inside the popover, so the popover has to close itself when the
+        // mode goes off — otherwise it stays up over a bar that is no longer there.
+        .onChange(of: canvasManager.isInterpolateMode) { _, on in
+            if !on { showInterpolateOptions = false }
+        }
+    }
+
     private var frameLabel: some View {
         Text("Frame \(canvasManager.currentFrame + 1)/\(canvasManager.sceneFrameCount)")
             .font(.caption)
@@ -374,6 +409,7 @@ struct AnimationTimeline: View {
             HStack(spacing: 16) {
                 onionSkinButton
                 loopButton
+                interpolateButton
                 Spacer()
                 frameLabel
             }
@@ -392,6 +428,7 @@ struct AnimationTimeline: View {
             HStack(spacing: 14) {
                 onionSkinButton
                 loopButton
+                interpolateButton
 
                 Spacer()
 

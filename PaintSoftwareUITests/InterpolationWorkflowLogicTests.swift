@@ -253,6 +253,110 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         XCTAssertNil(manager.layers[1].cels[1].interpolation)
     }
 
+    /// Pressing Generate twice used to interpolate twice, replacing the first recipe — so a double
+    /// tap silently threw away whatever `t` had been scrubbed to. Product owner, 2026-08-01.
+    func testGenerateRefusesOnACelThatIsAlreadyInterpolated() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        manager.enterInterpolateMode()
+        setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
+        XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1))
+        // A `t` a fresh recipe would never have — Generate always starts at 0.5, so this is what
+        // says the second attempt left the *first* recipe in place rather than replacing it.
+        manager.setInterpolationT(0.25, forCel: cels[1].id, inLayer: manager.layers[1].id)
+
+        XCTAssertEqual(manager.interpolationRefusal(mode: .generate, layerIndex: 1, celIndex: 1),
+                       .alreadyInterpolated,
+                       "The button is disabled from this call, so the refusal is what greys it out")
+        XCTAssertEqual(manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1),
+                       .alreadyInterpolated)
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual(recipe.t, 0.25, accuracy: 0.001,
+                       "The second Generate must leave the scrubbed timing alone")
+    }
+
+    /// Removing the recipe is how you start over — the refusal has to lift again afterwards, or
+    /// Remove Interpolation would be a one-way door.
+    func testRemovingTheInterpolationMakesGenerateAvailableAgain() {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        manager.enterInterpolateMode()
+        setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
+        manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1)
+        manager.removeInterpolation(layerIndex: 1, celIndex: 1)
+
+        XCTAssertNil(manager.interpolationRefusal(mode: .generate, layerIndex: 1, celIndex: 1))
+    }
+
+    // MARK: - Generating from the playhead
+
+    /// A slot with no block in it, between two references, is the ordinary way to ask for an
+    /// in-between. Generate makes the block rather than refusing (product owner, 2026-08-01) —
+    /// otherwise the artist has to know to add a drawing from the slot's own menu first.
+    func testGenerateAtThePlayheadCreatesTheBlockWhenTheSlotIsEmpty() throws {
+        let manager = manager(vectorLayers: 2)
+        let cels = threeCels(manager, layerIndex: 1)
+        emptyAfterFirstBlock(manager, layerIndex: 2)
+        manager.enterInterpolateMode()
+        setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
+
+        manager.currentLayerIndex = 2
+        manager.goToFrame(6)
+        XCTAssertNil(manager.interpolationTarget, "Setup: the playhead is over an empty slot")
+        XCTAssertNil(manager.interpolationRefusalAtPlayhead(mode: .generate),
+                     "A missing block is not a refusal — Generate makes one")
+
+        XCTAssertNil(manager.interpolateAtPlayhead(mode: .generate))
+
+        let at = try XCTUnwrap(manager.interpolationTarget, "A block should now exist under the playhead")
+        XCTAssertEqual(at.layer, 2)
+        let cel = manager.layers[2].cels[at.cel]
+        XCTAssertEqual(cel.startFrame, 6)
+        XCTAssertNotNil(cel.interpolation, "The new block carries the recipe")
+        XCTAssertNotNil(cel.vector, "A block created on a vector layer needs its own canvas")
+    }
+
+    /// One action, one undo step — the block and the recipe arrived together, so they leave together.
+    func testCreatingTheBlockAndItsRecipeIsOneUndoStep() {
+        let manager = manager(vectorLayers: 2)
+        let cels = threeCels(manager, layerIndex: 1)
+        emptyAfterFirstBlock(manager, layerIndex: 2)
+        manager.enterInterpolateMode()
+        setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
+        manager.currentLayerIndex = 2
+        manager.goToFrame(6)
+        manager.interpolateAtPlayhead(mode: .generate)
+        XCTAssertEqual(manager.layers[2].cels.count, 2, "Setup: the block was added")
+
+        manager.undo()
+
+        XCTAssertEqual(manager.layers[2].cels.count, 1,
+                       "One undo takes back both the block and the recipe, not just the recipe")
+        XCTAssertNil(manager.interpolationTarget)
+    }
+
+    func testGenerateAtThePlayheadRefusesOnARasterLayerWithNoBlock() {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 2)])
+        manager.enterInterpolateMode()
+        setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
+
+        manager.currentLayerIndex = 0
+        manager.goToFrame(6)
+        XCTAssertEqual(manager.interpolationRefusalAtPlayhead(mode: .generate), .notAVectorLayer)
+        XCTAssertEqual(manager.layers[0].cels.count, 1, "A refusal must not leave a block behind")
+    }
+
+    /// Leaves `layerIndex` holding a single short block, so the frames after it are empty slots.
+    private func emptyAfterFirstBlock(_ manager: CanvasManager, layerIndex: Int) {
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        manager.layers[layerIndex].cels = [
+            Cel(id: UUID(), startFrame: 0, frameCount: 2, raster: .empty(size: size),
+                vector: .empty(size: size))
+        ]
+    }
+
     // MARK: - Evaluating for display
 
     /// Moving `t` must change the frame. Together with `InterpolationRenderLogicTests`' endpoint

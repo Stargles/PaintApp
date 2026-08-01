@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum ActivePanel: Equatable {
-    case none, actions, adjust, select, move, layers, brush, color, fill, eraser, interpolate
+    case none, actions, adjust, select, move, layers, brush, color, fill, eraser
 }
 
 struct TopToolbar: View {
@@ -33,14 +33,11 @@ struct TopToolbar: View {
                 selectFillToolAndTogglePanel()
             }
             .accessibilityIdentifier("toolbar.fillButton")
-            // Highlighted while the *mode* is on as well as while its panel is open: interpolate mode
-            // persists after the panel closes (the artist still needs the timeline and the canvas),
-            // so the button is the only thing left saying they are in it.
-            iconButton(system: "point.topleft.down.to.point.bottomright.curvepath",
-                       isActive: activePanel == .interpolate || canvasManager.isInterpolateMode) {
-                toggle(.interpolate)
-            }
-            .accessibilityIdentifier("toolbar.interpolateButton")
+            // Interpolate is deliberately *not* here. Its entry point is the animation timeline's own
+            // top bar, next to onion skin and loop (`AnimationTimeline.interpolateButton`) — the mode
+            // acts on timeline blocks and every control it raises sits above the timeline, so a
+            // button at the top of the canvas put the switch as far from its subject as the screen
+            // allows. Product owner, 2026-08-01.
             iconButton(system: "square.stack.3d.up", isActive: activePanel == .layers) { toggle(.layers) }
                 .accessibilityIdentifier("toolbar.layersButton")
 

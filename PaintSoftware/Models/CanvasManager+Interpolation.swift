@@ -346,6 +346,8 @@ extension CanvasManager {
         case notAVectorLayer
         /// Every flagged keyframe is empty, so there is nothing to register.
         case referencesAreEmpty
+        /// The target cel already derives from a recipe — Generate would stack a second one on top.
+        case alreadyInterpolated
         /// Reproject is not built yet — see `IMPLEMENTATION.md` Phase 6 item 1.
         case reprojectNotImplemented
 
@@ -355,6 +357,7 @@ extension CanvasManager {
             case .targetIsAReference: return "This frame is a reference. Pick a different frame."
             case .notAVectorLayer: return "Interpolation works on vector layers."
             case .referencesAreEmpty: return "The reference frames have nothing to interpolate."
+            case .alreadyInterpolated: return "This frame is already interpolated."
             case .reprojectNotImplemented: return "Reproject isn't available yet."
             }
         }
@@ -366,15 +369,56 @@ extension CanvasManager {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               layers[layerIndex].cels[celIndex].vector != nil else { return .notAVectorLayer }
+        // Generating on a cel that already derives from a recipe is never what was meant: the second
+        // Generate silently replaces the first, so a double tap looks like it interpolated twice and
+        // an artist who has scrubbed to a `t` they like loses it. Retiming is the slider's job, and
+        // starting over is Remove Interpolation's. Deliberately *not* extended to Reproject, whose
+        // whole subject is a cel that already has content — when it is built it will need its own
+        // answer to this question rather than inheriting Generate's.
+        if layers[layerIndex].cels[celIndex].interpolation != nil { return .alreadyInterpolated }
+        let target = CelRef(layerID: layers[layerIndex].id, celID: layers[layerIndex].cels[celIndex].id)
+        return referenceRefusal(excludingTarget: target)
+    }
+
+    /// The part of the refusal that is about the *references* rather than the target, so the
+    /// playhead check can reuse it for a cel that does not exist yet.
+    private func referenceRefusal(excludingTarget target: CelRef?) -> InterpolationRefusal? {
         let keyframes = interpolationKeyframes
         guard keyframes.count >= 2 else { return .notEnoughReferences }
-        let target = CelRef(layerID: layers[layerIndex].id, celID: layers[layerIndex].cels[celIndex].id)
-        guard !interpolationReferences.contains(target) else { return .targetIsAReference }
+        if let target, interpolationReferences.contains(target) { return .targetIsAReference }
         let provider = interpolationContentProvider
         guard keyframes.contains(where: { !$0.cels.flatMap(provider).isEmpty }) else {
             return .referencesAreEmpty
         }
         return nil
+    }
+
+    // MARK: - The playhead as the target
+
+    /// The cel every interpolate command acts on: the one under the playhead on the current layer.
+    /// Nil when the playhead sits over an empty slot — which Generate treats as "make one", not as
+    /// "refuse" (see `interpolateAtPlayhead`).
+    var interpolationTarget: (layer: Int, cel: Int)? {
+        let layerIndex = currentLayerIndex
+        guard layers.indices.contains(layerIndex),
+              let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return nil }
+        return (layerIndex, celIndex)
+    }
+
+    /// Whether Generate/Reproject would succeed at the playhead, **including** the case where there
+    /// is no block there yet and one would be created.
+    func interpolationRefusalAtPlayhead(mode: InterpolationMode) -> InterpolationRefusal? {
+        if let at = interpolationTarget {
+            return interpolationRefusal(mode: mode, layerIndex: at.layer, celIndex: at.cel)
+        }
+        if mode == .reproject { return .reprojectNotImplemented }
+        // An empty slot between two references is the ordinary way to ask for an in-between, so the
+        // missing block is not a refusal — Generate makes it. Every target-side check is answered by
+        // construction for a cel that does not exist: it is empty, it carries no recipe, and nothing
+        // can have flagged it as a reference. What is left is the layer's kind and the references.
+        guard layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].kind == .vector else { return .notAVectorLayer }
+        return referenceRefusal(excludingTarget: nil)
     }
 
     /// **Generate** — attach a recipe deriving this cel from the flagged keyframes (`PLAN.md` §5.5).
@@ -411,6 +455,36 @@ extension CanvasManager {
             layers[layerIndex].cels[celIndex].interpolation = recipe
         }
         return nil
+    }
+
+    /// **Generate/Reproject as the bar presses them** — act on the playhead, creating the block if
+    /// there is not one there yet.
+    ///
+    /// Product owner, 2026-08-01: standing on an empty slot between two references and pressing
+    /// Generate should just work. The alternative — add the block from the slot's own menu, then
+    /// press Generate — is two steps for one intent, and the first of them is easy to not know about.
+    ///
+    /// The block and the recipe land as **one** undo step because they are one action. Both `addCel`
+    /// and `interpolate` open `withStructureUndo`, and both defer to an enclosing bracket rather than
+    /// recording their own, so the outer bracket here is all it takes.
+    @discardableResult
+    func interpolateAtPlayhead(mode: InterpolationMode) -> InterpolationRefusal? {
+        if let refusal = interpolationRefusalAtPlayhead(mode: mode) { return refusal }
+        let layerIndex = currentLayerIndex
+        if let at = interpolationTarget {
+            return interpolate(mode: mode, layerIndex: at.layer, celIndex: at.cel)
+        }
+        let frame = currentFrame
+        var result: InterpolationRefusal? = nil
+        withStructureUndo(name: "Interpolate") {
+            guard addCel(layerIndex: layerIndex, startFrame: frame, frameCount: 1),
+                  let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: frame) else {
+                result = .notAVectorLayer
+                return
+            }
+            result = interpolate(mode: mode, layerIndex: layerIndex, celIndex: celIndex)
+        }
+        return result
     }
 
     /// Removes a cel's recipe, leaving whatever content it already had.

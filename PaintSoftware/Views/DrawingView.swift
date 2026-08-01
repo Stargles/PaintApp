@@ -200,8 +200,8 @@ struct DrawingView: View {
             ColorPickerPanel(canvasManager: canvasManager)
         case .fill:
             FillSettingsPanel(canvasManager: canvasManager)
-        case .interpolate:
-            InterpolatePanel(canvasManager: canvasManager)
+        // Interpolate has no case here: its options are a popover on the timeline's own interpolate
+        // button (`AnimationTimeline.interpolateButton`), not a top-toolbar dropdown.
         }
     }
 }

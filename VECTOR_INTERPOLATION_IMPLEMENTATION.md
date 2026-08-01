@@ -405,6 +405,75 @@ and scrub it. Undo returns to the pre-interpolation state in one step.
 
 **Estimate.** Two sessions.
 
+### Phases 4.5 and 4.6 — the UI passes *(done)*
+
+Two follow-up passes driven by the product owner's iPad sessions. The layout below is **settled** —
+Phase 5 hangs group controls off this bar, so start from it rather than re-deriving it.
+
+- **The entry point is the animation timeline's own top bar**, next to onion skin and loop
+  (`AnimationTimeline.interpolateButton`) — not the canvas toolbar. Two-stage like the paint tools:
+  first tap enters the mode, a second tap once it is on opens the options popover
+  (`InterpolatePanel`: thickness fade, Clear References, Exit Interpolate Mode). There is no mode
+  switch inside the popover — the button *is* the switch. `ActivePanel.interpolate` no longer exists.
+- **`InterpolateBar`, pinned above the timeline, in two rows.** Top row: the timing (`t`) slider,
+  shown only once a recipe exists — it is the most-touched control, so it takes the edge nearest the
+  eye. Bottom row, as a `ZStack` so the centre group is centred on the *bar* rather than on the room
+  the sides leave: reference counter / refusal message far **left**, Set as Reference · **Generate** ·
+  Reproject centred on Generate, Remove Interpolation far **right**.
+- **Generate acts on the playhead, not on a cel index** (`interpolateAtPlayhead`). Standing on an
+  empty slot between two references and pressing Generate creates the block and attaches the recipe
+  as **one** undo step.
+- **Generate refuses on a cel that already has a recipe** (`.alreadyInterpolated`), which greys the
+  button out. Reproject deliberately does *not* inherit this — re-posing a frame more than once is
+  meaningful in a way that re-deriving it is not.
+
+---
+
+## Phase 4.7 — Engine correctness: what the deformation actually does — ***next, ahead of Phase 5***
+
+**Why this comes before Phase 5.** Motion groups are a *refinement* of the correspondence the engine
+produces: they let the artist say "these strokes move together" when the automatic answer is wrong.
+Built on top of a correspondence that is wrong in the base case, they become a workaround rather than
+a control, and every Phase 5 acceptance test would be written against output that already looks
+wrong. The product owner's four test drawings (2026-08-01, `HANDOFF.md` §8 items 27–30) are all
+single-group cases — no amount of grouping fixes them.
+
+**What was observed.** Each of these is a two-keyframe drawing of a few strokes; all four are the
+simplest possible cases the feature has to get right.
+
+1. A short vertical line → a large offset C. The line **rotated 180°** instead of bending across.
+   Suspected: rigid-motion cost is a lower minimum than deformation cost, so the fit prefers to spin.
+2. A vertical line → a C **encompassing** it. Registration froze for ~1 minute.
+3. The same pair: the line **grew and faded out** while the C **appeared and scaled up**, rather than
+   one bending into the other. This is the fade path, not the warp path — meaning the correspondence
+   effectively failed and the evaluator degraded to a cross-fade.
+4. Two vertical lines → one vertical line. The expected merge did not happen; the transform did
+   another 180° and did not resolve. Messy lineart will hit this constantly.
+
+**Approach.** Analysis first, code second — this is a "read and measure before changing" phase.
+
+1. **Reproduce all four as pure-logic tests** with pass criteria that describe the *motion*, not just
+   "the pixels differ": e.g. sample the warped path at several `t` and assert monotone progress and
+   bounded rotation. Today's render tests would pass on all four broken outputs.
+2. **Instrument the ARAP fit** — per-restart ICP residual, final rigid component, iteration count,
+   wall time. Items 1/4 are a hypothesis about the objective's minima; confirm it before changing the
+   objective.
+3. **Go back to the papers.** The product owner will supply PDFs and any public code. Compare what
+   they do at exactly the failure points: correspondence initialisation, how rotation is penalised or
+   factored out, whether a rigid pre-alignment is subtracted before the elastic fit, and how
+   topology changes (two strokes → one) are handled. **If their methods hit the same limits, say so
+   and brainstorm rather than reimplementing a known-limited method faithfully.**
+4. **Performance is in scope, not a separate concern** — one minute to register four strokes and
+   <10 fps to scrub means the engine cannot be *evaluated* artistically, let alone shipped. `HANDOFF.md`
+   §8 item 14's `ScrubSession` (hoist the per-drag constants out of the per-tick path) is the designed
+   fix and is now measured rather than speculative.
+
+**Definition of done.** All four product-owner cases produce motion an animator would accept, each
+pinned by a test that fails on today's engine. Registration on a few strokes is well under a second;
+scrubbing holds a usable frame rate at a stroke count the product owner can actually draw with.
+
+**Estimate.** Two to three sessions — one of which is mostly reading.
+
 ---
 
 ## Phase 5 — Motion groups: tagging, auto-grouping, visualisation

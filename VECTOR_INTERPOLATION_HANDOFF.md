@@ -44,11 +44,11 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 4.5 — done.** A UI-only pass on Phase 4's layout, from the product owner's first real iPad session. Phase 5 (motion groups: tagging, auto-grouping, visualisation) not started. |
+| **Current phase** | **Phase 4.6 — done.** The second UI pass; the interpolate-mode layout is now settled. **Next is Phase 4.7 — engine correctness — *before* Phase 5**, because the engine fails all four of the product owner's test drawings (§8 items 27–30). |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, **rebased onto `origin/main`** (Session 9's timeline work: infinite scroll, popover menus, the `onionSkinButton`/`transportControls` refactor). No upstream — ask before pushing. |
-| **Last known-green commit** | `5047bb6`. **Full suite green at the 4.5 boundary, on the rebased tree: 507 tests, 506 passed, 0 failed, 1 skipped, `xcodebuild` exit 0**, first attempt after a `simctl erase` — four phase boundaries in a row. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. |
+| **Last known-green commit** | **Full suite green at the 4.6 boundary: 512 tests, 511 passed, 0 failed, 1 skipped, `xcodebuild` exit 0**, first attempt after a `simctl erase` — five phase boundaries in a row. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. |
 | **Tree state** | Clean. |
-| **Blocked on** | Nothing. §8 items 21–24 are the product owner's own follow-on list and 21/23 are the natural next UI work. |
+| **Blocked on** | Nothing. Phase 4.7 is unblocked, but **ask the product owner for the papers' PDFs and any public repositories** at its start — they offered, and the phase is largely a reading exercise. |
 
 **The XCUITest flakiness that cost Session 5 hours was the simulator, and erasing it fixed it.**
 Session 6 opened by resetting `interp-ipad` (`simctl shutdown` + `erase`, §5) and then ran the full
@@ -157,17 +157,37 @@ reset *before* the phase-boundary run, not after it starts failing.
     Phase 4 item 1 now says so rather than contradicting it.
   - The e2e XCUITest drives the bar's buttons instead of the block gesture. Still exactly one.
 
+- **Phase 4.6 — the second UI pass, and the layout is now settled.** A second round of product-owner
+  feedback from the same iPad build. Again UI only; the engine is untouched. `IMPLEMENTATION.md`
+  Phase 4's "Phases 4.5 and 4.6" subsection is the record of the final shape.
+  - **The entry point moved to the animation timeline's top bar** (`interpolateButton`, next to onion
+    skin and loop) and is two-stage like the paint tools: tap once to enter the mode, tap again to
+    open the options popover. `InterpolatePanel` is that popover — thickness fade, Clear References,
+    Exit Interpolate Mode — with **no mode switch in it**, because the button is the switch.
+    `ActivePanel.interpolate` and the canvas toolbar's interpolate icon are gone.
+  - **The bar is two rows**: the timing slider on top, then reference counter far left · Set as
+    Reference / **Generate** / Reproject centred on Generate · Remove Interpolation far right.
+  - **Generate works from an empty slot** — `interpolateAtPlayhead` creates the block and attaches
+    the recipe in one undo step (§8 items 21–23 done; this one was new this session).
+  - **Generate is disabled on an already-interpolated cel** (`.alreadyInterpolated`). Reproject does
+    not inherit it.
+
 ### What is next
 
-**Phase 5** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — motion groups: tagging, auto-grouping,
-visualisation. It is the first phase where more than one motion group exists, which is where
-tagging stops being optional.
+**Phase 4.7 — engine correctness** (`IMPLEMENTATION.md`), *before* Phase 5. The product owner's four
+iPad test drawings all fail in ways no amount of motion grouping fixes: a line rotates 180° instead
+of bending, a warp degrades to a scale-and-fade, two strokes will not merge into one, and
+registration takes a minute on two strokes. **§8 items 27–30 are the four cases, with what was
+expected and what happened.** Motion groups are a refinement of a correspondence that is wrong in the
+base case; building them first makes them a workaround rather than a control, and writes every Phase
+5 acceptance test against output that already looks wrong.
 
-**Read §5.10 before starting** — what Phase 4 decided that Phase 5 inherits, as amended by 4.5.
+The product owner will supply the papers' PDFs and any public code on request — ask. If those methods
+hit the same limits, say so and brainstorm rather than reimplementing a known-limited method
+faithfully.
 
-Consider §8 items 21 and 23 first, though: they move where the mode is entered and exited, and both
-land on the same interpolate bar Phase 5 wants to hang group controls off. Doing them after Phase 5
-means moving Phase 5's controls too.
+**Then Phase 5** — motion groups: tagging, auto-grouping, visualisation. **Read §5.10 before starting
+it** — what Phase 4 decided that Phase 5 inherits, as amended by 4.5 and 4.6.
 
 ### History note
 
@@ -618,9 +638,33 @@ What Phase 2 decided that Phase 3 inherits:
   in that same outer stack.
 
 - **Every command targets the cel under the playhead on the current layer**, and that is now the
-  whole selection model: Set as Reference, Generate, Reproject and Remove all resolve `targetIndices`
-  the same way. It is duplicated in `InterpolateBar` and `InterpolatePanel` because they are the only
-  two callers; a third one should push it onto `CanvasManager` instead of copying it again.
+  whole selection model: Set as Reference, Generate, Reproject and Remove all resolve the same way.
+  Phase 4.6 pushed it onto `CanvasManager` as `interpolationTarget`, so there is no longer a copy in
+  the views — use it.
+
+### From Phase 4.6 (second UI pass)
+
+- **The layout is settled; do not re-derive it.** `IMPLEMENTATION.md` Phase 4's "Phases 4.5 and 4.6"
+  subsection records the final shape and the reason for each placement. Phase 5's group controls hang
+  off this bar, so start from that.
+
+- **`interpolationTarget` can legitimately be nil, and Generate treats that as "make a block".**
+  `interpolateAtPlayhead` creates the cel and attaches the recipe inside one `withStructureUndo`, and
+  it works because both `addCel` and `interpolate` defer to an enclosing bracket rather than recording
+  their own. Anything else that wants to compose two structural edits into one artist action should
+  use that same property rather than inventing a new bracket.
+
+- **`interpolationRefusalAtPlayhead` is what greys the buttons out, and it answers for a cel that
+  does not exist yet.** The target-side checks (empty, not a reference, no recipe) are true by
+  construction for a cel about to be created, so only the layer kind and the references are tested.
+  If Phase 5 adds a precondition, add it to `referenceRefusal` if it is about the references and to
+  `interpolationRefusal` if it is about the target — putting it in the wrong one silently changes
+  whether Generate works from an empty slot.
+
+- **A popover on a button inside the timeline's top bar works**, despite that bar carrying
+  `simultaneousGesture(resizeGesture)` — the resize gesture has a 6pt minimum distance, so taps pass
+  through untouched. `interpolateButton` closes its own popover on `isInterpolateMode` going false,
+  because Exit Interpolate Mode lives inside it.
 
 ### 5.10 For Phase 5's motion groups
 
@@ -649,8 +693,10 @@ What Phase 4 decided that Phase 5 inherits:
   presses of equal duration competing for one touch have no stable winner, and `require(toFail:)`
   between them does not help, which is why the mode-switch looked attractive in the first place.
 - **`InterpolationRefusal` is the pattern for saying no.** Commands return a reason rather than a
-  bool, the panel disables the button from the same call, and the message is on the enum. Phase 5's
-  group commands should follow it rather than inventing a second failure style.
+  bool, the bar disables the button from the same call, and the message is on the enum. Phase 5's
+  group commands should follow it rather than inventing a second failure style. Note 4.6 split the
+  check in two — `referenceRefusal` (about the references) and `interpolationRefusal` (about the
+  target) — so that Generate can answer for a cel that does not exist yet.
 
 ### 5.9 For Phase 4's UI
 
@@ -739,6 +785,20 @@ What Phase 3 decided that Phase 4 inherits:
   restore where both sides were wanted, and `AnimationTimeline`'s toolbar refactor). Recorded the
   product owner's four future items and the vector/raster divorce question as §8 items 21–26 rather
   than acting on any of them. No subagents.
+
+- **Session 9 (Phase 4.6 — UI, and the engine verdict) — 2026-08-01:** The product owner's second
+  iPad round. **The layout is now settled** — entry point moved to the timeline's own top bar and
+  made two-stage, the panel became an options popover with the redundant mode switch gone, the bar
+  became two rows with the timing slider on top and the commands centred on Generate, and Remove
+  Interpolation joined the bar. Two behaviour fixes rather than layout: Generate now refuses on an
+  already-interpolated cel (`.alreadyInterpolated`, §8 item 22), and Generate now works from an
+  empty slot by creating the block and the recipe in one undo step (`interpolateAtPlayhead`) — that
+  last one was new this session, not on any list. Five new logic tests; the e2e XCUITest enters the
+  mode with one tap instead of a panel-and-switch dance. **The session's real output is §8 items
+  27–30 and the new Phase 4.7**: the product owner ran four two-keyframe test drawings and the
+  engine failed all four — 180° rotations instead of bends, a warp degrading to a scale-and-fade,
+  no stroke merging, and a minute to register two strokes. That is why 4.7 goes before Phase 5.
+  Full suite green at the boundary: 512 tests, 511 passed, 0 failed, 1 skipped. No subagents.
 
 ---
 
@@ -948,24 +1008,19 @@ definition of done is met, and suggest rather than implement anything out of sco
 These came from using the build on an iPad. They were raised explicitly as *future* work, not as
 this session's scope, and are recorded here in their order of raising.
 
-21. **The toolbar icon should behave like every other tool: tap once to turn the mode on, tap again
-    to open its menu.** Today the icon opens a panel whose first control is an on/off switch for the
-    mode — a redundant step no other tool has. With that change the panel becomes a plain dropdown
-    holding thickness fade and Clear References, and **the way out of the mode becomes an exit
-    button on the right-hand end of the interpolate bar**. This is the last structural piece of the
-    4.5 layout and the natural thing to do before Phase 5 adds group controls to the same bar.
+21. ~~**The toolbar icon should behave like every other tool: tap once to turn the mode on, tap again
+    to open its menu.**~~ **Done in Phase 4.6.** The button moved to the timeline (item 23) and is
+    two-stage; `InterpolatePanel` is now a popover holding thickness fade, Clear References and Exit
+    Interpolate Mode, with no mode switch in it. The exit landed *in the popover* rather than on the
+    right of the bar — the bar's right-hand slot went to Remove Interpolation, which is pressed far
+    more often than leaving the mode.
 
-22. **Generate can be pressed twice and interpolates twice.** Nothing disables it once a recipe
-    exists on the target cel, so a second press re-registers and replaces the recipe — wasted work,
-    and a second undo step for an action the artist thinks they took once. The refusal machinery is
-    already the right shape for it: a `.alreadyInterpolated` case on `InterpolationRefusal` disables
-    the button and says why, in the same pattern as the other four. Note Reproject must *not* inherit
-    the same guard uncritically — re-posing a frame more than once is meaningful in a way that
-    re-deriving it is not (PLAN §10 decision 3).
+22. ~~**Generate can be pressed twice and interpolates twice.**~~ **Done in Phase 4.6** —
+    `.alreadyInterpolated`, exactly as sketched, and Reproject does not inherit it.
 
-23. **The interpolate entry point belongs in the animation timeline's top bar, not the canvas
-    toolbar.** Everything the mode does now happens at the timeline; reaching to the top of the
-    canvas to start is the one remaining trip away from it. Pairs naturally with item 21.
+23. ~~**The interpolate entry point belongs in the animation timeline's top bar.**~~ **Done in
+    Phase 4.6** — `AnimationTimeline.interpolateButton`, next to onion skin and loop.
+    `ActivePanel.interpolate` is gone.
 
 24. **Scrubbing runs at roughly 10 fps with four vector strokes.** Measured on the iPad, on a
     drawing far smaller than the >1000-object layers standing constraint C anticipates, so this is
@@ -1000,3 +1055,45 @@ this session's scope, and are recorded here in their order of raising.
     layer *is*), it would touch `PixelOps`, the fill tool, the selection tools and save/load, and item
     18 above wants a `ContentProvider` seam through `rasterize` that this work should be designed
     alongside rather than after.
+
+### From Phase 4.6 — the engine does not do what it is supposed to do
+
+**These four are the reason `IMPLEMENTATION.md` gained Phase 4.7, and why that phase goes *before*
+Phase 5.** All four are the product owner's own test drawings on the iPad (2026-08-01), each a
+two-keyframe scene of one to three strokes — the simplest cases the feature exists to handle. They
+are recorded verbatim in substance because the *shape* of each failure is the diagnostic.
+
+27. **A line rotates 180° instead of bending.** Keyframe A: a short vertical line. Keyframe C: a
+    large, offset C shape. Expected: the line bends while travelling until it matches the C. Observed:
+    a complete 180° flip. Product owner's own hypothesis, which is the right first thing to test:
+    **a rotation produces a lower minimum than a deformation does**, so the ARAP objective prefers to
+    spin the shape rather than bend it. If that is confirmed, the question is what the papers do about
+    it — a rigid pre-alignment subtracted before the elastic fit, a rotation penalty, or a
+    correspondence initialisation that never offers the flipped solution.
+
+28. **Registration takes ~1 minute on two strokes.** Keyframe A a vertical line, keyframe C a C shape
+    *encompassing* it; Generate froze the app for around a minute before producing output. Note this
+    is registration, not scrubbing (item 24 is the scrubbing half). Both together mean the engine
+    cannot currently be *evaluated* artistically, which is why performance is inside Phase 4.7 rather
+    than deferred behind it.
+
+29. **The warp degrades to a scale-and-fade.** Same drawing as item 28. Observed: the line did not
+    bend at all — it grew in size and faded out, while the C appeared and scaled up to its keyframe
+    size. That is the *cross-fade* path, not the warp path (`PLAN.md` §10 decision 2's honest
+    degenerate case), which means the correspondence effectively failed and the evaluator fell back.
+    **Whether it fell back deliberately or the lattice fit returned something near-identity is the
+    first thing to determine** — they need different fixes, and today nothing distinguishes them in
+    the output. Product owner asks specifically that this be checked against the papers' own results
+    for the same class of input.
+
+30. **Two strokes merging into one does not work.** Keyframe A: two vertical lines. Keyframe C: one
+    vertical line between them. Expected: the two merge. Observed: another 180°, and no clean
+    transform. This is the topology-change case (N strokes → M strokes), and the product owner's note
+    is the important one: **"This may be a problem for messy lineart"** — real lineart is full of
+    strokes that split and merge between keyframes, so this is not an edge case, it is the common
+    case wearing a small disguise.
+
+**Standing instruction from the product owner for Phase 4.7:** they will supply the papers' PDFs and
+any public repositories on request, so the phase can read the actual math and code rather than infer
+it. **If the papers' own methods hit the same limits, say so plainly and brainstorm new approaches
+rather than reimplementing a known-limited method faithfully.**

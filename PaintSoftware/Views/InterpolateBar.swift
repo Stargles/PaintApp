@@ -3,10 +3,19 @@ import SwiftUI
 /// Interpolate mode's command bar, pinned directly above the animation timeline.
 ///
 /// Everything the workflow *does* lives here — pick references, Generate/Reproject, scrub the
-/// result — because all three are judged against the blocks sitting underneath them. Reaching up
-/// to a toolbar panel to press Generate and back down to see what it did is the wrong shape for a
-/// workflow whose whole subject is the timeline. The mode's *settings* (thickness fade, clear
-/// references, remove) stay in the toolbar panel: they are set once, not reached for mid-flow.
+/// result, drop the recipe — because all of it is judged against the blocks sitting underneath.
+/// Reaching up to a toolbar panel to press Generate and back down to see what it did is the wrong
+/// shape for a workflow whose whole subject is the timeline. The mode's *settings* (thickness fade,
+/// clear references, leaving the mode) are the timeline's own interpolate button's popover: set once,
+/// not reached for mid-flow.
+///
+/// The layout is fixed by the product owner (2026-08-01) and the reasons are worth keeping. The
+/// timing bar is the **top** row because it is the control that gets touched over and over, so it
+/// wants the edge nearest the artist's eye rather than to be buried under the buttons. The three
+/// commands are **centred on Generate** — it is the one that gets pressed, and a centred group sits
+/// under the thumb of a hand holding the iPad, the same reasoning the timeline's transport controls
+/// already use. The reference counter goes far left and Remove Interpolation far right, so the two
+/// things that are read rather than pressed frame the group without crowding it.
 ///
 /// Setting a reference is a button here rather than a press-and-hold on the block. Press-and-hold
 /// was the first attempt and it was wrong — that gesture already means drag-reorder, so
@@ -16,28 +25,14 @@ struct InterpolateBar: View {
     @ObservedObject var canvasManager: CanvasManager
 
     /// The refusal from the last Generate/Reproject attempt, shown until the artist changes
-    /// something. `interpolationRefusal` is also consulted live to disable the buttons, so this is
-    /// only reached when a button was enabled and the attempt still failed.
+    /// something. `interpolationRefusalAtPlayhead` is also consulted live to disable the buttons, so
+    /// this is only reached when a button was enabled and the attempt still failed.
     @State private var refusal: CanvasManager.InterpolationRefusal?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                referenceButton
-                command(title: "Generate", mode: .generate, emphasised: targetCelIsEmpty)
-                command(title: "Reproject", mode: .reproject, emphasised: !targetCelIsEmpty)
-
-                if canvasManager.isRegisteringInterpolation {
-                    ProgressView().controlSize(.small)
-                    Text("Registering…")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.8))
-                }
-
-                Spacer(minLength: 8)
-                status
-            }
             if activeRecipe != nil { timing }
+            commandRow
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -50,13 +45,46 @@ struct InterpolateBar: View {
         // is exactly what made the bar's own buttons unreachable from XCUITest.
     }
 
+    /// Status on the left, commands centred over the top of it, Remove on the right.
+    ///
+    /// A `ZStack` rather than `Spacer`-padded thirds because only a `ZStack` centres the command
+    /// group on the *bar*: with spacers it centres on whatever room the side content leaves, so
+    /// Generate would slide sideways every time the reference count changed its own width.
+    private var commandRow: some View {
+        ZStack {
+            HStack(spacing: 10) {
+                status
+                if canvasManager.isRegisteringInterpolation {
+                    ProgressView().controlSize(.small)
+                    Text("Registering…")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.8))
+                }
+                Spacer(minLength: 12)
+                removeButton
+            }
+            commands
+        }
+    }
+
     // MARK: - Commands
+
+    private var commands: some View {
+        HStack(spacing: 10) {
+            referenceButton
+            command(title: "Generate", mode: .generate, emphasised: targetCelIsEmpty)
+            command(title: "Reproject", mode: .reproject, emphasised: !targetCelIsEmpty)
+        }
+    }
 
     /// Flags or unflags the block under the playhead on the current layer. A selection, not a
     /// document edit — `toggleInterpolationReference` deliberately records no undo step.
+    ///
+    /// Unlike Generate this genuinely needs a block to exist: there is nothing to flag on an empty
+    /// slot, and inventing a blank keyframe to hold the flag would quietly change the drawing.
     private var referenceButton: some View {
         Button(targetIsReference ? "Unset Reference" : "Set as Reference") {
-            guard let at = targetIndices else { return }
+            guard let at = canvasManager.interpolationTarget else { return }
             refusal = nil
             let cel = canvasManager.layers[at.layer].cels[at.cel]
             canvasManager.toggleInterpolationReference(celID: cel.id,
@@ -64,7 +92,7 @@ struct InterpolateBar: View {
         }
         .buttonStyle(.bordered)
         .tint(targetIsReference ? .yellow : .accentColor)
-        .disabled(targetIndices == nil)
+        .disabled(canvasManager.interpolationTarget == nil)
         .accessibilityIdentifier("interpolate.setReference")
     }
 
@@ -72,17 +100,34 @@ struct InterpolateBar: View {
     /// answer different intents ("make me an in-between" vs "nudge this drawing's timing") and
     /// conflating them is how the feature gets confusing. The likely one is emphasised from whether
     /// the cel already has a drawing, and the other stays available.
+    ///
+    /// Both act on the playhead rather than on a cel index, which is what lets Generate work from an
+    /// empty slot — it creates the block first (`interpolateAtPlayhead`).
     private func command(title: String, mode: InterpolationMode, emphasised: Bool) -> some View {
-        Button(title) {
-            guard let at = targetIndices else { return }
-            refusal = canvasManager.interpolate(mode: mode, layerIndex: at.layer, celIndex: at.cel)
+        let refused = canvasManager.interpolationRefusalAtPlayhead(mode: mode)
+        return Button(title) {
+            refusal = canvasManager.interpolateAtPlayhead(mode: mode)
         }
         .buttonStyle(.borderedProminent)
         .tint(emphasised ? .accentColor : .gray)
-        .disabled(targetIndices.map {
-            canvasManager.interpolationRefusal(mode: mode, layerIndex: $0.layer, celIndex: $0.cel) != nil
-        } ?? true)
+        .disabled(refused != nil)
         .accessibilityIdentifier("interpolate.\(mode == .generate ? "generate" : "reproject")")
+    }
+
+    /// Drops the recipe, leaving whatever content the cel already had — which for a derived
+    /// in-between is nothing, so this reads as "undo the interpolation" without being undo.
+    @ViewBuilder
+    private var removeButton: some View {
+        if activeRecipe != nil {
+            Button("Remove Interpolation", role: .destructive) {
+                guard let at = canvasManager.interpolationTarget else { return }
+                refusal = nil
+                canvasManager.removeInterpolation(layerIndex: at.layer, celIndex: at.cel)
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .accessibilityIdentifier("interpolate.remove")
+        }
     }
 
     @ViewBuilder
@@ -92,12 +137,14 @@ struct InterpolateBar: View {
                 .font(.caption)
                 .foregroundColor(.orange)
                 .lineLimit(2)
+                .frame(maxWidth: 180, alignment: .leading)
                 .accessibilityIdentifier("interpolate.refusal")
         } else {
             Text(referenceSummary)
                 .font(.caption)
                 .foregroundColor(.white.opacity(0.75))
                 .lineLimit(2)
+                .frame(maxWidth: 180, alignment: .leading)
                 .accessibilityIdentifier("interpolate.referenceSummary")
         }
     }
@@ -117,7 +164,7 @@ struct InterpolateBar: View {
                 value: Binding(
                     get: { Double(activeRecipe?.t ?? 0) },
                     set: { value in
-                        guard let at = targetIndices else { return }
+                        guard let at = canvasManager.interpolationTarget else { return }
                         let cel = canvasManager.layers[at.layer].cels[at.cel]
                         canvasManager.setInterpolationT(CGFloat(value), forCel: cel.id,
                                                         inLayer: canvasManager.layers[at.layer].id)
@@ -137,27 +184,21 @@ struct InterpolateBar: View {
 
     // MARK: - Derived state
 
-    /// The cel every command acts on: the one under the playhead on the current layer.
-    private var targetIndices: (layer: Int, cel: Int)? {
-        let layerIndex = canvasManager.currentLayerIndex
-        guard canvasManager.layers.indices.contains(layerIndex),
-              let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex,
-                                                          atFrame: canvasManager.currentFrame)
-        else { return nil }
-        return (layerIndex, celIndex)
-    }
-
     private var activeRecipe: InterpolationRecipe? {
-        targetIndices.flatMap { canvasManager.layers[$0.layer].cels[$0.cel].interpolation }
+        canvasManager.interpolationTarget.flatMap {
+            canvasManager.layers[$0.layer].cels[$0.cel].interpolation
+        }
     }
 
+    /// True when there is nothing on the target frame — including when there is no block there at
+    /// all, which is the case Generate is emphasised for.
     private var targetCelIsEmpty: Bool {
-        guard let at = targetIndices else { return true }
+        guard let at = canvasManager.interpolationTarget else { return true }
         return canvasManager.layers[at.layer].cels[at.cel].vector?.elements.isEmpty ?? true
     }
 
     private var targetIsReference: Bool {
-        guard let at = targetIndices else { return false }
+        guard let at = canvasManager.interpolationTarget else { return false }
         return canvasManager.isInterpolationReference(
             celID: canvasManager.layers[at.layer].cels[at.cel].id,
             inLayer: canvasManager.layers[at.layer].id)

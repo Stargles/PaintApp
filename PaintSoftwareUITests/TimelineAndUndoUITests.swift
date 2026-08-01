@@ -337,16 +337,11 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         // The cel the in-between lands on: a second vector layer, spanning the whole scene.
         addVectorLayer(app)
 
-        let interpolateButton = app.buttons["toolbar.interpolateButton"]
-        XCTAssertTrue(interpolateButton.waitForExistence(timeout: 5), "toolbar.interpolateButton exists")
+        // One tap on the timeline's own interpolate button *is* entering the mode — there is no
+        // panel and no switch in the way. A second tap would open the options popover instead.
+        let interpolateButton = app.buttons["timeline.interpolateButton"]
+        XCTAssertTrue(interpolateButton.waitForExistence(timeout: 5), "timeline.interpolateButton exists")
         interpolateButton.tap()
-        let modeToggle = app.switches["interpolate.modeToggle"]
-        XCTAssertTrue(modeToggle.waitForExistence(timeout: 5), "interpolate.modeToggle exists")
-        // The switch sits at the toggle row's trailing edge; a centre tap lands in the dead gap
-        // between the label and the control and does nothing.
-        modeToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-        XCTAssertEqual(modeToggle.value as? String, "1", "The mode toggle should read on after one tap")
-        interpolateButton.tap() // close the panel; the mode stays on
 
         // The controls under test. Set as Reference acts on the block under the playhead, so each
         // reference is "tap the block to go there, then press the button" — and the bar is on screen

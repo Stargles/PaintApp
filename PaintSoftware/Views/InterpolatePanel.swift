@@ -1,11 +1,15 @@
 import SwiftUI
 
-/// Interpolate mode's toolbar panel: turning the mode on, and the settings that are set once.
+/// Interpolate mode's options popover, hung off the timeline's own interpolate button.
 ///
-/// The commands themselves — Set as Reference, Generate, Reproject, and the timing bar — are not
-/// here. They live in `InterpolateBar`, pinned above the animation timeline, because every one of
-/// them is judged against the blocks underneath it. What is left here is what an artist reaches for
-/// deliberately rather than mid-flow.
+/// There is no "Interpolate Mode" switch in here, and that is the point. The button behaves like
+/// every other tool in the app: the first tap turns the mode *on*, and a second tap — once it is
+/// already on — opens this. A panel whose first control was a switch that turned on the mode you had
+/// to already be in to see it was redundant, and the product owner called it (2026-08-01).
+///
+/// What is left is what an artist reaches for deliberately rather than mid-flow: the thickness-fade
+/// setting, dropping the reference selection, and leaving the mode. Everything the workflow *does*
+/// is `InterpolateBar`, above the timeline.
 ///
 /// The panel is deliberately thin: every decision it can make is made in
 /// `CanvasManager+Interpolation`, so the same workflow is testable without a view.
@@ -14,44 +18,24 @@ struct InterpolatePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            header
+            options
 
-            if canvasManager.isInterpolateMode {
-                Divider().overlay(Color.white.opacity(0.2))
-                options
-                if !canvasManager.interpolationReferences.isEmpty {
-                    Button("Clear References") { canvasManager.interpolationReferences.removeAll() }
-                        .font(.caption)
-                        .accessibilityIdentifier("interpolate.clearReferences")
-                }
-                if activeRecipe != nil {
-                    Button("Remove Interpolation", role: .destructive) {
-                        guard let at = targetIndices else { return }
-                        canvasManager.removeInterpolation(layerIndex: at.layer, celIndex: at.cel)
-                    }
+            if !canvasManager.interpolationReferences.isEmpty {
+                Button("Clear References") { canvasManager.interpolationReferences.removeAll() }
                     .font(.caption)
-                    .accessibilityIdentifier("interpolate.remove")
-                }
+                    .accessibilityIdentifier("interpolate.clearReferences")
             }
+
+            Divider().overlay(Color.white.opacity(0.2))
+
+            Button("Exit Interpolate Mode", role: .destructive) {
+                canvasManager.exitInterpolateMode()
+            }
+            .font(.caption)
+            .accessibilityIdentifier("interpolate.exitMode")
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Sections
-
-    private var header: some View {
-        Toggle(isOn: Binding(
-            get: { canvasManager.isInterpolateMode },
-            set: { on in
-                if on { canvasManager.enterInterpolateMode() } else { canvasManager.exitInterpolateMode() }
-            })) {
-            Text("Interpolate Mode")
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.white)
-        }
-        .toggleStyle(.switch)
-        .accessibilityIdentifier("interpolate.modeToggle")
     }
 
     /// Thickness cross-fade, exposed as a toggle rather than shipped on or off.
@@ -71,22 +55,5 @@ struct InterpolatePanel: View {
         }
         .toggleStyle(.switch)
         .accessibilityIdentifier("interpolate.thicknessFadeToggle")
-    }
-
-    // MARK: - Derived state
-
-    /// The cel Remove Interpolation acts on: the one under the playhead on the current layer, the
-    /// same target `InterpolateBar`'s commands use.
-    private var targetIndices: (layer: Int, cel: Int)? {
-        let layerIndex = canvasManager.currentLayerIndex
-        guard canvasManager.layers.indices.contains(layerIndex),
-              let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex,
-                                                          atFrame: canvasManager.currentFrame)
-        else { return nil }
-        return (layerIndex, celIndex)
-    }
-
-    private var activeRecipe: InterpolationRecipe? {
-        targetIndices.flatMap { canvasManager.layers[$0.layer].cels[$0.cel].interpolation }
     }
 }
