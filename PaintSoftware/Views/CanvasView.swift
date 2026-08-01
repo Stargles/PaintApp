@@ -180,6 +180,7 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.updatePaper()
         context.coordinator.reconcileLayers()
         context.coordinator.updateActiveLayerAndTool()
+        context.coordinator.updateInterpolationPreviews()
         context.coordinator.updateOnionSkin()
         context.coordinator.updateTransformOverlay()
         context.coordinator.updateSelectionOverlay()
@@ -728,16 +729,79 @@ struct CanvasView: UIViewRepresentable {
             // non-interactive there (see reconcileLayers' shouldInteract).
         }
 
+        /// What an interpolated frame's pixels depend on. Recomputing only when this changes is what
+        /// makes the preview affordable: `updateUIView` runs on every SwiftUI pass, and evaluating a
+        /// recipe is two lattice embeddings, an ARAP solve and two canvas-sized renders.
+        ///
+        /// The referenced canvases' versions are in the key on purpose — that is what makes "edit
+        /// keyframe A and the in-between updates for free" (PLAN §4) actually happen, rather than
+        /// requiring an invalidation call at every site that can touch a keyframe.
+        private struct InterpolationPreviewKey: Equatable {
+            let celID: UUID
+            let t: CGFloat
+            let preview: Bool
+            let thicknessFade: Bool
+            let referenceVersions: [Int]
+        }
+        private var interpolationPreviewKeys: [UUID: InterpolationPreviewKey] = [:]
+
+        /// Renders each layer's interpolated frame, where it has one at the current frame, and clears
+        /// it everywhere else.
+        ///
+        /// `.preview` quality while the slider is being dragged and `.full` on release — the two cache
+        /// in separate slots on `VectorCanvas`, so switching between them does not throw the other
+        /// away, and `.full` on every tick of a drag is several times the cost per tick
+        /// (`HANDOFF.md` §5.9).
+        func updateInterpolationPreviews() {
+            for (layerIndex, layer) in canvasManager.layers.enumerated() {
+                guard let host = layerHosts[layer.id] else { continue }
+                guard let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex,
+                                                                  atFrame: canvasManager.currentFrame),
+                      let recipe = layer.cels[celIndex].interpolation else {
+                    interpolationPreviewKeys.removeValue(forKey: layer.id)
+                    host.strokeView.setInterpolationImage(nil)
+                    continue
+                }
+                let cel = layer.cels[celIndex]
+                let key = InterpolationPreviewKey(
+                    celID: cel.id,
+                    t: recipe.t,
+                    preview: canvasManager.isScrubbingInterpolation,
+                    thicknessFade: canvasManager.interpolationThicknessFade,
+                    referenceVersions: recipe.referencedCels.map { ref in
+                        canvasManager.celIndices(forCel: ref.celID, inLayer: ref.layerID)
+                            .flatMap { canvasManager.layers[$0.layer].cels[$0.cel].vector?.version } ?? -1
+                    })
+                guard interpolationPreviewKeys[layer.id] != key else { continue }
+                interpolationPreviewKeys[layer.id] = key
+                host.strokeView.setInterpolationImage(
+                    canvasManager.interpolatedImage(forCel: cel.id, inLayer: layer.id,
+                                                    quality: key.preview ? .preview : .full))
+            }
+        }
+
         func updateOnionSkin() {
             guard let onionSkinView else { return }
-            guard canvasManager.isOnionSkinEnabled,
-                  let frame = onionSkinSource.frames(for: canvasManager).first else {
+            guard canvasManager.isOnionSkinEnabled else {
+                onionSkinView.isHidden = true
+                return
+            }
+            // Interpolate mode wants the two reference keyframes rather than the previous cel
+            // (PLAN §5.0 step 4), so the source is swapped by mode rather than by a flag inside one
+            // source — that is what `OnionSkinSource` is for.
+            let source: OnionSkinSource = canvasManager.isInterpolateMode
+                ? InterpolationReferenceOnionSkinSource()
+                : onionSkinSource
+            let frames = source.frames(for: canvasManager)
+            guard !frames.isEmpty else {
                 onionSkinView.isHidden = true
                 return
             }
 
-            onionSkinView.image = frame.image
-            onionSkinView.alpha = frame.opacity
+            onionSkinView.image = OnionSkinFrame.composite(frames, size: canvasManager.canvasSize)
+            // The per-frame opacity is baked into the composite, so the view itself is opaque —
+            // otherwise two frames at 0.3 would come out at 0.09 through a 0.3 view.
+            onionSkinView.alpha = frames.count == 1 ? frames[0].opacity : 1
             onionSkinView.isHidden = false
         }
 

@@ -238,10 +238,38 @@ final class StrokeCanvasView: UIView {
         }
     }
 
+    /// A derived interpolated frame to show in place of this cel's own content.
+    ///
+    /// Non-nil exactly when the cel at the current frame carries an `InterpolationRecipe` that
+    /// evaluates. It is *not* stored in `vectorCanvas`: an in-between is derived, never stored
+    /// (VECTOR_INTERPOLATION_PLAN.md §4), so writing it into the display list would both persist a
+    /// frame that is supposed to be recomputed and break the two-isolated-composites structure the
+    /// evaluator needs (§5.6). The owner (`CanvasView.Coordinator`) recomputes it and pushes it here.
+    private(set) var interpolationImage: UIImage?
+
+    /// Replaces the interpolated frame and repaints if it actually changed.
+    ///
+    /// Repaints from here rather than from `refreshDisplayIfStale`, because an interpolated cel's own
+    /// canvas never changes when `t` moves — its `version` is constant across a whole scrub, so the
+    /// staleness check would never fire.
+    func setInterpolationImage(_ image: UIImage?) {
+        guard interpolationImage !== image else { return }
+        interpolationImage = image
+        refreshDisplay()
+    }
+
     func refreshDisplay() {
         displayedRasterVersion = raster?.version ?? -1
         if let vectorCanvas {
             displayedVectorVersion = vectorCanvas.version
+            // An interpolated frame replaces the cel's own content outright — for a `.generate` cel
+            // that content is empty anyway, and the evaluation already includes the artist's local
+            // edits composited in the right order. A live scratch still wins, so drawing at an
+            // in-between keeps its stroke preview.
+            if let interpolationImage, vectorScratch == nil {
+                imageView.image = interpolationImage
+                return
+            }
             // `.replacement` deliberately never asks the canvas to render: the scratch already holds a
             // copy of that render with this stroke's holes punched in it, and it *is* the display.
             if case .replacement = vectorScratchRole, let scratch = vectorScratch {

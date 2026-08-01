@@ -200,6 +200,8 @@ struct DrawingView: View {
             ColorPickerPanel(canvasManager: canvasManager)
         case .fill:
             FillSettingsPanel(canvasManager: canvasManager)
+        case .interpolate:
+            InterpolatePanel(canvasManager: canvasManager)
         }
     }
 }

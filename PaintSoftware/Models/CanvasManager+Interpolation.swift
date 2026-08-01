@@ -193,6 +193,7 @@ extension CanvasManager {
     /// changes while the slider moves, because the display list is *derived* from the recipe rather
     /// than rewritten by it.
     func beginInterpolationDrag() {
+        isScrubbingInterpolation = true
         beginStructureGesture()
     }
 
@@ -204,6 +205,7 @@ extension CanvasManager {
     }
 
     func commitInterpolationDrag() {
+        isScrubbingInterpolation = false
         commitStructureGesture(name: "Adjust Timing")
     }
 

@@ -91,6 +91,10 @@ final class CanvasManager: ObservableObject {
     /// so this exists for the UI to show that something is happening rather than to gate anything.
     @Published var isRegisteringInterpolation: Bool = false
 
+    /// True between `beginInterpolationDrag` and `commitInterpolationDrag` — the `t` slider is being
+    /// dragged. Selects `.preview` render quality for the duration; see `RenderQuality`.
+    @Published var isScrubbingInterpolation: Bool = false
+
     @Published var currentLayerIndex: Int = 0 {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }
