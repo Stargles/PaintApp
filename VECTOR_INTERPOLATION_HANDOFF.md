@@ -1289,8 +1289,10 @@ These are written as suggestions per §3.3, but unlike the rest of §8 they are 
 next session rather than optional extras. Ordered by confidence and independence: 31 is free, 32 is
 a product decision, 33 is the real work.
 
-31. **Un-defer the `.clean` correspondence path for the 1:1 case — this is the product decision the
-    diagnosis surfaces, and it needs the product owner's answer before the next session picks it up.**
+31. **Un-defer the `.clean` correspondence path for the 1:1 case. DECIDED 2026-08-01: yes, 1:1 only.**
+    The product owner un-deferred it for equal-stroke-count pairings and kept N:M deferred, with the
+    explicit note that handling messy and sketchy lineart *is* a real future goal — see item 36 for
+    the approach they want brainstormed for it.
     `IMPLEMENTATION.md`'s "Explicitly deferred — do not build these" lists the `.clean` path, on the
     reasoning that cross-fade is an honest degradation. The measurement changes the premise: **the
     four failing drawings cannot be fixed without it.** Nearest-point matching gives a short straight
@@ -1302,16 +1304,24 @@ a product decision, 33 is the real work.
     is the product owner's call, not the next session's.
 
 32. **Change the two registration defaults, together, and only together: `icpRestarts: 1` and
-    `allowScale: false`.** Measured: no case flips, and case 30's collapse goes from a y-span of 36.5
+    `allowScale: false`. DECIDED 2026-08-01: change both.** The coverage-gated escalation described
+    at the end of this item is *not* being built now — the product owner asked for it to be recorded
+    as a future improvement, and it is item 37. Measured: no case flips, and case 30's collapse goes from a y-span of 36.5
     to 198.5 against the target's 200. Both are needed — either alone is a different wrong answer
     (§5), and `testLockingTheScaleTradesTheCollapseForADifferentWrongAnswer` pins the half-fix so it
     cannot be applied by accident. **The cost is real and is the product owner's call:** the
     multi-start is what lets a genuinely large rotation register at all, and
     `testICPRecoversARigidMotionWithoutAnyCorrespondence` is written against it. frite has no
     multi-start at all (§5.11), which is the evidence that dropping it is the mainstream choice, but
-    a drawing that really does rotate 120° between keys will register worse afterwards. If both are
-    wanted, the escalation is "try the local fit; only widen the search if it fails a *coverage*
-    test" — not the current unconditional 8-way search.
+    a drawing that really does rotate 120° between keys will register worse afterwards, and
+    `testICPRecoversARigidMotionWithoutAnyCorrespondence` will need revisiting rather than deleting.
+
+37. **Coverage-gated rotation escalation — recorded as a future improvement, not for now.** The way
+    to keep large-rotation registration without reintroducing the 180° tie: try the local fit first,
+    and widen the rotation search *only* when the result fails a **coverage** test, rather than
+    running the unconditional 8-way search every time. It needs the coverage metric that items 36 and
+    32 both want, so build that first and this becomes cheap. Product owner asked for it to be noted
+    when deciding item 32.
 
 33. **N strokes → M strokes needs a UI, not an algorithm — and that is the literature's answer, not
     a shortcut.** §5.11 has the evidence: frite decomposes drawings into artist-defined parts and
@@ -1333,6 +1343,44 @@ a product decision, 33 is the real work.
     merging), and it is also what makes the thickness-fade toggle (§8 item 13 / Phase 3) finally have
     unmatched strokes to act on. Cheap relative to its value, but it depends on 31 to know which
     strokes are unmatched.
+
+36. **Messy/sketchy lineart: match ink to ink, not stroke to stroke — the product owner's proposal,
+    and it wants its own brainstorming session.** Raised 2026-08-01 in response to the N:M finding.
+    **Decided: not now** (item 31 is 1:1 only), but the product owner is explicit that handling messy
+    and sketchy lineart is a real future goal, so this is recorded in full rather than as a one-liner.
+
+    The proposal: stop trying to pair strokes at all. Instead fit the warp so that the **overlap
+    between the deformed drawing's ink and the target drawing's ink is maximised**, while
+    **minimising each stroke's displacement from where the uncorresponded fit already puts it** —
+    i.e. the current rotate-and-translate answer becomes the regulariser rather than the answer. With
+    a qualifier that is the sharpest part of the idea: **a higher local density of strokes must not
+    read as more overlap** — many overlapping strokes of the same colour are the same ink as one
+    stroke, so the objective is over the *ink footprint*, not over samples.
+
+    Three reasons to take it seriously rather than file it:
+
+    - **It dissolves the N:M problem instead of solving it.** There are no stroke identities in the
+      objective, so "two strokes become one" stops being a question that has to be answered. That is
+      exactly the right shape for sketchy lineart, where the stroke count is an artefact of how the
+      artist happened to scribble and carries no meaning.
+    - **It is the same metric the diagnosis independently arrived at.** §5's finding is that mean
+      residual is a lying metric — case 30 scores 3.6 points while covering a quarter of the target,
+      because distance-to-nearest *rewards* piling the source up. Coverage is precisely the measure
+      that catches it, and item 32's escalation gate wants a coverage test too. Three separate needs
+      converge on building one.
+    - **There is literature, and it is the literature frite already leans on.** frite cites Sýkora
+      et al., *"As-rigid-as-possible image registration for hand-drawn cartoon animation"* [31] for
+      its matching — an **image**-based ARAP registration, not a stroke-based one. So the proposal is
+      closer to the mainstream than our current stroke-cloud approach is, and there is prior art to
+      read before designing. Get that paper for the brainstorming session.
+
+    Open questions for that session, so it does not start cold: at what resolution is the footprint
+    rasterised, and does the objective stay differentiable enough for the existing solver or does it
+    become a search; how colour factors in (the "same colour counts once" rule needs a definition
+    when colours are merely close); whether it replaces the point-cloud tier or becomes a third tier
+    beneath it; and how it interacts with the eraser, whose ink is *negative* (`VECTOR_ERASER_PLAN.md`
+    §2.1). Note also that it is a per-*group* objective, so it composes with Phase 5 rather than
+    competing with it.
 
 35. **Subsample the registration point cloud.** The residual stops improving past ~250 samples and
     gets slightly *worse* at 1000 (§5). Combined with the `PointCloudIndex` fix this takes a
