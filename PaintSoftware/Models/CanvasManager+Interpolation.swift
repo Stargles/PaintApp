@@ -443,8 +443,8 @@ extension CanvasManager {
         defer { isRegisteringInterpolation = false }
 
         let provider = interpolationContentProvider
-        let clouds = keyframes.map { Self.registrationPoints(of: $0.cels.flatMap(provider)) }
-        let binding = Self.registerWholeFrameGroup(clouds: clouds)
+        let frames = keyframes.map { Self.registrationFrame(of: $0.cels.flatMap(provider)) }
+        let binding = Self.registerWholeFrameGroup(frames: frames)
 
         let recipe = InterpolationRecipe(references: keyframes, t: 0.5, mode: mode,
                                          groups: binding.map { [$0] } ?? [])
@@ -510,28 +510,59 @@ extension CanvasManager {
     /// Nil when there is nothing to register, which leaves a recipe with no bindings — legal, and
     /// meaning "warp nothing", which is the honest answer to two empty keyframes (`PLAN.md` §10
     /// decision 2).
-    static func registerWholeFrameGroup(clouds: [[CGPoint]]) -> MotionGroupBinding? {
-        guard let first = clouds.first, !first.isEmpty, clouds.count >= 2 else { return nil }
+    static func registerWholeFrameGroup(frames: [RegistrationFrame]) -> MotionGroupBinding? {
+        guard let first = frames.first, !first.cloud.isEmpty, frames.count >= 2 else { return nil }
 
         // The lattice is built over the bounding region at the *first* keyframe (`PLAN.md` §5.2) and
         // every later keyframe is a fit of it. Cell size is set from the content's own extent rather
         // than fixed, so a thumbnail-sized doodle and a full-canvas drawing get comparable
         // resolution; the floor keeps a tiny drawing from producing a needlessly huge grid.
-        let rest = Lattice(covering: first, targetCellSize: Self.latticeCellSize(covering: first),
-                           padding: 1)
+        let rest = Lattice(covering: first.cloud,
+                           targetCellSize: Self.latticeCellSize(covering: first.cloud), padding: 1)
         var lattices: [Lattice] = [rest]
-        for cloud in clouds.dropFirst() {
-            guard !cloud.isEmpty else {
+        for frame in frames.dropFirst() {
+            guard !frame.cloud.isEmpty else {
                 // A keyframe with no content has nothing to fit to, and "do not move" is the only
                 // answer that is not invented. Its set fades in or out on weight alone.
                 lattices.append(rest)
                 continue
             }
-            let fit = ARAPRegistration.fit(lattice: rest, source: first,
-                                           target: PointCloudIndex(cloud))
+            let fit = ARAPRegistration.fit(lattice: rest, source: first.cloud,
+                                           target: PointCloudIndex(frame.cloud),
+                                           correspondence: first.correspondence(to: frame))
             lattices.append(fit.lattice)
         }
         return MotionGroupBinding(groupID: UUID(), lattices: lattices)
+    }
+
+    /// One keyframe's geometry, as registration sees it.
+    ///
+    /// Two views of the same content, because the two tiers want different things: tier 1 and the
+    /// fallback fit want every point whatever drew it, and tier 0's 1:1 correspondence wants the
+    /// strokes kept apart so it can pair them (`HANDOFF.md` §8 item 31).
+    struct RegistrationFrame {
+        /// Every point a display list contributes. Never nil — this is what registration always had.
+        var cloud: [CGPoint]
+
+        /// The frame's strokes in drawing order, or **nil** when the frame holds anything that is
+        /// not a stroke.
+        ///
+        /// Nil rather than "the strokes among other things" on purpose. Dropping the point-cloud
+        /// data rows is what makes the correspondence work at all (see `ARAPRegistration.fit`), and
+        /// with them dropped a fill or a placed image would be left with nothing pulling it —
+        /// carried along by lattice rigidity alone. Its contour is also a closed loop, which needs a
+        /// phase offset rather than a direction bit, and that is not in scope. So a frame with a
+        /// fill in it takes the point-cloud path it always took.
+        var strokes: [[CGPoint]]?
+
+        /// The 1:1 correspondence between these two frames, or nil when they cannot be paired that
+        /// way — different stroke counts (the N:M case, `HANDOFF.md` §8 item 33, still deferred), or
+        /// either frame holding something that is not a stroke.
+        func correspondence(to other: RegistrationFrame) -> ARAPRegistration.StrokeCorrespondence? {
+            guard let mine = strokes, let theirs = other.strokes else { return nil }
+            let candidate = ARAPRegistration.StrokeCorrespondence(source: mine, target: theirs)
+            return candidate.isPairable ? candidate : nil
+        }
     }
 
     /// Roughly ten cells across the longer side, floored so a small drawing does not get a grid finer
@@ -542,6 +573,17 @@ extension CanvasManager {
         guard let minX = xs.min(), let maxX = xs.max(),
               let minY = ys.min(), let maxY = ys.max() else { return 32 }
         return max(max(maxX - minX, maxY - minY) / 10, 8)
+    }
+
+    /// What registration sees of one keyframe: the cloud always, and the strokes when *everything*
+    /// in the frame is a stroke. See `RegistrationFrame.strokes` for why it is all or nothing.
+    static func registrationFrame(of elements: [VectorElement]) -> RegistrationFrame {
+        var strokes: [[CGPoint]]? = []
+        for element in elements {
+            guard case .stroke(let stroke) = element else { strokes = nil; break }
+            strokes?.append(stroke.samples.map(\.point))
+        }
+        return RegistrationFrame(cloud: registrationPoints(of: elements), strokes: strokes)
     }
 
     /// Every point a display list contributes to registration.

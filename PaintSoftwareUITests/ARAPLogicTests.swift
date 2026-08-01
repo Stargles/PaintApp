@@ -417,6 +417,94 @@ final class ARAPLogicTests: XCTestCase {
         XCTAssertLessThan(worst, 5, "off by \(worst) on an L 55 across — near, but no longer exact")
     }
 
+    // MARK: - Tier 0: the 1:1 arc-length correspondence
+
+    func testResamplingWalksArcLengthRatherThanIndex() {
+        // Two segments of wildly different length: index-based sampling would put four of five
+        // samples in the first point of travel.
+        let uneven = [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 101, y: 0)]
+
+        let resampled = ARAPRegistration.resampleByArcLength(uneven, count: 5)
+
+        XCTAssertEqual(resampled.count, 5)
+        for (i, expected) in [0, 25.25, 50.5, 75.75, 101].enumerated() {
+            XCTAssertEqual(resampled[i].x, CGFloat(expected), accuracy: 1e-9)
+            XCTAssertEqual(resampled[i].y, 0, accuracy: 1e-9)
+        }
+    }
+
+    func testResamplingAZeroLengthStrokeRepeatsItsPointInsteadOfDividingByZero() {
+        let stuck = [CGPoint(x: 7, y: 9), CGPoint(x: 7, y: 9)]
+
+        let resampled = ARAPRegistration.resampleByArcLength(stuck, count: 3)
+
+        XCTAssertEqual(resampled.count, 3)
+        for p in resampled { assertPoint(p, CGPoint(x: 7, y: 9), accuracy: 1e-12) }
+    }
+
+    func testStrokesArePairedByPositionRatherThanDrawingOrder() {
+        let left = bar(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: 50), count: 8)
+        let right = bar(from: CGPoint(x: 90, y: 0), to: CGPoint(x: 90, y: 50), count: 8)
+        // Keyframe C holds the same two strokes, recorded in the opposite order.
+        let correspondence = ARAPRegistration.StrokeCorrespondence(source: [left, right],
+                                                                    target: [right, left])
+
+        let pairs = ARAPRegistration.pairings(correspondence, under: .identity)
+
+        XCTAssertEqual(pairs.map(\.target), [1, 0],
+                       "drawing order is not a guarantee between two independently drawn keyframes")
+    }
+
+    /// The other half of `testICPWithoutACorrespondenceRecoversARigidMotionOnlyApproximately`: the
+    /// case the multi-start was buying is the case tier 0 now covers outright, and covers better.
+    /// Without a correspondence this same motion lands 4.93 off; with one, 0.08.
+    func testARigidMotionIsRecoveredFarMoreCloselyOnceThereIsACorrespondence() {
+        let arm = (0..<12).map { CGPoint(x: CGFloat($0) * 5, y: 0) }
+        let upright = (1..<8).map { CGPoint(x: 0, y: CGFloat($0) * 5) }
+        let truth = Similarity(angle: 0.35, scale: 1, translation: CGPoint(x: 22, y: 17))
+        let targetStrokes = [arm.map(truth.applied(to:)), upright.map(truth.applied(to:))]
+        let source = arm + upright
+        let cloud = PointCloudIndex(targetStrokes.flatMap { $0 })
+        let lattice = Lattice(covering: source, targetCellSize: 20, padding: 1)
+
+        let plain = ARAPRegistration.fit(lattice: lattice, source: source, target: cloud)
+        let corresponded = ARAPRegistration.fit(
+            lattice: lattice, source: source, target: cloud,
+            correspondence: ARAPRegistration.StrokeCorrespondence(source: [arm, upright],
+                                                                   target: targetStrokes))
+
+        XCTAssertTrue(corresponded.refined)
+        XCTAssertLessThan(corresponded.meanResidual, plain.meanResidual * 0.2,
+                          "a correspondence leaves no basin to fall into")
+        for (warped, p) in zip(corresponded.warpedSource, source) {
+            assertPoint(warped, truth.applied(to: p), accuracy: 0.5)
+        }
+    }
+
+    /// The sample count is a resolution dial, not a switch that changes the answer. It once was:
+    /// with the direction margin expressed relative to the forward score, this same fixture flipped
+    /// a stroke's direction at 8, 16 and 32 samples but not at 24, turning an exactly-reproducible
+    /// rigid motion into a 46-point error. See `ARAPRegistration.directionMargin`.
+    func testTheFitDoesNotSwingOnHowManySamplesTheCorrespondenceUses() {
+        let arm = (0..<12).map { CGPoint(x: CGFloat($0) * 5, y: 0) }
+        let upright = (1..<8).map { CGPoint(x: 0, y: CGFloat($0) * 5) }
+        let truth = Similarity(angle: 0.35, scale: 1, translation: CGPoint(x: 22, y: 17))
+        let targetStrokes = [arm.map(truth.applied(to:)), upright.map(truth.applied(to:))]
+        let source = arm + upright
+        let lattice = Lattice(covering: source, targetCellSize: 20, padding: 1)
+
+        for samples in [8, 12, 16, 20, 24, 32, 48] {
+            var correspondence = ARAPRegistration.StrokeCorrespondence(source: [arm, upright],
+                                                                        target: targetStrokes)
+            correspondence.samplesPerStroke = samples
+            let result = ARAPRegistration.fit(lattice: lattice, source: source,
+                                              target: PointCloudIndex(targetStrokes.flatMap { $0 }),
+                                              correspondence: correspondence)
+            XCTAssertLessThan(result.meanResidual, 0.1,
+                              "\(samples) samples should describe the same motion as any other count")
+        }
+    }
+
 
     // MARK: - Tier 2: ARAP fit
 

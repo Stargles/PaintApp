@@ -143,6 +143,11 @@ struct Similarity: Equatable {
 ///
 /// Positional constraints ride on top of both, as extra data rows — that is how guide strokes and
 /// pinned points will attach in a later phase without this code changing.
+///
+/// Ahead of both, when the two keyframes hold the same number of strokes, sits tier 0: the 1:1
+/// arc-length correspondence (`StrokeCorrespondence`). It is not an escalation but a *shortcut* —
+/// where it applies there is nothing left to search for — and it is what makes a straight stroke
+/// bend into a curved one rather than slide along it.
 enum ARAPRegistration {
 
     struct Options {
@@ -234,6 +239,206 @@ enum ARAPRegistration {
         var meanResidual: CGFloat
         /// False when the solve could not be built and the result is the tier-1 similarity alone.
         var refined: Bool
+    }
+
+    // MARK: - Tier 0: the 1:1 arc-length correspondence
+
+    /// The two keyframes' strokes, when there are the *same number* of them and they can therefore
+    /// be paired one for one.
+    ///
+    /// This is `IMPLEMENTATION.md`'s deferred `.clean` path, un-deferred for the 1:1 case only
+    /// (`HANDOFF.md` §8 item 31, decided 2026-08-01). The measurement that changed the premise:
+    /// nearest-point matching gives a short straight stroke **no reason** to wrap around a long
+    /// curved one at any rigidity — the pulls from the two sides of the arc cancel — so the product
+    /// owner's line-into-a-C drawing could not be fixed without it. Sweeping `rigidity` from 2.0 to
+    /// 0.01 moves the bend by 0.02; a correspondence moves it from 0.17 to 0.99.
+    ///
+    /// **N strokes → M strokes stays deferred** (§8 item 33). Neither of the two papers solves it
+    /// algorithmically — frite decomposes drawings into artist-defined parts and ships a lasso for
+    /// stating the matching — so the honest answer there is Phase 5's grouping UI, not a speculative
+    /// automatic matcher. When the counts differ, registration takes the point-cloud path it always
+    /// took.
+    struct StrokeCorrespondence {
+        /// Keyframe A's strokes, in drawing order.
+        var source: [[CGPoint]]
+        /// Keyframe C's strokes, in drawing order.
+        var target: [[CGPoint]]
+
+        /// Constraints generated per stroke. Measured on the line-into-a-C case: 8 samples reach a
+        /// bend of 1.00, 16 → 0.99, 24 → 0.97, 48 → 0.95, against the target's own 1.07. Fewer
+        /// samples leave the elastic solve more freedom and score *better* on that fixture, which is
+        /// exactly why the number should not be tuned on it — a stroke with real detail needs enough
+        /// samples to describe its shape. Sixteen is the middle of the measured range.
+        var samplesPerStroke: Int = 16
+
+        /// Deliberately below `Constraint`'s own default of 100, so an artist's explicit pin or
+        /// guide stroke outranks a correspondence the engine derived for itself. It cancels out
+        /// today — `rigidity` is a ratio of totals, so scaling every constraint together changes
+        /// nothing — and it will stop cancelling the moment pins exist.
+        var weight: CGFloat = 10
+
+        /// Both keyframes hold the same number of strokes, and every one of them is a stroke rather
+        /// than a single point.
+        var isPairable: Bool {
+            !source.isEmpty && source.count == target.count
+                && source.allSatisfy { $0.count >= 2 } && target.allSatisfy { $0.count >= 2 }
+        }
+    }
+
+    /// How much better the reversed pairing has to score before it is believed, **as a fraction of
+    /// the target stroke's own arc length**. See `directionScores`.
+    ///
+    /// A fraction of the stroke and not of the forward score, which is the whole point. Two straight
+    /// strokes fit each other *exactly* in both directions, so both scores are zero to within
+    /// rounding and a relative test compares nothing but noise — which is not theoretical: it made
+    /// the direction bit on a rigid L flip with the sample count (8 → `Rf`, 16 → `fR`, 24 → `ff`,
+    /// 32 → `Rf`), turning a motion the engine reproduced exactly into a 46-point error.
+    ///
+    /// Measured gap, as a fraction of arc length, on a stroke whose last α hooks away:
+    ///
+    /// | α | 0 (straight) | 0.02 | 0.05 | 0.10 | 0.20 |
+    /// |---|---|---|---|---|---|
+    /// | gap / length | 1e-16 | 0.0073 | 0.0215 | 0.0545 | 0.1213 |
+    ///
+    /// There is no middle ground to land in: the signal is thirteen orders of magnitude above the
+    /// noise the moment a stroke is asymmetric at all. This sits comfortably between them.
+    static let directionMargin: CGFloat = 0.001
+
+    /// `count` points spread evenly along the polyline's own arc length, endpoints included.
+    ///
+    /// Arc length rather than index: a stroke's samples are spaced by how fast the artist drew, so
+    /// pairing sample *i* to sample *i* would match "wherever they slowed down", which is not a
+    /// property of the drawing.
+    static func resampleByArcLength(_ points: [CGPoint], count: Int) -> [CGPoint] {
+        guard count >= 2, points.count >= 2 else { return points }
+        var cumulative: [CGFloat] = [0]
+        cumulative.reserveCapacity(points.count)
+        for (a, b) in zip(points, points.dropFirst()) {
+            cumulative.append(cumulative[cumulative.count - 1] + hypot(b.x - a.x, b.y - a.y))
+        }
+        let total = cumulative[cumulative.count - 1]
+        // A stroke of zero length has no arc to walk along; every sample is the same point.
+        guard total > Lattice.epsilon else { return [CGPoint](repeating: points[0], count: count) }
+
+        var out: [CGPoint] = []
+        out.reserveCapacity(count)
+        var j = 0
+        for i in 0..<count {
+            let wanted = total * CGFloat(i) / CGFloat(count - 1)
+            while j + 2 < points.count && cumulative[j + 1] < wanted { j += 1 }
+            let span = cumulative[j + 1] - cumulative[j]
+            let u = span > Lattice.epsilon ? (wanted - cumulative[j]) / span : 0
+            out.append(CGPoint(x: points[j].x + (points[j + 1].x - points[j].x) * u,
+                               y: points[j].y + (points[j + 1].y - points[j].y) * u))
+        }
+        return out
+    }
+
+    /// Which source stroke goes with which target stroke: greedily, lowest aligned-centroid distance
+    /// first. Deterministic — ties break on index — and O(n²) over a stroke count, not a sample count.
+    ///
+    /// Drawing order is deliberately *not* the pairing: between two independently drawn keyframes it
+    /// carries no guarantee, and the artist redrawing one stroke last would silently re-pair the
+    /// whole frame.
+    static func pairings(_ correspondence: StrokeCorrespondence,
+                         under alignment: Similarity) -> [(source: Int, target: Int)] {
+        let n = correspondence.source.count
+        let sourceCentres = correspondence.source.map { centroid($0.map(alignment.applied(to:))) }
+        let targetCentres = correspondence.target.map(centroid)
+
+        var candidates: [(cost: CGFloat, source: Int, target: Int)] = []
+        candidates.reserveCapacity(n * n)
+        for i in 0..<n {
+            for j in 0..<n {
+                let dx = sourceCentres[i].x - targetCentres[j].x
+                let dy = sourceCentres[i].y - targetCentres[j].y
+                candidates.append((dx * dx + dy * dy, i, j))
+            }
+        }
+        candidates.sort {
+            $0.cost != $1.cost ? $0.cost < $1.cost
+                : ($0.source != $1.source ? $0.source < $1.source : $0.target < $1.target)
+        }
+
+        var usedSource = [Bool](repeating: false, count: n)
+        var usedTarget = usedSource
+        var pairs: [(source: Int, target: Int)] = []
+        for candidate in candidates where !usedSource[candidate.source] && !usedTarget[candidate.target] {
+            usedSource[candidate.source] = true
+            usedTarget[candidate.target] = true
+            pairs.append((candidate.source, candidate.target))
+            if pairs.count == n { break }
+        }
+        return pairs.sorted { $0.source < $1.source }
+    }
+
+    /// One discrete bit per pair — does this source stroke run with the target stroke or against it
+    /// — scored over the whole stroke, with each direction given its **own** best similarity.
+    ///
+    /// Self-aligned on purpose. Scoring the two directions under some shared global alignment makes
+    /// the answer a property of whatever that alignment happened to pick: on the line-into-a-C case
+    /// it manufactures a confident 49.6% preference out of nothing. Fitting each direction its own
+    /// similarity asks the real question — *which end-assignment admits a better fit between these
+    /// two strokes* — and it answers correctly: an asymmetric stroke separates by 100%, and a
+    /// straight line scores the two directions **identically**, because reversing a straight source
+    /// is the same operation as turning it 180°. There is no evidence to read there, and the honest
+    /// output is a tie.
+    ///
+    /// So a reversal has to beat forward by `directionMargin` to be believed, and drawing order is
+    /// the tie-break. That is *not* the refuted tangent term (§5), which treated drawn direction as
+    /// evidence and lost to geometry that disagreed with it; here geometry decides whenever it has
+    /// anything to say, and drawn order only settles what geometry calls a draw. It is not evidence
+    /// either — but it is deterministic and it does not introduce a spin.
+    static func directionScores(_ correspondence: StrokeCorrespondence, under alignment: Similarity)
+        -> [(pair: (source: Int, target: Int), reversed: Bool, forward: CGFloat, backward: CGFloat)] {
+        pairings(correspondence, under: alignment).map { pair in
+            let s = resampleByArcLength(correspondence.source[pair.source],
+                                        count: correspondence.samplesPerStroke)
+            let t = resampleByArcLength(correspondence.target[pair.target],
+                                        count: correspondence.samplesPerStroke)
+            func score(_ candidate: [CGPoint]) -> CGFloat {
+                // Scale free here even though the fit locks it: this is comparing two hypotheses
+                // about *ordering*, and a stroke changing length between keys is ordinary.
+                let fit = similarity(from: s, to: candidate, allowScale: true)
+                return zip(s.map(fit.applied(to:)), candidate)
+                    .reduce(0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) } / CGFloat(max(1, s.count))
+            }
+            let forward = score(t), backward = score(t.reversed())
+            let scale = arcLength(t)
+            let decisive = scale > Lattice.epsilon
+                && (forward - backward) > directionMargin * scale
+            return (pair, decisive, forward, backward)
+        }
+    }
+
+    private static func arcLength(_ points: [CGPoint]) -> CGFloat {
+        zip(points, points.dropFirst()).reduce(0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
+    }
+
+    /// The paired samples, as positional constraints. Empty when the two keyframes cannot be paired
+    /// 1:1, which is the signal to take the point-cloud path instead.
+    static func arcLengthConstraints(_ correspondence: StrokeCorrespondence,
+                                     under alignment: Similarity) -> [Constraint] {
+        guard correspondence.isPairable else { return [] }
+        var out: [Constraint] = []
+        out.reserveCapacity(correspondence.source.count * correspondence.samplesPerStroke)
+        for entry in directionScores(correspondence, under: alignment) {
+            let s = resampleByArcLength(correspondence.source[entry.pair.source],
+                                        count: correspondence.samplesPerStroke)
+            var t = resampleByArcLength(correspondence.target[entry.pair.target],
+                                        count: correspondence.samplesPerStroke)
+            if entry.reversed { t.reverse() }
+            for k in 0..<min(s.count, t.count) {
+                out.append(Constraint(source: s[k], target: t[k], weight: correspondence.weight))
+            }
+        }
+        return out
+    }
+
+    private static func centroid(_ points: [CGPoint]) -> CGPoint {
+        var x: CGFloat = 0, y: CGFloat = 0
+        for p in points { x += p.x; y += p.y }
+        return CGPoint(x: x / CGFloat(max(1, points.count)), y: y / CGFloat(max(1, points.count)))
     }
 
     // MARK: - Tier 1: similarity
@@ -459,23 +664,39 @@ enum ARAPRegistration {
     /// similarity warp of the whole group is exactly the graceful-degradation case `PLAN.md` §5.3
     /// says the design must always have.
     static func fit(lattice: Lattice, source: [CGPoint], target: PointCloudIndex,
-                    constraints: [Constraint] = [], options: Options = Options()) -> Result {
+                    constraints: [Constraint] = [],
+                    correspondence: StrokeCorrespondence? = nil,
+                    options: Options = Options()) -> Result {
         let rest = lattice.restConfiguration
         let fitted = similarityICP(source: source, target: target, iterations: options.icpIterations,
                                    restarts: options.icpRestarts, allowScale: options.allowScale)
         let initialVertices = rest.vertices.map(fitted.applied(to:))
         var current = rest.withVertices(initialVertices)
 
+        // The 1:1 arc-length correspondence, when the two keyframes have one. It **replaces** the
+        // point cloud's data rows rather than joining them: the correspondence *is* the data, and
+        // the nearest-point pulls it would otherwise sit alongside are the very thing that will not
+        // wrap a straight stroke around a curved one. Measured on a bar bending into a parabola —
+        // a case the plain path already got right — mean residual is 0.62 with the cloud alone,
+        // 0.87 with cloud **and** correspondence, and 0.00 with the correspondence alone. Keeping
+        // both is worse than either.
+        //
+        // The cloud is still what tier 1 registers against, what the lattice embeds, and what the
+        // residuals are reported over; it just stops pulling.
+        let derived = correspondence.map { arcLengthConstraints($0, under: fitted) } ?? []
+        let allConstraints = constraints + derived
+        let cloudRowCount = derived.isEmpty ? source.count : 0
+
         let embedding = rest.embedInRest(source)
-        let constraintEmbedding = rest.embedInRest(constraints.map(\.source))
+        let constraintEmbedding = rest.embedInRest(allConstraints.map(\.source))
 
         var dataRows: [DeformDataRow] = []
-        dataRows.reserveCapacity(source.count + constraints.count)
-        for i in 0..<source.count {
+        dataRows.reserveCapacity(cloudRowCount + allConstraints.count)
+        for i in 0..<cloudRowCount {
             dataRows.append(DeformDataRow(lattice: rest, embedding: embedding, index: i,
                                           weight: options.dataWeight))
         }
-        for (i, constraint) in constraints.enumerated() {
+        for (i, constraint) in allConstraints.enumerated() {
             dataRows.append(DeformDataRow(lattice: rest, embedding: constraintEmbedding, index: i,
                                           weight: constraint.weight))
         }
@@ -485,8 +706,8 @@ enum ARAPRegistration {
         // a unit weight — the anchor term is then the only thing holding the lattice in place, which
         // is the correct answer for an empty group.
         let edgeCount = CGFloat(rest.triangles.count * 3)
-        let dataTotal = options.dataWeight * CGFloat(source.count)
-            + constraints.reduce(0) { $0 + $1.weight }
+        let dataTotal = options.dataWeight * CGFloat(cloudRowCount)
+            + allConstraints.reduce(0) { $0 + $1.weight }
         let arapWeight = (dataTotal > 0 && edgeCount > 0) ? options.rigidity * dataTotal / edgeCount : 1
 
         let factorization = DeformFactorization(
@@ -496,15 +717,18 @@ enum ARAPRegistration {
             dataRows: dataRows,
             anchorWeights: [CGFloat](repeating: options.anchorWeight, count: rest.vertexCount))
 
-        guard let factorization, !source.isEmpty || !constraints.isEmpty else {
+        guard let factorization, cloudRowCount > 0 || !allConstraints.isEmpty else {
             return finish(lattice: current, similarity: fitted, embedding: embedding,
                           target: target, refined: false)
         }
 
         for _ in 0..<max(1, options.iterations) {
-            let warped = current.warp(embedding)
-            var targets = matchTargets(for: warped, in: target, outlierMultiple: options.outlierMultiple)
-            targets.append(contentsOf: constraints.map(\.target))
+            var targets: [CGPoint] = []
+            if cloudRowCount > 0 {
+                targets = matchTargets(for: current.warp(embedding), in: target,
+                                       outlierMultiple: options.outlierMultiple)
+            }
+            targets.append(contentsOf: allConstraints.map(\.target))
 
             // Local step: each triangle's best rotation taking its rest shape to its current one.
             let transforms = DeformFactorization
