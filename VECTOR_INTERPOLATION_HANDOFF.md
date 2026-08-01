@@ -46,7 +46,7 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Phase 4 — done.** The feature is reachable from the app and the workflow runs end to end. Phase 5 (motion groups: tagging, auto-grouping, visualisation) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `39f4365`. Wide pure-logic tier + the interpolation XCUITest: **389 tests, 0 failures, `xcodebuild` exit 0**. Full-suite result at the phase boundary is in §6's Session 7 line. |
+| **Last known-green commit** | `39f4365`. **Full suite green with Phase 4 in: 475 tests, 474 passed, 0 failed, 1 skipped, `xcodebuild` exit 0**, no harness errors. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. Wide pure-logic tier: 388 tests, 0 failures. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -691,7 +691,10 @@ What Phase 3 decided that Phase 4 inherits:
   frame out of the document entirely (`setInterpolationImage`), which is what makes "derived, never
   stored" true in the app and not just in the model. Reproject is stubbed and refuses out loud.
   The e2e test found a real pre-existing bug — `addCel` built raster-only cels on vector layers, so
-  a second hand-drawn vector keyframe could not be created at all (§5). No subagents.
+  a second hand-drawn vector keyframe could not be created at all (§5). Full suite green at the
+  phase boundary — 475 tests, 474 passed, 0 failed, 1 skipped, first attempt after a `simctl
+  erase`, which is now three phase boundaries in a row where resetting first produced a clean
+  run. No subagents.
 
 ---
 
