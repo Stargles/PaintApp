@@ -468,11 +468,46 @@ simplest possible cases the feature has to get right.
    §8 item 14's `ScrubSession` (hoist the per-drag constants out of the per-tick path) is the designed
    fix and is now measured rather than speculative.
 
+### Status after Session 10 — steps 1–3 done, and what they found
+
+**Step 1 done.** `InterpolationEngineDiagnosticsLogicTests` — three acceptance tests pinned as
+`XCTExpectFailure` plus four characterisations that pass. **Item 28 is deliberately not a test:** the
+tier builds unoptimised, so a 121-sample fit that takes 0.6s optimised took 598s there.
+`deploy/interp-registration-benchmark/run.sh` measures it instead, in seconds.
+
+**Steps 2 and 3 done, and the hypothesis in item 1 above is wrong in an important way.** Rotation is
+not a *lower* minimum than deformation — for a straight line the two are **exactly equal**, because a
+segment maps onto itself under a 180° turn. It is a tie broken by arithmetic noise, so no rotation
+penalty can fix it. Full diagnosis in `HANDOFF.md` §5 ("From Phase 4.7"), paper comparison in §5.11.
+
+**Three plausible fixes were refuted by experiment**, one of them recommended by the reading: a
+tangent/drawing-direction term (it breaks the one case the engine currently gets right), lowering
+rigidity (the bend ceiling is correspondence, not stiffness), and locking the scale on its own.
+`Engine/Deform` compiles standalone with `swiftc`, so an experiment loop is ~5s — **use it before
+believing any fix, including one from the papers.**
+
+**Step 4: the performance half is solved and verified.** `PointCloudIndex.nearest` degenerates on a
+line-shaped cloud; walking only the ring's own cells gives bit-identical output at 60–78× (94s → 1.5s
+at 1000 samples). This is registration, not scrubbing — §8 item 14's `ScrubSession` is still the
+separate fix for item 24's 10 fps and is untouched.
+
+**What remains is blocked on a product decision.** The four drawings cannot be fixed without
+arc-length correspondence, which is on this document's own "Explicitly deferred" list. `HANDOFF.md`
+§8 items 31–35 are the ordered fix list; 31 (un-defer `.clean` for the 1:1 case) and 32 (the two
+registration defaults, which trade away large-rotation registration) are the product owner's calls
+per `HANDOFF.md` §3.5.
+
 **Definition of done.** All four product-owner cases produce motion an animator would accept, each
 pinned by a test that fails on today's engine. Registration on a few strokes is well under a second;
 scrubbing holds a usable frame rate at a stroke count the product owner can actually draw with.
 
-**Estimate.** Two to three sessions — one of which is mostly reading.
+**Amendment after Session 10:** "each pinned by a test that fails on today's engine" is met, with one
+documented exception — item 28's pin is a benchmark, for the reason above. And **do not assert the
+180° flip's outcome in any test**: it varies by build, because the two solutions tie. Assert the
+margin between them.
+
+**Estimate.** Two to three sessions — one of which is mostly reading. *One spent; the reading and
+measurement are done and need not be repeated.*
 
 ---
 

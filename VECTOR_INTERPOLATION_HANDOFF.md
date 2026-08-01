@@ -44,11 +44,23 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 4.6 — done.** The second UI pass; the interpolate-mode layout is now settled. **Next is Phase 4.7 — engine correctness — *before* Phase 5**, because the engine fails all four of the product owner's test drawings (§8 items 27–30). |
-| **Branch** | `claude/vector-interpolation-design-9d5b83`, **rebased onto `origin/main`** (Session 9's timeline work: infinite scroll, popover menus, the `onionSkinButton`/`transportControls` refactor). No upstream — ask before pushing. |
-| **Last known-green commit** | **Full suite green at the 4.6 boundary: 512 tests, 511 passed, 0 failed, 1 skipped, `xcodebuild` exit 0**, first attempt after a `simctl erase` — five phase boundaries in a row. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. |
+| **Current phase** | **Phase 4.7 — diagnosis half done; no engine file has changed.** Every one of §8 items 27–30 is now a measured root cause with a tested fix, and three tempting fixes were *refuted* by experiment (§5). What remains is applying them, which is **blocked on one product decision** — see below. |
+| **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`** (Session 10 pushed the seven unpushed commits). Rebased onto `origin/main` as of Session 8. |
+| **Last known-green commit** | `46e75c1` — the diagnostics tests and the benchmark harness. Fast tier green with the new class in it. The last *full*-suite run is Session 9's 4.6 boundary: 512 tests, 511 passed, 0 failed, 1 skipped. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. |
 | **Tree state** | Clean. |
-| **Blocked on** | Nothing. Phase 4.7 is unblocked, but **ask the product owner for the papers' PDFs and any public repositories** at its start — they offered, and the phase is largely a reading exercise. |
+| **Blocked on** | **§8 item 31 — a product decision.** The four drawings cannot be fixed without the `.clean` correspondence path, which `IMPLEMENTATION.md` explicitly defers. Un-deferring it for the 1:1 case is the product owner's call (§3.5). Item 32 (the two registration defaults) is a second, smaller call. Everything else in 4.7 is unblocked. |
+
+**Papers: supplied and read — do not re-request.** [MoStyle/frite](https://github.com/MoStyle/frite)
+and [Inria RR-9559](https://inria.hal.science/hal-04797216/file/RR-9559.pdf). **§5.11 is the
+comparison**; the short version is that RR-9559 assumes registration is already solved, frite has no
+global rotation search at all (which is our bug), and neither solves N→M stroke matching — the artist
+does it, with a lasso. The product owner has also granted standing permission to **fork the repos and
+experiment on the forks**.
+
+**Experiment before you believe a fix.** `Engine/Deform` compiles standalone with `swiftc` (~5s a
+loop, vs ~90s through `xcodebuild test`) — see §5's first Phase 4.7 entry. Session 10 refuted three
+plausible fixes that way, one of which the reading positively recommended. Do not carry a hypothesis
+from the papers into the engine untested.
 
 **The XCUITest flakiness that cost Session 5 hours was the simulator, and erasing it fixed it.**
 Session 6 opened by resetting `interp-ipad` (`simctl shutdown` + `erase`, §5) and then ran the full
@@ -296,10 +308,14 @@ than a shared one, so concurrent sessions do not contend.
 ### Fast run — pure logic only (~1–2 min). Use this constantly.
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/InterpolationWorkflowLogicTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/InterpolationWorkflowLogicTests -only-testing:PaintSoftwareUITests/InterpolationEngineDiagnosticsLogicTests
 ```
 
-203 tests, all green as of `39f4365`. Add your own logic-test class to that filter as you create it.
+215 tests as of `46e75c1` — 212 passing plus **three expected failures**, which are Phase 4.7's
+pinned engine bugs (`InterpolationEngineDiagnosticsLogicTests`) and are a green run, not a red one.
+`** TEST SUCCEEDED **` is the thing to check. If one of those three ever reports *"expected failure
+but none recorded"*, the engine has changed under you — go read that test's comment before
+assuming it is flaky. Add your own logic-test class to that filter as you create it.
 
 **Wider, still fast (~4 min).** Every pure-logic class in the suite — 388 tests as of `39f4365`.
 Worth running before a commit that touches persistence, rendering or `CanvasManager`, since the fast
@@ -666,6 +682,152 @@ What Phase 2 decided that Phase 3 inherits:
   through untouched. `interpolateButton` closes its own popover on `isInterpolateMode` going false,
   because Exit Interpolate Mode lives inside it.
 
+### From Phase 4.7 (diagnosis) — what is actually wrong with the engine
+
+Session 10 was diagnosis only: no engine file changed. Everything below is **measured**, either by
+`deploy/interp-registration-benchmark/run.sh` or by an experimental fork of `Engine/Deform` compiled
+standalone. Where a hypothesis was refuted, the refutation is recorded too — three of them were, and
+each would have been shipped as "the fix" if the reading had not been tested.
+
+- **`Engine/Deform` compiles and runs standalone with `swiftc`, and that changes how numerical work
+  on it should be done.** It imports only `Accelerate`, `CoreGraphics` and `Foundation` (standing
+  constraint A), so no simulator, app or test host is needed. An experiment loop is **~5 seconds**
+  against ~90 through `xcodebuild test`. `deploy/interp-registration-benchmark/run.sh` is the
+  committed instance; copy the five files to a scratch directory to try engine changes without
+  touching the repo. This is the single biggest practical finding of the session — the whole
+  experiment set below would not have been affordable otherwise.
+
+- **The test tier builds unoptimised, so wall-clock assertions in it are meaningless.** A 121-sample
+  fit: **0.6s optimised, 598s in `PaintSoftwareUITests`.** That is why §8 item 28 is pinned by the
+  benchmark and not by a test, and why nobody should add the slow version back.
+
+- **The "180° rotation" is a *tie*, not a preferred minimum.** The product owner's hypothesis was
+  that rotation is a cheaper minimum than deformation. It is sharper and worse than that: a straight
+  line segment maps exactly onto itself under a 180° turn, so the point-cloud residual is **exactly
+  invariant** — upright and flipped score identically to six decimal places, and the 8-restart
+  multi-start picks between them on arithmetic noise. **No rotation penalty can fix a tie.**
+
+  The proof arrived by accident and is worth keeping: the first version of `testCase27` asserted the
+  flip, and **passed on the simulator while the same engine on the same input flipped on a native
+  optimised build**. Do not assert the flip outcome anywhere — it is a coin toss that varies by
+  build. Assert the *margin* between the two fits, which is deterministic.
+
+- **The multi-start is what *creates* the flip, and dropping it fixes cases 27, 29 and 30's angle.**
+  With `restarts: 1` (seed at the centroid/radius bootstrap, angle 0) no case flips. The multi-start
+  exists because "ICP's basin of convergence is narrow" — it buys genuine large rotations and pays
+  for them with a spurious 180° on any content with a symmetry, which straight lines all have.
+  That is a real trade and it is the product owner's call (§3.5), not a bug to quietly fix.
+
+- **The free scale is what causes both the collapse and the grow-and-fade, and locking it fixes
+  case 30 outright.** Measured at `restarts: 1, allowScale: false`: case 30's y-span goes from
+  **36.5 to 198.5 against the target's 200** — the collapse is gone. Cases 27/29 stop inflating 3×.
+  Note this contradicts the standalone reading of `similarity(allowScale:)`'s own comment: locking
+  the scale *with* the multi-start still in place trades the collapse for a 90° turn at triple the
+  residual (`testLockingTheScaleTradesTheCollapseForADifferentWrongAnswer` pins that). **The two
+  flags only work together**; either alone is a different wrong answer.
+
+- **Rigidity is not the bend dial. Sweeping it 2.0 → 0.01 barely moves the bend** (case 29 stays at
+  0.16–0.18 against the C's own 1.07). The bend failure is a *correspondence* failure, not a
+  stiffness one: nearest-point matching gives a short straight source no reason to wrap around a long
+  curved target, because the pulls from both sides of the arc cancel.
+
+- **Arc-length correspondence fixes the bend completely — and it is the deferred `.clean` path.**
+  Pairing source sample at fraction *u* to target sample at fraction *u* (with the stroke-direction
+  ambiguity resolved as one discrete per-stroke bit, scored over the whole stroke) takes case 29's
+  bend from **0.34 to 0.944** against the C's 1.072, and its arc length from 482 to 841 of 907. The
+  line genuinely becomes the C. This used **zero** point-cloud data rows — the correspondence *is*
+  the data. `IMPLEMENTATION.md` explicitly defers `.clean`, so this is a finding about a recorded
+  decision and is written up as §8 item 31 rather than built.
+
+- **REFUTED: a tangent/stroke-direction term does not break the tie.** The obvious fix for the
+  degeneracy — penalise matches whose drawn direction disagrees — was tested and is **worse than
+  doing nothing**. It left case 27 flipped (the tangent evidence actively *favoured* the flip) and it
+  **broke case 29, which the plain objective gets right** (plain picks 0.5°, tangent picks 179.5°).
+  The reason is simple in hindsight: between two independently drawn keyframes the drawing direction
+  of the second stroke is arbitrary, so the term is a coin flip dressed as evidence. Do not revisit
+  without a way to know the artist drew both keys the same way.
+
+- **REFUTED: item 29 is not the cross-fade fallback.** The report read the grow-and-fade as the
+  evaluator degrading to a cross-fade. It is not — `ARAPRegistration.Result.refined` is `true` and
+  the elastic solve runs. The motion is wrong *inside* the warp path.
+
+- **Mean residual is a lying metric and is why nothing caught this earlier.** Case 30 scores a mean
+  residual of **3.6 points** — an excellent fit — while covering a quarter of the target's span.
+  Piling the source onto the middle of the target is precisely how you win on distance-to-nearest.
+  **Any quality gate added later must measure coverage**, i.e. how much of the target has something
+  near it, not how near the source is to something.
+
+- **The ~1 minute freeze is `PointCloudIndex.nearest`, and the fix is ~15 lines and verified.** The
+  ring search generates the full (2·ring+1)² block of cell indices and filters it, which is O(ring²)
+  of pure rejection per ring. On a *line-shaped* cloud the adaptive cell size makes a grid one column
+  wide and hundreds of rows tall, so `maxRing` is in the hundreds and a single query costs millions
+  of iterations — and a line is exactly what the product owner drew. Walking only the ring's own
+  cells, clamped to the grid, gives **bit-identical residuals** and:
+
+  | samples | before | after | |
+  |---|---|---|---|
+  | 100 | 1.3 s | 40 ms | 33× |
+  | 250 | 12 s | 203 ms | 60× |
+  | 500 | 45 s | 572 ms | 78× |
+  | 1000 | 94 s | 1.5 s | 64× |
+
+  **The residual stops improving past ~250 samples** (11.69 → 12.72 *worse* at 1000), so subsampling
+  the registration cloud costs nothing and would take the remaining 1.5s to ~200ms. The lattice is
+  ~56 vertices whatever the sample count — it is the point cloud that grows, not the solve.
+
+### 5.11 What the papers do — and where they do not help
+
+Read this before proposing an engine change; it is the answer to "what do the papers do at exactly
+the failure points", and for two of the four cases the answer is "not what we assumed".
+
+Sources: [MoStyle/frite](https://github.com/MoStyle/frite) (the actual code, cloned and read) and
+[Inria RR-9559](https://inria.hal.science/hal-04797216/file/RR-9559.pdf). **The code was the useful
+half** — the report is about occlusion and layout, not registration.
+
+- **RR-9559 is not a registration paper and says so.** "We tackle an almost inverse problem:
+  starting from **already registered** key drawings, we aim at propagating the layout." Its
+  contribution is masks, depth ordering and visibility. It assumes our problem is already solved.
+
+- **frite's registration is deliberately *not* a global search, which is exactly our bug.**
+  `RegistrationManager::registration` is: `preRegistration` (rigid CPD — Coherent Point Drift, a
+  soft-assignment fit — or centre-of-mass alignment, or a rigid transform from artist-**pinned**
+  quads) and then alternating `pushPhase` + `Arap::regularizeLattice` to convergence. There is **no
+  multi-start over rotations anywhere**. It never offers itself the flipped solution. Our
+  `icpRestarts: 8` is the thing frite pointedly does not have.
+
+- **Scale is factored out, not fitted.** CPD gives a *rigid* transform; the size change is captured
+  separately as `m_preRegistrationScaling` and stored on the lattice via `setScaling`. Our tier-1
+  similarity fits rotation, translation **and** scale in one objective, which is what lets case 30
+  buy a good residual by shrinking to 15%.
+
+- **The push phase is per-quad and rigid, ours is per-point and translational.** frite matches the
+  points inside each quad, computes that quad's optimal *rigid* transform from its own matched pairs,
+  and moves its four corners by it — damped by `k_stepSize` and averaged over the quads sharing each
+  corner. Matches beyond `k_proximityFactor × cellSize` are **discarded**, and a quad with no matches
+  simply does not move. Ours builds one data row per source point pulling toward its nearest target,
+  with an outlier cut at a multiple of the *median* match distance — which admits everything when
+  everything is far.
+
+- **N strokes → M strokes is not solved algorithmically by either. The artist does it.** This is the
+  plain answer §8 item 30 asked for. frite's drawings are "manually decomposed into a set of
+  transient embeddings", registration runs **per user-defined part against a user-chosen target
+  stroke set**, and the tool list is full of manual correspondence machinery —
+  `CorrespondenceTool : public LassoTool`, `directmatchingtool`, `registrationlassotool`,
+  `pickstrokestool`. The paper concedes even the part-level version is fallible: "Automatic layout
+  propagation may not find the best **many-to-one mapping** between drawing parts in some tricky
+  cases."
+
+  So **the product owner's "this may be a problem for messy lineart" is correct, and the literature's
+  answer is a UI, not an algorithm.** Building a fully automatic N→M stroke matcher would be past the
+  state of the art, not a catch-up.
+
+- **What the paper *does* give us for case 30 is a shippable answer we already have the data model
+  for.** Content with no partner is not merged — it is **faded out progressively** via per-vertex
+  temporal visibility thresholds (Eq. 4: the set `Xout` of vertices with no near counterpart, seeded
+  at `Xseed` and diffused so the farthest-from-the-target disappear first). `VectorStroke` has
+  carried `visibilityThreshold` and `sampleVisibilityThresholds` since Phase 2 and nothing sets them.
+  That is the closest match between our model and the paper's, and it is unbuilt on our side.
+
 ### 5.10 For Phase 5's motion groups
 
 What Phase 4 decided that Phase 5 inherits:
@@ -799,6 +961,25 @@ What Phase 3 decided that Phase 4 inherits:
   engine failed all four — 180° rotations instead of bends, a warp degrading to a scale-and-fade,
   no stroke merging, and a minute to register two strokes. That is why 4.7 goes before Phase 5.
   Full suite green at the boundary: 512 tests, 511 passed, 0 failed, 1 skipped. No subagents.
+
+- **Session 10 (Phase 4.7 — diagnosis) — 2026-08-01:** No engine file changed; the output is a
+  diagnosis, `InterpolationEngineDiagnosticsLogicTests` (4 characterisations + 3 pinned expected
+  failures) and `deploy/interp-registration-benchmark`. Commits `46e75c1`, `…`. Found that
+  `Engine/Deform` compiles standalone with `swiftc`, which made a ~5-second experiment loop possible
+  and is why the session got past reading. **All four of items 27–30 are now measured causes**: the
+  180° is an exact *tie* (a line maps onto itself, so upright and flipped score identically and the
+  multi-start picks on float noise — proved when the first case-27 test passed on the simulator while
+  flipping natively); the grow-and-fade is the free scale, not the cross-fade fallback; the collapse
+  is that free scale again, and mean residual reports it as a good fit; the minute is
+  `PointCloudIndex.nearest` degenerating on a line-shaped cloud, fixed 60–78× with bit-identical
+  output. **Three plausible fixes were refuted by experiment** — a tangent/direction term (worse: it
+  breaks the one case the engine gets right), lowering rigidity (the bend ceiling is correspondence,
+  not stiffness), and locking the scale on its own. Read the papers' actual code rather than only the
+  PDF, which is where the answer was: frite has no multi-start, factors scale out, and hands N→M to
+  the artist via a lasso tool. Stopped before applying anything because item 31 is a product decision
+  (§3.5). The product owner's mid-session correction — *don't split diagnosis and implementation
+  across sessions, you can't test your hypotheses* — is why the refutations exist and is the reason
+  this entry is worth reading twice.
 
 ---
 
@@ -1097,3 +1278,63 @@ are recorded verbatim in substance because the *shape* of each failure is the di
 any public repositories on request, so the phase can read the actual math and code rather than infer
 it. **If the papers' own methods hit the same limits, say so plainly and brainstorm new approaches
 rather than reimplementing a known-limited method faithfully.**
+
+**Session 10 answered all four.** The diagnosis is §5's "From Phase 4.7" and the paper comparison is
+§5.11. Nothing in items 27–30 remains a hypothesis; each is now a measured cause with a tested (or
+refuted) fix. Items 31–34 below are what came out of it.
+
+### From Phase 4.7 — the ordered fix list
+
+These are written as suggestions per §3.3, but unlike the rest of §8 they are the *content* of the
+next session rather than optional extras. Ordered by confidence and independence: 31 is free, 32 is
+a product decision, 33 is the real work.
+
+31. **Un-defer the `.clean` correspondence path for the 1:1 case — this is the product decision the
+    diagnosis surfaces, and it needs the product owner's answer before the next session picks it up.**
+    `IMPLEMENTATION.md`'s "Explicitly deferred — do not build these" lists the `.clean` path, on the
+    reasoning that cross-fade is an honest degradation. The measurement changes the premise: **the
+    four failing drawings cannot be fixed without it.** Nearest-point matching gives a short straight
+    stroke no reason to wrap around a long curved one at any rigidity, and arc-length correspondence
+    takes case 29's bend from 0.34 to 0.944 against the target's 1.072 (§5). The scope that buys
+    that is small — pair strokes 1:1, resample both by normalized arc length, feed the pairs as
+    `ARAPRegistration.Constraint`s, resolve stroke direction as one discrete bit per pair scored over
+    the whole stroke. The **N:M** case is the hard part and stays deferred (item 33). Per §3.5 this
+    is the product owner's call, not the next session's.
+
+32. **Change the two registration defaults, together, and only together: `icpRestarts: 1` and
+    `allowScale: false`.** Measured: no case flips, and case 30's collapse goes from a y-span of 36.5
+    to 198.5 against the target's 200. Both are needed — either alone is a different wrong answer
+    (§5), and `testLockingTheScaleTradesTheCollapseForADifferentWrongAnswer` pins the half-fix so it
+    cannot be applied by accident. **The cost is real and is the product owner's call:** the
+    multi-start is what lets a genuinely large rotation register at all, and
+    `testICPRecoversARigidMotionWithoutAnyCorrespondence` is written against it. frite has no
+    multi-start at all (§5.11), which is the evidence that dropping it is the mainstream choice, but
+    a drawing that really does rotate 120° between keys will register worse afterwards. If both are
+    wanted, the escalation is "try the local fit; only widen the search if it fails a *coverage*
+    test" — not the current unconditional 8-way search.
+
+33. **N strokes → M strokes needs a UI, not an algorithm — and that is the literature's answer, not
+    a shortcut.** §5.11 has the evidence: frite decomposes drawings into artist-defined parts and
+    ships `CorrespondenceTool`, `directmatchingtool`, `registrationlassotool` and `pickstrokestool`
+    to let the artist state the matching, and RR-9559 concedes even its part-level many-to-one
+    mapping "may not find the best" answer. **Phase 5's motion groups are already most of this
+    mechanism**, which is a strong argument that 4.7 should land 31/32 and then let Phase 5 proceed —
+    the grouping UI is the correspondence UI. What should *not* happen is a speculative automatic
+    stroke matcher; that is past the state of the art.
+
+    The complement, for content that genuinely has no partner, is item 34.
+
+34. **Temporal visibility thresholds are the paper's answer to unmatched content, and our data model
+    already has the field.** RR-9559 §5 does not merge unmatched strokes — it fades them out
+    progressively, farthest-from-the-target first, via per-vertex thresholds diffused from a seed set
+    (Eq. 4). `VectorStroke.visibilityThreshold` and `.sampleVisibilityThresholds` have existed since
+    Phase 2 and **nothing sets them**. This is the closest correspondence between our model and the
+    paper's, it is the honest answer to "two lines become one" (one line retracts rather than
+    merging), and it is also what makes the thickness-fade toggle (§8 item 13 / Phase 3) finally have
+    unmatched strokes to act on. Cheap relative to its value, but it depends on 31 to know which
+    strokes are unmatched.
+
+35. **Subsample the registration point cloud.** The residual stops improving past ~250 samples and
+    gets slightly *worse* at 1000 (§5). Combined with the `PointCloudIndex` fix this takes a
+    1000-sample registration from 94s to roughly 200ms. Independent of everything above and the
+    cheapest remaining win after the index fix itself.
