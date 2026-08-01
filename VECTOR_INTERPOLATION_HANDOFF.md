@@ -44,9 +44,9 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 3 — done.** Phase 4 (interpolate mode UI, references, slider, Generate) not started. |
+| **Current phase** | **Phase 4 — done.** The feature is reachable from the app and the workflow runs end to end. Phase 5 (motion groups: tagging, auto-grouping, visualisation) not started. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `f6986df`. **Full suite green with Phase 3 in: 450 tests, 449 passed, 0 failed, 1 skipped, `xcodebuild` exit 0**, no harness errors. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. Wide pure-logic tier: 364 tests, 0 failures. |
+| **Last known-green commit** | `39f4365`. Wide pure-logic tier + the interpolation XCUITest: **389 tests, 0 failures, `xcodebuild` exit 0**. Full-suite result at the phase boundary is in §6's Session 7 line. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -122,15 +122,32 @@ reset *before* the phase-boundary run, not after it starts failing.
   - Tests: `InterpolationRenderLogicTests` (17). `t = 0` reproduces keyframe A and `t = 1` reproduces
     keyframe C at **zero** pixel tolerance, through the general path.
 
+- **Phase 4 — interpolate mode UI, references, slider, Generate.** All six work items; **the feature
+  is no longer inert.** Commits `6486f0e`, `3fa697a`, `e8b35da`, `39f4365`.
+  - New: [InterpolatePanel.swift](PaintSoftware/Views/InterpolatePanel.swift) (mode toggle, Generate
+    and Reproject as separate commands with their refusal reasons, the `t` slider, Remove
+    Interpolation, the thickness-fade toggle) and `InterpolationReferenceOnionSkinSource` in
+    [OnionSkinSource.swift](PaintSoftware/Views/OnionSkinSource.swift).
+  - Changed: `CanvasManager` (`isInterpolateMode`, `interpolationReferences`,
+    `interpolationThicknessFade`, `isRegisteringInterpolation`, `isScrubbingInterpolation`);
+    `CanvasManager+Interpolation` (mode entry/exit, reference toggling, keyframe grouping,
+    `interpolationContentProvider`, registration, `interpolate(mode:)` and its refusals,
+    `interpolatedImage`); `TimelineTrackView` (the gesture split and the yellow highlight);
+    `CanvasView` (the memoized preview pass and the mode-swapped onion skin); `StrokeCanvasView`
+    (`setInterpolationImage`); `TopToolbar`/`DrawingView` (`ActivePanel.interpolate`);
+    `CanvasManager+Timeline` (`addCel` now matches the layer's kind — see §5).
+  - Tests: `InterpolationWorkflowLogicTests` (24) plus **one** XCUITest,
+    `testInterpolateModeEndToEndFromGestureToScrub`.
+  - **Reproject is stubbed** — it refuses with `.reprojectNotImplemented` rather than quietly
+    behaving like Generate. Phase 6 item 1 owns it.
+
 ### What is next
 
-**Phase 4** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — interpolate mode UI, references, the `t`
-slider and Generate. The first phase where any of this is reachable from the app, and the first
-usable milestone.
+**Phase 5** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — motion groups: tagging, auto-grouping,
+visualisation. It is the first phase where more than one motion group exists, which is where
+tagging stops being optional.
 
-**Read §5.9 before starting** — what Phase 3 decided that Phase 4 inherits, in particular that the
-evaluator needs a `ContentProvider` and never touches `CanvasManager` itself, and that the two
-render qualities are what the slider drag/release should switch between.
+**Read §5.10 before starting** — what Phase 4 decided that Phase 5 inherits.
 
 ### History note
 
@@ -239,17 +256,17 @@ than a shared one, so concurrent sessions do not contend.
 ### Fast run — pure logic only (~1–2 min). Use this constantly.
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/InterpolationWorkflowLogicTests
 ```
 
-179 tests, all green as of `f6986df`. Add your own logic-test class to that filter as you create it.
+203 tests, all green as of `39f4365`. Add your own logic-test class to that filter as you create it.
 
-**Wider, still fast (~4 min).** Every pure-logic class in the suite — 364 tests as of `f6986df`.
+**Wider, still fast (~4 min).** Every pure-logic class in the suite — 388 tests as of `39f4365`.
 Worth running before a commit that touches persistence, rendering or `CanvasManager`, since the fast
 filter above misses `ProjectSaveLogicTests`, the eraser classes and the characterisation tests:
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/VectorEraserHybridLogicTests -only-testing:PaintSoftwareUITests/RasterVectorParityLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/BackupManagerLogicTests -only-testing:PaintSoftwareUITests/CelCRUDCharacterizationTests -only-testing:PaintSoftwareUITests/LayerTreeCharacterizationTests -only-testing:PaintSoftwareUITests/ViewPresetCharacterizationTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/InterpolationWorkflowLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/VectorEraserHybridLogicTests -only-testing:PaintSoftwareUITests/RasterVectorParityLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/BackupManagerLogicTests -only-testing:PaintSoftwareUITests/CelCRUDCharacterizationTests -only-testing:PaintSoftwareUITests/LayerTreeCharacterizationTests -only-testing:PaintSoftwareUITests/ViewPresetCharacterizationTests
 ```
 
 ### Reading a failure
@@ -518,6 +535,90 @@ What Phase 2 decided that Phase 3 inherits:
   lives in the `Cel` struct. Anything that writes *strokes* — Generate committing an in-between,
   Reproject re-posing one — needs `withInterpolationUndo(name:touching:)`.
 
+### From Phase 4
+
+- **`addCel` built a raster-only `Cel` on every layer, including `.vector` ones — and that made a
+  second hand-drawn vector keyframe impossible to create.** "Add Drawing" in an empty timeline slot
+  produced a cel with `vector == nil`; `StrokeCanvasView` then silently falls back to raster mode
+  (it branches on `vectorCanvas != nil`, not on the layer's kind), so the drawing landed as *pixels
+  on a vector layer*. Invisible to the eraser's geometric modes, to save/load's vector payload, and
+  to interpolation, which reads `cel.vector` and finds nothing.
+
+  It is fixed — `addCel` now matches `layers[layerIndex].kind`, as `addVectorLayer`'s own cel
+  already did. Two things worth knowing. First, **the fix changes behaviour outside interpolation**:
+  any vector layer's added frames are now vector cels, which is what they always should have been,
+  but it is a real behaviour change and `CelCRUDCharacterizationTests` covers that area (it stayed
+  green). Second, **the bug was invisible until an end-to-end test existed**, because every earlier
+  vector test built its cels directly rather than through the timeline's own affordance. Expect more
+  of this shape: paths that were never exercised because the feature was inert.
+
+- **The e2e test could not tell the in-between from the onion skin, because in this mode the skin
+  *is* both keyframes.** A pixel probe saw ink at each keyframe's position and read it as success
+  for two runs. `timeline.onionSkinToggle` now has an accessibility identifier and the test turns
+  the skin off. **Any later pixel assertion in interpolate mode has to do the same** — the mode's
+  onion skin draws content at exactly the positions an interpolation test cares about.
+
+- **Registration runs at `interpolate(...)`, not at mode entry**, and `IMPLEMENTATION.md` Phase 4
+  item 1 says otherwise. It is ordering, not disagreement: at mode entry no references have been
+  picked (that is step 2 of the workflow), so there is nothing to register against. If Phase 5's
+  auto-grouping wants a registration earlier — and it might, since "show the grouping it inferred
+  immediately" (PLAN §5.0 step 1) implies one — the moment to run it is still first-reference-pair,
+  not mode entry.
+
+- **A SwiftUI `Toggle`'s centre is not a tap target.** `app.switches["…"].tap()` lands in the dead
+  gap between the label and the control and silently does nothing — the toggle reads `"0"`
+  afterwards and the failure surfaces several steps later as something unrelated. Tap the trailing
+  edge instead: `.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()`.
+
+- **`xcodebuild` *did* print per-test output this session**, contradicting the Phase 3 note below.
+  Both are true — it varies. The result bundle is still the thing to trust; do not conclude a run
+  has hung from an empty `grep "Test Case"`, and do not conclude it is fine from a full one.
+
+- **The derived in-between never enters the document, and the seam that keeps it out is
+  `StrokeCanvasView.setInterpolationImage`.** `CanvasView.Coordinator` evaluates and pushes a
+  `UIImage`; nothing writes to the cel's `VectorCanvas`. That is what makes "derived, never stored"
+  (PLAN §4) true in the app rather than only in the model, and it is also what preserves §5.6's
+  two-isolated-composites structure — a single display list could not hold both keyframes' erasers.
+  **Do not "simplify" this by assigning the evaluation into `cel.vector`.** The cost is that the
+  preview is a bitmap, so anything wanting the in-between *as vectors* (a Commit action, export)
+  has to call the evaluator itself.
+
+- **The preview pass is memoized on a key, and the referenced canvases' `version`s are in it.** That
+  is what makes "edit keyframe A and the in-between updates for free" actually happen without an
+  invalidation call at every site that can touch a keyframe. `updateInterpolationPreviews` runs on
+  every SwiftUI pass, so anything added to the evaluation's inputs — a per-recipe option, a guide —
+  **must be added to `InterpolationPreviewKey` too**, or it will appear to have no effect until
+  something unrelated forces a re-render.
+
+### 5.10 For Phase 5's motion groups
+
+What Phase 4 decided that Phase 5 inherits:
+
+- **Phase 4's whole-frame binding registers no `MotionGroup`.** `registerWholeFrameGroup` mints a
+  fresh `groupID` per recipe and leaves `motionGroups` empty, because a registered group is an
+  artist-facing object (name, tag colour, mode badge) and inventing one per recipe would put
+  document state in front of the artist that they never asked for. **Phase 5 must therefore handle a
+  binding whose `groupID` has no registry entry** — either by adopting it into a real group when the
+  artist first tags something, or by treating "no entry" as the implicit whole-frame group in the UI.
+  `motionGroup(withID:)` returns nil for it today.
+- **Nothing is tagged, and that is correct rather than unfinished.** Untagged content rides the
+  recipe's first binding (§5.9), which is exactly right with one group and is the safe default with
+  several (content carried by a neighbour's motion is a much quieter failure than content left
+  behind). Phase 5 owns making tagging reachable; it does not have to backfill tags onto existing
+  recipes.
+- **Keyframes are grouped by `startFrame`.** `interpolationKeyframes` folds every flagged cel that
+  starts on the same frame into one `InterpolationReference` — that is what makes requirement 5
+  (lineart + flats interpolate together) work with no second gesture. Grouping by *overlap* was
+  rejected: it folds a long held cel in with every short cel beside it.
+- **The timeline's press-and-hold is mode-switched, not duplicated.** One
+  `UILongPressGestureRecognizer` on `TimelineRowView` means drag-reorder normally and "set as
+  reference" in interpolate mode. If Phase 5 wants another timeline gesture, add it the same way —
+  two long presses of equal duration competing for one touch have no stable winner, and
+  `require(toFail:)` between them does not help.
+- **`InterpolationRefusal` is the pattern for saying no.** Commands return a reason rather than a
+  bool, the panel disables the button from the same call, and the message is on the enum. Phase 5's
+  group commands should follow it rather than inventing a second failure style.
+
 ### 5.9 For Phase 4's UI
 
 What Phase 3 decided that Phase 4 inherits:
@@ -581,6 +682,16 @@ What Phase 3 decided that Phase 4 inherits:
   subagents. Also compacted §5 (eight facts that duplicated a code comment became a pointer table)
   and, on the product owner's ask, deleted `VECTOR_ERASER_HANDOFF.md` after moving its unstarted
   backlog into `VECTOR_ERASER_PLAN.md` §12 — the plan stays, it is cited from ~20 source files.
+
+- **Session 7 (Phase 4) — 2026-07-31:** Built the interpolate-mode UI — all six work items, one new
+  view, 24 new logic tests and the single end-to-end XCUITest, four commits (`6486f0e` … `39f4365`).
+  **The feature stopped being inert:** an artist can enter the mode, press-and-hold two blocks to
+  set them as references, Generate, and scrub the in-between. Resolved the press-and-hold conflict
+  by mode-switching the one recognizer rather than adding a competing one, and kept the derived
+  frame out of the document entirely (`setInterpolationImage`), which is what makes "derived, never
+  stored" true in the app and not just in the model. Reproject is stubbed and refuses out loud.
+  The e2e test found a real pre-existing bug — `addCel` built raster-only cels on vector layers, so
+  a second hand-drawn vector keyframe could not be created at all (§5). No subagents.
 
 ---
 
@@ -734,3 +845,53 @@ definition of done is met, and suggest rather than implement anything out of sco
     ("build one and hold it for the lifetime of a slider drag"), and this phase does not hold it.
     Phase 4 owns the drag, so Phase 4 is where a `ScrubSession` holding both belongs — worth doing
     there rather than retrofitting into the evaluator, which is stateless on purpose.
+
+    **Still open after Phase 4.** Phase 4 memoizes the finished *image* against a key
+    (`InterpolationPreviewKey`), which is what stops an idle SwiftUI pass re-rendering — but every
+    distinct `t` still re-embeds and re-factorises from scratch, which is every tick of an actual
+    drag. The `ScrubSession` is the remaining half and its home is `CanvasView.Coordinator`,
+    alongside that key. Measure before building it: `.preview` quality made scrubbing usable enough
+    on a 24-stroke drawing that this was not the bottleneck, and the product owner's >1000-object
+    layers (standing constraint C) are where it will start to be.
+
+### From Phase 4
+
+15. **A reference on another layer looks identical to one on this layer.** `PLAN.md` §5.0 step 2
+    asks for the highlight to distinguish "reference" from "reference on another layer feeding this
+    one", because those read differently on the timeline. Today both are the same yellow. The data
+    is all there (`CelRef` carries the layer), so this is a presentation change — a second tint, or
+    a badge — and it only starts to matter once artists routinely reference across layers.
+
+16. **The slider does not show where neighbouring in-betweens sit.** `PLAN.md` §5.0 step 4 asks for
+    it, so the artist can judge spacing against the frames either side rather than in isolation. It
+    is the same information the spacing chart shows (§6.2), in a second place, and it wants the
+    recipes on the cels between the two references — which nothing currently gathers.
+
+17. **There is no Commit action.** `PLAN.md` §4 names it: evaluate at the current `t`, write the
+    result into the cel as ordinary content, drop the recipe — one-way, undoable, explicit, never
+    automatic. Nothing in Phase 4 needs it, and Generate-then-Commit is what produces a frame that
+    Reproject then works on, so it is worth building alongside Phase 6's Reproject rather than
+    before it. Note it would be the first thing that writes stroke content from a recipe, so it is
+    the first caller of `withInterpolationUndo` in this part of the feature (§5).
+
+18. **An interpolated cel is blank everywhere except the canvas at the current frame.**
+    `updateInterpolationPreviews` asks each layer for the cel under the playhead, which is exactly
+    right for the canvas — but **thumbnails, the ordinary onion skin, and export** all go through
+    `PixelOps.rasterize(cel:canvasSize:)`, which reads `cel.vector` and finds an interpolated cel
+    empty. So an in-between shows as a blank timeline thumbnail today. Fixing it means giving
+    `rasterize` a way to evaluate a recipe, and it cannot have one now because a `Cel` cannot
+    resolve its own `CelRef`s without the layer tree — the `ContentProvider` seam again. Worth
+    solving deliberately (pass a provider into `rasterize`) rather than by giving `Cel` a
+    back-reference to the manager.
+
+19. **`interpolationReferences` is not pruned when a referenced cel is deleted.** The same shape as
+    item 7 but for the transient selection rather than a stored recipe: `interpolationKeyframes`
+    skips refs it cannot resolve, so the effect is a silently-shrinking keyframe count rather than a
+    crash. Cheap to fix wherever item 7 is fixed.
+
+20. **Registration cost is untested at scale.** `latticeCellSize` targets ~10 cells across the
+    longer side, so the ARAP factorisation is over ~150 vertices whatever the drawing — but the
+    *point cloud* is every stroke sample at both keyframes, and ICP is run with 8 restarts to
+    convergence. That is the number that grows with a >1000-object layer, not the lattice.
+    `isRegisteringInterpolation` exists so the UI can say something; nothing has measured what it
+    will need to say.

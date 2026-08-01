@@ -386,7 +386,7 @@ group**. Groups become artist-controllable in Phase 5.
    It is not a persisted per-recipe setting yet — a view-level toggle feeding `Options` is enough to
    judge it, and where it eventually lives (global preference, per-recipe, per-group) is a decision to
    take after looking at it, not before.
-5. **Onion skin in interpolate mode** — supply an `OnionSkinSource` (Phase 0) that shows the two
+6. **Onion skin in interpolate mode** — supply an `OnionSkinSource` (Phase 0) that shows the two
    reference keyframes, tinted differently.
 
 **Files.** `CanvasManager.swift`, `Tool.swift`, `TimelineTrackView.swift`, `SideToolbar.swift`,
