@@ -26,7 +26,8 @@ func cellSize(_ p: [CGPoint]) -> CGFloat {
 }
 
 print("Registration cost — a vertical line fitted to a C that encompasses it (§8 item 28).")
-print("Baseline at 26ff3e9:  24=34ms  100=1.3s  250=12s  500=45s  1000=94s  2000=285s")
+print("Before the ring-walk fix:  24=34ms  100=1.3s  250=12s  500=45s  1000=94s  2000=285s")
+print("After it, same residuals:  24= 9ms  100=93ms  250=412ms  500=1.2s  1000=2.9s  2000=7.6s")
 print("")
 print("  samples      fit time     mean residual")
 for n in [24, 100, 250, 500, 1000, 2000] {

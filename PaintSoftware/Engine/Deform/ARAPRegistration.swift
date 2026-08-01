@@ -63,7 +63,9 @@ struct PointCloudIndex {
 
         var bestIndex = -1
         var bestDistance = CGFloat.infinity
-        let maxRing = max(cols, rows)
+        // The last ring that can still hold a cell. Past it every index is off the grid, so the
+        // ceiling is this bucket's distance to the furthest edge, not the grid's whole extent.
+        let maxRing = max(max(col, cols - 1 - col), max(row, rows - 1 - row))
 
         var ring = 0
         while ring <= maxRing {
@@ -73,21 +75,40 @@ struct PointCloudIndex {
                 let floorDistance = CGFloat(ring - 1) * cellSize
                 if floorDistance > 0, floorDistance * floorDistance > bestDistance { break }
             }
-            for r in (row - ring)...(row + ring) where r >= 0 && r < rows {
-                for c in (col - ring)...(col + ring) where c >= 0 && c < cols {
-                    // Ring, not block: skip the interior already covered by a smaller ring.
-                    guard ring == 0 || abs(r - row) == ring || abs(c - col) == ring else { continue }
-                    for i in buckets[r * cols + c] {
-                        let dx = points[i].x - p.x, dy = points[i].y - p.y
-                        let d = dx * dx + dy * dy
-                        if d < bestDistance { bestDistance = d; bestIndex = i }
-                    }
+            if ring == 0 {
+                scan(row: row, col: col, from: p, bestIndex: &bestIndex, bestDistance: &bestDistance)
+            } else {
+                // Walk the ring's own cells. Generating the (2·ring+1)² block and filtering it down
+                // to the ring spends O(ring²) per ring on cells that are not in the ring at all — and
+                // a *line*-shaped cloud is where that bites: the adaptive cell size gives it a grid
+                // one column wide and hundreds of rows tall, so `maxRing` runs into the hundreds and
+                // a single query costs millions of iterations. That was the ~1-minute freeze on a
+                // two-stroke drawing (`HANDOFF.md` §8 item 28), and a line is what the artist drew.
+                for c in (col - ring)...(col + ring) {
+                    scan(row: row - ring, col: c, from: p, bestIndex: &bestIndex, bestDistance: &bestDistance)
+                    scan(row: row + ring, col: c, from: p, bestIndex: &bestIndex, bestDistance: &bestDistance)
+                }
+                for r in (row - ring + 1)...(row + ring - 1) {
+                    scan(row: r, col: col - ring, from: p, bestIndex: &bestIndex, bestDistance: &bestDistance)
+                    scan(row: r, col: col + ring, from: p, bestIndex: &bestIndex, bestDistance: &bestDistance)
                 }
             }
             ring += 1
         }
         guard bestIndex >= 0 else { return nil }
         return (bestIndex, points[bestIndex], bestDistance)
+    }
+
+    /// One bucket against the running best. An index off the grid simply holds nothing, which is what
+    /// lets the ring walk above stay a fixed pattern rather than a clamped one.
+    private func scan(row: Int, col: Int, from p: CGPoint,
+                      bestIndex: inout Int, bestDistance: inout CGFloat) {
+        guard row >= 0, row < rows, col >= 0, col < cols else { return }
+        for i in buckets[row * cols + col] {
+            let dx = points[i].x - p.x, dy = points[i].y - p.y
+            let d = dx * dx + dy * dy
+            if d < bestDistance { bestDistance = d; bestIndex = i }
+        }
     }
 }
 
