@@ -210,6 +210,20 @@ enum ARAPRegistration {
         /// Stop early once no vertex moves further than this in an iteration.
         var convergenceDistance: CGFloat = 1e-4
 
+        /// Ceiling on how many source points actually drive the fit (`HANDOFF.md` §8 item 35).
+        ///
+        /// Registration cost is dominated by the point cloud, not the solve: the lattice is ~56
+        /// vertices whatever the sample count, while every extra sample is another nearest-target
+        /// query per ICP round and per ARAP iteration. And the accuracy it buys runs out — on the
+        /// line-into-a-C fixture the mean residual is 11.32 at 100 samples, 11.69 at 250, and
+        /// *worse* at 12.72 by 1000. A stroke drawn on an iPad carries hundreds of samples, so this
+        /// is the difference between a fit that costs 2.8 s and one that costs 80 ms.
+        ///
+        /// Residuals are still reported over every source point — this caps what *pulls*, not what
+        /// is measured. The target cloud is capped by whoever builds the `PointCloudIndex`;
+        /// `CanvasManager.registerWholeFrameGroup` is the caller that does it.
+        var maxRegistrationSamples: Int = 250
+
         init() {}
     }
 
@@ -303,6 +317,18 @@ enum ARAPRegistration {
     /// There is no middle ground to land in: the signal is thirteen orders of magnitude above the
     /// noise the moment a stroke is asymmetric at all. This sits comfortably between them.
     static let directionMargin: CGFloat = 0.001
+
+    /// Evenly-strided decimation to at most `cap` points, first and last kept. Returns the input
+    /// untouched when it is already short enough. See `Options.maxRegistrationSamples`.
+    ///
+    /// Stride and not arc length: this runs over a *cloud* — several strokes concatenated, and
+    /// possibly a fill's control points — where there is no single curve to walk along. Striding
+    /// thins every stroke in proportion to how many samples it brought, which is the behaviour that
+    /// leaves the drawing's shape alone.
+    static func subsampled(_ points: [CGPoint], to cap: Int) -> [CGPoint] {
+        guard cap > 1, points.count > cap else { return points }
+        return (0..<cap).map { points[$0 * (points.count - 1) / (cap - 1)] }
+    }
 
     /// `count` points spread evenly along the polyline's own arc length, endpoints included.
     ///
@@ -668,7 +694,9 @@ enum ARAPRegistration {
                     correspondence: StrokeCorrespondence? = nil,
                     options: Options = Options()) -> Result {
         let rest = lattice.restConfiguration
-        let fitted = similarityICP(source: source, target: target, iterations: options.icpIterations,
+        // What drives the fit is capped; what gets reported is not (`Options.maxRegistrationSamples`).
+        let driving = subsampled(source, to: options.maxRegistrationSamples)
+        let fitted = similarityICP(source: driving, target: target, iterations: options.icpIterations,
                                    restarts: options.icpRestarts, allowScale: options.allowScale)
         let initialVertices = rest.vertices.map(fitted.applied(to:))
         var current = rest.withVertices(initialVertices)
@@ -685,15 +713,16 @@ enum ARAPRegistration {
         // residuals are reported over; it just stops pulling.
         let derived = correspondence.map { arcLengthConstraints($0, under: fitted) } ?? []
         let allConstraints = constraints + derived
-        let cloudRowCount = derived.isEmpty ? source.count : 0
+        let cloudRowCount = derived.isEmpty ? driving.count : 0
 
         let embedding = rest.embedInRest(source)
+        let drivingEmbedding = driving.count == source.count ? embedding : rest.embedInRest(driving)
         let constraintEmbedding = rest.embedInRest(allConstraints.map(\.source))
 
         var dataRows: [DeformDataRow] = []
         dataRows.reserveCapacity(cloudRowCount + allConstraints.count)
         for i in 0..<cloudRowCount {
-            dataRows.append(DeformDataRow(lattice: rest, embedding: embedding, index: i,
+            dataRows.append(DeformDataRow(lattice: rest, embedding: drivingEmbedding, index: i,
                                           weight: options.dataWeight))
         }
         for (i, constraint) in allConstraints.enumerated() {
@@ -725,7 +754,7 @@ enum ARAPRegistration {
         for _ in 0..<max(1, options.iterations) {
             var targets: [CGPoint] = []
             if cloudRowCount > 0 {
-                targets = matchTargets(for: current.warp(embedding), in: target,
+                targets = matchTargets(for: current.warp(drivingEmbedding), in: target,
                                        outlierMultiple: options.outlierMultiple)
             }
             targets.append(contentsOf: allConstraints.map(\.target))

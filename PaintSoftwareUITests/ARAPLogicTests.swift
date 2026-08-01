@@ -442,6 +442,38 @@ final class ARAPLogicTests: XCTestCase {
         for p in resampled { assertPoint(p, CGPoint(x: 7, y: 9), accuracy: 1e-12) }
     }
 
+    func testSubsamplingThinsEvenlyAndKeepsBothEnds() {
+        let ramp = (0..<10).map { CGPoint(x: CGFloat($0), y: 0) }
+
+        XCTAssertEqual(ARAPRegistration.subsampled(ramp, to: 4).map(\.x), [0, 3, 6, 9],
+                       "first and last must survive — they are the extremities the fit needs")
+        XCTAssertEqual(ARAPRegistration.subsampled(ramp, to: 20).count, 10,
+                       "a cap above the count is a no-op, not padding")
+        XCTAssertEqual(ARAPRegistration.subsampled([], to: 4).count, 0)
+    }
+
+    /// The cap governs what *pulls*, not what is measured: motion grouping reads a residual per
+    /// source point, so thinning the fit must not thin the report.
+    ///
+    /// The cap is set low here rather than feeding in a thousand real samples, because this tier
+    /// builds unoptimised and a big fit costs minutes in it (`HANDOFF.md` §5) — the property is the
+    /// same at 20 as at 250, and the cost curve is the benchmark's job.
+    func testCappingTheRegistrationCloudStillReportsEverySourcePoint() {
+        var options = ARAPRegistration.Options()
+        options.maxRegistrationSamples = 20
+        let source = bar(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 0), count: 120)
+        let truth = Similarity(angle: 0, scale: 1, translation: CGPoint(x: 30, y: 12))
+        let lattice = Lattice(covering: source, targetCellSize: 40, padding: 1)
+
+        let result = ARAPRegistration.fit(lattice: lattice, source: source,
+                                          target: PointCloudIndex(source.map(truth.applied(to:))),
+                                          options: options)
+
+        XCTAssertEqual(result.warpedSource.count, 120, "every source point is still reported")
+        XCTAssertEqual(result.residuals.count, 120)
+        XCTAssertLessThan(result.meanResidual, 1, "and twenty samples were enough to place it")
+    }
+
     func testStrokesArePairedByPositionRatherThanDrawingOrder() {
         let left = bar(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: 50), count: 8)
         let right = bar(from: CGPoint(x: 90, y: 0), to: CGPoint(x: 90, y: 50), count: 8)

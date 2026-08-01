@@ -527,8 +527,14 @@ extension CanvasManager {
                 lattices.append(rest)
                 continue
             }
+            // The target cloud is capped here rather than inside `fit`, which only ever sees the
+            // index and not the points that went into it. Same reasoning and same ceiling as
+            // `ARAPRegistration.Options.maxRegistrationSamples`: past a couple of hundred samples
+            // the extra points buy no accuracy and cost a nearest query each, per iteration.
+            let cloud = ARAPRegistration.subsampled(
+                frame.cloud, to: ARAPRegistration.Options().maxRegistrationSamples)
             let fit = ARAPRegistration.fit(lattice: rest, source: first.cloud,
-                                           target: PointCloudIndex(frame.cloud),
+                                           target: PointCloudIndex(cloud),
                                            correspondence: first.correspondence(to: frame))
             lattices.append(fit.lattice)
         }
