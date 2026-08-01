@@ -429,7 +429,7 @@ Phase 5 hangs group controls off this bar, so start from it rather than re-deriv
 
 ---
 
-## Phase 4.7 — Engine correctness: what the deformation actually does — ***next, ahead of Phase 5***
+## Phase 4.7 — Engine correctness: what the deformation actually does — ***DONE (Session 12)***
 
 **Why this comes before Phase 5.** Motion groups are a *refinement* of the correspondence the engine
 produces: they let the artist say "these strokes move together" when the automatic answer is wrong.
@@ -491,11 +491,25 @@ line-shaped cloud; walking only the ring's own cells gives bit-identical output 
 at 1000 samples). This is registration, not scrubbing — §8 item 14's `ScrubSession` is still the
 separate fix for item 24's 10 fps and is untouched.
 
-**What remains is blocked on a product decision.** The four drawings cannot be fixed without
-arc-length correspondence, which is on this document's own "Explicitly deferred" list. `HANDOFF.md`
-§8 items 31–35 are the ordered fix list; 31 (un-defer `.clean` for the 1:1 case) and 32 (the two
-registration defaults, which trade away large-rotation registration) are the product owner's calls
-per `HANDOFF.md` §3.5.
+### Status after Session 12 — the fixes applied, and the phase closed
+
+Both product decisions were made on 2026-08-01 and built. **The `.clean` correspondence path is
+un-deferred for the 1:1 case only** (`HANDOFF.md` §8 item 31), which changes this document's
+"Explicitly deferred" list: `N:M` correspondence stays deferred, and a keyframe pair whose stroke
+counts differ — or that holds a fill or a placed image — falls back to the point-cloud path exactly
+as before. **`icpRestarts: 1` and `allowScale: false` are the defaults** (item 32), together and
+only together.
+
+| case | before | after |
+|---|---|---|
+| 1 — line spins instead of bending | bend 0.16, coverage 0.31 | bend **0.907**, coverage **0.96** |
+| 2 — ~1 minute registration | 1000 samples = 94 s | **77 ms**, and *flat* in the sample count |
+| 3 — warp degrades to grow-and-fade | bend 0.17, arc length ×3 | bend **0.985** of the C's 1.072 |
+| 4 — two strokes will not merge | span 51 of 200 | span **194.6** of 200 |
+
+Case 4's *merge* is still not solved, and 4.7 was never going to solve it: it is the N:M case, whose
+answer in both papers is a UI rather than an algorithm (`HANDOFF.md` §8 item 33) — which is Phase 5.
+What changed is that it is now watchable instead of a collapsing smudge.
 
 **Definition of done.** All four product-owner cases produce motion an animator would accept, each
 pinned by a test that fails on today's engine. Registration on a few strokes is well under a second;
@@ -506,8 +520,20 @@ documented exception — item 28's pin is a benchmark, for the reason above. And
 180° flip's outcome in any test**: it varies by build, because the two solutions tie. Assert the
 margin between them.
 
-**Estimate.** Two to three sessions — one of which is mostly reading. *One spent; the reading and
-measurement are done and need not be repeated.*
+**Met after Session 12, with one part explicitly carried forward.** All three `XCTExpectFailure`
+wrappers are off and their tests pass on Session 10's own thresholds — none was loosened.
+Registration is 77 ms on iPad-sized strokes, well under the bar. **The scrubbing clause is not met
+and is not this phase's**: `HANDOFF.md` §8 item 24's ~10 fps is a per-tick evaluation cost, a
+different code path from registration, and item 14's `ScrubSession` remains the designed fix. It is
+recorded rather than quietly counted as done.
+
+One amendment to the amendment, learned by applying it: **`testCase27`'s "assert the margin" is
+right in spirit but was unsatisfiable as literally written**, because the margin between the two
+tied fits is not merely small but provably zero. The rule that survives is the one behind it — never
+assert something a tie can flip — and the test now asserts a property both branches share, checked
+with keyframe C recorded in both directions. See `HANDOFF.md` §5.
+
+**Estimate.** Two to three sessions — one of which is mostly reading. *Two spent.*
 
 ---
 

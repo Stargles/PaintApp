@@ -44,11 +44,11 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 4.7 — diagnosis half done; no engine file has changed.** Every one of §8 items 27–30 is now a measured root cause with a tested fix, and three tempting fixes were *refuted* by experiment (§5). What remains is applying them, which is **blocked on one product decision** — see below. |
-| **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`** (Session 10 pushed the seven unpushed commits). Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | `46e75c1` — the diagnostics tests and the benchmark harness. Fast tier green with the new class in it. The last *full*-suite run is Session 9's 4.6 boundary: 512 tests, 511 passed, 0 failed, 1 skipped. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. |
+| **Current phase** | **Phase 4.7 — done. Its definition of done is met: all three `XCTExpectFailure` wrappers are off and the tests pass on their own.** §8 items 31, 32 and 35 are applied; items 27, 28, 29 and 30 are all fixed and pinned by tests that describe the motion. **Phase 5 is next** and is a separate session. |
+| **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`**. Rebased onto `origin/main` as of Session 8. |
+| **Last known-green commit** | `ea85793` — the registration cloud cap. Wider pure-logic tier green. The last *full*-suite run is Session 9's 4.6 boundary: 512 tests, 511 passed, 0 failed, 1 skipped. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. |
 | **Tree state** | Clean. |
-| **Blocked on** | **§8 item 31 — a product decision.** The four drawings cannot be fixed without the `.clean` correspondence path, which `IMPLEMENTATION.md` explicitly defers. Un-deferring it for the 1:1 case is the product owner's call (§3.5). Item 32 (the two registration defaults) is a second, smaller call. Everything else in 4.7 is unblocked. |
+| **Blocked on** | Nothing. The two product decisions 4.7 was waiting on (§8 items 31 and 32) were made on 2026-08-01 and are built. §8 item 36's *timing* question is answered below and in item 36 — it is a later pass, with one constraint on Phase 5. |
 
 **Papers: supplied and read — do not re-request.** [MoStyle/frite](https://github.com/MoStyle/frite)
 and [Inria RR-9559](https://inria.hal.science/hal-04797216/file/RR-9559.pdf). **§5.11 is the
@@ -184,22 +184,34 @@ reset *before* the phase-boundary run, not after it starts failing.
   - **Generate is disabled on an already-interpolated cel** (`.alreadyInterpolated`). Reproject does
     not inherit it.
 
+- **Phase 4.7 — engine correctness. All four failing drawings fixed.** Four commits: `b9100af`,
+  `8a46b77`, `8733589`, `ea85793`. The engine changes are `ARAPRegistration.swift` and three lines
+  of `MotionGrouping.swift`; the app change is `CanvasManager+Interpolation.swift`'s registration
+  entry point. Nothing in the evaluator, the recipe, the UI or persistence was touched.
+  - **`PointCloudIndex.nearest` walks the ring, not the (2·ring+1)² block** (item 28). Residuals
+    bit-identical over 18,500 queries on seven cloud shapes; 250 samples 12 s → 412 ms.
+  - **`icpRestarts: 1` and `allowScale: false`, together** (item 32). The multi-start was what
+    *created* the 180° flip; the free scale was what bought a good residual by collapsing. Case 30's
+    span at *t* = 1 went from 51 to 194.6 of the target's 200.
+  - **Tier 0: the 1:1 arc-length correspondence** (item 31), which is what makes a line bend into a
+    C: case 29's bend 0.17 → 0.985 against the C's own 1.072, ink coverage 0.31 → 0.96. `N:M` stays
+    deferred and falls back to the point-cloud path.
+  - **The registration cloud is capped at 250 samples** (item 35). Cost is now *flat* in the sample
+    count: 2000 samples went 285 s → 78 ms, at coverage 1.00.
+  - Tests: `InterpolationEngineDiagnosticsLogicTests` lost all three expected-failure wrappers and
+    gained two characterisations; `ARAPLogicTests` gained seven. Wider pure-logic tier green.
+
 ### What is next
 
-**Phase 4.7 — engine correctness** (`IMPLEMENTATION.md`), *before* Phase 5. The product owner's four
-iPad test drawings all fail in ways no amount of motion grouping fixes: a line rotates 180° instead
-of bending, a warp degrades to a scale-and-fade, two strokes will not merge into one, and
-registration takes a minute on two strokes. **§8 items 27–30 are the four cases, with what was
-expected and what happened.** Motion groups are a refinement of a correspondence that is wrong in the
-base case; building them first makes them a workaround rather than a control, and writes every Phase
-5 acceptance test against output that already looks wrong.
+**Phase 5** — motion groups: tagging, auto-grouping, visualisation. **Read §5.10 before starting
+it** — what Phase 4 decided that Phase 5 inherits, as amended by 4.5 and 4.6 — and **§8 item 36's
+timing note**, which puts exactly one constraint on Phase 5's design (keep a group's membership
+"which ink is in this group", not "which stroke pairs with which").
 
-The product owner will supply the papers' PDFs and any public code on request — ask. If those methods
-hit the same limits, say so and brainstorm rather than reimplementing a known-limited method
-faithfully.
-
-**Then Phase 5** — motion groups: tagging, auto-grouping, visualisation. **Read §5.10 before starting
-it** — what Phase 4 decided that Phase 5 inherits, as amended by 4.5 and 4.6.
+Two things 4.7 leaves on the table deliberately, both recorded rather than built: §8 item 24's
+~10 fps scrub, which is a *separate* problem from registration cost and is still unfixed (§8 item 14's
+`ScrubSession` is the shape of the fix), and §8 item 34's temporal visibility thresholds, which are
+the honest answer to unmatched content and now have a way to know which content is unmatched.
 
 ### History note
 
@@ -775,6 +787,73 @@ each would have been shipped as "the fix" if the reading had not been tested.
   the registration cloud costs nothing and would take the remaining 1.5s to ~200ms. The lattice is
   ~56 vertices whatever the sample count — it is the point cloud that grows, not the solve.
 
+### From Phase 4.7 (the fixes) — what applying them taught that the diagnosis had not
+
+Session 12 applied items 31, 32 and 35. The diagnosis held up: every number Session 10 measured
+reproduced, and the fixes did what it said they would. These are the things that only appeared once
+the code was written.
+
+- **A margin expressed relative to the score being beaten is a bug when both scores can be zero, and
+  this cost the most time of anything in the session.** The direction bit started as "believe the
+  reversal if it beats forward by 5%". Two *straight* strokes fit each other exactly in **both**
+  directions, so both scores are ~1e-16 and the rule compares nothing but rounding noise. The
+  symptom was not subtle and was nearly missed anyway: on a rigid L the direction bit flipped with
+  the **sample count** — 8 → `Rf`, 16 → `fR`, 24 → `ff`, 32 → `Rf` — turning a motion the engine
+  reproduces exactly into a 46-point error, non-monotonically, which reads exactly like tuning noise
+  and is not. The fix is to make the margin **a fraction of the stroke's own arc length**, i.e. a
+  geometric statement. Measured gap/length: 1e-16 for a straight stroke, 0.0073 for one whose last
+  2% hooks away — thirteen orders of magnitude, with nothing in between, so the threshold is not a
+  tuned number. `testTheFitDoesNotSwingOnHowManySamplesTheCorrespondenceUses` is the tripwire.
+
+  The general lesson, worth carrying past this feature: **any comparison of the form `a < b × (1 − ε)`
+  needs to know what happens when both sides are zero.** Normalise by something with units.
+
+- **The correspondence has to *replace* the point-cloud data rows, not join them.** Measured on a bar
+  bending into a parabola — a case the plain path already got right — mean residual is 0.62 with the
+  cloud alone, **0.87 with cloud *and* correspondence**, and 0.00 with the correspondence alone.
+  Adding good information to good information made it worse, because the nearest-point pulls are
+  exactly the thing that will not wrap a stroke around a curve. This confirms Session 10's
+  "correspondence *is* the data" the hard way, and it is why `RegistrationFrame.strokes` is nil for
+  a frame holding anything that is not a stroke: with the cloud rows dropped, a fill would be left
+  with nothing pulling it at all.
+
+- **Two tests in the same class were direct logical contradictions, and the acceptance one was the
+  wrong one.** `testCase27` asked the objective to prefer the upright fit "by a margin arithmetic
+  noise cannot flip", while `testA180DegreeFitScoresIdenticallyToTheUprightOneOnALine` asserted the
+  two are equal to 1e-6. The second is not a measurement but a **proof** — a straight segment maps
+  onto itself under a half turn, so `F` and `F ∘ turn` send the source onto the identical point set;
+  it holds with the scale free or locked, at any restart count, for any objective that sees only the
+  two clouds. So the margin can never be anything but zero and `testCase27` was unsatisfiable as
+  written. It now asserts what *survives* a tie — the line bends into the C — checked on the drawing
+  as made **and** with keyframe C's stroke recorded the other way round, which is the input that
+  flips the choice. Both branches clear the same bar, so no build can flip it.
+
+  Worth generalising: when a pinned root cause and an acceptance criterion disagree, check whether
+  the acceptance criterion is *achievable* before assuming the engine is at fault.
+
+- **Registration's defaults are not grouping's defaults, and inheriting them silently broke two
+  Phase 1 tests.** `MotionGrouping.Options.icpRestarts` read `ARAPRegistration.Options()`'s, so
+  dropping the multi-start took it away from grouping too — and grouping is the one place it is
+  doing real work, because it fits a *part* seeded where it already sits and exists to discover that
+  something turned. It is now `8` with its own reasoning written next to it. **4.7 measured
+  registration, not grouping; Phase 5 owns that dial.**
+
+- **The coverage metric §8 items 32, 36 and 37 all want now exists twice, in test-local form.** It is
+  in `InterpolationEngineDiagnosticsLogicTests.inkCoverage` and in the benchmark. Both measure
+  distance from each target point to the warped **polyline's segments**, not to its samples — a
+  stroke stretched five times over carries its samples 35 points apart, and sample-based coverage
+  scores continuous ink as a dotted line. Whoever builds the shipping version should start from
+  those two rather than from the definition; the segment detail is the part that is easy to get
+  wrong and it makes a factor-of-three difference to the number.
+
+- **The standalone harness paid for itself again, and the ratio got better.** Every number in the
+  four commits was measured with `swiftc -O` in a scratch copy before any repo file changed — the
+  flag matrix on the L test, the direction-margin sweep, the sample-count instability, the
+  cloud-rows-versus-correspondence comparison. The sample-count bug in particular would have been
+  impractical to find through `xcodebuild test`: it took eight fits per configuration across nine
+  configurations, which is ~15 seconds optimised and would have been most of an hour in the test
+  tier. Copy `Engine/Deform`'s five files to a scratch directory; do not experiment in the repo.
+
 ### 5.11 What the papers do — and where they do not help
 
 Read this before proposing an engine change; it is the answer to "what do the papers do at exactly
@@ -980,6 +1059,29 @@ What Phase 3 decided that Phase 4 inherits:
   (§3.5). The product owner's mid-session correction — *don't split diagnosis and implementation
   across sessions, you can't test your hypotheses* — is why the refutations exist and is the reason
   this entry is worth reading twice.
+
+- **Session 12 (Phase 4.7, second half — the fixes) — 2026-08-01:** Applied §8 items 31, 32 and 35
+  and finished Phase 4.7. **All four of the product owner's failing drawings are fixed and the
+  definition of done is met — the three `XCTExpectFailure` wrappers are off and the tests pass on
+  their own**, on Session 10's own thresholds rather than loosened ones. Four commits, one per fix,
+  each green before the next: `b9100af` (the ring walk — 250 samples 12 s → 412 ms, residuals
+  bit-identical over 18,500 queries), `8a46b77` (`icpRestarts: 1` + `allowScale: false` — case 30's
+  span 51 → 194.6 of 200), `8733589` (tier 0, the 1:1 arc-length correspondence — case 29's bend
+  0.17 → 0.985 against the C's 1.072, case 27's 0.16 → 0.907, coverage 0.31 → 0.96), `ea85793` (the
+  250-sample cap — cost now *flat* in the sample count, 2000 samples 285 s → 78 ms).
+  Session 10's diagnosis reproduced exactly; three things it could not have known appeared only once
+  the code existed, and all three are in §5: the correspondence has to **replace** the point-cloud
+  data rows (keeping both is worse than either), the direction bit must be scored with each
+  direction **self-aligned**, and its margin must be a fraction of the stroke's **arc length** — the
+  relative version compared pure rounding noise on straight strokes and made the fit swing with the
+  sample count. Two tests turned out to be direct logical contradictions and the *acceptance* one
+  was the wrong one: `testCase27` asked for a margin between two provably identical scores, and now
+  asserts what survives the tie, checked with keyframe C recorded both ways round. `MotionGrouping`
+  was silently inheriting registration's restart count and is now pinned at 8 with its reasoning, on
+  the principle that 4.7 measured registration and Phase 5 owns grouping. Answered the product
+  owner's timing question on §8 item 36 (ink-to-ink matching): **a later pass, with one constraint
+  on Phase 5** — keep group membership "which ink", not "which stroke pairs with which". No
+  subagents. Stopped at the definition of done per §3.3; Phase 5 is a separate session.
 
 ---
 
@@ -1279,17 +1381,36 @@ any public repositories on request, so the phase can read the actual math and co
 it. **If the papers' own methods hit the same limits, say so plainly and brainstorm new approaches
 rather than reimplementing a known-limited method faithfully.**
 
-**Session 10 answered all four.** The diagnosis is §5's "From Phase 4.7" and the paper comparison is
-§5.11. Nothing in items 27–30 remains a hypothesis; each is now a measured cause with a tested (or
-refuted) fix. Items 31–34 below are what came out of it.
+**Session 10 answered all four; Session 12 fixed all four. DONE.** The diagnosis is §5's "From
+Phase 4.7" and the paper comparison is §5.11. Where each ended up:
+
+| | before | after | fixed by |
+|---|---|---|---|
+| **27** line spins instead of bending | bend 0.16, coverage 0.31 | bend **0.907**, coverage **0.96** | items 31 + 32 |
+| **28** ~1 min registration | 1000 samples = 94 s | **77 ms**, and flat in the sample count | items 28-fix + 35 |
+| **29** warp degrades to grow-and-fade | bend 0.17, arc length ×3 | bend **0.985** of the C's 1.072, length 853 of 907 | item 31 |
+| **30** two strokes will not merge | span 51 of 200 | span **194.6** of 200 | item 32 |
+
+Item 30's *merge* is still not solved and was never going to be by 4.7 — it is the N:M case (item
+33), and what changed is that it is now watchable rather than a collapsing smudge. Item 34 is the
+honest completion of it.
 
 ### From Phase 4.7 — the ordered fix list
 
-These are written as suggestions per §3.3, but unlike the rest of §8 they are the *content* of the
-next session rather than optional extras. Ordered by confidence and independence: 31 is free, 32 is
-a product decision, 33 is the real work.
+These were written as suggestions per §3.3, but unlike the rest of §8 they were the *content* of
+Session 12 rather than optional extras. **31, 32 and 35 are DONE** (commits `b9100af`, `8a46b77`,
+`8733589`, `ea85793`); 33, 34, 36 and 37 remain open and are ordered notes for later.
 
-31. **Un-defer the `.clean` correspondence path for the 1:1 case. DECIDED 2026-08-01: yes, 1:1 only.**
+31. **DONE (Session 12).** Un-defer the `.clean` correspondence path for the 1:1 case. **DECIDED 2026-08-01: yes, 1:1 only.**
+    Built as `ARAPRegistration.StrokeCorrespondence` — a "tier 0" ahead of the two existing tiers,
+    which is a shortcut rather than an escalation: where it applies there is nothing to search for.
+    Delivered case 29's bend at **0.985** against the C's own 1.072 (Session 10 predicted 0.944) and
+    ink coverage 0.96. Three things the plan did not anticipate, all in §5: the correspondence must
+    **replace** the point-cloud data rows rather than join them; the direction bit must be scored
+    with each direction **self-aligned**, not under a shared global alignment; and its margin must be
+    a fraction of the stroke's **arc length**, not of the forward score. `N:M` falls back to the
+    point-cloud path via `RegistrationFrame.correspondence(to:)`, which also refuses any frame
+    holding a fill or a placed image.
     The product owner un-deferred it for equal-stroke-count pairings and kept N:M deferred, with the
     explicit note that handling messy and sketchy lineart *is* a real future goal — see item 36 for
     the approach they want brainstormed for it.
@@ -1303,8 +1424,15 @@ a product decision, 33 is the real work.
     the whole stroke. The **N:M** case is the hard part and stays deferred (item 33). Per §3.5 this
     is the product owner's call, not the next session's.
 
-32. **Change the two registration defaults, together, and only together: `icpRestarts: 1` and
-    `allowScale: false`. DECIDED 2026-08-01: change both.** The coverage-gated escalation described
+32. **DONE (Session 12).** Change the two registration defaults, together, and only together: `icpRestarts: 1` and
+    `allowScale: false`. **DECIDED 2026-08-01: change both.** The bill came in as forecast and is
+    recorded on `testICPWithoutACorrespondenceRecoversARigidMotionOnlyApproximately`: without a
+    correspondence a rigid motion now lands 3.47 off on an L 55 across, where the multi-start landed
+    it exactly. The measured matrix in that test's comment also shows eight restarts missed 20° and
+    120° *anyway*, so "exact" was a property of which seeds happened to be tried and never of the
+    method — and with a correspondence the same motion comes back to within 0.08. One thing the
+    decision did not cover: `MotionGrouping` was inheriting `icpRestarts` and is now pinned at 8
+    with its own reasoning (§5), because grouping is where the multi-start earns its keep. The coverage-gated escalation described
     at the end of this item is *not* being built now — the product owner asked for it to be recorded
     as a future improvement, and it is item 37. Measured: no case flips, and case 30's collapse goes from a y-span of 36.5
     to 198.5 against the target's 200. Both are needed — either alone is a different wrong answer
@@ -1382,7 +1510,48 @@ a product decision, 33 is the real work.
     §2.1). Note also that it is a per-*group* objective, so it composes with Phase 5 rather than
     competing with it.
 
-35. **Subsample the registration point cloud.** The residual stops improving past ~250 samples and
-    gets slightly *worse* at 1000 (§5). Combined with the `PointCloudIndex` fix this takes a
-    1000-sample registration from 94s to roughly 200ms. Independent of everything above and the
-    cheapest remaining win after the index fix itself.
+    **When to build it — the product owner's question, answered 2026-08-01 (Session 12).**
+
+    **Recommendation: a later pass, after the phases. It does not need to come before Phase 5, and
+    there is exactly one thing Phase 5 must avoid so that stays true.** The evidence is that
+    Session 12 just did the structurally identical thing — added a whole new correspondence tier
+    ahead of the existing two — and it touched one file plus a call site.
+
+    Why it is modular enough:
+
+    - **Registration already has the seam, and it was exercised this session.** Tier 0 went in
+      without tiers 1 or 2 changing at all. The seam is `ARAPRegistration.fit`'s data-row
+      construction: something decides what pulls where, and the alternatives to date are "nearest
+      point in the cloud" and "the 1:1 correspondence". Ink overlap would be a third answer to the
+      same question, in the same place.
+    - **The output contract is one type and item 36 does not change it.** Everything downstream —
+      the evaluator, the preview, the recipe, persistence, undo — consumes `MotionGroupBinding`'s
+      fitted `Lattice` per keyframe and knows nothing about how it was obtained. That is what makes
+      this swappable rather than load-bearing: modules stack on the *result* of registration, not
+      on its method.
+    - **Phase 5 supplies item 36 its input rather than blocking it.** It is a per-group objective;
+      groups are what Phase 5 builds. Doing it first would mean building it against the single
+      whole-frame group, which is the case it is least suited to.
+
+    The one constraint, and it is a *product* constraint rather than a code one: **keep a motion
+    group's membership "which ink is in this group", not "which stroke pairs with which".** Phase 5's
+    grouping UI is also the correspondence UI (item 33), so it is the natural place to let an artist
+    state stroke-to-stroke matching — and item 36's whole premise is that *there are no stroke
+    identities in the objective*. If pairwise stroke identity gets written into the document model
+    and its undo, item 36 stops being a new tier and becomes a migration. Group-of-ink membership
+    keeps both readings open.
+
+    Two things worth pulling forward regardless, because they are small and shared:
+
+    - **The coverage metric.** Items 32, 36 and 37 all want it and it exists twice already in
+      test-local form (§5). Promoting it is a few lines and it is the dependency all three share.
+    - **Sýkora et al., *"As-rigid-as-possible image registration for hand-drawn cartoon animation"*
+      — get the paper before that session**, per the note above. It is the prior art and frite
+      already leans on it.
+
+35. **DONE (Session 12).** Subsample the registration point cloud. `Options.maxRegistrationSamples`
+    is 250 and caps what *drives* the fit; residuals are still reported for every source point,
+    because motion grouping reads them per point. The target cloud is capped by
+    `registerWholeFrameGroup`, which is the caller that owns the index. Registration cost is now
+    **flat** in the sample count — 2000 samples went 285 s → 78 ms at coverage 1.00 — because the
+    lattice was never what grew.
