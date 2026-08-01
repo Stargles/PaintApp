@@ -31,9 +31,7 @@ struct InterpolatePanel: View {
             }
         }
         .padding(14)
-        .frame(width: 260)
-        .background(Color.black.opacity(0.9))
-        .cornerRadius(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Sections

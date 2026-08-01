@@ -290,4 +290,127 @@ final class TimelineAndUndoUITests: PaintUITestCase {
                        "One undo should fully restore the cel's original length in a single step, not just partially reverse one frame of the drag")
     }
 
+    /// The one XCUITest for interpolation's gesture path — deliberately one, not a suite.
+    ///
+    /// XCUITests are 99.3% of this suite's runtime (REFACTOR_BASELINE.md), so everything about
+    /// interpolation that can be asserted without a simulator gesture is in
+    /// `InterpolationWorkflowLogicTests` instead. What is left here is exactly what a logic test
+    /// cannot reach: that the *gestures* are wired up — that press-and-hold on a timeline block
+    /// means "set as reference" once the mode is on, that Generate is reachable from the panel, and
+    /// that dragging the slider changes what is on the canvas.
+    ///
+    /// Structure: two keyframes on one vector layer, and the in-between generated on a *second*
+    /// vector layer whose single cel spans the scene. That avoids splitting one layer into three
+    /// blocks — the target only has to not be a reference, and it may live on any layer.
+    func testInterpolateModeEndToEndFromGestureToScrub() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "reached editor")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), "canvas.host exists")
+
+        // Keyframe A: an L on the left of a new vector layer. An L rather than a straight line
+        // because parallel strokes pin neither orientation nor position for the registration's ICP
+        // (VECTOR_INTERPOLATION_HANDOFF.md §5) — a corner gives the fit something to hold onto.
+        addVectorLayer(app)
+        drawLine(on: canvas, from: CGVector(dx: 0.22, dy: 0.42), to: CGVector(dx: 0.34, dy: 0.42))
+        drawLine(on: canvas, from: CGVector(dx: 0.34, dy: 0.42), to: CGVector(dx: 0.34, dy: 0.56))
+
+        // Split the layer so there is a second block to be the other keyframe.
+        performDrag(app, identifier: "timeline.cel.1.0.rightHandle", totalDelta: -260)
+        let firstBlock = app.otherElements["timeline.cel.1.0"]
+        let shrunk = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0),
+                                   "Could not read the vector layer's block after shrinking it")
+        XCTAssertLessThan(shrunk.length, 12, "Setup: the drag has to leave a gap to add a block into")
+
+        // Tap two frames past the block's own right edge — an offset beyond the element's bounds,
+        // which is the only handle a test has on an empty timeline slot.
+        firstBlock.coordinate(withNormalizedOffset:
+            CGVector(dx: (Double(shrunk.length) + 2.0) / Double(shrunk.length), dy: 0.5)).tap()
+        let addDrawing = app.buttons["Add Drawing"]
+        XCTAssertTrue(addDrawing.waitForExistence(timeout: 5), "Tapping an empty slot opens its menu")
+        addDrawing.tap()
+
+        // Keyframe C: the same L, moved right.
+        drawLine(on: canvas, from: CGVector(dx: 0.62, dy: 0.42), to: CGVector(dx: 0.74, dy: 0.42))
+        drawLine(on: canvas, from: CGVector(dx: 0.74, dy: 0.42), to: CGVector(dx: 0.74, dy: 0.56))
+
+        // The cel the in-between lands on: a second vector layer, spanning the whole scene.
+        addVectorLayer(app)
+
+        let interpolateButton = app.buttons["toolbar.interpolateButton"]
+        XCTAssertTrue(interpolateButton.waitForExistence(timeout: 5), "toolbar.interpolateButton exists")
+        interpolateButton.tap()
+        let modeToggle = app.switches["interpolate.modeToggle"]
+        XCTAssertTrue(modeToggle.waitForExistence(timeout: 5), "interpolate.modeToggle exists")
+        // The switch sits at the toggle row's trailing edge; a centre tap lands in the dead gap
+        // between the label and the control and does nothing.
+        modeToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertEqual(modeToggle.value as? String, "1", "The mode toggle should read on after one tap")
+        interpolateButton.tap() // close the panel; the mode stays on
+
+        // The gesture under test. Outside interpolate mode this same press-and-hold picks the block
+        // up to drag it along the timeline.
+        XCTAssertFalse(readCelIsReference(app, layerIndex: 1, celIndex: 0),
+                       "Setup: nothing is a reference yet")
+        app.otherElements["timeline.cel.1.0"].press(forDuration: 0.9)
+        app.otherElements["timeline.cel.1.1"].press(forDuration: 0.9)
+        XCTAssertTrue(readCelIsReference(app, layerIndex: 1, celIndex: 0),
+                      "Press-and-hold in interpolate mode should flag the block as a reference")
+        XCTAssertTrue(readCelIsReference(app, layerIndex: 1, celIndex: 1), "second block flagged as reference")
+
+        // Make the second vector layer's block the target — a plain tap still means "go here",
+        // which is the other half of the gesture split.
+        app.otherElements["timeline.cel.2.0"].tap()
+
+        // Interpolate mode's onion skin draws *both* references, so leaving it on would put ink at
+        // each keyframe's position and make a pixel probe unable to tell the in-between from the
+        // skin. The skin has its own logic test; this one is about the in-between.
+        let onionSkin = app.buttons["timeline.onionSkinToggle"]
+        XCTAssertTrue(onionSkin.waitForExistence(timeout: 5), "timeline.onionSkinToggle exists")
+        onionSkin.tap()
+
+        let probe = (dx: 0.48, dy: 0.42)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)),
+                      "Setup: the middle of the canvas is blank before the in-between exists")
+
+        interpolateButton.tap()
+        let generate = app.buttons["interpolate.generate"]
+        XCTAssertTrue(generate.waitForExistence(timeout: 5), "interpolate.generate exists")
+        XCTAssertTrue(generate.isEnabled, "Two references and an empty target cel — Generate should be live")
+        generate.tap()
+        interpolateButton.tap()
+
+        // Built only on failure — it costs ~20 element screenshots, and "no ink at one point" is
+        // almost impossible to diagnose from a bare assertion. Where the ink actually landed, and what
+        // the timeline looked like when it did, is the whole diagnosis: ink at the keyframes but not
+        // between them means the warp is identity, and a block reading `nil` means the setup drifted.
+        func inkReport() -> String {
+            let sweep = stride(from: 0.14, through: 0.86, by: 0.04).map { x in
+                String(format: "%.2f:%@", x, isWhitish(rgbaPixel(of: canvas, dx: x, dy: probe.dy)) ? "." : "#")
+            }.joined(separator: " ")
+            let blocks = [(1, 0), (1, 1), (2, 0)].map { l, c -> String in
+                let cel = readCel(app, layerIndex: l, celIndex: c)
+                let ref = readCelIsReference(app, layerIndex: l, celIndex: c) ? "*" : ""
+                return "\(l).\(c)=\(cel.map { "\($0.start)+\($0.length)" } ?? "nil")\(ref)"
+            }.joined(separator: " ")
+            return "sweep at dy=\(probe.dy): \(sweep) | blocks \(blocks) "
+                + "| frame \(readFrameLabel(app).map { "\($0.current)/\($0.total)" } ?? "?")"
+        }
+
+        if isWhitish(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)) {
+            XCTFail("At t = 0.5 the in-between should have ink about halfway between the keyframes. \(inkReport())")
+        }
+
+        // Scrub to t = 0, where the frame *is* keyframe A — so the midpoint goes back to blank.
+        interpolateButton.tap()
+        let slider = app.sliders["interpolate.tSlider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "interpolate.tSlider exists")
+        slider.adjust(toNormalizedSliderPosition: 0)
+        interpolateButton.tap()
+
+        if !isWhitish(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)) {
+            XCTFail("Dragging the slider to 0 should move the drawing back onto keyframe A. \(inkReport())")
+        }
+    }
+
 }

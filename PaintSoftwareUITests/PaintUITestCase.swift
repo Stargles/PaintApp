@@ -41,13 +41,25 @@ class PaintUITestCase: XCTestCase {
         return (current, total)
     }
 
-    /// Parses a cel block's accessibilityValue, formatted as "startFrame,frameCount".
+    /// Parses a cel block's accessibilityValue, formatted as "startFrame,frameCount" with an
+    /// optional trailing ",ref" while the block is an interpolation reference.
+    ///
+    /// The suffix is tolerated rather than required: every timeline test predates it and reads a
+    /// two-part value, and interpolate mode is the only thing that ever adds a third.
     func readCel(_ app: XCUIApplication, layerIndex: Int, celIndex: Int) -> (start: Int, length: Int)? {
         let cel = app.otherElements["timeline.cel.\(layerIndex).\(celIndex)"]
         guard cel.waitForExistence(timeout: 5), let value = cel.value as? String else { return nil }
         let parts = value.split(separator: ",")
-        guard parts.count == 2, let start = Int(parts[0]), let length = Int(parts[1]) else { return nil }
+        guard parts.count >= 2, let start = Int(parts[0]), let length = Int(parts[1]) else { return nil }
         return (start, length)
+    }
+
+    /// Whether a cel block is currently flagged as an interpolation reference — the yellow
+    /// highlight, which is not otherwise reachable from XCUITest.
+    func readCelIsReference(_ app: XCUIApplication, layerIndex: Int, celIndex: Int) -> Bool {
+        let cel = app.otherElements["timeline.cel.\(layerIndex).\(celIndex)"]
+        guard cel.waitForExistence(timeout: 5), let value = cel.value as? String else { return false }
+        return value.hasSuffix(",ref")
     }
 
     /// Reads a layer panel row's accessibilityValue, which is the stroke count of that

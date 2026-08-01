@@ -338,6 +338,7 @@ struct AnimationTimeline: View {
                   : "square.stack.3d.forward.dottedline")
         }
         .foregroundColor(canvasManager.isOnionSkinEnabled ? .blue : .white)
+        .accessibilityIdentifier("timeline.onionSkinToggle")
     }
 
     private var loopButton: some View {

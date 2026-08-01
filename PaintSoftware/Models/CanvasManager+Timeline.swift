@@ -50,7 +50,15 @@ extension CanvasManager {
         guard activeCelIndex(inLayer: layerIndex, atFrame: startFrame) == nil else { return false }
         guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: startFrame, maxLength: frameCount) else { return false }
         withStructureUndo(name: "Add Frame") {
-            let cel = Cel(id: UUID(), startFrame: startFrame, frameCount: length, raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
+            let size = canvasSize ?? CGSize(width: 1, height: 1)
+            // A new cel on a `.vector` layer needs its own `VectorCanvas`, exactly as the one
+            // `addVectorLayer` creates does. Without it the cel has nowhere to put vector content, so
+            // `StrokeCanvasView` silently falls back to raster mode and the drawing lands as pixels on
+            // a vector layer — invisible to the eraser's geometric modes, to save/load's vector
+            // payload, and to interpolation, which reads `cel.vector` and finds nothing.
+            let cel = Cel(id: UUID(), startFrame: startFrame, frameCount: length,
+                          raster: .empty(size: size),
+                          vector: layers[layerIndex].kind == .vector ? .empty(size: size) : nil)
             layers[layerIndex].cels.append(cel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             sceneFrameCount = max(sceneFrameCount, startFrame + length)
