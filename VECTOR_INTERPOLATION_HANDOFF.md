@@ -737,7 +737,7 @@ What Phase 3 decided that Phase 4 inherits:
   documenting it a third time. Rebased onto `origin/main` to pick up Session 9's timeline rework
   (32 commits replayed; conflicts were the regenerated graph report, one `CanvasManager+Undo`
   restore where both sides were wanted, and `AnimationTimeline`'s toolbar refactor). Recorded the
-  product owner's four future items and the vector/raster divorce question as §8 items 21–25 rather
+  product owner's four future items and the vector/raster divorce question as §8 items 21–26 rather
   than acting on any of them. No subagents.
 
 ---
@@ -975,9 +975,22 @@ this session's scope, and are recorded here in their order of raising.
     re-runs the ARAP factorisation, both of which are constant across a drag. Start there, and
     profile before assuming it is the whole story at four strokes.
 
+25. **Editing at a transient in-between — confirmed as the intent, and liquify does not fit the
+    mechanism.** The product owner (2026-08-01) wants draw / erase / liquify at an in-between while
+    it is still derived, with the slider still live afterwards. That is `IMPLEMENTATION.md` Phase 6
+    items 2–3 and `PLAN.md` §5.4, and the model has carried `InterpolationRecipe.localEdits` since
+    Phase 2, so nothing about it is new — but two parts of it are not covered by what exists. Erase
+    is free (an eraser *is* a stroke, `VECTOR_ERASER_PLAN.md` §2.1, so it rides `localEdits` like
+    any other). **Liquify does not fit `LocalEdit` at all**: `LocalEdit` carries an element back to
+    keyframe space through the inverse map, and a liquify is a *deformation* — a warp composed with
+    the interpolation's own warp, with no element to carry. Where it is stored (a per-recipe
+    displacement field, a second lattice stacked on the group's) is an open design question and
+    should be answered before Phase 6 starts wiring, not during. See also item 6: `LocalEdit`
+    carrying only a `VectorStroke` already excludes a fill made at an in-between.
+
 ### From Phase 4.5 — noticed while working
 
-25. **A vector cel still carries `fillImage` and `bakedImage`, so raster features allocate
+26. **A vector cel still carries `fillImage` and `bakedImage`, so raster features allocate
     canvas-sized bitmaps on a vector layer.** Select+move, Clear and bucket fill all go through the
     raster path even when the layer is `.vector`, which means a vector layer can quietly acquire
     full-canvas images that the vector pipeline neither reads nor benefits from — memory cost, and a

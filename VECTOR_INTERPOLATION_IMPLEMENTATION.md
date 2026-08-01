@@ -432,6 +432,16 @@ can retag and see the result immediately; group state persists and undoes.
    threshold τ = *t*. Lattice expansion when a stroke falls outside.
 3. Erase at *t*, and lasso transform at *t*.
 
+**Product owner, 2026-08-01:** the artist should be able to draw, erase, **liquify** (a tool not yet
+built) and so on at an in-between while it is still transient, and go on adjusting the slider after
+each. That is this phase, and items 2–3 are most of it — the eraser needs nothing special, because
+an eraser *is* a stroke (`VECTOR_ERASER_PLAN.md` §2.1) and rides the same `localEdits` path. Two
+things it adds. **Liquify is a deformation, not an element**, so it does not fit `LocalEdit`'s
+"carry a stroke back to keyframe space" shape at all — a liquify at *t* is a warp composed with the
+interpolation's own warp, and where it is stored (a per-recipe displacement field? a second lattice?)
+is an open design question, not a wiring job. And every editable-at-*t* tool widens `LocalEdit`
+beyond a stroke, which is §8 item 6.
+
 **Tests.** Draw at *t*=0.5, move the slider, confirm the stroke **follows the motion** rather than
 sitting still — this is the whole point of the inverse map and the test that proves it works.
 
