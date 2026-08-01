@@ -44,11 +44,11 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 4 — done.** The feature is reachable from the app and the workflow runs end to end. Phase 5 (motion groups: tagging, auto-grouping, visualisation) not started. |
-| **Branch** | `claude/vector-interpolation-design-9d5b83` |
-| **Last known-green commit** | `39f4365`. **Full suite green with Phase 4 in: 475 tests, 474 passed, 0 failed, 1 skipped, `xcodebuild` exit 0**, no harness errors. The skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. Wide pure-logic tier: 388 tests, 0 failures. |
+| **Current phase** | **Phase 4.5 — done.** A UI-only pass on Phase 4's layout, from the product owner's first real iPad session. Phase 5 (motion groups: tagging, auto-grouping, visualisation) not started. |
+| **Branch** | `claude/vector-interpolation-design-9d5b83`, **rebased onto `origin/main`** (Session 9's timeline work: infinite scroll, popover menus, the `onionSkinButton`/`transportControls` refactor). No upstream — ask before pushing. |
+| **Last known-green commit** | See §6's Session 8 line. Full suite green at the 4.5 boundary. The one skip is the pre-existing `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`. |
 | **Tree state** | Clean. |
-| **Blocked on** | Nothing. |
+| **Blocked on** | Nothing. §8 items 21–24 are the product owner's own follow-on list and 21/23 are the natural next UI work. |
 
 **The XCUITest flakiness that cost Session 5 hours was the simulator, and erasing it fixed it.**
 Session 6 opened by resetting `interp-ipad` (`simctl shutdown` + `erase`, §5) and then ran the full
@@ -141,13 +141,33 @@ reset *before* the phase-boundary run, not after it starts failing.
   - **Reproject is stubbed** — it refuses with `.reprojectNotImplemented` rather than quietly
     behaving like Generate. Phase 6 item 1 owns it.
 
+- **Phase 4.5 — the UI pass.** Not a planned phase: the product owner used Phase 4 on an iPad and
+  gave layout feedback, and tying the layout down before Phase 5 builds motion-group UI on top of it
+  was worth a session. Scope was UI only — the evaluator, the recipe and the undo mapping are
+  untouched.
+  - New: [InterpolateBar.swift](PaintSoftware/Views/InterpolateBar.swift) — **Set as Reference,
+    Generate, Reproject and the timing bar, pinned directly above the animation timeline**, where
+    the blocks they act on are visible. `InterpolatePanel` keeps only the mode switch and the
+    settings that are set once (thickness fade, Clear References, Remove Interpolation).
+  - **Press-and-hold on a timeline block means drag-reorder again, in every mode.** Phase 4's
+    mode-switched recognizer is gone, along with `Coordinator.toggleReference` — the product owner
+    scrapped it on sight, because it cost re-timing exactly while the artist is working on timing.
+  - The claim that mode entry runs registration is **gone from the code and the plan**. Registration
+    runs when Generate or Reproject is pressed, which is where it always ran; `IMPLEMENTATION.md`
+    Phase 4 item 1 now says so rather than contradicting it.
+  - The e2e XCUITest drives the bar's buttons instead of the block gesture. Still exactly one.
+
 ### What is next
 
 **Phase 5** in `VECTOR_INTERPOLATION_IMPLEMENTATION.md` — motion groups: tagging, auto-grouping,
 visualisation. It is the first phase where more than one motion group exists, which is where
 tagging stops being optional.
 
-**Read §5.10 before starting** — what Phase 4 decided that Phase 5 inherits.
+**Read §5.10 before starting** — what Phase 4 decided that Phase 5 inherits, as amended by 4.5.
+
+Consider §8 items 21 and 23 first, though: they move where the mode is entered and exited, and both
+land on the same interpolate bar Phase 5 wants to hang group controls off. Doing them after Phase 5
+means moving Phase 5's controls too.
 
 ### History note
 
@@ -558,13 +578,6 @@ What Phase 2 decided that Phase 3 inherits:
   the skin off. **Any later pixel assertion in interpolate mode has to do the same** — the mode's
   onion skin draws content at exactly the positions an interpolation test cares about.
 
-- **Registration runs at `interpolate(...)`, not at mode entry**, and `IMPLEMENTATION.md` Phase 4
-  item 1 says otherwise. It is ordering, not disagreement: at mode entry no references have been
-  picked (that is step 2 of the workflow), so there is nothing to register against. If Phase 5's
-  auto-grouping wants a registration earlier — and it might, since "show the grouping it inferred
-  immediately" (PLAN §5.0 step 1) implies one — the moment to run it is still first-reference-pair,
-  not mode entry.
-
 - **A SwiftUI `Toggle`'s centre is not a tap target.** `app.switches["…"].tap()` lands in the dead
   gap between the label and the control and silently does nothing — the toggle reads `"0"`
   afterwards and the failure surfaces several steps later as something unrelated. Tap the trailing
@@ -590,6 +603,25 @@ What Phase 2 decided that Phase 3 inherits:
   **must be added to `InterpolationPreviewKey` too**, or it will appear to have no effect until
   something unrelated forces a re-render.
 
+### From Phase 4.5 (UI pass)
+
+- **An accessibility modifier on a SwiftUI *container* can hide everything inside it.**
+  `.accessibilityIdentifier("interpolate.bar")` on the bar's outer `VStack` promoted it to a single
+  accessibility element, and every button within it vanished from XCUITest — the rewritten e2e test
+  failed on `waitForExistence` for a button that was plainly on screen. Identify the controls, never
+  the container. The same trap is waiting for Phase 5's group chips.
+
+- **The interpolate bar lives *outside* the timeline's height constraint.** `AnimationTimeline`'s
+  body is `VStack { InterpolateBar; timelinePanel }`, and `.frame(height: timelineHeight)` is on
+  `timelinePanel` alone. Putting the bar inside would make turning the mode on silently eat a track
+  row out of a panel the artist had already sized. Anything Phase 5 adds above the timeline belongs
+  in that same outer stack.
+
+- **Every command targets the cel under the playhead on the current layer**, and that is now the
+  whole selection model: Set as Reference, Generate, Reproject and Remove all resolve `targetIndices`
+  the same way. It is duplicated in `InterpolateBar` and `InterpolatePanel` because they are the only
+  two callers; a third one should push it onto `CanvasManager` instead of copying it again.
+
 ### 5.10 For Phase 5's motion groups
 
 What Phase 4 decided that Phase 5 inherits:
@@ -610,11 +642,12 @@ What Phase 4 decided that Phase 5 inherits:
   starts on the same frame into one `InterpolationReference` — that is what makes requirement 5
   (lineart + flats interpolate together) work with no second gesture. Grouping by *overlap* was
   rejected: it folds a long held cel in with every short cel beside it.
-- **The timeline's press-and-hold is mode-switched, not duplicated.** One
-  `UILongPressGestureRecognizer` on `TimelineRowView` means drag-reorder normally and "set as
-  reference" in interpolate mode. If Phase 5 wants another timeline gesture, add it the same way —
-  two long presses of equal duration competing for one touch have no stable winner, and
-  `require(toFail:)` between them does not help.
+- **The timeline's press-and-hold means drag-reorder in every mode, interpolate included.** Phase 4
+  overloaded it by mode and the product owner scrapped that in 4.5: it took re-timing away exactly
+  while the artist was working on timing. Interpolate's commands are buttons on `InterpolateBar`.
+  **If Phase 5 wants a new timeline affordance, put it on the bar, not on a gesture** — two long
+  presses of equal duration competing for one touch have no stable winner, and `require(toFail:)`
+  between them does not help, which is why the mode-switch looked attractive in the first place.
 - **`InterpolationRefusal` is the pattern for saying no.** Commands return a reason rather than a
   bool, the panel disables the button from the same call, and the message is on the enum. Phase 5's
   group commands should follow it rather than inventing a second failure style.
@@ -695,6 +728,17 @@ What Phase 3 decided that Phase 4 inherits:
   phase boundary — 475 tests, 474 passed, 0 failed, 1 skipped, first attempt after a `simctl
   erase`, which is now three phase boundaries in a row where resetting first produced a clean
   run. No subagents.
+
+- **Session 8 (Phase 4.5 — UI) — 2026-08-01:** The product owner's first real iPad session on Phase
+  4, turned into a layout pass. Built `InterpolateBar` above the animation timeline and moved every
+  command onto it; **deleted the mode-switched press-and-hold**, which was the session's headline
+  correction — it was my judgement call in Phase 4, not a recorded decision, and it was wrong.
+  Removed the "registration runs at mode entry" contradiction from the code and the plan rather than
+  documenting it a third time. Rebased onto `origin/main` to pick up Session 9's timeline rework
+  (32 commits replayed; conflicts were the regenerated graph report, one `CanvasManager+Undo`
+  restore where both sides were wanted, and `AnimationTimeline`'s toolbar refactor). Recorded the
+  product owner's four future items and the vector/raster divorce question as §8 items 21–25 rather
+  than acting on any of them. No subagents.
 
 ---
 
@@ -898,3 +942,48 @@ definition of done is met, and suggest rather than implement anything out of sco
     convergence. That is the number that grows with a >1000-object layer, not the lattice.
     `isRegisteringInterpolation` exists so the UI can say something; nothing has measured what it
     will need to say.
+
+### From Phase 4.5 — the product owner's own list
+
+These came from using the build on an iPad. They were raised explicitly as *future* work, not as
+this session's scope, and are recorded here in their order of raising.
+
+21. **The toolbar icon should behave like every other tool: tap once to turn the mode on, tap again
+    to open its menu.** Today the icon opens a panel whose first control is an on/off switch for the
+    mode — a redundant step no other tool has. With that change the panel becomes a plain dropdown
+    holding thickness fade and Clear References, and **the way out of the mode becomes an exit
+    button on the right-hand end of the interpolate bar**. This is the last structural piece of the
+    4.5 layout and the natural thing to do before Phase 5 adds group controls to the same bar.
+
+22. **Generate can be pressed twice and interpolates twice.** Nothing disables it once a recipe
+    exists on the target cel, so a second press re-registers and replaces the recipe — wasted work,
+    and a second undo step for an action the artist thinks they took once. The refusal machinery is
+    already the right shape for it: a `.alreadyInterpolated` case on `InterpolationRefusal` disables
+    the button and says why, in the same pattern as the other four. Note Reproject must *not* inherit
+    the same guard uncritically — re-posing a frame more than once is meaningful in a way that
+    re-deriving it is not (PLAN §10 decision 3).
+
+23. **The interpolate entry point belongs in the animation timeline's top bar, not the canvas
+    toolbar.** Everything the mode does now happens at the timeline; reaching to the top of the
+    canvas to start is the one remaining trip away from it. Pairs naturally with item 21.
+
+24. **Scrubbing runs at roughly 10 fps with four vector strokes.** Measured on the iPad, on a
+    drawing far smaller than the >1000-object layers standing constraint C anticipates, so this is
+    not the scale problem item 20 describes — it is the per-tick cost item 14 predicted, arriving
+    much earlier than expected. **Item 14's `ScrubSession` is the designed fix and it is now
+    measured rather than speculative**: every slider tick re-embeds both keyframes' geometry and
+    re-runs the ARAP factorisation, both of which are constant across a drag. Start there, and
+    profile before assuming it is the whole story at four strokes.
+
+### From Phase 4.5 — noticed while working
+
+25. **A vector cel still carries `fillImage` and `bakedImage`, so raster features allocate
+    canvas-sized bitmaps on a vector layer.** Select+move, Clear and bucket fill all go through the
+    raster path even when the layer is `.vector`, which means a vector layer can quietly acquire
+    full-canvas images that the vector pipeline neither reads nor benefits from — memory cost, and a
+    second representation of the same drawing that nothing keeps in sync. **The product owner wants
+    vector fully divorced from raster features.** Raised as a design question this session and
+    deliberately *not* acted on: it reaches well past interpolation (it is really about what a vector
+    layer *is*), it would touch `PixelOps`, the fill tool, the selection tools and save/load, and item
+    18 above wants a `ContentProvider` seam through `rasterize` that this work should be designed
+    alongside rather than after.

@@ -368,17 +368,18 @@ group**. Groups become artist-controllable in Phase 5.
 
 1. **Mode state** on `CanvasManager` (`isInterpolateMode`), plumbed the way `VectorEraserMode` is
    (`Tool.swift` → `CanvasManager` → `StrokeCanvasView`). Follow that precedent rather than inventing
-   a new pattern. Entering the mode runs registration — this is the expensive step; show progress.
-2. **Timeline: press-and-hold → "Set as reference"**, highlighting the block **yellow** (brief step 2).
-   Hooks into `TimelineTrackView`'s coordinator. **Check the existing press-and-hold drag-reorder
-   gesture first** and resolve the conflict deliberately — do not add a competing recogniser silently.
-   References must be settable across multiple layers (requirement 5).
+   a new pattern. Registration runs when **Generate or Reproject** is pressed — it is the expensive
+   step, and it needs both keyframes, which mode entry does not have; show progress while it runs.
+2. **"Set as Reference"** on the interpolate bar, highlighting the block **yellow** (brief step 2).
+   It acts on the block under the playhead. References must be settable across multiple layers
+   (requirement 5). **Not a timeline gesture** — press-and-hold there already means drag-reorder, and
+   overloading it takes re-timing away exactly while the artist is working on timing.
 3. **"Interpolate" action** on a selected block → creates the recipe. Surface **Generate** and
    **Reproject** as *separate* commands (`PLAN.md` §5.5); default to the likely one based on whether
    the cel is empty, but never conflate them. *Reproject may be stubbed to "not yet" in this phase if
    scope demands — say so in the handoff if you stub it.*
-4. **The `t` slider**, with live preview wired to `.preview` quality during drag and `.full` on
-   release, and undo bracketed per drag.
+4. **The `t` slider** — the timing bar — with live preview wired to `.preview` quality during drag
+   and `.full` on release, and undo bracketed per drag.
 
 5. **A thickness-fade toggle in the panel.** `InterpolationEvaluator.Options.thicknessFade` is built
    and defaults to `.none`; `.weighted(exponent: 1)` is the other setting. **Product owner's steer
@@ -389,8 +390,9 @@ group**. Groups become artist-controllable in Phase 5.
 6. **Onion skin in interpolate mode** — supply an `OnionSkinSource` (Phase 0) that shows the two
    reference keyframes, tinted differently.
 
-**Files.** `CanvasManager.swift`, `Tool.swift`, `TimelineTrackView.swift`, `SideToolbar.swift`,
-`CanvasView.swift`; new `PaintSoftware/Views/InterpolatePanel.swift`.
+**Files.** `CanvasManager.swift`, `Tool.swift`, `TimelineTrackView.swift`, `AnimationTimeline.swift`,
+`CanvasView.swift`; new `PaintSoftware/Views/InterpolatePanel.swift` (the mode switch and its
+settings) and `PaintSoftware/Views/InterpolateBar.swift` (the commands, pinned above the timeline).
 
 **Tests.** Logic tests for mode state, reference selection and recipe creation. **One** XCUITest for
 the end-to-end gesture path (enter mode → set references → interpolate → drag slider → content
