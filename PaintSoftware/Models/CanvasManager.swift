@@ -117,6 +117,16 @@ final class CanvasManager: ObservableObject {
     /// appears to do nothing until something unrelated forces a re-render (`HANDOFF.md` §5, Phase 4).
     @Published var hiddenMotionGroups: Set<UUID> = []
 
+    /// Whether a keyframe's strokes are drawn in their motion groups' tag colours while interpolate
+    /// mode is on — `IMPLEMENTATION.md` Phase 5 item 4.
+    ///
+    /// **On by default**, because "what did it decide?" is the question the phase exists to answer
+    /// and an overlay nobody switches on answers nothing. It shows only where there is a decision to
+    /// show — a drawing that grouped into one part is not tinted at all — and the switch is in the
+    /// mode's options popover for the artist who wants their own colours back for a moment.
+    /// Transient, like the rest of this mode's view state.
+    @Published var showMotionGroupOverlay: Bool = true
+
     @Published var currentLayerIndex: Int = 0 {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }

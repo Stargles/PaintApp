@@ -725,6 +725,79 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
         XCTAssertEqual(canvas.topmostStroke(atCanvasPoint: CGPoint(x: 150, y: 101))?.id, over.id)
     }
 
+    // MARK: - Muting reaches the evaluation
+
+    /// Solo/mute has to reach the *evaluation*, not just a set on the manager. Muting a group must
+    /// take its ink out of the in-between; anything less is a switch that does nothing.
+    func testAMutedGroupIsLeftOutOfTheEvaluationEntirely() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        let chips = manager.motionGroupChips
+        XCTAssertEqual(chips.count, 2, "Setup")
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+
+        let all = try XCTUnwrap(InterpolationEvaluator.evaluate(
+            recipe: recipe, at: 0.5, content: manager.interpolationContentProvider,
+            options: manager.interpolationOptions))
+        XCTAssertEqual(all.forward.count, 7, "Setup: the whole drawing evaluates")
+
+        manager.toggleMotionGroupHidden(chips[0].id)
+        let muted = try XCTUnwrap(InterpolationEvaluator.evaluate(
+            recipe: recipe, at: 0.5, content: manager.interpolationContentProvider,
+            options: manager.interpolationOptions))
+
+        XCTAssertEqual(muted.forward.count, 7 - chips[0].strokeCount / 2,
+                       "the muted group's strokes are gone from keyframe A's set")
+        XCTAssertEqual(muted.backward.count, 7 - chips[0].strokeCount / 2,
+                       "and from keyframe C's")
+    }
+
+    /// A group left muted must not follow the artist out of the mode and quietly blank part of every
+    /// render — `interpolationOptions` gates it on the mode rather than trusting the set to be empty.
+    func testMutingHasNoEffectOutsideInterpolateMode() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        manager.hiddenMotionGroups = [try XCTUnwrap(strokeTags(of: cels[0])[0])]
+
+        XCTAssertFalse(manager.interpolationOptions.hiddenGroups.isEmpty, "Setup: in the mode")
+        manager.isInterpolateMode = false
+        XCTAssertTrue(manager.interpolationOptions.hiddenGroups.isEmpty)
+    }
+
+    // MARK: - The tinted overlay
+
+    /// Item 4's legibility pass. It shows only where there is a decision to show: a drawing that
+    /// grouped into one part is not tinted, because tinting a whole drawing one colour says nothing.
+    func testTheOverlayRendersOnlyForATaggedKeyframeInTheMode() {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        let layerID = manager.layers[1].id
+
+        XCTAssertNotNil(manager.motionGroupOverlayImage(forCel: cels[0].id, inLayer: layerID),
+                        "a tagged keyframe is tinted")
+        XCTAssertNil(manager.motionGroupOverlayImage(forCel: cels[1].id, inLayer: layerID),
+                     "the derived in-between has no strokes of its own to tint")
+
+        manager.showMotionGroupOverlay = false
+        XCTAssertNil(manager.motionGroupOverlayImage(forCel: cels[0].id, inLayer: layerID))
+        manager.showMotionGroupOverlay = true
+        manager.exitInterpolateMode()
+        XCTAssertNil(manager.motionGroupOverlayImage(forCel: cels[0].id, inLayer: layerID),
+                     "and it is view state that belongs to the mode")
+    }
+
+    func testASinglePartDrawingIsNotTintedAtAll() {
+        let manager = manager()
+        let cels = oneBodyKeyframes(manager)
+        generate(manager, cels: cels)
+
+        XCTAssertNil(manager.motionGroupOverlayImage(forCel: cels[0].id,
+                                                     inLayer: manager.layers[1].id))
+    }
+
     // MARK: - Solo and mute
 
     func testMutingHidesOneGroupAndSoloHidesEveryOtherOne() throws {

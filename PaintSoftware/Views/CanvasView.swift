@@ -740,7 +740,15 @@ struct CanvasView: UIViewRepresentable {
             let celID: UUID
             let t: CGFloat
             let preview: Bool
+            /// True for Phase 5's tinted group overlay rather than an in-between. One cel can only
+            /// ever be one of the two — an interpolated cel has a recipe, a keyframe does not — but
+            /// they share this dictionary, so the key has to keep them apart.
+            let overlay: Bool
             let thicknessFade: Bool
+            /// Solo/mute. In the key because it is an input to the evaluation, and anything that is
+            /// an input and not in the key appears to do nothing until an unrelated change forces a
+            /// re-render — the trap this struct's own comment above describes, from the other side.
+            let hiddenGroups: Set<UUID>
             let referenceVersions: [Int]
         }
         private var interpolationPreviewKeys: [UUID: InterpolationPreviewKey] = [:]
@@ -756,10 +764,17 @@ struct CanvasView: UIViewRepresentable {
             for (layerIndex, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
                 guard let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex,
-                                                                  atFrame: canvasManager.currentFrame),
-                      let recipe = layer.cels[celIndex].interpolation else {
+                                                                  atFrame: canvasManager.currentFrame) else {
                     interpolationPreviewKeys.removeValue(forKey: layer.id)
                     host.strokeView.setInterpolationImage(nil)
+                    continue
+                }
+                guard let recipe = layer.cels[celIndex].interpolation else {
+                    // No recipe here, so this cel is a *keyframe* or an ordinary drawing — and the
+                    // same seam carries Phase 5's tinted "what did it decide?" overlay, which only
+                    // ever applies to a cel with its own tagged strokes. The two can never contend:
+                    // an interpolated cel has a recipe and takes the branch below.
+                    updateMotionGroupOverlay(layer: layer, celIndex: celIndex, host: host)
                     continue
                 }
                 let cel = layer.cels[celIndex]
@@ -767,7 +782,10 @@ struct CanvasView: UIViewRepresentable {
                     celID: cel.id,
                     t: recipe.t,
                     preview: canvasManager.isScrubbingInterpolation,
+                    overlay: false,
                     thicknessFade: canvasManager.interpolationThicknessFade,
+                    hiddenGroups: canvasManager.isInterpolateMode
+                        ? canvasManager.hiddenMotionGroups : [],
                     referenceVersions: recipe.referencedCels.map { ref in
                         canvasManager.celIndices(forCel: ref.celID, inLayer: ref.layerID)
                             .flatMap { canvasManager.layers[$0.layer].cels[$0.cel].vector?.version } ?? -1
@@ -778,6 +796,31 @@ struct CanvasView: UIViewRepresentable {
                     canvasManager.interpolatedImage(forCel: cel.id, inLayer: layer.id,
                                                     quality: key.preview ? .preview : .full))
             }
+        }
+
+        /// Phase 5 item 4's tinted overlay, memoized on the same key as the in-between preview.
+        ///
+        /// It has to be memoized for exactly the reason that one is: `updateInterpolationPreviews`
+        /// runs on every SwiftUI pass, so an un-keyed render here would re-rasterise every keyframe
+        /// on screen at every pass. `t: 0` and `overlay: true` keep it from ever colliding with a
+        /// preview key for the same cel, and the cel's own `version` is what a retag moves — which is
+        /// how tapping a stroke recolours it with no invalidation call anywhere.
+        private func updateMotionGroupOverlay(layer: Layer, celIndex: Int, host: LayerHostView) {
+            let cel = layer.cels[celIndex]
+            guard canvasManager.isInterpolateMode, canvasManager.showMotionGroupOverlay,
+                  let version = cel.vector?.version else {
+                interpolationPreviewKeys.removeValue(forKey: layer.id)
+                host.strokeView.setInterpolationImage(nil)
+                return
+            }
+            let key = InterpolationPreviewKey(
+                celID: cel.id, t: 0, preview: true, overlay: true,
+                thicknessFade: false, hiddenGroups: [],
+                referenceVersions: [version, canvasManager.motionGroups.count])
+            guard interpolationPreviewKeys[layer.id] != key else { return }
+            interpolationPreviewKeys[layer.id] = key
+            host.strokeView.setInterpolationImage(
+                canvasManager.motionGroupOverlayImage(forCel: cel.id, inLayer: layer.id))
         }
 
         func updateOnionSkin() {

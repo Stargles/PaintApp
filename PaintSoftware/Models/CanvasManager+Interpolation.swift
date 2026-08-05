@@ -277,6 +277,44 @@ extension CanvasManager {
         return stroke.id
     }
 
+    // MARK: - "What did it decide?" — the tinted overlay
+
+    /// A keyframe's own drawing, with every stroke repainted in its motion group's tag colour —
+    /// `IMPLEMENTATION.md` Phase 5 item 4's legibility pass.
+    ///
+    /// Nil unless interpolate mode is on, the overlay is switched on, the cel is a vector cel and
+    /// something on it is actually tagged. In particular a single-part drawing gets nothing, because
+    /// tinting a whole drawing one colour says nothing at all.
+    ///
+    /// **The whole display list, not just the tagged strokes**, because the seam it goes through
+    /// (`StrokeCanvasView.setInterpolationImage`) *replaces* the cel's display rather than drawing
+    /// over it. Returning only the tinted strokes would make every fill and placed image vanish
+    /// while the overlay was up.
+    ///
+    /// Untagged strokes are drawn grey rather than left in their own colour. Grey is a statement —
+    /// "this rides the first binding, it is along for someone else's ride" (`HANDOFF.md` §5.9) — and
+    /// it is the state the artist is looking for when they suspect a stroke is being carried by the
+    /// wrong part. Leaving it black would make it indistinguishable from a stroke that is fine.
+    ///
+    /// Rendered at `.preview` quality: this is a diagram of a decision, not artwork, and the polyline
+    /// tier is several times cheaper per pass (`HANDOFF.md` §5.9).
+    func motionGroupOverlayImage(forCel celID: UUID, inLayer layerID: UUID) -> UIImage? {
+        guard isInterpolateMode, showMotionGroupOverlay,
+              let at = celIndices(forCel: celID, inLayer: layerID),
+              let canvas = layers[at.layer].cels[at.cel].vector else { return nil }
+        let elements = canvas.elements
+        guard elements.contains(where: { $0.stroke?.motionGroupID != nil }) else { return nil }
+
+        let untagged = CodableColor(red: 0.55, green: 0.55, blue: 0.55, alpha: 1)
+        let tinted: [VectorElement] = elements.map { element in
+            guard case .stroke(var stroke) = element, stroke.composite == .paint else { return element }
+            stroke.color = stroke.motionGroupID.flatMap { motionGroup(withID: $0)?.tagColor } ?? untagged
+            stroke.opacity = 1
+            return .stroke(stroke)
+        }
+        return VectorCanvas(size: canvas.size, elements: tinted).render(quality: .preview)
+    }
+
     // MARK: - Solo and mute
 
     /// Hides or shows one group in the interpolated preview.
@@ -609,6 +647,9 @@ extension CanvasManager {
     var interpolationOptions: InterpolationEvaluator.Options {
         var options = InterpolationEvaluator.Options()
         options.thicknessFade = interpolationThicknessFade ? .weighted(exponent: 1) : .none
+        // Only inside the mode: solo/mute is a working view of an in-between being judged, and a
+        // group left muted must not follow the artist out and quietly blank part of every export.
+        options.hiddenGroups = isInterpolateMode ? hiddenMotionGroups : []
         return options
     }
 

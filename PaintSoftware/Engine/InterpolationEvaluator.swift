@@ -64,6 +64,21 @@ enum InterpolationEvaluator {
     struct Options {
         var thicknessFade: ThicknessFade = .none
         var arap = ARAPInterpolation.Options()
+
+        /// Motion groups to leave out of the evaluation entirely — Phase 5's solo/mute.
+        ///
+        /// A *view* filter and never document state: it answers "which part is moving wrongly" by
+        /// taking the others away, and an artist who forgets to unmute must not find it in the file.
+        /// `CanvasManager.hiddenMotionGroups` is the source, and it is also in
+        /// `InterpolationPreviewKey` — the preview is memoized, so an input the key does not mention
+        /// appears to do nothing until something unrelated forces a re-render (`HANDOFF.md` §5,
+        /// Phase 4).
+        ///
+        /// Content is hidden by the group it **would move as**, which for anything untagged is the
+        /// recipe's first binding. Untagged ink is carried by that group's motion, so leaving it on
+        /// screen while its group is muted would show exactly the part the artist asked to hide.
+        var hiddenGroups: Set<UUID> = []
+
         init() {}
     }
 
@@ -127,17 +142,21 @@ enum InterpolationEvaluator {
         // several it is a choice, and it is the safe one: content left behind while its neighbours
         // move is a much louder failure than content carried by a neighbouring group's motion. Phase
         // 5, which is where several groups first exist, is responsible for tagging.
-        let fallback = recipe.groups.first.flatMap { warps[$0.groupID] }
+        let fallbackID = recipe.groups.first?.groupID
+        let fallback = fallbackID.flatMap { warps[$0] }
 
         let forwardElements = recipe.references[index].cels.flatMap(content)
         let backwardElements = recipe.references[index + 1].cels.flatMap(content)
 
         return Evaluation(
             forward: warped(forwardElements, at: t, weight: 1 - local, direction: .forward,
-                            warps: warps, fallback: fallback, options: options),
+                            warps: warps, fallback: fallback, fallbackID: fallbackID,
+                            options: options),
             backward: warped(backwardElements, at: t, weight: local, direction: .backward,
-                             warps: warps, fallback: fallback, options: options),
-            localEdits: warpedLocalEdits(recipe.localEdits, at: t, warps: warps, fallback: fallback),
+                             warps: warps, fallback: fallback, fallbackID: fallbackID,
+                             options: options),
+            localEdits: warpedLocalEdits(recipe.localEdits, at: t, warps: warps, fallback: fallback,
+                                         fallbackID: fallbackID, hidden: options.hiddenGroups),
             forwardWeight: 1 - local,
             backwardWeight: local)
     }
@@ -199,18 +218,28 @@ enum InterpolationEvaluator {
 
     private static func warped(_ elements: [VectorElement], at t: CGFloat, weight: CGFloat,
                                direction: Direction, warps: [UUID: GroupWarp],
-                               fallback: GroupWarp?, options: Options) -> [VectorElement] {
+                               fallback: GroupWarp?, fallbackID: UUID?,
+                               options: Options) -> [VectorElement] {
         elements.compactMap { element in
+            // Hidden by the group the element *would move as*: its own tag when it has one, and the
+            // recipe's first binding when it does not. A fill or a placed image never has one
+            // (`HANDOFF.md` §8 item 11), so it is always the fallback that decides for them.
+            let hidden = { (tag: UUID?) in
+                (tag ?? fallbackID).map(options.hiddenGroups.contains) == true
+            }
             switch element {
             case .stroke(let stroke):
+                guard !hidden(stroke.motionGroupID) else { return nil }
                 let warp = stroke.motionGroupID.flatMap { warps[$0] } ?? fallback
                 guard let visible = visible(stroke, at: t) else { return nil }
                 return .stroke(warped(visible, weight: weight, options: options) {
                     warp?.map($0, direction) ?? $0
                 })
             case .fill(let fill):
+                guard !hidden(nil) else { return nil }
                 return .fill(warped(fill) { fallback?.map($0, direction) ?? $0 })
             case .image(let image):
+                guard !hidden(nil) else { return nil }
                 return .image(warped(image) { fallback?.map($0, direction) ?? $0 })
             }
         }
@@ -218,8 +247,10 @@ enum InterpolationEvaluator {
 
     private static func warpedLocalEdits(_ edits: [LocalEdit], at t: CGFloat,
                                          warps: [UUID: GroupWarp],
-                                         fallback: GroupWarp?) -> [VectorElement] {
+                                         fallback: GroupWarp?, fallbackID: UUID?,
+                                         hidden: Set<UUID>) -> [VectorElement] {
         edits.compactMap { edit in
+            guard (edit.groupID ?? fallbackID).map(hidden.contains) != true else { return nil }
             guard let visible = visible(edit.stroke, at: t) else { return nil }
             let warp = edit.groupID.flatMap { warps[$0] } ?? fallback
             // Weight 1 and no thickness fade: a local edit is the artist's own content at this

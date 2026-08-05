@@ -19,6 +19,7 @@ struct InterpolatePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             options
+            groupOverlayOption
 
             if !canvasManager.interpolationReferences.isEmpty {
                 Button("Clear References") { canvasManager.interpolationReferences.removeAll() }
@@ -55,5 +56,24 @@ struct InterpolatePanel: View {
         }
         .toggleStyle(.switch)
         .accessibilityIdentifier("interpolate.thicknessFadeToggle")
+    }
+
+    /// The tinted per-group overlay — `IMPLEMENTATION.md` Phase 5 item 4.
+    ///
+    /// On by default, because "what did it decide?" is the question the phase exists to answer and an
+    /// overlay nobody switches on answers nothing. The switch is here rather than on the bar because
+    /// it is set once and not reached for mid-flow, which is this popover's whole remit — and because
+    /// a drawing with one motion group is not tinted at all, so most artists will never need it.
+    private var groupOverlayOption: some View {
+        Toggle(isOn: $canvasManager.showMotionGroupOverlay) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Colour by Motion Group").font(.caption).foregroundColor(.white)
+                Text("Keyframe strokes take their group's tag colour")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+        }
+        .toggleStyle(.switch)
+        .accessibilityIdentifier("interpolate.groupOverlayToggle")
     }
 }
