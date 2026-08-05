@@ -551,6 +551,38 @@ can retag and see the result immediately; group state persists and undoes.
 
 **Estimate.** Two sessions.
 
+### What Phase 5 actually built (Sessions 13–14)
+
+All four items. The engine and model half landed in Session 13 (`2870773`); Session 14 wrote the
+tests, took two decisions off the back of them, and built every piece of UI.
+
+- **Item 1 — auto-grouping.** `CanvasManager.registerGroups` replaces the single whole-frame binding
+  with one per part: `MotionGrouping` seeded by the artist's tags, measured against the **last**
+  keyframe, each part fitted to its own counterpart. **Phase 4's whole-frame answer is preserved bit
+  for bit** — a drawing with one part takes the old path, mints no group and tags nothing, which is
+  why every Phase 4 test stayed green untouched. Registration **writes the tags back onto both
+  keyframes' strokes**, which is what makes the partition visible and correctable, and is also what
+  makes group ids stable across re-registration.
+- **Item 2 — tagging.** `MotionGroupRow` is the bar's third row: a chip per group (swatch, name, ink
+  count), tap to arm, tap a stroke on the canvas to assign, tap the chip again to disarm. Tag by
+  Colour is the one-shot populate of §5.1.1. The gesture is `StrokeCanvasView.consumeAsMotionGroupTap`,
+  which consumes the touch even on a miss.
+- **Item 3 — the mode badge.** On the chip, in its context menu. `.clean` never degrades silently: it
+  renders with a warning glyph and the word "fade", because the matcher is deferred and it is
+  cross-fading every time, not occasionally.
+- **Item 4 — legibility.** `motionGroupOverlayImage` repaints a keyframe's strokes in their groups'
+  tag colours, through `setInterpolationImage`; untagged strokes go grey. Solo/mute is
+  `InterpolationEvaluator.Options.hiddenGroups`, gated on the mode so it cannot follow the artist out.
+
+**Two decisions taken during the phase** (product owner, 2026-08-05), both recorded in `PLAN.md` §10:
+
+1. **Generate writes motion-group tags onto the reference drawings.** Kept. Without it the partition
+   lives only in the recipe, where nothing can show it or correct it.
+2. **An artist's tag is a constraint, not a seed.** `MotionGrouping.group` no longer splits a seeded
+   group; only the untagged leftover is refined. This was a *test* finding: a stroke deliberately
+   moved into a group whose motion it did not share was splintered back out and given a third group.
+   What it gives up is auto-grouping discovering a second part inside a group the artist tagged.
+
 ---
 
 ## Phase 6 — Reproject and editing at an intermediate frame

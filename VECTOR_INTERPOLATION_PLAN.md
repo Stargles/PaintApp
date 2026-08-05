@@ -743,6 +743,18 @@ with `.clean` degrading to it until the matcher lands.
 motion residual (§5.3), seeded either with one global group (automatic) or with the artist's tags
 (one tap per part). Worst case degrades to a single global warp, which is still usable.
 
+> **Amended 2026-08-05 (Phase 5): a tag is a constraint, not a seed.** One algorithm and two seeds
+> still holds, but a **seeded** group is now accepted as given and never split; only the untagged
+> leftover is refined. The original reading cost the artist their own correction in exactly the
+> situation they reach for it: a stroke deliberately moved into a group whose motion it does not
+> share has a high residual *by construction*, so it was splintered straight back out and — since
+> the reused name goes to the larger half — handed a third group. The same behaviour reads correctly
+> when the split is a genuine discovery inside a tagged part, and **nothing in the model tells those
+> two apart**, so one of them had to go. What is given up is auto-grouping finding a second part
+> inside a group the artist tagged; they split it themselves. Found by
+> `InterpolationMotionGroupLogicTests`, which failed on the old behaviour before anything was
+> changed.
+
 **3. Generate and Reproject ship as separate commands** (§5.5). Generate derives a blank frame from
 its neighbours; Reproject keeps the artist's existing strokes and slides only their pose along the
 A→C motion. They compose — Generate → Commit produces a frame Reproject then works on.
@@ -775,6 +787,14 @@ non-linear paths from them. We are deferring that, not abandoning it, because a 
 noisy hand-drawn keyframes may be both unergonomic and unstable, and pairwise is the honest way to
 find out. **The data model must therefore make the spline addable without a refactor** (§4), and
 that constraint is load-bearing rather than aspirational.
+
+**8. Generate writes motion-group tags onto the reference drawings.** Decided 2026-08-05, at Phase 5,
+because it is a real behaviour change: pressing Generate modifies keyframes A and C and not only the
+in-between. It is undoable in the same step and the tags are inert outside interpolate mode. It is
+kept because without the write-back the partition lives only inside the recipe's bindings, where
+nothing can display it and nothing can correct it — and because re-registration would then find every
+stroke untagged again and mint a fresh set of groups on every Generate. Tagging the strokes is what
+closes that loop; after one round nothing is untagged.
 
 ### Standing constraints from the product owner
 

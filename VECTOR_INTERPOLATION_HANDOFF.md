@@ -44,9 +44,9 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 5 — motion groups. In progress, roughly half done.** The engine and model half is built and committed (`2870773`); **no UI reaches any of it yet**, and there are **no new tests**. See "Where Phase 5 actually is" below — it is the thing to read before writing a line of code. |
+| **Current phase** | **Phase 5 — motion groups. COMPLETE.** All four items; definition of done met. Phase 6 (Reproject, and editing at an in-between) is the next phase and is a fresh session. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`**. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | `2870773` — Phase 5's engine half. Builds; `InterpolationWorkflowLogicTests`, `InterpolationModelLogicTests`, `InterpolationRenderLogicTests` and `ARAPLogicTests` all pass. The last full fast-tier run is `ea85793`: 224 tests, 223 passed (see §5 for the one flake and why it is not real). The last *full*-suite run is still Session 9's 4.6 boundary: 512 tests, 511 passed, 0 failed, 1 skipped. |
+| **Last known-green commit** | `30ae616` — Phase 5's legibility pass. Wider pure-logic tier: 453 tests, 453 passed. Full suite at the phase boundary: see §6's Session 14 entry. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -201,77 +201,48 @@ reset *before* the phase-boundary run, not after it starts failing.
   - Tests: `InterpolationEngineDiagnosticsLogicTests` lost all three expected-failure wrappers and
     gained two characterisations; `ARAPLogicTests` gained seven. Wider pure-logic tier green.
 
-- **Phase 5 — motion groups. HALF DONE.** One commit, `2870773`. The engine and model half only;
-  see the next section for exactly what is missing.
+- **Phase 5 — motion groups. COMPLETE.** Six commits: `2870773` (the engine and model half, Session
+  13), then Session 14's `cfff6d9`, `f2da39b`, `f868e4d`, `7a47e95`, `30ae616`. All four
+  `IMPLEMENTATION.md` items; definition of done met. That file's "What Phase 5 actually built"
+  subsection is the record of the final shape.
+  - **Auto-grouping** (item 1). `registerGroups` replaces the single whole-frame binding with one per
+    part — `MotionGrouping` seeded by the artist's tags, measured against the **last** keyframe, each
+    part fitted to its own counterpart. **Phase 4's whole-frame answer is preserved bit for bit**,
+    which is why every Phase 4 test stayed green untouched. Registration writes the tags back onto
+    both keyframes' strokes, which is what makes the partition visible, correctable, and stable
+    across re-registration.
+  - **Tagging** (item 2). `MotionGroupRow` is `InterpolateBar`'s third row: a chip per group (swatch,
+    name, ink count), tap to arm, tap a stroke on the canvas to assign, tap the chip again to disarm.
+    Tag by Colour is `PLAN.md` §5.1.1's one-shot populate. The gesture is
+    `StrokeCanvasView.consumeAsMotionGroupTap`, which consumes the touch even on a miss.
+  - **The mode badge** (item 3). On the chip, mode set from its context menu. `.clean` never degrades
+    silently — the matcher is deferred, so it renders with a warning glyph and the word "fade".
+  - **Legibility** (item 4). `motionGroupOverlayImage` repaints a keyframe's strokes in their groups'
+    tag colours through `setInterpolationImage`, untagged ones grey; solo/mute is
+    `InterpolationEvaluator.Options.hiddenGroups`, threaded into `InterpolationPreviewKey` and gated
+    on the mode.
+  - Tests: `InterpolationMotionGroupLogicTests` (33). **Two product decisions were taken off the back
+    of them**, and are now `PLAN.md` §10 decision 8 and decision 2's amendment — see §5.
 
-### Where Phase 5 actually is
+### What is next
 
-**Built and committed (`2870773`), all in `CanvasManager+Interpolation.swift`:**
+**Phase 6 — Reproject and editing at an intermediate frame.** Read `IMPLEMENTATION.md`'s Phase 6
+section, then §8 item 25, which is the product owner's own statement of what they want from it and
+names the one thing that does **not** fit the mechanism: a liquify at *t* is a deformation, not an
+element, so it has no `LocalEdit` shape at all and where it is stored is an open design question to
+answer before wiring rather than during. §8 item 6 is the smaller version of the same gap (a fill
+made at an in-between).
 
-- **`RegistrationFrame` now holds `RegistrationElement`s** (points, stroke-or-nil, tag) rather than a
-  summed cloud, plus `restricted(to:)` — the slice that lets a keyframe be cut down to one part.
-  A part made entirely of strokes keeps its 1:1 correspondence even when a *fill* elsewhere on the
-  frame made the whole frame's `strokes` nil, which is exactly the lineart-plus-flats case.
-- **`registerGroups(frames:existing:)`** — Phase 5's registration. `MotionGrouping` seeded by the
-  artist's tags (PLAN §5.3's one algorithm, two seeds), grouping measured against the **last**
-  keyframe, one lattice per part fitted to that part's own counterpart. Returns
-  `GroupRegistration { bindings, invented, assignments }`.
-- **The whole-frame answer is preserved exactly.** A drawing that groups into one part takes the
-  Phase 4 path unchanged — one anonymous binding, no registered `MotionGroup`, no tags written. That
-  is why every Phase 4 test stayed green without being touched.
-- **Tags are written back onto both keyframes' strokes** (`applyMotionGroupTags`). This is the part
-  that is easy to leave out and the part that makes the feature usable: without it the partition
-  lives only inside the recipe's bindings, where nothing can show it and nothing can correct it.
-- **`setMotionGroup` re-registers** every recipe reading a touched cel, in the same undo step
-  (`reregisterInterpolations(reading:)`), so a retag changes the *motion* and not only the colour.
-- **`tagMotionGroupsByStrokeColour(in:tolerance:)`** — PLAN §5.1.1's one-shot populate. Erasers
-  skipped; refuses when there is only one colour.
-- **Generate's undo bracket widened** from `withStructureUndo` to `withInterpolationUndo`, because
-  it now writes stroke content. `interpolateAtPlayhead`'s outer bracket widened with it.
+Reproject itself is stubbed and refuses out loud (`.reprojectNotImplemented`); §8 item 17's Commit
+action is worth building alongside it, because Generate → Commit is what produces a frame Reproject
+then works on.
 
-**NOT built. This is the whole of what is left:**
-
-1. **No tests at all for any of the above.** This is the single highest-value next action and it is
-   where the next session should start. The fixture to use is already written and known-good:
-   `ARAPLogicTests.rectangleBody` + `triangleBody`, rect moved `+40` in x and the triangle left
-   still — see `testTwoBodiesMovingDifferentlySplitIntoExactlyTwoGroups`. **Do not invent a new
-   two-body fixture**; §5's Phase 1 entry lists four that looked obviously correct and were not.
-   A new `InterpolationMotionGroupLogicTests` class needs a hand-edit to the UITests target's
-   pbxproj (§5), and must be added to §4's fast filter.
-2. **No UI whatsoever.** Nothing in the app can reach tagging, the colour bake, group modes, or
-   solo/mute. `InterpolateBar` and `InterpolatePanel` are untouched. This is `IMPLEMENTATION.md`
-   Phase 5 items 2, 3 and 4.
-3. **No manual retagging gesture.** `setMotionGroup(_:forStrokeIDs:)` is the whole API and nothing
-   calls it. The intended shape is: arm a group from its chip on the bar, then tap strokes on the
-   canvas to assign them — hit-tested through `StrokeSpatialIndex`. §5.10's rule applies: put it on
-   the bar, not on a timeline gesture.
-4. **No "what did it decide?" overlay, and no solo/mute.** The cheap route for the overlay is the
-   seam that already exists — `StrokeCanvasView.setInterpolationImage` — with a tinted polyline
-   render of the cel's strokes in their groups' tag colours. Solo/mute wants a `hiddenGroups` set on
-   `InterpolationEvaluator.Options`, and **it must go into `InterpolationPreviewKey` too** or it will
-   appear to do nothing (§5, Phase 4).
-5. **The per-group `.auto`/`.clean`/`.crossFade` badge** (`IMPLEMENTATION.md` Phase 5 item 3).
-   `setMotionGroupMode` exists and is untested; nothing displays the mode, and `.clean` degrading to
-   `.crossFade` has no visible state.
-
-**One thing to put in front of the product owner before going further** (§3.5): **Generate now
-writes motion-group tags onto the keyframes' strokes.** That is a real behaviour change — pressing
-Generate modifies the reference drawings, not only the in-between. It is undoable in the same step
-and the tags are inert outside interpolate mode, and it is what makes auto-grouping correctable at
-all, so it is believed to be the right call. It was not a recorded decision, so say it out loud.
-
-### What is next after that
-
-**Read §5.10 before touching Phase 5** — what Phase 4 decided that Phase 5 inherits, as amended by
-4.5 and 4.6 — and **§8 item 36's timing note**, which puts exactly one constraint on Phase 5's
-design (keep a group's membership "which ink is in this group", not "which stroke pairs with which").
-The design as built honours that: membership is a tag on a stroke, and nothing anywhere records that
-stroke *X* pairs with stroke *Y*.
-
-Two things 4.7 leaves on the table deliberately, both recorded rather than built: §8 item 24's
-~10 fps scrub, which is a *separate* problem from registration cost and is still unfixed (§8 item 14's
-`ScrubSession` is the shape of the fix), and §8 item 34's temporal visibility thresholds, which are
-the honest answer to unmatched content and now have a way to know which content is unmatched.
+Three things earlier phases left on the table deliberately, all recorded rather than built: §8 item
+24's ~10 fps scrub (§8 item 14's `ScrubSession` is the shape of the fix, and it is a *separate*
+problem from registration cost), §8 item 34's temporal visibility thresholds — the honest answer to
+unmatched content, and Phase 5 is what finally gives it a per-group way to know which content is
+unmatched — and §8 item 36's ink-to-ink matching, whose one constraint on Phase 5 was honoured:
+membership is a tag on a stroke, and nothing anywhere records that stroke *X* pairs with stroke *Y*.
 
 ### History note
 
@@ -959,6 +930,52 @@ the code was written.
   Generate that created its own block puts the block and the recipe back but leaves the motion-group
   tags on the keyframes.
 
+### From Phase 5 (the UI half, and what the tests found)
+
+- **The tests found a design bug, and it is the reason to write tests before UI.** Two of the first
+  seventeen failed. One was a bad assertion; the other was real and became a product decision: an
+  artist's tag was a *seed*, so `MotionGrouping.group` ran it through the same splitting loop as an
+  untagged partition, and a stroke deliberately moved into a group whose motion it did not share was
+  splintered straight back out and — since `dominantTag`'s reused name goes to the larger half —
+  handed a **third** group. The tagging UI would have shipped appearing to ignore the artist.
+
+  Two general lessons. **A refinement step and a correction step are the same code here, and nothing
+  in the model tells them apart**: "it found another part inside the one I tagged" and "it undid what
+  I just said" are one behaviour seen from two situations, so one of the two readings had to be given
+  up. And a residual high enough to trigger a split is exactly what a *deliberate* correction looks
+  like — the artist reaches for tagging precisely when the automatic answer is wrong, so the signal
+  the algorithm splits on is the signal that they are correcting it. Seeded groups are now accepted
+  as given (`PLAN.md` §10 decision 2's amendment).
+
+- **`setMotionGroup(nil, …)` does not leave a stroke untagged, and the word "clear" is misleading.**
+  Clearing re-registers, and registration tags everything it partitions, so the stroke is
+  *re-decided* by geometry rather than left out. After one Generate there is no untagged state left
+  to hand it back to. The behaviour is right; anything the UI says about it should say "re-decide".
+
+- **`setInterpolationImage` *replaces* the cel's display, it does not draw over it.** The tinted
+  group overlay therefore has to render the **whole** display list with strokes recoloured — hand it
+  only the tagged strokes and every fill and placed image vanishes while the overlay is up. Worth
+  knowing for anything else that reaches for that seam.
+
+- **Anything memoized against `InterpolationPreviewKey` has to be *in* the key, and Phase 5 put two
+  more things there.** `hiddenGroups` (or muting appears to do nothing) and an `overlay` flag (or the
+  tinted keyframe overlay and an in-between preview collide in the same dictionary). The key is also
+  what makes a retag show up with no invalidation call anywhere: the overlay is keyed on the cel's
+  own `version`, which `applyMotionGroupTags` bumps.
+
+- **The armed group is transient and `exitInterpolateMode` must clear it.** An armed group left set
+  turns the next ordinary canvas tap into a silent document edit. Same for `hiddenMotionGroups`,
+  which additionally must not reach a render outside the mode — `interpolationOptions` gates it on
+  `isInterpolateMode` rather than trusting the set to be empty.
+
+- **The retagging gesture consumes the touch even when it misses.** Considered and chosen: while a
+  chip is lit the canvas is in tagging, and a miss that quietly drew a dot instead is the worst of
+  both — ink where the artist was pointing at a stroke, noticed later. Only the *current layer's*
+  view answers, because the assignment resolves through `interpolationTarget`.
+
+- **A `MotionGroupChip` count of zero is shown rather than hidden.** A group with nothing in it is
+  one to tag into or delete; hiding it makes it unreachable rather than tidy.
+
 ### 5.11 What the papers do — and where they do not help
 
 Read this before proposing an engine change; it is the answer to "what do the papers do at exactly
@@ -1202,6 +1219,23 @@ What Phase 3 decided that Phase 4 inherits:
   `withInterpolationUndo`, which §5's Phase 2 entry predicted three phases ago. **Nothing in the app
   can reach any of it and nothing is tested** — §2's "Where Phase 5 actually is" is the list. No
   subagents.
+
+- **Session 14 (Phase 5, second half — tests, two decisions, and all the UI) — 2026-08-05:** Phase 5
+  is **complete**; five commits, each green before the next. Opened by writing
+  `InterpolationMotionGroupLogicTests` before touching any UI, which is the single thing that made
+  the session worth it: **two of the first seventeen tests failed, and one of the failures was a
+  design bug that would have shipped inside the tagging UI.** An artist's tag was a *seed*, so a
+  stroke deliberately moved into a group whose motion it did not share was splintered back out and
+  given a third group — the tool undoing the artist's work in exactly the situation tagging exists
+  for. The product owner took both open decisions on the spot: keep Generate's tag write-back
+  (`PLAN.md` §10 decision 8), and make a tag a **constraint** rather than a seed (decision 2's
+  amendment) — `MotionGrouping` no longer splits a seeded group, at the cost of auto-grouping
+  discovering a part inside one, which §8 item 40 offers back explicitly. Then items 2, 3 and 4 in
+  order: `MotionGroupRow` on the bar with arm-and-tap tagging and the never-silent `.clean` badge,
+  `StrokeCanvasView.consumeAsMotionGroupTap` for the gesture, and the tinted overlay plus solo/mute
+  threaded through `InterpolationEvaluator.Options.hiddenGroups` and `InterpolationPreviewKey`.
+  33 tests in the new class; wider pure-logic tier 453/453. Four new §8 items, none built. No
+  subagents. Stopped at the definition of done per §3.3; Phase 6 is a separate session.
 
 ---
 
@@ -1668,6 +1702,40 @@ Session 12 rather than optional extras. **31, 32 and 35 are DONE** (commits `b91
     - **Sýkora et al., *"As-rigid-as-possible image registration for hand-drawn cartoon animation"*
       — get the paper before that session**, per the note above. It is the prior art and frite
       already leans on it.
+
+### From Phase 5
+
+38. **A motion group cannot be renamed.** Registration names them `Group 1`, `Group 2`; the colour
+    bake names them `Colour 1`… They are the labels an artist reads on every chip, and "Torso" and
+    "Arm" would make the row self-explanatory. `MotionGroup.displayName` is already a plain `var` and
+    `addMotionGroup` takes a name, so the model is done — what is missing is a rename affordance, and
+    the reason it was left out is that a text field in a context menu on iPad brings up a keyboard
+    over the timeline the artist is looking at. Worth a moment's design rather than the obvious
+    implementation.
+
+39. **An eraser cannot be tagged, and rides the recipe's first binding.** `tagMotionGroupsByStrokeColour`
+    skips erasers (an eraser's colour is not a colour) and `topmostStroke(atCanvasPoint:)` will not
+    pick one, so there is no path to putting an eraser in a group at all. That is right as a default —
+    the alternative is a group made of every eraser on the drawing — but it is wrong once a character's
+    erased highlight has to travel with the arm it is on. **The right answer is for an eraser to
+    inherit the group of the ink it overlaps**, which is computable from what the eraser already
+    knows (`VectorEraser`'s coverage test finds exactly that ink). Recorded rather than built because
+    it wants a decision about what happens when it overlaps two groups.
+
+40. **Auto-grouping can no longer look inside a group the artist tagged**, which is the price of
+    `PLAN.md` §10 decision 2's amendment and was accepted knowingly. The artist splits it themselves —
+    except there is no "split this group" action, so today they have to tag the new part stroke by
+    stroke. A **Split** item on the chip's context menu, running `MotionGrouping` on that group's
+    members alone and adopting whatever it finds, would give the discovery back *explicitly* — which
+    is the distinction the amendment turned on. Small, and the algorithm is already there.
+
+41. **Fills and placed images are not tinted by the group overlay, because they cannot carry a tag.**
+    Item 11 is the underlying gap (`motionGroupID` is a field on `VectorStroke` only); this is what it
+    now *looks* like. On a lineart-plus-flats drawing the flats stay their own colour while the
+    lineart goes red and blue, which reads as the overlay being broken rather than as the flats being
+    ungroupable. Whoever fixes item 11 should check the overlay in the same pass; until then the
+    honest interim would be to grey them like untagged strokes, which was not done because grey flats
+    over tinted lineart is its own kind of misleading.
 
 35. **DONE (Session 12).** Subsample the registration point cloud. `Options.maxRegistrationSamples`
     is 250 and caps what *drives* the fit; residuals are still reported for every source point,
