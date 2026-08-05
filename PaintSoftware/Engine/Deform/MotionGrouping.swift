@@ -104,6 +104,10 @@ enum MotionGrouping {
     /// in one group. Strokes missing from `seeds` are gathered into one extra group rather than
     /// dropped, so a partial tagging still produces a complete partition.
     ///
+    /// **A seeded group comes back exactly as it was given.** It is fitted and measured like any
+    /// other — callers read `fit` and the residuals — but it is never split. Only the untagged
+    /// leftover is refined. See the `if seeded` branch below for why, and for what that gives up.
+    ///
     /// Groups come back in a deterministic order — by their lowest stroke index — because a grouping
     /// that reshuffles between runs would make the artist's per-group overrides land on different
     /// parts each time.
@@ -113,12 +117,16 @@ enum MotionGrouping {
         guard !valid.isEmpty else { return [] }
 
         var pending: [[Int]]
+        /// How many entries at the head of `pending` are the artist's own seeds. Those are never
+        /// split; everything appended after them is.
+        var protectedSeeds = 0
         if let seeds {
             var claimed = Set<Int>()
             pending = seeds.map { seed in
                 let cleaned = seed.filter { valid.contains($0) && claimed.insert($0).inserted }
                 return cleaned.sorted()
             }.filter { !$0.isEmpty }
+            protectedSeeds = pending.count
             let leftover = valid.filter { !claimed.contains($0) }
             if !leftover.isEmpty { pending.append(leftover) }
         } else {
@@ -128,6 +136,7 @@ enum MotionGrouping {
         var settled: [Group] = []
         var head = 0
         while head < pending.count {
+            let seeded = head < protectedSeeds
             let members = pending[head]; head += 1
             let (fit, residuals, meanResidual) = analyse(members, strokes: strokes, target: target,
                                                         options: options)
@@ -137,6 +146,22 @@ enum MotionGrouping {
                 settled.append(Group(strokes: members, fit: fit, meanResidual: meanResidual,
                                      maxStrokeResidual: worst))
             }
+
+            // **A seeded group is never split.** The artist said these strokes move together, and a
+            // residual high enough to trigger a split is precisely what a *deliberate* correction
+            // looks like: they moved a stroke into a group whose motion it does not currently share,
+            // because the current answer is the one they are correcting. Splitting it back out and —
+            // via `CanvasManager.registerGroups`' `dominantTag` — handing it a third group is the tool
+            // undoing the artist's work, and it is the single thing that would make the tagging UI
+            // untrustworthy.
+            //
+            // The cost is real and was weighed: automatic grouping can no longer discover a second
+            // part *inside* a group the artist tagged. That reading of the same behaviour ("it found
+            // another part in the one I tagged") is the one being given up, and the artist splits it
+            // themselves instead. Product owner's decision, 2026-08-05, taken on the characterisation
+            // in `InterpolationMotionGroupLogicTests`. Untagged content is unaffected: it arrives as
+            // the leftover group, which is not protected and is refined exactly as before.
+            if seeded { accept(); continue }
 
             // Room left in the budget counts what is settled plus what is still queued.
             let outstanding = settled.count + (pending.count - head)

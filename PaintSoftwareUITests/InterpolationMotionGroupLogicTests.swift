@@ -396,41 +396,34 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
                        "and re-registration leaves nothing untagged")
     }
 
-    /// **Characterisation of a design consequence, not an aspiration — and one to put in front of the
-    /// product owner** (`HANDOFF.md` §3.5).
+    /// **The correction sticks even when the geometry disagrees**, which is the whole reason the
+    /// tagging UI exists — the artist reaches for it precisely when the automatic answer is wrong,
+    /// so "wrong by the residuals" is the *expected* state of a stroke they have just moved.
     ///
-    /// The artist's tag is a *seed*, not a constraint. `MotionGrouping.group` puts seeds through
-    /// exactly the same splitting loop as an untagged partition (`PLAN.md` §5.3's "one algorithm, two
-    /// seeds"), so a seeded part whose residual is high is splintered like any other — and
-    /// `dominantTag` then hands the reused name to the larger half and mints a fresh group for the
-    /// splinter. That reads correctly as "it found another part inside the one I tagged" when the
-    /// split is a *discovery*. It reads as the tool undoing the artist's work when the artist has
-    /// just deliberately moved a stroke into a group whose motion it does not share, which is this
-    /// test: the stroke lands in neither the group that was named nor the one it came from, but in a
-    /// third group of its own.
-    ///
-    /// Both readings come from one line of behaviour and nothing in the model distinguishes them. The
-    /// fix — never splitting a *seeded* part, and only refining the untagged leftover — would change
-    /// `PLAN.md` §5.3, so it is the product owner's call rather than this session's.
-    func testRetaggingAStrokeAgainstItsGeometrySplintersItIntoANewGroup() throws {
+    /// This is the test that failed when it was first written, and the failure was the finding: a
+    /// seeded part used to go through the same splitting loop as an untagged one, so a deliberately
+    /// retagged stroke was splintered straight back out and — via `dominantTag`, whose reused name
+    /// goes to the larger half — handed a *third* group. Product owner's decision, 2026-08-05: seeded
+    /// groups are never split (`MotionGrouping.group`). What that gives up is auto-grouping
+    /// discovering a second part *inside* a group the artist tagged; they split it themselves.
+    func testRetaggingAStrokeAgainstItsGeometryStillSticks() throws {
         let manager = manager()
         let cels = twoBodyKeyframes(manager)
         generate(manager, cels: cels)
         let ids = strokeIDs(of: cels[0])
         let tagsBefore = strokeTags(of: cels[0])
         let rectangleGroup = try XCTUnwrap(tagsBefore[0])
-        let triangleGroup = try XCTUnwrap(tagsBefore[4])
         XCTAssertEqual(manager.motionGroups.count, 2, "Setup: two parts")
 
         manager.setMotionGroup(rectangleGroup, forStrokeIDs: [ids[4]])
 
         let tags = strokeTags(of: cels[0])
-        XCTAssertEqual(tags[0], rectangleGroup, "the larger half keeps the name it had")
-        XCTAssertNotEqual(tags[4], rectangleGroup,
-                          "the retagged stroke does NOT stay in the group the artist named")
-        XCTAssertNotEqual(tags[4], triangleGroup, "nor does it go back to the one it came from")
-        XCTAssertEqual(manager.motionGroups.count, 3,
-                       "a third group is minted for it, which is the behaviour to review")
+        XCTAssertEqual(tags[4], rectangleGroup,
+                       "the stroke stays where the artist put it, residuals notwithstanding")
+        XCTAssertEqual(Set(Self.rectangle.map { tags[$0] }), [rectangleGroup],
+                       "and the group it joined is otherwise unchanged")
+        XCTAssertEqual(manager.motionGroups.count, 2,
+                       "no third group is invented behind the artist's back")
     }
 
     func testRetaggingIsOneUndoStepThatRestoresTheMotionAsWellAsTheTag() throws {
