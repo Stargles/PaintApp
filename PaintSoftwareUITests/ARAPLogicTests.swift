@@ -744,6 +744,71 @@ final class ARAPLogicTests: XCTestCase {
         XCTAssertEqual(groups.flatMap(\.strokes).sorted(), Array(0..<source.count))
     }
 
+    /// The open, hand-drawn version of `testOneRigidBodyDoesNotSplit` — and the fixture class the
+    /// whole logic tier was blind to (`HANDOFF.md` §8 item 43).
+    ///
+    /// Every other grouping fixture here is a *closed* outline drawn twice identically, which pins its
+    /// own orientation and translates cleanly. Both properties hide the bug: put a few points of hand
+    /// jitter on a second keyframe and the whole-drawing fit used to come out at 118° with a mean
+    /// residual of 22 against the true motion's 5.6, because `.sourceToTarget` seeds the search where
+    /// the source already sits and an L 120 points across that moved 400 is outside ICP's basin from
+    /// every one of the eight restarts. Every stroke's residual was then large and the L was cut into
+    /// its two legs — each a lone straight segment, which is the 180° tie §5 proves no objective can
+    /// break.
+    func testAHandJitteredBodyThatMovedFurtherThanItsOwnSizeStaysOneGroup() {
+        func wobble(_ points: [CGPoint], seed: CGFloat) -> [CGPoint] {
+            points.enumerated().map { i, p in
+                CGPoint(x: p.x + sin(CGFloat(i) * 0.7 + seed) * 4,
+                        y: p.y + cos(CGFloat(i) * 0.5 + seed) * 4)
+            }
+        }
+        func ell(x: CGFloat) -> [[CGPoint]] {
+            [bar(from: CGPoint(x: x, y: 420), to: CGPoint(x: x + 120, y: 420), count: 12),
+             bar(from: CGPoint(x: x + 120, y: 420), to: CGPoint(x: x + 120, y: 560), count: 14)]
+        }
+        let source = ell(x: 220).enumerated().map { wobble($1, seed: CGFloat($0)) }
+        let target = PointCloudIndex(ell(x: 620).enumerated()
+            .map { wobble($1, seed: CGFloat($0) + 2.1) }.flatMap { $0 })
+
+        let groups = MotionGrouping.group(strokes: source, target: target)
+
+        XCTAssertEqual(groups.count, 1, "an L drawn twice by hand is still one body")
+        XCTAssertEqual(groups[0].strokes, [0, 1])
+        XCTAssertEqual(groups[0].fit.translation.x, 400, accuracy: 25,
+                       "and the motion it found is the one that is actually there")
+        XCTAssertLessThan(abs(groups[0].fit.angle), 0.15, "with no spurious rotation")
+
+        // The closed-outline version of the same thing, which also over-split before the fix.
+        let rect = rectangleBody(at: CGPoint(x: 40, y: 60))
+        let jittered = rect.enumerated().map { wobble($1, seed: CGFloat($0)) }
+        let jitteredTarget = PointCloudIndex(moved(rect, by: CGPoint(x: 40, y: 0))
+            .enumerated().map { wobble($1, seed: CGFloat($0) + 2.1) }.flatMap { $0 })
+        XCTAssertEqual(MotionGrouping.group(strokes: jittered, target: jitteredTarget).count, 1,
+                       "a hand-drawn rectangle is one body too — one-directional matching used to "
+                       + "score a 27-degree overlap better than the translation that is really there")
+    }
+
+    /// The other half of the same fix: matching the whole drawing bidirectionally is what lets a large
+    /// rotation be found at all. Rotating the seed *in place* never moves it nearer to a target that
+    /// has travelled, so the multi-start bought nothing — this fit was wrong before and is exact now.
+    func testAWholeDrawingTurnedNinetyDegreesIsOneGroupFittedExactly() {
+        func ell(x: CGFloat) -> [[CGPoint]] {
+            [bar(from: CGPoint(x: x, y: 420), to: CGPoint(x: x + 120, y: 420), count: 12),
+             bar(from: CGPoint(x: x + 120, y: 420), to: CGPoint(x: x + 120, y: 560), count: 14)]
+        }
+        let centre = CGPoint(x: 340, y: 490)
+        let source = ell(x: 220)
+        let turned = source.map { $0.map { p -> CGPoint in
+            CGPoint(x: centre.x - (p.y - centre.y), y: centre.y + (p.x - centre.x))
+        } }
+
+        let groups = MotionGrouping.group(strokes: source, target: PointCloudIndex(turned.flatMap { $0 }))
+
+        XCTAssertEqual(groups.count, 1, "turning a drawing does not make it two drawings")
+        XCTAssertEqual(groups[0].fit.angle, .pi / 2, accuracy: 1e-6)
+        XCTAssertLessThan(groups[0].meanResidual, 1e-6, "and it lands on the target exactly")
+    }
+
     func testGroupingEmptyOrDegenerateInputIsSane() {
         XCTAssertTrue(MotionGrouping.group(strokes: [], target: PointCloudIndex([])).isEmpty)
         XCTAssertTrue(MotionGrouping.group(strokes: [[]], target: PointCloudIndex([])).isEmpty,

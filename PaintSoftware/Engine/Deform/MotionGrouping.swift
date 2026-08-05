@@ -138,8 +138,10 @@ enum MotionGrouping {
         while head < pending.count {
             let seeded = head < protectedSeeds
             let members = pending[head]; head += 1
+            // Whether this group *is* the whole drawing decides how it is matched — see `analyse`.
             let (fit, residuals, meanResidual) = analyse(members, strokes: strokes, target: target,
-                                                        options: options)
+                                                        options: options,
+                                                        isWholeDrawing: members.count == valid.count)
             let worst = residuals.map(\.length).max() ?? 0
 
             func accept() {
@@ -193,11 +195,32 @@ enum MotionGrouping {
     /// whose points scatter 20 points in every direction is just a poor match, and its mean vector
     /// is near zero. Only the first is a reason to split, and only the vector form tells them apart.
     ///
-    /// The fit matches source→target only. Matching backwards would pair every *other* group's target
-    /// points against this group's strokes, which is exactly the wrong thing when the source is a
-    /// part of what the target shows.
+    /// **How the fit is matched depends on whether this group is a part or the whole drawing**, and
+    /// getting that wrong is what `HANDOFF.md` §8 item 43 was.
+    ///
+    /// A *part* matches source→target only: matching backwards would pair every other group's target
+    /// points against this group's strokes, which is exactly the wrong thing when the source is only
+    /// a part of what the target shows. But the group the recursion *starts* from is the entire
+    /// drawing, and then the two clouds are the same content drawn twice — which is precisely
+    /// `.bidirectional`'s premise. Applying the part rule there cost the answer twice over, both
+    /// measured on the standalone harness (§5's Phase 4.7 entry):
+    ///
+    /// - **`.sourceToTarget` seeds the search where the source already sits**, on the reasoning that
+    ///   a part has usually moved a little. A whole drawing has not: an L 120 points across that
+    ///   moved 400 is further than ICP's basin is wide, so all eight restarts fell into the *same*
+    ///   wrong minimum (118°, mean 22.4) while the correct motion scored 5.6. The multi-start bought
+    ///   nothing because rotating the seed in place never moves it nearer.
+    /// - **One-directional matching lets a rotated partial overlap outscore the true motion.** A
+    ///   hand-drawn rectangle translated 40 points fitted at 27° with mean 3.63, beating its own
+    ///   correct fit's 4.00, because nothing pulls the target's extremities back into the objective.
+    ///
+    /// Either way the whole-drawing fit came out wrong, every stroke's residual was therefore large,
+    /// and grouping split a body that moves as one into its individual strokes — each of which is
+    /// then a lone straight segment, the 180° tie no objective can break. Matched bidirectionally the
+    /// same L fits exactly, and an L turned 90° about its own centre now fits to the last bits where
+    /// before it did not.
     private static func analyse(_ members: [Int], strokes: [[CGPoint]], target: PointCloudIndex,
-                                options: Options)
+                                options: Options, isWholeDrawing: Bool)
         -> (fit: Similarity, residuals: [CGPoint], meanResidual: CGFloat) {
         let points = members.flatMap { strokes[$0] }
         guard !points.isEmpty, !target.isEmpty else {
@@ -210,7 +233,8 @@ enum MotionGrouping {
         let fit = ARAPRegistration.similarityICP(source: points, target: target,
                                                  iterations: options.icpIterations,
                                                  restarts: options.icpRestarts,
-                                                 matching: .sourceToTarget, allowScale: false)
+                                                 matching: isWholeDrawing ? .bidirectional : .sourceToTarget,
+                                                 allowScale: false)
         var residuals: [CGPoint] = []
         residuals.reserveCapacity(members.count)
         var total: CGFloat = 0

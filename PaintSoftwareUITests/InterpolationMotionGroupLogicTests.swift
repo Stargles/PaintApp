@@ -667,11 +667,9 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
     /// them fitted alone. `registerGroups` will split when the residuals say so, and a lone straight
     /// stroke is precisely the case `HANDOFF.md` §5's Phase 4.7 entry proves is a *tie* — it maps onto
     /// itself under a half turn, so the fit is chosen on arithmetic noise.
+    /// **Fixed in Phase 5.1** by matching the whole-drawing group bidirectionally — see
+    /// `MotionGrouping.analyse`. The `XCTExpectFailure` this carried is gone.
     func testAHandDrawnSecondKeyframeStillGroupsAsOnePart() throws {
-        // **PINNED BUG — this is a real regression, not a characterisation.** Wrapped the way Phase
-        // 4.7 wrapped its three engine bugs, so the tree stays honest-green while the failure stays
-        // described. Take the wrapper off when it is fixed; if it ever reports "expected failure but
-        // none recorded", the fix landed and this becomes an ordinary assertion.
         let manager = manager()
         let size = manager.canvasSize ?? CanvasFixture.canvasSize
         let cels = (0..<3).map { i in
@@ -700,12 +698,9 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
         generate(manager, cels: cels)
 
         let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
-        XCTExpectFailure("Auto-grouping over-splits a single hand-drawn body into its own strokes "
-                         + "— see HANDOFF.md §8 item 43") {
-            XCTAssertEqual(recipe.groups.count, 1,
-                           "an L is one body — splitting its two legs fits each straight stroke "
-                           + "alone, which is the 180-degree tie of HANDOFF.md §5")
-        }
+        XCTAssertEqual(recipe.groups.count, 1,
+                       "an L is one body — splitting its two legs fits each straight stroke "
+                       + "alone, which is the 180-degree tie of HANDOFF.md §5")
         let half = try XCTUnwrap(InterpolationEvaluator.evaluate(
             recipe: recipe, at: 0.5, content: manager.interpolationContentProvider,
             options: manager.interpolationOptions))
