@@ -73,6 +73,7 @@
 		DEC0DE000000000000000044 /* PaintSoftware/Views/OnionSkinSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000043 /* PaintSoftware/Views/OnionSkinSource.swift */; };
 		DEC0DE000000000000000046 /* OnionSkinLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000045 /* OnionSkinLogicTests.swift */; };
 		DEC0DE0000000000000000A1 /* InterpolationEngineDiagnosticsLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000A0 /* InterpolationEngineDiagnosticsLogicTests.swift */; };
+		DEC0DE0000000000000000B1 /* InterpolationMotionGroupLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000B0 /* InterpolationMotionGroupLogicTests.swift */; };
 		DEC0DE000000000000000048 /* PaintSoftware/Engine/Deform/Lattice.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000047 /* PaintSoftware/Engine/Deform/Lattice.swift */; };
 		DEC0DE00000000000000004A /* LatticeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000049 /* LatticeLogicTests.swift */; };
 		DEC0DE2F0000000000000002 /* PaintSoftware/Models/InterpolationRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE2F0000000000000001 /* PaintSoftware/Models/InterpolationRecipe.swift */; };
@@ -169,6 +170,7 @@
 		DEC0DE000000000000000043 /* PaintSoftware/Views/OnionSkinSource.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/OnionSkinSource.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000045 /* OnionSkinLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OnionSkinLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000A0 /* InterpolationEngineDiagnosticsLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolationEngineDiagnosticsLogicTests.swift; sourceTree = "<group>"; };
+		DEC0DE0000000000000000B0 /* InterpolationMotionGroupLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolationMotionGroupLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000047 /* PaintSoftware/Engine/Deform/Lattice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/Lattice.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000049 /* LatticeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LatticeLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE2F0000000000000001 /* PaintSoftware/Models/InterpolationRecipe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/InterpolationRecipe.swift; sourceTree = "<group>"; };
@@ -260,6 +262,7 @@
 				9A7B5C3D1E2F000000000E01 /* VectorEraserLogicTests.swift */,
 				DEC0DE000000000000000045 /* OnionSkinLogicTests.swift */,
 				DEC0DE0000000000000000A0 /* InterpolationEngineDiagnosticsLogicTests.swift */,
+				DEC0DE0000000000000000B0 /* InterpolationMotionGroupLogicTests.swift */,
 				DEC0DE000000000000000049 /* LatticeLogicTests.swift */,
 				DEC0DE00000000000000004F /* ARAPLogicTests.swift */,
 				DEC0DE2F0000000000000007 /* InterpolationModelLogicTests.swift */,
@@ -513,6 +516,7 @@
 				DEC0DE000000000000000044 /* PaintSoftware/Views/OnionSkinSource.swift in Sources */,
 				DEC0DE000000000000000046 /* OnionSkinLogicTests.swift in Sources */,
 				DEC0DE0000000000000000A1 /* InterpolationEngineDiagnosticsLogicTests.swift in Sources */,
+				DEC0DE0000000000000000B1 /* InterpolationMotionGroupLogicTests.swift in Sources */,
 				DEC0DE000000000000000048 /* PaintSoftware/Engine/Deform/Lattice.swift in Sources */,
 				DEC0DE00000000000000004A /* LatticeLogicTests.swift in Sources */,
 				DEC0DEDF0000000000000005 /* PaintSoftware/Engine/Deform/MotionGrouping.swift in Sources */,
