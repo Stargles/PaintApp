@@ -44,11 +44,11 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 5 — motion groups. All four items built; NOT signed off.** The phase-boundary full run found **one regression**, bisected to Session 13's `2870773` and reproduced at the logic tier in 9 seconds: **auto-grouping over-splits a single hand-drawn body into its individual strokes.** §8 item 43 is the write-up and it is the next session's first job — fix it, take the `XCTExpectFailure` off, re-run the full suite, *then* start Phase 6. |
+| **Current phase** | **Phase 5 — motion groups. COMPLETE and signed off.** Session 14's one open regression (§8 item 43) is fixed: the whole-drawing group is matched bidirectionally, because at that level the two clouds are the same content drawn twice. The pinned `XCTExpectFailure` is gone and the e2e passes. **Phase 6 — Reproject and editing at an intermediate frame — is next and has not been started.** |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`**. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | `166182f`. Wider pure-logic tier 453/453; `InterpolationMotionGroupLogicTests` 36/36 with **one** `XCTExpectFailure` (§8 item 43), which is a green run, not a red one. Full suite at the phase boundary: **560 tests, 558 passed, 1 failed, 1 skipped** — the one failure is `testInterpolateModeEndToEndFromGestureToScrub`, and it is item 43. |
+| **Last known-green commit** | `bf17928`, plus Session 15's doc commit on top. Fast tier **261/261**, wider pure-logic tier **458/458**, and the phase-boundary full run **565 tests, 564 passed, 0 failed, 1 skipped** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design. **Zero expected failures anywhere**: for the first time since Phase 4.7 the tree carries no pinned bugs. |
 | **Tree state** | Clean. |
-| **Blocked on** | Nothing, but **do not start Phase 6 first** — §8 item 43 is an open regression in shipped Phase 4 behaviour, and it is pinned rather than fixed. |
+| **Blocked on** | Nothing. |
 
 **Papers: supplied and read — do not re-request.** [MoStyle/frite](https://github.com/MoStyle/frite)
 and [Inria RR-9559](https://inria.hal.science/hal-04797216/file/RR-9559.pdf). **§5.11 is the
@@ -221,12 +221,24 @@ reset *before* the phase-boundary run, not after it starts failing.
     tag colours through `setInterpolationImage`, untagged ones grey; solo/mute is
     `InterpolationEvaluator.Options.hiddenGroups`, threaded into `InterpolationPreviewKey` and gated
     on the mode.
-  - Tests: `InterpolationMotionGroupLogicTests` (33). **Two product decisions were taken off the back
+  - Tests: `InterpolationMotionGroupLogicTests` (36). **Two product decisions were taken off the back
     of them**, and are now `PLAN.md` §10 decision 8 and decision 2's amendment — see §5.
+
+- **Phase 5.1 — the one regression that held Phase 5 open.** One commit, `bf17928`; one line of
+  `MotionGrouping.swift` plus its reasoning. The phase-boundary full run found auto-grouping
+  over-splitting a single hand-drawn body into its individual strokes, each of which is then the
+  180° tie of §5. `analyse` was applying the **part** matching rule to the group the recursion starts
+  from — but that group is the entire drawing, so the two clouds are the same content drawn twice and
+  the rule is `.bidirectional`. It cost the answer twice over: the in-place seed cannot reach a
+  translation larger than the drawing (all eight restarts fell into the *same* wrong minimum), and
+  one-directional matching let a rotated partial overlap outscore the true motion. Both are measured
+  in §8 item 43. `icpRestarts` is untouched. Two clean fixtures that merely *passed* before now fit
+  at zero residual, and a drawing turned 90° is fitted exactly where before it was not fitted at all.
 
 ### What is next
 
-**Phase 6 — Reproject and editing at an intermediate frame.** Read `IMPLEMENTATION.md`'s Phase 6
+**Phase 6 — Reproject and editing at an intermediate frame.** Nothing blocks it: Phase 5 is signed
+off and the tree carries no pinned failures. Read `IMPLEMENTATION.md`'s Phase 6
 section, then §8 item 25, which is the product owner's own statement of what they want from it and
 names the one thing that does **not** fit the mechanism: a liquify at *t* is a deformation, not an
 element, so it has no `LocalEdit` shape at all and where it is stored is an open design question to
@@ -955,6 +967,11 @@ the code was written.
   fixture rule exists because a shape is hard to fit, remember that the same rule excludes the shapes
   the fit is worst at.
 
+  **Amended by Session 15: "closed" was not the property that made those fixtures blind — "drawn
+  twice identically" was.** A hand-jittered *rectangle* over-splits exactly as the L does, and
+  `testAHandJitteredBodyThatMovedFurtherThanItsOwnSizeStaysOneGroup` now covers both. The paragraph
+  above credited the immunity to the wrong half of the fixture. See §5's Phase 5.1 entry.
+
 - **`registerGroups` made every part individually degenerate, and 4.7's fixes were measured on whole
   frames.** Phase 4.7 tuned registration against drawings fitted as one group. Phase 5 fits *parts*,
   and a part can be a single straight stroke — the exact input §5's Phase 4.7 entry proves is a tie
@@ -990,6 +1007,51 @@ the code was written.
 
 - **A `MotionGroupChip` count of zero is shown rather than hidden.** A group with nothing in it is
   one to tag into or delete; hiding it makes it unreachable rather than tidy.
+
+### From Phase 5.1 (fixing §8 item 43)
+
+- **"Which matching direction" is a statement about what the target *contains*, and it has to be
+  re-asked every time the source changes size.** `.sourceToTarget` versus `.bidirectional` is
+  documented on `ARAPRegistration.Matching` as exactly that — bidirectional when the two clouds are
+  the same content drawn twice, one-directional when the source is only a part of what the target
+  shows. `MotionGrouping.analyse` had the rule right for a part and applied it to the group the
+  recursion *starts* from, which is the whole drawing and therefore the bidirectional case. One
+  wrong answer to a question the codebase had already answered correctly elsewhere.
+
+  The general shape is worth carrying: a helper whose correctness depends on a property of its
+  *caller's* data (here "is the source all of the target's content?") will be called one day from a
+  site where that property does not hold, and nothing in the type system notices. The fix passes the
+  property in rather than assuming it.
+
+- **A multi-start that seeds *in place* buys nothing when the content has moved further than its own
+  size, and it looks exactly like a multi-start that is working.** All eight restarts on the L
+  converged to the identical wrong minimum — same angle, same translation, same score to three
+  decimals. Rotating a seed about its own centroid never moves it nearer to a target 400 points
+  away, so every restart entered the same basin. **The tell is that the restarts agree.** If a
+  multi-start's candidates all converge to one answer, it is not confirming that answer, it is
+  reporting that the seeds were never distinct.
+
+- **The hand-drawn *closed outline* over-splits too, so §5's "closed outlines never over-split" was
+  half right and the half that was wrong is the useful half.** Session 14's entry below concluded
+  that every logic fixture is closed and a closed outline pins its own orientation. True of a
+  closed outline drawn *twice identically*, which is what every fixture was — and the clean-geometry
+  half is doing the work, not the closed half. Put four points of jitter on a rectangle and it
+  over-split as readily as the L. **When writing a fixture, ask which of its properties the test is
+  actually leaning on**; "closed" and "drawn twice identically" were being credited to the same
+  cause.
+
+- **Diagnosis-before-fix paid again, and this time it saved building the wrong thing three ways.**
+  Item 43 offered three candidate fixes; the harness refuted all three in one run, including the
+  coverage gate, which was the most principled-looking of them and which *would have accepted the
+  bad split* (children cov@8 0.542 against the broken parent's 0.133). A gate that compares children
+  to their parent cannot help when the parent fit is what is wrong. Copy `Engine/Deform`'s five
+  files to a scratch directory and print the numbers before choosing.
+
+- **Fixing the fit made two *passing* tests strictly better, which is the sign it was the real
+  cause.** The clean L and the clean rectangle both had non-zero residuals before (4.617 and 2.458)
+  and simply stayed under the split threshold; both now fit at **0.000**, and a whole drawing turned
+  90° now fits exactly where before its own multi-start could not find the rotation. A fix that only
+  moves a threshold does not do that.
 
 ### 5.11 What the papers do — and where they do not help
 
@@ -1256,6 +1318,22 @@ What Phase 3 decided that Phase 4 inherits:
   single hand-drawn body into its own strokes, and each lone straight stroke is then the 180°
   tie of §5. Pinned with `XCTExpectFailure` and written up as §8 item 43 rather than fixed on
   the last of the budget. Five new §8 items, none built. No subagents.
+
+- **Session 15 (Phase 5.1 — closing §8 item 43) — 2026-08-05:** **Phase 5 is signed off.** One
+  engine commit, `bf17928`: `MotionGrouping.analyse` was applying the *part* matching rule to the
+  group the recursion starts from, which is the whole drawing and therefore `.bidirectional`'s case.
+  **None of item 43's three candidate fixes was the cause**, and the standalone `swiftc` harness
+  refuted all three in one loop — including the coverage gate, the most principled-looking of them,
+  which would have *accepted* the bad split because it compares children against a parent that is
+  itself wrong. The measurements are in §8 item 43 and §5's Phase 5.1 entry; the two that matter are
+  that all eight restarts converged to the *same* wrong minimum (a seed rotated in place never
+  reaches a target 400 points away) and that one-directional matching let a 27° overlap outscore the
+  true translation. `icpRestarts` untouched at 8. The pinned `XCTExpectFailure` is gone; two
+  `ARAPLogicTests` added for the fixture class the logic tier was blind to. Corrected a §5 entry that
+  credited that blindness to the wrong property — "drawn twice identically", not "closed". Full suite
+  **565 / 564 passed / 0 failed / 1 skipped**, zero expected failures, first attempt after a `simctl
+  erase` — four phase boundaries in a row where resetting first gave a clean run. One new §8 item
+  (44), not built. No subagents.
 
 ---
 
@@ -1766,42 +1844,47 @@ Session 12 rather than optional extras. **31, 32 and 35 are DONE** (commits `b91
     against the keyframes' `version`s — and it is a few lines. Recorded rather than done because
     guessing at a cache before measuring is how the render path got complicated.
 
-43. **OPEN REGRESSION — auto-grouping over-splits a single hand-drawn body, and it is the next
-    session's first job.** Introduced by Session 13's `2870773`, found by Session 14's
-    phase-boundary full run, bisected to that commit (the e2e passes at `26f8b7a` and fails at
-    `2870773`), and reproduced at the logic tier in 9 seconds by
-    `testAHandDrawnSecondKeyframeStillGroupsAsOnePart`, which is pinned with `XCTExpectFailure`.
+43. **DONE (Session 15, `bf17928`).** Auto-grouping over-split a single hand-drawn body into its
+    individual strokes, each of which is then the 180° tie of §5. Introduced by Session 13's
+    `2870773`, pinned by Session 14, fixed here.
 
-    **What happens.** An L — two strokes — drawn by hand at both keyframes, so keyframe C is not a
-    clean translation of A. `MotionGrouping` reads the leftover residual as two motions and splits
-    the legs into two parts. `registerGroups` then fits **each leg on its own**, and a lone straight
-    stroke is exactly the degenerate case §5's Phase 4.7 entry *proves* is a tie: a segment maps onto
-    itself under a half turn, so the two fits score identically and the choice is arithmetic noise.
-    Phase 4 could never hit this, because it always fitted one whole-frame group; the parts only
-    became individually degenerate when parts became a thing.
+    **None of the three candidate fixes below was the cause, and the standalone harness is what said
+    so** — the whole diagnosis took one `swiftc -O` loop. The cause is one line:
+    `MotionGrouping.analyse` applied the **part** matching rule to the group the recursion *starts*
+    from. A part is correctly matched `.sourceToTarget`; the root group is the entire drawing, and
+    then the two clouds are the same content drawn twice, which is exactly `.bidirectional`'s
+    premise. The full write-up is §5's "From Phase 5.1" entry and the comment on `analyse`.
 
-    **Why the existing logic tests did not catch it.** Every fixture in `ARAPLogicTests` and
-    `InterpolationMotionGroupLogicTests` uses *closed outlines* — a rectangle of four strokes, a
-    triangle of three — precisely because §5's Phase 1 entry says loose strokes make bad fixtures.
-    A closed outline pins its own orientation, so it never splits. The e2e's open L is the first
-    fixture in the project that is both realistic and degenerate, and it took the XCUITest to find
-    it. **The lesson generalises: the fixtures that are good for testing grouping are exactly the
-    ones that cannot exhibit this bug.**
+    The three candidates are kept below because each was plausible and each is now known *not* to be
+    the answer, which is worth as much as knowing what was:
+    - **A minimum part size or a stricter `residualThreshold`** — would have masked it. The residuals
+      were large because the fit was wrong, not because the body has two motions.
+    - **A re-merge pass** (§8 item 5) — would have merged two groups whose fits were both garbage.
+      Still worth building on its own merits; it is no longer urgent.
+    - **A coverage gate on the split** — measured, and it would have *accepted* the split: children
+      cov@8 0.542 against the broken parent's 0.133. A gate comparing children to a parent cannot
+      help when the parent is the thing that is wrong.
 
-    **Three candidate fixes, none tried.** Do not pick from the armchair — `Engine/Deform` compiles
-    standalone with `swiftc` in ~5 seconds a loop (§5's Phase 4.7 entry), so measure.
-    - **A minimum part size or a stricter `residualThreshold`.** Cheapest. Wrong if it only moves the
-      threshold at which the same failure appears.
-    - **A re-merge pass** — §8 item 5, already on this list, which says merging groups whose fitted
-      motions agree is the tidy-up `MotionGrouping` never got. This bug is that item becoming urgent.
-    - **A coverage gate on the split** — accept a split only when each part's own fit beats the
-      parent's by a real margin, measured as *coverage* rather than mean residual, which §5 shows is
-      a lying metric. This is items 32/36/37's shared coverage metric, so building it pays three
-      other debts.
+44. **A *part* that is itself a hand-drawn body can still over-split — item 43's fix is about the
+    root group only.** Found while measuring item 43, on a fixture that is not in the suite: two
+    hand-jittered bodies where one moves. The root correctly splits into rectangle and triangle, and
+    then the rectangle *part* — now fitted `.sourceToTarget` from where it already sits, which is
+    the right rule for a part — over-splits 3 + 1, and the triangle part (which does not move at
+    all) fits at 126°. Three groups where two are right.
 
-    **Watch for the interaction with the seed protection** added this session: seeded groups are
-    never split now, so any fix must not accidentally re-enable that path, and the tagging workflow
-    is the artist's existing escape hatch from this bug today.
+    This is the same disease one level down: the part path's in-place seed plus eight restarts picks
+    a spurious rotation on jittered content. It is **not** the same fix, because a part genuinely
+    cannot be matched bidirectionally — the target holds the other parts' ink.
+
+    Measured, so the next session does not re-measure: sweeping `icpRestarts` over 1, 2, 4, 8, 12
+    with the root fix in gives part counts `3,3,3,2,2` on the two-clean-bodies fixture and
+    `3,3,3,3,2` on the jittered one. **12 gets every fixture right and 1 breaks
+    `testTwoBodiesMovingDifferentlySplitIntoExactlyTwoGroups`.** Moving the dial from 8 to 12 on
+    that evidence would be tuning noise, which is why it was not moved — §5's Phase 4.7 entry on the
+    direction margin is the cautionary tale. A real fix needs a per-part prior that is better than
+    "it has not moved": §5.3's bootstrap hints (a coarse flow field, matching tags), or the
+    coverage-scored restart selection §8 item 37 wants. Over-splitting is the safe direction and
+    merging is one tap, so this is a quality item, not a correctness one.
 
 35. **DONE (Session 12).** Subsample the registration point cloud. `Options.maxRegistrationSamples`
     is 250 and caps what *drives* the fit; residuals are still reported for every source point,

@@ -578,6 +578,12 @@ enum ARAPRegistration {
         /// Pair source→target only. Correct when the source is a *part* of what the target shows —
         /// fitting one motion group against the whole target drawing. Matching backwards there
         /// would drag every other group's geometry into this group's fit.
+        ///
+        /// **Check that the source really is only a part before choosing this.** It also seeds the
+        /// search where the source already sits (see `seed`), which is a good prior for a part and a
+        /// bad one for a whole drawing that has travelled — `MotionGrouping.analyse` picked this for
+        /// its root group and cut single bodies into their strokes for a phase (`HANDOFF.md` §8
+        /// item 43).
         case sourceToTarget
     }
 

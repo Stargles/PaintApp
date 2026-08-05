@@ -549,10 +549,11 @@ with keyframe C recorded in both directions. See `HANDOFF.md` §5.
 **Definition of done.** Auto-grouping produces sensible groups on a two-limb test drawing; the artist
 can retag and see the result immediately; group state persists and undoes.
 
-> **Not yet signed off (Session 14).** The retagging and persistence halves hold and are tested.
-> The *auto-grouping* half does not: it over-splits a single hand-drawn body into its individual
-> strokes, which then fit as the 180° tie. `HANDOFF.md` §8 item 43 is the write-up, and closing
-> it is what signs this phase off.
+> **Signed off (Session 15).** Session 14 held the phase open on one regression — auto-grouping
+> over-split a single hand-drawn body into its individual strokes, which then fit as the 180° tie.
+> `HANDOFF.md` §8 item 43 is closed: the whole-drawing group is now matched bidirectionally, because
+> at that level the two clouds are the same content drawn twice. The pinned test lost its
+> `XCTExpectFailure` and two `ARAPLogicTests` were added for the fixture class that was blind to it.
 
 **Estimate.** Two sessions.
 
