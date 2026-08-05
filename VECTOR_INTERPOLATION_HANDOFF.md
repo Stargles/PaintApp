@@ -1737,6 +1737,15 @@ Session 12 rather than optional extras. **31, 32 and 35 are DONE** (commits `b91
     honest interim would be to grey them like untagged strokes, which was not done because grey flats
     over tinted lineart is its own kind of misleading.
 
+42. **`motionGroupChips` walks both keyframes' display lists on every SwiftUI pass.** It is what puts
+    the ink count on each chip, and the count is genuinely the useful part — "how much of what I am
+    looking at is in this group" is the question an artist correcting a grouping has. But it is an
+    O(elements) walk per pass, and standing constraint C anticipates >1000-object layers, so on real
+    art it is 2000+ element visits per frame of SwiftUI. Nothing measured it; nothing has been slow.
+    The fix if it ever matters is the same shape as `InterpolationPreviewKey` — memoize the counts
+    against the keyframes' `version`s — and it is a few lines. Recorded rather than done because
+    guessing at a cache before measuring is how the render path got complicated.
+
 35. **DONE (Session 12).** Subsample the registration point cloud. `Options.maxRegistrationSamples`
     is 250 and caps what *drives* the fit; residuals are still reported for every source point,
     because motion grouping reads them per point. The target cloud is capped by

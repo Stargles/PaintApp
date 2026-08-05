@@ -570,6 +570,45 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
         XCTAssertTrue(strokeTags(of: manager.layers[1].cels[0]).contains(doomed))
     }
 
+
+    /// The end-to-end XCUITest's own drawing, at the logic tier: an L that translates right, one
+    /// motion group, probed at the midpoint. It exists because the e2e version of this costs 95
+    /// seconds inside a 22-minute suite, and when it fails all it can say is "no ink at one point".
+    func testTheEndToEndDrawingWarpsToTheMidpointAtHalfWay() throws {
+        let manager = manager()
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        let cels = (0..<3).map { i in
+            Cel(id: UUID(), startFrame: i * 4, frameCount: 4, raster: .empty(size: size),
+                vector: .empty(size: size))
+        }
+        manager.layers[1].cels = cels
+        func ell(x: CGFloat) -> [[CGPoint]] {
+            [bar(from: CGPoint(x: x, y: 420), to: CGPoint(x: x + 120, y: 420), count: 12),
+             bar(from: CGPoint(x: x + 120, y: 420), to: CGPoint(x: x + 120, y: 560), count: 14)]
+        }
+        for points in ell(x: 220) { cels[0].vector?.addStroke(stroke(points)) }
+        for points in ell(x: 620) { cels[2].vector?.addStroke(stroke(points)) }
+        generate(manager, cels: cels)
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual(recipe.t, 0.5, "Generate starts at the midpoint")
+        let half = try XCTUnwrap(InterpolationEvaluator.evaluate(
+            recipe: recipe, at: 0.5, content: manager.interpolationContentProvider,
+            options: manager.interpolationOptions))
+
+        func meanX(_ elements: [VectorElement]) -> CGFloat {
+            let xs = elements.compactMap(\.stroke).flatMap { $0.samples.map(\.x) }
+            return xs.isEmpty ? .nan : xs.reduce(0, +) / CGFloat(xs.count)
+        }
+        let forwardX = meanX(half.forward), backwardX = meanX(half.backward)
+        XCTAssertEqual(half.forwardWeight, 0.5, accuracy: 0.01)
+        XCTAssertEqual(half.backwardWeight, 0.5, accuracy: 0.01)
+        XCTAssertEqual(forwardX, 480, accuracy: 60,
+                       "keyframe A's L should be warped to the middle, not left at 280")
+        XCTAssertEqual(backwardX, 480, accuracy: 60,
+                       "and keyframe C's back to the middle, not left at 680")
+    }
+
     // MARK: - The chips, the armed group and the retagging gesture
 
     /// The chips are drawn from the **registry**, not from the active recipe's bindings, because a
