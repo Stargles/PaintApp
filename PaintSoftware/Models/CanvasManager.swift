@@ -95,6 +95,28 @@ final class CanvasManager: ObservableObject {
     /// dragged. Selects `.preview` render quality for the duration; see `RenderQuality`.
     @Published var isScrubbingInterpolation: Bool = false
 
+    /// The motion group a canvas tap assigns to, or nil when tapping does nothing — Phase 5's
+    /// retagging gesture, armed from its chip on `InterpolateBar`.
+    ///
+    /// **Armed state rather than a tool**, for the same reason `isInterpolateMode` is not a `Tool`
+    /// case: the artist keeps whatever brush they had, and arming a group must not evict it. It is
+    /// also why this is transient and cleared on leaving the mode — an armed group left set would
+    /// turn the next ordinary tap into a silent document edit.
+    ///
+    /// Deliberately not a *selection* of strokes. §8 item 36's constraint is that a group's
+    /// membership stays "which ink is in this group" and never "which stroke pairs with which", and
+    /// arm-then-tap writes exactly that: one tag per stroke, no pairing anywhere.
+    @Published var armedMotionGroupID: UUID? = nil
+
+    /// Motion groups hidden from the interpolated preview — the mute half of Phase 5's solo/mute.
+    ///
+    /// A view filter, not document state: it changes what the in-between *shows* while the artist is
+    /// working out which part moves wrongly, and it must not survive the session or reach the file.
+    /// It feeds `InterpolationEvaluator.Options.hiddenGroups`, and it is in `InterpolationPreviewKey`
+    /// — without that the preview is memoized against inputs that do not mention it and muting
+    /// appears to do nothing until something unrelated forces a re-render (`HANDOFF.md` §5, Phase 4).
+    @Published var hiddenMotionGroups: Set<UUID> = []
+
     @Published var currentLayerIndex: Int = 0 {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }

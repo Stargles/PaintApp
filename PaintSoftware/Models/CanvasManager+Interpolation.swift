@@ -188,6 +188,111 @@ extension CanvasManager {
         }
     }
 
+    // MARK: - The groups the bar shows, and the retagging gesture
+
+    /// One chip's worth of state — a registered group plus how much of the current keyframes is
+    /// actually in it.
+    struct MotionGroupChip: Identifiable {
+        var group: MotionGroup
+        /// Strokes carrying this group's id across every flagged keyframe. Zero is meaningful: it is
+        /// a group the artist made or deleted the last stroke out of, and hiding it would make it
+        /// unreachable rather than tidy.
+        var strokeCount: Int
+        var isArmed: Bool
+        var isHidden: Bool
+        var id: UUID { group.id }
+    }
+
+    /// The groups `InterpolateBar` puts on screen, in registry order.
+    ///
+    /// The registry rather than the active recipe's bindings, because a `MotionGroup` is
+    /// **document-level** by design (requirement 5: one group spans a lineart layer and a flats
+    /// layer), so scoping the chips to one recipe would hide the group an artist is about to tag
+    /// content into on a second layer. Counts are over the flagged keyframes, which is the drawing in
+    /// front of them.
+    ///
+    /// Phase 4's whole-frame binding has a `groupID` with no registry entry and so contributes no
+    /// chip — deliberately. It is not an artist-facing object and never was (`HANDOFF.md` §5.10);
+    /// `hasAnonymousWholeFrameGroup` is what the bar uses to say so in words instead.
+    var motionGroupChips: [MotionGroupChip] {
+        let provider = interpolationContentProvider
+        var counts: [UUID: Int] = [:]
+        for reference in interpolationKeyframes {
+            for element in reference.cels.flatMap(provider) {
+                guard let id = element.stroke?.motionGroupID else { continue }
+                counts[id, default: 0] += 1
+            }
+        }
+        return motionGroups.map {
+            MotionGroupChip(group: $0, strokeCount: counts[$0.id] ?? 0,
+                            isArmed: armedMotionGroupID == $0.id,
+                            isHidden: hiddenMotionGroups.contains($0.id))
+        }
+    }
+
+    /// True when the cel under the playhead derives from a recipe whose grouping is Phase 4's single
+    /// anonymous whole-frame binding — one part, no registry entry, nothing tagged.
+    var hasAnonymousWholeFrameGroup: Bool {
+        guard let at = interpolationTarget,
+              let recipe = layers[at.layer].cels[at.cel].interpolation,
+              recipe.groups.count == 1 else { return false }
+        return motionGroup(withID: recipe.groups[0].groupID) == nil
+    }
+
+    /// Arms a group for tap-to-assign, or disarms it when it is already armed.
+    ///
+    /// Toggling rather than a separate off switch: the chip is the only control, and an artist who
+    /// has finished tagging presses the thing they pressed to start. Arming a *different* group while
+    /// one is armed just moves the arming, which is what tagging several parts in a row looks like.
+    func toggleArmedMotionGroup(_ id: UUID) {
+        armedMotionGroupID = armedMotionGroupID == id ? nil : id
+    }
+
+    /// The retagging gesture: assign the stroke under `point` on the current layer to the armed group.
+    ///
+    /// Returns the stroke it tagged, or nil when nothing was armed, the layer is not a vector layer,
+    /// or the tap landed on bare canvas — all three are "do nothing quietly" rather than errors, since
+    /// a miss is an ordinary part of tapping at strokes.
+    ///
+    /// The cel it reaches is `interpolationTarget`, the same one every other command in this mode
+    /// acts on (`HANDOFF.md` §5.10). In practice that is a *keyframe*, because that is where the ink
+    /// is: standing on the derived in-between there is nothing to tap, which is correct — the
+    /// in-between has no strokes of its own to belong to a group.
+    ///
+    /// Tapping a stroke **already** in the armed group clears its tag instead, so one gesture both
+    /// adds and removes and the artist can undo a mis-tap without hunting for a second control. Note
+    /// what clearing means here, which is not what it sounds like: registration re-tags everything it
+    /// partitions, so the stroke is re-decided by geometry rather than left out
+    /// (`InterpolationMotionGroupLogicTests` pins this).
+    ///
+    /// It goes through `setMotionGroup`, so it re-registers and undoes in exactly one step like any
+    /// other retag.
+    @discardableResult
+    func assignArmedMotionGroup(atCanvasPoint point: CGPoint) -> UUID? {
+        guard let armed = armedMotionGroupID, isInterpolateMode,
+              let at = interpolationTarget,
+              let canvas = layers[at.layer].cels[at.cel].vector,
+              let stroke = canvas.topmostStroke(atCanvasPoint: point) else { return nil }
+        setMotionGroup(stroke.motionGroupID == armed ? nil : armed, forStrokeIDs: [stroke.id])
+        return stroke.id
+    }
+
+    // MARK: - Solo and mute
+
+    /// Hides or shows one group in the interpolated preview.
+    func toggleMotionGroupHidden(_ id: UUID) {
+        if hiddenMotionGroups.contains(id) { hiddenMotionGroups.remove(id) }
+        else { hiddenMotionGroups.insert(id) }
+    }
+
+    /// Solo: show only this group. Pressing it again on the group that is already alone clears the
+    /// filter rather than hiding everything, which is the only reading that lets solo be its own
+    /// off switch.
+    func soloMotionGroup(_ id: UUID) {
+        let others = Set(motionGroups.map(\.id)).subtracting([id])
+        hiddenMotionGroups = hiddenMotionGroups == others ? [] : others
+    }
+
     // MARK: - Tag by stroke colour
 
     /// **Tag by stroke colour** — `PLAN.md` §5.1.1's one-shot populate.
@@ -445,6 +550,10 @@ extension CanvasManager {
     func exitInterpolateMode() {
         isInterpolateMode = false
         interpolationReferences.removeAll()
+        // Both are view state that only means anything inside the mode, and an armed group left set
+        // would turn the next ordinary canvas tap into a silent retag.
+        armedMotionGroupID = nil
+        hiddenMotionGroups.removeAll()
     }
 
     func isInterpolationReference(celID: UUID, inLayer layerID: UUID) -> Bool {

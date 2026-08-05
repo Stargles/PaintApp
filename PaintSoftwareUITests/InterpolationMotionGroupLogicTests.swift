@@ -570,6 +570,182 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
         XCTAssertTrue(strokeTags(of: manager.layers[1].cels[0]).contains(doomed))
     }
 
+    // MARK: - The chips, the armed group and the retagging gesture
+
+    /// The chips are drawn from the **registry**, not from the active recipe's bindings, because a
+    /// group is document-level by design — scoping them to one recipe would hide the group an artist
+    /// is about to tag content into on a second layer (requirement 5).
+    func testTheChipsShowEachRegisteredGroupAndHowMuchInkIsInIt() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+
+        let chips = manager.motionGroupChips
+        XCTAssertEqual(chips.count, 2)
+        XCTAssertEqual(chips.map(\.strokeCount).reduce(0, +), 14,
+                       "seven strokes on each of the two keyframes are all accounted for")
+        XCTAssertEqual(Set(chips.map(\.strokeCount)), [8, 6],
+                       "four rectangle strokes and three triangle strokes, twice over")
+        XCTAssertFalse(chips.contains { $0.isArmed || $0.isHidden })
+    }
+
+    /// Phase 4's whole-frame binding has a group id with no registry entry, and it must stay that way
+    /// — it is not an artist-facing object (`HANDOFF.md` §5.10). So it contributes no chip, and the
+    /// bar says so in words instead.
+    func testASinglePartDrawingShowsNoChipsButIsReportedAsTheWholeFrameGroup() {
+        let manager = manager()
+        let cels = oneBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        manager.goToFrame(4)
+
+        XCTAssertTrue(manager.motionGroupChips.isEmpty)
+        XCTAssertTrue(manager.hasAnonymousWholeFrameGroup)
+    }
+
+    func testArmingIsAToggleAndOnlyOneGroupIsEverArmed() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        let chips = manager.motionGroupChips
+        XCTAssertEqual(chips.count, 2, "Setup")
+
+        manager.toggleArmedMotionGroup(chips[0].id)
+        XCTAssertEqual(manager.armedMotionGroupID, chips[0].id)
+        manager.toggleArmedMotionGroup(chips[1].id)
+        XCTAssertEqual(manager.armedMotionGroupID, chips[1].id, "arming another moves the arming")
+        manager.toggleArmedMotionGroup(chips[1].id)
+        XCTAssertNil(manager.armedMotionGroupID, "and the chip is its own off switch")
+    }
+
+    /// An armed group left set after leaving the mode would turn the next ordinary canvas tap into a
+    /// silent document edit.
+    func testLeavingTheModeDisarmsAndUnmutes() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        let chips = manager.motionGroupChips
+        manager.toggleArmedMotionGroup(chips[0].id)
+        manager.toggleMotionGroupHidden(chips[1].id)
+
+        manager.exitInterpolateMode()
+
+        XCTAssertNil(manager.armedMotionGroupID)
+        XCTAssertTrue(manager.hiddenMotionGroups.isEmpty)
+        XCTAssertNotNil(manager.layers[1].cels[1].interpolation,
+                        "but the recipe is document content and survives")
+    }
+
+    /// The gesture end to end: arm a group, tap a stroke belonging to the other one, and it moves —
+    /// tag, motion and all, in one undo step.
+    func testTappingAStrokeWithAGroupArmedRetagsIt() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        manager.currentLayerIndex = 1
+        manager.goToFrame(0)
+        let rectangleGroup = try XCTUnwrap(strokeTags(of: cels[0])[0])
+        manager.toggleArmedMotionGroup(rectangleGroup)
+
+        // The midpoint of the triangle's first stroke, which runs from (220,60) to (264,66).
+        let tagged = manager.assignArmedMotionGroup(atCanvasPoint: CGPoint(x: 242, y: 63))
+
+        XCTAssertEqual(tagged, strokeIDs(of: cels[0])[4], "the tap found the stroke under it")
+        XCTAssertEqual(strokeTags(of: cels[0])[4], rectangleGroup)
+        manager.undo()
+        XCTAssertNotEqual(strokeTags(of: manager.layers[1].cels[0])[4], rectangleGroup,
+                          "one undo takes the whole retag back")
+    }
+
+    /// Tapping a stroke that is already in the armed group clears it, so one gesture both adds and
+    /// removes and a mis-tap is undone by tapping again.
+    func testTappingAStrokeAlreadyInTheArmedGroupClearsItInstead() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        manager.currentLayerIndex = 1
+        manager.goToFrame(0)
+        let triangleGroup = try XCTUnwrap(strokeTags(of: cels[0])[4])
+        manager.toggleArmedMotionGroup(triangleGroup)
+
+        XCTAssertNotNil(manager.assignArmedMotionGroup(atCanvasPoint: CGPoint(x: 242, y: 63)))
+
+        XCTAssertNotEqual(strokeTags(of: cels[0])[4], triangleGroup,
+                          "it left the group it was in")
+    }
+
+    func testATapOnBareCanvasDoesNothingAtAll() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        manager.currentLayerIndex = 1
+        manager.goToFrame(0)
+        manager.toggleArmedMotionGroup(try XCTUnwrap(strokeTags(of: cels[0])[0]))
+        let before = strokeTags(of: cels[0])
+
+        XCTAssertNil(manager.assignArmedMotionGroup(atCanvasPoint: CGPoint(x: 600, y: 600)))
+
+        XCTAssertEqual(strokeTags(of: cels[0]), before)
+    }
+
+    func testNothingIsRetaggedWithNoGroupArmed() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        manager.currentLayerIndex = 1
+        manager.goToFrame(0)
+        let before = strokeTags(of: cels[0])
+
+        XCTAssertNil(manager.assignArmedMotionGroup(atCanvasPoint: CGPoint(x: 242, y: 63)))
+
+        XCTAssertEqual(strokeTags(of: cels[0]), before)
+    }
+
+    /// Hit testing is against the stroke's **ink**, not its centreline: a tap on the visible middle of
+    /// a fat stroke has to find it, or the gesture reads as broken.
+    func testTheTapFindsAStrokeByItsInkRatherThanItsCentreline() {
+        let canvas = VectorCanvas.empty(size: CGSize(width: 400, height: 400))
+        var fat = stroke([CGPoint(x: 100, y: 100), CGPoint(x: 200, y: 100)])
+        fat.size = 40
+        canvas.addStroke(fat)
+
+        XCTAssertEqual(canvas.topmostStroke(atCanvasPoint: CGPoint(x: 150, y: 112))?.id, fat.id,
+                       "12 points off the centreline is well inside a 40-point brush")
+        XCTAssertNil(canvas.topmostStroke(atCanvasPoint: CGPoint(x: 150, y: 260)),
+                     "and far outside it is still a miss")
+    }
+
+    /// Topmost, i.e. last in the display list — the one the artist can see under their finger.
+    func testTheTapPicksTheTopmostOfTwoOverlappingStrokes() {
+        let canvas = VectorCanvas.empty(size: CGSize(width: 400, height: 400))
+        let under = stroke([CGPoint(x: 100, y: 100), CGPoint(x: 200, y: 100)])
+        let over = stroke([CGPoint(x: 100, y: 102), CGPoint(x: 200, y: 102)])
+        canvas.addStroke(under)
+        canvas.addStroke(over)
+
+        XCTAssertEqual(canvas.topmostStroke(atCanvasPoint: CGPoint(x: 150, y: 101))?.id, over.id)
+    }
+
+    // MARK: - Solo and mute
+
+    func testMutingHidesOneGroupAndSoloHidesEveryOtherOne() throws {
+        let manager = manager()
+        let cels = twoBodyKeyframes(manager)
+        generate(manager, cels: cels)
+        let chips = manager.motionGroupChips
+        XCTAssertEqual(chips.count, 2, "Setup")
+
+        manager.toggleMotionGroupHidden(chips[0].id)
+        XCTAssertEqual(manager.hiddenMotionGroups, [chips[0].id])
+        manager.toggleMotionGroupHidden(chips[0].id)
+        XCTAssertTrue(manager.hiddenMotionGroups.isEmpty)
+
+        manager.soloMotionGroup(chips[0].id)
+        XCTAssertEqual(manager.hiddenMotionGroups, [chips[1].id], "solo hides the others")
+        manager.soloMotionGroup(chips[0].id)
+        XCTAssertTrue(manager.hiddenMotionGroups.isEmpty,
+                      "and pressing solo again on the group that is already alone is the off switch")
+    }
+
     /// The per-group mode badge is Phase 5 item 3. Nothing displays it yet; this pins that setting it
     /// is a real, undoable document edit rather than view state, which is what the badge will need.
     func testChangingAGroupsModeIsOneUndoableDocumentEdit() throws {

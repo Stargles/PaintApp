@@ -1326,6 +1326,49 @@ final class VectorCanvas {
         return index
     }
 
+    // MARK: - Hit testing
+
+    /// The **topmost** paint stroke whose ink covers `point`, or nil for a tap on bare canvas.
+    ///
+    /// Topmost, i.e. last in the display list, because that is the one the artist can see under their
+    /// finger — the same rule every other pick-what-I-touched affordance follows. Phase 5's retagging
+    /// gesture is the caller (`CanvasManager.assignArmedMotionGroup(atCanvasPoint:)`).
+    ///
+    /// Measured against the stroke's **ink**, not its centreline: the spatial index stores segment
+    /// boxes with no padding, so the query rect is grown by the layer's widest half-width and each
+    /// candidate is then tested against its own stamp radius. Without that a tap on the visible middle
+    /// of a fat stroke misses it, which reads as the gesture being broken.
+    ///
+    /// `slop` widens the target beyond the ink for a fingertip. It is added to the stroke's own
+    /// radius rather than replacing it, so a hairline is tappable without a fat stroke swallowing its
+    /// neighbours.
+    ///
+    /// Erasers are skipped. An eraser has no colour and no part — `tagMotionGroupsByStrokeColour`
+    /// skips them for the same reason — and tagging one by tapping the hole it left would be
+    /// mystifying. Fills and placed images cannot carry a tag at all (`HANDOFF.md` §8 item 11).
+    func topmostStroke(atCanvasPoint point: CGPoint, slop: CGFloat = 6) -> VectorStroke? {
+        lock.lock()
+        defer { lock.unlock() }
+        let reach = maxPaintReach() + slop
+        guard reach > 0 else { return nil }
+        let box = CGRect(x: point.x - reach, y: point.y - reach, width: reach * 2, height: reach * 2)
+
+        var best: Int?
+        for ref in strokeIndex().segments(near: box) {
+            if let best, ref.elementIndex <= best { continue }
+            guard let stroke = _elements[ref.elementIndex].stroke, stroke.composite == .paint,
+                  stroke.samples.indices.contains(ref.sampleIndex) else { continue }
+            let a = stroke.samples[ref.sampleIndex].point
+            let b = stroke.samples[min(ref.sampleIndex + 1, stroke.samples.count - 1)].point
+            let limit = slop + StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
+                                                          size: stroke.size)
+            if StrokeGeometry.distanceSquared(from: point, toSegment: a, b) <= limit * limit {
+                best = ref.elementIndex
+            }
+        }
+        return best.flatMap { _elements[$0].stroke }
+    }
+
     // MARK: - Rendering
 
     /// Rasterizes all content to a canvas-native `UIImage` (cached by `version`, one slot per
