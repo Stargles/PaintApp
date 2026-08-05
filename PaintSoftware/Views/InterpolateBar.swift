@@ -33,6 +33,11 @@ struct InterpolateBar: View {
         VStack(alignment: .leading, spacing: 6) {
             if activeRecipe != nil { timing }
             commandRow
+            // Phase 5's group controls hang off the bar rather than off a timeline gesture
+            // (`HANDOFF.md` §5.10), and go *under* the settled two rows so neither moves. The row
+            // hides itself when there is nothing to show, so a single-part drawing's bar is exactly
+            // Phase 4.6's.
+            MotionGroupRow(canvasManager: canvasManager)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

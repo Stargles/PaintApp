@@ -70,6 +70,9 @@ final class StrokeCanvasView: UIView {
     /// `onStrokeMoved` / `onStrokeEnded` so the coordinator can follow the shape and transition it
     /// to the adjustable state on finger-lift.
     var shapeFollowingTouch = false
+    /// True for the remainder of a touch that `consumeAsMotionGroupTap` took as a retag rather than a
+    /// stroke, so the move and end handlers do nothing with it.
+    private var consumedAsMotionGroupTap = false
     /// Reverts this stroke's raster changes to the pre-stroke snapshot. Used when the hold timer
     /// fires and the stroke is detected as a smart shape — the partial stroke is replaced by the
     /// shape overlay instead.
@@ -293,7 +296,34 @@ final class StrokeCanvasView: UIView {
         imageView.image = raster?.renderToUIImage()
     }
 
+    /// **Phase 5's retagging gesture.** While interpolate mode is on and a motion group is armed from
+    /// its chip on `InterpolateBar`, a touch on this layer's canvas assigns the stroke under it to
+    /// that group instead of drawing.
+    ///
+    /// The touch is consumed **even when it hits nothing**. Arming a group puts the canvas into
+    /// tagging for as long as the chip stays lit, and a miss that quietly drew a dot instead would be
+    /// the worst of both — the artist gets ink where they were pointing at a stroke, and only notices
+    /// later. Disarming is one tap on the same chip.
+    ///
+    /// Only the current layer's view answers, because the assignment resolves through
+    /// `interpolationTarget`, which is the cel under the playhead *on the current layer*
+    /// (`HANDOFF.md` §5.10). A tap routed to some other layer's view would silently tag a drawing the
+    /// artist is not looking at.
+    ///
+    /// A gesture rather than a `Tool` case, for the same reason interpolate mode itself is not one:
+    /// tagging must not evict the brush the artist had.
+    private func consumeAsMotionGroupTap(_ touch: UITouch) -> Bool {
+        guard let manager = canvasManager, manager.isInterpolateMode,
+              manager.armedMotionGroupID != nil, vectorCanvas != nil,
+              manager.layers.indices.contains(manager.currentLayerIndex),
+              manager.layers[manager.currentLayerIndex].id == layerID else { return false }
+        consumedAsMotionGroupTap = true
+        manager.assignArmedMotionGroup(atCanvasPoint: StrokeInput(touch: touch, in: self).position)
+        return true
+    }
+
     private func handleBegin(_ touch: UITouch) {
+        if consumeAsMotionGroupTap(touch) { return }
         onStrokeBegan?() // commit any still-adjustable fill before this stroke's own undo step registers
         if vectorCanvas != nil { beginVectorStroke(touch); return }
         guard let raster else { return }
@@ -308,6 +338,7 @@ final class StrokeCanvasView: UIView {
     }
 
     private func handleMove(_ touch: UITouch, _ event: UIEvent) {
+        if consumedAsMotionGroupTap { return }
         if vectorCanvas != nil {
             if shapeFollowingTouch {
                 // Shape was detected on a vector layer; the scratch is cleared, so just forward
@@ -341,6 +372,7 @@ final class StrokeCanvasView: UIView {
     }
 
     private func handleEnd(_ touch: UITouch) {
+        if consumedAsMotionGroupTap { consumedAsMotionGroupTap = false; return }
         if vectorCanvas != nil { endVectorStroke(touch); return }
         // Shape was detected and reverted: skip all stroke-end bookkeeping (no undo step, no
         // stamp-through, no thumbnail regen of a non-existent stroke) — just notify the coordinator
@@ -379,6 +411,9 @@ final class StrokeCanvasView: UIView {
     /// committed and no undo step is registered — as far as the document is concerned this stroke
     /// never happened, which is what the user means by putting a second finger down to pan.
     private func handleCancel() {
+        // A retag has already landed as its own undo step by the time a second finger can cancel the
+        // gesture, so there is nothing to roll back — only the flag to clear.
+        if consumedAsMotionGroupTap { consumedAsMotionGroupTap = false; return }
         if shapeFollowingTouch {
             // The stroke was already reverted when the shape was detected; the shape itself is the
             // live state now, so hand off exactly as a normal lift does.
