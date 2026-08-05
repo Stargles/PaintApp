@@ -44,11 +44,11 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 5 — motion groups. COMPLETE.** All four items; definition of done met. Phase 6 (Reproject, and editing at an in-between) is the next phase and is a fresh session. |
+| **Current phase** | **Phase 5 — motion groups. All four items built; NOT signed off.** The phase-boundary full run found **one regression**, bisected to Session 13's `2870773` and reproduced at the logic tier in 9 seconds: **auto-grouping over-splits a single hand-drawn body into its individual strokes.** §8 item 43 is the write-up and it is the next session's first job — fix it, take the `XCTExpectFailure` off, re-run the full suite, *then* start Phase 6. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`**. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | `30ae616` — Phase 5's legibility pass. Wider pure-logic tier: 453 tests, 453 passed. Full suite at the phase boundary: see §6's Session 14 entry. |
+| **Last known-green commit** | `166182f`. Wider pure-logic tier 453/453; `InterpolationMotionGroupLogicTests` 36/36 with **one** `XCTExpectFailure` (§8 item 43), which is a green run, not a red one. Full suite at the phase boundary: **560 tests, 558 passed, 1 failed, 1 skipped** — the one failure is `testInterpolateModeEndToEndFromGestureToScrub`, and it is item 43. |
 | **Tree state** | Clean. |
-| **Blocked on** | Nothing. |
+| **Blocked on** | Nothing, but **do not start Phase 6 first** — §8 item 43 is an open regression in shipped Phase 4 behaviour, and it is pinned rather than fixed. |
 
 **Papers: supplied and read — do not re-request.** [MoStyle/frite](https://github.com/MoStyle/frite)
 and [Inria RR-9559](https://inria.hal.science/hal-04797216/file/RR-9559.pdf). **§5.11 is the
@@ -947,6 +947,21 @@ the code was written.
   the algorithm splits on is the signal that they are correcting it. Seeded groups are now accepted
   as given (`PLAN.md` §10 decision 2's amendment).
 
+- **The fixtures that are good for testing grouping are exactly the ones that cannot exhibit its
+  worst bug.** §5's Phase 1 entry says to use closed, unequal-sided outlines because loose strokes
+  pin neither orientation nor position — correct, and it is why every logic fixture in the project is
+  a rectangle or a triangle. But a closed outline also *never over-splits*, so the whole logic tier
+  was structurally blind to §8 item 43, which the e2e's open two-stroke L found immediately. When a
+  fixture rule exists because a shape is hard to fit, remember that the same rule excludes the shapes
+  the fit is worst at.
+
+- **`registerGroups` made every part individually degenerate, and 4.7's fixes were measured on whole
+  frames.** Phase 4.7 tuned registration against drawings fitted as one group. Phase 5 fits *parts*,
+  and a part can be a single straight stroke — the exact input §5's Phase 4.7 entry proves is a tie
+  no objective can break. Nothing in 4.7 is wrong; its measurements simply do not transfer to a
+  population of smaller, simpler parts. Anything that changes what a part *is* should re-ask 4.7's
+  questions.
+
 - **`setMotionGroup(nil, …)` does not leave a stroke untagged, and the word "clear" is misleading.**
   Clearing re-registers, and registration tags everything it partitions, so the stroke is
   *re-decided* by geometry rather than left out. After one Generate there is no untagged state left
@@ -1234,8 +1249,13 @@ What Phase 3 decided that Phase 4 inherits:
   order: `MotionGroupRow` on the bar with arm-and-tap tagging and the never-silent `.clean` badge,
   `StrokeCanvasView.consumeAsMotionGroupTap` for the gesture, and the tinted overlay plus solo/mute
   threaded through `InterpolationEvaluator.Options.hiddenGroups` and `InterpolationPreviewKey`.
-  33 tests in the new class; wider pure-logic tier 453/453. Four new §8 items, none built. No
-  subagents. Stopped at the definition of done per §3.3; Phase 6 is a separate session.
+  36 tests in the new class; wider pure-logic tier 453/453. **The phase-boundary full run then
+  found a regression and the phase is not signed off**: 560 tests, 558 passed, 1 failed —
+  `testInterpolateModeEndToEndFromGestureToScrub`. It bisects to Session 13's `2870773`, not to
+  this session's UI, and reproduces at the logic tier in 9 seconds: auto-grouping over-splits a
+  single hand-drawn body into its own strokes, and each lone straight stroke is then the 180°
+  tie of §5. Pinned with `XCTExpectFailure` and written up as §8 item 43 rather than fixed on
+  the last of the budget. Five new §8 items, none built. No subagents.
 
 ---
 
@@ -1745,6 +1765,43 @@ Session 12 rather than optional extras. **31, 32 and 35 are DONE** (commits `b91
     The fix if it ever matters is the same shape as `InterpolationPreviewKey` — memoize the counts
     against the keyframes' `version`s — and it is a few lines. Recorded rather than done because
     guessing at a cache before measuring is how the render path got complicated.
+
+43. **OPEN REGRESSION — auto-grouping over-splits a single hand-drawn body, and it is the next
+    session's first job.** Introduced by Session 13's `2870773`, found by Session 14's
+    phase-boundary full run, bisected to that commit (the e2e passes at `26f8b7a` and fails at
+    `2870773`), and reproduced at the logic tier in 9 seconds by
+    `testAHandDrawnSecondKeyframeStillGroupsAsOnePart`, which is pinned with `XCTExpectFailure`.
+
+    **What happens.** An L — two strokes — drawn by hand at both keyframes, so keyframe C is not a
+    clean translation of A. `MotionGrouping` reads the leftover residual as two motions and splits
+    the legs into two parts. `registerGroups` then fits **each leg on its own**, and a lone straight
+    stroke is exactly the degenerate case §5's Phase 4.7 entry *proves* is a tie: a segment maps onto
+    itself under a half turn, so the two fits score identically and the choice is arithmetic noise.
+    Phase 4 could never hit this, because it always fitted one whole-frame group; the parts only
+    became individually degenerate when parts became a thing.
+
+    **Why the existing logic tests did not catch it.** Every fixture in `ARAPLogicTests` and
+    `InterpolationMotionGroupLogicTests` uses *closed outlines* — a rectangle of four strokes, a
+    triangle of three — precisely because §5's Phase 1 entry says loose strokes make bad fixtures.
+    A closed outline pins its own orientation, so it never splits. The e2e's open L is the first
+    fixture in the project that is both realistic and degenerate, and it took the XCUITest to find
+    it. **The lesson generalises: the fixtures that are good for testing grouping are exactly the
+    ones that cannot exhibit this bug.**
+
+    **Three candidate fixes, none tried.** Do not pick from the armchair — `Engine/Deform` compiles
+    standalone with `swiftc` in ~5 seconds a loop (§5's Phase 4.7 entry), so measure.
+    - **A minimum part size or a stricter `residualThreshold`.** Cheapest. Wrong if it only moves the
+      threshold at which the same failure appears.
+    - **A re-merge pass** — §8 item 5, already on this list, which says merging groups whose fitted
+      motions agree is the tidy-up `MotionGrouping` never got. This bug is that item becoming urgent.
+    - **A coverage gate on the split** — accept a split only when each part's own fit beats the
+      parent's by a real margin, measured as *coverage* rather than mean residual, which §5 shows is
+      a lying metric. This is items 32/36/37's shared coverage metric, so building it pays three
+      other debts.
+
+    **Watch for the interaction with the seed protection** added this session: seeded groups are
+    never split now, so any fix must not accidentally re-enable that path, and the tagging workflow
+    is the artist's existing escape hatch from this bug today.
 
 35. **DONE (Session 12).** Subsample the registration point cloud. `Options.maxRegistrationSamples`
     is 250 and caps what *drives* the fit; residuals are still reported for every source point,

@@ -609,6 +609,114 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
                        "and keyframe C's back to the middle, not left at 680")
     }
 
+
+    /// The e2e's arrangement rather than only its drawing: keyframes on layer 1, the target cel on a
+    /// **second** vector layer spanning the whole scene. That is the one structural difference
+    /// between the passing logic reproduction above and the failing XCUITest.
+    func testTheEndToEndTwoLayerArrangementAlsoWarpsToTheMidpoint() throws {
+        let manager = manager()
+        manager.addVectorLayer()
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        func ell(x: CGFloat) -> [[CGPoint]] {
+            [bar(from: CGPoint(x: x, y: 420), to: CGPoint(x: x + 120, y: 420), count: 12),
+             bar(from: CGPoint(x: x + 120, y: 420), to: CGPoint(x: x + 120, y: 560), count: 14)]
+        }
+        let keys = [Cel(id: UUID(), startFrame: 0, frameCount: 4, raster: .empty(size: size),
+                        vector: .empty(size: size)),
+                    Cel(id: UUID(), startFrame: 5, frameCount: 1, raster: .empty(size: size),
+                        vector: .empty(size: size))]
+        manager.layers[1].cels = keys
+        for points in ell(x: 220) { keys[0].vector?.addStroke(stroke(points)) }
+        for points in ell(x: 620) { keys[1].vector?.addStroke(stroke(points)) }
+
+        manager.enterInterpolateMode()
+        for cel in keys {
+            manager.toggleInterpolationReference(celID: cel.id, inLayer: manager.layers[1].id)
+        }
+        manager.currentLayerIndex = 2
+        manager.goToFrame(7)
+        let at = try XCTUnwrap(manager.interpolationTarget, "layer 2's cel spans the scene")
+        XCTAssertEqual(at.layer, 2)
+        XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: at.layer, celIndex: at.cel))
+
+        let recipe = try XCTUnwrap(manager.layers[2].cels[at.cel].interpolation)
+        XCTAssertEqual(recipe.t, 0.5)
+        XCTAssertEqual(recipe.groups.count, 1, "one L is one motion group")
+        XCTAssertTrue(recipe.isWellFormed, "a malformed recipe evaluates to nil and renders nothing")
+
+        let half = try XCTUnwrap(InterpolationEvaluator.evaluate(
+            recipe: recipe, at: 0.5, content: manager.interpolationContentProvider,
+            options: manager.interpolationOptions), "the evaluation must not be nil")
+        func meanX(_ elements: [VectorElement]) -> CGFloat {
+            let xs = elements.compactMap(\.stroke).flatMap { $0.samples.map(\.x) }
+            return xs.isEmpty ? .nan : xs.reduce(0, +) / CGFloat(xs.count)
+        }
+        XCTAssertEqual(meanX(half.forward), 480, accuracy: 60)
+        XCTAssertEqual(meanX(half.backward), 480, accuracy: 60)
+        XCTAssertNotNil(manager.interpolatedImage(forCel: manager.layers[2].cels[at.cel].id,
+                                                  inLayer: manager.layers[2].id),
+                        "and the image the canvas actually shows must exist")
+    }
+
+
+    /// The same L, but keyframe C **hand-drawn** rather than a clean translation — which is what the
+    /// XCUITest actually produces, and what a real second keyframe always is.
+    ///
+    /// This is the shape of the regression Session 13 introduced and Session 14 found: Phase 4 always
+    /// fitted one whole-frame group, so a drawing whose parts are individually degenerate never had
+    /// them fitted alone. `registerGroups` will split when the residuals say so, and a lone straight
+    /// stroke is precisely the case `HANDOFF.md` §5's Phase 4.7 entry proves is a *tie* — it maps onto
+    /// itself under a half turn, so the fit is chosen on arithmetic noise.
+    func testAHandDrawnSecondKeyframeStillGroupsAsOnePart() throws {
+        // **PINNED BUG — this is a real regression, not a characterisation.** Wrapped the way Phase
+        // 4.7 wrapped its three engine bugs, so the tree stays honest-green while the failure stays
+        // described. Take the wrapper off when it is fixed; if it ever reports "expected failure but
+        // none recorded", the fix landed and this becomes an ordinary assertion.
+        let manager = manager()
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        let cels = (0..<3).map { i in
+            Cel(id: UUID(), startFrame: i * 4, frameCount: 4, raster: .empty(size: size),
+                vector: .empty(size: size))
+        }
+        manager.layers[1].cels = cels
+        // A wobble that is small against the stroke but large against a perfect translation — a few
+        // points of hand jitter, which is all it takes to put the residuals over the split threshold.
+        func wobble(_ points: [CGPoint], seed: CGFloat) -> [CGPoint] {
+            points.enumerated().map { i, p in
+                CGPoint(x: p.x + sin(CGFloat(i) * 0.7 + seed) * 4,
+                        y: p.y + cos(CGFloat(i) * 0.5 + seed) * 4)
+            }
+        }
+        func ell(x: CGFloat) -> [[CGPoint]] {
+            [bar(from: CGPoint(x: x, y: 420), to: CGPoint(x: x + 120, y: 420), count: 12),
+             bar(from: CGPoint(x: x + 120, y: 420), to: CGPoint(x: x + 120, y: 560), count: 14)]
+        }
+        for (i, points) in ell(x: 220).enumerated() {
+            cels[0].vector?.addStroke(stroke(wobble(points, seed: CGFloat(i))))
+        }
+        for (i, points) in ell(x: 620).enumerated() {
+            cels[2].vector?.addStroke(stroke(wobble(points, seed: CGFloat(i) + 2.1)))
+        }
+        generate(manager, cels: cels)
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTExpectFailure("Auto-grouping over-splits a single hand-drawn body into its own strokes "
+                         + "— see HANDOFF.md §8 item 43") {
+            XCTAssertEqual(recipe.groups.count, 1,
+                           "an L is one body — splitting its two legs fits each straight stroke "
+                           + "alone, which is the 180-degree tie of HANDOFF.md §5")
+        }
+        let half = try XCTUnwrap(InterpolationEvaluator.evaluate(
+            recipe: recipe, at: 0.5, content: manager.interpolationContentProvider,
+            options: manager.interpolationOptions))
+        func meanX(_ elements: [VectorElement]) -> CGFloat {
+            let xs = elements.compactMap(\.stroke).flatMap { $0.samples.map(\.x) }
+            return xs.isEmpty ? .nan : xs.reduce(0, +) / CGFloat(xs.count)
+        }
+        XCTAssertEqual(meanX(half.forward), 480, accuracy: 60)
+        XCTAssertEqual(meanX(half.backward), 480, accuracy: 60)
+    }
+
     // MARK: - The chips, the armed group and the retagging gesture
 
     /// The chips are drawn from the **registry**, not from the active recipe's bindings, because a
