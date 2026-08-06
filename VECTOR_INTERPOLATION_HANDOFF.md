@@ -46,7 +46,7 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Phase 6 — Reproject and editing at an intermediate frame. Item 1 done; items 2 and 3 not started.** Phase 5 is COMPLETE and signed off (§8 item 43 fixed — the whole-drawing group is matched bidirectionally, because at that level the two clouds are the same content drawn twice; the pinned `XCTExpectFailure` is gone and the e2e passes). **Reproject is built and no longer refuses**: a cel's own drawing is reposed along the A→C motion. What is left in Phase 6 is editing *at* an in-between — drawing, erasing and lasso at `t`, stored as `localEdits` — plus the liquify design question §8 item 25 says to answer before wiring. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`**. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | `93b7e02` (Reproject). The **fast tier plus persistence and cel CRUD is 311/311**. The Phase 5 boundary's full run, on `bf17928`, was **565 tests, 564 passed, 0 failed, 1 skipped** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design. **Zero expected failures anywhere**: for the first time since Phase 4.7 the tree carries no pinned bugs. **No full run has been done since Reproject landed** — do one at the Phase 6 boundary. |
+| **Last known-green commit** | `b0ac5b7`. Fast tier plus persistence and cel CRUD **311/311**, and a **full run with Reproject in: 571 tests, 570 passed, 0 failed, 1 skipped** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design. **Zero expected failures anywhere**: for the first time since Phase 4.7 the tree carries no pinned bugs. Two full runs this session, both clean first time after a `simctl erase`. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -1395,9 +1395,10 @@ What Phase 3 decided that Phase 4 inherits:
   Three decisions taken and written down rather than left implicit: the subject reaches the evaluator
   as a defaulted parameter, not a `CelRef` on the recipe; a `.reproject` recipe with no bindings is
   malformed where a `.generate` one is legal; and Reproject does not inherit `.alreadyInterpolated`,
-  answering the question Phase 4's comment left open. Six new tests, 311/311 green. **Items 2 and 3
-  — editing at *t* — are not started, and no full suite has run since Reproject landed.** No
-  subagents all session.
+  answering the question Phase 4's comment left open. Six new tests. **Items 2 and 3 — editing at *t* — are not started.**
+  Full suite re-run with Reproject in: **571 tests, 570 passed, 0 failed, 1 skipped**, zero expected
+  failures. Two full runs this session, both clean first time after a `simctl erase` — five phase
+  boundaries in a row now. No subagents all session.
 
 ---
 
