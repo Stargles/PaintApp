@@ -203,17 +203,140 @@ enum InterpolationEvaluator {
                                    span: CGFloat, options: Options) -> [UUID: GroupWarp] {
         var warps: [UUID: GroupWarp] = [:]
         for binding in recipe.groups {
-            let groupT = (binding.spacing ?? recipe.spacing).eased(t)
-            let u = min(max(groupT * span - CGFloat(segment), 0), 1)
-            let from = binding.lattices[segment]
-            let to = binding.lattices[segment + 1]
-            // A topology mismatch has no meaningful in-between; `Interpolator.init` is failable for
-            // that reason and the honest fallback is "do not move", not an invented blend.
-            let current = ARAPInterpolation.Interpolator(from: from, to: to, options: options.arap)?
-                .lattice(at: u) ?? from
-            warps[binding.groupID] = GroupWarp(from: from, to: to, current: current)
+            warps[binding.groupID] = groupWarp(binding: binding, lattices: binding.lattices,
+                                               recipe: recipe, at: t, segment: segment, span: span,
+                                               options: options)
         }
         return warps
+    }
+
+    /// One binding's warp at `t`, over a supplied lattice array rather than the binding's own.
+    ///
+    /// The array is a parameter because `planLocalEdit` has to ask the same question of a *grown*
+    /// set of lattices before it knows whether to keep them — see `LocalEditPlan`. Every other
+    /// caller passes `binding.lattices` and gets exactly what it always got.
+    private static func groupWarp(binding: MotionGroupBinding, lattices: [Lattice],
+                                  recipe: InterpolationRecipe, at t: CGFloat, segment: Int,
+                                  span: CGFloat, options: Options) -> GroupWarp {
+        let groupT = (binding.spacing ?? recipe.spacing).eased(t)
+        let u = min(max(groupT * span - CGFloat(segment), 0), 1)
+        let from = lattices[segment]
+        let to = lattices[segment + 1]
+        // A topology mismatch has no meaningful in-between; `Interpolator.init` is failable for
+        // that reason and the honest fallback is "do not move", not an invented blend.
+        let current = ARAPInterpolation.Interpolator(from: from, to: to, options: options.arap)?
+            .lattice(at: u) ?? from
+        return GroupWarp(from: from, to: to, current: current)
+    }
+
+    // MARK: - Editing at an in-between
+
+    /// Everything the document needs in order to store one stroke drawn *at* `t` — `PLAN.md` §5.4,
+    /// `IMPLEMENTATION.md` Phase 6 item 2.
+    ///
+    /// A plan rather than a mutation because the two halves live in different places: the geometry
+    /// goes into the recipe's `localEdits` and the grown lattices go back into a *binding*, and only
+    /// `CanvasManager` may write either — inside one undo bracket. Keeping the arithmetic here keeps
+    /// it testable without a document, which is the same rule the rest of this file follows.
+    struct LocalEditPlan {
+        /// The stroke's points, carried back to the group's rest space. This is what to store.
+        var restPoints: [CGPoint]
+
+        /// Which binding carries the edit — an index into `recipe.groups`. Nil when the recipe has
+        /// no bindings at all, which is the legal degenerate "warp nothing" case (`HANDOFF.md`
+        /// §5.8): there is no lattice, so `restPoints` is the input unchanged.
+        var bindingIndex: Int?
+
+        /// The id to record on the `LocalEdit`, so the evaluator re-warps it with the same group.
+        var groupID: UUID?
+
+        /// `binding.lattices` grown by whole rings so the stroke falls inside, or **nil** when no
+        /// growth was needed — which is the overwhelmingly common case, and the nil is what tells
+        /// the caller it has nothing to write back.
+        var grownLattices: [Lattice]?
+    }
+
+    /// Where a stroke drawn at `t` has to be stored, and whether the lattice had to grow to hold it.
+    ///
+    /// Nil for an empty stroke or a recipe that cannot be evaluated — same "not yet" contract as
+    /// `evaluate`, and the caller should decline to record rather than store geometry it cannot
+    /// warp back.
+    ///
+    /// `points` are in the space the evaluator works in, which is the space the reference cels'
+    /// display lists are in. See `CanvasManager.recordLocalEdit(canvasSpaceStroke:…)` for why that
+    /// is canvas space in practice and what it costs.
+    static func planLocalEdit(recipe: InterpolationRecipe, at t: CGFloat, points: [CGPoint],
+                              options: Options = Options(),
+                              maxRings: Int = 8) -> LocalEditPlan? {
+        guard !points.isEmpty, recipe.isWellFormed else { return nil }
+
+        let count = recipe.references.count
+        let span = CGFloat(count - 1)
+        let frameT = recipe.spacing.eased(t)
+        let segment = min(max(Int((frameT * span).rounded(.down)), 0), count - 2)
+
+        // No bindings: the recipe warps nothing, so rest space and the frame coincide and the
+        // stroke stores verbatim. Recording it is still right — the artist drew it, and it renders
+        // at full strength from τ onward exactly like any other local edit.
+        guard !recipe.groups.isEmpty else {
+            return LocalEditPlan(restPoints: points, bindingIndex: nil, groupID: nil,
+                                 grownLattices: nil)
+        }
+
+        let index = bindingCarrying(points, recipe: recipe, at: t, segment: segment, span: span,
+                                    options: options)
+        let binding = recipe.groups[index]
+
+        // Grow a ring at a time and re-interpolate, rather than growing the interpolated lattice
+        // directly. What has to end up in the document is the *stored* `from`/`to`, and a ring added
+        // to each of them does not produce quite the same grid as a ring added to their in-between —
+        // so the only way to be sure the stroke lands inside what will actually be re-evaluated is
+        // to re-evaluate. `Lattice.expanded(toContain:)` loops for the same reason: a deformed
+        // lattice gives no closed form for "how many rings would reach this point".
+        var lattices = binding.lattices
+        var warp = groupWarp(binding: binding, lattices: lattices, recipe: recipe, at: t,
+                             segment: segment, span: span, options: options)
+        var rings = 0
+        while rings < max(0, maxRings), !warp.current.embedInCurrent(points).allInside() {
+            lattices = lattices.map { $0.addingRing() }
+            warp = groupWarp(binding: binding, lattices: lattices, recipe: recipe, at: t,
+                             segment: segment, span: span, options: options)
+            rings += 1
+        }
+
+        return LocalEditPlan(restPoints: warp.mapToRest(points),
+                             bindingIndex: index,
+                             groupID: binding.groupID,
+                             grownLattices: rings > 0 ? lattices : nil)
+    }
+
+    /// Which binding a stroke drawn at `t` belongs to.
+    ///
+    /// Containment in the group's lattice at `t`, which is the only signal available that does not
+    /// require evaluating the frame: a stroke drawn over the arm falls inside the arm's grid. Ties —
+    /// and they are common, because each group's lattice is padded past its own content — go to the
+    /// group whose lattice is *centred* nearest the stroke, which is the one it is most plausibly
+    /// part of.
+    ///
+    /// Falls back to binding **0** when nothing contains it, which is the same rule untagged content
+    /// follows everywhere else (`HANDOFF.md` §5.9). Note the fallback is nearly unreachable in
+    /// practice: the expansion loop above grows whichever binding is chosen until the stroke does
+    /// fit, so "outside every lattice" only decides *which* group grows, never whether one does.
+    private static func bindingCarrying(_ points: [CGPoint], recipe: InterpolationRecipe,
+                                        at t: CGFloat, segment: Int, span: CGFloat,
+                                        options: Options) -> Int {
+        let centroid = CGPoint(x: points.reduce(0) { $0 + $1.x } / CGFloat(points.count),
+                               y: points.reduce(0) { $0 + $1.y } / CGFloat(points.count))
+        var best: (index: Int, distance: CGFloat)?
+        for (index, binding) in recipe.groups.enumerated() {
+            let warp = groupWarp(binding: binding, lattices: binding.lattices, recipe: recipe,
+                                 at: t, segment: segment, span: span, options: options)
+            guard warp.current.containsInCurrent(centroid) else { continue }
+            let centre = warp.current.currentBounds
+            let distance = hypot(centre.midX - centroid.x, centre.midY - centroid.y)
+            if best == nil || distance < best!.distance { best = (index, distance) }
+        }
+        return best?.index ?? 0
     }
 
     // MARK: - Warping one set
@@ -244,6 +367,17 @@ enum InterpolationEvaluator {
         /// instead of sitting still (`PLAN.md` §5.4).
         func mapFromRest(_ points: [CGPoint]) -> [CGPoint] {
             current.warp(current.embedInRest(points))
+        }
+
+        /// The exact inverse of `mapFromRest`: where content sitting at the in-between *now* has to
+        /// be stored so that re-warping puts it back here.
+        ///
+        /// This is `PLAN.md` §5.4's inverse map and the whole reason editing at an in-between works.
+        /// It is an inverse in the strict sense rather than an approximation — `embedInCurrent`
+        /// solves the same bilinear cell coordinates `embedInRest` assigns, and `warpToRest`
+        /// evaluates them against the rest vertices that `warp` evaluates against the current ones.
+        func mapToRest(_ points: [CGPoint]) -> [CGPoint] {
+            current.warpToRest(current.embedInCurrent(points))
         }
 
         /// `embedInCurrent` is the general inverse map and needs a point-in-quad search plus inverse

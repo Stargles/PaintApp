@@ -73,6 +73,16 @@ final class StrokeCanvasView: UIView {
     /// True for the remainder of a touch that `consumeAsMotionGroupTap` took as a retag rather than a
     /// stroke, so the move and end handlers do nothing with it.
     private var consumedAsMotionGroupTap = false
+
+    /// The interpolated cel this gesture is editing, when the layer is showing one — Phase 6 items
+    /// 2 and 3. Non-nil means the finished stroke becomes a `LocalEdit` on that cel's recipe instead
+    /// of content in `vectorCanvas` (`PLAN.md` §5.4).
+    ///
+    /// Resolved once at touch-down and held for the whole gesture rather than re-asked at lift. The
+    /// playhead can move under a drag — a running preview, a stray timeline touch — and a stroke
+    /// that started as an edit at an in-between and committed as ordinary ink (or the reverse) would
+    /// be the worst kind of surprise: silent, and only visible one scrub later.
+    private var inBetweenCelID: UUID?
     /// Reverts this stroke's raster changes to the pre-stroke snapshot. Used when the hold timer
     /// fires and the stroke is detected as a smart shape — the partial stroke is replaced by the
     /// shape overlay instead.
@@ -93,6 +103,7 @@ final class StrokeCanvasView: UIView {
         lastStampPoint = nil
         refreshDisplay()
         vectorElementsBeforeSnapshot = nil
+        inBetweenCelID = nil
         shapeFollowingTouch = true
     }
 
@@ -280,7 +291,10 @@ final class StrokeCanvasView: UIView {
                 livePreviewFrames += 1
                 return
             }
-            let base = vectorCanvas.render()
+            // `interpolationImage` first for the same reason the branch above prefers it: at an
+            // in-between the cel's own canvas is empty, so compositing the live stroke over
+            // `render()` would make the frame vanish for the length of the drag.
+            let base = interpolationImage ?? vectorCanvas.render()
             guard case .overlay = vectorScratchRole, let scratch = vectorScratch else {
                 imageView.image = base
                 return
@@ -434,6 +448,9 @@ final class StrokeCanvasView: UIView {
             currentVectorSamples = []
             vectorElementsBeforeSnapshot = nil
             vectorContentChanged = false
+            // Nothing to roll back for an edit at an in-between: it is only recorded at lift, which
+            // a cancel never reaches.
+            inBetweenCelID = nil
         } else if let raster, let snapshot = strokeBeforeSnapshot {
             // `reset` restores the stroke count too, so deliberately no `endStroke()` here — that
             // would count a stroke that is being thrown away.
@@ -551,15 +568,24 @@ final class StrokeCanvasView: UIView {
         guard let vectorCanvas else { return }
         vectorElementsBeforeSnapshot = vectorCanvas.elements
         vectorContentChanged = false
+        inBetweenCelID = layerID.flatMap { canvasManager?.inBetweenCelID(inLayer: $0) }
         // A fresh driver is armed, so Mode 3's very first sample cuts — the plan's "CSP cuts
         // immediately" (§4, Mode 3), as opposed to the Phase 2 behaviour of resolving once on lift.
         intersectionDriver = VectorEraser.IntersectionDriver()
-        vectorScratchRole = Self.scratchRole(isEraser: isEraser, mode: vectorEraserMode)
+        // **At an in-between the eraser is always Mode 1**, whatever mode is selected, because
+        // Modes 2 and 3 edit stored geometry — they split and cut the strokes in the display list —
+        // and an in-between has none: it is derived, never stored (`PLAN.md` §4). Mode 1 is the one
+        // that is *itself a stroke* (`VECTOR_ERASER_PLAN.md` §2.1), which is exactly why erasing at
+        // an in-between needs no eraser-specific code: it rides `localEdits` like any other stroke.
+        vectorScratchRole = Self.scratchRole(isEraser: isEraser,
+                                             mode: inBetweenCelID != nil ? .erase : vectorEraserMode)
         // Mode 1 previews by punching into a *copy of what is already on screen*, so the scratch is
-        // seeded with the canvas's own render instead of starting transparent.
+        // seeded with the canvas's own render instead of starting transparent — and at an in-between
+        // what is on screen is the evaluated frame, not the canvas, which holds nothing.
         vectorScratch = {
             if case .replacement = vectorScratchRole {
-                return RasterLayerTexture.load(from: vectorCanvas.render(), size: vectorCanvas.size)
+                return RasterLayerTexture.load(from: interpolationImage ?? vectorCanvas.render(),
+                                               size: vectorCanvas.size)
             }
             return RasterLayerTexture.empty(size: vectorCanvas.size)
         }()
@@ -624,7 +650,9 @@ final class StrokeCanvasView: UIView {
             currentVectorSamples = currentVectorSamples.filter { clipPath.contains($0.point) }
         }
 
-        if isEraser {
+        if let celID = inBetweenCelID {
+            recordLocalEdit(forCel: celID)
+        } else if isEraser {
             // Mode 3 has already committed, incrementally, during the drag — see
             // `resolveIntersectionCut`. Re-running the whole-gesture form here would cut a second time
             // against the post-cut geometry.
@@ -674,7 +702,40 @@ final class StrokeCanvasView: UIView {
             registerVectorUndo(canvas: vectorCanvas, from: before, to: vectorCanvas.elements)
         }
         vectorElementsBeforeSnapshot = nil
+        // A local edit records its own step (`withInterpolationUndo`), so it deliberately leaves
+        // `vectorContentChanged` false — the canvas genuinely did not change.
+        inBetweenCelID = nil
         onStrokeEnded?()
+    }
+
+    /// Hands the finished gesture to the recipe as a `LocalEdit` instead of committing it to the
+    /// cel's display list — `PLAN.md` §5.4, `IMPLEMENTATION.md` Phase 6 items 2 and 3.
+    ///
+    /// **The eraser needs no branch beyond its composite mode**, which is the whole payoff of "an
+    /// eraser is a stroke" (`VECTOR_ERASER_PLAN.md` §2.1): the punch is the same brush, size and
+    /// samples as a paint stroke and differs only in being composited `.destinationOut` at render.
+    /// So it goes back through the inverse map, gets the same τ, and rides the same lattice — and
+    /// `InterpolationEvaluator.composite` already draws local edits *over the blended result*, which
+    /// is exactly what an eraser at an in-between has to do to reach both keyframes' ink.
+    ///
+    /// Nothing is committed when the recipe declines (it cannot evaluate, or the stroke is empty).
+    /// Dropping the gesture is the right failure: the alternative is putting ink into a display list
+    /// that nothing on screen renders, which looks to the artist like the stroke was lost anyway and
+    /// leaves a document they cannot see to clean up.
+    private func recordLocalEdit(forCel celID: UUID) {
+        guard let canvasManager, let layerID, !currentVectorSamples.isEmpty else { return }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+        brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        // An eraser's colour is arbitrary — `.destinationOut` reads only the stamp's alpha coverage
+        // — but it is read as a colour on the way past, so it is given a concrete one rather than
+        // whatever the brush happened to be set to.
+        let stroke = VectorStroke(
+            brush: brush,
+            color: isEraser ? CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
+                            : CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
+            size: brushSize, opacity: brushOpacity, samples: currentVectorSamples,
+            composite: isEraser ? .erase : .paint)
+        canvasManager.recordLocalEdit(canvasSpaceStroke: stroke, forCel: celID, inLayer: layerID)
     }
 
     /// Releases the live-preview scratch. Mode 1's is a full canvas-sized copy of the layer's render
@@ -688,7 +749,10 @@ final class StrokeCanvasView: UIView {
 
     private func recordVectorSample(at point: CGPoint, pressure: CGFloat) {
         currentVectorSamples.append(VectorSample(x: point.x, y: point.y, pressure: pressure))
-        if let vectorCanvas, isEraser, vectorEraserMode == .cutToIntersection {
+        // Mode 3 is off at an in-between for the reason `beginVectorStroke` gives: it cuts *stored*
+        // geometry, and this cel's display list is empty because the frame is derived. Without this
+        // guard the incremental commit would run against that empty list on every touch sample.
+        if let vectorCanvas, isEraser, vectorEraserMode == .cutToIntersection, inBetweenCelID == nil {
             resolveIntersectionCut(at: point, pressure: pressure, in: vectorCanvas)
             return
         }

@@ -750,6 +750,18 @@ struct CanvasView: UIViewRepresentable {
             /// re-render — the trap this struct's own comment above describes, from the other side.
             let hiddenGroups: Set<UUID>
             let referenceVersions: [Int]
+            /// The recipe's local edits, by identity — Phase 6 items 2 and 3.
+            ///
+            /// In the key for the same reason `hiddenGroups` is, and it is the one input that no
+            /// *version* number covers: an edit at an in-between changes the recipe, which lives in
+            /// the `Cel` struct, while every version here belongs to a `VectorCanvas` that the edit
+            /// never touches. Without it the artist draws at `t` and nothing appears until some
+            /// unrelated change forces a re-render.
+            ///
+            /// The ids rather than the count, so that undo (which removes the last edit) and redo
+            /// (which puts the same one back) are told apart from each other and from a *different*
+            /// edit appended in between.
+            let localEditIDs: [UUID]
         }
         private var interpolationPreviewKeys: [UUID: InterpolationPreviewKey] = [:]
 
@@ -789,7 +801,8 @@ struct CanvasView: UIViewRepresentable {
                     referenceVersions: recipe.referencedCels.map { ref in
                         canvasManager.celIndices(forCel: ref.celID, inLayer: ref.layerID)
                             .flatMap { canvasManager.layers[$0.layer].cels[$0.cel].vector?.version } ?? -1
-                    })
+                    },
+                    localEditIDs: recipe.localEdits.map(\.id))
                 guard interpolationPreviewKeys[layer.id] != key else { continue }
                 interpolationPreviewKeys[layer.id] = key
                 host.strokeView.setInterpolationImage(
@@ -816,7 +829,8 @@ struct CanvasView: UIViewRepresentable {
             let key = InterpolationPreviewKey(
                 celID: cel.id, t: 0, preview: true, overlay: true,
                 thicknessFade: false, hiddenGroups: [],
-                referenceVersions: [version, canvasManager.motionGroups.count])
+                referenceVersions: [version, canvasManager.motionGroups.count],
+                localEditIDs: [])
             guard interpolationPreviewKeys[layer.id] != key else { return }
             interpolationPreviewKeys[layer.id] = key
             host.strokeView.setInterpolationImage(

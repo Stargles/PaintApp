@@ -521,6 +521,87 @@ extension CanvasManager {
         commitStructureGesture(name: "Adjust Timing")
     }
 
+    // MARK: - Editing at an in-between (Phase 6 items 2 and 3)
+
+    /// The interpolated cel a layer is showing at the playhead, or nil when it is showing an
+    /// ordinary drawing.
+    ///
+    /// The gate is "the cel carries a recipe", **not** "interpolate mode is on", and the difference
+    /// matters. An interpolated cel shows its derived in-between whatever mode the app is in, so a
+    /// stroke committed to its own `VectorCanvas` would land in a display list nothing on screen
+    /// renders — the artist would draw and watch the ink vanish. Routing on the recipe alone means
+    /// an in-between behaves the same way from every entry point.
+    ///
+    /// By layer rather than by cel because the caller is a layer's own canvas view, which knows
+    /// which layer it is and nothing about cels. Note this is deliberately *not*
+    /// `interpolationTarget` (§5.10's "the cel under the playhead on the **current** layer"): that
+    /// one answers for the commands on the bar, which act on the layer the artist has selected,
+    /// while a touch is answered by the view it landed in.
+    func inBetweenCelID(inLayer layerID: UUID) -> UUID? {
+        guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
+              let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame),
+              layers[layerIndex].cels[celIndex].interpolation != nil
+        else { return nil }
+        return layers[layerIndex].cels[celIndex].id
+    }
+
+    /// Records a stroke drawn *at* the in-between — `PLAN.md` §5.4, `IMPLEMENTATION.md` Phase 6
+    /// item 2. Returns false when the recipe cannot take it, and the caller should fall back to
+    /// committing the stroke normally.
+    ///
+    /// The four steps of §5.4, in order: the stroke is embedded in the deformed lattice at `t`, the
+    /// lattice grows by whole rings if it falls outside, the inverse map carries it back to the
+    /// lattice's rest space, and it is given τ = `t` so it does not appear before the frame it was
+    /// drawn at. `InterpolationEvaluator.planLocalEdit` does the first three; this does the writing.
+    ///
+    /// **Why the samples go in without the canvas→local transform** the ordinary
+    /// `addStroke(canvasSpaceStroke:)` path applies. The whole interpolation pipeline works in one
+    /// space: registration reads the reference cels' display lists, and `composite` renders the
+    /// result into a fresh identity-transform `VectorCanvas` that the layer view shows as-is. So the
+    /// lattices live in whatever space those display lists are in, and the pixels the artist is
+    /// aiming at are placed by that same space — mapping the samples through *this* cel's transform
+    /// would put the edit somewhere other than where they drew it. The cost is inherited rather than
+    /// added: a moved or scaled reference layer is already unhandled by the evaluator.
+    @discardableResult
+    func recordLocalEdit(canvasSpaceStroke stroke: VectorStroke,
+                         forCel celID: UUID, inLayer layerID: UUID) -> Bool {
+        guard let at = celIndices(forCel: celID, inLayer: layerID),
+              let recipe = layers[at.layer].cels[at.cel].interpolation,
+              let plan = InterpolationEvaluator.planLocalEdit(
+                recipe: recipe, at: recipe.t, points: stroke.samples.map(\.point),
+                options: interpolationOptions),
+              plan.restPoints.count == stroke.samples.count
+        else { return false }
+
+        var stored = stroke
+        stored.samples = zip(stroke.samples, plan.restPoints).map {
+            VectorSample(x: $1.x, y: $1.y, pressure: $0.pressure)
+        }
+        // τ = `t`: the edit belongs to the pose it was made at and does not exist before it
+        // (`PLAN.md` §5.4 step 4). The evaluator's one-sided `t >= τ` test is what enforces it, so
+        // sliding the frame *earlier* than where the edit was drawn hides it again — which is the
+        // designed behaviour and not a rounding artefact.
+        stored.visibilityThreshold = recipe.t
+        // A stroke's own tag is what *keyframe* content uses to find its group. A local edit's group
+        // is on the `LocalEdit`, because the edit is not part of either keyframe's drawing and a tag
+        // here would make it look like it were. One place records the answer, not two.
+        stored.motionGroupID = nil
+
+        let edit = LocalEdit(stroke: stored, groupID: plan.groupID)
+        withInterpolationUndo(name: stroke.composite == .erase ? "Erase at In-Between"
+                                                               : "Draw at In-Between") {
+            // The grown lattices go back into the binding they came from. No index anywhere needs
+            // remapping, which is the whole point of the recipe storing geometry and never indices
+            // (`HANDOFF.md` §5.7) — a ring shifts every cell and vertex index, and nothing here
+            // holds one.
+            if let grown = plan.grownLattices, let index = plan.bindingIndex {
+                layers[at.layer].cels[at.cel].interpolation?.groups[index].lattices = grown
+            }
+            layers[at.layer].cels[at.cel].interpolation?.localEdits.append(edit)
+        }
+        return true
+    }
+
     // MARK: - Render-cache eviction
 
     /// How many vector cels may keep a memoized render at once.

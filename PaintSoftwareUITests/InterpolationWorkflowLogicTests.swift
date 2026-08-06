@@ -383,6 +383,219 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                        "undoing the reprojection must not take the drawing with it")
     }
 
+    // MARK: - Editing at an in-between (Phase 6 items 2 and 3)
+
+    /// A Generate on the middle cel, with the manager left in interpolate mode and `t` where the
+    /// caller wants it.
+    @discardableResult
+    private func generated(_ manager: CanvasManager, cels: [Cel], t: CGFloat = 0.5) -> [Cel] {
+        manager.enterInterpolateMode()
+        setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
+        XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1))
+        manager.layers[1].cels[1].interpolation?.t = t
+        return manager.layers[1].cels
+    }
+
+    /// A stroke as the canvas view hands one over — canvas-space samples, straight off the touch.
+    private func drawn(_ points: [CGPoint], erasing: Bool = false) -> VectorStroke {
+        var s = stroke(points)
+        if erasing { s.composite = .erase }
+        return s
+    }
+
+    /// Where a recipe's local edits actually land on screen at `t`.
+    private func editSamples(_ manager: CanvasManager, at t: CGFloat) throws -> [CGPoint] {
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        let e = try XCTUnwrap(InterpolationEvaluator.evaluate(
+            recipe: recipe, at: t, content: manager.interpolationContentProvider))
+        return e.localEdits.compactMap(\.stroke).flatMap { $0.samples.map(\.point) }
+    }
+
+    /// **The test `IMPLEMENTATION.md` Phase 6 names by hand**, and the one the inverse map exists to
+    /// pass: draw at `t`, then move the slider, and the stroke has to **follow the motion** rather
+    /// than sit still.
+    ///
+    /// A's bar sits at x = 10…30 and C's at 34…54, so the drawing travels +24 in x across the span.
+    /// The edit is drawn at `t = 0.5` and must therefore be somewhere near the middle at 0.5, back
+    /// near A's pose at 0, and near C's at 1 — moving in the same direction and by a comparable
+    /// amount, which is exactly what "stored in keyframe space and re-warped" buys and what storing
+    /// it at the in-between could not.
+    func testAStrokeDrawnAtAnInBetweenFollowsTheMotionWhenTheSliderMoves() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+
+        XCTAssertTrue(manager.recordLocalEdit(
+            canvasSpaceStroke: drawn([CGPoint(x: 20, y: 28), CGPoint(x: 26, y: 32)]),
+            forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        func meanX(at t: CGFloat) throws -> CGFloat {
+            let xs = try editSamples(manager, at: t).map(\.x)
+            XCTAssertFalse(xs.isEmpty, "the edit must be visible at t = \(t)")
+            return xs.reduce(0, +) / CGFloat(xs.count)
+        }
+        // Read at 0.5 and 1 only: τ = 0.5 hides the edit below the frame it was drawn at, which is
+        // the next test's subject.
+        let atHalf = try meanX(at: 0.5), atOne = try meanX(at: 1)
+        XCTAssertGreaterThan(atOne, atHalf + 4,
+                             "the edit rides the drawing's motion instead of sitting still")
+    }
+
+    /// τ = `t` (`PLAN.md` §5.4 step 4). The edit belongs to the pose it was made at, so it does not
+    /// exist before it — and the comparison is one-sided, so it stays put from there on.
+    func testAnEditAtAnInBetweenDoesNotExistBeforeTheFrameItWasDrawnAt() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1), t: 0.6)
+
+        XCTAssertTrue(manager.recordLocalEdit(
+            canvasSpaceStroke: drawn([CGPoint(x: 20, y: 28), CGPoint(x: 26, y: 32)]),
+            forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual(recipe.localEdits.first?.stroke.visibilityThreshold, 0.6)
+        XCTAssertTrue(try editSamples(manager, at: 0.4).isEmpty)
+        XCTAssertFalse(try editSamples(manager, at: 0.6).isEmpty)
+        XCTAssertFalse(try editSamples(manager, at: 1).isEmpty)
+    }
+
+    /// The inverse map is an inverse, not an approximation: what gets stored, re-warped at the `t`
+    /// it was drawn at, comes back where the artist put it. This is the property every other claim
+    /// in this section rests on, and it is the one that would fail silently — a stroke a few points
+    /// off looks like a shaky hand.
+    func testTheStoredEditWarpsBackToExactlyWhereItWasDrawn() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1), t: 0.5)
+        let points = [CGPoint(x: 18, y: 26), CGPoint(x: 24, y: 30), CGPoint(x: 28, y: 36)]
+
+        XCTAssertTrue(manager.recordLocalEdit(canvasSpaceStroke: drawn(points),
+                                              forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        let back = try editSamples(manager, at: 0.5)
+        XCTAssertEqual(back.count, points.count)
+        for (drawn, evaluated) in zip(points, back) {
+            XCTAssertEqual(evaluated.x, drawn.x, accuracy: 0.01)
+            XCTAssertEqual(evaluated.y, drawn.y, accuracy: 0.01)
+        }
+    }
+
+    /// The edit goes into the **recipe**, never into the cel's display list. An in-between is
+    /// derived and never stored (`PLAN.md` §4); an edit that landed in `cel.vector` would both
+    /// persist a frame meant to be recomputed and be invisible, since the view shows the evaluation
+    /// rather than the canvas.
+    func testAnEditAtAnInBetweenIsStoredOnTheRecipeAndNotInTheCel() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+
+        XCTAssertTrue(manager.recordLocalEdit(
+            canvasSpaceStroke: drawn([CGPoint(x: 20, y: 28), CGPoint(x: 26, y: 32)]),
+            forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        XCTAssertEqual(manager.layers[1].cels[1].interpolation?.localEdits.count, 1)
+        XCTAssertTrue(manager.layers[1].cels[1].vector?.elements.isEmpty ?? false,
+                      "the in-between stays derived")
+    }
+
+    /// The edit is bound to the group whose lattice carries it, so a later re-registration that
+    /// gives that group a different motion takes the edit with it. With one whole-frame binding
+    /// there is exactly one answer, and "nil, ride the first binding" would be indistinguishable
+    /// from it on screen — so the assertion is on the id itself.
+    func testAnEditRecordsTheGroupWhoseLatticeCarriesIt() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+
+        XCTAssertTrue(manager.recordLocalEdit(
+            canvasSpaceStroke: drawn([CGPoint(x: 20, y: 28), CGPoint(x: 26, y: 32)]),
+            forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual(recipe.localEdits.first?.groupID, recipe.groups.first?.groupID)
+        XCTAssertNil(recipe.localEdits.first?.stroke.motionGroupID,
+                     "membership is recorded on the edit, not duplicated onto its stroke")
+    }
+
+    /// A stroke drawn well outside the group's lattice grows it by whole rings rather than being
+    /// clamped onto the boundary — `PLAN.md` §5.4 step 2. The tell that clamping is *not* what
+    /// happened is that the edit still evaluates back to where it was drawn: a clamped embedding
+    /// folds every outside point onto the same edge and the stroke collapses.
+    func testAStrokeDrawnOutsideTheLatticeGrowsItRatherThanBeingClamped() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+        let before = try XCTUnwrap(manager.layers[1].cels[1].interpolation).groups[0].lattices[0]
+        let far = [CGPoint(x: 150, y: 160), CGPoint(x: 162, y: 172)]
+
+        XCTAssertTrue(manager.recordLocalEdit(canvasSpaceStroke: drawn(far),
+                                              forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        let after = try XCTUnwrap(manager.layers[1].cels[1].interpolation).groups[0]
+        XCTAssertGreaterThan(after.lattices[0].cols, before.cols, "the lattice grew to hold it")
+        XCTAssertEqual(after.lattices[0].cols, after.lattices[1].cols,
+                       "and both keyframes' lattices grew together, or the topologies mismatch")
+        let back = try editSamples(manager, at: 0.5)
+        XCTAssertEqual(back.count, far.count)
+        for (drawn, evaluated) in zip(far, back) {
+            XCTAssertEqual(evaluated.x, drawn.x, accuracy: 0.5)
+            XCTAssertEqual(evaluated.y, drawn.y, accuracy: 0.5)
+        }
+    }
+
+    /// **Item 3's engine half: erasing at an in-between needs no eraser-specific code.** An eraser
+    /// *is* a stroke (`VECTOR_ERASER_PLAN.md` §2.1), so it rides `localEdits` like any other — and
+    /// `composite(_:size:quality:)` already draws local edits over the *blended* result, which is
+    /// what lets it reach both keyframes' ink rather than only one set's.
+    func testErasingAtAnInBetweenRecordsAnEraserStrokeLikeAnyOtherEdit() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+
+        XCTAssertTrue(manager.recordLocalEdit(
+            canvasSpaceStroke: drawn([CGPoint(x: 20, y: 28), CGPoint(x: 26, y: 32)], erasing: true),
+            forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual(recipe.localEdits.count, 1)
+        XCTAssertEqual(recipe.localEdits.first?.stroke.composite, .erase)
+        XCTAssertEqual(recipe.localEdits.first?.stroke.visibilityThreshold, 0.5,
+                       "and it fades in at its own frame exactly like a paint stroke")
+    }
+
+    /// One artist action, one undo step — including the lattice growth, which is part of the same
+    /// edit and would otherwise be left behind enlarging the recipe for no reason.
+    func testAnEditAtAnInBetweenIsOneUndoStep() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+        let before = try XCTUnwrap(manager.layers[1].cels[1].interpolation).groups[0].lattices[0].cols
+        XCTAssertTrue(manager.recordLocalEdit(
+            canvasSpaceStroke: drawn([CGPoint(x: 150, y: 160), CGPoint(x: 162, y: 172)]),
+            forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        manager.undo()
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertTrue(recipe.localEdits.isEmpty)
+        XCTAssertEqual(recipe.groups[0].lattices[0].cols, before,
+                       "the growth undoes with the stroke that caused it")
+    }
+
+    /// A cel with no recipe is not an in-between, and the routing has to say so — otherwise an
+    /// ordinary drawing would have its strokes diverted into a recipe that does not exist.
+    func testACelWithNoRecipeIsNotEditableAsAnInBetween() {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        manager.currentFrame = cels[1].startFrame
+        XCTAssertNil(manager.inBetweenCelID(inLayer: manager.layers[1].id))
+
+        XCTAssertFalse(manager.recordLocalEdit(
+            canvasSpaceStroke: drawn([CGPoint(x: 20, y: 28)]),
+            forCel: cels[1].id, inLayer: manager.layers[1].id))
+    }
+
+    /// And the positive half of the same routing question, which is what the canvas view actually
+    /// asks: the layer is showing an interpolated cel at the playhead.
+    func testAnInterpolatedCelUnderThePlayheadIsEditableAsAnInBetween() {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+        manager.currentFrame = cels[1].startFrame
+        XCTAssertEqual(manager.inBetweenCelID(inLayer: manager.layers[1].id), cels[1].id)
+    }
+
     /// Pressing Generate twice used to interpolate twice, replacing the first recipe — so a double
     /// tap silently threw away whatever `t` had been scrubbed to. Product owner, 2026-08-01.
     func testGenerateRefusesOnACelThatIsAlreadyInterpolated() throws {
