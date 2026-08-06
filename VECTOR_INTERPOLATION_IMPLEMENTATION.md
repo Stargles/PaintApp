@@ -610,6 +610,13 @@ interpolation's own warp, and where it is stored (a per-recipe displacement fiel
 is an open design question, not a wiring job. And every editable-at-*t* tool widens `LocalEdit`
 beyond a stroke, which is §8 item 6.
 
+**The storage question is answered — `HANDOFF.md` §5.12, Session 16 — and the tool stays deferred.**
+A liquify is a **rest-space displacement gesture in its own field on the recipe**: not per-vertex
+offsets, because indices do not survive `Lattice.expanded(toContain:)` or a re-Generate (§5.7), and
+not inside `localEdits`, because content is warped *by* the lattice while a liquify *is* the lattice.
+The point of answering it first was to find out whether it constrained items 2–3, and it does not:
+`LocalEdit` stays strokes-only and the field is purely additive whenever the tool is built.
+
 **Tests.** Draw at *t*=0.5, move the slider, confirm the stroke **follows the motion** rather than
 sitting still — this is the whole point of the inverse map and the test that proves it works.
 

@@ -1105,6 +1105,54 @@ the code was written.
   `.nothingToReproject`. §8 item 17's Commit is what makes a generated frame reprojectable, which is
   exactly the composition `PLAN.md` §5.5 describes, and it is now load-bearing rather than a nicety.
 
+### 5.12 Where a liquify at *t* is stored — §8 item 25's design question, answered
+
+`IMPLEMENTATION.md` Phase 6 and §8 item 25 both say to settle this **before** wiring items 2–3 rather
+than during. This is the answer. The liquify *tool* stays deferred (`IMPLEMENTATION.md`'s "do not
+build these"); what follows is the storage shape it has to land in when someone builds it, and the
+reason items 2–3 could be wired without waiting for it.
+
+**The headline: `LocalEdit` stays strokes-only, and a liquify gets its own sibling field on the
+recipe. Nothing about items 2–3 had to change.** That is the part the question was asked to
+establish, and it is the reason this is a paragraph rather than a phase.
+
+- **It does not belong in `localEdits`, and the reason is where the two enter evaluation.** A local
+  edit is content the lattice *carries*: `warpedLocalEdits` embeds it in the rest grid and pushes it
+  through `current`. A liquify **is** the lattice: it modifies `current` before anything is warped by
+  it at all. They are one step apart in `InterpolationEvaluator.evaluate` and nothing about them
+  composes. Folding them into one array would make every consumer of `localEdits` — persistence,
+  undo, the visibility gate, the warp — branch on a case that has no content to warp.
+
+- **Store the artist's gesture in rest space; never store vertex offsets.** The tempting shape is an
+  array of per-vertex displacements, and it is exactly what §5.7 forbids. Two routine actions
+  invalidate it: `Lattice.expanded(toContain:)` shifts every vertex and cell index when a ring is
+  added (which is item 2's own lattice-expansion path, so it is not hypothetical), and Generate
+  re-registers and rebuilds every lattice in the binding from scratch. A displacement keyed by index
+  would be silently misread after either.
+
+  Rest space survives both, and the reason is worth stating because it is what makes the whole
+  no-indices rule work: **a lattice's rest space is canvas space.** `Lattice(covering:)` puts
+  `restOrigin` at a point in the cloud's bounding box and `embedInRest` subtracts it, so a rest
+  coordinate is a plain canvas coordinate. `addingRing` moves `restOrigin` by one cell and keeps
+  `restCellSize`, so it only extends *which part of that plane is covered* — the coordinate of any
+  given point is untouched. Re-registration rebuilds the grid over the same drawing. So a liquify
+  recorded as `(restPoint, displacement, radius, falloff)` per dab, plus `groupID` and τ, survives
+  expansion, re-registration and a change of cell size, and the vertex offsets are derived at
+  evaluation. Same principle the recipe already applies three times over: geometry, never indices.
+
+- **Applied after the interpolation and transported by it.** `groupWarps` produces `current`, the
+  group's lattice at `t`. The liquify displaces `current`'s vertices *after* the interpolator hands
+  it over — which is precisely item 25's "a warp composed with the interpolation's own warp". The
+  displacement vector itself is carried into the current configuration by the cell's own affine map
+  (`Lattice.cellAffine`, which already exists for the expansion path), so the bump rotates and
+  stretches with the drawing instead of being a fixed screen-space nudge. τ gates it exactly as it
+  gates a local edit, for the same reason.
+
+- **§8 item 6 is a different gap and this does not answer it.** A fill made at an in-between is
+  *content*, so it belongs in `localEdits` — which means widening `LocalEdit.stroke` from a
+  `VectorStroke` to a `VectorElement`. That widening and this field are independent; neither blocks
+  the other.
+
 ### 5.11 What the papers do — and where they do not help
 
 Read this before proposing an engine change; it is the answer to "what do the papers do at exactly
@@ -1642,6 +1690,13 @@ this session's scope, and are recorded here in their order of raising.
     displacement field, a second lattice stacked on the group's) is an open design question and
     should be answered before Phase 6 starts wiring, not during. See also item 6: `LocalEdit`
     carrying only a `VectorStroke` already excludes a fill made at an in-between.
+
+    **The storage question is ANSWERED (Session 16) — §5.12 is the answer, and the tool itself stays
+    deferred.** In one line: a liquify is a **rest-space displacement gesture in its own field on the
+    recipe** — never per-vertex offsets (indices do not survive lattice expansion or re-registration,
+    §5.7) and never inside `localEdits` (content is warped *by* the lattice; a liquify *is* the
+    lattice). **The consequence for Phase 6 is that nothing had to change:** `LocalEdit` stays
+    strokes-only and items 2–3 were wired unblocked. Item 6 is a separate gap and is untouched by it.
 
 ### From Phase 4.5 — noticed while working
 
