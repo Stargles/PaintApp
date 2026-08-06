@@ -44,9 +44,9 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 6 — Reproject and editing at an intermediate frame. Item 1 done; items 2 and 3 not started.** Phase 5 is COMPLETE and signed off (§8 item 43 fixed — the whole-drawing group is matched bidirectionally, because at that level the two clouds are the same content drawn twice; the pinned `XCTExpectFailure` is gone and the e2e passes). **Reproject is built and no longer refuses**: a cel's own drawing is reposed along the A→C motion. What is left in Phase 6 is editing *at* an in-between — drawing, erasing and lasso at `t`, stored as `localEdits` — plus the liquify design question §8 item 25 says to answer before wiring. |
+| **Current phase** | **Phase 6 — Reproject and editing at an intermediate frame. All three items done; the definition of done is met for drawing and erasing, and the transform half of item 3 is a recorded refusal rather than a build — the product owner's call on whether that closes the phase.** Item 1 (Reproject) landed in Session 15. Session 16 answered §8 item 25's liquify design question (§5.12, and the answer freed items 2–3 rather than constraining them), then wired editing at an in-between end to end: a stroke drawn at `t` is carried back through the inverse map and stored as a `LocalEdit` with τ = `t`, with lattice expansion when it lands outside. Erasing needed no eraser-specific code. **"Lasso transform at `t`" turned out not to exist as an operation** — see §5.13. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`**. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | `b0ac5b7`. Fast tier plus persistence and cel CRUD **311/311**, and a **full run with Reproject in: 571 tests, 570 passed, 0 failed, 1 skipped** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design. **Zero expected failures anywhere**: for the first time since Phase 4.7 the tree carries no pinned bugs. Two full runs this session, both clean first time after a `simctl erase`. |
+| **Last known-green commit** | Session 16's last. Wider pure-logic tier **475/475**, and a **full run with editing-at-an-in-between in: 583 tests, 582 passed, 0 failed, 1 skipped** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design. **Zero expected failures**, as since Phase 5.1. It took **two** full runs to get there and the first one is the lesson, not a blemish — see §5's note on erasing *immediately* before the full run rather than before the session's first run. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -244,22 +244,51 @@ reset *before* the phase-boundary run, not after it starts failing.
   one is legal; and Reproject does **not** inherit `.alreadyInterpolated`, which answers the question
   Phase 4's comment left open. Six new `InterpolationWorkflowLogicTests`.
 
+- **Phase 6 items 2 and 3 — editing at an in-between.** Three commits, `78f262c`, `ebbaa4a`,
+  `f2fced5`. `PLAN.md` §5.4's four steps, wired end to end.
+  - **The design gate first.** §8 item 25 said to settle where a liquify at *t* is stored *before*
+    wiring rather than during. §5.12 is the answer — a rest-space displacement gesture in its own
+    field on the recipe, never per-vertex offsets and never inside `localEdits` — and its point is
+    that it **freed** items 2–3 rather than constraining them: `LocalEdit` stays strokes-only. The
+    liquify tool itself stays deferred.
+  - **Item 2.** `InterpolationEvaluator.planLocalEdit` is the arithmetic (choose the binding, grow
+    the lattice by whole rings until the stroke fits, carry it back through `GroupWarp.mapToRest`,
+    the strict inverse of `mapFromRest`); `CanvasManager.recordLocalEdit` is the writing, one
+    `withInterpolationUndo` step covering the growth as well as the edit; `StrokeCanvasView` routes
+    at lift **on the recipe rather than on the mode**, because an interpolated cel shows its derived
+    frame from every entry point.
+  - **Item 3, erase half.** No eraser-specific code, which is what "an eraser is a stroke" was
+    always for — but pinned to Mode 1 at an in-between, since Modes 2 and 3 cut *stored* geometry.
+  - **Item 3, transform half: a refusal, and §5.13 is why.** There is no lasso transform on a vector
+    layer to route (Move on one is a whole-content affine; the lasso path is raster pixels), and the
+    whole-content transform that does exist was a *silent no-op* on an in-between. Refused through
+    `activeCelIsInBetween`. A transform at *t* is a deformation, so its home is §5.12's field
+    alongside liquify. §8 item 45 has the pair.
+  - Tests: 11 new `InterpolationWorkflowLogicTests`, and the single interpolate XCUITest was
+    *extended* rather than joined by a second — it was already in exactly the right state, and the
+    view-layer routing is the one part a logic test cannot reach.
+
 ### What is next
 
-**Phase 6 items 2 and 3 — editing at an intermediate frame.** Item 1 (Reproject) is done and was the
-self-contained half. What is left is drawing, erasing and lasso-transform *at* `t`, carried back to
-keyframe space through the inverse map and stored as `localEdits` with τ = `t`, plus lattice
-expansion when a stroke falls outside. Read `IMPLEMENTATION.md`'s Phase 6
-section, then §8 item 25, which is the product owner's own statement of what they want from it and
-names the one thing that does **not** fit the mechanism: a liquify at *t* is a deformation, not an
-element, so it has no `LocalEdit` shape at all and where it is stored is an open design question to
-answer before wiring rather than during. §8 item 6 is the smaller version of the same gap (a fill
-made at an in-between).
+**Phase 7 — guide strokes**, if the product owner signs Phase 6 off. Read `IMPLEMENTATION.md`'s
+Phase 7 section; item 1 (capturing `UITouch.timestamp`, which is currently discarded) is the only
+part that reaches outside the feature's own files.
 
-**§8 item 17's Commit action is now load-bearing rather than a nicety.** Reproject refuses on a cel
-carrying a `.generate` recipe, because an in-between is derived and never stored, so such a cel has
-no linework of its own to repose. Generate → Commit → Reproject is the composition `PLAN.md` §5.5
-describes, and Commit is the missing middle of it.
+**Two things the product owner should decide before Phase 7 rather than after:**
+
+1. **Does the transform refusal close Phase 6?** §5.13 and §8 item 45. The alternative is building
+   §5.12's displacement field now, which makes the whole-content transform at *t* a small addition
+   and puts liquify within reach — but liquify is on `IMPLEMENTATION.md`'s explicitly-deferred list,
+   so building the field is a decision, not a tidy-up.
+2. **§8 item 17's Commit is still the missing middle**, and Phase 6 did not change that. Reproject
+   refuses on a `.generate` cel because an in-between is derived and never stored, so
+   Generate → Commit → Reproject is the composition `PLAN.md` §5.5 describes and Commit is the one
+   link that does not exist. It is also now the only way an artist can keep an in-between they have
+   drawn on.
+
+§8 item 6 (a fill made at an in-between) is untouched and independent of all of the above: a fill is
+*content*, so it belongs in `localEdits`, which means widening `LocalEdit.stroke` to a
+`VectorElement`.
 
 Three things earlier phases left on the table deliberately, all recorded rather than built: §8 item
 24's ~10 fps scrub (§8 item 14's `ScrubSession` is the shape of the fix, and it is a *separate*
@@ -1105,6 +1134,73 @@ the code was written.
   `.nothingToReproject`. §8 item 17's Commit is what makes a generated frame reprojectable, which is
   exactly the composition `PLAN.md` §5.5 describes, and it is now load-bearing rather than a nicety.
 
+### From Phase 6 (items 2 and 3 — editing at an in-between)
+
+- **The whole interpolation pipeline works in one space, and it is not the layer's local space —
+  which is why a local edit deliberately skips the canvas→local mapping every other stroke gets.**
+  Registration reads the reference cels' display lists (`registrationFrame(of:)` takes
+  `stroke.samples` verbatim), and `composite` renders the result into a *fresh identity-transform*
+  `VectorCanvas` that the layer view shows as-is. So the lattices live in the space those display
+  lists are in, and the pixels the artist aims at are placed by that same space. Putting a local
+  edit's samples through `addStroke(canvasSpaceStroke:)`'s transform would land it somewhere other
+  than where they drew it. **The limitation this inherits rather than adds:** a moved or scaled
+  *reference* layer is already unhandled by the evaluator, and a local edit is wrong in exactly the
+  same case and no other. Worth fixing once, in the evaluator, if it ever matters.
+
+- **`InterpolationPreviewKey` bit for a third time, and this was the new face of it: the missing
+  input was not a *version*.** §5's Phase 4 and Phase 5 entries both warn that an evaluation input
+  not in the key appears to do nothing. Both were about inputs that had a version or a flag to add.
+  A local edit has neither — it lives in the `Cel` struct, and every version in that key belongs to
+  a `VectorCanvas` the edit never touches. So the rule is sharper than "add your input to the key":
+  **ask what changed, and check whether anything in the key can see it.** `localEditIDs` is the
+  answer here, ids rather than a count so undo and redo are told apart.
+
+- **Two display branches read `vectorCanvas.render()`, which is empty on an in-between, and both had
+  to prefer `interpolationImage`.** The live scratch composites over the canvas render, so drawing
+  at an in-between made the whole frame vanish for the length of the drag and reappear on lift; and
+  the eraser's Mode 1 scratch is *seeded* from that render, so an erase preview started from blank.
+  Neither is subtle on screen and both read as the feature being broken rather than as a preview
+  detail. Anything else that reaches for the canvas's own render on a cel that might be interpolated
+  wants the same `interpolationImage ?? render()`.
+
+- **Lattice expansion for a local edit has to re-interpolate after each ring, not grow the
+  in-between lattice.** What ends up in the document is the stored `from`/`to`, and a ring added to
+  each of them does not produce the same grid as a ring added to their interpolation — so the only
+  way to know the stroke lands inside what will actually be re-evaluated is to re-evaluate.
+  `Lattice.expanded(toContain:)` loops for the related reason (no closed form for "how many rings"),
+  and `planLocalEdit` borrows its shape rather than calling it.
+
+- **At an in-between the eraser is Mode 1 whatever mode is selected**, and this is a constraint
+  rather than a simplification: Modes 2 and 3 *cut stored geometry* — they split the strokes in the
+  display list — and an in-between has none. Mode 3 is the one that would have been silently wrong,
+  because it commits incrementally during the drag rather than on lift, so it needed a guard in
+  `recordVectorSample` as well as the role choice in `beginVectorStroke`.
+
+- **The gesture resolves whether it is editing an in-between at touch-down and holds it for the
+  whole drag.** The playhead can move under a stroke — a running preview, a stray timeline touch —
+  and a stroke that began as an edit at an in-between and committed as ordinary ink would be silent
+  and only visible one scrub later.
+
+- **Routing on the recipe rather than on interpolate mode is the load-bearing choice.** An
+  interpolated cel shows its derived frame from every entry point, in every mode, so gating on
+  `isInterpolateMode` would mean a stroke drawn with the mode off went into a display list nothing
+  renders — ink that vanishes with no undo step explaining it.
+
+- **"Erase the simulator first" means immediately before the *full run*, not once at the start of
+  the session — and this session is the counter-example that sharpens five phase boundaries of
+  advice.** The device was erased, then a single 119-second XCUITest was run to check the extended
+  e2e, and the full suite was started straight after. It failed one test:
+  `LayerUITests.testAddingFolderShowsItInLayerPanelAndTimeline`, a bare `XCTAssertTrue` in a test
+  that never draws and never touches interpolation, which took **61 s** in the run and **34 s**
+  alone. Erasing again and re-running gave 583 / 582 / 0 / 1 with nothing else changed.
+
+  So one XCUITest's worth of parallel clones is enough to degrade the device. The tells from §5's
+  Phase 2 entry all held — a launch/existence assertion, no message, a test with no relationship to
+  the change — **except** the `failed to launch` line, which was absent this time. Do not require
+  that line before concluding it is environmental: it is confirmation when present, not a
+  precondition. The cheap check is the one used here: re-run the test alone, and read whether the
+  code under it can even reach your change.
+
 ### 5.12 Where a liquify at *t* is stored — §8 item 25's design question, answered
 
 `IMPLEMENTATION.md` Phase 6 and §8 item 25 both say to settle this **before** wiring items 2–3 rather
@@ -1476,6 +1572,43 @@ What Phase 3 decided that Phase 4 inherits:
   Full suite re-run with Reproject in: **571 tests, 570 passed, 0 failed, 1 skipped**, zero expected
   failures. Two full runs this session, both clean first time after a `simctl erase` — five phase
   boundaries in a row now. No subagents all session.
+
+- **Session 16 (Phase 6 items 2 and 3 — editing at an in-between) — 2026-08-05:** Three commits,
+  `78f262c`, `ebbaa4a`, `f2fced5`, each green before the next. Opened with the design gate §8 item
+  25 and `IMPLEMENTATION.md` both say to close *before* wiring: where a liquify at *t* is stored.
+  The answer is §5.12 — a **rest-space displacement gesture in its own field on the recipe**, never
+  per-vertex offsets (indices survive neither `Lattice.expanded(toContain:)` nor a re-Generate,
+  §5.7) and never inside `localEdits` (content is warped *by* the lattice; a liquify *is* the
+  lattice) — and the useful part of it is that it **freed** items 2–3 instead of constraining them.
+  The fact underneath it is worth carrying: **a lattice's rest space is canvas space**, and adding a
+  ring only extends which part of that plane is covered, so rest-space geometry is expansion-proof
+  by construction. That is the same property `LocalEdit` has relied on since Phase 2 without anyone
+  writing down why.
+
+  Then `PLAN.md` §5.4 wired end to end: `planLocalEdit` (choose the binding, grow by whole rings
+  until the stroke fits, carry it back through `mapToRest`), `recordLocalEdit` (one undo step
+  covering the growth as well as the edit), and `StrokeCanvasView` routing at lift **on the recipe
+  rather than on the mode**. Erasing needed no eraser-specific code and is pinned to Mode 1, since
+  Modes 2 and 3 cut stored geometry an in-between does not have.
+
+  **Two display branches would each have read as the feature not working** and are in §5: the live
+  scratch composited over the cel's own empty render, so the frame vanished for the length of every
+  drag, and `InterpolationPreviewKey` had nothing in it that a recipe change moves — the third time
+  that key has bitten, and the first where the missing input was not a *version* at all.
+
+  **"Lasso transform at *t*" turned out not to be a wiring job**: there is no lasso transform on a
+  vector layer to route, and the whole-content transform that does exist was a silent no-op on an
+  in-between. Refused at three sites rather than half-built, written up as §5.13 and §8 item 45, and
+  handed to §5.12's field where a transform belongs — it is a deformation, and an affine is the
+  degenerate liquify. Per §3.5 that is a finding about a stated item, not a decision taken: whether
+  it closes Phase 6 is the product owner's call.
+
+  12 new logic tests; the single interpolate XCUITest **extended** rather than joined by a second,
+  since it was already in the exact state the new half needed — it now draws at the in-between and
+  asserts the ink moves with the slider, which is the only coverage `StrokeCanvasView`'s routing
+  has. Boundary run **583 / 582 passed / 0 failed / 1 skipped**, zero expected failures — on the
+  *second* attempt, and the first one is written up in §5 because it sharpens the erase advice
+  rather than contradicting it. No subagents.
 
 ---
 

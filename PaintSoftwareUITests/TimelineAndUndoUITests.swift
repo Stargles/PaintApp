@@ -407,6 +407,53 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         if !isWhitish(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)) {
             XCTFail("Dragging the slider to 0 should move the drawing back onto keyframe A. \(inkReport())")
         }
+
+        // --- Phase 6 items 2 and 3: editing *at* the in-between ---
+        //
+        // This half is here rather than in a logic test for one reason: everything below the gesture
+        // is already covered by `InterpolationWorkflowLogicTests`, and what is not covered anywhere
+        // else is `StrokeCanvasView`'s routing — that a touch on an interpolated cel becomes a
+        // `LocalEdit` instead of ink in a display list nothing renders, and that the memoized preview
+        // notices. Phase 4's `addCel` bug is the precedent: it was invisible until a gesture ran
+        // through the real path (`HANDOFF.md` §5).
+        slider.adjust(toNormalizedSliderPosition: 0.5)
+
+        // A row just below the L, clear of every keyframe's ink at every `t`, so anything found on it
+        // can only be the edit. It is also outside the lattice, which puts the expansion path
+        // (`PLAN.md` §5.4 step 2) under the same test rather than needing its own.
+        let editRow = 0.60
+        func inkedColumns() -> [Double] {
+            stride(from: 0.14, through: 0.92, by: 0.02).filter {
+                !isWhitish(rgbaPixel(of: canvas, dx: $0, dy: editRow))
+            }
+        }
+        func meanColumn(_ columns: [Double]) -> Double {
+            columns.reduce(0, +) / Double(max(1, columns.count))
+        }
+        XCTAssertTrue(inkedColumns().isEmpty,
+                      "Setup: the row the edit is drawn on has to start blank")
+
+        drawLine(on: canvas, from: CGVector(dx: 0.42, dy: editRow), to: CGVector(dx: 0.50, dy: editRow))
+
+        let editAtHalf = inkedColumns()
+        if editAtHalf.isEmpty {
+            XCTFail("A stroke drawn at the in-between has to appear on it. Either it was committed "
+                    + "to the cel's own display list, which nothing renders, or the preview key did "
+                    + "not notice the recipe changed. \(inkReport())")
+        }
+
+        // The claim the inverse map exists to earn, and the test `IMPLEMENTATION.md` Phase 6 asks
+        // for by hand: move the slider and the edit **follows the motion**. The keyframes are 0.40 of
+        // the canvas apart, so half that span is 0.20 — an edit that had been stored at the
+        // in-between instead of in keyframe space would not move at all.
+        slider.adjust(toNormalizedSliderPosition: 1)
+        let editAtOne = inkedColumns()
+        if editAtOne.isEmpty {
+            XCTFail("The edit has τ = 0.5, so it must still be there at t = 1. \(inkReport())")
+        }
+        XCTAssertGreaterThan(meanColumn(editAtOne), meanColumn(editAtHalf) + 0.05,
+                             "The edit must ride the drawing's motion rather than sit still — "
+                             + "columns at t=0.5 \(editAtHalf) vs at t=1 \(editAtOne)")
     }
 
 }

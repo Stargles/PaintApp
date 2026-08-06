@@ -537,6 +537,27 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         }
     }
 
+    /// Growing the lattice must not cost the endpoint invariant. `lattices[0]` of a `.generate`
+    /// recipe is the **rest** grid, and `t = 0` reproduces keyframe A to the last bit precisely
+    /// because `GroupWarp.embed` takes the closed-form rest path for a lattice that `isRest` at
+    /// `tolerance: 0` — "near rest" is not rest. `addingRing` extrapolates through each cell's
+    /// affine, which is the identity on a rest lattice, and then ARAP-relaxes with the interior
+    /// pinned; that *should* leave the whole thing exactly at rest, and this is the test that says
+    /// it does rather than the comment that says it ought to.
+    func testGrowingTheLatticeForAnEditKeepsTheRestConfigurationExact() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+        XCTAssertTrue(manager.recordLocalEdit(
+            canvasSpaceStroke: drawn([CGPoint(x: 150, y: 160), CGPoint(x: 162, y: 172)]),
+            forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        let grown = try XCTUnwrap(manager.layers[1].cels[1].interpolation).groups[0].lattices[0]
+        XCTAssertTrue(grown.cols > 3, "Setup: the lattice actually grew")
+        XCTAssertTrue(grown.isRest(tolerance: 0),
+                      "a grown rest lattice is still exactly at rest, or t = 0 stops reproducing "
+                      + "keyframe A and nothing else in the suite would notice")
+    }
+
     /// **Item 3's engine half: erasing at an in-between needs no eraser-specific code.** An eraser
     /// *is* a stroke (`VECTOR_ERASER_PLAN.md` §2.1), so it rides `localEdits` like any other — and
     /// `composite(_:size:quality:)` already draws local edits over the *blended* result, which is
