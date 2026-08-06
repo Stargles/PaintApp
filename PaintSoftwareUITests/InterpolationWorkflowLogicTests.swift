@@ -596,6 +596,22 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         XCTAssertEqual(manager.inBetweenCelID(inLayer: manager.layers[1].id), cels[1].id)
     }
 
+    /// **The transform half of item 3 is a refusal, not a routing** (`HANDOFF.md` §5.13). Vector
+    /// Move is a whole-content transform written onto the cel's own `VectorCanvas`, and an
+    /// in-between's canvas is not where its pixels come from — so on one the handle box would drag
+    /// a drawing that never moved. `activeCelIsInBetween` is what the three call sites check.
+    func testTheWholeContentVectorTransformIsUnavailableOnAnInBetween() {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+        manager.currentLayerIndex = 1
+
+        manager.currentFrame = cels[0].startFrame
+        XCTAssertFalse(manager.activeCelIsInBetween, "a keyframe transforms as it always did")
+
+        manager.currentFrame = cels[1].startFrame
+        XCTAssertTrue(manager.activeCelIsInBetween)
+    }
+
     /// Pressing Generate twice used to interpolate twice, replacing the first recipe — so a double
     /// tap silently threw away whatever `t` had been scrubbed to. Product owner, 2026-08-01.
     func testGenerateRefusesOnACelThatIsAlreadyInterpolated() throws {

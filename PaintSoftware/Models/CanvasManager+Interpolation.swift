@@ -545,6 +545,19 @@ extension CanvasManager {
         return layers[layerIndex].cels[celIndex].id
     }
 
+    /// The current layer is showing an interpolated cel at the playhead.
+    ///
+    /// The whole-content vector transform (`isVectorTransforming`) is refused on one, and it is a
+    /// refusal rather than a routing — see `IMPLEMENTATION.md` Phase 6 item 3 and `HANDOFF.md` §5.13.
+    /// A transform at `t` moves the *frame*, and an in-between's frame is derived: `setVectorTransform`
+    /// writes onto the cel's own `VectorCanvas`, which is empty and which the evaluated image does not
+    /// come from, so the handle box would drag around a drawing that never moved. That is a silent
+    /// no-op, and a silent no-op is worse than an unavailable control.
+    var activeCelIsInBetween: Bool {
+        guard layers.indices.contains(currentLayerIndex) else { return false }
+        return inBetweenCelID(inLayer: layers[currentLayerIndex].id) != nil
+    }
+
     /// Records a stroke drawn *at* the in-between — `PLAN.md` §5.4, `IMPLEMENTATION.md` Phase 6
     /// item 2. Returns false when the recipe cannot take it, and the caller should fall back to
     /// committing the stroke normally.

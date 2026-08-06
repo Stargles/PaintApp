@@ -643,7 +643,32 @@ as a defaulted **parameter** rather than as a `CelRef` on the recipe; a `.reproj
 bindings is **malformed** where a `.generate` one is the legal degenerate case; and Reproject does
 **not** inherit `.alreadyInterpolated`, which answers the question Phase 4's comment left open.
 
-**Items 2 and 3 — editing at *t* — are not started.** Item 1 was the self-contained half.
+### Items 2 and 3 are done (Session 16, `ebbaa4a` and the commit after it)
+
+**Item 2, and the erase half of item 3, are wired end to end.** `PLAN.md` §5.4's four steps in
+order: `InterpolationEvaluator.planLocalEdit` embeds the stroke in the deformed lattice at *t*, grows
+the lattice by whole rings when it falls outside, carries it back through the inverse map
+(`GroupWarp.mapToRest`, the strict inverse of `mapFromRest`), and `CanvasManager.recordLocalEdit`
+stores it with τ = *t* in one `withInterpolationUndo` step covering the growth as well as the edit.
+`StrokeCanvasView` routes at lift, **on the recipe rather than on the mode** — an interpolated cel
+shows its derived frame from every entry point, so a stroke committed to its own canvas would land
+where nothing renders.
+
+The eraser needed no eraser-specific code, which is what "an eraser is a stroke" was always for. It
+*is* pinned to Mode 1 at an in-between: Modes 2 and 3 cut **stored** geometry and an in-between has
+none.
+
+**The transform half of item 3 is a refusal rather than a routing, and the item's wording was
+misleading** — see `HANDOFF.md` §5.13. There is no lasso transform on a vector layer to route at all
+(Move on a vector layer is a whole-content affine; the lasso path is raster pixels), and the
+whole-content transform that does exist was a *silent no-op* on an in-between, since it writes onto
+a canvas the displayed frame does not come from. It is now refused through
+`CanvasManager.activeCelIsInBetween`. A transform at *t* is a **deformation**, so its home is
+§5.12's field alongside liquify — an affine is the degenerate liquify. `HANDOFF.md` §8 item 45 has
+the pair.
+
+**Definition of done: met.** Brief workflow step 5 — edit at an in-between, keep sliding, seamless —
+works for drawing and erasing, which are the two operations §5.4's mechanism exists to carry.
 
 ---
 

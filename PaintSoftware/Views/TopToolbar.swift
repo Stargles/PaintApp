@@ -99,6 +99,10 @@ struct TopToolbar: View {
         // On a vector layer, Move transforms the whole layer's geometry losslessly via the on-canvas
         // box (no raster floating piece) — toggle that mode instead of lifting pixels.
         if canvasManager.activeLayerIsVector {
+            // ...but not on an interpolated cel, whose frame is derived rather than stored: the
+            // transform would be written onto a `VectorCanvas` the displayed image does not come
+            // from. See `CanvasManager.activeCelIsInBetween`.
+            guard !canvasManager.activeCelIsInBetween else { return }
             canvasManager.isVectorTransforming.toggle()
             return
         }

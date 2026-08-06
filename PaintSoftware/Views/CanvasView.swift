@@ -523,7 +523,11 @@ struct CanvasView: UIViewRepresentable {
             // local space), driven by the VectorCanvas's current overall transform — not the whole
             // canvas, so Move only carries the actual drawn content along, matching the raster Move
             // tool's use of the content's bounding box.
+            // `activeCelIsInBetween` as well as the mode flag, because the playhead can move onto an
+            // interpolated cel while the transform is already on — at which point the box would be
+            // handles over a frame it cannot move.
             if layer.kind == .vector, layer.isVisible, canvasManager.isVectorTransforming,
+               !canvasManager.activeCelIsInBetween,
                let canvasSize = canvasManager.canvasSize,
                let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame),
                let vector = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].vector {
@@ -541,6 +545,7 @@ struct CanvasView: UIViewRepresentable {
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
             let index = canvasManager.currentLayerIndex
             guard canvasManager.isVectorTransforming, canvasManager.layers[index].kind == .vector,
+                  !canvasManager.activeCelIsInBetween,
                   let canvasSize = canvasManager.canvasSize,
                   let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame),
                   let vector = canvasManager.layers[index].cels[celIdx].vector else { return }

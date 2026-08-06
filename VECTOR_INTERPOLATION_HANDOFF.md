@@ -1153,6 +1153,35 @@ establish, and it is the reason this is a paragraph rather than a phase.
   `VectorStroke` to a `VectorElement`. That widening and this field are independent; neither blocks
   the other.
 
+### 5.13 "Lasso transform at *t*" — what it turned out to be, and why it is a refusal
+
+`IMPLEMENTATION.md` Phase 6 item 3 reads "erase at *t*, and lasso transform at *t*". The erase half
+was free, exactly as predicted. The transform half is **not a wiring job at all**, and the reason is
+worth stating because the item's wording implies an operation that does not exist.
+
+- **There is no lasso transform on a vector layer to route.** `beginMove`/`FloatingPiece` is
+  entirely raster — it calls `PixelOps.rasterize(cel:)`, lifts *pixels* through a mask, and commits
+  them back as pixels. `TopToolbar.toggleMove` knows this and never takes that path on a vector
+  layer: it toggles `isVectorTransforming` instead, which is a **whole-content** affine written onto
+  the cel's `VectorCanvas` via `setVectorTransform`. Selecting a subset of strokes and transforming
+  only those is not a vector operation the app has. Building it is §8 item 26's vector/raster
+  divorce, which the product owner deferred as reaching well past interpolation.
+
+- **The whole-content transform that *does* exist is a silent no-op on an in-between, and that was
+  the reachable bug.** `setVectorTransform` writes onto the cel's own canvas; an interpolated cel's
+  canvas is empty and is not where the displayed pixels come from (`composite` renders the
+  evaluation into a fresh identity-transform canvas). So the handle box would appear, drag, and move
+  nothing. It is now refused at three sites through `CanvasManager.activeCelIsInBetween` — entering
+  the mode, showing the overlay, and applying a change — because the playhead can also move onto an
+  in-between while the transform is already on.
+
+- **A transform at *t* is a deformation, so it belongs in §5.12's field, not in `localEdits`.** This
+  is the same answer as liquify and it falls out of the same argument: a transform moves the *frame*,
+  and the frame is derived. An affine over the whole frame is the degenerate liquify — one
+  displacement field with no falloff — so the moment §5.12's field exists, the whole-content
+  transform at *t* becomes a small addition to it rather than a new mechanism. Until then the refusal
+  is the honest state. §8 item 45 records the pair.
+
 ### 5.11 What the papers do — and where they do not help
 
 Read this before proposing an engine change; it is the answer to "what do the papers do at exactly
@@ -2005,6 +2034,25 @@ Session 12 rather than optional extras. **31, 32 and 35 are DONE** (commits `b91
     "it has not moved": §5.3's bootstrap hints (a coarse flow field, matching tags), or the
     coverage-scored restart selection §8 item 37 wants. Over-splitting is the safe direction and
     merging is one tap, so this is a quality item, not a correctness one.
+
+### From Phase 6
+
+45. **Transforming at an in-between — the two halves of what Phase 6 item 3's "lasso transform"
+    turned out to mean.** §5.13 is the full write-up; this is the pair of jobs it leaves.
+
+    - **A vector lasso.** Selecting a subset of a vector drawing's strokes and transforming only
+      those does not exist anywhere in the app — Move on a vector layer is whole-content, and the
+      lasso path is raster pixels. This is really item 26's vector/raster divorce wearing a smaller
+      name, and it should be designed with item 26 and item 18's `ContentProvider`-through-`rasterize`
+      rather than bolted on for interpolation's benefit.
+    - **The whole-content transform at *t*, which is currently refused.** It is a *deformation*, so
+      its home is §5.12's per-recipe displacement field — the same field liquify wants, with an
+      affine being the degenerate case of one. Small once that field exists; a second mechanism if
+      built before it. The refusal costs the artist nothing they had, because the operation was a
+      silent no-op on an in-between before it was refused.
+
+    Neither is urgent: drawing and erasing at an in-between are what `PLAN.md` §5.4's mechanism is
+    for and both work, and the brief's workflow step 5 does not name a transform.
 
 35. **DONE (Session 12).** Subsample the registration point cloud. `Options.maxRegistrationSamples`
     is 250 and caps what *drives* the fit; residuals are still reported for every source point,
