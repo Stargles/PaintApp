@@ -263,6 +263,12 @@ struct InterpolationRecipe: Codable {
     /// evaluator should be able to say "not yet" instead of indexing off the end of an array.
     var isWellFormed: Bool {
         guard references.count >= 2 else { return false }
+        // A `.generate` recipe with no bindings is the honest degenerate case — warp the whole frame
+        // as one group, i.e. cross-fade in place (`PLAN.md` §10 decision 2). A `.reproject` one is
+        // not: with no binding there is no motion path to slide the cel's pose along, so it would
+        // render the artist's drawing sitting perfectly still at every `t` and look like the slider
+        // was broken rather than like a frame that cannot be posed.
+        if mode == .reproject, groups.isEmpty { return false }
         return groups.allSatisfy { $0.lattices.count == references.count }
     }
 

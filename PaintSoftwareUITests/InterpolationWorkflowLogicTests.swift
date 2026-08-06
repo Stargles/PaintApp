@@ -240,17 +240,147 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                        .notAVectorLayer)
     }
 
-    /// Reproject is stubbed in this phase and refuses out loud rather than quietly behaving like
-    /// Generate. `PLAN.md` §10 decision 3 says the two are never conflated; a stub that silently
-    /// generated would be exactly that conflation.
+    /// Reproject is built now (Phase 6 item 1), but it still refuses out loud rather than quietly
+    /// behaving like Generate — `PLAN.md` §10 decision 3 says the two are never conflated, and the
+    /// way they would get conflated is Reproject inventing content when the cel has none.
+    ///
+    /// The empty in-between is precisely the frame Generate is for.
     func testReprojectRefusesRatherThanBehavingLikeGenerate() {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)
         manager.enterInterpolateMode()
         setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
         XCTAssertEqual(manager.interpolate(mode: .reproject, layerIndex: 1, celIndex: 1),
-                       .reprojectNotImplemented)
+                       .nothingToReproject)
         XCTAssertNil(manager.layers[1].cels[1].interpolation)
+    }
+
+    // MARK: - Reproject (Phase 6 item 1)
+
+    /// A distinctly-shaped drawing of the artist's own in the middle cel. Deliberately *not* the same
+    /// shape as either keyframe, so "the linework was preserved" is a claim the geometry can settle:
+    /// nothing derived from A or C could produce these samples.
+    @discardableResult
+    private func drawSubject(into cel: Cel, at x: CGFloat = 60) -> VectorStroke {
+        let s = stroke([CGPoint(x: x, y: 100), CGPoint(x: x + 18, y: 132),
+                        CGPoint(x: x - 6, y: 150), CGPoint(x: x + 24, y: 168)])
+        cel.vector?.addStroke(s)
+        return s
+    }
+
+    private func reprojected(_ manager: CanvasManager, cels: [Cel]) -> InterpolationRecipe? {
+        manager.enterInterpolateMode()
+        setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
+        XCTAssertNil(manager.interpolate(mode: .reproject, layerIndex: 1, celIndex: 1))
+        return manager.layers[1].cels[1].interpolation
+    }
+
+    /// The whole point of Reproject: the drawing is the artist's, and only its *pose* moves
+    /// (`PLAN.md` §5.5). So the recipe records `.reproject`, and the cel keeps its own strokes —
+    /// unlike Generate, whose in-between is derived and never stored.
+    func testReprojectKeepsTheCelsOwnDrawingAndRecordsTheMode() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        let subject = drawSubject(into: cels[1])
+
+        let recipe = try XCTUnwrap(reprojected(manager, cels: cels))
+
+        XCTAssertEqual(recipe.mode, .reproject)
+        XCTAssertTrue(recipe.isWellFormed)
+        XCTAssertEqual(recipe.groups.count, 1, "one drawing, one pose, one binding")
+        XCTAssertEqual(recipe.groups[0].lattices.count, 2, "one fit per reference")
+        let kept = manager.layers[1].cels[1].vector?.elements.compactMap(\.stroke) ?? []
+        XCTAssertEqual(kept.map(\.id), [subject.id],
+                       "the artist's linework is never replaced — only reposed")
+    }
+
+    /// The evaluation is one set at full strength, not a cross-fade. Nothing is being derived from
+    /// two keyframes, so there is no second set and nothing to blend against.
+    func testAReprojectedFrameIsOneSetAtFullStrengthRatherThanACrossFade() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        drawSubject(into: cels[1])
+        let recipe = try XCTUnwrap(reprojected(manager, cels: cels))
+
+        let half = try XCTUnwrap(InterpolationEvaluator.evaluate(
+            recipe: recipe, at: 0.5, content: manager.interpolationContentProvider,
+            subject: manager.layers[1].cels[1].vector?.elements ?? []))
+
+        XCTAssertEqual(half.forwardWeight, 1)
+        XCTAssertEqual(half.backwardWeight, 0)
+        XCTAssertTrue(half.backward.isEmpty, "a reprojection has no second set")
+        XCTAssertEqual(half.forward.compactMap(\.stroke).count, 1)
+    }
+
+    /// The claim the mechanism has to earn: sliding `t` **moves** the drawing, and it moves it the
+    /// way the keyframes move. A's bar sits at x = 10…30 and C's at 34…54, so the motion is +24 in
+    /// x; the subject is drawn elsewhere entirely and must ride that same motion rather than sit
+    /// still or jump onto a keyframe's position.
+    func testSlidingTMovesTheReprojectedDrawingAlongTheKeyframeMotion() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        drawSubject(into: cels[1])
+        let recipe = try XCTUnwrap(reprojected(manager, cels: cels))
+        let subject = manager.layers[1].cels[1].vector?.elements ?? []
+
+        func meanX(at t: CGFloat) throws -> CGFloat {
+            let e = try XCTUnwrap(InterpolationEvaluator.evaluate(
+                recipe: recipe, at: t, content: manager.interpolationContentProvider,
+                subject: subject))
+            let xs = e.forward.compactMap(\.stroke).flatMap { $0.samples.map(\.x) }
+            return xs.reduce(0, +) / CGFloat(max(1, xs.count))
+        }
+        let atZero = try meanX(at: 0), atOne = try meanX(at: 1), atHalf = try meanX(at: 0.5)
+
+        XCTAssertGreaterThan(atOne, atZero + 8, "the pose slides with the keyframes' motion")
+        XCTAssertEqual(atHalf, (atZero + atOne) / 2, accuracy: 6, "and it slides through the middle")
+    }
+
+    /// Reproject does **not** inherit Generate's already-interpolated refusal, and this is the
+    /// decision Phase 4 left open rather than a gap: re-running it re-registers the same linework
+    /// against whatever the references are now, and replaces nothing.
+    func testReprojectCanBeRunAgainToPickUpChangedReferences() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        let subject = drawSubject(into: cels[1])
+        XCTAssertNotNil(reprojected(manager, cels: cels))
+
+        XCTAssertNil(manager.interpolate(mode: .reproject, layerIndex: 1, celIndex: 1),
+                     "a second Reproject is how the artist picks up moved keyframes")
+        XCTAssertEqual(manager.layers[1].cels[1].vector?.elements.compactMap(\.stroke).map(\.id),
+                       [subject.id], "and it still has not touched the linework")
+    }
+
+    /// A cel carrying a `.generate` recipe holds no strokes of its own — an in-between is derived,
+    /// never stored (`PLAN.md` §4) — so Reproject has nothing to repose and says so. Commit is what
+    /// turns a generated frame into one Reproject can work on, which is how §5.5 says the two
+    /// commands compose.
+    func testReprojectOnAGeneratedFrameRefusesBecauseThereIsNoLineworkYet() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        manager.enterInterpolateMode()
+        setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
+        XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1))
+
+        XCTAssertEqual(manager.interpolate(mode: .reproject, layerIndex: 1, celIndex: 1),
+                       .nothingToReproject)
+        XCTAssertEqual(manager.layers[1].cels[1].interpolation?.mode, .generate,
+                       "and the refusal left the generated recipe alone")
+    }
+
+    /// Undo of a Reproject puts the frame back the way it was — and the bracket it uses is the
+    /// structural one, because unlike Generate it writes no tag onto any keyframe's strokes.
+    func testReprojectIsUndoable() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        drawSubject(into: cels[1])
+        XCTAssertNotNil(reprojected(manager, cels: cels))
+
+        manager.undo()
+
+        XCTAssertNil(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual(manager.layers[1].cels[1].vector?.elements.compactMap(\.stroke).count, 1,
+                       "undoing the reprojection must not take the drawing with it")
     }
 
     /// Pressing Generate twice used to interpolate twice, replacing the first recipe — so a double

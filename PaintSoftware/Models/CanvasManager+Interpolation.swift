@@ -667,8 +667,8 @@ extension CanvasManager {
         case referencesAreEmpty
         /// The target cel already derives from a recipe — Generate would stack a second one on top.
         case alreadyInterpolated
-        /// Reproject is not built yet — see `IMPLEMENTATION.md` Phase 6 item 1.
-        case reprojectNotImplemented
+        /// Reproject was asked for on a cel with no drawing of its own to repose.
+        case nothingToReproject
 
         var message: String {
             switch self {
@@ -677,24 +677,34 @@ extension CanvasManager {
             case .notAVectorLayer: return "Interpolation works on vector layers."
             case .referencesAreEmpty: return "The reference frames have nothing to interpolate."
             case .alreadyInterpolated: return "This frame is already interpolated."
-            case .reprojectNotImplemented: return "Reproject isn't available yet."
+            case .nothingToReproject: return "Reproject needs a drawing in this frame."
             }
         }
     }
 
     /// Whether `interpolate` would succeed for this cel, and why not if it would not.
     func interpolationRefusal(mode: InterpolationMode, layerIndex: Int, celIndex: Int) -> InterpolationRefusal? {
-        if mode == .reproject { return .reprojectNotImplemented }
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               layers[layerIndex].cels[celIndex].vector != nil else { return .notAVectorLayer }
         // Generating on a cel that already derives from a recipe is never what was meant: the second
         // Generate silently replaces the first, so a double tap looks like it interpolated twice and
         // an artist who has scrubbed to a `t` they like loses it. Retiming is the slider's job, and
-        // starting over is Remove Interpolation's. Deliberately *not* extended to Reproject, whose
-        // whole subject is a cel that already has content — when it is built it will need its own
-        // answer to this question rather than inheriting Generate's.
-        if layers[layerIndex].cels[celIndex].interpolation != nil { return .alreadyInterpolated }
+        // starting over is Remove Interpolation's.
+        //
+        // **Reproject does not inherit it, and that is now a decision rather than a stub.** Its whole
+        // subject is a cel that already has content, and re-running it is the honest way to pick up
+        // references that have changed — it re-registers the same linework against them and replaces
+        // nothing. Note what this does *not* let through: a cel carrying a `.generate` recipe holds
+        // no strokes of its own (an in-between is derived, never stored), so Reproject on one refuses
+        // with `.nothingToReproject`. Commit is what turns it into a frame Reproject can work on,
+        // which is exactly the composition `PLAN.md` §5.5 describes.
+        if mode == .generate, layers[layerIndex].cels[celIndex].interpolation != nil {
+            return .alreadyInterpolated
+        }
+        if mode == .reproject, layers[layerIndex].cels[celIndex].vector?.elements.isEmpty != false {
+            return .nothingToReproject
+        }
         let target = CelRef(layerID: layers[layerIndex].id, celID: layers[layerIndex].cels[celIndex].id)
         return referenceRefusal(excludingTarget: target)
     }
@@ -730,7 +740,9 @@ extension CanvasManager {
         if let at = interpolationTarget {
             return interpolationRefusal(mode: mode, layerIndex: at.layer, celIndex: at.cel)
         }
-        if mode == .reproject { return .reprojectNotImplemented }
+        // No block at the playhead means no drawing to repose. Generate makes one; Reproject cannot,
+        // because the thing it acts on is the artist's own linework.
+        if mode == .reproject { return .nothingToReproject }
         // An empty slot between two references is the ordinary way to ask for an in-between, so the
         // missing block is not a refusal — Generate makes it. Every target-side check is answered by
         // construction for a cel that does not exist: it is empty, it carries no recipe, and nothing
@@ -763,6 +775,28 @@ extension CanvasManager {
 
         let provider = interpolationContentProvider
         let frames = keyframes.map { Self.registrationFrame(of: $0.cels.flatMap(provider)) }
+
+        // **Reproject registers the cel's own drawing, not the keyframes' parts.** No grouping runs
+        // and no tags are written: motion groups partition a drawing that is being *derived* from two
+        // others, and here there is one drawing whose pose slides as a whole. `PLAN.md` §5.5's mixed
+        // case — "groups B has get Reproject, groups it lacks get Generate" — is a later item; the
+        // model already allows it, since a recipe's bindings are a list.
+        if mode == .reproject {
+            let subject = Self.registrationFrame(of: layers[layerIndex].cels[celIndex].vector?.elements ?? [])
+            guard let binding = Self.registerReprojection(subject: subject, frames: frames) else {
+                return .nothingToReproject
+            }
+            let recipe = InterpolationRecipe(references: keyframes, t: 0.5, mode: .reproject,
+                                             groups: [binding])
+            // The structural bracket is enough here, and only here: reprojection writes a value type
+            // into `Cel` and touches no stroke anywhere. Generate's wider bracket exists because its
+            // registration tags the *keyframes'* strokes — see below.
+            withStructureUndo(name: "Reproject") {
+                layers[layerIndex].cels[celIndex].interpolation = recipe
+            }
+            return nil
+        }
+
         let registration = Self.registerGroups(frames: frames, existing: motionGroups)
 
         let recipe = InterpolationRecipe(references: keyframes, t: 0.5, mode: mode,
@@ -923,6 +957,47 @@ extension CanvasManager {
             let fit = ARAPRegistration.fit(lattice: rest, source: first.cloud,
                                            target: PointCloudIndex(cloud),
                                            correspondence: first.correspondence(to: frame))
+            lattices.append(fit.lattice)
+        }
+        return MotionGroupBinding(groupID: UUID(), lattices: lattices)
+    }
+
+    /// **Reproject** — the target cel's own drawing, registered so its *pose* can slide along the
+    /// A→C motion while its linework is never touched (`PLAN.md` §5.5, Phase 6 item 1).
+    ///
+    /// One structural difference from `registerWholeFrameGroup` carries the whole feature: **which
+    /// drawing the rest lattice covers.** Generate's rest lattice is drawn over keyframe A, and A's
+    /// content is what rides it. Here it is drawn over the *subject* — this cel's own cloud — and
+    /// every entry in `lattices`, including the first, is a fit of that grid to a reference. So
+    /// `lattices[0]` is the subject posed as keyframe A, `lattices[1]` is it posed as keyframe C, and
+    /// the evaluator's interpolation between them is the pose sliding. The subject embeds in the
+    /// lattice's **rest** configuration, which is where it was drawn, so nothing about its geometry
+    /// is derived — only where the grid carrying it currently sits.
+    ///
+    /// That first entry being a fit rather than the rest configuration is the invariant Generate's
+    /// array has and this one deliberately does not. For Generate, `t = 0` reproduces keyframe A to
+    /// the last bit precisely because `lattices[0]` *is* the rest grid its content was embedded in.
+    /// A reprojected cel has no such endpoint — it is neither keyframe — and giving it one would
+    /// show the drawing unposed at `t = 0` and snap the instant the slider moved.
+    ///
+    /// Nil when there is nothing to repose or nothing to repose it along; the caller turns that into
+    /// a refusal the artist can read.
+    static func registerReprojection(subject: RegistrationFrame,
+                                     frames: [RegistrationFrame]) -> MotionGroupBinding? {
+        guard !subject.cloud.isEmpty, frames.count >= 2 else { return nil }
+
+        let rest = Lattice(covering: subject.cloud,
+                           targetCellSize: latticeCellSize(covering: subject.cloud), padding: 1)
+        let ceiling = ARAPRegistration.Options().maxRegistrationSamples
+        var lattices: [Lattice] = []
+        for frame in frames {
+            // A keyframe with nothing in it gives the pose no target, and "stay where it was drawn"
+            // is the only answer that is not invented — the same rule the Generate path uses.
+            guard !frame.cloud.isEmpty else { lattices.append(rest); continue }
+            let cloud = ARAPRegistration.subsampled(frame.cloud, to: ceiling)
+            let fit = ARAPRegistration.fit(lattice: rest, source: subject.cloud,
+                                           target: PointCloudIndex(cloud),
+                                           correspondence: subject.correspondence(to: frame))
             lattices.append(fit.lattice)
         }
         return MotionGroupBinding(groupID: UUID(), lattices: lattices)
@@ -1310,8 +1385,12 @@ extension CanvasManager {
         guard let canvasSize,
               let at = celIndices(forCel: celID, inLayer: layerID),
               let recipe = layers[at.layer].cels[at.cel].interpolation else { return nil }
+        // A reprojection's content is the cel's own display list, which no `ContentProvider` can
+        // reach — the recipe holds no reference to the cel it lives on, by design. Handing it over
+        // here is the one place that knows both.
+        let subject = recipe.mode == .reproject ? (layers[at.layer].cels[at.cel].vector?.elements ?? []) : []
         return InterpolationEvaluator.render(recipe: recipe, at: t ?? recipe.t, size: canvasSize,
-                                             content: interpolationContentProvider,
+                                             content: interpolationContentProvider, subject: subject,
                                              quality: quality, options: interpolationOptions)
     }
 

@@ -115,9 +115,16 @@ enum InterpolationEvaluator {
     /// editing *around* it — deleting a referenced cel, adding a reference without re-registering the
     /// groups — and "not yet" is the honest answer to that, where a partial render would look like a
     /// bug in the interpolation.
+    /// `subject` is the target cel's **own** display list, and it is read only in `.reproject`, where
+    /// it is the whole content of the frame. It is a parameter rather than a `CelRef` on the recipe
+    /// on purpose: the recipe lives *on* the cel it describes, so a stored self-reference is document
+    /// state that duplicates something the caller already knows and can silently go stale — copy a
+    /// cel and its recipe would point at the original's ink. Defaulted so every `.generate` call site
+    /// is unaffected.
     static func evaluate(recipe: InterpolationRecipe,
                          at t: CGFloat,
                          content: ContentProvider,
+                         subject: [VectorElement] = [],
                          options: Options = Options()) -> Evaluation? {
         guard recipe.isWellFormed else { return nil }
 
@@ -144,6 +151,31 @@ enum InterpolationEvaluator {
         // 5, which is where several groups first exist, is responsible for tagging.
         let fallbackID = recipe.groups.first?.groupID
         let fallback = fallbackID.flatMap { warps[$0] }
+
+        // **Reproject: one set, not two, and nothing is derived** (`PLAN.md` §5.5). The cel's own
+        // linework is the frame; all that slides is its pose. So there is no cross-fade to weight —
+        // the subject sits at full strength at every `t` — and `backward` is empty rather than
+        // holding a second copy of the same drawing.
+        //
+        // The subject rides the lattice **from rest**, exactly as a local edit does, because the rest
+        // grid of a reprojection's lattice is the one drawn over *this cel's* cloud rather than a
+        // keyframe's. See `CanvasManager.registerReprojection`.
+        if recipe.mode == .reproject {
+            // The artist's own linework at this frame, not a keyframe's content being faded in or
+            // out — so it is never thinned, for the same reason a local edit is not. Solo/mute still
+            // applies: it is a view filter over whatever is on screen.
+            var full = options
+            full.thicknessFade = .none
+            return Evaluation(
+                forward: warped(subject, at: t, weight: 1, direction: .fromRest, warps: warps,
+                                fallback: fallback, fallbackID: fallbackID, options: full),
+                backward: [],
+                localEdits: warpedLocalEdits(recipe.localEdits, at: t, warps: warps,
+                                             fallback: fallback, fallbackID: fallbackID,
+                                             hidden: options.hiddenGroups),
+                forwardWeight: 1,
+                backwardWeight: 0)
+        }
 
         let forwardElements = recipe.references[index].cels.flatMap(content)
         let backwardElements = recipe.references[index + 1].cels.flatMap(content)
@@ -186,7 +218,11 @@ enum InterpolationEvaluator {
 
     // MARK: - Warping one set
 
-    private enum Direction { case forward, backward }
+    /// Which configuration a set's geometry is embedded in before the current lattice warps it.
+    ///
+    /// `.forward`/`.backward` are the two keyframes a Generate cross-fades between. `.fromRest` is
+    /// content stored in the lattice's own rest space — a local edit, or a whole reprojected cel.
+    private enum Direction { case forward, backward, fromRest }
 
     /// One motion group's lattice at this `t`, alongside the two keyframe configurations its
     /// embeddings are taken in.
@@ -196,7 +232,11 @@ enum InterpolationEvaluator {
         let current: Lattice
 
         func map(_ points: [CGPoint], _ direction: Direction) -> [CGPoint] {
-            current.warp(Self.embed(points, in: direction == .forward ? from : to))
+            switch direction {
+            case .forward: return current.warp(Self.embed(points, in: from))
+            case .backward: return current.warp(Self.embed(points, in: to))
+            case .fromRest: return mapFromRest(points)
+            }
         }
 
         /// A local edit is stored in rest space (`LocalEdit`), so it embeds in the rest grid and
@@ -447,9 +487,11 @@ enum InterpolationEvaluator {
     /// Evaluate and composite in one call — what a caller that just wants the frame's pixels asks
     /// for. Nil for a recipe that is not evaluable, same contract as `evaluate`.
     static func render(recipe: InterpolationRecipe, at t: CGFloat, size: CGSize,
-                       content: ContentProvider, quality: RenderQuality = .full,
+                       content: ContentProvider, subject: [VectorElement] = [],
+                       quality: RenderQuality = .full,
                        options: Options = Options()) -> UIImage? {
-        guard let evaluation = evaluate(recipe: recipe, at: t, content: content, options: options) else {
+        guard let evaluation = evaluate(recipe: recipe, at: t, content: content, subject: subject,
+                                        options: options) else {
             return nil
         }
         return composite(evaluation, size: size, quality: quality)
