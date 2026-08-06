@@ -617,6 +617,27 @@ sitting still — this is the whole point of the inverse map and the test that p
 
 **Estimate.** Two sessions.
 
+### Item 1 is done (Session 15, `93b7e02`)
+
+`CanvasManager.registerReprojection` plus a `.reproject` branch in `InterpolationEvaluator.evaluate`.
+The mechanism is one structural difference from Generate — **which drawing the rest lattice covers**:
+Generate's is drawn over keyframe A and A's content rides it; a reprojection's is drawn over the
+target cel's own cloud, and every entry in `lattices`, *including the first*, is a fit of that grid
+to a reference. `lattices[0]` is the subject posed as A, `lattices[1]` posed as C, and interpolating
+between them is the pose sliding. The subject embeds from **rest**, where it was drawn, so no
+geometry is derived.
+
+That first entry being a fit is the invariant Generate's array has and this one deliberately does
+not: Generate reproduces keyframe A bit for bit at `t = 0` *because* `lattices[0]` is the rest grid
+its content was embedded in, and a reprojected cel is neither keyframe.
+
+Three decisions, all recorded in `HANDOFF.md` §5's Phase 6 entry: the subject reaches the evaluator
+as a defaulted **parameter** rather than as a `CelRef` on the recipe; a `.reproject` recipe with no
+bindings is **malformed** where a `.generate` one is the legal degenerate case; and Reproject does
+**not** inherit `.alreadyInterpolated`, which answers the question Phase 4's comment left open.
+
+**Items 2 and 3 — editing at *t* — are not started.** Item 1 was the self-contained half.
+
 ---
 
 ## Phase 7 — Guide strokes

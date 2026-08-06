@@ -44,9 +44,9 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 5 — motion groups. COMPLETE and signed off.** Session 14's one open regression (§8 item 43) is fixed: the whole-drawing group is matched bidirectionally, because at that level the two clouds are the same content drawn twice. The pinned `XCTExpectFailure` is gone and the e2e passes. **Phase 6 — Reproject and editing at an intermediate frame — is next and has not been started.** |
+| **Current phase** | **Phase 6 — Reproject and editing at an intermediate frame. Item 1 done; items 2 and 3 not started.** Phase 5 is COMPLETE and signed off (§8 item 43 fixed — the whole-drawing group is matched bidirectionally, because at that level the two clouds are the same content drawn twice; the pinned `XCTExpectFailure` is gone and the e2e passes). **Reproject is built and no longer refuses**: a cel's own drawing is reposed along the A→C motion. What is left in Phase 6 is editing *at* an in-between — drawing, erasing and lasso at `t`, stored as `localEdits` — plus the liquify design question §8 item 25 says to answer before wiring. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`**. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | `bf17928`, plus Session 15's doc commit on top. Fast tier **261/261**, wider pure-logic tier **458/458**, and the phase-boundary full run **565 tests, 564 passed, 0 failed, 1 skipped** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design. **Zero expected failures anywhere**: for the first time since Phase 4.7 the tree carries no pinned bugs. |
+| **Last known-green commit** | `93b7e02` (Reproject). The **fast tier plus persistence and cel CRUD is 311/311**. The Phase 5 boundary's full run, on `bf17928`, was **565 tests, 564 passed, 0 failed, 1 skipped** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design. **Zero expected failures anywhere**: for the first time since Phase 4.7 the tree carries no pinned bugs. **No full run has been done since Reproject landed** — do one at the Phase 6 boundary. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -150,8 +150,8 @@ reset *before* the phase-boundary run, not after it starts failing.
     `CanvasManager+Timeline` (`addCel` now matches the layer's kind — see §5).
   - Tests: `InterpolationWorkflowLogicTests` (24) plus **one** XCUITest,
     `testInterpolateModeEndToEndFromGestureToScrub`.
-  - **Reproject is stubbed** — it refuses with `.reprojectNotImplemented` rather than quietly
-    behaving like Generate. Phase 6 item 1 owns it.
+  - **Reproject was stubbed** — it refused with `.reprojectNotImplemented` rather than quietly
+    behaving like Generate. **Built in Session 15**; that refusal is now `.nothingToReproject`.
 
 - **Phase 4.5 — the UI pass.** Not a planned phase: the product owner used Phase 4 on an iPad and
   gave layout feedback, and tying the layout down before Phase 5 builds motion-group UI on top of it
@@ -235,19 +235,31 @@ reset *before* the phase-boundary run, not after it starts failing.
   in §8 item 43. `icpRestarts` is untouched. Two clean fixtures that merely *passed* before now fit
   at zero residual, and a drawing turned 90° is fitted exactly where before it was not fitted at all.
 
+- **Phase 6 item 1 — Reproject.** One commit, `93b7e02`. `registerReprojection` plus the evaluator's
+  `.reproject` branch: the rest lattice is drawn over the *target cel's* cloud rather than keyframe
+  A's, and every entry in `lattices` — including the first — is a fit of it to a reference, so
+  sliding `t` slides the drawing's pose while its linework is never touched. Three decisions, all in
+  §5's Phase 6 entry: the subject reaches the evaluator as a defaulted **parameter** rather than a
+  `CelRef` on the recipe; a `.reproject` recipe with no bindings is **malformed** where a `.generate`
+  one is legal; and Reproject does **not** inherit `.alreadyInterpolated`, which answers the question
+  Phase 4's comment left open. Six new `InterpolationWorkflowLogicTests`.
+
 ### What is next
 
-**Phase 6 — Reproject and editing at an intermediate frame.** Nothing blocks it: Phase 5 is signed
-off and the tree carries no pinned failures. Read `IMPLEMENTATION.md`'s Phase 6
+**Phase 6 items 2 and 3 — editing at an intermediate frame.** Item 1 (Reproject) is done and was the
+self-contained half. What is left is drawing, erasing and lasso-transform *at* `t`, carried back to
+keyframe space through the inverse map and stored as `localEdits` with τ = `t`, plus lattice
+expansion when a stroke falls outside. Read `IMPLEMENTATION.md`'s Phase 6
 section, then §8 item 25, which is the product owner's own statement of what they want from it and
 names the one thing that does **not** fit the mechanism: a liquify at *t* is a deformation, not an
 element, so it has no `LocalEdit` shape at all and where it is stored is an open design question to
 answer before wiring rather than during. §8 item 6 is the smaller version of the same gap (a fill
 made at an in-between).
 
-Reproject itself is stubbed and refuses out loud (`.reprojectNotImplemented`); §8 item 17's Commit
-action is worth building alongside it, because Generate → Commit is what produces a frame Reproject
-then works on.
+**§8 item 17's Commit action is now load-bearing rather than a nicety.** Reproject refuses on a cel
+carrying a `.generate` recipe, because an in-between is derived and never stored, so such a cel has
+no linework of its own to repose. Generate → Commit → Reproject is the composition `PLAN.md` §5.5
+describes, and Commit is the missing middle of it.
 
 Three things earlier phases left on the table deliberately, all recorded rather than built: §8 item
 24's ~10 fps scrub (§8 item 14's `ScrubSession` is the shape of the fix, and it is a *separate*
@@ -1053,6 +1065,46 @@ the code was written.
   90° now fits exactly where before its own multi-start could not find the rotation. A fix that only
   moves a threshold does not do that.
 
+### From Phase 6 (item 1 — Reproject)
+
+- **Reproject is Generate with the rest lattice drawn over a different drawing, and everything else
+  follows from that.** It reads like a second mechanism and is not: `registerReprojection` differs
+  from `registerWholeFrameGroup` in exactly which cloud `Lattice(covering:)` is given, plus fitting
+  the *first* reference as well as the rest. The evaluator's `.reproject` branch then reuses the
+  local-edit path (`mapFromRest`) verbatim, because "content stored in the lattice's own rest space"
+  is the same question a local edit asks. If a later item makes these diverge, check first whether
+  the divergence is real or whether the rest lattice is being asked to cover the wrong thing.
+
+- **`lattices[0]` means two different things in the two modes, and that is deliberate.** For
+  `.generate` it is the rest configuration, which is *why* `t = 0` reproduces keyframe A to the last
+  bit. For `.reproject` it is a fit like every other entry, because a reprojected cel is neither
+  keyframe and an endpoint that showed the drawing unposed would snap the instant the slider moved.
+  **Anything that reads `lattices[0]` and assumes "rest" is wrong for a reprojection** — use
+  `Lattice.isRest(tolerance:)` rather than the index if it matters.
+
+- **The subject reaches the evaluator as a parameter, not as a `CelRef` on the recipe, and this is
+  the general rule for anything a recipe would say about its own cel.** A recipe lives *on* the cel
+  it describes, so a self-reference duplicates something every caller already knows and can silently
+  go stale — duplicate a cel and its recipe points at the original's ink. `evaluate` and `render`
+  take `subject: [VectorElement] = []`, defaulted so no `.generate` call site changed.
+  `CanvasManager.interpolatedImage` is the one place that knows both the recipe and the cel, and it
+  is where the two are joined.
+
+- **"A recipe with no bindings is legal" is a `.generate` rule only.** §5.8 records it as the honest
+  degenerate case — warp the whole frame as one group — and it stays true there. For `.reproject`
+  it is malformed, because with no binding there is no motion path to slide a pose along and the
+  render would show the artist's drawing sitting perfectly still at every `t`: the slider looking
+  broken rather than the frame being unposeable. `isWellFormed` now branches on the mode, and it is
+  the first thing in the recipe that does.
+
+- **Phase 4 left "does Reproject inherit `.alreadyInterpolated`?" open in a comment, and the answer
+  is no.** Re-running Reproject re-registers the same linework against references that have since
+  moved, and replaces nothing, so it is the natural way to pick them up. What that does *not* let
+  through is the case the refusal was protecting: a cel carrying a `.generate` recipe holds no
+  strokes of its own — an in-between is derived, never stored — so Reproject on one refuses with
+  `.nothingToReproject`. §8 item 17's Commit is what makes a generated frame reprojectable, which is
+  exactly the composition `PLAN.md` §5.5 describes, and it is now load-bearing rather than a nicety.
+
 ### 5.11 What the papers do — and where they do not help
 
 Read this before proposing an engine change; it is the answer to "what do the papers do at exactly
@@ -1333,7 +1385,19 @@ What Phase 3 decided that Phase 4 inherits:
   credited that blindness to the wrong property — "drawn twice identically", not "closed". Full suite
   **565 / 564 passed / 0 failed / 1 skipped**, zero expected failures, first attempt after a `simctl
   erase` — four phase boundaries in a row where resetting first gave a clean run. One new §8 item
-  (44), not built. No subagents.
+  (44), not built.
+
+  **Then started Phase 6 and finished its item 1: Reproject** (`93b7e02`), which had been stubbed
+  since Phase 4. It turns out to be Generate with the rest lattice drawn over a different drawing —
+  the target cel's own cloud instead of keyframe A's — with every entry in `lattices`, *including the
+  first*, a fit of that grid to a reference. The evaluator's `.reproject` branch then reuses the
+  local-edit path verbatim, because "content stored in the lattice's rest space" is the same question.
+  Three decisions taken and written down rather than left implicit: the subject reaches the evaluator
+  as a defaulted parameter, not a `CelRef` on the recipe; a `.reproject` recipe with no bindings is
+  malformed where a `.generate` one is legal; and Reproject does not inherit `.alreadyInterpolated`,
+  answering the question Phase 4's comment left open. Six new tests, 311/311 green. **Items 2 and 3
+  — editing at *t* — are not started, and no full suite has run since Reproject landed.** No
+  subagents all session.
 
 ---
 
