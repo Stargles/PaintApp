@@ -1082,20 +1082,16 @@ extension CanvasManager {
         return nil
     }
 
-    /// Whether `commitInterpolation` would succeed at the playhead, and why not if it would not —
-    /// what greys the bar's button out, in `InterpolationRefusal`'s usual shape (§5.10).
+    /// Whether `commitInterpolation` would succeed, without performing it. Shares every check with
+    /// it, **including the evaluation** — a malformed recipe is the reachable failure (delete a
+    /// referenced cel and the frame stops being renderable while the recipe stays put).
     ///
-    /// Unlike Generate there is no "make one" case: Commit acts on a recipe that already exists, so
-    /// an empty slot at the playhead is simply nothing to commit.
-    func commitRefusalAtPlayhead() -> InterpolationRefusal? {
-        guard let at = interpolationTarget else { return .nothingToCommit }
-        return commitRefusal(layerIndex: at.layer, celIndex: at.cel)
-    }
-
-    /// The refusal without performing the commit. Shares every check with `commitInterpolation`,
-    /// **including the evaluation**, so the button cannot offer a commit that then declines — a
-    /// malformed recipe is the reachable case (delete a referenced cel and the frame stops being
-    /// renderable while the recipe stays put).
+    /// **Not what greys the bar's button out, and that is deliberate**, which makes this the one
+    /// refusal in the feature that breaks §5.10's pattern. Every other one is a cheap structural
+    /// test that a view can afford to re-ask on every SwiftUI pass; this one runs `evaluate`, which
+    /// is an ARAP solve per motion group. `InterpolateBar` gates the button on "there is a recipe"
+    /// and reports the refusal on tap instead. Anything that wants the precise answer should call
+    /// this from an event handler, never from a `body`.
     func commitRefusal(layerIndex: Int, celIndex: Int) -> InterpolationRefusal? {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),

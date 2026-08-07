@@ -454,6 +454,26 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         XCTAssertGreaterThan(meanColumn(editAtOne), meanColumn(editAtHalf) + 0.05,
                              "The edit must ride the drawing's motion rather than sit still — "
                              + "columns at t=0.5 \(editAtHalf) vs at t=1 \(editAtOne)")
+
+        // --- Commit (`HANDOFF.md` §8 item 17) ---
+        //
+        // Here for the seam no logic test can reach, and it is a real one. Until now every pixel on
+        // screen came from `setInterpolationImage` — the evaluated bitmap the coordinator pushes.
+        // Committing drops the recipe, so `updateInterpolationPreviews` takes its no-recipe branch and
+        // clears that image to nil; from the next pass on, the same drawing has to be coming out of
+        // the cel's **own** display list instead. If the bake wrote anywhere else, the frame goes
+        // blank here and nowhere earlier.
+        let commit = app.buttons["interpolate.commit"]
+        XCTAssertTrue(commit.waitForExistence(timeout: 5), "interpolate.commit exists")
+        commit.tap()
+
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5),
+                      "The timing row is gated on there being a recipe, so it must go with it.")
+        let afterCommit = inkedColumns()
+        if afterCommit.isEmpty {
+            XCTFail("After Commit the frame has to keep its ink, now from the cel's own display "
+                    + "list rather than from the evaluated preview. \(inkReport())")
+        }
     }
 
 }

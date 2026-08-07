@@ -66,6 +66,7 @@ struct InterpolateBar: View {
                         .foregroundColor(.white.opacity(0.8))
                 }
                 Spacer(minLength: 12)
+                commitButton
                 removeButton
             }
             commands
@@ -117,6 +118,34 @@ struct InterpolateBar: View {
         .tint(emphasised ? .accentColor : .gray)
         .disabled(refused != nil)
         .accessibilityIdentifier("interpolate.\(mode == .generate ? "generate" : "reproject")")
+    }
+
+    /// Bakes the frame into the cel and drops the recipe — `PLAN.md` §4's Commit.
+    ///
+    /// **Beside Remove rather than in the centred group**, and both halves of that matter. It is not
+    /// in the group because a fourth button there would push Generate off the bar's centre, which is
+    /// the one thing the `ZStack` above exists to prevent. It is *next to Remove* because they are
+    /// the two ways a recipe ends and the artist is choosing between them: Commit keeps the drawing
+    /// and lets go of the link, Remove lets go of both. Remove stays furthest right, where it was.
+    ///
+    /// Shown only while there is a recipe, which is the same condition Remove uses and is deliberately
+    /// the *cheap* one. `commitRefusal` would be the more precise gate, but it evaluates the recipe —
+    /// an ARAP solve per motion group — and this body runs on every SwiftUI pass. So the button is
+    /// offered whenever a recipe exists and reports its refusal on tap instead, exactly as `refusal`'s
+    /// own comment describes.
+    @ViewBuilder
+    private var commitButton: some View {
+        if activeRecipe != nil {
+            Button("Commit") {
+                refusal = canvasManager.commitInterpolationAtPlayhead()
+            }
+            .buttonStyle(.bordered)
+            // Not destructive — nothing is lost that undo cannot return — but one-way in the sense
+            // that matters to the artist: the frame stops being derived, so editing a keyframe will
+            // no longer update it. Warm rather than red says "a decision" without saying "danger".
+            .tint(.orange)
+            .accessibilityIdentifier("interpolate.commit")
+        }
     }
 
     /// Drops the recipe, leaving whatever content the cel already had — which for a derived
