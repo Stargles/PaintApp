@@ -672,6 +672,36 @@ works for drawing and erasing, which are the two operations §5.4's mechanism ex
 
 ---
 
+## Commit — not a phase, and built between 6 and 7 *(done, Session 17)*
+
+Not in the original eight phases: `HANDOFF.md` §8 item 17 recorded it as the missing middle and the
+product owner un-deferred it after Phase 6 signed off, because Phase 6 is what made it load-bearing.
+An in-between the artist has drawn on is derived and stores nothing, so its local edits live exactly
+as long as the recipe — Commit is the only way to keep them. It is also the link that makes
+`PLAN.md` §5.5's Generate → **Commit** → Reproject compose at all, since Reproject refuses on a
+`.generate` cel for want of linework.
+
+**What it is.** `CanvasManager.commitInterpolation` evaluates the recipe at the cel's own `t`, writes
+`InterpolationEvaluator.flattened`'s single display list into the cel as ordinary content, and drops
+the recipe — one `withInterpolationUndo` step, the first caller in the feature to write stroke content
+from a recipe. `InterpolateBar` gets a Commit button beside Remove, which are the two ways a recipe
+ends.
+
+**What it costs, and why the cost is not negotiable.** `PLAN.md` §5.6 forbids concatenating the two
+sets into one list, and Commit's whole job is to produce one list. There is no way around it:
+`VectorElement` has no group case, so a display list has no per-set alpha either. The product owner's
+call (2026-08-07) was to give up exactness rather than vectors — a pixel-exact commit would write an
+image element, which registration cannot draw a cloud from, so the composition above would not work
+on the result. §5.6 now records the exception; `flattened` documents the three things that change and
+each is pinned by a test. **At `t` = 0 and `t` = 1 there is no loss**, and it falls out rather than
+being special-cased.
+
+Tests: 9 `InterpolationWorkflowLogicTests`, and the interpolate e2e extended once more — Commit is
+where the frame stops coming from `setInterpolationImage` and has to start coming from the cel's own
+display list, which is the one claim no logic test reaches.
+
+---
+
 ## Phase 7 — Guide strokes
 
 1. **Timestamp capture.** `UITouch.timestamp` is currently discarded; add a capture path for guides
@@ -714,7 +744,11 @@ without the product owner's say-so.
 - **Spline interpolation across 4+ keyframes.** Pairwise only. The data model must *allow* it
   (Phase 2) but must not implement it.
 - **Range interpolation** (edge case 4) — architecture must not preclude it; do not build it.
-- **Break-link / Commit-to-static.** Frames stay linked indefinitely.
+- ~~**Break-link / Commit-to-static.** Frames stay linked indefinitely.~~ **Un-deferred by the product
+  owner, 2026-08-07, and built the same session — see "Commit" below.** Phase 6 is what changed the
+  balance: an in-between the artist has *drawn on* stores nothing, so those edits lived exactly as
+  long as the recipe did, and Commit became the only way to keep them. Break-link is still not built;
+  what exists is Commit, which is one-way by design (`PLAN.md` §4).
 - **The GPU dab rasteriser.** Separate pre-existing project (`VECTOR_ERASER_PLAN.md` §11). The
   polyline preview tier is this project's answer.
 - **The liquify / mesh-distort tool.** Phase 1's engine is built to serve it later; the tool is not

@@ -533,6 +533,18 @@ naively appended alongside C's backward-warped strokes, would punch holes in geo
 business touching. Two isolated composites blended at (1−t)/t is the correct structure and it fits
 the existing transparency-layer machinery.
 
+**Amended (2026-08-07, Session 17): this is a rule about *rendering an in-between*, and Commit is the
+one deliberate exception.** Commit's whole job is to turn the frame into a single display list (§4),
+so it cannot honour the rule and there is no way to make it — `VectorElement` has no group case, so a
+display list has no per-set alpha either, and the weights have to reach the elements themselves.
+Which means Commit at an interior *t* is lossy, structurally and not for want of trying. The product
+owner's call was to **give up exactness and keep vectors**, because a pixel-exact commit would not be
+reprojectable (registration draws its cloud from strokes) and Generate → Commit → Reproject is the
+composition Commit exists to enable. `InterpolationEvaluator.flattened` documents the three things
+that change and pins each by test; at *t* = 0 and *t* = 1 there is no loss at all. Nothing about the
+live render changed — this rule still governs every path except the one the artist explicitly asks
+for, once, on a button.
+
 ---
 
 ## 6. Guide strokes

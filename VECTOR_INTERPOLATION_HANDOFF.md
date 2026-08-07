@@ -44,9 +44,9 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 6 — Reproject and editing at an intermediate frame. All three items done; the definition of done is met for drawing and erasing, and the transform half of item 3 is a recorded refusal rather than a build — the product owner's call on whether that closes the phase.** Item 1 (Reproject) landed in Session 15. Session 16 answered §8 item 25's liquify design question (§5.12, and the answer freed items 2–3 rather than constraining them), then wired editing at an in-between end to end: a stroke drawn at `t` is carried back through the inverse map and stored as a `LocalEdit` with τ = `t`, with lattice expansion when it lands outside. Erasing needed no eraser-specific code. **"Lasso transform at `t`" turned out not to exist as an operation** — see §5.13. |
+| **Current phase** | **Between phases. Phase 6 is signed off and Commit is built; Phase 7 (guide strokes) is next and unstarted.** The product owner answered both of §2's open questions on 2026-08-07: the transform refusal **does** close Phase 6 (§5.13 stands; §5.12's displacement field is not being built now), and §8 item 17's **Commit was un-deferred and built the same session** — see §5.14 and `IMPLEMENTATION.md`'s "Commit" section. Phase 6 itself: item 1 (Reproject) landed in Session 15; Session 16 answered §8 item 25's liquify question (§5.12) and wired editing at an in-between end to end. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`**. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | Session 16's last. Wider pure-logic tier **475/475**, and a **full run with editing-at-an-in-between in: 583 tests, 582 passed, 0 failed, 1 skipped** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design. **Zero expected failures**, as since Phase 5.1. It took **two** full runs to get there and the first one is the lesson, not a blemish — see §5's note on erasing *immediately* before the full run rather than before the session's first run. |
+| **Last known-green commit** | Session 17's last. Fast tier **288/288**, wider pure-logic tier and the full run as recorded in §6's Session 17 line. Session 16's full run was **583 / 582 / 0 / 1** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design — with **zero expected failures**, as since Phase 5.1. §5's note on erasing the simulator *immediately* before the full run rather than at the start of the session still applies. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -268,27 +268,40 @@ reset *before* the phase-boundary run, not after it starts failing.
     *extended* rather than joined by a second — it was already in exactly the right state, and the
     view-layer routing is the one part a logic test cannot reach.
 
+- **Commit — `PLAN.md` §4, §8 item 17. Not a phase; built between 6 and 7 (Session 17).** Two
+  commits, `dbc2233` and `0bf5ed0`. `IMPLEMENTATION.md`'s "Commit" section is the record of the
+  shape, §5.14 of the decision behind it.
+  - **The decision came first, and §3.5 is why.** Item 17 read as a wiring job and is not: `PLAN.md`
+    §5.6 forbids concatenating the two sets into one display list, and producing one list is
+    Commit's whole job. No display list can express an in-between at an interior *t* — an `.erase`
+    stroke reaches everything beneath it, and `VectorElement` has no group case to hold a per-set
+    alpha. The product owner chose **vectors over exactness**; §5.6 now records the exception and
+    §5.14 records what it costs.
+  - `CanvasManager.commitInterpolation` + `InterpolationEvaluator.flattened`, one
+    `withInterpolationUndo` step. A Commit button beside Remove on `InterpolateBar` — the two ways a
+    recipe ends. `interpolationCommitOptions` keeps solo/mute out of the document write.
+  - Tests: 9 `InterpolationWorkflowLogicTests`, plus the interpolate e2e extended a third time to
+    cover the one seam no logic test reaches — the frame changing over from `setInterpolationImage`
+    to the cel's own display list.
+
 ### What is next
 
-**Phase 7 — guide strokes**, if the product owner signs Phase 6 off. Read `IMPLEMENTATION.md`'s
-Phase 7 section; item 1 (capturing `UITouch.timestamp`, which is currently discarded) is the only
-part that reaches outside the feature's own files.
+**Phase 7 — guide strokes.** Phase 6 is signed off and Commit is in, so this is the next work with
+nothing in front of it. Read `IMPLEMENTATION.md`'s Phase 7 section; item 1 (capturing
+`UITouch.timestamp`, which is currently discarded) is the only part that reaches outside the
+feature's own files. After Phase 7 the feature's own definition of done is in reach — check it
+rather than looking for more work (§3.3).
 
-**Two things the product owner should decide before Phase 7 rather than after:**
+Nothing is blocked and nothing is half-done. Three things remain recorded rather than built, all
+independent of Phase 7:
 
-1. **Does the transform refusal close Phase 6?** §5.13 and §8 item 45. The alternative is building
-   §5.12's displacement field now, which makes the whole-content transform at *t* a small addition
-   and puts liquify within reach — but liquify is on `IMPLEMENTATION.md`'s explicitly-deferred list,
-   so building the field is a decision, not a tidy-up.
-2. **§8 item 17's Commit is still the missing middle**, and Phase 6 did not change that. Reproject
-   refuses on a `.generate` cel because an in-between is derived and never stored, so
-   Generate → Commit → Reproject is the composition `PLAN.md` §5.5 describes and Commit is the one
-   link that does not exist. It is also now the only way an artist can keep an in-between they have
-   drawn on.
-
-§8 item 6 (a fill made at an in-between) is untouched and independent of all of the above: a fill is
-*content*, so it belongs in `localEdits`, which means widening `LocalEdit.stroke` to a
-`VectorElement`.
+- **§8 item 6** — a fill made at an in-between. A fill is *content*, so it belongs in `localEdits`,
+  which means widening `LocalEdit.stroke` to a `VectorElement`. Untouched by Commit.
+- **§8 item 45** — the two halves of "transform at an in-between": a vector lasso (really item 26's
+  vector/raster divorce) and the whole-content transform, whose home is §5.12's displacement field.
+  The product owner explicitly declined to build that field now.
+- **§8 items 24, 34 and 36** — the ~10 fps scrub, temporal visibility thresholds, and ink-to-ink
+  matching. All three predate Phase 6 and none moved.
 
 Three things earlier phases left on the table deliberately, all recorded rather than built: §8 item
 24's ~10 fps scrub (§8 item 14's `ScrubSession` is the shape of the fix, and it is a *separate*
@@ -1201,6 +1214,89 @@ the code was written.
   precondition. The cheap check is the one used here: re-run the test alone, and read whether the
   code under it can even reach your change.
 
+### From Commit (§8 item 17, Session 17)
+
+- **A one-line follow-on item can still be gated on a recorded decision, and this one was.** Item 17
+  read as a wiring job — evaluate, write, drop the recipe — and the first thing writing it hits is
+  `PLAN.md` §5.6, which says in as many words that the two sets "cannot be concatenated into one
+  list". Commit's entire job is to produce one list. The useful habit this rewards: before building
+  a §8 item, **grep the plan for the thing it is about**, because §8 entries were written while
+  looking at code and the plan's constraints were written while looking at the design. Neither
+  document was checked against the other at the time.
+
+- **Proving an impossibility is worth more than picking an option, and it is what made the decision
+  askable.** The instinct was to weigh "concatenate with baked opacity" against "commit pixels".
+  What actually settled it was checking whether a display list *could* express the frame: it cannot,
+  and for two independent reasons — an `.erase` stroke reaches everything beneath it in its list, and
+  `VectorElement` has no group case, so there is nowhere to put a per-set alpha either. That turns a
+  matter of taste into a trichotomy (give up exactness, give up vectors, or give up interior `t`)
+  and makes it a question the product owner can answer in one pass. Check for the group case before
+  assuming any future "flatten this into a display list" job is arithmetic.
+
+- **The endpoints come out exact for free, and the two guards that do it look exactly like
+  optimisations.** `faded` returns `[]` below weight 0 and the elements untouched at weight 1. Those
+  are not fast paths: dropping the far set is what stops a `t` = 0 commit carrying a second copy of
+  the drawing at alpha 0, and returning early at weight 1 is what stops a `Double` round-trip
+  through `× 1.0` perturbing samples that Phase 1 guarantees bit-for-bit.
+  `testCommittingAtTZeroReproducesKeyframeAExactly` is the tripwire if someone tidies them away.
+
+- **`interpolationOptions` was unsafe for a document write, and the direction of the danger is the
+  opposite of the one §5 already warns about.** Phase 5's entry says `hiddenMotionGroups` must not
+  reach a render *outside* the mode. Commit is the reverse: it runs **inside** the mode, where
+  solo/mute is legitimately populated, and it writes what it evaluates — so committing with a group
+  muted would delete that group's drawing permanently, on a command that says nothing about
+  deleting. `interpolationCommitOptions` is the seam. **The general rule this generalises to: any
+  evaluation whose result reaches the document has to strip every view filter first**, and the way
+  to find them is to ask which `Options` fields exist to answer "what am I looking at" rather than
+  "what is this frame".
+
+- **A refusal that is expensive to compute cannot be the thing that greys a button out.** Every
+  other `InterpolationRefusal` is a structural test a SwiftUI `body` can re-ask on every pass.
+  `commitRefusal` runs `evaluate`, which is an ARAP solve per motion group. `InterpolateBar` gates
+  the button on "there is a recipe" — the same cheap condition Remove uses — and reports the refusal
+  on tap, which is the pattern `refusal`'s own comment already described for the rare case. This is
+  the one place in the feature where §5.10's "commands return a reason and the bar disables from the
+  same call" is deliberately not followed, so it is written on `commitRefusal` itself.
+
+- **Committed strokes keep their `motionGroupID`, and that is a choice rather than a leftover.** A
+  tag says which part of the character a stroke is, which stays true after the frame stops being
+  derived, and it means a later Reproject on the committed cel seeds its grouping from the partition
+  the artist already corrected. §5's Phase 5 warning about a stale tag falling through to the first
+  binding does not apply, because there is no recipe left to fall through to. Note a commit at an
+  interior `t` produces two copies of the drawing carrying the *same* tags — which is also right, as
+  both copies are the same part.
+
+- **A fully-muted frame renders blank rather than nil, and a test premise got that wrong.** `nil`
+  from `evaluate`/`interpolatedImage` means "this recipe cannot be evaluated", not "there is nothing
+  to see" — hiding every group still produces an `Evaluation` with empty display lists and a blank
+  image. Assert on the evaluation's contents, not on the image being nil, whenever the question is
+  about visibility rather than about well-formedness.
+
+### 5.14 Commit's fidelity — the decision, and what it costs
+
+The product owner's call, 2026-08-07, taken after the impossibility above was established. Recorded
+here because §3.5 makes it theirs and because the alternative will look tempting again.
+
+**Chosen: give up exactness, keep vectors.** Commit at an interior *t* writes both sets into one
+display list with each set's cross-fade weight baked into its elements' own `opacity`.
+
+- **Why not commit pixels.** A single `.image` element is exact at every *t* and honours §5.6
+  untouched. It also cannot be reprojected — `registrationFrame` draws its cloud from strokes — so
+  Generate → Commit → Reproject, the composition the item exists to enable, would not work on the
+  result, and the eraser's geometric modes could not touch it either.
+- **Why not refuse in between.** Exact and honest, and it does not do the thing that was asked: an
+  in-between drawn on at *t* = 0.5 still could not be kept.
+- **What changes, precisely.** (1) Overlapping ink inside one set darkens — `1 − (1 − w)ⁿ` instead of
+  `w`. (2) The backward set's erasers reach the forward set's ink; the forward set's do not, because
+  it is emitted first, and that ordering is the only thing bounding the leak. (3) A placed image
+  cannot fade at all, having no opacity. **None of this applies at *t* = 0 or *t* = 1.**
+- **Erasers are scaled like everything else, and it is a genuine trade.** Leaving an eraser at full
+  strength is *more* faithful inside its own set — the hole clears completely — and much less
+  faithful across sets. At `w = 0.5`: scaling leaves a 0.25 ghost inside the set's own holes, not
+  scaling takes a 0.5 bite out of the other set's drawing. Twice the error, and a hole reads as
+  damage where a ghost reads as softness. Scaling also makes the leak vanish exactly as the leaking
+  set fades out, and keeps `faded` one rule instead of two.
+
 ### 5.12 Where a liquify at *t* is stored — §8 item 25's design question, answered
 
 `IMPLEMENTATION.md` Phase 6 and §8 item 25 both say to settle this **before** wiring items 2–3 rather
@@ -1610,6 +1706,36 @@ What Phase 3 decided that Phase 4 inherits:
   *second* attempt, and the first one is written up in §5 because it sharpens the erase advice
   rather than contradicting it. No subagents.
 
+- **Session 17 (Phase 6 sign-off, and Commit) — 2026-08-07:** Opened by putting §2's two open
+  questions to the product owner, which is what the previous session's handoff asked for. Both were
+  answered: **the transform refusal closes Phase 6** (§5.12's displacement field is explicitly not
+  being built now), and **§8 item 17's Commit was un-deferred and built the same session** — so
+  `IMPLEMENTATION.md`'s "Break-link / Commit-to-static" line is struck and that file has a "Commit"
+  section between Phases 6 and 7. Two commits, `dbc2233` (engine + document) and `0bf5ed0` (the
+  button and the e2e).
+
+  **A third question had to be asked before any code, and §3.5 is the whole reason.** Item 17 read
+  as a wiring job. It is not: `PLAN.md` §5.6 says the two sets "cannot be concatenated into one
+  list", and producing one list is exactly what Commit does. Rather than pick an option, the session
+  established an *impossibility* — no display list can express an in-between at an interior *t*,
+  because an `.erase` stroke reaches everything beneath it and `VectorElement` has no group case to
+  hold a per-set alpha either — which turned a matter of taste into a three-way choice the product
+  owner could answer in one pass. They chose **vectors over exactness**; §5.14 records the decision
+  and its cost, and §5.6 now carries the amendment.
+
+  **One real bug was caught while writing the comment that claimed it could not happen.**
+  `interpolationOptions` populates `hiddenGroups` inside interpolate mode, which is exactly where
+  Commit is pressed — so committing with a group muted would have deleted that group's drawing
+  permanently. `interpolationCommitOptions` is the seam, and the general rule is in §5: **any
+  evaluation whose result reaches the document has to strip every view filter first.** Phase 5's
+  existing warning about `hiddenMotionGroups` points the other way, which is why this one was not
+  already covered.
+
+  9 new logic tests; the interpolate XCUITest **extended** for the third phase running, because
+  Commit is where the frame stops coming from `setInterpolationImage` and has to start coming from
+  the cel's own display list — a bake that wrote anywhere else goes blank there and nowhere earlier.
+  Fast tier 288/288, wider pure-logic tier 476/476, both zero expected failures. No subagents.
+
 ---
 
 ## 7. Handoff prompt template
@@ -1784,12 +1910,13 @@ definition of done is met, and suggest rather than implement anything out of sco
     is the same information the spacing chart shows (§6.2), in a second place, and it wants the
     recipes on the cels between the two references — which nothing currently gathers.
 
-17. **There is no Commit action.** `PLAN.md` §4 names it: evaluate at the current `t`, write the
-    result into the cel as ordinary content, drop the recipe — one-way, undoable, explicit, never
-    automatic. Nothing in Phase 4 needs it, and Generate-then-Commit is what produces a frame that
-    Reproject then works on, so it is worth building alongside Phase 6's Reproject rather than
-    before it. Note it would be the first thing that writes stroke content from a recipe, so it is
-    the first caller of `withInterpolationUndo` in this part of the feature (§5).
+17. **DONE (Session 17).** Commit. `CanvasManager.commitInterpolation` evaluates at the cel's own
+    `t`, writes `InterpolationEvaluator.flattened`'s single display list in as ordinary content and
+    drops the recipe, in one `withInterpolationUndo` step — and it was indeed the first caller in the
+    feature to write stroke content from a recipe, as this entry predicted. The prediction it got
+    *wrong* is that this was a wiring job: `PLAN.md` §5.6 forbids the concatenation Commit has to
+    perform, which made it a product decision first (§5.14). Un-deferred by the product owner the
+    same day, so `IMPLEMENTATION.md`'s "Break-link / Commit-to-static" line is struck.
 
 18. **An interpolated cel is blank everywhere except the canvas at the current frame.**
     `updateInterpolationPreviews` asks each layer for the cel under the playhead, which is exactly
