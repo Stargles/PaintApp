@@ -46,7 +46,8 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Between phases. Phase 6 is signed off and Commit is built; Phase 7 (guide strokes) is next and unstarted.** The product owner answered both of §2's open questions on 2026-08-07: the transform refusal **does** close Phase 6 (§5.13 stands; §5.12's displacement field is not being built now), and §8 item 17's **Commit was un-deferred and built the same session** — see §5.14 and `IMPLEMENTATION.md`'s "Commit" section. Phase 6 itself: item 1 (Reproject) landed in Session 15; Session 16 answered §8 item 25's liquify question (§5.12) and wired editing at an in-between end to end. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, tracks `origin/`. Rebased onto `origin/main` as of Session 8. **Session 17's four commits are local — `git push` before relying on the remote.** |
-| **Last known-green commit** | Session 17's last. Fast tier **288/288**, wider pure-logic tier and the full run as recorded in §6's Session 17 line. Session 16's full run was **583 / 582 / 0 / 1** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design — with **zero expected failures**, as since Phase 5.1. §5's note on erasing the simulator *immediately* before the full run rather than at the start of the session still applies. |
+| **Last known-green commit** | Session 17's last, for everything that was verifiable. Fast tier **288/288**, wider pure-logic tier **476/476**, the interpolate e2e **passing standalone at 117 s**, all with zero expected failures. **The phase-boundary full run is NOT verified this session, and that is the one gap — see the row below.** Session 16's full run remains the last known-good whole-suite number: **583 / 582 / 0 / 1**, the skip being `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, by design. |
+| **The unverified full run** | Two attempts, both meaningless, and the cause is the **host machine rather than the simulator or the code**. Attempt 1: 592 tests, one `FillUITests` failure that passed alone. Attempt 2: aborted at 556 of 592 with five failures, **three of them runner crashes**. Load average was **129 / 272 / 412 on 8 cores**, with `spindump` at 59% CPU and no test process of ours running. See §5's new entry — `uptime` first, and `simctl erase` cannot help, because the device is not what is broken. **Next session: run the full suite on a quiet machine before treating the boundary as closed.** Nothing about it is expected to fail; the two runs that did failed on disjoint sets, and the changes this session are 211 insertions with zero deletions. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -1272,6 +1273,43 @@ the code was written.
   image. Assert on the evaluation's contents, not on the image being nil, whenever the question is
   about visibility rather than about well-formedness.
 
+### 5.15 Run `uptime` before diagnosing a failed full run — it is the cheapest signal and no earlier entry mentions it
+
+Five phase boundaries of advice in this file treat *which tests failed and how* as the discriminator:
+a launch assertion versus a behavioural one, the `failed to launch` line present or absent, a
+different set failing each run. All of that is still true and all of it is **downstream**. Session 17
+added the one measurement that settles it in a second, and it is not about the tests at all.
+
+- **The host was at load 129 / 272 / 412 on an 8-core machine**, with `spindump` — macOS's own
+  hang-sampler — burning 59% CPU while *no* test process of ours was running. At that point no
+  suite result carries information, and `simctl erase` cannot rescue it, because the simulator is
+  not the thing that is broken. Two full runs failed on **disjoint** sets, the second aborting at
+  556 of 592 tests with three failures that were **runner crashes** rather than tests. Check
+  `uptime` before reading a single assertion message.
+
+- **The corroborating signal is the duration ratio, and it is remarkably consistent at ~2×.** The
+  same test took **224 s** in the degraded run and **117 s** settled. Session 16's case was **61 s**
+  in-run against **34 s** alone. If a failing test also took about twice as long as it should, stop
+  reading the failure and look at the machine.
+
+- **A behavioural assertion *with a message* is not proof the failure is real, and this is the third
+  time that class of tell has been downgraded.** Session 16 established that the `failed to launch`
+  line is confirmation-when-present rather than a precondition. This session establishes the same
+  for the assertion's shape: `FillUITests` failed on "Fill should color the square's interior" — a
+  behavioural claim, with a message, nothing like a launch assertion — and passed alone. **The two
+  checks that have worked every time are the two from §5's Phase 6 entry**: re-run the test alone,
+  and ask whether the code under it can even reach your change. Here it could not — the session's
+  three source files were 211 insertions and **zero** deletions, and the only view change renders
+  behind `if canvasManager.isInterpolateMode`.
+
+- **Size an XCUITest wait by what the tap actually triggers, not by the file's prevailing number.**
+  The one genuinely self-inflicted failure this session was a `waitForNonExistence(timeout: 5)`
+  copied from the twenty other waits in `TimelineAndUndoUITests` — all of which guard a panel
+  presenting or a button appearing, while this one guards the view catching up with a **synchronous
+  ARAP solve**. Mis-sized when written rather than unlucky. Raising it is not "making a red test
+  green" only because the assertion was independently verified to pass at settled load; if that had
+  not been established first, raising the timeout would have been exactly the wrong move.
+
 ### 5.14 Commit's fidelity — the decision, and what it costs
 
 The product owner's call, 2026-08-07, taken after the impossibility above was established. Recorded
@@ -1734,7 +1772,15 @@ What Phase 3 decided that Phase 4 inherits:
   9 new logic tests; the interpolate XCUITest **extended** for the third phase running, because
   Commit is where the frame stops coming from `setInterpolationImage` and has to start coming from
   the cel's own display list — a bake that wrote anywhere else goes blank there and nowhere earlier.
-  Fast tier 288/288, wider pure-logic tier 476/476, both zero expected failures. No subagents.
+  Fast tier 288/288, wider pure-logic tier 476/476, the interpolate e2e passing standalone at 117 s,
+  all zero expected failures. **The phase-boundary full run is the one thing this session did not
+  get**, and §5.15 is the write-up: two attempts, both meaningless, on a host at load 129/272/412
+  across 8 cores with `spindump` at 59% and nothing of ours running. The second aborted at 556 of
+  592 tests with three *runner crashes* among its five failures. §2 carries it as an explicit open
+  item rather than a claimed green. The one self-inflicted failure in there was real and is fixed:
+  the e2e's new Commit wait was `timeout: 5`, copied from the file's twenty other waits, all of
+  which guard a cheap transition where this one guards the view catching up with a synchronous ARAP
+  solve (`7045da3`). No subagents.
 
 ---
 
