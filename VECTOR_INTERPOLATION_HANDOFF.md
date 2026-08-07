@@ -45,7 +45,7 @@ need. Read what §1 says to read; consult the rest on demand.
 | | |
 |---|---|
 | **Current phase** | **Between phases. Phase 6 is signed off and Commit is built; Phase 7 (guide strokes) is next and unstarted.** The product owner answered both of §2's open questions on 2026-08-07: the transform refusal **does** close Phase 6 (§5.13 stands; §5.12's displacement field is not being built now), and §8 item 17's **Commit was un-deferred and built the same session** — see §5.14 and `IMPLEMENTATION.md`'s "Commit" section. Phase 6 itself: item 1 (Reproject) landed in Session 15; Session 16 answered §8 item 25's liquify question (§5.12) and wired editing at an in-between end to end. |
-| **Branch** | `claude/vector-interpolation-design-9d5b83`, **pushed; tracks `origin/`**. Rebased onto `origin/main` as of Session 8. |
+| **Branch** | `claude/vector-interpolation-design-9d5b83`, tracks `origin/`. Rebased onto `origin/main` as of Session 8. **Session 17's four commits are local — `git push` before relying on the remote.** |
 | **Last known-green commit** | Session 17's last. Fast tier **288/288**, wider pure-logic tier and the full run as recorded in §6's Session 17 line. Session 16's full run was **583 / 582 / 0 / 1** — the skip is `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design — with **zero expected failures**, as since Phase 5.1. §5's note on erasing the simulator *immediately* before the full run rather than at the start of the session still applies. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |

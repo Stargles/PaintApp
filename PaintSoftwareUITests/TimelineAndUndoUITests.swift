@@ -467,7 +467,13 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         XCTAssertTrue(commit.waitForExistence(timeout: 5), "interpolate.commit exists")
         commit.tap()
 
-        XCTAssertTrue(slider.waitForNonExistence(timeout: 5),
+        // The one wait in this file that is not 5 seconds, and the asymmetry is deliberate. Every
+        // other one here guards a cheap transition — a panel presenting, a button appearing. This one
+        // guards the view catching up with a **synchronous ARAP solve**: the tap runs `evaluate` on
+        // the main actor for every motion group before the recipe is dropped, and only then does
+        // SwiftUI re-run and the accessibility tree lose the slider. Sizing it like the cheap waits
+        // was wrong when it was written, not merely unlucky.
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 20),
                       "The timing row is gated on there being a recipe, so it must go with it.")
         let afterCommit = inkedColumns()
         if afterCommit.isEmpty {
