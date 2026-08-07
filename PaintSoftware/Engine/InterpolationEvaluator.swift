@@ -618,6 +618,77 @@ enum InterpolationEvaluator {
             .render(quality: quality)
     }
 
+    // MARK: - Commit
+
+    /// The single display list that **replaces** an evaluation when the artist commits it —
+    /// `PLAN.md` §4's Commit, `HANDOFF.md` §8 item 17.
+    ///
+    /// ## This is lossy at an interior `t`, and the loss is structural rather than a shortcut
+    ///
+    /// `PLAN.md` §5.6 says the two sets "cannot be concatenated into one list", and it is right about
+    /// rendering: `composite` draws each set in isolation and blends the two images, because an
+    /// `.erase` stroke lowers the alpha of everything beneath it *in its list* and A's eraser has no
+    /// business reaching C's ink. Commit's whole job is to produce one list, so it cannot honour that.
+    /// Nor is there a way around it — `VectorElement` has no group case, so a display list has no
+    /// per-set alpha either, and the weights have to reach the elements themselves.
+    ///
+    /// So this is the deliberate one-way flatten the artist asked for, and exactly three things
+    /// change at an interior `t`:
+    ///
+    /// 1. **Overlapping ink inside one set darkens.** The set used to be rendered opaque and then
+    ///    faded to `w`; now each element carries `w` and *n* overlapping ones give `1 − (1 − w)ⁿ`.
+    ///    Two coincident strokes at `w = 0.5` land at 0.75 where they used to land at 0.5.
+    /// 2. **The backward set's erasers reach the forward set's ink.** Order is what bounds this: the
+    ///    forward set is emitted first, so its own erasers still see nothing but its own elements and
+    ///    are exactly right. Only the later set leaks, and it leaks by its own weight (see below).
+    /// 3. **A placed image cannot fade at all** — `VectorImageElement` has no opacity — so one in a
+    ///    partially-faded set commits at full strength. `HANDOFF.md` §8 records it.
+    ///
+    /// **At `t = 0` and `t = 1` there is no loss whatsoever**, and that falls out rather than being
+    /// special-cased: one weight is 0, so that set is dropped entirely, and the other is 1, so
+    /// `faded` returns its elements untouched. A commit at an endpoint is bit-exact.
+    ///
+    /// Local edits go last and unweighted, which is the same position and the same strength
+    /// `composite` gives them: an `.erase` local edit is *supposed* to reach both keyframes' ink
+    /// (rule 3), so for that one set the flatten is not a compromise but the intended behaviour.
+    static func flattened(_ evaluation: Evaluation) -> [VectorElement] {
+        faded(evaluation.forward, by: evaluation.forwardWeight)
+            + faded(evaluation.backward, by: evaluation.backwardWeight)
+            + evaluation.localEdits
+    }
+
+    /// One set's elements carrying their set's cross-fade weight as their own opacity.
+    ///
+    /// **An eraser is scaled like everything else**, and that is a considered trade rather than an
+    /// oversight, because the two choices are wrong in different places. Leaving an eraser at full
+    /// strength is *more* faithful inside its own set — the hole clears completely, as it did in the
+    /// isolated render — but it is much less faithful across sets, since the later set's eraser would
+    /// then punch a full hole in the earlier set's ink. Measured as leftover/removed alpha at
+    /// `w = 0.5`: scaling leaves a 0.25 ghost inside the set's own holes, while not scaling takes a
+    /// 0.5 bite out of the other set's drawing — twice the error, and a hole reads as damage where a
+    /// ghost reads as softness. Scaling also makes the leak vanish exactly as the leaking set fades
+    /// out, and keeps this function one rule rather than two.
+    private static func faded(_ elements: [VectorElement], by weight: CGFloat) -> [VectorElement] {
+        // Both guards are what make the endpoints exact, so neither is an optimisation: a set at
+        // weight 0 contributes nothing at all, and a set at weight 1 must come through bit-identical
+        // rather than multiplied by a 1.0 that a `Double` round-trip could perturb.
+        guard weight > 0 else { return [] }
+        guard weight < 1 else { return elements }
+        return elements.map { element in
+            switch element {
+            case .stroke(var stroke):
+                stroke.opacity *= Double(weight)
+                return .stroke(stroke)
+            case .fill(var fill):
+                fill.opacity *= Double(weight)
+                return .fill(fill)
+            case .image:
+                // Nothing to scale — point 3 above.
+                return element
+            }
+        }
+    }
+
     /// Evaluate and composite in one call — what a caller that just wants the frame's pixels asks
     /// for. Nil for a recipe that is not evaluable, same contract as `evaluate`.
     static func render(recipe: InterpolationRecipe, at t: CGFloat, size: CGSize,

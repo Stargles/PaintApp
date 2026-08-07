@@ -635,6 +635,196 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
 
     /// Pressing Generate twice used to interpolate twice, replacing the first recipe — so a double
     /// tap silently threw away whatever `t` had been scrubbed to. Product owner, 2026-08-01.
+    // MARK: - Commit (§8 item 17)
+
+    /// The committed cel's display list, as strokes.
+    private func committedStrokes(_ manager: CanvasManager) throws -> [VectorStroke] {
+        try XCTUnwrap(manager.layers[1].cels[1].vector).elements.compactMap(\.stroke)
+    }
+
+    /// The whole point of the command: the derived frame becomes the cel's own content, and the
+    /// recipe — the thing that made it derived — is gone.
+    func testCommitBakesTheFrameIntoTheCelAndDropsTheRecipe() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+        XCTAssertTrue(try XCTUnwrap(cels[1].vector).elements.isEmpty,
+                      "an in-between stores nothing until it is committed")
+
+        XCTAssertNil(manager.commitInterpolation(layerIndex: 1, celIndex: 1))
+
+        XCTAssertNil(manager.layers[1].cels[1].interpolation)
+        XCTAssertFalse(try committedStrokes(manager).isEmpty)
+    }
+
+    /// **A commit at an endpoint is bit-exact**, and it is exact by construction rather than by a
+    /// special case: at `t = 0` the backward weight is 0 so that set is dropped whole, and the
+    /// forward weight is 1 so `faded` returns its elements untouched. Combined with Phase 1's
+    /// "`t = 0` reproduces keyframe A to the last bit", the committed drawing *is* keyframe A.
+    ///
+    /// This is the half of the fidelity story that carries no compromise, so it is pinned separately
+    /// from the interior case below — if the guards in `faded` ever become "optimisations" somebody
+    /// removes, this is what fails.
+    func testCommittingAtTZeroReproducesKeyframeAExactly() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1), t: 0)
+        let keyframe = try XCTUnwrap(try XCTUnwrap(cels[0].vector).elements.compactMap(\.stroke).first)
+
+        XCTAssertNil(manager.commitInterpolation(layerIndex: 1, celIndex: 1))
+
+        let baked = try committedStrokes(manager)
+        XCTAssertEqual(baked.count, 1, "the far set is dropped entirely rather than added at alpha 0")
+        XCTAssertEqual(baked[0].opacity, keyframe.opacity,
+                       "and the near set is not scaled by a 1.0 that could perturb it")
+        XCTAssertEqual(baked[0].samples.count, keyframe.samples.count)
+        for (got, want) in zip(baked[0].samples, keyframe.samples) {
+            XCTAssertEqual(got.x, want.x, accuracy: 0, "bit-exact, not merely close")
+            XCTAssertEqual(got.y, want.y, accuracy: 0)
+        }
+    }
+
+    /// **And the interior case is lossy in exactly the way `flattened` documents.** Both sets come
+    /// through as ordinary strokes carrying their cross-fade weight as their own opacity, because a
+    /// display list has no per-set alpha to put it in (`PLAN.md` §5.6, and the amendment recording
+    /// why Commit cannot honour it).
+    ///
+    /// Pinned because it is the *accepted* loss: if this ever changes, the artist's committed drawing
+    /// changes with it, and that must be a decision rather than a side effect.
+    func testCommittingAtAnInteriorTCarriesBothSetsWithTheirWeightsAsOpacity() throws {
+        let manager = manager()
+        generated(manager, cels: threeCels(manager, layerIndex: 1), t: 0.5)
+
+        XCTAssertNil(manager.commitInterpolation(layerIndex: 1, celIndex: 1))
+
+        let baked = try committedStrokes(manager)
+        XCTAssertEqual(baked.count, 2, "keyframe A's bar and keyframe C's, both present")
+        for stroke in baked {
+            XCTAssertEqual(stroke.opacity, 0.5, accuracy: 1e-9,
+                           "the set's weight reaches the element, since nothing else can hold it")
+        }
+    }
+
+    /// An in-between the artist has drawn on is the case that made Commit worth building now: a
+    /// `.generate` cel stores nothing, so those edits live only as long as the recipe. After a commit
+    /// they are ordinary strokes in the cel like any other.
+    func testCommitKeepsAnInBetweenTheArtistDrewOn() throws {
+        let manager = manager()
+        let cels = generated(manager, cels: threeCels(manager, layerIndex: 1))
+        XCTAssertTrue(manager.recordLocalEdit(
+            canvasSpaceStroke: drawn([CGPoint(x: 20, y: 28), CGPoint(x: 26, y: 32)]),
+            forCel: cels[1].id, inLayer: manager.layers[1].id))
+
+        XCTAssertNil(manager.commitInterpolation(layerIndex: 1, celIndex: 1))
+
+        let baked = try committedStrokes(manager)
+        XCTAssertEqual(baked.count, 3, "both keyframes' sets plus the edit")
+        let edit = try XCTUnwrap(baked.last)
+        XCTAssertEqual(edit.opacity, 1, "a local edit is the artist's own ink and is never faded")
+        XCTAssertNil(edit.visibilityThreshold,
+                     "τ is a parameter of a derived frame; a committed drawing has no `t` left to gate on")
+    }
+
+    /// **The composition `PLAN.md` §5.5 describes, and the reason item 17 called Commit the missing
+    /// middle.** Reproject refuses on a generated cel because it holds no linework of its own; Commit
+    /// is what gives it some.
+    func testCommitIsWhatMakesAGeneratedFrameReprojectable() throws {
+        let manager = manager()
+        generated(manager, cels: threeCels(manager, layerIndex: 1))
+        XCTAssertEqual(manager.interpolationRefusal(mode: .reproject, layerIndex: 1, celIndex: 1),
+                       .nothingToReproject)
+
+        XCTAssertNil(manager.commitInterpolation(layerIndex: 1, celIndex: 1))
+
+        XCTAssertNil(manager.interpolationRefusal(mode: .reproject, layerIndex: 1, celIndex: 1),
+                     "Generate → Commit → Reproject now composes")
+    }
+
+    /// One artist action, one undo step — and it has to restore **both** tiers. `withStructureUndo`
+    /// alone would put the recipe back and leave the baked strokes in the canvas, because
+    /// `StructureSnapshot` shares each `VectorCanvas` by reference rather than copying it (§5's
+    /// Phase 2 entry). Commit is the first caller in this feature that writes stroke content from a
+    /// recipe, so it is the first place that trap is reachable.
+    func testCommitIsOneUndoStepAndRestoresBothTheRecipeAndTheEmptyCanvas() throws {
+        let manager = manager()
+        generated(manager, cels: threeCels(manager, layerIndex: 1))
+
+        XCTAssertNil(manager.commitInterpolation(layerIndex: 1, celIndex: 1))
+        manager.undo()
+
+        XCTAssertNotNil(manager.layers[1].cels[1].interpolation, "the recipe comes back")
+        XCTAssertTrue(try committedStrokes(manager).isEmpty,
+                      "and so does the empty display list — the structure tier alone would not do this")
+    }
+
+    /// **Solo/mute must not reach a document write.** `interpolationOptions` populates `hiddenGroups`
+    /// inside interpolate mode, which is exactly where Commit is pressed — so evaluating with it
+    /// would bake the muted group's content *away*, deleting drawing on a command that says nothing
+    /// about deleting. `interpolationCommitOptions` is the seam that stops it.
+    func testCommitIgnoresSoloAndMuteRatherThanBakingTheHiddenPartAway() throws {
+        let manager = manager()
+        generated(manager, cels: threeCels(manager, layerIndex: 1))
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        // Muting the recipe's only binding hides every stroke, tagged or not: untagged content rides
+        // the first binding, so this is the whole frame.
+        manager.hiddenMotionGroups = [try XCTUnwrap(recipe.groups.first).groupID]
+        XCTAssertTrue(manager.isInterpolateMode, "the mode is what makes `hiddenGroups` live at all")
+        // The premise, stated on the evaluation rather than on the image: with the group muted the
+        // *view* legitimately has nothing in it. (Not nil — a fully-hidden frame still renders, as a
+        // blank one. Nil is reserved for a recipe that cannot be evaluated at all.)
+        let hidden = try XCTUnwrap(InterpolationEvaluator.evaluate(
+            recipe: recipe, at: recipe.t, content: manager.interpolationContentProvider,
+            options: manager.interpolationOptions))
+        XCTAssertTrue(hidden.forward.isEmpty && hidden.backward.isEmpty,
+                      "so an evaluation that reached the document would bake the drawing away")
+
+        XCTAssertNil(manager.commitInterpolation(layerIndex: 1, celIndex: 1))
+
+        XCTAssertFalse(try committedStrokes(manager).isEmpty,
+                       "a muted group is hidden, not deleted")
+    }
+
+    /// Committing a reprojection bakes the *pose*: the cel keeps its own linework, moved to where the
+    /// slider put it. One set at full strength, so unlike a generation there is no fidelity question
+    /// at any `t`.
+    func testCommittingAReprojectionBakesThePoseAndKeepsTheLinework() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        let subject = drawSubject(into: cels[1])
+        XCTAssertNotNil(reprojected(manager, cels: cels))
+        manager.layers[1].cels[1].interpolation?.t = 1
+
+        XCTAssertNil(manager.commitInterpolation(layerIndex: 1, celIndex: 1))
+
+        XCTAssertNil(manager.layers[1].cels[1].interpolation)
+        let baked = try committedStrokes(manager)
+        XCTAssertEqual(baked.count, 1, "the artist's drawing, still one stroke")
+        XCTAssertEqual(baked[0].opacity, 1, "a reprojection is one set at full strength")
+        let movedX = baked[0].samples.map(\.x)
+        let restX = subject.samples.map(\.x)
+        XCTAssertNotEqual(movedX, restX, "and it is baked posed rather than unposed")
+    }
+
+    /// The refusals, in `InterpolationRefusal`'s usual shape so the bar can grey the button out with
+    /// a reason (§5.10). `commitRefusal` runs the evaluation too, so the button can never offer a
+    /// commit that then declines.
+    func testCommitRefusesOnACelWithNoRecipeAndOnOneItCannotEvaluate() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        XCTAssertEqual(manager.commitInterpolation(layerIndex: 1, celIndex: 1), .nothingToCommit)
+        XCTAssertEqual(manager.commitRefusal(layerIndex: 1, celIndex: 1), .nothingToCommit)
+        XCTAssertEqual(manager.commitInterpolation(layerIndex: 0, celIndex: 0), .notAVectorLayer)
+
+        generated(manager, cels: cels)
+        XCTAssertNil(manager.commitRefusal(layerIndex: 1, celIndex: 1))
+
+        // Broken by editing *around* the recipe, which is the reachable way to get here: a reference
+        // it names stops resolving and the frame is no longer renderable, while the recipe stays put.
+        manager.layers[1].cels[1].interpolation?.references = []
+        XCTAssertEqual(manager.commitRefusal(layerIndex: 1, celIndex: 1), .interpolationNotEvaluable)
+        XCTAssertEqual(manager.commitInterpolation(layerIndex: 1, celIndex: 1), .interpolationNotEvaluable)
+        XCTAssertNotNil(manager.layers[1].cels[1].interpolation,
+                        "a refused commit leaves the recipe alone rather than half-dropping it")
+    }
+
     func testGenerateRefusesOnACelThatIsAlreadyInterpolated() throws {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)

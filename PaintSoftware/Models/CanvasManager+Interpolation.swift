@@ -747,6 +747,25 @@ extension CanvasManager {
         return options
     }
 
+    /// `interpolationOptions` with solo/mute forced off — what any evaluation whose result is
+    /// **written to the document** must use, which today means Commit.
+    ///
+    /// The distinction is sharp and it is worth naming rather than inlining. `hiddenGroups` is a view
+    /// filter: it answers "which part is moving wrongly" by taking the others away, and §5 already
+    /// records that it must not reach a render outside the mode. Commit is the case that breaks that
+    /// rule from the other side — it runs *inside* the mode, where `hiddenGroups` is legitimately
+    /// populated, and it writes what it evaluates. Baking with a group muted would delete that
+    /// group's content from the drawing permanently, on a command that says nothing about deleting.
+    ///
+    /// `thicknessFade` is deliberately kept, because that one is not a filter: it is a choice about
+    /// what the in-between *looks like*, the artist toggled it, and it is what they can see when they
+    /// press the button.
+    var interpolationCommitOptions: InterpolationEvaluator.Options {
+        var options = interpolationOptions
+        options.hiddenGroups = []
+        return options
+    }
+
     // MARK: - Creating a recipe
 
     /// Why `interpolate(...)` declined, for a UI that has to say something more useful than nothing.
@@ -763,6 +782,10 @@ extension CanvasManager {
         case alreadyInterpolated
         /// Reproject was asked for on a cel with no drawing of its own to repose.
         case nothingToReproject
+        /// Commit was asked for on a cel that derives from nothing — there is no frame to bake.
+        case nothingToCommit
+        /// Commit was asked for on a recipe `evaluate` cannot render, so there is no frame *yet*.
+        case interpolationNotEvaluable
 
         var message: String {
             switch self {
@@ -772,6 +795,8 @@ extension CanvasManager {
             case .referencesAreEmpty: return "The reference frames have nothing to interpolate."
             case .alreadyInterpolated: return "This frame is already interpolated."
             case .nothingToReproject: return "Reproject needs a drawing in this frame."
+            case .nothingToCommit: return "Commit needs an interpolated frame."
+            case .interpolationNotEvaluable: return "This interpolation is not ready to commit."
             }
         }
     }
@@ -1000,6 +1025,96 @@ extension CanvasManager {
             result = interpolate(mode: mode, layerIndex: layerIndex, celIndex: celIndex)
         }
         return result
+    }
+
+    // MARK: - Commit
+
+    /// **Commit** — bake the frame this cel currently derives at into the cel as ordinary content and
+    /// drop the recipe. `PLAN.md` §4, `HANDOFF.md` §8 item 17. One-way, explicit, never automatic;
+    /// undoable like anything else, which is what keeps "one-way" from meaning "unrecoverable".
+    ///
+    /// This is the counterpart to `interpolate`: that one makes a frame derived, this one makes it a
+    /// drawing again. It is also the missing link in `PLAN.md` §5.5's composition — a `.generate` cel
+    /// stores no strokes of its own, so Reproject refuses on one with `.nothingToReproject`, and
+    /// Generate → **Commit** → Reproject is how an in-between becomes something to re-pose.
+    ///
+    /// **It is lossy at an interior `t` and that is the artist's decision to make, not this
+    /// function's to prevent.** `InterpolationEvaluator.flattened` documents exactly what changes and
+    /// why no display list can avoid it; a commit at `t = 0` or `t = 1` is bit-exact. What matters
+    /// here is that the loss happens *once*, visibly, on a command the artist pressed — the reason
+    /// PLAN §4 insists this is never automatic.
+    ///
+    /// Note it deliberately does **not** care whether interpolate mode is on. A cel carries its
+    /// recipe from every entry point (the same reasoning as `inBetweenCelID`), and a command that
+    /// worked only in one mode would be a second rule to learn.
+    ///
+    /// Returns the refusal reason, or nil on success.
+    @discardableResult
+    func commitInterpolation(layerIndex: Int, celIndex: Int) -> InterpolationRefusal? {
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex),
+              let canvas = layers[layerIndex].cels[celIndex].vector else { return .notAVectorLayer }
+        guard let recipe = layers[layerIndex].cels[celIndex].interpolation else { return .nothingToCommit }
+        // The cel's own display list is the subject of a reprojection and is ignored by a generation
+        // — the same join `interpolatedImage` makes, and for the same reason: the recipe holds no
+        // reference to the cel it lives on, so this is the one place that knows both.
+        let subject = recipe.mode == .reproject ? canvas.elements : []
+        // `interpolationCommitOptions`, never `interpolationOptions` — see its comment. Committing
+        // with a group muted would delete that group's content from the drawing for good.
+        guard let evaluation = InterpolationEvaluator.evaluate(
+            recipe: recipe, at: recipe.t, content: interpolationContentProvider,
+            subject: subject, options: interpolationCommitOptions)
+        else { return .interpolationNotEvaluable }
+
+        let baked = InterpolationEvaluator.flattened(evaluation)
+        // `withInterpolationUndo` rather than `withStructureUndo`, and this is the first caller in
+        // the feature that writes stroke content from a recipe — §5's Phase 2 entry predicted it.
+        // The structure bracket alone would restore the recipe and none of the ink, because
+        // `StructureSnapshot` shares each `VectorCanvas` by reference rather than copying it.
+        withInterpolationUndo(name: "Commit Interpolation", touching: [canvas]) {
+            canvas.elements = baked
+            // The setters do not invalidate — `VectorCanvas`'s accessor contract — so a wholesale
+            // assignment has to bump the version itself, or the cel would keep rendering the cached
+            // image of an empty display list.
+            canvas.bumpVersion()
+            layers[layerIndex].cels[celIndex].interpolation = nil
+        }
+        return nil
+    }
+
+    /// Whether `commitInterpolation` would succeed at the playhead, and why not if it would not —
+    /// what greys the bar's button out, in `InterpolationRefusal`'s usual shape (§5.10).
+    ///
+    /// Unlike Generate there is no "make one" case: Commit acts on a recipe that already exists, so
+    /// an empty slot at the playhead is simply nothing to commit.
+    func commitRefusalAtPlayhead() -> InterpolationRefusal? {
+        guard let at = interpolationTarget else { return .nothingToCommit }
+        return commitRefusal(layerIndex: at.layer, celIndex: at.cel)
+    }
+
+    /// The refusal without performing the commit. Shares every check with `commitInterpolation`,
+    /// **including the evaluation**, so the button cannot offer a commit that then declines — a
+    /// malformed recipe is the reachable case (delete a referenced cel and the frame stops being
+    /// renderable while the recipe stays put).
+    func commitRefusal(layerIndex: Int, celIndex: Int) -> InterpolationRefusal? {
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex),
+              let canvas = layers[layerIndex].cels[celIndex].vector else { return .notAVectorLayer }
+        guard let recipe = layers[layerIndex].cels[celIndex].interpolation else { return .nothingToCommit }
+        let subject = recipe.mode == .reproject ? canvas.elements : []
+        guard InterpolationEvaluator.evaluate(recipe: recipe, at: recipe.t,
+                                              content: interpolationContentProvider,
+                                              subject: subject,
+                                              options: interpolationCommitOptions) != nil
+        else { return .interpolationNotEvaluable }
+        return nil
+    }
+
+    /// Commit the cel under the playhead on the current layer — what the bar's button calls.
+    @discardableResult
+    func commitInterpolationAtPlayhead() -> InterpolationRefusal? {
+        guard let at = interpolationTarget else { return .nothingToCommit }
+        return commitInterpolation(layerIndex: at.layer, celIndex: at.cel)
     }
 
     /// Removes a cel's recipe, leaving whatever content it already had.
