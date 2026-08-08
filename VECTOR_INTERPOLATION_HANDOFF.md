@@ -46,8 +46,9 @@ need. Read what §1 says to read; consult the rest on demand.
 |---|---|
 | **Current phase** | **Phase 7 (guide strokes), items 1, 3, 4 and 6 done plus half of item 2.** An artist can arm Guide on the bar, draw an arc, and watch the in-between leave the straight line; the stylus velocity along that arc becomes the easing. **Not built: item 2's editable handles, item 5's spacing chart, item 7's link/duplicate.** Read `IMPLEMENTATION.md`'s "What Session 18 built" subsection before touching any of it — especially the chord-deviation interpretation (§5.16), which is the one genuine design call the phase required. Item 4 works and is pinned but has **never been tried on an iPad**, which its own wording asks for. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, tracks `origin/`. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | Session 18's last. **Full suite 592 / 591 passed / 0 failed / 1 skipped, zero expected failures**, `** TEST SUCCEEDED **`, first attempt after a `simctl erase` on a settled host — the skip being `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, by design. Six phase boundaries in a row where erasing first gave a clean run. |
-| **The Session 17 full run — closed** | Session 17 left the boundary run unverified after two attempts on a host at load 129/272/412. **Session 18 re-ran it on a settled machine and it is green on the first attempt**, on Session 17's tree plus this session's work. Nothing was wrong with the code; both bad runs were the host, exactly as §5.15 predicted. |
+| **Last known-green commit** | Session 18's last. Wider pure-logic tier **517/517**, zero expected failures. On the **whole suite**, Session 18's first run (on Session 17's tree) was **592 / 591 / 0 / 1, `** TEST SUCCEEDED **`**, the skip being `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, by design — that is the last fully clean whole-suite number. See the row below for the second run. |
+| **The Session 17 full run — closed** | Session 17 left the boundary run unverified after two attempts on a host at load 129/272/412. **Session 18 re-ran it on a settled machine and it is green on the first attempt.** Nothing was wrong with the code; both bad runs were the host, exactly as §5.15 predicted. |
+| **The run with Phase 7 in — one environmental failure, diagnosed, not fixed** | 624 tests, 622 passed, **1 failed**, 1 skipped. The failure is `VectorEraserUITests.testMode1DeletesAStrokeItCoversEndToEndAndRetainsNothing`, and **both** of §5.15's reliable checks say environmental: it **passes alone** (32 s, on a settled erased device), and its assertion is *"The add menu should offer a Vector Layer option"* — the layer add menu, in a file this session's diff never touches (10 files, none in the layer panel). Its duration ratio was **29 s in-run against 32 s alone**, i.e. no slowdown, which is why §5.15 now downgrades that tell too. **Not re-run to a clean number, deliberately: Phase 7 is not finished, so this was a mid-phase check on the view-layer changes and not a boundary run.** The boundary run is still owed at the end of Phase 7. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -1452,6 +1453,25 @@ added the one measurement that settles it in a second, and it is not about the t
   in-run against **34 s** alone. If a failing test also took about twice as long as it should, stop
   reading the failure and look at the machine.
 
+  **Downgraded by Session 18: its absence proves nothing.** `VectorEraserUITests
+  .testMode1DeletesAStrokeItCoversEndToEndAndRetainsNothing` failed in-run at **29 s** and passed
+  alone at **32 s** — *no* slowdown, and it was environmental anyway (it passed alone, and its
+  assertion is about the layer add menu, in a file this session never opened). So the ratio joins
+  the other tells as confirmation-when-present.
+
+  **That is now the third tell to be downgraded the same way, and the pattern is the finding.**
+  `failed to launch` went first (Session 16), the assertion's *shape* second (Session 17), the
+  duration ratio third. Every cheap tell this file has invented eventually turns out to be
+  sufficient and not necessary. **The two checks that have never failed are still the same two:
+  re-run the test alone, and ask whether the code under it can reach your change.** Spend the two
+  minutes on those rather than on a fourth tell.
+
+- **A run that *starts* on a settled machine can still degrade itself, so the erase-and-wait
+  protocol reduces these rather than eliminating them.** Session 18's second full run began at
+  1-minute load **8.39** on a freshly erased device and still produced one environmental failure at
+  624 tests. Do not read a clean start as a guarantee, and do not treat a single such failure as a
+  regression before running the two checks.
+
 - **A behavioural assertion *with a message* is not proof the failure is real, and this is the third
   time that class of tell has been downgraded.** Session 16 established that the `failed to launch`
   line is confirmation-when-present rather than a precondition. This session establishes the same
@@ -1922,6 +1942,16 @@ What Phase 3 decided that Phase 4 inherits:
   the list the key compares, because all four of that key's bugs were the two disagreeing. A guide
   was its worst case — no version moves, and `updateGuideStroke` keeps the id, so the id list does
   not move either. No subagents.
+
+  The session's second full run — a mid-phase check on the view-layer changes, not a boundary run —
+  came back **624 / 622 / 1 / 1**, and the one failure produced §5.15's third downgrade. It failed
+  in-run at **29 s** and passed alone at **32 s**: the duration ratio, which two sessions had found
+  reliable at ~2×, did not move at all. That makes three tells now demoted from precondition to
+  confirmation-when-present, and the honest conclusion is to stop inventing them — **re-run it
+  alone, and ask whether the code can reach your change** are the only two that have never failed.
+  Both said environmental here, and the diff agrees: the assertion is about the layer add menu and
+  none of the ten changed files is in the layer panel. Also worth knowing: **that run began at load
+  8.39 on a freshly erased device**, so a settled start reduces these without eliminating them.
 
   12 new logic tests; the single interpolate XCUITest **extended** rather than joined by a second,
   since it was already in the exact state the new half needed — it now draws at the in-between and
