@@ -45,9 +45,9 @@ need. Read what §1 says to read; consult the rest on demand.
 | | |
 |---|---|
 | **Current phase** | **Between phases. Phase 6 is signed off and Commit is built; Phase 7 (guide strokes) is next and unstarted.** The product owner answered both of §2's open questions on 2026-08-07: the transform refusal **does** close Phase 6 (§5.13 stands; §5.12's displacement field is not being built now), and §8 item 17's **Commit was un-deferred and built the same session** — see §5.14 and `IMPLEMENTATION.md`'s "Commit" section. Phase 6 itself: item 1 (Reproject) landed in Session 15; Session 16 answered §8 item 25's liquify question (§5.12) and wired editing at an in-between end to end. |
-| **Branch** | `claude/vector-interpolation-design-9d5b83`, tracks `origin/`. Rebased onto `origin/main` as of Session 8. **Session 17's five commits (`dbc2233` … `1777038`) are local — `git push` before relying on the remote.** |
-| **Last known-green commit** | Session 17's last, for everything that was verifiable. Fast tier **288/288**, wider pure-logic tier **476/476**, the interpolate e2e **passing standalone at 117 s**, all with zero expected failures. **The phase-boundary full run is NOT verified this session, and that is the one gap — see the row below.** Session 16's full run remains the last known-good whole-suite number: **583 / 582 / 0 / 1**, the skip being `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, by design. |
-| **The unverified full run** | Two attempts, both meaningless, and the cause is the **host machine rather than the simulator or the code**. Attempt 1: 592 tests, one `FillUITests` failure that passed alone. Attempt 2: aborted at 556 of 592 with five failures, **three of them runner crashes**. Load average was **129 / 272 / 412 on 8 cores**, with `spindump` at 59% CPU and no test process of ours running. See §5's new entry — `uptime` first, and `simctl erase` cannot help, because the device is not what is broken. **Next session: run the full suite on a quiet machine before treating the boundary as closed.** Nothing about it is expected to fail; the two runs that did failed on disjoint sets, and the changes this session are 211 insertions with zero deletions. |
+| **Branch** | `claude/vector-interpolation-design-9d5b83`, tracks `origin/`. Rebased onto `origin/main` as of Session 8. |
+| **Last known-green commit** | Session 18's last. **Full suite 592 / 591 passed / 0 failed / 1 skipped, zero expected failures**, `** TEST SUCCEEDED **`, first attempt after a `simctl erase` on a settled host — the skip being `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, by design. Six phase boundaries in a row where erasing first gave a clean run. |
+| **The Session 17 full run — closed** | Session 17 left the boundary run unverified after two attempts on a host at load 129/272/412. **Session 18 re-ran it on a settled machine and it is green on the first attempt**, on Session 17's tree plus this session's work. Nothing was wrong with the code; both bad runs were the host, exactly as §5.15 predicted. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -1286,6 +1286,22 @@ added the one measurement that settles it in a second, and it is not about the t
   not the thing that is broken. Two full runs failed on **disjoint** sets, the second aborting at
   556 of 592 tests with three failures that were **runner crashes** rather than tests. Check
   `uptime` before reading a single assertion message.
+
+- **Amended by Session 18, and this is the half that was missing: load *during* a run carries no
+  information at all.** The rule above says to check `uptime` first, which is right, but it does not
+  say **when**. Session 18 checked mid-run and read **582 / 886 / 498** — four times worse than the
+  numbers that made Session 17's runs meaningless — and that same run finished
+  **592 / 591 / 0 / 1, `** TEST SUCCEEDED **`, first attempt**. `xcodebuild` plus a booted simulator
+  legitimately puts hundreds of threads in the run queue; the figure is a thread count, not a
+  distress signal. Taken at face value it would have aborted a perfectly good run and cost the
+  session the boundary a second time.
+
+  **So the measurement is load when *nothing of ours is running*.** That is precisely the condition
+  Session 17 recorded — "with `spindump` at 59% CPU and **no test process of ours running**" — and
+  the clause was doing all the work. Check it before you erase and start, and again after a failure
+  once the run has exited. The procedure that worked: wait for the 1-minute figure to fall below
+  ~10 while idle (it was 170 four minutes after boot and 3.39 at eleven), erase, then start and do
+  not look at load again until the run is over.
 
 - **The corroborating signal is the duration ratio, and it is remarkably consistent at ~2×.** The
   same test took **224 s** in the degraded run and **117 s** settled. Session 16's case was **61 s**
