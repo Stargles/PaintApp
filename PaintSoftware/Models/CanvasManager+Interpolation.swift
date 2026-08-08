@@ -582,7 +582,7 @@ extension CanvasManager {
               let recipe = layers[at.layer].cels[at.cel].interpolation,
               let plan = InterpolationEvaluator.planLocalEdit(
                 recipe: recipe, at: recipe.t, points: stroke.samples.map(\.point),
-                options: interpolationOptions),
+                guides: guides(driving: recipe), options: interpolationOptions),
               plan.restPoints.count == stroke.samples.count
         else { return false }
 
@@ -1063,7 +1063,8 @@ extension CanvasManager {
         // with a group muted would delete that group's content from the drawing for good.
         guard let evaluation = InterpolationEvaluator.evaluate(
             recipe: recipe, at: recipe.t, content: interpolationContentProvider,
-            subject: subject, options: interpolationCommitOptions)
+            subject: subject, guides: guides(driving: recipe),
+            options: interpolationCommitOptions)
         else { return .interpolationNotEvaluable }
 
         let baked = InterpolationEvaluator.flattened(evaluation)
@@ -1100,7 +1101,7 @@ extension CanvasManager {
         let subject = recipe.mode == .reproject ? canvas.elements : []
         guard InterpolationEvaluator.evaluate(recipe: recipe, at: recipe.t,
                                               content: interpolationContentProvider,
-                                              subject: subject,
+                                              subject: subject, guides: guides(driving: recipe),
                                               options: interpolationCommitOptions) != nil
         else { return .interpolationNotEvaluable }
         return nil
@@ -1596,10 +1597,33 @@ extension CanvasManager {
         let subject = recipe.mode == .reproject ? (layers[at.layer].cels[at.cel].vector?.elements ?? []) : []
         return InterpolationEvaluator.render(recipe: recipe, at: t ?? recipe.t, size: canvasSize,
                                              content: interpolationContentProvider, subject: subject,
+                                             guides: guides(driving: recipe),
                                              quality: quality, options: interpolationOptions)
     }
 
     // MARK: - Guides
+
+    /// The guides `recipe` references, deduplicated and in a stable order.
+    ///
+    /// **One resolver, used by both the evaluation and the preview key**, and that is the point of it
+    /// rather than an incidental tidiness. `InterpolationPreviewKey` memoizes the in-between on its
+    /// inputs, and a guide is an input that no *version* in that key can see — guides live here, not
+    /// on any `VectorCanvas`, and `updateGuideStroke` replaces one **keeping its id**, so even the id
+    /// list is unmoved by a geometry edit. §5 records this key biting three times for exactly this
+    /// shape of reason; having the key and the evaluator read the same list is what stops a fourth.
+    ///
+    /// Returns `[]` immediately for a recipe naming no guides, which is every recipe before Phase 7
+    /// and most recipes after it.
+    func guides(driving recipe: InterpolationRecipe) -> [GuideStroke] {
+        var wanted = recipe.guideIDs
+        for binding in recipe.groups { wanted.append(contentsOf: binding.guideIDs) }
+        guard !wanted.isEmpty else { return [] }
+        var seen: Set<UUID> = []
+        return wanted.compactMap { id in
+            guard seen.insert(id).inserted else { return nil }
+            return guideStrokes.first { $0.id == id }
+        }
+    }
 
     @discardableResult
     func addGuideStroke(_ guide: GuideStroke) -> GuideStroke {

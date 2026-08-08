@@ -767,6 +767,21 @@ struct CanvasView: UIViewRepresentable {
             /// (which puts the same one back) are told apart from each other and from a *different*
             /// edit appended in between.
             let localEditIDs: [UUID]
+            /// The guides driving this recipe — Phase 7, and the **fourth** input this key has had to
+            /// learn about the hard way, so it is stated as the rule rather than the instance: ask
+            /// what changed and whether anything already here can see it.
+            ///
+            /// Nothing could. Guides live on `CanvasManager`, not on any `VectorCanvas`, so no
+            /// `referenceVersions` entry moves when one is edited — and `updateGuideStroke` replaces
+            /// a guide **keeping its id**, which is what makes reuse across frames a reference rather
+            /// than a copy (`PLAN.md` §6.4) and also what stops an id list from noticing. So the
+            /// whole guides go in, compared by value.
+            ///
+            /// That deep compare is cheaper than it looks and much cheaper than being wrong: a guide
+            /// is tens of samples, a recipe names one or two, and the alternative is re-rendering the
+            /// frame on every SwiftUI pass. `CanvasManager.guides(driving:)` produces this list *and*
+            /// the one the evaluator gets, so the two cannot drift apart.
+            let guides: [GuideStroke]
         }
         private var interpolationPreviewKeys: [UUID: InterpolationPreviewKey] = [:]
 
@@ -807,7 +822,8 @@ struct CanvasView: UIViewRepresentable {
                         canvasManager.celIndices(forCel: ref.celID, inLayer: ref.layerID)
                             .flatMap { canvasManager.layers[$0.layer].cels[$0.cel].vector?.version } ?? -1
                     },
-                    localEditIDs: recipe.localEdits.map(\.id))
+                    localEditIDs: recipe.localEdits.map(\.id),
+                    guides: canvasManager.guides(driving: recipe))
                 guard interpolationPreviewKeys[layer.id] != key else { continue }
                 interpolationPreviewKeys[layer.id] = key
                 host.strokeView.setInterpolationImage(
@@ -835,7 +851,7 @@ struct CanvasView: UIViewRepresentable {
                 celID: cel.id, t: 0, preview: true, overlay: true,
                 thicknessFade: false, hiddenGroups: [],
                 referenceVersions: [version, canvasManager.motionGroups.count],
-                localEditIDs: [])
+                localEditIDs: [], guides: [])
             guard interpolationPreviewKeys[layer.id] != key else { return }
             interpolationPreviewKeys[layer.id] = key
             host.strokeView.setInterpolationImage(

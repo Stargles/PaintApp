@@ -121,10 +121,18 @@ enum InterpolationEvaluator {
     /// state that duplicates something the caller already knows and can silently go stale — copy a
     /// cel and its recipe would point at the original's ink. Defaulted so every `.generate` call site
     /// is unaffected.
+    ///
+    /// `guides` is the document's guide registry, and it is a parameter for exactly the reason
+    /// `subject` is: the recipe stores guide *ids*, the guides themselves are document-level so they
+    /// can be shared across frames (`PLAN.md` §6.4), and this file may not reach `CanvasManager`
+    /// (`HANDOFF.md` §5.9). Passing the whole registry rather than a pre-filtered list keeps the
+    /// binding rules in `GuideSet`, where they are testable. Defaulted, so a caller with no guides —
+    /// which is every call site before Phase 7 — is unaffected.
     static func evaluate(recipe: InterpolationRecipe,
                          at t: CGFloat,
                          content: ContentProvider,
                          subject: [VectorElement] = [],
+                         guides: [GuideStroke] = [],
                          options: Options = Options()) -> Evaluation? {
         guard recipe.isWellFormed else { return nil }
 
@@ -141,7 +149,8 @@ enum InterpolationEvaluator {
         let index = min(max(Int((frameT * span).rounded(.down)), 0), count - 2)
         let local = min(max(frameT * span - CGFloat(index), 0), 1)
 
-        let warps = groupWarps(recipe: recipe, at: t, segment: index, span: span, options: options)
+        let warps = groupWarps(recipe: recipe, at: t, segment: index, span: span, guides: guides,
+                               options: options)
         // Untagged content — every stroke the app creates today, plus every fill and image, since
         // only `VectorStroke` carries a `motionGroupID` — rides the first binding.
         //
@@ -200,11 +209,14 @@ enum InterpolationEvaluator {
     /// composited as whole canvases and a canvas has one alpha. With no per-group override, which is
     /// every recipe today, the two coincide exactly.
     private static func groupWarps(recipe: InterpolationRecipe, at t: CGFloat, segment: Int,
-                                   span: CGFloat, options: Options) -> [UUID: GroupWarp] {
+                                   span: CGFloat, guides: [GuideStroke],
+                                   options: Options) -> [UUID: GroupWarp] {
         var warps: [UUID: GroupWarp] = [:]
         for binding in recipe.groups {
             warps[binding.groupID] = groupWarp(binding: binding, lattices: binding.lattices,
                                                recipe: recipe, at: t, segment: segment, span: span,
+                                               guideSet: GuideSet(binding: binding, recipe: recipe,
+                                                                  guides: guides),
                                                options: options)
         }
         return warps
@@ -217,15 +229,38 @@ enum InterpolationEvaluator {
     /// caller passes `binding.lattices` and gets exactly what it always got.
     private static func groupWarp(binding: MotionGroupBinding, lattices: [Lattice],
                                   recipe: InterpolationRecipe, at t: CGFloat, segment: Int,
-                                  span: CGFloat, options: Options) -> GroupWarp {
-        let groupT = (binding.spacing ?? recipe.spacing).eased(t)
+                                  span: CGFloat, guideSet: GuideSet = .none,
+                                  options: Options) -> GroupWarp {
+        // Precedence: an explicit per-group curve, then this group's guide, then the frame's own.
+        //
+        // The explicit override has to win, and that is what makes Phase 7 item 5 buildable — its
+        // spacing chart retimes a frame by *writing* `binding.spacing`, and a guide's derived timing
+        // that outranked it would make dragging a dot appear to do nothing. So the order is
+        // most-specific-explicit, then derived, then the frame default.
+        let groupT = (binding.spacing ?? guideSet.spacing ?? recipe.spacing).eased(t)
         let u = min(max(groupT * span - CGFloat(segment), 0), 1)
         let from = lattices[segment]
         let to = lattices[segment + 1]
         // A topology mismatch has no meaningful in-between; `Interpolator.init` is failable for
         // that reason and the honest fallback is "do not move", not an invented blend.
-        let current = ARAPInterpolation.Interpolator(from: from, to: to, options: options.arap)?
+        let interpolated = ARAPInterpolation.Interpolator(from: from, to: to, options: options.arap)?
             .lattice(at: u) ?? from
+        // The trajectory constraint, applied **after** the interpolation and as a rigid translation
+        // of the whole group.
+        //
+        // Rigid because that is precisely what a guide says and no more: the ARAP solve already owns
+        // how the group rotates and deforms between its two poses, and a guide is a statement about
+        // the *path its anchor travels*, which is a displacement. Pulling individual vertices toward
+        // the guide instead would re-open the deformation question the solve just answered.
+        //
+        // Read at the same eased `u` as the pose, so a retimed group travels the guide's arc with
+        // its own retiming rather than the two signals disagreeing about where it is.
+        let offset = guideSet.deviation(atArcFraction: u)
+        let current = (offset.dx == 0 && offset.dy == 0)
+            ? interpolated
+            : interpolated.withVertices(interpolated.vertices.map {
+                CGPoint(x: $0.x + offset.dx, y: $0.y + offset.dy)
+            })
         return GroupWarp(from: from, to: to, current: current)
     }
 
@@ -266,6 +301,7 @@ enum InterpolationEvaluator {
     /// display lists are in. See `CanvasManager.recordLocalEdit(canvasSpaceStroke:…)` for why that
     /// is canvas space in practice and what it costs.
     static func planLocalEdit(recipe: InterpolationRecipe, at t: CGFloat, points: [CGPoint],
+                              guides: [GuideStroke] = [],
                               options: Options = Options(),
                               maxRings: Int = 8) -> LocalEditPlan? {
         guard !points.isEmpty, recipe.isWellFormed else { return nil }
@@ -284,8 +320,11 @@ enum InterpolationEvaluator {
         }
 
         let index = bindingCarrying(points, recipe: recipe, at: t, segment: segment, span: span,
-                                    options: options)
+                                    guides: guides, options: options)
         let binding = recipe.groups[index]
+        // Resolved once rather than inside the growth loop: the rules do not depend on the lattices,
+        // and re-resolving would re-parse every guide's samples on each added ring.
+        let guideSet = GuideSet(binding: binding, recipe: recipe, guides: guides)
 
         // Grow a ring at a time and re-interpolate, rather than growing the interpolated lattice
         // directly. What has to end up in the document is the *stored* `from`/`to`, and a ring added
@@ -295,12 +334,12 @@ enum InterpolationEvaluator {
         // lattice gives no closed form for "how many rings would reach this point".
         var lattices = binding.lattices
         var warp = groupWarp(binding: binding, lattices: lattices, recipe: recipe, at: t,
-                             segment: segment, span: span, options: options)
+                             segment: segment, span: span, guideSet: guideSet, options: options)
         var rings = 0
         while rings < max(0, maxRings), !warp.current.embedInCurrent(points).allInside() {
             lattices = lattices.map { $0.addingRing() }
             warp = groupWarp(binding: binding, lattices: lattices, recipe: recipe, at: t,
-                             segment: segment, span: span, options: options)
+                             segment: segment, span: span, guideSet: guideSet, options: options)
             rings += 1
         }
 
@@ -324,13 +363,18 @@ enum InterpolationEvaluator {
     /// fit, so "outside every lattice" only decides *which* group grows, never whether one does.
     private static func bindingCarrying(_ points: [CGPoint], recipe: InterpolationRecipe,
                                         at t: CGFloat, segment: Int, span: CGFloat,
-                                        options: Options) -> Int {
+                                        guides: [GuideStroke], options: Options) -> Int {
         let centroid = CGPoint(x: points.reduce(0) { $0 + $1.x } / CGFloat(points.count),
                                y: points.reduce(0) { $0 + $1.y } / CGFloat(points.count))
         var best: (index: Int, distance: CGFloat)?
         for (index, binding) in recipe.groups.enumerated() {
+            // The guided lattice, not the unguided one: a group swung out along its arc is *where
+            // the artist sees it*, and that is what a stroke drawn on it has to be tested against.
             let warp = groupWarp(binding: binding, lattices: binding.lattices, recipe: recipe,
-                                 at: t, segment: segment, span: span, options: options)
+                                 at: t, segment: segment, span: span,
+                                 guideSet: GuideSet(binding: binding, recipe: recipe,
+                                                    guides: guides),
+                                 options: options)
             guard warp.current.containsInCurrent(centroid) else { continue }
             let centre = warp.current.currentBounds
             let distance = hypot(centre.midX - centroid.x, centre.midY - centroid.y)
@@ -693,10 +737,11 @@ enum InterpolationEvaluator {
     /// for. Nil for a recipe that is not evaluable, same contract as `evaluate`.
     static func render(recipe: InterpolationRecipe, at t: CGFloat, size: CGSize,
                        content: ContentProvider, subject: [VectorElement] = [],
+                       guides: [GuideStroke] = [],
                        quality: RenderQuality = .full,
                        options: Options = Options()) -> UIImage? {
         guard let evaluation = evaluate(recipe: recipe, at: t, content: content, subject: subject,
-                                        options: options) else {
+                                        guides: guides, options: options) else {
             return nil
         }
         return composite(evaluation, size: size, quality: quality)
