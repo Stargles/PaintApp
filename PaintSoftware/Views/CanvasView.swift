@@ -62,12 +62,26 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.shapeOverlay = shapeOverlay
 
         // Above everything, including the shape overlay: a guide annotates the whole frame, so
-        // anything drawn over it would be reading as ink on top of a reference mark. It never claims
-        // a touch (`GuideOverlayView.hitTest`), so being topmost costs nothing.
+        // anything drawn over it would be reading as ink on top of a reference mark. It claims only
+        // its own handle hitboxes (`GuideOverlayView.hitTest`), so being topmost costs a shape handle
+        // only where the two coincide — and a pending smart shape and a guide are never both live,
+        // since guides are drawn only in interpolate mode.
         let guideOverlay = GuideOverlayView()
         guideOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(guideOverlay)
         context.coordinator.guideOverlay = guideOverlay
+        guideOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] id in
+            coordinator?.canvasManager.beginGuideHandleDrag(guideID: id)
+        }
+        guideOverlay.onHandleDragged = { [weak coordinator = context.coordinator] _, sampleIndex, point in
+            coordinator?.canvasManager.dragGuideHandle(sampleIndex: sampleIndex, to: point)
+        }
+        guideOverlay.onHandleDragEnded = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.commitGuideHandleDrag()
+        }
+        guideOverlay.onHandleDragCancelled = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.cancelGuideHandleDrag()
+        }
 
         // Paper is inset from the container by `canvasPadding` on each side (the artwork rect); the
         // coordinator updates these constants in `updatePaper()`. Positive top/leading, negative
@@ -890,10 +904,22 @@ struct CanvasView: UIViewRepresentable {
         /// Not memoized on `InterpolationPreviewKey`, and deliberately: that key guards an ARAP solve
         /// and two canvas-sized rasterisations, while this sets two `CGPath`s. `GuideOverlayView.update`
         /// does its own equality check, so a pass where nothing moved costs one array compare.
+        ///
+        /// The handles are shown only while the Guide toggle is **off** — see `GuideOverlayView`'s
+        /// type comment. Armed, every canvas drag is a new guide and nothing may carve an exception
+        /// out of that; disarmed is the artist saying they are done drawing them.
         func updateGuideOverlay() {
             guard let guideOverlay else { return }
-            guideOverlay.update(guides: canvasManager.visibleGuideStrokes.map { $0.samples.map(\.point) },
-                                live: liveGuidePoints)
+            let guides = canvasManager.visibleGuideStrokes.map { guide in
+                GuideOverlayView.Guide(
+                    id: guide.id,
+                    points: guide.samples.map(\.point),
+                    handles: canvasManager.guideHandlePositions(for: guide).map {
+                        GuideOverlayView.Guide.Handle(sampleIndex: $0.sampleIndex, position: $0.position)
+                    })
+            }
+            guideOverlay.update(guides: guides, live: liveGuidePoints,
+                                editable: !canvasManager.isDrawingGuide)
         }
 
         func updateOnionSkin() {

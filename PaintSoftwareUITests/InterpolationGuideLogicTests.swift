@@ -569,4 +569,257 @@ final class InterpolationGuideLogicTests: XCTestCase {
         XCTAssertEqual(before.map(\.id), after.map(\.id), "the id is what makes reuse a reference")
         XCTAssertNotEqual(before, after, "but the value has to move, or the preview key cannot see it")
     }
+
+    // MARK: - Editable handles (item 2's other half)
+
+    /// A straight guide sampled finely enough that a sample lands on every quarter of the handle
+    /// falloff radius — which is what lets the kernel's shape be asserted on real indices rather
+    /// than by restating the formula.
+    private func dense() -> [TimedSample] {
+        guide((0...40).map { CGPoint(x: CGFloat($0) * 2.5, y: 0) })
+    }
+
+    /// A guide long enough for the full set gets one handle per requested position, each **on a
+    /// sample** and in path order, with the two ends pinned to the real ends.
+    ///
+    /// Sitting on a sample is what makes a dragged handle land exactly under the finger; placing
+    /// them at abstract arc fractions would leave each one short by however far the nearest sample
+    /// was, and the gap would grow as the drag lengthened the arc.
+    func testHandlesSitOnSamplesInOrderWithTheEndsPinned() {
+        let samples = straight()
+        let indices = GuideHandles.indices(in: samples)
+
+        XCTAssertEqual(indices.count, GuideHandles.count)
+        XCTAssertEqual(indices.first, 0)
+        XCTAssertEqual(indices.last, samples.count - 1)
+        XCTAssertEqual(indices, indices.sorted())
+        XCTAssertEqual(Set(indices).count, indices.count, "no two handles on one sample")
+    }
+
+    /// Handles are placed by **arc length**, not by sample index — the same parameterisation the
+    /// trajectory is read on. On a path whose samples bunch at one end, index-spacing would put four
+    /// of the five handles inside the bunch.
+    func testHandlesAreSpacedByArcLengthRatherThanBySampleIndex() throws {
+        // Half the samples crammed into the first tenth of the path — a pen that started slowly.
+        // Spacing by index would put three of the five handles inside that tenth.
+        let bunched = guide((0...10).map { CGPoint(x: CGFloat($0), y: 0) }
+                            + (1...10).map { CGPoint(x: 10 + CGFloat($0) * 9, y: 0) })
+        let positions = GuideHandles.positions(in: bunched)
+
+        XCTAssertEqual(positions.count, GuideHandles.count)
+        for (i, p) in positions.enumerated() {
+            XCTAssertEqual(p.x, 100 * CGFloat(i) / CGFloat(GuideHandles.count - 1), accuracy: 6,
+                           "handle \(i) should sit at its arc-length station, not its index's")
+        }
+    }
+
+    /// Nothing to grab on something that is not a path, rather than five handles stacked on one
+    /// point — the same answer `GuidePath`'s failable initialiser gives for the same input.
+    func testAGuideWithNoArcOffersNoHandles() {
+        XCTAssertTrue(GuideHandles.indices(in: []).isEmpty)
+        XCTAssertTrue(GuideHandles.indices(in: guide([CGPoint(x: 5, y: 5), CGPoint(x: 5, y: 5)])).isEmpty)
+    }
+
+    /// The handle goes exactly where it was put — no falloff rounding, no drift.
+    func testAHandleLandsExactlyWhereItWasDragged() throws {
+        let samples = straight()
+        let index = try XCTUnwrap(GuideHandles.indices(in: samples).dropFirst().first)
+        let destination = CGPoint(x: 25, y: -60)
+
+        let moved = GuideHandles.dragged(samples, index: index, to: destination)
+        XCTAssertEqual(moved[index].x, destination.x, accuracy: 1e-9)
+        XCTAssertEqual(moved[index].y, destination.y, accuracy: 1e-9)
+    }
+
+    /// **Dragging one handle moves no other handle.** The falloff radius is exactly the arc distance
+    /// between neighbours and the kernel is zero there, so the five behave as independent controls
+    /// rather than a set that shoves each other around. Change the radius and this is what breaks.
+    func testDraggingAHandleMovesNoOtherHandle() throws {
+        let samples = straight()
+        let indices = GuideHandles.indices(in: samples)
+        let grabbed = indices[2]
+
+        let moved = GuideHandles.dragged(samples, index: grabbed, to: CGPoint(x: 50, y: 70))
+        for index in indices where index != grabbed {
+            XCTAssertEqual(moved[index].x, samples[index].x, accuracy: 1e-9)
+            XCTAssertEqual(moved[index].y, samples[index].y, accuracy: 1e-9)
+        }
+    }
+
+    /// The consequence that matters most: the ends are handles too, so reshaping the middle of an
+    /// arc leaves the chord alone — and the chord is what `chordDeviation` measures against. Without
+    /// it, nudging the middle of a guide would quietly re-aim where the whole motion starts and ends.
+    func testAnInteriorDragLeavesTheChordExactlyWhereItWas() throws {
+        let dense = self.dense()
+        let indices = GuideHandles.indices(in: dense)
+
+        let moved = GuideHandles.dragged(dense, index: indices[2], to: CGPoint(x: 50, y: 40))
+        XCTAssertEqual(moved[0].point, dense[0].point)
+        XCTAssertEqual(moved[moved.count - 1].point, dense[dense.count - 1].point)
+    }
+
+    /// The neighbourhood comes along, and smoothly. The kernel is a raised cosine, so the sample
+    /// **half a radius** from the handle moves half as far — a property of that curve rather than of
+    /// this fixture. A linear falloff would agree here and leave a visible corner where the edit
+    /// stops, which on a dashed overlay reads as a badly drawn guide rather than as an edit.
+    func testTheNeighbourhoodFollowsUnderASmoothFalloff() throws {
+        let dense = self.dense()  // 41 samples, 2.5 apart, so a sample sits at every quarter-radius
+        let indices = GuideHandles.indices(in: dense)
+        let grabbed = indices[2]
+        let radiusInSamples = (indices[3] - grabbed)
+
+        let moved = GuideHandles.dragged(dense, index: grabbed, to: CGPoint(x: dense[grabbed].x, y: 40))
+        XCTAssertEqual(moved[grabbed + radiusInSamples / 2].y, 20, accuracy: 1e-6)
+
+        // Monotone from the handle out to its neighbour: no bump, no reversal.
+        for i in grabbed..<indices[3] {
+            XCTAssertGreaterThanOrEqual(moved[i].y, moved[i + 1].y - 1e-9)
+        }
+    }
+
+    /// Geometry only. The timestamps are what the easing is derived from, and rewriting them to keep
+    /// the old curve across a reshape would invent timing the artist never drew.
+    func testAHandleDragCarriesTimingAndPressureThrough() throws {
+        let samples = straight()
+        let moved = GuideHandles.dragged(samples, index: 5, to: CGPoint(x: 50, y: 99))
+
+        XCTAssertEqual(moved.count, samples.count)
+        XCTAssertEqual(moved.map(\.time), samples.map(\.time))
+        XCTAssertEqual(moved.map(\.pressure), samples.map(\.pressure))
+    }
+
+    // MARK: - Handles through the document
+
+    private func soleGuide(_ manager: CanvasManager) throws -> GuideStroke {
+        try XCTUnwrap(manager.guideStrokes.first)
+    }
+
+    /// A guide on the in-between, ready to have its handles pulled.
+    ///
+    /// Sampled finely (`dense`) so the handles land on their arc stations exactly, which makes the
+    /// deformed path symmetric about the middle handle and the expected deviation exact. A coarse
+    /// guide works identically — the snapping is simply off-centre, and then the arithmetic a test
+    /// would have to assert is no longer worth reading.
+    private func guidedFrame() -> CanvasManager {
+        let manager = manager()
+        generated(manager)
+        manager.currentFrame = 4
+        manager.currentLayerIndex = 1
+        manager.recordGuideStroke(samples: dense())
+        return manager
+    }
+
+    /// **A drag is a pure function of the geometry at touch-down.** Three moves in one gesture give
+    /// the same path as one move straight to the last position — because the manager re-derives from
+    /// the touch-down samples rather than nudging what it produced last time. Applying deltas
+    /// compounds the falloff, so the same drag made slowly (more touch samples) would bend the guide
+    /// further than one made quickly.
+    func testMovesWithinOneDragDoNotCompound() throws {
+        let manager = guidedFrame()
+        let guide0 = try soleGuide(manager)
+        let index = GuideHandles.indices(in: guide0.samples)[2]
+        let destination = CGPoint(x: 50, y: 60)
+
+        manager.beginGuideHandleDrag(guideID: guide0.id)
+        manager.dragGuideHandle(sampleIndex: index, to: CGPoint(x: 50, y: 20))
+        manager.dragGuideHandle(sampleIndex: index, to: CGPoint(x: 50, y: 45))
+        manager.dragGuideHandle(sampleIndex: index, to: destination)
+        manager.commitGuideHandleDrag()
+
+        let expected = GuideHandles.dragged(guide0.samples, index: index, to: destination)
+        XCTAssertEqual(try soleGuide(manager).samples, expected)
+    }
+
+    /// One gesture, one undo step — the trap `PLAN.md` §9 names and the same bracket the `t` slider
+    /// uses. A step per touch sample would make undo useless exactly where the artist is fiddling.
+    ///
+    /// The single `undo()` has to put the geometry back *and* leave the guide itself in place, which
+    /// is what distinguishes "one step for the drag" from "no step at all".
+    func testAWholeHandleDragIsOneUndoStep() throws {
+        let manager = guidedFrame()
+        let before = try soleGuide(manager)
+        let index = GuideHandles.indices(in: before.samples)[2]
+
+        manager.beginGuideHandleDrag(guideID: before.id)
+        for y in stride(from: CGFloat(10), through: 60, by: 10) {
+            manager.dragGuideHandle(sampleIndex: index, to: CGPoint(x: 50, y: y))
+        }
+        manager.commitGuideHandleDrag()
+        XCTAssertNotEqual(try soleGuide(manager).samples, before.samples)
+
+        manager.undo()
+        XCTAssertEqual(try soleGuide(manager).samples, before.samples)
+        XCTAssertEqual(manager.guideStrokes.count, 1, "one undo is the drag, not the guide")
+
+        manager.redo()
+        XCTAssertNotEqual(try soleGuide(manager).samples, before.samples)
+    }
+
+    /// A tap on a handle is not an edit. Recording a step that restores identical geometry makes the
+    /// artist press undo twice to get anywhere — so the commit drops the gesture instead, and the one
+    /// undo left is the guide's own creation.
+    func testAHandleDragThatMovedNothingRecordsNoStep() throws {
+        let manager = guidedFrame()
+        let before = try soleGuide(manager)
+
+        manager.beginGuideHandleDrag(guideID: before.id)
+        manager.commitGuideHandleDrag()
+
+        manager.undo()
+        XCTAssertTrue(manager.guideStrokes.isEmpty, "the only step should be the guide's creation")
+    }
+
+    /// A second finger landing mid-drag puts the guide back exactly as it was and records nothing —
+    /// the same answer a half-drawn stroke gets, and it must not leave the gesture snapshot behind
+    /// for whichever drag commits next.
+    func testCancellingAHandleDragRestoresTheGuideAndRecordsNothing() throws {
+        let manager = guidedFrame()
+        let before = try soleGuide(manager)
+        let index = GuideHandles.indices(in: before.samples)[2]
+
+        manager.beginGuideHandleDrag(guideID: before.id)
+        manager.dragGuideHandle(sampleIndex: index, to: CGPoint(x: 50, y: 60))
+        manager.cancelGuideHandleDrag()
+        XCTAssertEqual(try soleGuide(manager).samples, before.samples)
+
+        manager.undo()
+        XCTAssertTrue(manager.guideStrokes.isEmpty, "a cancelled drag leaves nothing to undo")
+    }
+
+    /// A move that arrives with no drag in flight does nothing. The overlay can only send one after
+    /// `touchesBegan` claimed a handle, but the guide can vanish under it — an undo, or a scrub off
+    /// the in-between — and reshaping a guide the artist can no longer see would be unexplainable.
+    func testAHandleMoveOutsideADragIsIgnored() throws {
+        let manager = guidedFrame()
+        let before = try soleGuide(manager)
+
+        manager.dragGuideHandle(sampleIndex: 5, to: CGPoint(x: 50, y: 60))
+        XCTAssertEqual(try soleGuide(manager).samples, before.samples)
+    }
+
+    /// The loop item 2 exists to close: pull a handle, and the in-between moves. The handle positions
+    /// the overlay draws come from the same place the drag writes to, so what is grabbed is what is
+    /// seen.
+    func testDraggingAHandleBendsTheInBetween() throws {
+        let manager = guidedFrame()
+        let guide0 = try soleGuide(manager)
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        let flat = try forwardPoints(manager, at: 0.5, guides: manager.guides(driving: recipe))
+
+        let handles = manager.guideHandlePositions(for: guide0)
+        XCTAssertEqual(handles.count, GuideHandles.count)
+        let middle = handles[2]
+        XCTAssertEqual(middle.position, guide0.samples[middle.sampleIndex].point)
+
+        manager.beginGuideHandleDrag(guideID: guide0.id)
+        manager.dragGuideHandle(sampleIndex: middle.sampleIndex,
+                                to: CGPoint(x: middle.position.x, y: middle.position.y + 40))
+        manager.commitGuideHandleDrag()
+
+        let bent = try forwardPoints(manager, at: 0.5, guides: manager.guides(driving: recipe))
+        for (a, b) in zip(flat, bent) {
+            XCTAssertEqual(b.y - a.y, 40, accuracy: 1e-4)
+            XCTAssertEqual(b.x, a.x, accuracy: 1e-4)
+        }
+    }
 }

@@ -20,7 +20,11 @@ struct GuidePath {
     /// different question: the pen emits coincident samples whenever it is held still, and keeping
     /// them would leave zero-length segments for `point(atArcFraction:)` to bracket ambiguously. Well
     /// under any distance a stylus can resolve, so no real geometry is lost.
-    private static let coincident: CGFloat = 1e-6
+    ///
+    /// `fileprivate` rather than `private` so `GuideHandles` uses this exact threshold: the handles
+    /// walk the raw samples rather than the filtered ones, and two walks that disagreed about what
+    /// counts as a step would put a handle at a different arc length than `point(atArcFraction:)`.
+    fileprivate static let coincident: CGFloat = 1e-6
 
     private let points: [CGPoint]
     private let times: [TimeInterval]
@@ -153,6 +157,151 @@ struct GuidePath {
         out[0] = 0
         out[resolution - 1] = 1
         return SpacingCurve(kind: .sampled, samples: out)
+    }
+}
+
+/// Editing a drawn guide's geometry — Phase 7 item 2's handles.
+///
+/// Pure geometry over `[TimedSample]`, kept out of the view for the usual reason: `GuideOverlayView`
+/// reports *which* handle moved and *where to*, and everything that decides what that means to the
+/// path is here, in the fast tier.
+///
+/// Four properties are load-bearing and each is pinned by a test:
+///
+/// 1. **A handle is a sample index, not an arc fraction.** So a dragged handle lands exactly where
+///    the artist put it, the way `ShapeOverlayView`'s do. Placing handles at abstract arc fractions
+///    and displacing the neighbourhood would leave the handle short of the finger by however much
+///    the nearest sample was off, and the error would grow as the drag lengthened the arc.
+/// 2. **The falloff reaches exactly to the adjacent handle, measured per side**, so dragging one
+///    handle moves **no other handle** — the kernel is exactly zero at that distance. The handles
+///    behave like independent controls rather than a set that shoves each other around.
+/// 3. **Therefore an interior drag leaves both endpoints exactly where they were**, since they are
+///    handles too. The chord is unchanged, so reshaping the middle of an arc does not move where the
+///    motion starts or ends — which is what keeps a geometry edit from quietly re-aiming the whole
+///    in-between.
+/// 4. **A drag is a pure function of the samples at touch-down.** `CanvasManager` holds the geometry
+///    the gesture began with and re-derives from it on every move, rather than applying a delta to
+///    the already-deformed path — otherwise the falloff compounds and one slow drag bends the guide
+///    further than the same drag made quickly.
+///
+/// Timestamps are carried through untouched. The derived easing does shift, because the same stylus
+/// times now cover a different arc length, and that is the honest answer: re-fitting the times to
+/// preserve the old curve would invent timing the artist never drew.
+enum GuideHandles {
+
+    /// How many handles a guide gets. Both ends plus three interior — enough to reshape a hand-drawn
+    /// arc, few enough that the hitboxes do not carpet the canvas they are transparent to.
+    static let count = 5
+
+    /// The **sample indices** the handles sit on, evenly spaced by arc length, ends included.
+    ///
+    /// The first and last are pinned to the first and last sample rather than found by search. A
+    /// guide can end in a run of coincident samples (the pen resting before it lifts), which all
+    /// share the final arc length, so a nearest-match would pick the earliest of them and leave the
+    /// rest behind. Note the same coincidence is harmless *during* a drag: samples at equal arc
+    /// length get equal weight from the kernel and therefore move together.
+    ///
+    /// Returns `[]` for anything that is not a path — fewer than two samples, or no arc at all — so a
+    /// caller shows no handles rather than a pile of them at one point.
+    static func indices(in samples: [TimedSample], count: Int = count) -> [Int] {
+        guard samples.count >= 2, count >= 2 else { return [] }
+        let lengths = arcLengths(samples)
+        let total = lengths[lengths.count - 1]
+        guard total > GuidePath.coincident else { return [] }
+
+        var out: [Int] = []
+        for handle in 0..<count {
+            let index: Int
+            switch handle {
+            case 0: index = 0
+            case count - 1: index = samples.count - 1
+            default:
+                let target = total * CGFloat(handle) / CGFloat(count - 1)
+                var best = 0
+                var bestGap = CGFloat.greatestFiniteMagnitude
+                for (i, d) in lengths.enumerated() where abs(d - target) < bestGap {
+                    bestGap = abs(d - target)
+                    best = i
+                }
+                index = best
+            }
+            // A guide shorter than the handle count collapses several handles onto one sample. Drop
+            // the repeats rather than stacking hitboxes that all do the same thing.
+            if out.last != index { out.append(index) }
+        }
+        return out.count >= 2 ? out : []
+    }
+
+    /// The positions those handles are drawn at.
+    static func positions(in samples: [TimedSample], count: Int = count) -> [CGPoint] {
+        indices(in: samples, count: count).map { samples[$0].point }
+    }
+
+    /// `samples` with the sample at `index` moved to `destination`, carrying its arc-length
+    /// neighbourhood with it under a raised-cosine falloff.
+    ///
+    /// The kernel is 1 at the handle and 0 at the reach, with zero slope at both ends, so the seam
+    /// where the edit stops is smooth — a linear falloff leaves a visible corner there, which on a
+    /// dashed overlay reads as a mis-drawn guide rather than as an edit.
+    ///
+    /// **The reach is measured to the neighbouring handles, one side at a time, rather than being a
+    /// fixed fraction of the path.** Handles snap to samples, so the gap to the next one is only
+    /// *near* an even share of the arc and is different on each side; a single fixed radius therefore
+    /// overshoots one neighbour whenever the snapping was uneven, and dragging a handle would drag
+    /// its neighbour along with it. Per-side reach makes "one handle never moves another" true by
+    /// construction rather than nearly true. It also makes an interior drag leave both endpoints
+    /// exactly where they were, since those are handles too — so reshaping the middle of an arc never
+    /// re-aims where the motion starts and ends.
+    ///
+    /// `handleCount` must be the count the handles were placed with, since it is what resolves them.
+    /// Returns `samples` unchanged for an index that is not a handle, or a guide with no arc.
+    static func dragged(_ samples: [TimedSample], index: Int, to destination: CGPoint,
+                        handleCount: Int = count) -> [TimedSample] {
+        guard samples.indices.contains(index) else { return samples }
+        let stations = indices(in: samples, count: handleCount)
+        guard let slot = stations.firstIndex(of: index) else { return samples }
+
+        let lengths = arcLengths(samples)
+        let anchor = lengths[index]
+        let backward = slot > 0 ? anchor - lengths[stations[slot - 1]] : 0
+        let forward = slot < stations.count - 1 ? lengths[stations[slot + 1]] - anchor : 0
+
+        let dx = destination.x - samples[index].x
+        let dy = destination.y - samples[index].y
+        return samples.enumerated().map { i, sample in
+            let offset = lengths[i] - anchor
+            // Every sample at the handle's own arc length moves with it, weight 1 — which is what
+            // carries a run of coincident samples (a pen resting) along as one instead of tearing it.
+            var weight: CGFloat = 1
+            if offset != 0 {
+                let reach = offset < 0 ? backward : forward
+                guard reach > GuidePath.coincident else { return sample }
+                let x = abs(offset) / reach
+                guard x < 1 else { return sample }
+                weight = 0.5 * (1 + cos(CGFloat.pi * x))
+            }
+            return TimedSample(x: sample.x + dx * weight, y: sample.y + dy * weight,
+                               pressure: sample.pressure, time: sample.time)
+        }
+    }
+
+    /// Cumulative arc length at each sample, including the coincident ones `GuidePath` drops.
+    ///
+    /// Nothing is filtered here on purpose: an edit has to return a sample for every sample it was
+    /// given, or it would silently rewrite the guide's pressure and timing while claiming to move a
+    /// handle. Coincident samples simply share an arc length, which is exactly what makes them move
+    /// as one under the kernel above. The parameterisation is `GuidePath`'s own — a dropped sample
+    /// contributes zero length there too — so handles land where `point(atArcFraction:)` says.
+    private static func arcLengths(_ samples: [TimedSample]) -> [CGFloat] {
+        var out: [CGFloat] = [0]
+        out.reserveCapacity(samples.count)
+        var total: CGFloat = 0
+        for (previous, sample) in zip(samples, samples.dropFirst()) {
+            let step = hypot(sample.x - previous.x, sample.y - previous.y)
+            if step > GuidePath.coincident { total += step }
+            out.append(total)
+        }
+        return out
     }
 }
 

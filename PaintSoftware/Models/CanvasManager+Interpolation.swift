@@ -1706,6 +1706,64 @@ extension CanvasManager {
         }
     }
 
+    // MARK: - Guide handles (Phase 7 item 2)
+
+    /// The positions to draw `guide`'s editable handles at, and the sample each one edits.
+    ///
+    /// A thin pass-through to `GuideHandles`, kept here so the view layer never has to know how a
+    /// handle is placed — it receives positions and reports back the index it was given.
+    func guideHandlePositions(for guide: GuideStroke) -> [(sampleIndex: Int, position: CGPoint)] {
+        GuideHandles.indices(in: guide.samples).map { ($0, guide.samples[$0].point) }
+    }
+
+    /// A handle drag's touch-down.
+    ///
+    /// The bracket is `beginStructureGesture`, the same one the `t` slider uses and for the same
+    /// reason — a step per touch sample makes undo useless. It is *sufficient* here, unlike the
+    /// retag case §5's Phase 2 entry warns about, because `StructureSnapshot` carries `guideStrokes`
+    /// outright: a guide is a document-level value, not stroke content behind a class reference, so
+    /// nothing about a vector canvas moves while a handle does. `updateGuideStroke`'s own
+    /// `withInterpolationUndo` then defers to this gesture rather than recording per move.
+    func beginGuideHandleDrag(guideID: UUID) {
+        guard let guide = guideStrokes.first(where: { $0.id == guideID }) else { return }
+        guideHandleDrag = (guideID, guide.samples)
+        beginStructureGesture()
+    }
+
+    /// Moves the handle mid-drag. Records nothing — the bracket owns the step.
+    ///
+    /// Re-derived from the touch-down geometry every time, which is what makes the result depend on
+    /// where the finger *is* rather than on how it got there.
+    func dragGuideHandle(sampleIndex: Int, to destination: CGPoint) {
+        guard let drag = guideHandleDrag,
+              var guide = guideStrokes.first(where: { $0.id == drag.guideID }) else { return }
+        guide.samples = GuideHandles.dragged(drag.samples, index: sampleIndex, to: destination)
+        updateGuideStroke(guide)
+    }
+
+    /// The lift. Records the step, or drops it when the handle came back to where it started — a tap
+    /// on a handle is not an edit, and an undo step that restores identical geometry is one the
+    /// artist has to press through twice to get anywhere.
+    func commitGuideHandleDrag() {
+        guard let drag = guideHandleDrag else { return }
+        guideHandleDrag = nil
+        let moved = guideStrokes.first { $0.id == drag.guideID }?.samples != drag.samples
+        if moved { commitStructureGesture(name: "Edit Guide") } else { cancelStructureGesture() }
+    }
+
+    /// A second finger landing mid-drag. Puts the guide back exactly as it was and records nothing —
+    /// the same answer `StrokeCanvasView.handleCancel` gives a half-drawn stroke, and the reason
+    /// `cancelStructureGesture` exists: a snapshot left in place would be handed to whichever gesture
+    /// committed next.
+    func cancelGuideHandleDrag() {
+        guard let drag = guideHandleDrag else { return }
+        guideHandleDrag = nil
+        if let index = guideStrokes.firstIndex(where: { $0.id == drag.guideID }) {
+            guideStrokes[index].samples = drag.samples
+        }
+        cancelStructureGesture()
+    }
+
     func removeGuideStroke(id: UUID) {
         guard guideStrokes.contains(where: { $0.id == id }) else { return }
         withInterpolationUndo(name: "Delete Guide") {

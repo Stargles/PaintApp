@@ -136,6 +136,18 @@ final class CanvasManager: ObservableObject {
     /// at all.
     @Published var isDrawingGuide: Bool = false
 
+    /// The guide a handle drag is reshaping, and its geometry as it stood at touch-down — Phase 7
+    /// item 2. Non-nil exactly while a handle is under the finger.
+    ///
+    /// The samples are kept because every move re-derives the whole path from *these* rather than
+    /// nudging the path it last produced. Applying each move as a delta to the already-deformed
+    /// geometry compounds the falloff, so the same drag performed slowly (more touch samples) bends
+    /// the guide further than one performed quickly — see `GuideHandles`.
+    ///
+    /// Deliberately not `@Published`: nothing renders from it, and the guide itself is published, so
+    /// a second object change per touch sample would only cost SwiftUI passes.
+    var guideHandleDrag: (guideID: UUID, samples: [TimedSample])?
+
     @Published var currentLayerIndex: Int = 0 {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }
