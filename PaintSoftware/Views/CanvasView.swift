@@ -61,6 +61,14 @@ struct CanvasView: UIViewRepresentable {
         container.addSubview(shapeOverlay)
         context.coordinator.shapeOverlay = shapeOverlay
 
+        // Above everything, including the shape overlay: a guide annotates the whole frame, so
+        // anything drawn over it would be reading as ink on top of a reference mark. It never claims
+        // a touch (`GuideOverlayView.hitTest`), so being topmost costs nothing.
+        let guideOverlay = GuideOverlayView()
+        guideOverlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(guideOverlay)
+        context.coordinator.guideOverlay = guideOverlay
+
         // Paper is inset from the container by `canvasPadding` on each side (the artwork rect); the
         // coordinator updates these constants in `updatePaper()`. Positive top/leading, negative
         // bottom/trailing so a larger padding shrinks the white paper inward, revealing the grey margin.
@@ -95,7 +103,11 @@ struct CanvasView: UIViewRepresentable {
             shapeOverlay.topAnchor.constraint(equalTo: container.topAnchor),
             shapeOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             shapeOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            shapeOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+            shapeOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            guideOverlay.topAnchor.constraint(equalTo: container.topAnchor),
+            guideOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            guideOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            guideOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor)
         ])
 
         context.coordinator.hostView = host
@@ -181,6 +193,7 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.reconcileLayers()
         context.coordinator.updateActiveLayerAndTool()
         context.coordinator.updateInterpolationPreviews()
+        context.coordinator.updateGuideOverlay()
         context.coordinator.updateOnionSkin()
         context.coordinator.updateTransformOverlay()
         context.coordinator.updateSelectionOverlay()
@@ -200,6 +213,11 @@ struct CanvasView: UIViewRepresentable {
         weak var hostView: CanvasHostView?
         weak var containerView: UIView?
         weak var onionSkinView: UIImageView?
+        weak var guideOverlay: GuideOverlayView?
+        /// The guide under the pen right now, pushed up from `StrokeCanvasView` on every sample. Held
+        /// here rather than read back out of the stroke view so `updateGuideOverlay` stays a pure
+        /// function of coordinator state and can run from the ordinary per-pass update.
+        private var liveGuidePoints: [CGPoint] = []
         var onionSkinSource: OnionSkinSource = PreviousCelOnionSkinSource()
         weak var paperView: UIView?
         /// The four constraints pinning the white paper to the container, whose constants are the
@@ -331,6 +349,14 @@ struct CanvasView: UIViewRepresentable {
                 let host = LayerHostView()
                 host.strokeView.layerID = layer.id
                 host.strokeView.canvasManager = canvasManager
+                // Live guide feedback. Straight to the overlay rather than through SwiftUI state:
+                // this fires per touch sample, and a `@Published` write per sample would re-run every
+                // view body on the canvas for the length of the drag.
+                host.strokeView.guideOverlayNeedsUpdate = { [weak self] samples in
+                    guard let self else { return }
+                    self.liveGuidePoints = samples.map(\.point)
+                    self.updateGuideOverlay()
+                }
                 host.strokeView.onStrokeBegan = { [weak self, weak host] in
                     guard let self else { return }
                     // A stroke is a canvas edit, so any adjustable fill/shape bakes before this one
@@ -856,6 +882,18 @@ struct CanvasView: UIViewRepresentable {
             interpolationPreviewKeys[layer.id] = key
             host.strokeView.setInterpolationImage(
                 canvasManager.motionGroupOverlayImage(forCel: cel.id, inLayer: layer.id))
+        }
+
+        /// Phase 7 item 2's render pass — the guides bound to the frame under the playhead, plus
+        /// whatever is under the pen.
+        ///
+        /// Not memoized on `InterpolationPreviewKey`, and deliberately: that key guards an ARAP solve
+        /// and two canvas-sized rasterisations, while this sets two `CGPath`s. `GuideOverlayView.update`
+        /// does its own equality check, so a pass where nothing moved costs one array compare.
+        func updateGuideOverlay() {
+            guard let guideOverlay else { return }
+            guideOverlay.update(guides: canvasManager.visibleGuideStrokes.map { $0.samples.map(\.point) },
+                                live: liveGuidePoints)
         }
 
         func updateOnionSkin() {

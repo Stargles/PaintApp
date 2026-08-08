@@ -127,6 +127,15 @@ final class CanvasManager: ObservableObject {
     /// Transient, like the rest of this mode's view state.
     @Published var showMotionGroupOverlay: Bool = true
 
+    /// Whether the next canvas drag draws a **guide stroke** rather than ink — Phase 7 item 2.
+    ///
+    /// Armed state rather than a `Tool` case, exactly like `armedMotionGroupID` and for the same
+    /// reason: the artist keeps the brush they had. It is cleared on leaving the mode for the same
+    /// reason too — left armed, the next ordinary stroke would silently become a guide instead of a
+    /// drawing, which is the louder half of that failure since a guide does not appear in the layer
+    /// at all.
+    @Published var isDrawingGuide: Bool = false
+
     @Published var currentLayerIndex: Int = 0 {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }

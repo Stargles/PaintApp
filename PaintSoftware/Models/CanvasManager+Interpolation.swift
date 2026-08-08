@@ -682,10 +682,13 @@ extension CanvasManager {
     func exitInterpolateMode() {
         isInterpolateMode = false
         interpolationReferences.removeAll()
-        // Both are view state that only means anything inside the mode, and an armed group left set
-        // would turn the next ordinary canvas tap into a silent retag.
+        // All three are view state that only means anything inside the mode, and each left set would
+        // turn the next ordinary canvas gesture into something the artist did not ask for: a silent
+        // retag, a part of the drawing missing, or a stroke that becomes a guide and never appears in
+        // the layer at all.
         armedMotionGroupID = nil
         hiddenMotionGroups.removeAll()
+        isDrawingGuide = false
     }
 
     func isInterpolationReference(celID: UUID, inLayer layerID: UUID) -> Bool {
@@ -786,6 +789,13 @@ extension CanvasManager {
         case nothingToCommit
         /// Commit was asked for on a recipe `evaluate` cannot render, so there is no frame *yet*.
         case interpolationNotEvaluable
+        /// A guide was drawn on a frame with no recipe to attach it to.
+        ///
+        /// A guide is a constraint *on a motion*, so there has to be a motion first. Storing it
+        /// unbound and hoping a later Generate adopted it is the silent-no-op shape this feature has
+        /// refused three times already — the artist would draw an arc, press Generate, and get a
+        /// straight line with nothing saying why.
+        case noInterpolationToGuide
 
         var message: String {
             switch self {
@@ -797,6 +807,7 @@ extension CanvasManager {
             case .nothingToReproject: return "Reproject needs a drawing in this frame."
             case .nothingToCommit: return "Commit needs an interpolated frame."
             case .interpolationNotEvaluable: return "This interpolation is not ready to commit."
+            case .noInterpolationToGuide: return "Generate an in-between first, then guide it."
             }
         }
     }
@@ -1623,6 +1634,59 @@ extension CanvasManager {
             guard seen.insert(id).inserted else { return nil }
             return guideStrokes.first { $0.id == id }
         }
+    }
+
+    /// Records a guide the artist just drew and binds it to the frame under the playhead.
+    ///
+    /// **Whole-frame by default** — `boundGroups` empty, and the id goes on the recipe rather than on
+    /// a binding. That is `PLAN.md` §10 decision 6's "bind this guide to every group at once", and it
+    /// is the right default because the artist drew one arc over the whole drawing; narrowing it to a
+    /// group is a later, deliberate act. `GuideSet` reads all three bindings, so nothing has to change
+    /// when it is narrowed.
+    ///
+    /// The interval is the recipe's own span, first reference to last, which is what scopes the guide
+    /// library later (`GuideStroke.interval`) without binding the guide to this recipe — the binding
+    /// runs the other way, from `guideIDs`, and that is what makes requirement 7's reuse a reference
+    /// rather than a copy.
+    ///
+    /// Returns the refusal reason, or nil on success.
+    @discardableResult
+    func recordGuideStroke(samples: [TimedSample]) -> InterpolationRefusal? {
+        guard samples.count >= 2 else { return .noInterpolationToGuide }
+        guard let at = interpolationTarget,
+              let recipe = layers[at.layer].cels[at.cel].interpolation,
+              let first = recipe.references.first?.cels.first,
+              let last = recipe.references.last?.cels.last
+        else { return .noInterpolationToGuide }
+
+        let guide = GuideStroke(samples: samples,
+                                interval: KeyframeInterval(start: first, end: last),
+                                boundGroups: [], role: .both)
+        // One step covering both halves: the artist's action was "add a guide to this frame", and an
+        // undo that left the guide in the registry bound to nothing would be a leak they cannot see.
+        withInterpolationUndo(name: "Add Guide") {
+            guideStrokes.append(guide)
+            layers[at.layer].cels[at.cel].interpolation?.guideIDs.append(guide.id)
+        }
+        return nil
+    }
+
+    /// Why `recordGuideStroke` would refuse, without drawing anything — what greys the bar's toggle
+    /// out. Cheap enough for a SwiftUI `body`, unlike `commitRefusal` (§5.10).
+    var guideRefusal: InterpolationRefusal? {
+        guard let at = interpolationTarget else { return .noInterpolationToGuide }
+        return layers[at.layer].cels[at.cel].interpolation == nil ? .noInterpolationToGuide : nil
+    }
+
+    /// The guides to *draw* right now: those bound to the frame under the playhead.
+    ///
+    /// Deliberately the recipe's own list rather than every guide in the document. A scene
+    /// accumulates guides across every interval it has ever had one on, and showing all of them at
+    /// once would bury the arc the artist is working on under every arc they have ever drawn.
+    var visibleGuideStrokes: [GuideStroke] {
+        guard isInterpolateMode, let at = interpolationTarget,
+              let recipe = layers[at.layer].cels[at.cel].interpolation else { return [] }
+        return guides(driving: recipe)
     }
 
     @discardableResult

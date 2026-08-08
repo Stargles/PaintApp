@@ -468,6 +468,89 @@ final class InterpolationGuideLogicTests: XCTestCase {
         XCTAssertTrue(manager.guides(driving: InterpolationRecipe()).isEmpty)
     }
 
+    // MARK: - Recording a drawn guide (item 2's document half)
+
+    /// The whole item-2 loop without the view: draw a guide, and the frame arcs. The capture path
+    /// itself is `StrokeCanvasView`'s and is the one part only an XCUITest reaches.
+    func testARecordedGuideBendsTheFrameItWasDrawnOn() throws {
+        let manager = manager()
+        generated(manager)
+        manager.currentFrame = 4  // the in-between block, so `interpolationTarget` resolves to it
+        manager.currentLayerIndex = 1
+
+        let straightLine = try forwardPoints(manager, at: 0.5, guides: [])
+        XCTAssertNil(manager.recordGuideStroke(samples: arched()))
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual(recipe.guideIDs.count, 1)
+        XCTAssertEqual(manager.guideStrokes.count, 1)
+
+        let arcedNow = try forwardPoints(manager, at: 0.5, guides: manager.guides(driving: recipe))
+        for (a, b) in zip(straightLine, arcedNow) {
+            XCTAssertEqual(b.y - a.y, 40, accuracy: 1e-6)
+        }
+    }
+
+    /// **A guide is a constraint on a motion, so there has to be a motion.** Storing it unbound and
+    /// hoping a later Generate adopted it is the silent-no-op this feature has refused three times.
+    func testAGuideOnAFrameWithNoRecipeIsRefused() {
+        let manager = manager()
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        manager.layers[1].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 12,
+                                      raster: .empty(size: size), vector: .empty(size: size))]
+        manager.currentLayerIndex = 1
+        manager.currentFrame = 0
+
+        XCTAssertEqual(manager.guideRefusal, .noInterpolationToGuide)
+        XCTAssertEqual(manager.recordGuideStroke(samples: arched()), .noInterpolationToGuide)
+        XCTAssertTrue(manager.guideStrokes.isEmpty)
+    }
+
+    /// One artist action, one undo step — covering the registry *and* the binding. An undo that put
+    /// the guide back in the registry bound to nothing would be a leak they cannot see.
+    func testUndoingAGuideRemovesBothTheGuideAndItsBinding() throws {
+        let manager = manager()
+        generated(manager)
+        manager.currentFrame = 4
+        manager.currentLayerIndex = 1
+        XCTAssertNil(manager.recordGuideStroke(samples: arched()))
+
+        manager.undo()
+        XCTAssertTrue(manager.guideStrokes.isEmpty)
+        XCTAssertEqual(manager.layers[1].cels[1].interpolation?.guideIDs, [])
+
+        manager.redo()
+        XCTAssertEqual(manager.guideStrokes.count, 1)
+        XCTAssertEqual(manager.layers[1].cels[1].interpolation?.guideIDs.count, 1)
+    }
+
+    /// Guides are invisible outside interpolate mode (§0 requirement 6), and the overlay reads this
+    /// property rather than the registry — a scene accumulates guides across every interval it has
+    /// had one on, and drawing all of them at once would bury the one being worked on.
+    func testGuidesAreOnlyVisibleInsideInterpolateMode() throws {
+        let manager = manager()
+        generated(manager)
+        manager.currentFrame = 4
+        manager.currentLayerIndex = 1
+        XCTAssertNil(manager.recordGuideStroke(samples: arched()))
+        XCTAssertEqual(manager.visibleGuideStrokes.count, 1)
+
+        manager.exitInterpolateMode()
+        XCTAssertTrue(manager.visibleGuideStrokes.isEmpty)
+        XCTAssertEqual(manager.guideStrokes.count, 1, "leaving the mode hides guides, never deletes them")
+    }
+
+    /// Armed state left set turns the next ordinary gesture into something the artist did not ask
+    /// for — the same trap `armedMotionGroupID` documents, and louder here because a guide does not
+    /// appear in the layer at all.
+    func testLeavingTheModeDisarmsGuideDrawing() {
+        let manager = manager()
+        manager.enterInterpolateMode()
+        manager.isDrawingGuide = true
+        manager.exitInterpolateMode()
+        XCTAssertFalse(manager.isDrawingGuide)
+    }
+
     /// A guide edit keeps the guide's id (`PLAN.md` §6.4 — reuse across frames is a reference, not a
     /// copy), so the resolved list has to differ by **value** or the preview would keep the stale
     /// frame. This is the assertion standing in for the fourth `InterpolationPreviewKey` bug.

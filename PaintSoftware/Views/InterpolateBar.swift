@@ -66,6 +66,7 @@ struct InterpolateBar: View {
                         .foregroundColor(.white.opacity(0.8))
                 }
                 Spacer(minLength: 12)
+                guideButton
                 commitButton
                 removeButton
             }
@@ -145,6 +146,28 @@ struct InterpolateBar: View {
             // no longer update it. Warm rather than red says "a decision" without saying "danger".
             .tint(.orange)
             .accessibilityIdentifier("interpolate.commit")
+        }
+    }
+
+    /// Arms guide drawing — Phase 7 item 2. A toggle rather than a command, because the artist draws
+    /// the guide on the *canvas* and the button only says which thing the next drag is.
+    ///
+    /// The same arm-and-draw shape as `MotionGroupRow`'s chips, and a button rather than a timeline
+    /// gesture for §5.10's reason: press-and-hold already means drag-reorder, in every mode.
+    ///
+    /// Gated on `guideRefusal`, which is cheap — a guide needs a recipe to attach to, and offering
+    /// the toggle without one would let the artist draw an arc that had nowhere to go.
+    @ViewBuilder
+    private var guideButton: some View {
+        if activeRecipe != nil {
+            Button(canvasManager.isDrawingGuide ? "Drawing Guide…" : "Guide") {
+                refusal = canvasManager.guideRefusal
+                guard refusal == nil else { return }
+                canvasManager.isDrawingGuide.toggle()
+            }
+            .buttonStyle(.bordered)
+            .tint(canvasManager.isDrawingGuide ? .teal : .gray)
+            .accessibilityIdentifier("interpolate.guide")
         }
     }
 

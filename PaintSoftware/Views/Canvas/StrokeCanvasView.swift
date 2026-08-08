@@ -173,6 +173,16 @@ final class StrokeCanvasView: UIView {
     }
     private var vectorScratchRole: VectorScratchRole = .overlay
 
+    /// Phase 7 item 2. Non-nil exactly while a guide gesture is in flight, and it is what every
+    /// handler branches on — rather than re-reading `isDrawingGuide`, so that toggling the bar
+    /// mid-drag cannot strand a half-captured guide. Same reasoning as `inBetweenCelID`: the gesture
+    /// resolves what it is at touch-down and holds it.
+    private var guideStartTime: TimeInterval?
+    private var currentGuideSamples: [TimedSample] = []
+    /// Live feedback while a guide is being drawn — the coordinator hands these to the guide overlay.
+    /// Empty means the gesture ended or was abandoned.
+    var guideOverlayNeedsUpdate: (([TimedSample]) -> Void)?
+
     /// How many times this gesture has published the scratch to `imageView` as the display — i.e.
     /// how many live preview frames the user was shown before lifting. Only `.replacement` counts;
     /// `.overlay` composites the scratch over the canvas render and `.none` never draws it at all.
@@ -336,7 +346,61 @@ final class StrokeCanvasView: UIView {
         return true
     }
 
+    /// **Phase 7 item 2's guide capture.** While interpolate mode is on and the bar's Guide toggle is
+    /// lit, a drag on this layer's canvas draws a guide stroke instead of ink.
+    ///
+    /// Timestamped, which is the whole reason `StrokeInput` now carries one: a guide's stylus velocity
+    /// *is* its easing curve (`PLAN.md` §6.1), so a capture path that dropped the timing would throw
+    /// away half of what the gesture is for.
+    ///
+    /// Coalesced touches are read exactly as ordinary drawing reads them. A guide is short and read
+    /// by arc length, so the extra samples barely change its shape — but they are most of the timing
+    /// resolution, and the easing is the signal that has none to spare.
+    ///
+    /// Consumes the touch even when it will be refused at lift, on the same reasoning as
+    /// `consumeAsMotionGroupTap`: while the toggle is lit the canvas is drawing guides, and quietly
+    /// laying down a brush stroke instead would put ink on the drawing that the artist did not ask
+    /// for and would not notice until later. The bar greys the toggle out via `guideRefusal` so the
+    /// refused case is nearly unreachable anyway.
+    private func beginGuideStrokeIfArmed(_ touch: UITouch) -> Bool {
+        guard let manager = canvasManager, manager.isInterpolateMode, manager.isDrawingGuide,
+              vectorCanvas != nil,
+              manager.layers.indices.contains(manager.currentLayerIndex),
+              manager.layers[manager.currentLayerIndex].id == layerID else { return false }
+        let input = StrokeInput(touch: touch, in: self)
+        guideStartTime = input.timestamp
+        currentGuideSamples = [TimedSample(point: input.position, pressure: input.pressure, time: 0)]
+        return true
+    }
+
+    private func recordGuideSample(_ touch: UITouch, _ event: UIEvent) {
+        guard let start = guideStartTime else { return }
+        for sample in event.coalescedTouches(for: touch) ?? [touch] {
+            let input = StrokeInput(touch: sample, in: self)
+            currentGuideSamples.append(TimedSample(point: input.position, pressure: input.pressure,
+                                                   time: input.timestamp - start))
+        }
+        guideOverlayNeedsUpdate?(currentGuideSamples)
+    }
+
+    private func endGuideStroke(_ touch: UITouch) {
+        guard let start = guideStartTime else { return }
+        let input = StrokeInput(touch: touch, in: self)
+        currentGuideSamples.append(TimedSample(point: input.position, pressure: input.pressure,
+                                               time: input.timestamp - start))
+        let samples = currentGuideSamples
+        cancelGuideStroke()
+        canvasManager?.recordGuideStroke(samples: samples)
+    }
+
+    private func cancelGuideStroke() {
+        guideStartTime = nil
+        currentGuideSamples = []
+        guideOverlayNeedsUpdate?([])
+    }
+
     private func handleBegin(_ touch: UITouch) {
+        if beginGuideStrokeIfArmed(touch) { return }
         if consumeAsMotionGroupTap(touch) { return }
         onStrokeBegan?() // commit any still-adjustable fill before this stroke's own undo step registers
         if vectorCanvas != nil { beginVectorStroke(touch); return }
@@ -352,6 +416,7 @@ final class StrokeCanvasView: UIView {
     }
 
     private func handleMove(_ touch: UITouch, _ event: UIEvent) {
+        if guideStartTime != nil { recordGuideSample(touch, event); return }
         if consumedAsMotionGroupTap { return }
         if vectorCanvas != nil {
             if shapeFollowingTouch {
@@ -386,6 +451,7 @@ final class StrokeCanvasView: UIView {
     }
 
     private func handleEnd(_ touch: UITouch) {
+        if guideStartTime != nil { endGuideStroke(touch); return }
         if consumedAsMotionGroupTap { consumedAsMotionGroupTap = false; return }
         if vectorCanvas != nil { endVectorStroke(touch); return }
         // Shape was detected and reverted: skip all stroke-end bookkeeping (no undo step, no
@@ -425,6 +491,9 @@ final class StrokeCanvasView: UIView {
     /// committed and no undo step is registered — as far as the document is concerned this stroke
     /// never happened, which is what the user means by putting a second finger down to pan.
     private func handleCancel() {
+        // A guide is only committed at lift, which a cancel never reaches — so a second finger
+        // landing mid-guide throws the samples away, exactly as it throws away a partial stroke.
+        if guideStartTime != nil { cancelGuideStroke(); return }
         // A retag has already landed as its own undo step by the time a second finger can cancel the
         // gesture, so there is nothing to roll back — only the flag to clear.
         if consumedAsMotionGroupTap { consumedAsMotionGroupTap = false; return }
