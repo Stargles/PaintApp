@@ -44,7 +44,7 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Between phases. Phase 6 is signed off and Commit is built; Phase 7 (guide strokes) is next and unstarted.** The product owner answered both of §2's open questions on 2026-08-07: the transform refusal **does** close Phase 6 (§5.13 stands; §5.12's displacement field is not being built now), and §8 item 17's **Commit was un-deferred and built the same session** — see §5.14 and `IMPLEMENTATION.md`'s "Commit" section. Phase 6 itself: item 1 (Reproject) landed in Session 15; Session 16 answered §8 item 25's liquify question (§5.12) and wired editing at an in-between end to end. |
+| **Current phase** | **Phase 7 (guide strokes), items 1, 3, 4 and 6 done plus half of item 2.** An artist can arm Guide on the bar, draw an arc, and watch the in-between leave the straight line; the stylus velocity along that arc becomes the easing. **Not built: item 2's editable handles, item 5's spacing chart, item 7's link/duplicate.** Read `IMPLEMENTATION.md`'s "What Session 18 built" subsection before touching any of it — especially the chord-deviation interpretation (§5.16), which is the one genuine design call the phase required. Item 4 works and is pinned but has **never been tried on an iPad**, which its own wording asks for. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, tracks `origin/`. Rebased onto `origin/main` as of Session 8. |
 | **Last known-green commit** | Session 18's last. **Full suite 592 / 591 passed / 0 failed / 1 skipped, zero expected failures**, `** TEST SUCCEEDED **`, first attempt after a `simctl erase` on a settled host — the skip being `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, by design. Six phase boundaries in a row where erasing first gave a clean run. |
 | **The Session 17 full run — closed** | Session 17 left the boundary run unverified after two attempts on a host at load 129/272/412. **Session 18 re-ran it on a settled machine and it is green on the first attempt**, on Session 17's tree plus this session's work. Nothing was wrong with the code; both bad runs were the host, exactly as §5.15 predicted. |
@@ -285,13 +285,51 @@ reset *before* the phase-boundary run, not after it starts failing.
     cover the one seam no logic test reaches — the frame changing over from `setInterpolationImage`
     to the cel's own display list.
 
+- **Phase 7 — guide strokes. Items 1, 3, 4 and 6 done, plus item 2's draw-and-render half
+  (Session 18).** Two commits, `3543e57` and `9bedcf6`. `IMPLEMENTATION.md`'s "What Session 18
+  built" subsection is the record of the shape, **§5.16 of the one design call it required**.
+  - **Item 1** — `StrokeInput` now carries `UITouch.timestamp`, the signal `PLAN.md` §2's gap 2 and
+    §6.3 both name as missing. On `StrokeInput` rather than `VectorSample`, which is exactly what
+    §6.3 decided: the objection there is to persisting eight bytes per sample on the most numerous
+    type in the format, and `StrokeInput` is transient. Left absolute; only the capture site knows
+    where its gesture began.
+  - **Items 3 and 4** — new [GuidePath.swift](PaintSoftware/Engine/GuidePath.swift). Geometry read
+    by **arc length**, timing by **stylus clock**, never mixed. `chordDeviation` is the trajectory
+    constraint (§5.16) and `spacingCurve` the easing — `PLAN.md` §6.1's claim that arc length per
+    unit stylus time *is* the spacing function, confirmed by test: drawing fast then slow gives
+    ease-out.
+  - **Item 6** — as cheap as decision 6 predicted. `GuideSet` reconciles the binding's list, the
+    recipe's list and `GuideStroke.boundGroups`, with no new field anywhere.
+  - **Item 2, draw and render** — a Guide toggle on `InterpolateBar`, capture on all four of
+    `StrokeCanvasView`'s handlers, `recordGuideStroke` binding whole-frame in one undo step, and
+    [GuideOverlayView.swift](PaintSoftware/Views/GuideOverlayView.swift) drawing them dashed and
+    topmost. **Handles are not built** — `hitTest` returns nil unconditionally and says so.
+  - Tests: `InterpolationGuideLogicTests` (32). Wider pure-logic tier **517/517**, zero expected
+    failures.
+
 ### What is next
 
-**Phase 7 — guide strokes.** Phase 6 is signed off and Commit is in, so this is the next work with
-nothing in front of it. Read `IMPLEMENTATION.md`'s Phase 7 section; item 1 (capturing
-`UITouch.timestamp`, which is currently discarded) is the only part that reaches outside the
-feature's own files. After Phase 7 the feature's own definition of done is in reach — check it
-rather than looking for more work (§3.3).
+**Phase 7's remaining three pieces**, in the order they are worth doing:
+
+1. **Item 2's editable handles.** The guide renders and is never touchable —
+   `GuideOverlayView.hitTest` returns nil unconditionally, with a comment saying what to change.
+   `ShapeOverlayView` is the pattern to copy, including its "claim only the handle hitboxes" rule,
+   which is what lets the canvas underneath keep drawing while a guide is on screen. Dragging a
+   handle calls `updateGuideStroke`, which already exists and already keeps the id.
+2. **Item 5's spacing chart** — dots along the guide path, drag one to retime that frame. The
+   precedence it needs is already built and tested: `binding.spacing` outranks a guide's derived
+   timing, so writing that field is what a dot-drag does. `GuidePath.point(atArcFraction:)` places
+   the dots.
+3. **Item 7's link and duplicate.** Link is `recipe.guideIDs.append(existingID)` — the model has
+   been a reference since Phase 2, so this is UI only. Duplicate is a copy with a fresh `id`.
+
+Then Phase 7's definition of done (brief workflow step 6, requirements 6 and 7), and after it the
+**feature's** definition of done is in reach — check it rather than looking for more work (§3.3).
+
+**Also worth doing early: try item 4 on the iPad.** `IMPLEMENTATION.md` item 4 says to tune the
+velocity→easing mapping against real strokes and warns it will feel twitchy before it feels good.
+The mapping is built and pinned by tests, and has never met a real stylus. That is a product-owner
+judgement, not a test.
 
 Nothing is blocked and nothing is half-done. Three things remain recorded rather than built, all
 independent of Phase 7:
@@ -418,7 +456,7 @@ than a shared one, so concurrent sessions do not contend.
 ### Fast run — pure logic only (~1–2 min). Use this constantly.
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/InterpolationWorkflowLogicTests -only-testing:PaintSoftwareUITests/InterpolationEngineDiagnosticsLogicTests -only-testing:PaintSoftwareUITests/InterpolationMotionGroupLogicTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/InterpolationWorkflowLogicTests -only-testing:PaintSoftwareUITests/InterpolationEngineDiagnosticsLogicTests -only-testing:PaintSoftwareUITests/InterpolationMotionGroupLogicTests -only-testing:PaintSoftwareUITests/InterpolationGuideLogicTests
 ```
 
 215 tests as of `46e75c1` — 212 passing plus **three expected failures**, which are Phase 4.7's
@@ -432,7 +470,7 @@ Worth running before a commit that touches persistence, rendering or `CanvasMana
 filter above misses `ProjectSaveLogicTests`, the eraser classes and the characterisation tests:
 
 ```bash
-xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/InterpolationWorkflowLogicTests -only-testing:PaintSoftwareUITests/InterpolationMotionGroupLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/VectorEraserHybridLogicTests -only-testing:PaintSoftwareUITests/RasterVectorParityLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/BackupManagerLogicTests -only-testing:PaintSoftwareUITests/CelCRUDCharacterizationTests -only-testing:PaintSoftwareUITests/LayerTreeCharacterizationTests -only-testing:PaintSoftwareUITests/ViewPresetCharacterizationTests
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware -destination 'platform=iOS Simulator,name=interp-ipad' -derivedDataPath /tmp/interp-dd -only-testing:PaintSoftwareUITests/BrushEngineLogicTests -only-testing:PaintSoftwareUITests/ShapeDetectorLogicTests -only-testing:PaintSoftwareUITests/OnionSkinLogicTests -only-testing:PaintSoftwareUITests/LatticeLogicTests -only-testing:PaintSoftwareUITests/ARAPLogicTests -only-testing:PaintSoftwareUITests/InterpolationModelLogicTests -only-testing:PaintSoftwareUITests/InterpolationRenderLogicTests -only-testing:PaintSoftwareUITests/InterpolationWorkflowLogicTests -only-testing:PaintSoftwareUITests/InterpolationMotionGroupLogicTests -only-testing:PaintSoftwareUITests/InterpolationGuideLogicTests -only-testing:PaintSoftwareUITests/StrokeGeometryLogicTests -only-testing:PaintSoftwareUITests/VectorEraserLogicTests -only-testing:PaintSoftwareUITests/VectorEraserHybridLogicTests -only-testing:PaintSoftwareUITests/RasterVectorParityLogicTests -only-testing:PaintSoftwareUITests/ProjectSaveLogicTests -only-testing:PaintSoftwareUITests/BackupManagerLogicTests -only-testing:PaintSoftwareUITests/CelCRUDCharacterizationTests -only-testing:PaintSoftwareUITests/LayerTreeCharacterizationTests -only-testing:PaintSoftwareUITests/ViewPresetCharacterizationTests
 ```
 
 ### Reading a failure
@@ -1273,6 +1311,112 @@ the code was written.
   image. Assert on the evaluation's contents, not on the image being nil, whenever the question is
   about visibility rather than about well-formedness.
 
+### From Phase 7 (items 1, 3, 4, 6 and half of 2)
+
+- **The plan's one-line description of the trajectory constraint was not implementable as written,
+  and finding that out cost nothing because it was checked before any code — see §5.16.** The habit
+  that caught it is the one §5's Commit entry names: before building a work item, read what the
+  *plan* says about the thing it is about, because the two documents were written at different times
+  looking at different artefacts.
+
+- **Item 4 was producing a curve, not plumbing one, and that is Phase 2's model work paying off two
+  phases later.** `SpacingCurve.sampled` already existed, `groupWarp` already read
+  `binding.spacing ?? recipe.spacing`, and `MotionGroupBinding.guideIDs` and
+  `GuideStroke.boundGroups` were already there with `drives(_:)` implementing decision 6's
+  whole-frame rule. So items 4 and 6 together were about **fifteen lines of wiring plus the
+  derivation**, against an estimate that treated them as two of seven items. Worth knowing before
+  estimating items 5 and 7: check what Phase 2 already built before assuming a model change.
+
+- **The two signals must be read off different parameters, and that is what keeps them
+  independent.** Geometry by **arc length**, timing by **stylus clock**. Parameterising the shape by
+  time instead would mean a pause mid-gesture bent the arc, and the artist would have no way to draw
+  a shape slowly. `testStylusSpeedDoesNotChangeTheArc` is the tripwire, and it is worth keeping even
+  though it looks tautological — it is only tautological given the current parameterisation, which
+  is exactly the thing a future "optimisation" would change.
+
+- **The trajectory is applied as a rigid translation of the interpolated lattice, and the reason is a
+  division of labour rather than a simplification.** The ARAP solve already owns how a group rotates
+  and deforms between its two poses; a guide is a statement about **the path its anchor travels**,
+  which is a displacement and nothing else. Pulling individual lattice vertices toward the guide
+  would re-open the deformation question the solve had just answered, and there is no reason to
+  believe a hand-drawn arc is better evidence about shape than two keyframes are.
+
+- **A guide needs a motion to constrain, so a frame with no recipe refuses.** The tempting
+  alternative — store the guide unbound and let a later Generate adopt it — is the silent-no-op shape
+  this feature has now declined three times (the others being §5.13's transform and Phase 4's
+  Reproject stub). The artist would draw an arc, press Generate, get a straight line, and have
+  nothing to read. `.noInterpolationToGuide` says it out loud instead.
+
+- **The guide gesture resolves what it is at touch-down and holds it**, via `guideStartTime != nil`
+  rather than re-reading `isDrawingGuide` in each handler. Identical reasoning to `inBetweenCelID`
+  (§5's Phase 6 entry): the armed flag can change under a drag — a stray tap on the bar — and a
+  gesture that began as a guide and committed as ink would be silent.
+
+- **An XCUITest cannot verify the easing, and probably cannot verify it later either.** A guide's
+  timing comes from `UITouch.timestamp`, and `GuidePath.spacingCurve` deliberately returns `.linear`
+  when every sample shares a timestamp, which is what a synthetic touch can produce.
+  `testAGuideWithNoTimingDeclinesToInventAnEasing` pins that fallback. **Whoever writes Phase 7's
+  e2e should assert the trajectory and not the easing** — the arc is geometry and survives synthetic
+  input; the velocity may not. This was not measured, only anticipated, so measure before concluding
+  the easing is broken on device.
+
+### 5.17 One resolver for both the evaluation and the memo — the `InterpolationPreviewKey` rule, generalised
+
+`InterpolationPreviewKey` has now bitten four times, and Phase 7 is the first where it was designed
+around rather than discovered. The rule §5's Phase 6 entry arrived at — *ask what changed, and check
+whether anything in the key can see it* — is right and is still not quite enough, because it asks a
+question at exactly the moment the answer is easiest to get wrong.
+
+A guide was the worst case yet. Guides live on `CanvasManager`, so **no `referenceVersions` entry
+moves** when one is edited. `updateGuideStroke` replaces a guide **keeping its id**, which is what
+makes reuse across frames a reference rather than a copy (`PLAN.md` §6.4) — so **the id list does not
+move either**. Both of the shapes the key already knew how to watch were blind to it.
+
+**The structural fix is to have one function produce the list that the evaluation reads *and* the
+list the key compares.** `CanvasManager.guides(driving:)` is that function. It is not tidiness: as
+long as the two are computed separately they can disagree, and every one of the four bugs was
+exactly that disagreement. With one resolver, an input the evaluator can see is an input the key can
+see, by construction rather than by remembering.
+
+The cost is a value compare of the guides rather than an integer — tens of samples across one or two
+guides, against an ARAP solve and two canvas-sized rasterisations. Nowhere near the boundary where
+that trade could go the other way, but worth stating so nobody "optimises" it back into a version
+number that cannot see a same-id edit.
+
+### 5.16 What the trajectory constraint actually is, and why it is not what §6.1 says
+
+`PLAN.md` §6.1: "The bound group's anchor point follows this path instead of travelling in a straight
+line between its A and C positions." That is the design intent and it is right; it is also, read
+literally, not implementable, and the difference matters enough to be the first thing a session
+touching guides should read.
+
+**Taken literally it means placing the anchor at `guide.point(atArcFraction: u)`.** Two things break.
+The artist would have to start and end the guide exactly on the group's own A and C anchor positions
+— to the pixel, with a stylus, on a drawing whose anchors are not even displayed — or the frame jumps
+at both ends of the slider. And it destroys the **endpoint invariant**: `t = 0` reproduces keyframe A
+bit for bit and `t = 1` reproduces C, which Phase 1 paid a change of variables for, Phase 3 pinned at
+zero pixel tolerance, and Commit inherits for free (§5.14).
+
+**What is built is the deviation from the guide's own chord**, `g(u) − lerp(g(0), g(1), u)`, added to
+the interpolated pose. It keeps the only thing the artist was really expressing — the *shape* of the
+arc — and it is **exactly zero at both ends by construction**, so the invariant survives with no
+special case at all. A guide drawn accurately from anchor to anchor gives the literal reading back,
+so nothing is lost; the artist is simply no longer required to be accurate about the two points they
+cannot see.
+
+Three things follow that are worth keeping:
+
+- **The endpoint exactness is structural, not guarded.** `testAGuideLeavesBothEndpointsExactlyWhereTheyWere`
+  compares against the *unguided* evaluation at zero tolerance. Like `flattened`'s two early returns
+  (§5's Commit entry), this looks like it could be simplified and cannot.
+- **It is why the guide does not need to be drawn anywhere near the drawing.** Only its shape is
+  read. That is a real ergonomic gain and it was a consequence rather than a goal — worth checking
+  with the product owner, since §6.1's wording implies the artist draws over the motion.
+- **It generalises: when a plan describes a constraint in absolute terms, ask what happens at the
+  boundaries the rest of the system holds fixed.** The literal reading was not wrong about the
+  intent, it was wrong about the frame of reference — and the relative form is what makes the intent
+  compatible with everything already built.
+
 ### 5.15 Run `uptime` before diagnosing a failed full run — it is the cheapest signal and no earlier entry mentions it
 
 Five phase boundaries of advice in this file treat *which tests failed and how* as the discriminator:
@@ -1752,6 +1896,32 @@ What Phase 3 decided that Phase 4 inherits:
   handed to §5.12's field where a transform belongs — it is a deformation, and an affine is the
   degenerate liquify. Per §3.5 that is a finding about a stated item, not a decision taken: whether
   it closes Phase 6 is the product owner's call.
+
+- **Session 18 (Phase 7, first half) — 2026-08-08:** Opened by closing Session 17's one open item:
+  the phase-boundary full run, which Session 17 could not get on a host at load 129/272/412. On a
+  settled machine it is **592 / 591 / 0 / 1, zero expected failures, first attempt** — nothing was
+  ever wrong with the code. That produced §5.15's missing half, and it is the sharper half: load
+  read *during* a run carries no information at all. This session's own healthy run showed
+  **582/886/498** mid-flight, four times worse than the numbers that condemned Session 17's, and
+  passed clean. The discriminator is load **when nothing of ours is running**, which is the clause
+  Session 17 wrote down and which was doing all the work.
+
+  Then Phase 7's items 1, 3, 4 and 6 plus item 2's draw-and-render half, in two commits.
+  **The session's real output is §5.16**: `PLAN.md` §6.1's one-line description of the trajectory
+  constraint is not implementable as written — placing the anchor *on* the guide requires the artist
+  to hit two points they cannot see, and destroys the endpoint invariant every phase since Phase 1
+  has preserved. Taking the guide's deviation from its **own chord** keeps the shape they drew and
+  is exactly zero at both ends by construction. Checked before writing code, per the habit §5's
+  Commit entry names, so it cost nothing.
+
+  Two things fell out that are worth carrying. **Items 4 and 6 were ~15 lines of wiring** because
+  Phase 2 had already built `SpacingCurve.sampled`, `guideIDs` on both the recipe and the binding,
+  and `drives(_:)` — check what the model already has before estimating a guide item. And
+  **`InterpolationPreviewKey` was designed around rather than discovered for the first time**, which
+  §5.17 turns into a structural rule: have one function produce the list the evaluator reads *and*
+  the list the key compares, because all four of that key's bugs were the two disagreeing. A guide
+  was its worst case — no version moves, and `updateGuideStroke` keeps the id, so the id list does
+  not move either. No subagents.
 
   12 new logic tests; the single interpolate XCUITest **extended** rather than joined by a second,
   since it was already in the exact state the new half needed — it now draws at the in-between and
@@ -2375,6 +2545,39 @@ Session 12 rather than optional extras. **31, 32 and 35 are DONE** (commits `b91
 
     Neither is urgent: drawing and erasing at an in-between are what `PLAN.md` §5.4's mechanism is
     for and both work, and the brief's workflow step 5 does not name a transform.
+
+### From Phase 7
+
+46. **A guide does not have to be drawn near the drawing, and the product owner should be told.**
+    §5.16's chord-relative constraint reads only the guide's *shape*, so an arc drawn in an empty
+    corner of the canvas moves the character exactly as one drawn over it. That is a real ergonomic
+    gain — no fighting for space over the linework — and it is a **consequence** of making the
+    endpoint invariant survive, not something anyone asked for. It also mildly contradicts §6.1's
+    picture of drawing the path the motion takes. Worth a minute of the product owner's attention on
+    an iPad before item 2's handles fix the interaction in place: if they want the guide anchored to
+    the motion, the absolute reading can be offered as an option on top of this, but not instead of
+    it.
+
+47. **Guides are never deleted, only unbound.** `removeGuideStroke` exists and strips the id from
+    every recipe, but nothing in the UI calls it — the bar has no way to remove a guide, so an artist
+    who draws a bad arc can only undo it. Once item 2's handles land, a delete belongs next to them
+    (long-press a guide, or a control on the selected guide's own handle set). Small, and deliberately
+    not invented this session because it wants the selection model item 2's handles introduce.
+
+48. **A second guide on the same frame silently averages with the first.** `GuideSet` averages
+    trajectories, which is the least surprising rule for two (§5's Phase 7 entry), but nothing tells
+    the artist it happened — they draw a second arc and the motion moves half as far as it looks like
+    it should. The honest fix is a guide *list* in the UI, which is also what item 7's link/duplicate
+    needs and what would give item 47 somewhere to live. Recorded rather than built because all three
+    want the same widget and it should be designed once.
+
+49. **`visibleGuideStrokes` shows only the frame under the playhead's guides, which is right and is
+    not the guide *library* §6.4 anticipates.** Scrubbing off the in-between hides the arc being
+    worked on, which is correct — a scene accumulates guides and showing all of them would bury the
+    live one — but it means the artist cannot see a guide while looking at the keyframe it was drawn
+    between. If that turns out to matter, the fix is to widen the property to guides whose
+    `KeyframeInterval` contains the current frame, which is the field's whole purpose and is unused
+    today.
 
 35. **DONE (Session 12).** Subsample the registration point cloud. `Options.maxRegistrationSamples`
     is 250 and caps what *drives* the fit; residuals are still reported for every source point,

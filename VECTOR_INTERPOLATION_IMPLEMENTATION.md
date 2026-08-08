@@ -705,19 +705,60 @@ display list, which is the one claim no logic test reaches.
 ## Phase 7 — Guide strokes
 
 1. **Timestamp capture.** `UITouch.timestamp` is currently discarded; add a capture path for guides
-   only (`StrokeInput` / `StrokeGestureRecognizer`).
+   only (`StrokeInput` / `StrokeGestureRecognizer`). ***DONE (Session 18)***
 2. Guide tool: draw, render only in interpolate mode, edit geometry with handles.
-3. **Geometry → trajectory constraint** on the bound group's lattice.
+   ***Draw and render done (Session 18); handles NOT built.***
+3. **Geometry → trajectory constraint** on the bound group's lattice. ***DONE (Session 18)***
 4. **Stylus velocity → spacing curve** (easing). Tune against real strokes; expect this to feel
-   twitchy before it feels good.
+   twitchy before it feels good. ***DONE (Session 18) — not yet tuned on real strokes.***
 5. Spacing chart drawn *as dots along the guide path*; drag a dot to retime that frame.
 6. **Per-group binding**, plus a whole-frame option **if cheap** — if binding is a set of group IDs,
-   "all groups" is nearly free. If it turns out not to be, drop it and say so.
+   "all groups" is nearly free. If it turns out not to be, drop it and say so. ***DONE (Session 18)
+   — it was cheap, exactly as decision 6 predicted.***
 7. Fetch a guide from another frame: **link** and **duplicate** (requirement 7).
 
 **Definition of done.** Brief workflow step 6 and requirements 6 and 7 work.
 
 **Estimate.** Two sessions.
+
+### What Session 18 built — items 1, 3, 4, 6 and half of 2
+
+Two commits, `3543e57` (the engine half) and `9bedcf6` (the tool). 32
+`InterpolationGuideLogicTests`; wider pure-logic tier 517/517, zero expected failures.
+
+**The one real interpretation, and it is the thing to read before touching any of this.** §6.1 says
+"the bound group's anchor point follows this path instead of travelling in a straight line between
+its A and C positions". Taken literally that *places* the anchor on the guide, which needs the artist
+to start and end the guide exactly on the group's own anchors — to the pixel — or the drawing snaps
+at both ends of the slider, and which destroys the endpoint invariant Phase 1 paid a change of
+variables to get. What is built instead is the guide's **deviation from its own chord**, which keeps
+the shape the artist drew and is exactly zero at `u = 0` and `u = 1` *by construction*. The invariant
+survives with no guard to tidy away — the same way `flattened`'s endpoints come out exact. A guide
+drawn accurately anchor-to-anchor gives the literal reading straight back. See
+`GuidePath.chordDeviation` and `HANDOFF.md` §5.16.
+
+- **`Engine/GuidePath.swift`** is the whole of the math: `GuidePath` reads geometry by **arc length**
+  and timing by **stylus clock**, never mixing them, which is what keeps the two signals independent
+  (hesitating mid-stroke must not bend the arc). `GuideSet` reconciles the three ways the model can
+  bind a guide — the binding's list, the recipe's list, and `GuideStroke.boundGroups` — and splits
+  them by `GuideRole`. Trajectories average rather than sum; the first timing guide wins.
+- **The trajectory is applied as a rigid translation of the group's `current` lattice**, after the
+  ARAP interpolation. Rigid because that is exactly what a guide says: the solve already owns how the
+  group rotates and deforms, and a guide is a statement about the path its anchor travels.
+- **Spacing precedence is `binding.spacing ?? guideSet.spacing ?? recipe.spacing`.** The explicit
+  per-group override has to outrank the derived timing, or **item 5 could not work** — its spacing
+  chart retimes a frame by writing `binding.spacing`.
+- **Guides reach the evaluator as a defaulted parameter**, the Phase 6 precedent for anything the
+  recipe names but does not contain. `CanvasManager.guides(driving:)` resolves the ids, and feeds
+  **both** the evaluator and `InterpolationPreviewKey` — see §5.17 for why that matters.
+- **The tool.** A Guide toggle on `InterpolateBar` arms it; `StrokeCanvasView` captures on all four
+  handlers; `recordGuideStroke` binds whole-frame in one undo step and refuses with
+  `.noInterpolationToGuide` on a frame with no recipe. `GuideOverlayView` draws them, dashed and
+  topmost, and never claims a touch.
+
+**What is not built, and is the next session's work:** item 2's editable handles, item 5's spacing
+chart, item 7's link/duplicate. Item 4 works and is pinned by tests but has **not been tuned against
+real strokes on an iPad**, which its own wording asks for.
 
 ---
 
