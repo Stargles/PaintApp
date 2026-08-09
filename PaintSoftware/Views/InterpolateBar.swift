@@ -38,8 +38,13 @@ struct InterpolateBar: View {
             // hides itself when there is nothing to show, so a single-part drawing's bar is exactly
             // Phase 4.6's.
             MotionGroupRow(canvasManager: canvasManager)
-            // Item 7's list, under the groups and on the same terms: it hides itself when there is
-            // nothing to show, so a bar on a frame with no guides is unchanged.
+            // Everything about guides — both toggles and item 7's list — on its own row under the
+            // groups. **They were on the command row and had to move**: the trailing cluster grew
+            // from {Commit, Remove} to {Guide, Shape, Commit, Remove} and overran the centred
+            // command group, which the `ZStack` draws last, so on a portrait iPad the Guide button
+            // ended up underneath Reproject and `isHittable` was false. Restoring the command row to
+            // exactly what Phase 4.6 settled is the point; grouping the guide controls with the guide
+            // list is the bonus.
             GuideRow(canvasManager: canvasManager)
         }
         .padding(.horizontal, 12)
@@ -69,8 +74,6 @@ struct InterpolateBar: View {
                         .foregroundColor(.white.opacity(0.8))
                 }
                 Spacer(minLength: 12)
-                guideButton
-                spacingButton
                 commitButton
                 removeButton
             }
@@ -150,49 +153,6 @@ struct InterpolateBar: View {
             // no longer update it. Warm rather than red says "a decision" without saying "danger".
             .tint(.orange)
             .accessibilityIdentifier("interpolate.commit")
-        }
-    }
-
-    /// Arms guide drawing — Phase 7 item 2. A toggle rather than a command, because the artist draws
-    /// the guide on the *canvas* and the button only says which thing the next drag is.
-    ///
-    /// The same arm-and-draw shape as `MotionGroupRow`'s chips, and a button rather than a timeline
-    /// gesture for §5.10's reason: press-and-hold already means drag-reorder, in every mode.
-    ///
-    /// Gated on `guideRefusal`, which is cheap — a guide needs a recipe to attach to, and offering
-    /// the toggle without one would let the artist draw an arc that had nowhere to go.
-    @ViewBuilder
-    private var guideButton: some View {
-        if activeRecipe != nil {
-            Button(canvasManager.isDrawingGuide ? "Drawing Guide…" : "Guide") {
-                refusal = canvasManager.guideRefusal
-                guard refusal == nil else { return }
-                canvasManager.isDrawingGuide.toggle()
-            }
-            .buttonStyle(.bordered)
-            .tint(canvasManager.isDrawingGuide ? .teal : .gray)
-            .accessibilityIdentifier("interpolate.guide")
-        }
-    }
-
-    /// Swaps the guide overlay between its two editors — Phase 7 item 5, `PLAN.md` §6.2's "timing
-    /// adjustment", against item 2's "geometric adjustment".
-    ///
-    /// A toggle and not a third arming state: shape handles and spacing dots sit on the same
-    /// polyline, so both at once would put two meanings under one touch. Off means handles, which is
-    /// the state an artist who has never pressed this button is in.
-    ///
-    /// Shown only when there is a guide on the frame *and* a chart to draw — keyframes one frame
-    /// apart have no in-betweens to space, and a button that reveals nothing is worse than no button.
-    @ViewBuilder
-    private var spacingButton: some View {
-        if hasASpacingChart {
-            Button(canvasManager.isEditingGuideSpacing ? "Spacing" : "Shape") {
-                canvasManager.isEditingGuideSpacing.toggle()
-            }
-            .buttonStyle(.bordered)
-            .tint(canvasManager.isEditingGuideSpacing ? .orange : .gray)
-            .accessibilityIdentifier("interpolate.guideSpacing")
         }
     }
 
@@ -277,13 +237,6 @@ struct InterpolateBar: View {
     private var targetCelIsEmpty: Bool {
         guard let at = canvasManager.interpolationTarget else { return true }
         return canvasManager.layers[at.layer].cels[at.cel].vector?.elements.isEmpty ?? true
-    }
-
-    /// Whether any visible guide has in-between frames to space. Cheap — it resolves a frame span and
-    /// samples a curve; no evaluation, so it is safe in a `body`.
-    private var hasASpacingChart: Bool {
-        !canvasManager.isDrawingGuide
-            && canvasManager.visibleGuideStrokes.contains { canvasManager.spacingChart(forGuide: $0.id) != nil }
     }
 
     private var targetIsReference: Bool {

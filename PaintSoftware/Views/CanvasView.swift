@@ -948,6 +948,14 @@ struct CanvasView: UIViewRepresentable {
                                        grips: grips(for: guide, editing: editing))
             }
             guideOverlay.update(guides: guides, live: liveGuidePoints, editing: editing)
+            // **Re-asserted every pass, exactly as `updateShapeOverlay` does, and it is not
+            // redundant.** `makeUIView` adds this overlay last, but `reconcileLayers` calls
+            // `bringSubviewToFront` on every layer host whenever the layer order changes — which puts
+            // every host above it. A transparent host still lets the dashes show through, so the
+            // guide went on *looking* right while `hitTest` never reached it: the active layer's
+            // `StrokeCanvasView` claimed the touch first and the handles were dead. Found by the e2e,
+            // and invisible to every logic test by construction.
+            guideOverlay.superview?.bringSubviewToFront(guideOverlay)
         }
 
         /// A guide's grips for the active editor: sample-indexed shape handles, or the spacing

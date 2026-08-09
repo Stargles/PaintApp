@@ -455,6 +455,123 @@ final class TimelineAndUndoUITests: PaintUITestCase {
                              "The edit must ride the drawing's motion rather than sit still — "
                              + "columns at t=0.5 \(editAtHalf) vs at t=1 \(editAtOne)")
 
+        // --- Phase 7: guide strokes (workflow step 6, requirements 6 and 7) ---
+        //
+        // Here for the same reason as the block above: everything below the gesture is covered by
+        // `InterpolationGuideLogicTests`, and what is covered nowhere else is the view-layer routing —
+        // that arming the toggle turns a canvas drag into a *guide* instead of ink, and that
+        // `GuideOverlayView` claims a handle's hitbox and nothing else. A handle drag that fell
+        // through to the stroke view would land as a local edit instead, which is exactly the failure
+        // the assertions below distinguish from "nothing happened".
+        //
+        // **The trajectory is asserted and the easing is not**, deliberately. A guide's timing comes
+        // from `UITouch.timestamp` and a synthetic drag can hand every sample the same one, which
+        // `GuidePath.spacingCurve` answers with `.linear` on purpose. The arc is geometry and survives
+        // synthetic input; the velocity may not — `HANDOFF.md` §5's Phase 7 entry.
+        slider.adjust(toNormalizedSliderPosition: 0.5)
+
+        // Columns carrying ink at the drawing's own row, rather than one point: XCUITest's synthetic
+        // drags undershoot by a timing-dependent amount (`performDrag`'s own comment), so the guide's
+        // pull is asserted as a direction and a magnitude floor, never as an exact landing place.
+        //
+        // The sweep stops at 0.26 on the left, which is what keeps the dashed guide overlay — drawn
+        // at 0.20 and pulled to 0.08 — out of every reading. A teal dash is not whitish, so a guide
+        // crossing the sweep would read as ink.
+        func guideColumns() -> [Double] {
+            stride(from: 0.26, through: 0.74, by: 0.02).filter {
+                !isWhitish(rgbaPixel(of: canvas, dx: $0, dy: probe.dy))
+            }
+        }
+        func guideReport() -> String {
+            let sweep = stride(from: 0.04, through: 0.80, by: 0.02).map { x in
+                String(format: "%.2f:%@", x, isWhitish(rgbaPixel(of: canvas, dx: x, dy: probe.dy)) ? "." : "#")
+            }.joined(separator: " ")
+            return "columns at dy=\(probe.dy): \(sweep) | guide toggle "
+                + "\(app.buttons["interpolate.guide"].label)"
+        }
+
+        let columnsBeforeGuide = guideColumns()
+        XCTAssertFalse(columnsBeforeGuide.isEmpty,
+                       "Setup: back at t = 0.5 there is ink to move. \(guideReport())")
+
+        // A **vertical** guide down the left, spanning only rows this test has already put ink on —
+        // 0.42 and 0.60 both demonstrably reach the stroke view, so 0.36…0.64 is known-live canvas.
+        // Its distance from the drawing is not a shortcut but the behaviour §5.16 predicts: only the
+        // guide's *shape* is read, so an arc drawn clear of the character moves it exactly as one
+        // drawn over it.
+        let guideColumn = 0.20
+        let guideToggle = app.buttons["interpolate.guide"]
+        XCTAssertTrue(guideToggle.waitForExistence(timeout: 5), "interpolate.guide exists")
+        guideToggle.tap()
+        // Asserted here rather than left to surface as "no guide was recorded" two steps later: the
+        // toggle is what decides whether the next drag is a guide or ink, and the two failures want
+        // completely different investigations.
+        XCTAssertTrue(guideToggle.label.hasPrefix("Drawing Guide"),
+                      "Tapping Guide has to arm guide drawing — the label is the armed state. "
+                      + "label=\(guideToggle.label) hittable=\(guideToggle.isHittable) "
+                      + "frame=\(guideToggle.frame) enabled=\(guideToggle.isEnabled) "
+                      + "refusal=\(app.staticTexts["interpolate.refusal"].exists ? app.staticTexts["interpolate.refusal"].label : "none")")
+        dragOnCanvas(app, from: CGVector(dx: guideColumn, dy: 0.36),
+                     to: CGVector(dx: guideColumn, dy: 0.64))
+
+        // Item 7's list reporting what the frame ended up with — and here it doubles as proof that
+        // the drag was captured as a guide rather than laid down as ink, which is the one thing a
+        // pixel probe well clear of the drawing could not tell apart from a stray stroke.
+        let guideChip = app.descendants(matching: .any)["interpolate.guideChip.1"]
+        XCTAssertTrue(guideChip.waitForExistence(timeout: 5),
+                      "Drawing with Guide armed should record a guide and list it on the bar. "
+                      + "\(guideReport())")
+
+        // Disarm. The toggle's promise is that every canvas drag draws a guide, so the handles are
+        // deliberately neither live nor drawn while it is lit — disarming is what says "done drawing".
+        guideToggle.tap()
+
+        // The baseline for everything below is taken **with the guide already on**, not before it,
+        // and the difference is real rather than pedantic: a guide's role is `.both`, so merely
+        // drawing one hands the frame the stylus velocity as its easing (item 4), and at t = 0.5 an
+        // eased motion does not sit where a linear one did. Comparing the handle drag against the
+        // no-guide state charges it for that shift as well, which cost a run to find out.
+        let columnsWithGuide = guideColumns()
+        XCTAssertFalse(columnsWithGuide.isEmpty,
+                       "Drawing a guide must not blank the in-between. \(guideReport())")
+
+        // Drag the guide's **start** handle, which is the one position in this test that is known
+        // exactly: it is where the guide-drawing press began, and a synthetic drag's *start* is
+        // reliable where its end is not (`performDrag`'s undershoot note). Aiming at the middle
+        // handle was the first attempt and it missed — the guide-drawing drag had undershot, so the
+        // arc midpoint was some way above 0.50 and outside the handle's hitbox.
+        //
+        // Pulling the start **left** moves the drawing **right**, and that is the chord-relative
+        // constraint (§5.16) showing its working: the path's middle does not move, but the chord it
+        // is measured against now tilts, so the deviation at the midpoint is about half the pull in
+        // the opposite direction. An absolute reading of the guide would have moved it left.
+        dragOnCanvas(app, from: CGVector(dx: guideColumn, dy: 0.36),
+                     to: CGVector(dx: 0.02, dy: 0.36))
+
+        // **What is asserted is that the handle drag reached the frame, not which way it went.** The
+        // direction is chord-relative geometry and is pinned at zero tolerance by
+        // `InterpolationGuideLogicTests`; predicting it here would mean re-deriving, in a comment,
+        // where a tilted chord puts the midpoint — and getting it wrong once already cost a run. What
+        // no logic test can reach is the routing: that the overlay claimed the touch instead of the
+        // stroke view underneath, which is exactly the bug this found (`bringSubviewToFront`).
+        let columnsAfterGuide = guideColumns()
+        XCTAssertNotEqual(columnsAfterGuide, columnsWithGuide,
+                          "Dragging a guide handle has to move the in-between. Unchanged means the "
+                          + "touch fell through to the stroke view instead of being claimed by the "
+                          + "overlay's handle hitbox. \(guideReport())")
+
+        // One undo puts the whole drag back, **exactly** — which is the strong half of this: it says
+        // the gesture was one step and that the frame came back intact rather than merely moving
+        // again. The guide itself stays, because the step is the drag and not the guide.
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5), "sideToolbar.undoButton exists")
+        undo.tap()
+        XCTAssertTrue(guideChip.waitForExistence(timeout: 5),
+                      "Undoing the handle drag must not delete the guide")
+        XCTAssertEqual(guideColumns(), columnsWithGuide,
+                       "One undo should put the whole handle drag back — and only it, leaving the "
+                       + "guide and its timing in place. \(guideReport())")
+
         // --- Commit (`HANDOFF.md` §8 item 17) ---
         //
         // Here for the seam no logic test can reach, and it is a real one. Until now every pixel on
