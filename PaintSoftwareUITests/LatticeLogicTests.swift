@@ -1,8 +1,7 @@
 import XCTest
 import CoreGraphics
 
-/// Pure-logic tests for `Lattice` — Phase 1 of `VECTOR_INTERPOLATION_IMPLEMENTATION.md`, the
-/// embedding half.
+/// Pure-logic tests for `Lattice`, the embedding half of the deform pipeline.
 ///
 /// Two things here are load-bearing for everything built on top:
 ///
@@ -10,8 +9,8 @@ import CoreGraphics
 ///   identity, for points inside the grid *and* outside it. If that drifts, geometry moves the
 ///   instant it is embedded, before any interpolation has happened at all.
 /// - **The inverse map round-trips.** A point placed on a strongly deformed lattice, carried back to
-///   rest space and warped forward again, must land where it started. That is the mechanism
-///   `PLAN.md` §5.4 uses to let the artist draw at an in-between frame.
+///   rest space and warped forward again, must land where it started. That is the mechanism that
+///   lets the artist draw at an in-between frame.
 final class LatticeLogicTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -178,8 +177,7 @@ final class LatticeLogicTests: XCTestCase {
     }
 
     func testWarpIsAPureFunctionOfTheEmbeddingAndTheVertices() {
-        // The performance claim in PLAN.md §5.2 rests on this: re-evaluating at a new configuration
-        // must not require re-embedding.
+        // Re-evaluating at a new configuration must not require re-embedding.
         let lattice = restLattice()
         let points = [CGPoint(x: 120, y: 70), CGPoint(x: 200, y: 120)]
         let embedding = lattice.embedInRest(points)
@@ -251,8 +249,8 @@ final class LatticeLogicTests: XCTestCase {
     }
 
     func testTheInverseMapIsExactForAPointDrawnOnTheDeformedLattice() {
-        // The §5.4 workflow in the other direction: a stroke authored at the in-between is carried to
-        // rest space and must warp forward to exactly where it was drawn.
+        // The draw-at-an-in-between workflow in reverse: a stroke authored at the in-between is
+        // carried to rest space and must warp forward to exactly where it was drawn.
         let deformed = twisted(restLattice())
         let drawn = [CGPoint(x: 175, y: 100), CGPoint(x: 150, y: 80), CGPoint(x: 205, y: 118)]
 

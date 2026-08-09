@@ -1,11 +1,10 @@
 import XCTest
 import CoreGraphics
 
-/// Phase 4.7 — the product owner's four failing test drawings, pinned as motion assertions.
+/// The product owner's four failing test drawings, pinned as motion assertions.
 ///
-/// `HANDOFF.md` §8 items 27–30 are four two-keyframe drawings of one to three strokes that the
-/// engine gets wrong. This class is the record of *what* it gets wrong, in numbers, and it is
-/// deliberately split in two halves:
+/// Four two-keyframe drawings of one to three strokes that the engine gets wrong. This class is
+/// the record of *what* it gets wrong, in numbers, and it is deliberately split in two halves:
 ///
 /// - **The acceptance tests** (`testCase27…` … `testCase30…`) describe the motion an animator would
 ///   accept. They are wrapped in `XCTExpectFailure`, so the suite stays green while the engine is
@@ -42,8 +41,8 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
 
     // MARK: - Motion measures
     //
-    // Each of these describes something an animator would name while watching the in-between, which
-    // is the bar `IMPLEMENTATION.md` Phase 4.7 sets: "pass criteria that describe the motion".
+    // Each of these describes something an animator would name while watching the in-between —
+    // pass criteria that describe the motion, not the pixels.
 
     private func arcLength(_ points: [CGPoint]) -> CGFloat {
         zip(points, points.dropFirst()).reduce(0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
@@ -142,7 +141,7 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
     //
     // All four are expected failures today. See the class comment before touching a threshold.
 
-    /// §8 item 27 — a short vertical line becoming a large offset C.
+    /// A short vertical line becoming a large offset C.
     ///
     /// **The original version of this test asserted something no engine can deliver, and finding
     /// that out is the result.** It asked the point-cloud objective to prefer the upright fit "by a
@@ -178,19 +177,18 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
         }
     }
 
-    /// §8 items 28/29 — a vertical line becoming a C that encompasses it.
+    /// A vertical line becoming a C that encompasses it.
     ///
     /// The animator's requirement is that the line *bends*. It is allowed to grow — the C is genuinely
     /// longer — but by t = 1 it has to have acquired most of the target's curvature. Measured before
-    /// Phase 4.7: bend ratio 0.34 against the target's 1.07, while arc length tripled. That was the
-    /// "it grew and faded instead of bending" report, as a number.
+    /// the fix: bend ratio 0.34 against the target's 1.07, while arc length tripled — "it grew and
+    /// faded instead of bending", as a number.
     ///
     /// The 1:1 arc-length correspondence is what fixes it, and nothing else did: rigidity was swept
     /// 2.0 → 0.01 and moved the bend by 0.02, because this is a *correspondence* failure and not a
     /// stiffness one. Nearest-point matching gives a short straight source no reason to wrap around
     /// a long curved target — the pulls from the two sides of the arc cancel. Measured now: bend
-    /// 0.985 against the C's 1.072, arc length 853 of 907, and the threshold below is Session 10's
-    /// own, untouched.
+    /// 0.985 against the C's 1.072, arc length 853 of 907.
     func testCase29_LineIntoEncompassingCActuallyBends() {
         let target = cShape(centre: CGPoint(x: 400, y: 400), radius: 200)
         let source = polyline(CGPoint(x: 400, y: 320), CGPoint(x: 400, y: 480))
@@ -206,16 +204,16 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
             "and it has to land on the C, not merely curve somewhere near it")
     }
 
-    /// §8 item 30 — two vertical lines becoming one between them.
+    /// Two vertical lines becoming one between them.
     ///
     /// The animator's requirement is that the pair arrives *on* the single line and still spans it.
-    /// Measured today: the fit collapses the source to scale 0.15, so at t = 1 the drawing covers 51
-    /// points of the target's 200 — a quarter-height smudge sitting on the middle of the line.
-    /// **Fixed by `allowScale: false` + `icpRestarts: 1`** (§8 item 32). Nothing about the *merge*
+    /// Measured before the fix: the fit collapsed the source to scale 0.15, so at t = 1 the drawing
+    /// covered 51 points of the target's 200 — a quarter-height smudge sitting on the middle of the
+    /// line. **Fixed by `allowScale: false` + `icpRestarts: 1`.** Nothing about the *merge*
     /// was solved — this is a 2:1 pairing, so it takes the point-cloud path, not the 1:1
     /// correspondence path — but the collapse that made it unwatchable is gone: the span went from
-    /// 51 to 194.6 of the target's 200. Honest merging of unmatched content is §8 item 34's
-    /// per-vertex visibility thresholds, still unbuilt.
+    /// 51 to 194.6 of the target's 200. Honest merging of unmatched content still needs per-vertex
+    /// visibility thresholds (`VECTOR_INTERPOLATION.md` §4 item 34), still unbuilt.
     func testCase30_TwoLinesMergeOntoTheSingleLineAndStillSpanIt() {
         let target = polyline(CGPoint(x: 400, y: 200), CGPoint(x: 400, y: 400))
         let registration = register(
@@ -231,7 +229,7 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
             "at t=1 the merged drawing spans \(span) of the target's \(targetSpan) — it has collapsed")
     }
 
-    // §8 item 28 — registration cost — is deliberately **not** pinned here.
+    // Registration cost is deliberately **not** pinned here.
     //
     // A wall-clock assertion in this tier measures the wrong thing: tests build unoptimised, so a
     // 121-sample fit that takes 0.6s in an optimised build took **598 seconds** here. That is a
@@ -239,15 +237,14 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
     // have made the "run this constantly" fast tier unusable.
     //
     // The cost curve is measured instead by `deploy/interp-registration-benchmark`, an optimised
-    // standalone harness over the same engine sources — see `HANDOFF.md` §5 for the numbers and for
-    // the verified fix. This is the one Phase 4.7 item whose pin is a benchmark rather than a test,
-    // and it is called out here so nobody adds the slow version back.
+    // standalone harness over the same engine sources. This is called out here so nobody adds the
+    // slow version back.
 
     // MARK: - Characterisation: the measured root causes
     //
     // These pass today. They are the evidence behind the four above, and a tripwire on the mechanism.
 
-    /// **The rotation hypothesis, made precise.** `HANDOFF.md` item 27 guessed that "rotation is a
+    /// **The rotation hypothesis, made precise.** The original hypothesis guessed that "rotation is a
     /// lower minimum than deformation". It is sharper than that: for a straight-line source the
     /// point-cloud residual is *exactly invariant* under a 180° turn, because a line segment maps onto
     /// itself. There is no lower minimum to prefer — the two solutions tie, and the multi-start picks
@@ -273,12 +270,12 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
                        "the upright and flipped fits are indistinguishable to the objective")
     }
 
-    /// **Item 29's open question, answered: it is not the cross-fade fallback.** The report read the
-    /// grow-and-fade as the evaluator degrading to a cross-fade. It is not — the ARAP solve runs and
+    /// **Open question answered: it is not the cross-fade fallback.** The grow-and-fade could have
+    /// been the evaluator degrading to a cross-fade. It is not — the ARAP solve runs and
     /// reports `refined`. The motion is wrong inside the warp path, which needs a different fix from
     /// a fallback that fired too eagerly.
     ///
-    /// Locking the scale (§8 item 32) took the *grow* half away — the stroke used to triple in
+    /// Locking the scale took the *grow* half away — the stroke used to triple in
     /// length, and now reaches 265 of its own 160 — but it left the failure that mattered: at the
     /// point-cloud tier it still barely bends. That is what the correspondence path fixes, and it is
     /// why the two changes had to land in that order rather than either alone.
@@ -304,7 +301,8 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
     ///
     /// The fit itself no longer does this (`allowScale: false`), so this drives the free-scale path
     /// directly. **Any future gate on registration quality has to measure coverage**, not
-    /// distance-to-nearest — §8 items 32, 36 and 37 all need the same metric.
+    /// distance-to-nearest — the deferred messy-lineart-matching and coverage-gated-rotation work
+    /// (`VECTOR_INTERPOLATION.md` §4 items 36 and 37) will both need the same metric.
     func testMeanResidualStillLooksGoodOnAFitThatHasCollapsed() {
         let source = polyline(CGPoint(x: 300, y: 200), CGPoint(x: 300, y: 400))
                    + polyline(CGPoint(x: 500, y: 200), CGPoint(x: 500, y: 400))
@@ -322,8 +320,8 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
     /// **Locking the scale *alone* is not the fix.** `ARAPRegistration.similarity`'s own comment
     /// warns that a free scale can collapse a partial match, and taking the warning on its own —
     /// without also dropping the multi-start — trades the collapse for a different wrong answer at
-    /// more than triple the residual. That is why §8 item 32 is one decision about two flags, and
-    /// this pins the half-fix so it cannot be applied by accident in either direction.
+    /// more than triple the residual. `icpRestarts: 1` and `allowScale: false` are one decision about
+    /// two flags, and this pins the half-fix so it cannot be applied by accident in either direction.
     func testLockingTheScaleAloneTradesTheCollapseForADifferentWrongAnswer() {
         let source = polyline(CGPoint(x: 300, y: 200), CGPoint(x: 300, y: 400))
                    + polyline(CGPoint(x: 500, y: 200), CGPoint(x: 500, y: 400))
@@ -345,9 +343,9 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
 
     /// **The direction bit reads geometry, and reports a tie when the geometry has nothing to say.**
     ///
-    /// This is the part of the correspondence that most looks like the refuted tangent term (§5) and
+    /// This is the part of the correspondence that most looks like a refuted, earlier tangent term and
     /// is not it. That term treated the artist's drawn direction as *evidence*, and lost — it left
-    /// case 27 flipped and broke case 29, which the plain objective got right, because between two
+    /// one case flipped and broke another that the plain objective got right, because between two
     /// independently drawn keyframes the second stroke's direction is arbitrary. Here geometry
     /// decides whenever it has anything to say, and drawn order only settles what geometry calls a
     /// draw.
@@ -391,12 +389,11 @@ final class InterpolationEngineDiagnosticsLogicTests: XCTestCase {
         }
     }
 
-    /// **The correspondence is only taken 1:1, and case 30 is what "not 1:1" looks like.**
-    ///
-    /// Two strokes becoming one is the N:M case, which stays deferred (§8 item 33) — neither paper
-    /// solves it algorithmically, and Phase 5's grouping UI is the mechanism the literature actually
-    /// uses. So this pairing is refused and registration falls back to the point-cloud path, which
-    /// after §8 item 32 is good enough to watch even though nothing about the *merge* is solved.
+    /// **The correspondence is only taken 1:1** — two strokes becoming one is the N:M case, which
+    /// stays deferred (`VECTOR_INTERPOLATION.md` §4 item 33): neither paper solves it algorithmically,
+    /// and a grouping UI is the mechanism the literature actually uses. So this pairing is refused and
+    /// registration falls back to the point-cloud path, which is good enough to watch even though
+    /// nothing about the *merge* is solved.
     func testAMismatchedStrokeCountRefusesTheCorrespondenceRatherThanGuessing() {
         let two = ARAPRegistration.StrokeCorrespondence(
             source: [polyline(CGPoint(x: 300, y: 200), CGPoint(x: 300, y: 400)),

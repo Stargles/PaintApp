@@ -309,8 +309,8 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "canvas.host exists")
 
         // Keyframe A: an L on the left of a new vector layer. An L rather than a straight line
-        // because parallel strokes pin neither orientation nor position for the registration's ICP
-        // (VECTOR_INTERPOLATION_HANDOFF.md §5) — a corner gives the fit something to hold onto.
+        // because parallel strokes pin neither orientation nor position for the registration's ICP —
+        // a corner gives the fit something to hold onto.
         addVectorLayer(app)
         drawLine(on: canvas, from: CGVector(dx: 0.22, dy: 0.42), to: CGVector(dx: 0.34, dy: 0.42))
         drawLine(on: canvas, from: CGVector(dx: 0.34, dy: 0.42), to: CGVector(dx: 0.34, dy: 0.56))
@@ -408,19 +408,19 @@ final class TimelineAndUndoUITests: PaintUITestCase {
             XCTFail("Dragging the slider to 0 should move the drawing back onto keyframe A. \(inkReport())")
         }
 
-        // --- Phase 6 items 2 and 3: editing *at* the in-between ---
+        // --- Editing *at* the in-between ---
         //
         // This half is here rather than in a logic test for one reason: everything below the gesture
         // is already covered by `InterpolationWorkflowLogicTests`, and what is not covered anywhere
         // else is `StrokeCanvasView`'s routing — that a touch on an interpolated cel becomes a
         // `LocalEdit` instead of ink in a display list nothing renders, and that the memoized preview
-        // notices. Phase 4's `addCel` bug is the precedent: it was invisible until a gesture ran
-        // through the real path (`HANDOFF.md` §5).
+        // notices. A bug in `addCel` is the precedent: it was invisible until a gesture ran
+        // through the real path.
         slider.adjust(toNormalizedSliderPosition: 0.5)
 
         // A row just below the L, clear of every keyframe's ink at every `t`, so anything found on it
-        // can only be the edit. It is also outside the lattice, which puts the expansion path
-        // (`PLAN.md` §5.4 step 2) under the same test rather than needing its own.
+        // can only be the edit. It is also outside the lattice, which puts the lattice-expansion path
+        // under the same test rather than needing its own.
         let editRow = 0.60
         func inkedColumns() -> [Double] {
             stride(from: 0.14, through: 0.92, by: 0.02).filter {
@@ -442,8 +442,8 @@ final class TimelineAndUndoUITests: PaintUITestCase {
                     + "not notice the recipe changed. \(inkReport())")
         }
 
-        // The claim the inverse map exists to earn, and the test `IMPLEMENTATION.md` Phase 6 asks
-        // for by hand: move the slider and the edit **follows the motion**. The keyframes are 0.40 of
+        // The claim the inverse map exists to earn: move the slider and the edit **follows the
+        // motion**. The keyframes are 0.40 of
         // the canvas apart, so half that span is 0.20 — an edit that had been stored at the
         // in-between instead of in keyframe space would not move at all.
         slider.adjust(toNormalizedSliderPosition: 1)
@@ -455,7 +455,7 @@ final class TimelineAndUndoUITests: PaintUITestCase {
                              "The edit must ride the drawing's motion rather than sit still — "
                              + "columns at t=0.5 \(editAtHalf) vs at t=1 \(editAtOne)")
 
-        // --- Phase 7: guide strokes (workflow step 6, requirements 6 and 7) ---
+        // --- Guide strokes ---
         //
         // Here for the same reason as the block above: everything below the gesture is covered by
         // `InterpolationGuideLogicTests`, and what is covered nowhere else is the view-layer routing —
@@ -467,7 +467,7 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         // **The trajectory is asserted and the easing is not**, deliberately. A guide's timing comes
         // from `UITouch.timestamp` and a synthetic drag can hand every sample the same one, which
         // `GuidePath.spacingCurve` answers with `.linear` on purpose. The arc is geometry and survives
-        // synthetic input; the velocity may not — `HANDOFF.md` §5's Phase 7 entry.
+        // synthetic input; the velocity may not.
         slider.adjust(toNormalizedSliderPosition: 0.5)
 
         // Columns carrying ink at the drawing's own row, rather than one point: XCUITest's synthetic
@@ -572,7 +572,7 @@ final class TimelineAndUndoUITests: PaintUITestCase {
                        "One undo should put the whole handle drag back — and only it, leaving the "
                        + "guide and its timing in place. \(guideReport())")
 
-        // --- Commit (`HANDOFF.md` §8 item 17) ---
+        // --- Commit ---
         //
         // Here for the seam no logic test can reach, and it is a real one. Until now every pixel on
         // screen came from `setInterpolationImage` — the evaluated bitmap the coordinator pushes.

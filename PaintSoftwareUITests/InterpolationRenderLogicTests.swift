@@ -2,14 +2,13 @@ import XCTest
 import UIKit
 import CoreGraphics
 
-/// Pure-logic tests for turning a recipe into pixels — Phase 3 of
-/// VECTOR_INTERPOLATION_IMPLEMENTATION.md.
+/// Pure-logic tests for turning a recipe into pixels.
 ///
 /// Three things are being pinned here, in descending order of how expensive they are to discover
 /// later:
 ///
-/// 1. **Isolation.** Keyframe A's eraser must not reach keyframe C's ink. This is `PLAN.md` §5.6 and
-///    it is the one correctness property the phase exists for; `testAnEraserInKeyframeADoesNot…`
+/// 1. **Isolation.** Keyframe A's eraser must not reach keyframe C's ink. This is the one
+///    correctness property the renderer exists for; `testAnEraserInKeyframeADoesNot…`
 ///    carries a control case that shows the naive alternative genuinely fails, so the test is not
 ///    quietly passing for the wrong reason.
 /// 2. **The endpoints.** `t = 0` reproduces keyframe A and `t = 1` reproduces keyframe C, as pixels,
@@ -250,8 +249,8 @@ final class InterpolationRenderLogicTests: XCTestCase {
         let withEdit = recipe(motion: Self.still, a: a, c: c, localEdits: [edit])
 
         // 192, not 255: two opaque coincident drawings cross-faded at ½ compose to ¾ alpha
-        // (½ + ½·½). That washing-out at interior `t` is the known cost of engine C and the reason
-        // engine D exists (`PLAN.md` §3) — it is not this test's subject, so it only asserts ink.
+        // (½ + ½·½). That washing-out at interior `t` is a known cost of a cross-fade fallback,
+        // not this test's subject, so it only asserts ink.
         XCTAssertGreaterThan(alpha(try XCTUnwrap(render(withoutEdit, at: 0.5, a: a, c: c)), at: hole), 0,
                              "Setup: both keyframes have ink here")
         XCTAssertEqual(alpha(try XCTUnwrap(render(withEdit, at: 0.5, a: a, c: c)), at: hole), 0,
@@ -344,7 +343,7 @@ final class InterpolationRenderLogicTests: XCTestCase {
 
     /// A recipe with no bindings is legal and means "warp the whole frame as one group" — with no
     /// lattices there is no motion to apply, so it degrades to a straight cross-fade rather than
-    /// failing. `PLAN.md` §10 decision 2.
+    /// failing.
     func testARecipeWithNoGroupBindingsCrossFadesInPlace() throws {
         let a = [bar(y: 60, id: ID.paintA)]
         let c = [bar(y: 100, id: ID.paintC)]

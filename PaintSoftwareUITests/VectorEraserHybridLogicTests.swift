@@ -2,7 +2,7 @@ import XCTest
 import UIKit
 import CoreGraphics
 
-/// `VECTOR_ERASER_PLAN.md` §1's Mode 1 commit — `VectorCanvas.eraseHybrid` — under test.
+/// `VectorCanvas.eraseHybrid` — the Mode 1 commit — under test.
 ///
 /// `RasterVectorParityLogicTests` proves the two *representations* agree: a hand-built display list
 /// ending in an `.erase` element renders exactly what a raster layer erased the same way renders.
@@ -13,8 +13,9 @@ import CoreGraphics
 /// So this asserts the four things the hybrid claims, in the order they matter:
 ///
 /// 1. **Exactness.** Running a real erase through `VectorCanvas.erase(…, mode: .erase)` and rendering
-///    the result is byte-identical to the raster ground truth, over the same §8 matrix, at tolerance
-///    zero. This is the design's whole justification and the one test that can falsify it.
+///    the result is byte-identical to the raster ground truth, over the same brush/opacity/gesture
+///    matrix as the parity tests, at tolerance zero. This is the design's whole justification and
+///    the one test that can falsify it.
 /// 2. **Whole-stroke deletion** fires where the eraser covers a stroke completely, and nowhere else.
 /// 3. **The partial split**, which ships now that `DabLattice` lets a piece render on its parent's
 ///    dabs — together with the measurement that says a split *without* that still diverges, so the
@@ -122,7 +123,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
     /// The hybrid's render against the raster ground truth for the same scene.
     ///
-    /// The ground truth is unchanged from §8's: stamp the paint stroke whole, then stamp the eraser
+    /// The ground truth matches the parity tests: stamp the paint stroke whole, then stamp the eraser
     /// gesture whole with `isEraser: true`. The vector side is whatever `eraseHybrid` decided to
     /// leave in the display list — the stroke plus a punch, a punch alone, or nothing at all.
     ///
@@ -212,8 +213,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     // MARK: - 2. Whole-stroke deletion
 
     /// A nib comfortably wider than the 24pt line, so a crossing covers a genuine span of it rather
-    /// than grazing. The §8 matrix deliberately uses 16 — the awkward size — so tests about coverage
-    /// need their own.
+    /// than grazing. The parity matrix deliberately uses 16 — the awkward size — so tests about
+    /// coverage need their own.
     private static let wideNib: CGFloat = 48
 
     /// The one geometric verdict Mode 1 acts on: a gesture that covers a stroke end to end deletes it.
@@ -242,8 +243,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// keeping in one test because they were one case until `DabLattice` existed:
     ///
     /// - Covered **full width** over a stretch, and only there: the stroke is *cut*, into pieces that
-    ///   render on the parent's lattice. That is plan §1's geometric split, and
-    ///   `testTheSplitIsExactOnlyBecauseThePiecesShareTheParentsLattice` is why it is allowed to happen.
+    ///   render on the parent's lattice. `testTheSplitIsExactOnlyBecauseThePiecesShareTheParentsLattice`
+    ///   is why that split is allowed to happen.
     /// - Never covered full width anywhere — a shave along one edge, a nib narrower than the line —
     ///   there is nothing to cut and the punch is the whole answer, so the stroke stays whole and keeps
     ///   its id.
@@ -368,10 +369,10 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// as fresh strokes, the way every split did before `DabLattice`, and once with the pieces sharing
     /// the parent's walk. Compare each against the whole stroke plus the same punch.
     ///
-    /// The naive pieces **diverge**, and outside the punch, which is what made the split unshippable
-    /// for three sessions: a fresh stroke re-anchors `BrushStamper`'s lattice at its own first sample,
-    /// so its ink lands somewhere new along its entire length — most visibly at the far tip, the end
-    /// furthest from the eraser and therefore the one the punch cannot cover.
+    /// The naive pieces **diverge**, and outside the punch: a fresh stroke re-anchors `BrushStamper`'s
+    /// lattice at its own first sample, so its ink lands somewhere new along its entire length — most
+    /// visibly at the far tip, the end furthest from the eraser and therefore the one the punch cannot
+    /// cover.
     ///
     /// The lattice-sharing pieces are **exact**, because their dabs are not a reconstruction of the
     /// parent's; `stampStroke` makes the identical calls and drops the ones outside the range.
@@ -586,7 +587,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         }
     }
 
-    /// The common case §1 wanted to cost nothing: scribble a stroke out completely and the layer ends
+    /// The common case that should cost nothing: scribble a stroke out completely and the layer ends
     /// up empty — the stroke deleted outright, and no punch left hanging over nothing.
     func testErasingAStrokeAwayCompletelyLeavesAnEmptyDisplayList() {
         let scene = scenario(brush: BrushLibrary.hardRound, eraserSize: Self.wideNib,
@@ -685,8 +686,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// `hasContentBeneath` asks about stroke *geometry*, not about ink still visible after earlier
     /// punches, so a second gesture over a stroke the eraser does not wholly cover retains a second punch. That is the
     /// design being consistent rather than leaking: an eraser **is** a stroke, and N eraser gestures
-    /// cost N elements exactly as N paint gestures do. What §1 asked for — and what
-    /// `testErasingAStrokeAwayCompletelyLeavesAnEmptyDisplayList` covers — is that an erase which
+    /// cost N elements exactly as N paint gestures do. What
+    /// `testErasingAStrokeAwayCompletelyLeavesAnEmptyDisplayList` covers is that an erase which
     /// fully resolves costs *nothing*, not that repeated scrubbing is free.
     ///
     /// So this pins the two properties that do hold: growth is one element per gesture (not one per
@@ -730,13 +731,13 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertEqual(strokes(canvas, .paint).count, 1, "…and it must not delete")
     }
 
-    // MARK: - 5. Display-list ordering, now that a phase finally interleaves
+    // MARK: - 5. Display-list ordering, now that erase punches interleave
 
     /// `VectorCanvas`'s `strokes`/`fills`/`images` setters splice: they remove every element of that
     /// kind and reinsert the new list where the *first* removed one sat. That round-trips exactly
-    /// only while each kind occupies one contiguous run — and the accessors' own comment flagged a
-    /// phase that starts interleaving as the thing that would break it. Phase 4 is the first phase
-    /// that appends an `.erase` element after the paint strokes, so this was the phase to check.
+    /// only while each kind occupies one contiguous run — and the accessors' own comment flagged
+    /// interleaving as the thing that would break it. An `.erase` element appended after paint
+    /// strokes is exactly that interleaving, so this checks it.
     ///
     /// It does not break, and the reason is worth pinning rather than re-deriving: **every**
     /// insertion goes through `insertionIndex(forKind:)`, which orders by `Kind.rawValue`
@@ -775,9 +776,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
     /// The consequence of that same invariant, stated so it is a decision rather than a surprise: the
     /// list *cannot* express a fill above a stroke, so a flood fill made after an erase gesture is
-    /// inserted beneath that gesture and is punched by it. This is the open `addFill` ordering
-    /// question (plan §1 carry-overs), and it is the behaviour that question is about — recorded here
-    /// so whoever settles it changes this assertion deliberately.
+    /// inserted beneath that gesture and is punched by it. This is an open `addFill` ordering
+    /// question, recorded here so whoever settles it changes this assertion deliberately.
     func testAFillAddedAfterAnErasePunchLandsBeneathItAndIsPunched() {
         let scene = scenario(brush: BrushLibrary.hardRound)
         let (canvas, _, _) = erased(scene)

@@ -87,16 +87,16 @@ struct ParityScenario {
     var eraserID: UUID
 }
 
-/// The raster-vs-vector comparison harness behind `VECTOR_ERASER_PLAN.md` §8's acceptance test.
+/// The raster-vs-vector comparison harness behind the hybrid eraser's acceptance test.
 ///
-/// §1 rests on one claim: that keeping the eraser as a retained `.erase` element in the vector
-/// display list is *indistinguishable* from having erased the same stroke on a raster layer. That is
-/// what lets the hybrid fall back to an alpha punch whenever a geometric split cannot express the
-/// cut. The claim is checkable — both tiers rasterize through the same `BrushStamper`, so the two
-/// results should agree byte for byte, not approximately — and this is what checks it.
+/// The hybrid design rests on one claim: that keeping the eraser as a retained `.erase` element in
+/// the vector display list is *indistinguishable* from having erased the same stroke on a raster
+/// layer. That is what lets the hybrid fall back to an alpha punch whenever a geometric split cannot
+/// express the cut. The claim is checkable — both tiers rasterize through the same `BrushStamper`, so
+/// the two results should agree byte for byte, not approximately — and this is what checks it.
 ///
 /// Deliberately a plain namespace rather than test-case methods: `parityOfGeometricSplit` below is
-/// meant to be *called* by Phase 4c, which will live in its own test file.
+/// meant to be *called* from other test files too, not just this one.
 enum RasterVectorParity {
 
     // MARK: - Building the two tiers
@@ -149,13 +149,14 @@ enum RasterVectorParity {
     /// than being redrawn with an equivalent set of Core Graphics calls. That is the only way to hold
     /// the backdrop constant across the two tiers, and holding it constant is what makes the reported
     /// delta attributable to the punch. Redrawing it independently would fold "does CG fill this path
-    /// the same way in two different contexts" into the same number, which is a different question
-    /// and not the one §8 asks. The load is lossless: same size, scale 1, source-over onto a cleared
-    /// context, so the bytes survive the transfer.
+    /// the same way in two different contexts" into the same number, which this harness is not meant
+    /// to measure. The load is lossless: same size, scale 1, source-over onto a cleared context, so
+    /// the bytes survive the transfer.
     ///
-    /// Internal rather than private because Phase 4c's tests build the same ground truth against a
-    /// display list they mutate through `VectorCanvas.erase` — they need this half without the vector
-    /// half `tiers(_:)` builds alongside it, and they must share the *same* backdrop element.
+    /// Internal rather than private because `VectorEraserHybridLogicTests` builds the same ground
+    /// truth against a display list it mutates through `VectorCanvas.erase` — it needs this half
+    /// without the vector half `tiers(_:)` builds alongside it, and must share the *same* backdrop
+    /// element.
     static func rasterBase(_ scenario: ParityScenario, backdrop: VectorElement?) -> RasterLayerTexture {
         guard let backdrop else { return RasterLayerTexture.empty(size: scenario.canvasSize) }
         let image = VectorCanvas(size: scenario.canvasSize, elements: [backdrop]).render()
@@ -258,30 +259,30 @@ enum RasterVectorParity {
         return report
     }
 
-    /// §8's acceptance measurement: retained-`.erase`-element vector result vs raster ground truth.
+    /// The acceptance measurement: retained-`.erase`-element vector result vs raster ground truth.
     static func parityOfRetainedPunch(_ scenario: ParityScenario, tolerance: Int = 0) -> ParityReport? {
         let (raster, vector) = tiers(scenario)
         return report(raster: raster, vector: vector, size: scenario.canvasSize, tolerance: tolerance)
     }
 
-    // MARK: - Phase 4c's tuning hook
+    // MARK: - The raw split's tuning hook
 
-    /// **Phase 4c's tuning hook. Not a test, and deliberately unasserted.**
+    /// **A measurement hook for the raw geometric split, deliberately unasserted.**
     ///
-    /// `parityOfRetainedPunch` measures the alpha-punch half of plan §1's hybrid. This measures the
+    /// `parityOfRetainedPunch` measures the alpha-punch half of the hybrid. This measures the
     /// *other* half: the paint stroke geometrically cut into surviving pieces, with no `.erase`
     /// element in the display list at all, against the same raster ground truth. That is the number
-    /// §1's "clean cut" gate has to be tuned against — a span may only be resolved geometrically when
-    /// the split's own parity is good enough to be invisible, and nobody currently knows where that
-    /// threshold sits for a given hardness/opacity/grain combination.
+    /// a "clean cut" gate would need to be tuned against — a span may only be resolved geometrically
+    /// when the split's own parity is good enough to be invisible, and the threshold varies with
+    /// hardness/opacity/grain.
     ///
-    /// No assertion ships with it because the hybrid commit does not exist yet: the split is expected
-    /// to be *bad* for a soft brush, for `eraserOpacity < 1`, and for anything grazing the stroke
-    /// rather than crossing it, and that badness is the whole reason the punch fallback exists. What
-    /// this provides is the instrument, so Phase 4c can assert `report.maxChannelDelta == 0` exactly
-    /// where its gate claims a cut is clean, and record the measured delta everywhere else.
+    /// No assertion ships with it: the split is expected to be *bad* for a soft brush, for
+    /// `eraserOpacity < 1`, and for anything grazing the stroke rather than crossing it, and that
+    /// badness is the whole reason the punch fallback exists. What this provides is the instrument to
+    /// assert `report.maxChannelDelta == 0` wherever a gate claims a cut is clean, and record the
+    /// measured delta everywhere else.
     ///
-    /// Two things it deliberately does *not* paper over, both of which Phase 4c must reckon with:
+    /// Two things it deliberately does *not* paper over:
     ///
     /// - A backdrop is never cut. A fill or a placed image beneath the stroke has no geometry the
     ///   eraser can trim, so any scenario with a backdrop can only ever be resolved by a punch —
@@ -290,7 +291,7 @@ enum RasterVectorParity {
     /// - Each surviving piece gets a fresh `id`, so it seeds a different dab sequence than the stroke
     ///   it came from. Irrelevant for a brush with no scatter or rotation jitter; for one that has
     ///   them, a split visibly re-rolls the grain of the pieces and that shows up here as real delta.
-    ///   Whether the pieces should inherit a derived-but-stable seed is a Phase 4c decision.
+    ///   Whether the pieces should inherit a derived-but-stable seed is an open question.
     static func parityOfGeometricSplit(_ scenario: ParityScenario, tolerance: Int = 0) -> ParityReport? {
         let paint = paintStroke(scenario)
         let erase = eraseStroke(scenario)
@@ -319,12 +320,12 @@ enum RasterVectorParity {
     }
 }
 
-/// `VECTOR_ERASER_PLAN.md` §8's acceptance test for Mode 1, as a headless logic test.
+/// The hybrid eraser's acceptance test for Mode 1, as a headless logic test.
 ///
-/// The whole hybrid design in §1 rests on one assumption: that a retained `.erase` element renders
+/// The whole hybrid design rests on one assumption: that a retained `.erase` element renders
 /// *exactly* what a raster layer would have produced. If it does not, "indistinguishable from raster"
 /// is false and the fallback the design leans on is not a fallback at all — so this is checked at
-/// zero tolerance, across the matrix §8 names, rather than at a comfortable epsilon.
+/// zero tolerance across the brush/opacity/backdrop matrix, rather than at a comfortable epsilon.
 ///
 /// Same arrangement as `VectorEraserLogicTests` and `StrokeGeometryLogicTests`: the engine files are
 /// compiled into this target as well as the app, so their types are local to this module and there is
@@ -352,7 +353,8 @@ final class RasterVectorParityLogicTests: XCTestCase {
         }
     }
 
-    /// §8's three gesture shapes. The paint stroke is 24 wide, so its ink spans y ∈ [52, 76].
+    /// The three gesture shapes the acceptance matrix runs. The paint stroke is 24 wide, so its ink
+    /// spans y ∈ [52, 76].
     private enum Gesture: String, CaseIterable {
         /// Straight across the line — the case a geometric split handles cleanly.
         case squareCut
@@ -406,15 +408,15 @@ final class RasterVectorParityLogicTests: XCTestCase {
                        eraserID: Self.eraserID)
     }
 
-    // MARK: - The §8 matrix
+    // MARK: - The acceptance matrix
 
     /// The brush axis. `hardRound` (hardness 0.95) and `softRound` (hardness 0.15) are the two ends
-    /// of the falloff the plan cares about — §1's alpha gate exists because the soft one's edge alpha
-    /// is below 1 even at full geometric coverage.
+    /// of the falloff that matters — the alpha gate exists because the soft one's edge alpha is below
+    /// 1 even at full geometric coverage.
     private static let brushes = [BrushLibrary.hardRound, BrushLibrary.softRound]
 
-    /// Full opacity, and the `0.4` §1 names explicitly as the case that must produce a real partial
-    /// fade rather than a binary cut.
+    /// Full opacity, and `0.4` as the case that must produce a real partial fade rather than a binary
+    /// cut.
     private static let eraserOpacities: [Double] = [1, 0.4]
 
     /// Runs brush × eraser-opacity × gesture for one backdrop. One `runActivity` per case, so a
@@ -444,7 +446,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
         assertPunchMatchesRaster(over: "bare stroke", .none)
     }
 
-    /// §1's punch must reach *everything* beneath it, fills included — which is why
+    /// The punch must reach *everything* beneath it, fills included — which is why
     /// `renderLocalContent`'s rule 3 keeps an `.erase` element out of any transparency layer. If that
     /// rule regressed, the vector tier would leave the fill intact where the raster tier removed it,
     /// and the delta here would be the fill's own colour rather than a rounding artefact.
@@ -488,8 +490,8 @@ final class RasterVectorParityLogicTests: XCTestCase {
 
     /// The other way the matrix could be vacuous: a backdrop that never rendered would make the "over
     /// a fill" and "over a placed image" runs into duplicates of the bare one. This pins both that the
-    /// backdrop is really there and that the punch reaches it — §1's "erases everything beneath,
-    /// fills and placed images included", which is what `renderLocalContent`'s rule 3 keeps true by
+    /// backdrop is really there and that the punch reaches it — erasing everything beneath, fills and
+    /// placed images included, which is what `renderLocalContent`'s rule 3 keeps true by
     /// never letting an `.erase` element sit inside a transparency layer.
     ///
     /// The probe is at (64, 40): under the square cut's path, inside both backdrops, and clear of the
@@ -521,7 +523,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
         }
     }
 
-    /// A partial-opacity eraser has to *fade* rather than cut, or §1's "real partial fade" promise is
+    /// A partial-opacity eraser has to *fade* rather than cut, or "real partial fade" is
     /// only a claim about a code path nobody measured. Erasing at 0.4 must leave a band of ink that a
     /// full-opacity pass over the same gesture removes completely.
     func testAPartialOpacityEraserFadesRatherThanCuts() {
@@ -588,11 +590,11 @@ final class RasterVectorParityLogicTests: XCTestCase {
                        "A mis-seeded scattering brush should not match, or the parity harness is comparing something other than the pixels")
     }
 
-    // MARK: - Phase 4c
+    // MARK: - The split's measurement hook
 
-    /// Not an assertion about the split — Phase 4c owns that. This only pins that
+    /// Not an assertion about the split's quality — this only pins that
     /// `RasterVectorParity.parityOfGeometricSplit` runs end to end and returns a report, so the hook
-    /// is known to work when the phase that needs it arrives.
+    /// itself is known to work.
     func testTheGeometricSplitHookProducesAReport() {
         let scene = scenario(brush: BrushLibrary.hardRound, eraserOpacity: 1,
                              gesture: .squareCut, backdrop: .none)
@@ -601,8 +603,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
         }
         XCTAssertEqual(report.totalPixelCount,
                        Int(Self.canvasSize.width) * Int(Self.canvasSize.height))
-        // Recorded rather than asserted: this is the number Phase 4c's clean-cut gate is tuned
-        // against, and it is expected to be non-zero until the hybrid commit exists.
+        // Recorded rather than asserted: this is the number a clean-cut gate would be tuned against.
         XCTContext.runActivity(named: "geometric split parity — \(report.diagnostic)") { _ in }
     }
 }

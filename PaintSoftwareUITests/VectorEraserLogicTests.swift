@@ -1,17 +1,16 @@
 import XCTest
 import CoreGraphics
 
-/// Pure-logic tests for `VectorEraser` — the per-mode geometry of Phase 2 of
-/// `VECTOR_ERASER_PLAN.md`, sitting on top of the `StrokeGeometry` primitives
-/// `StrokeGeometryLogicTests` already covers.
+/// Pure-logic tests for `VectorEraser` — the per-mode geometry, sitting on top of the
+/// `StrokeGeometry` primitives `StrokeGeometryLogicTests` already covers.
 ///
 /// Same arrangement as that file: `VectorEraser.swift` is compiled into this target as well as the
 /// app, so its types are local to this module — no `@testable import PaintSoftware`, which would make
 /// every name ambiguous between the two copies.
 ///
-/// The four tests named `…RegressionOfDefectN` are the four defects the pre-Phase-2 implementation
-/// had (plan §4). Each fails against that implementation by construction, which is the only way to
-/// know the rewrite actually bought something.
+/// The four tests named `…RegressionOfDefectN` are the four defects the earlier point-sampled
+/// implementation had. Each fails against that implementation by construction, which is the only
+/// way to know the rewrite actually bought something.
 final class VectorEraserLogicTests: XCTestCase {
 
     // MARK: - Helpers
@@ -103,8 +102,8 @@ final class VectorEraserLogicTests: XCTestCase {
 
     func testCutBoundariesLandOffSampleWhereTheFootprintEdgeIs() {
         // Deliberately chosen so neither edge coincides with a stored sample: a radius-7 dab at
-        // x == 55 covers x ∈ [48, 62] → parameters 4.8...6.2. The pre-Phase-2 implementation could
-        // only ever cut at whole samples, so this is the "ragged edge" defect stated numerically.
+        // x == 55 covers x ∈ [48, 62] → parameters 4.8...6.2. A sample-granularity implementation
+        // could only ever cut at whole samples, so this is the "ragged edge" defect stated numerically.
         assertCut(mergedCuts(in: horizontalRun, sweep([(55, 0)], size: 14)), 4.8, 6.2)
     }
 
@@ -156,7 +155,7 @@ final class VectorEraserLogicTests: XCTestCase {
         XCTAssertEqual(StrokeGeometry.splitStroke(run, removing: mergedCuts(in: run, sweep([(50, 0)], size: 20))).count, 2)
     }
 
-    // MARK: - The four pre-Phase-2 defects
+    // MARK: - The four defects a sample-granularity eraser had
 
     /// Defect 1 — point-to-point distance. A small nib dragged between two coarsely-sampled touches
     /// existed only *at* those touches, so a stroke crossing the gap survived untouched.
@@ -242,11 +241,10 @@ final class VectorEraserLogicTests: XCTestCase {
         assertCut(VectorEraser.cutToIntersection(in: horizontalRun, at: 5, others: [far]), 0, 10)
     }
 
-    // MARK: - Mode 3: the gesture driver (Phase 3)
+    // MARK: - Mode 3: the gesture driver
     //
-    // Phase 2 shipped the geometry above and resolved it once, on lift, against the gesture's first
-    // sample. Phase 3 is the gesture semantics on top: cut on touch-**down**, re-query per crossing so
-    // one drag across three lines cuts three spans, and one undo entry for the whole drag.
+    // Gesture semantics on top of the geometry above: cut on touch-**down**, re-query per crossing
+    // so one drag across three lines cuts three spans, and one undo entry for the whole drag.
     //
     // These drive a real `VectorCanvas` through exactly the loop `StrokeCanvasView` runs — resolve at
     // `cutting: driver.isArmed`, feed the outcome back — so what is under test is the shipped rule
@@ -286,9 +284,9 @@ final class VectorEraserLogicTests: XCTestCase {
         return outcome
     }
 
-    /// The headline Phase 3 behaviour. One drag across three lines cuts three spans — which the
-    /// lift-time implementation could not do at all, since it resolved a single target against the
-    /// gesture's first sample and ignored everything the drag went on to touch.
+    /// One drag across three lines cuts three spans — which a lift-time-only implementation could
+    /// not do at all, since it resolves a single target against the gesture's first sample and
+    /// ignores everything the drag went on to touch.
     func testOneDragAcrossThreeLinesCutsThreeSpans() {
         let canvas = laddersCanvas()
         var driver = VectorEraser.IntersectionDriver()

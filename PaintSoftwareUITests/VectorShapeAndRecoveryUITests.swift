@@ -302,7 +302,7 @@ final class VectorShapeAndRecoveryUITests: PaintUITestCase {
         let after = readVectorMarker(app, layerIndex: 1)
         XCTAssertEqual(after?.strokes, 2,
                        "A gesture covering the shape's line full-width cuts it into two paint pieces "
-                       + "(VECTOR_ERASER_PLAN.md §1) — reading 1 means the split never fired")
+                       + "— reading 1 means the split never fired")
         XCTAssertEqual(after?.erases, 1,
                        "Erasing across a shape should retain the gesture as one .erase punch, "
                        + "exactly as it does for a freehand stroke — the cut is inset inside the "

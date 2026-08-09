@@ -2,11 +2,10 @@ import XCTest
 import UIKit
 import CoreGraphics
 
-/// Pure-logic tests for `OnionSkinSource` (Phase 0 of `VECTOR_INTERPOLATION_IMPLEMENTATION.md`).
+/// Pure-logic tests for `OnionSkinSource`.
 ///
-/// `testVectorCelWithStrokeProducesNonBlankOnionSkin` is the regression test for the shipping bug
-/// this phase fixes: onion skin used to read `cel.raster` directly, which is empty for a `.vector`
-/// cel — its live strokes live in `cel.vector` instead — so a vector layer onion-skinned blank.
+/// `testVectorCelWithStrokeProducesNonBlankOnionSkin` pins a fixed bug: onion skin used to read
+/// `cel.raster` directly, which is empty for a `.vector` cel, so a vector layer onion-skinned blank.
 final class OnionSkinLogicTests: XCTestCase {
 
     private func fixedBrush(size: CGFloat = 10) -> Brush {

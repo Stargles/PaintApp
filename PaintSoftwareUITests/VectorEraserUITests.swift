@@ -8,7 +8,7 @@ import XCTest
 /// — the segmented control, `CanvasManager.vectorEraserMode`, `CanvasView.updateActiveLayerAndTool`,
 /// `StrokeCanvasView`'s scratch role and its Mode 3 driver.
 ///
-/// The behaviour being asserted is VECTOR_ERASER_PLAN.md §1 *as shipped*: Mode 1 retains the
+/// The behaviour being asserted is Mode 1 as shipped: it retains the
 /// gesture whole as an `.erase` punch, deletes strokes it covers end to end, and cuts the ones it
 /// covers full-width over a stretch into pieces that keep rendering on the original's dab lattice.
 /// `readVectorMarker` reports paint strokes and erase punches as separate counts precisely so these
@@ -76,7 +76,7 @@ final class VectorEraserUITests: PaintUITestCase {
 
     // MARK: - The picker itself
 
-    /// Plan §5: the three-way control is shown *only* on a `.vector` layer. On a raster layer the
+    /// The three-way control is shown *only* on a `.vector` layer. On a raster layer the
     /// eraser is a plain `.destinationOut` brush with no modes to pick between and the panel must
     /// look exactly as it did before the feature existed.
     func testVectorModePickerIsHiddenOnARasterLayerAndShownOnAVectorLayer() throws {
@@ -109,8 +109,8 @@ final class VectorEraserUITests: PaintUITestCase {
     /// the default's. Both modes cut this stroke in two; what tells them apart is the punch. Mode 2 is
     /// a pure geometric split and retains nothing, where Mode 1 always keeps the gesture as an
     /// `.erase` element — so `erases == 0` is the assertion that proves the picker's selection reached
-    /// the commit. (Until Phase 4d the piece *count* distinguished them too. It no longer does, which
-    /// is exactly the sort of thing that turns a test into a formality if nobody notices.)
+    /// the commit. (The piece *count* alone no longer distinguishes them, which is exactly the sort
+    /// of thing that turns a test into a formality if nobody notices.)
     func testPickingCutModeMakesTheGestureCutInsteadOfPunch() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -134,7 +134,7 @@ final class VectorEraserUITests: PaintUITestCase {
 
     // MARK: - Mode 1
 
-    /// Mode 1 as shipped (plan §1): a gesture that covers the line's full width cuts it into two
+    /// Mode 1 as shipped: a gesture that covers the line's full width cuts it into two
     /// pieces *and* retains the gesture as one `.erase` punch, and the visible result is a hole — ink
     /// either side of the gesture, blank paper under it. The pixel probes are what make this a claim
     /// about what the user sees rather than about element bookkeeping, and they are the part no logic
@@ -203,7 +203,7 @@ final class VectorEraserUITests: PaintUITestCase {
                        + "scribbling a stroke out costs an element forever (plan §1)")
     }
 
-    /// Plan §4's live preview: Mode 1 seeds a scratch `RasterLayerTexture` from the layer's own
+    /// Mode 1's live preview: it seeds a scratch `RasterLayerTexture` from the layer's own
     /// render and punches `.destinationOut` dabs into it *during* the drag, so the hole follows the
     /// finger instead of appearing on lift.
     ///
@@ -273,12 +273,11 @@ final class VectorEraserUITests: PaintUITestCase {
 
     // MARK: - Mode 3
 
-    /// Phase 3's gesture semantics, and the thing that separates it from the Phase 2 behaviour it
-    /// replaced: Mode 3 resolves on touch-**down** and re-queries per crossing, so one drag across
-    /// three lines acts on all three. Resolving once on lift against the gesture's first sample —
-    /// which is what the earlier version did — leaves two of these three untouched.
+    /// Mode 3 resolves on touch-**down** and re-queries per crossing, so one drag across three lines
+    /// acts on all three. Resolving once on lift against the gesture's first sample would leave two
+    /// of these three untouched.
     ///
-    /// These lines cross nothing, which exercises plan §4's free third case: a stroke with no
+    /// These lines cross nothing, which exercises the free third case: a stroke with no
     /// intersections at all is deleted whole.
     func testMode3ActsOnEveryLineOneDragCrossesUnderASingleUndo() throws {
         let app = XCUIApplication()
@@ -314,7 +313,7 @@ final class VectorEraserUITests: PaintUITestCase {
     }
 
     /// The other half of Mode 3: with crossings present, a touch removes the span of the touched
-    /// stroke *between the two nearest crossings* and leaves the rest — plan §4, steps 1–4.
+    /// stroke *between the two nearest crossings* and leaves the rest.
     func testMode3RemovesOnlyTheSpanBetweenTheTwoNearestCrossings() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))

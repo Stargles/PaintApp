@@ -1,10 +1,8 @@
 import XCTest
 import UIKit
 
-/// Pure-logic tests for the interpolation **data model** — Phase 2 of
-/// VECTOR_INTERPOLATION_IMPLEMENTATION.md. Nothing here renders or interpolates anything; the
-/// feature is inert at this phase and these tests exist to pin the two properties that are
-/// expensive to discover later:
+/// Pure-logic tests for the interpolation **data model**. Nothing here renders or interpolates
+/// anything; these tests exist to pin the two properties that are expensive to discover later:
 ///
 /// 1. **Backward compatibility.** A project saved before any of this existed loads unchanged, and a
 ///    project that never uses interpolation writes exactly the bytes it used to. The repo's whole

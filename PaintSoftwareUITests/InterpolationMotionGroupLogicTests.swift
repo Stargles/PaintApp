@@ -2,38 +2,37 @@ import XCTest
 import UIKit
 import CoreGraphics
 
-/// Pure-logic tests for **motion groups** — Phase 5 of `VECTOR_INTERPOLATION_IMPLEMENTATION.md`.
+/// Pure-logic tests for **motion groups**.
 ///
 /// The division of labour with the three neighbouring classes: `ARAPLogicTests` owns
 /// `MotionGrouping` as an algorithm ("does this partition split"), `InterpolationWorkflowLogicTests`
-/// owns Phase 4's single whole-frame answer, `InterpolationRenderLogicTests` owns pixels. This file
+/// owns the single whole-frame answer, `InterpolationRenderLogicTests` owns pixels. This file
 /// owns the seam between them — `CanvasManager.registerGroups` and the document-level tagging,
 /// retagging and undo that hang off it.
 ///
 /// What is being pinned, in descending order of how expensive it is to discover later:
 ///
-/// 1. **The whole-frame answer is preserved exactly.** A drawing with one part must take Phase 4's
-///    path untouched: one anonymous binding, no registered group, no tags written. If that ever
-///    stops holding, every single-body test drawing starts acquiring document state the artist did
-///    not ask for, and it would show up as an unexplained group in the UI rather than as a failure.
+/// 1. **The whole-frame answer is preserved exactly.** A drawing with one part must take the
+///    single-group path untouched: one anonymous binding, no registered group, no tags written. If
+///    that ever stops holding, every single-body test drawing starts acquiring document state the
+///    artist did not ask for, and it would show up as an unexplained group in the UI rather than as a
+///    failure.
 /// 2. **Tags are written back onto the keyframes.** Without the write-back the partition lives only
 ///    inside the recipe's bindings, where nothing can show it and nothing can correct it — and, worse,
 ///    re-registration would find every stroke untagged again and mint a fresh set of groups on every
-///    Generate (`HANDOFF.md` §5, "From Phase 5").
-/// 3. **A retag changes the motion, not only the label.** Phase 5's definition of done is "the artist
-///    can retag and see the result immediately"; `setMotionGroup` re-registers inside the same undo
+///    Generate.
+/// 3. **A retag changes the motion, not only the label.** The artist must be able to retag and see
+///    the result immediately; `setMotionGroup` re-registers inside the same undo
 ///    step, and it is the re-registration rather than the tag that makes that true.
 /// 4. **Generate's undo bracket covers the tags.** It writes stroke content now, so
 ///    `withStructureUndo` is not enough — undoing must take the tags off the reference drawings as
-///    well as the recipe off the target (`HANDOFF.md` §5, Phase 2).
+///    well as the recipe off the target.
 ///
-/// **The two-body fixture is copied from `ARAPLogicTests`, deliberately and verbatim.** §5's Phase 1
-/// entry lists four two-body fixtures that looked obviously correct and asserted things that were
-/// simply not true of the geometry, and §5's Phase 5 entry adds a fifth trap: two strokes alone can
-/// never split, because `MotionGrouping.splinter`'s spatial radius is a multiple of the *median*
-/// nearest-neighbour spacing and with two strokes the median is their own separation. A rectangle of
-/// four strokes beside a triangle of three, with the rectangle moved along the line joining them, is
-/// the arrangement that is known to split — do not simplify it.
+/// **The two-body fixture is copied from `ARAPLogicTests`, deliberately and verbatim.** Two strokes
+/// alone can never split, because `MotionGrouping.splinter`'s spatial radius is a multiple of the
+/// *median* nearest-neighbour spacing and with two strokes the median is their own separation. A
+/// rectangle of four strokes beside a triangle of three, with the rectangle moved along the line
+/// joining them, is the arrangement that is known to split — do not simplify it.
 final class InterpolationMotionGroupLogicTests: XCTestCase {
 
     // MARK: - Geometry fixtures (copied from ARAPLogicTests — see the class comment)
@@ -121,7 +120,7 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
     /// bodies with the rectangle moved at frame 8.
     ///
     /// Assigns `cels` directly rather than calling `addCel`, because `CanvasFixture.manager` gives each
-    /// layer one cel spanning the whole scene and every `addCel` inside it collides (`HANDOFF.md` §5).
+    /// layer one cel spanning the whole scene and every `addCel` inside it collides.
     @discardableResult
     private func twoBodyKeyframes(_ manager: CanvasManager, layerIndex: Int = 1) -> [Cel] {
         let size = manager.canvasSize ?? CanvasFixture.canvasSize
@@ -195,10 +194,10 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
 
     // MARK: - registerGroups: the whole-frame answer
 
-    /// Phase 4's answer must survive Phase 5 *bit for bit* on a drawing with one part. Not a nicety:
-    /// a registered `MotionGroup` is an artist-facing object with a name, a swatch and a mode badge,
-    /// and minting one for a single-body doodle would put document state on screen that nobody asked
-    /// for (`HANDOFF.md` §5.10). One anonymous binding, nothing invented, nothing tagged.
+    /// The single-group answer must survive motion grouping *bit for bit* on a drawing with one part.
+    /// Not a nicety: a registered `MotionGroup` is an artist-facing object with a name, a swatch and
+    /// a mode badge, and minting one for a single-body doodle would put document state on screen that
+    /// nobody asked for. One anonymous binding, nothing invented, nothing tagged.
     func testASinglePartDrawingKeepsPhase4sAnonymousWholeFrameBinding() {
         let body = rectangleBody(at: CGPoint(x: 40, y: 60))
         let registration = CanvasManager.registerGroups(
@@ -273,8 +272,9 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
 
     /// The artist's own tags are the seeds, and registration must come back with *their* groups
     /// rather than a parallel set beside them. This is the attached-limb case — the one automatic
-    /// grouping cannot do (`HANDOFF.md` §8 item 1) — so it is also the case where reuse matters most:
-    /// a session that minted new groups here would lose the artist's tagging on every Generate.
+    /// grouping cannot do (`VECTOR_INTERPOLATION.md` §4 item 1) — so it is also the case where reuse
+    /// matters most: a session that minted new groups here would lose the artist's tagging on every
+    /// Generate.
     func testTaggedSeedsAreReusedRatherThanRepartitioned() throws {
         let joint = CGPoint(x: 130, y: 120)
         let torso = rectangleBody(at: CGPoint(x: 60, y: 100), width: 70, height: 40)
@@ -350,8 +350,7 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
 
     /// Generate now writes stroke content, so it needs `withInterpolationUndo` rather than
     /// `withStructureUndo`: `StructureSnapshot` copies `[Layer]` but shares each `VectorCanvas`, so
-    /// the structural bracket would put the recipe back and leave the tags on the reference drawings
-    /// (`HANDOFF.md` §5, Phase 2 — the trap this feature was warned about three phases early).
+    /// the structural bracket would put the recipe back and leave the tags on the reference drawings.
     func testUndoingGenerateTakesTheTagsOffAsWellAsTheRecipe() {
         let manager = manager()
         let cels = twoBodyKeyframes(manager)
@@ -447,10 +446,10 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
     /// Clearing a tag is the same action with a nil group — and it does **not** leave the stroke
     /// untagged, because clearing re-registers and registration tags everything it partitions. Worth
     /// pinning precisely because the opposite is the natural expectation: "clear" reads like it should
-    /// hand the stroke back to the untagged default (the recipe's first binding, `HANDOFF.md` §5.9),
+    /// hand the stroke back to the untagged default (the recipe's first binding),
     /// and after one Generate there is no untagged state left to hand it back to. What clearing
     /// actually means is "forget what I said and re-decide", which is a useful action but a different
-    /// one, and the UI wording in Phase 5 item 2 should say so.
+    /// one, and the UI wording should say so.
     func testClearingATagReDecidesItRatherThanLeavingTheStrokeUntagged() throws {
         let manager = manager()
         let cels = twoBodyKeyframes(manager)
@@ -469,7 +468,7 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
 
     // MARK: - Tag by stroke colour
 
-    /// `PLAN.md` §5.1.1's one-shot populate — the mitigation the product owner named for the
+    /// A one-shot populate — the mitigation the product owner named for the
     /// attached-limb limitation. A *populate*, never a live binding: after it runs the tags are
     /// ordinary tags, so recolouring a stroke afterwards must not silently move it to another group.
     func testTagByStrokeColourMakesOneGroupPerColour() throws {
@@ -662,13 +661,11 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
     /// The same L, but keyframe C **hand-drawn** rather than a clean translation — which is what the
     /// XCUITest actually produces, and what a real second keyframe always is.
     ///
-    /// This is the shape of the regression Session 13 introduced and Session 14 found: Phase 4 always
-    /// fitted one whole-frame group, so a drawing whose parts are individually degenerate never had
-    /// them fitted alone. `registerGroups` will split when the residuals say so, and a lone straight
-    /// stroke is precisely the case `HANDOFF.md` §5's Phase 4.7 entry proves is a *tie* — it maps onto
-    /// itself under a half turn, so the fit is chosen on arithmetic noise.
-    /// **Fixed in Phase 5.1** by matching the whole-drawing group bidirectionally — see
-    /// `MotionGrouping.analyse`. The `XCTExpectFailure` this carried is gone.
+    /// `registerGroups` will split when the residuals say so, and a lone straight stroke is precisely
+    /// a case that ties — it maps onto itself under a half turn, so the fit would otherwise be chosen
+    /// on arithmetic noise. Matching the whole-drawing group bidirectionally (see
+    /// `MotionGrouping.analyse`) is what keeps this L as one part instead of splitting into two
+    /// straight, individually-tied strokes.
     func testAHandDrawnSecondKeyframeStillGroupsAsOnePart() throws {
         let manager = manager()
         let size = manager.canvasSize ?? CanvasFixture.canvasSize
@@ -700,7 +697,7 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
         let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
         XCTAssertEqual(recipe.groups.count, 1,
                        "an L is one body — splitting its two legs fits each straight stroke "
-                       + "alone, which is the 180-degree tie of HANDOFF.md §5")
+                       + "alone, which is the 180-degree tie")
         let half = try XCTUnwrap(InterpolationEvaluator.evaluate(
             recipe: recipe, at: 0.5, content: manager.interpolationContentProvider,
             options: manager.interpolationOptions))
@@ -731,8 +728,8 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
         XCTAssertFalse(chips.contains { $0.isArmed || $0.isHidden })
     }
 
-    /// Phase 4's whole-frame binding has a group id with no registry entry, and it must stay that way
-    /// — it is not an artist-facing object (`HANDOFF.md` §5.10). So it contributes no chip, and the
+    /// The whole-frame binding has a group id with no registry entry, and it must stay that way
+    /// — it is not an artist-facing object. So it contributes no chip, and the
     /// bar says so in words instead.
     func testASinglePartDrawingShowsNoChipsButIsReportedAsTheWholeFrameGroup() {
         let manager = manager()

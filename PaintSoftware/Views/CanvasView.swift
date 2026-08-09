@@ -18,9 +18,8 @@ struct CanvasView: UIViewRepresentable {
         container.backgroundColor = .clear
         host.addSubview(container)
 
-        // Light-grey backing for the drawable padding margin: fills the whole (padded) container and
-        // sits behind the white paper, so wherever the paper is inset by `canvasPadding` the grey shows
-        // through as the margin. At padding 0 the paper covers it edge-to-edge and it's never seen.
+        // Light-grey backing for the drawable padding margin: shows through wherever the paper is
+        // inset by `canvasPadding`. Never seen at padding 0.
         let paddingBackdrop = UIView()
         paddingBackdrop.backgroundColor = UIColor(white: 0.85, alpha: 1)
         paddingBackdrop.isUserInteractionEnabled = false
@@ -37,10 +36,8 @@ struct CanvasView: UIViewRepresentable {
         onionSkin.contentMode = .scaleAspectFit
         onionSkin.isUserInteractionEnabled = false
         onionSkin.translatesAutoresizingMaskIntoConstraints = false
-        // Deliberately left on the default (bilinear) filter: onion skin is a translucent reference
-        // ghost of the previous frame, shown independent of the current layer's own opacity — nearest-
-        // neighbor made that ghost render as a sharp, distractingly pixelated overlay instead of the
-        // soft blended reference it's meant to be.
+        // Deliberately left on the default bilinear filter — nearest-neighbor made the onion-skin
+        // ghost render as a distractingly pixelated overlay instead of a soft reference.
         container.addSubview(onionSkin)
 
         let transformOverlay = ObjectTransformOverlayView()
@@ -61,11 +58,9 @@ struct CanvasView: UIViewRepresentable {
         container.addSubview(shapeOverlay)
         context.coordinator.shapeOverlay = shapeOverlay
 
-        // Above everything, including the shape overlay: a guide annotates the whole frame, so
-        // anything drawn over it would be reading as ink on top of a reference mark. It claims only
-        // its own handle hitboxes (`GuideOverlayView.hitTest`), so being topmost costs a shape handle
-        // only where the two coincide — and a pending smart shape and a guide are never both live,
-        // since guides are drawn only in interpolate mode.
+        // Above everything, including the shape overlay: a guide annotates the whole frame. It
+        // claims only its own handle hitboxes, so being topmost costs a shape handle only where
+        // the two coincide — and the two are never both live, since guides need interpolate mode.
         let guideOverlay = GuideOverlayView()
         guideOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(guideOverlay)
@@ -84,9 +79,8 @@ struct CanvasView: UIViewRepresentable {
             case .handles:
                 manager.dragGuideHandle(sampleIndex: index, to: point)
             case .spacing:
-                // The finger is somewhere near the guide; the chart wants a position *along* it, so
-                // the drag is projected onto the path. Doing it here rather than in the view keeps
-                // `GuideOverlayView` free of geometry — `arcFraction(nearest:)` is fast-tier.
+                // The chart wants a position along the guide, so the drag is projected onto the
+                // path — keeps `GuideOverlayView` free of geometry.
                 guard let guide = manager.guideStrokes.first(where: { $0.id == id }),
                       let path = GuidePath(samples: guide.samples) else { return }
                 manager.dragGuideSpacingStop(index: index, to: path.arcFraction(nearest: point))
@@ -111,9 +105,8 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        // Paper is inset from the container by `canvasPadding` on each side (the artwork rect); the
-        // coordinator updates these constants in `updatePaper()`. Positive top/leading, negative
-        // bottom/trailing so a larger padding shrinks the white paper inward, revealing the grey margin.
+        // Paper is inset by `canvasPadding` on each side; positive top/leading, negative
+        // bottom/trailing so a larger padding shrinks the paper inward, revealing the grey margin.
         let paperTop = paper.topAnchor.constraint(equalTo: container.topAnchor)
         let paperBottom = paper.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         let paperLeading = paper.leadingAnchor.constraint(equalTo: container.leadingAnchor)
@@ -188,7 +181,6 @@ struct CanvasView: UIViewRepresentable {
         }
         shapeOverlay.onEndpointDragged = { [weak coordinator = context.coordinator] point, endpoint in
             guard let coordinator else { return }
-            // Move the end that was actually grabbed, leaving the other anchored.
             switch endpoint {
             case .start: coordinator.canvasManager.updateInteractiveShape(startPoint: point)
             case .end: coordinator.canvasManager.updateInteractiveShape(endPoint: point)
@@ -200,11 +192,8 @@ struct CanvasView: UIViewRepresentable {
             coordinator.canvasManager.updateInteractiveShape(rotation: rotation)
             coordinator.updateShapeOverlay()
         }
-        // Both handle drags are pure geometry — see `ShapeGeometry.draggingCorner`/`draggingEdge`,
-        // which is where the rotation-inverted local-frame mapping and the oval's axis math live.
-        // Writing the whole resulting geometry back (rather than only the fields a given drag can
-        // change) is the same update either way: a drag that leaves rotation alone writes back the
-        // rotation it read.
+        // Both handle drags are pure geometry — see `ShapeGeometry.draggingCorner`/`draggingEdge`.
+        // The whole resulting geometry is written back either way.
         shapeOverlay.onCornerDragged = { [weak coordinator = context.coordinator] point, corner in
             guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
             coordinator.applyShapeDrag(shape.draggingCorner(corner, to: point))
@@ -256,14 +245,13 @@ struct CanvasView: UIViewRepresentable {
         weak var containerView: UIView?
         weak var onionSkinView: UIImageView?
         weak var guideOverlay: GuideOverlayView?
-        /// The guide under the pen right now, pushed up from `StrokeCanvasView` on every sample. Held
-        /// here rather than read back out of the stroke view so `updateGuideOverlay` stays a pure
-        /// function of coordinator state and can run from the ordinary per-pass update.
+        /// The guide under the pen right now, pushed up from `StrokeCanvasView` per sample. Held here
+        /// so `updateGuideOverlay` stays a pure function of coordinator state.
         private var liveGuidePoints: [CGPoint] = []
         var onionSkinSource: OnionSkinSource = PreviousCelOnionSkinSource()
         weak var paperView: UIView?
-        /// The four constraints pinning the white paper to the container, whose constants are the
-        /// `canvasPadding` inset on each side (see `updatePaper`).
+        /// The four constraints pinning the paper to the container; constants are the
+        /// `canvasPadding` inset on each side.
         var paperInsetConstraints: (top: NSLayoutConstraint, bottom: NSLayoutConstraint, leading: NSLayoutConstraint, trailing: NSLayoutConstraint)?
         weak var transformOverlay: ObjectTransformOverlayView?
         weak var selectionOverlay: SelectionOverlayView?
@@ -276,44 +264,37 @@ struct CanvasView: UIViewRepresentable {
         weak var rotationRecognizer: UIRotationGestureRecognizer?
         weak var fillTapRecognizer: UILongPressGestureRecognizer?
         /// Enabled when there are no layers or the active layer is hidden, so a drawing-tool touch
-        /// (which would otherwise be silently swallowed) triggers a user-facing alert instead.
+        /// triggers a user-facing alert instead of being silently swallowed.
         weak var catchAllTapRecognizer: UILongPressGestureRecognizer?
-        /// Counts live canvas touches — engages the shape constraint snap (rect→square, oval→circle,
-        /// line→nearest 15°) whenever a second one is down.
+        /// Counts live canvas touches — engages the shape constraint snap whenever a second is down.
         weak var touchCountRecognizer: TouchCountRecognizer?
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
-        /// True while the two-finger snap constraint is engaged on the pending shape. Owned here
-        /// rather than by the overlay, because the touches that engage it usually land on the canvas
-        /// rather than on the overlay (which only claims its handles).
+        /// True while the two-finger snap constraint is engaged. Owned here rather than by the
+        /// overlay, since the engaging touches usually land on the canvas, not the overlay.
         private(set) var isShapeConstraintEngaged = false
-        /// Debounces the snap by `shapeConstraintDelay` so a quick two-finger tap — undo — doesn't
-        /// flash a shape into its snapped form on the way past.
+        /// Debounces the snap so a quick two-finger tap-undo doesn't flash a snapped shape.
         private var shapeConstraintTimer: Timer?
         private static let shapeConstraintDelay: TimeInterval = 0.12
         /// See `scheduleShapePreviewRenderIfNeeded`.
         private var isShapePreviewRenderScheduled = false
-        /// Accumulated canvas-space stroke samples from the current stroke (for shape detection
-        /// and later collapsing onto the detected shape geometry).
+        /// Accumulated canvas-space stroke samples from the current stroke, for shape detection.
         private var shapeDetectionSamples: [VectorSample] = []
-        /// Timer that fires after the user holds the finger still for ~1s — triggers shape detection.
+        /// Fires after the user holds the finger still for ~1s — triggers shape detection.
         private var shapeHoldTimer: Timer?
-        /// True when a shape detection is in progress (timer running).
         private var shapeDetectionActive = false
-        /// The stroke view that started the current detection stroke (needed to revert on shape found).
+        /// The stroke view that started the current detection stroke, to revert on shape found.
         private weak var shapeDetectionHost: LayerHostView?
-        // Interactive-fill drag state, captured at press-down: the finger's start point in fixed
-        // screen (host) space, and all three fill settings at that moment. The drag is horizontal-only —
-        // its rightward travel raises whichever single setting is currently selected (canvasManager
-        // .fillSelectedAxis, default gap-closing), relative to these baselines; the others hold.
+        // Interactive-fill drag state, captured at press-down. The drag is horizontal-only — its
+        // rightward travel raises whichever setting is currently selected, relative to these baselines.
         private var fillDragStartHost: CGPoint?
         private var fillDragStartGap: CGFloat = 0
         private var fillDragStartThreshold: CGFloat = 0
         private var fillDragStartEdge: CGFloat = 0
 
-        /// Finger travel (in screen points) that sweeps a fill setting across its whole slider range.
-        /// Deliberately generous so fine adjustments are easy; the value is clamped in CanvasManager.
+        /// Finger travel that sweeps a fill setting across its whole slider range. Generous so fine
+        /// adjustments are easy; clamped in CanvasManager.
         private static let fillDragSweepPoints: CGFloat = 320
 
         private var fitScale: CGFloat = 1
@@ -340,18 +321,16 @@ struct CanvasView: UIViewRepresentable {
 
         private var lastAppliedTransform: (scale: CGFloat, rotation: CGFloat, offset: CGSize)?
 
-        /// Guards against reassigning the stroke view's tool settings on every SwiftUI re-render
-        /// (this method runs on every re-render, including mid-stroke ones).
+        /// Guards against reassigning the stroke view's tool settings on every SwiftUI re-render,
+        /// including mid-stroke ones.
         private struct AppliedTool: Equatable {
             let tool: Tool
             let color: Color
             let size: CGFloat
             let opacity: Double
             let brush: Brush
-            /// Part of the cache key, not just something pushed alongside it: without it, changing
-            /// the vector eraser mode leaves every other field equal, the guard below decides nothing
-            /// tool-relevant changed, and the picker silently does nothing until some unrelated
-            /// setting moves.
+            /// Must be in the cache key: without it, changing eraser mode leaves every other field
+            /// equal and the guard silently does nothing.
             let vectorEraserMode: VectorEraserMode
         }
         private var lastAppliedTool: [UUID: AppliedTool] = [:]
@@ -367,7 +346,7 @@ struct CanvasView: UIViewRepresentable {
             guard let paperView else { return }
             paperView.backgroundColor = UIColor(canvasManager.canvasBackgroundColor)
             paperView.isHidden = !canvasManager.isCanvasBackgroundVisible
-            // Inset the paper to the artwork rect; the grey backdrop shows through the resulting margin.
+            // Inset the paper to the artwork rect; the grey backdrop shows through the margin.
             if let c = paperInsetConstraints {
                 let p = canvasManager.canvasPadding
                 if c.top.constant != p { c.top.constant = p }
@@ -391,9 +370,8 @@ struct CanvasView: UIViewRepresentable {
                 let host = LayerHostView()
                 host.strokeView.layerID = layer.id
                 host.strokeView.canvasManager = canvasManager
-                // Live guide feedback. Straight to the overlay rather than through SwiftUI state:
-                // this fires per touch sample, and a `@Published` write per sample would re-run every
-                // view body on the canvas for the length of the drag.
+                // Live guide feedback goes straight to the overlay, not through SwiftUI state — a
+                // `@Published` write per touch sample would re-run every view body for the drag.
                 host.strokeView.guideOverlayNeedsUpdate = { [weak self] samples in
                     guard let self else { return }
                     self.liveGuidePoints = samples.map(\.point)
@@ -402,17 +380,11 @@ struct CanvasView: UIViewRepresentable {
                 host.strokeView.onStrokeBegan = { [weak self, weak host] in
                     guard let self else { return }
                     // A stroke is a canvas edit, so any adjustable fill/shape bakes before this one
-                    // changes a single pixel: they become the older undo steps and this stroke
-                    // undoes first, and the caller snapshots the raster for undo *after* this
-                    // returns, so the baked content is part of that snapshot rather than lost by it.
-                    //
-                    // This is also what makes drawing straight over a pending shape work in one
-                    // touch: the shape overlay only claims touches on its handles, so this stroke's
-                    // very first touch arrives here, bakes the shape, and then goes on to draw —
-                    // rather than being consumed as a dismissal the user has to follow with a
-                    // second touch to actually start drawing.
+                    // changes a pixel: they become older undo steps, and this stroke's undo
+                    // snapshot (taken after this returns) includes the baked content. This is also
+                    // what lets drawing straight over a pending shape work in one touch — the first
+                    // touch bakes the shape and then goes on to draw.
                     self.commitTransientsAndRefresh()
-                    // Begin accumulating stroke points for smart-shape detection.
                     if let host { self.startShapeDetection(host: host) }
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
@@ -426,11 +398,9 @@ struct CanvasView: UIViewRepresentable {
                 host.strokeView.onStrokeMoved = { [weak self, weak host] sample in
                     guard let self else { return }
                     if self.canvasManager.isShapeFollowingFinger {
-                        // Shape following: the user is still holding after detection. For lines,
-                        // just move the endpoint. For rects & ovals, the finger angle sets
-                        // rotation and the distance sets a uniform scale from centre — see
-                        // `ShapeGeometry.following(_:from:)`, measured against the frame captured
-                        // on the first sample of the drag.
+                        // For lines, just move the endpoint. For rects & ovals, the finger angle
+                        // sets rotation and the distance sets a uniform scale from centre — see
+                        // `ShapeGeometry.following(_:from:)`.
                         let point = sample.point
                         if case .line? = self.canvasManager.activeShape?.kind {
                             self.canvasManager.updateInteractiveShape(endPoint: point)
@@ -445,24 +415,20 @@ struct CanvasView: UIViewRepresentable {
                     }
                 }
                 host.strokeView.strokeRecognizer.onAnyTouchBegan = { [weak self] in
-                    // Touching the canvas at all — even a finger tap that the pencil-only gate below
-                    // rejects — dismisses whatever top-bar dropdown is open (see CanvasManager.
-                    // interactionBegan), so continuing to draw both closes the menu and keeps drawing.
+                    // Touching the canvas at all dismisses whatever top-bar dropdown is open.
                     self?.canvasManager.interactionBegan.send()
                 }
                 host.strokeView.onStrokeEnded = { [weak self, weak host] in
                     guard let self else { return }
                     self.canvasManager.refreshUndoRedoState()
                     self.cancelShapeDetection()
-                    // If the shape was being followed (finger down since detection), lift transitions
-                    // it to the adjustable state — no stroke was committed (it was reverted), so skip
-                    // the normal stroke-end path. `endInteractiveShape` self-guards on finger-down.
+                    // If the shape was being followed, lift transitions it to adjustable state; no
+                    // stroke was committed (it was reverted), so skip the normal stroke-end path.
                     if self.canvasManager.shapeGestureActive {
                         self.canvasManager.endInteractiveShape()
                         self.updateShapeOverlay()
                         return
                     }
-                    // Normal stroke-end path.
                     guard let host, let layerID = host.strokeView.layerID,
                           let layerIndex = self.canvasManager.layers.firstIndex(where: { $0.id == layerID }),
                           let celIndex = self.canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: self.canvasManager.currentFrame) else { return }
@@ -508,8 +474,7 @@ struct CanvasView: UIViewRepresentable {
                 if host.bakedImageView.isHidden != bakedHidden { host.bakedImageView.isHidden = bakedHidden }
 
                 // While this cel's content is floating (lifted into a Move piece), its live strokes
-                // are hidden — the "hole" is shown via bakedImageView's remainder preview instead —
-                // so the lifted content doesn't render twice (once floating, once still in place).
+                // are hidden so the content doesn't render twice.
                 let isFloatingSource = isFloatingMoveSource(layerIndex: index, celIndex: celIdx)
                 if host.strokeView.isHidden != isFloatingSource {
                     host.strokeView.isHidden = isFloatingSource
@@ -519,17 +484,13 @@ struct CanvasView: UIViewRepresentable {
                     if host.strokeView.raster !== targetRaster {
                         host.strokeView.raster = targetRaster
                     }
-                    // Vector layers route drawing into their VectorCanvas instead of the raster (nil
-                    // for raster layers, so the stroke view stays in raster mode there).
+                    // Vector layers route drawing into their VectorCanvas instead of the raster.
                     let targetVector = celIdx.flatMap { canvasManager.layers[index].cels[$0].vector }
                     if host.strokeView.vectorCanvas !== targetVector {
                         host.strokeView.vectorCanvas = targetVector
                     } else {
-                        // Same backing instance, but it may have been mutated in place — a shape or
-                        // fill baking down, an undo/redo of one, a vector transform or image import.
-                        // Neither `RasterLayerTexture` nor `VectorCanvas` changes the `layers` value
-                        // when its content changes, so this version check is the only thing that
-                        // brings the display back in sync. See `displayedRasterVersion`.
+                        // Same instance, but may have been mutated in place; version check brings
+                        // the display back in sync. See `displayedRasterVersion`.
                         host.strokeView.refreshDisplayIfStale()
                     }
                 }
@@ -538,14 +499,9 @@ struct CanvasView: UIViewRepresentable {
                     host.fillImageView.image = targetFillImage
                 }
                 // Disabling only strokeView.isUserInteractionEnabled isn't enough: each LayerHostView
-                // fully covers the container and stacks as a sibling, so an inactive host still
-                // swallows touches via UIView's default hitTest (which returns the host itself once
-                // its non-interactive subviews all reject the point), preventing the touch from ever
-                // reaching an active layer underneath. Disabling the host itself lets hit-testing
-                // fall through to the next layer down. The fill tool also disables it on the active
-                // layer: it works via a tap gesture on the container, not stroke capture.
-                // Select/Move take over touch handling entirely while engaged (via SelectionOverlayView/
-                // FloatingPieceOverlayView, both above the whole layer stack), so drawing is disabled then too.
+                // fully covers the container, so an inactive host still swallows touches via UIView's
+                // default hitTest, blocking an active layer underneath. Disabling the host itself
+                // lets hit-testing fall through. Select/Move also disable drawing while engaged.
                 let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil
                     && canvasManager.selectedTool != .fill
                     && activePanel != .select && canvasManager.floatingPiece == nil
@@ -558,8 +514,7 @@ struct CanvasView: UIViewRepresentable {
                 }
             }
 
-            // Enable the catch-all gesture when no layers exist or the active layer is hidden,
-            // so a drawing-tool touch triggers a user-facing alert instead of being silently swallowed.
+            // Enable the catch-all gesture when no layers exist or the active layer is hidden.
             let needsCatch: Bool
             if canvasManager.layers.isEmpty {
                 needsCatch = true
@@ -575,10 +530,8 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: - Vector-layer transform overlay
 
-        /// Drives `ObjectTransformOverlayView` (a generic single-`LayerTransform` handle box) from the
-        /// active vector layer's aggregate transform while `isVectorTransforming` is on — the only
-        /// remaining user of this overlay now that dedicated object layers are gone (inserted photos
-        /// are vector elements moved as part of their layer's overall transform, same as this).
+        /// Drives `ObjectTransformOverlayView` from the active vector layer's aggregate transform
+        /// while `isVectorTransforming` is on — the only remaining user of this overlay.
         func updateTransformOverlay() {
             guard let overlay = transformOverlay, let container = containerView else { return }
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else {
@@ -587,13 +540,10 @@ struct CanvasView: UIViewRepresentable {
             }
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
 
-            // Vector layer being transformed: box just the layer's own content (its bounding box in
-            // local space), driven by the VectorCanvas's current overall transform — not the whole
-            // canvas, so Move only carries the actual drawn content along, matching the raster Move
-            // tool's use of the content's bounding box.
-            // `activeCelIsInBetween` as well as the mode flag, because the playhead can move onto an
-            // interpolated cel while the transform is already on — at which point the box would be
-            // handles over a frame it cannot move.
+            // Vector layer being transformed: box just the layer's own content, in local space, so
+            // Move only carries the drawn content, matching the raster Move tool. Also checks
+            // `activeCelIsInBetween` since the playhead can move onto an interpolated cel while the
+            // transform is already on, where the box would be handles over a frame it can't move.
             if layer.kind == .vector, layer.isVisible, canvasManager.isVectorTransforming,
                !canvasManager.activeCelIsInBetween,
                let canvasSize = canvasManager.canvasSize,
@@ -617,22 +567,18 @@ struct CanvasView: UIViewRepresentable {
                   let canvasSize = canvasManager.canvasSize,
                   let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame),
                   let vector = canvasManager.layers[index].cels[celIdx].vector else { return }
-            // Same pivot `updateTransformOverlay` handed the overlay: the content's own local bounding
-            // box center, fixed for the gesture since the raw (untransformed) geometry doesn't change
-            // while it's only being moved/scaled/rotated.
+            // Same pivot `updateTransformOverlay` handed the overlay: the content's local bounding
+            // box center, fixed for the gesture.
             let localBounds = vector.localContentBounds() ?? CGRect(origin: .zero, size: canvasSize)
             let pivot = CGPoint(x: localBounds.midX, y: localBounds.midY)
             canvasManager.setVectorTransform(transform, layerIndex: index, pivot: pivot)
-            // VectorCanvas is a reference type mutated in place, so refresh its host directly
-            // (the @Published layers array didn't change identity).
+            // VectorCanvas is a reference type mutated in place, so refresh its host directly.
             let layerID = canvasManager.layers[index].id
             layerHosts[layerID]?.strokeView.refreshDisplay()
         }
 
-        /// What a layer's `bakedImageView` should show for its active cel: the real `bakedImage`,
-        /// or — while that exact cel's content is lifted into a Move (not Duplicate) piece — the
-        /// transient "hole" preview computed at lift time, which isn't written into the model until
-        /// the piece commits (see `CanvasManager.beginMove`/`commitFloatingPieceIfNeeded`).
+        /// What a layer's `bakedImageView` should show: the real `bakedImage`, or — while that cel's
+        /// content is lifted into a Move piece — the transient "hole" preview computed at lift time.
         private func bakedImageToDisplay(layerIndex: Int, celIndex: Int?) -> UIImage? {
             guard let celIndex else { return nil }
             if let piece = canvasManager.floatingPiece, piece.kind == .move,
@@ -656,10 +602,8 @@ struct CanvasView: UIViewRepresentable {
             overlay.mode = canvasManager.selectionMode
             overlay.isCapturingGestures = (activePanel == .select) && (canvasManager.floatingPiece == nil)
             overlay.updateSelection(canvasManager.selection, allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection)
-            // Layer hosts are added to `container` after this overlay (see CanvasView.makeUIView), so
-            // without this the marching ants/hatch render *underneath* every layer's own content —
-            // bring it back to front whenever it has something to show or is actively capturing a new
-            // lasso/rectangle drag, same pattern updateTransformOverlay uses for its own overlay.
+            // Layer hosts are added after this overlay, so without this the marching ants/hatch
+            // render underneath layer content — bring it back to front when it has something to show.
             if overlay.isCapturingGestures || canvasManager.selection != nil {
                 container.bringSubviewToFront(overlay)
             }
@@ -669,13 +613,9 @@ struct CanvasView: UIViewRepresentable {
             floatingOverlay?.update(canvasManager.floatingPiece)
             guard let overlay = floatingOverlay, let container = containerView else { return }
 
-            // A piece lifted by the Move tool still belongs to its source layer, so it has to render
-            // in that layer's place in the stack — floating it above everything makes content that
-            // should sit *under* the layers above it appear on top while it's being dragged.
-            //
-            // Every other case (no piece, or a duplicate/paste that isn't tied to a position in the
-            // stack) puts it back at the front. Without that `else`, one move would leave the overlay
-            // wedged below a layer host for good, and the next operation would render behind it.
+            // A piece lifted by the Move tool still belongs to its source layer, so it renders in
+            // that layer's stack position rather than floating above everything above it. Every
+            // other case puts it back at the front, or the overlay would stay wedged below.
             if let piece = canvasManager.floatingPiece, piece.kind == .move,
                let sourceIndex = canvasManager.layers.firstIndex(where: { $0.id == piece.sourceLayerID }),
                sourceIndex + 1 < canvasManager.layers.count,
@@ -694,26 +634,22 @@ struct CanvasView: UIViewRepresentable {
             }
             let isAdjustable = canvasManager.isShapeInAdjustableState
             overlay.isActive = true
-            // Render inline the first time (otherwise the shape would be invisible for a frame the
-            // moment it's detected); after that let the coalescing below carry it.
+            // Render inline the first time so the shape isn't invisible for a frame; the
+            // coalescing below carries subsequent renders.
             if canvasManager.activeShapePreviewImage == nil { canvasManager.renderActiveShapePreview() }
             overlay.update(shape: shape,
                            previewImage: canvasManager.activeShapePreviewImage,
                            showHandles: isAdjustable)
             scheduleShapePreviewRenderIfNeeded()
-            // Put the overlay above every layer host so it's visible and, in the adjustable
-            // state, its handles are hit-testable. During shape following (finger still down)
-            // we disable interaction so touches pass through to the stroke view, which routes
-            // them back to `updateInteractiveShape`.
+            // Above every layer host so it's visible and hit-testable; interaction is disabled
+            // during shape following so touches pass through to the stroke view instead.
             container.bringSubviewToFront(overlay)
             overlay.isUserInteractionEnabled = isAdjustable
         }
 
-        /// Coalesces preview re-renders to one per run-loop turn. A Pencil delivers several coalesced
-        /// samples per frame and each one moves the shape, but re-stamping a canvas-sized preview for
-        /// every sample would cost far more than the one frame of lag this trades for. Feeding the
-        /// result straight to the overlay (rather than re-entering `updateShapeOverlay`) also keeps
-        /// this from scheduling itself in a loop.
+        /// Coalesces preview re-renders to one per run-loop turn — a Pencil delivers several coalesced
+        /// samples per frame, and re-stamping a canvas-sized preview per sample costs far more than
+        /// the frame of lag this trades for. Feeds the overlay directly to avoid re-scheduling itself.
         private func scheduleShapePreviewRenderIfNeeded() {
             guard canvasManager.isActiveShapePreviewStale, !isShapePreviewRenderScheduled else { return }
             isShapePreviewRenderScheduled = true
@@ -727,9 +663,8 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// Repaints every layer host whose backing content has drifted from what it last rendered.
-        /// `reconcileLayers` does the same per layer on each SwiftUI pass; this is the synchronous
-        /// form, for the moment a transient bakes — the overlay drawing its preview is torn down
-        /// immediately, so waiting a pass for the baked pixels to appear shows a visible flicker.
+        /// The synchronous form of `reconcileLayers`' per-pass version, needed for the moment a
+        /// transient bakes so the baked pixels don't flicker in a pass later.
         func syncLayerDisplays() {
             for host in layerHosts.values {
                 host.strokeView.refreshDisplayIfStale()
@@ -737,14 +672,12 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// Bakes whatever is transient (shape or fill) and brings the canvas back in sync in the
-        /// same turn — the entry point for every "the user did something that ends shape editing"
-        /// path in this coordinator.
+        /// same turn — the entry point for every path that ends shape editing.
         func commitTransientsAndRefresh() {
             canvasManager.beginCanvasEdit()
             syncLayerDisplays()
             updateShapeOverlay()
-            // Nothing is pending any more, so the snap has nothing to constrain — drop it here
-            // rather than waiting for the fingers holding it to leave.
+            // Nothing pending, so the snap has nothing left to constrain.
             if !canvasManager.shapeGestureActive {
                 shapeConstraintTimer?.invalidate()
                 shapeConstraintTimer = nil
@@ -757,19 +690,14 @@ struct CanvasView: UIViewRepresentable {
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
             guard let host = layerHosts[layer.id] else { return }
 
-            // Not per-layer (there's only one global selected tool), so it lives outside the
-            // per-layer caching guard below and is kept in sync on every call. Also suspended while
-            // Select is engaged or a piece is floating — same conditions `shouldInteract` already
-            // gates the stroke view on above — so the fill tool's one-finger press can't fire
-            // underneath (and race) the Selection/Move overlays' own gestures on the same touch.
+            // Not per-layer, so it lives outside the AppliedTool caching guard below and stays in
+            // sync every call. Suspended while Select is engaged or a piece is floating, so the fill
+            // tool's press can't race the Selection/Move overlays' own gestures.
             fillTapRecognizer?.isEnabled = (canvasManager.selectedTool == .fill)
                 && activePanel != .select && canvasManager.floatingPiece == nil
 
-            // Same reasoning as fillTapRecognizer above: kept in sync on every call, outside the
-            // AppliedTool caching guard below, since toggling "paint outside selection" or making/
-            // clearing a selection doesn't otherwise touch any of that struct's fields. Only applies
-            // to the exact layer/cel the selection belongs to (selection is always cleared when the
-            // active layer/cel moves away from it — see handleActiveContextChanged).
+            // Also outside the AppliedTool guard: toggling "paint outside selection" doesn't touch
+            // any of that struct's fields. Only applies to the layer/cel the selection belongs to.
             let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame)
             let celID = celIdx.map { layer.cels[$0].id }
             if let selection = canvasManager.selection, !canvasManager.allowsPaintingOutsideSelection,
@@ -779,15 +707,13 @@ struct CanvasView: UIViewRepresentable {
                 host.strokeView.selectionClipPath = nil
             }
 
-            // Eraser gets its own brush/size/opacity, entirely separate from the paint brush's, so
-            // switching tools never clobbers either one's settings (see CanvasManager's eraser state).
+            // Eraser gets its own brush/size/opacity, separate from the paint brush's.
             let isEraser = canvasManager.selectedTool == .eraser
             let activeSize = isEraser ? canvasManager.eraserSize : canvasManager.brushSize
             let activeOpacity = isEraser ? canvasManager.eraserOpacity : canvasManager.brushOpacity
             let activeBrush = isEraser ? canvasManager.selectedEraserBrush : canvasManager.selectedBrush
 
-            // Only push new tool settings into the view when something tool-relevant actually
-            // changed, same caching reason as before (this method runs on every SwiftUI re-render).
+            // Only push new tool settings when something tool-relevant actually changed.
             let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, size: activeSize, opacity: activeOpacity, brush: activeBrush, vectorEraserMode: canvasManager.vectorEraserMode)
             guard lastAppliedTool[layer.id] != desired else { return }
             lastAppliedTool[layer.id] = desired
@@ -798,64 +724,38 @@ struct CanvasView: UIViewRepresentable {
             host.strokeView.brush = activeBrush
             host.strokeView.isEraser = isEraser
             host.strokeView.vectorEraserMode = canvasManager.vectorEraserMode
-            // .fill is handled by fillTapRecognizer, not the stroke view — the canvas is
-            // non-interactive there (see reconcileLayers' shouldInteract).
+            // .fill is handled by fillTapRecognizer, not the stroke view.
         }
 
-        /// What an interpolated frame's pixels depend on. Recomputing only when this changes is what
-        /// makes the preview affordable: `updateUIView` runs on every SwiftUI pass, and evaluating a
-        /// recipe is two lattice embeddings, an ARAP solve and two canvas-sized renders.
-        ///
-        /// The referenced canvases' versions are in the key on purpose — that's what makes "edit
-        /// keyframe A and the in-between updates for free" actually happen, rather than requiring an
-        /// invalidation call at every site that can touch a keyframe.
+        /// What an interpolated frame's pixels depend on. Recomputing only when this changes makes
+        /// the preview affordable: `updateUIView` runs every SwiftUI pass, and evaluating a recipe is
+        /// two lattice embeddings, an ARAP solve and two canvas-sized renders. Reference-canvas
+        /// versions are in the key so editing a keyframe updates its in-betweens for free.
         private struct InterpolationPreviewKey: Equatable {
             let celID: UUID
             let t: CGFloat
             let preview: Bool
-            /// True for the tinted group overlay rather than an in-between. One cel can only ever be
-            /// one of the two — an interpolated cel has a recipe, a keyframe does not — but they
-            /// share this dictionary, so the key has to keep them apart.
+            /// True for the tinted group overlay rather than an in-between; the two share this
+            /// dictionary so the key has to keep them apart.
             let overlay: Bool
             let thicknessFade: Bool
-            /// Solo/mute. In the key because it's an input to the evaluation, and anything that is an
-            /// input and not in the key appears to do nothing until an unrelated change forces a
-            /// re-render.
+            /// Solo/mute state — an evaluation input, so it must be in the key.
             let hiddenGroups: Set<UUID>
             let referenceVersions: [Int]
-            /// The recipe's local edits, by identity.
-            ///
-            /// In the key for the same reason `hiddenGroups` is, and it's the one input no *version*
-            /// number covers: an edit at an in-between changes the recipe, which lives in the `Cel`
-            /// struct, while every version here belongs to a `VectorCanvas` the edit never touches.
-            /// Without it the artist draws at `t` and nothing appears until an unrelated change
-            /// forces a re-render.
-            ///
-            /// The ids rather than the count, so undo (which removes the last edit) and redo (which
-            /// puts the same one back) are told apart from each other and from a *different* edit
-            /// appended in between.
+            /// The recipe's local edits, by identity. No version number covers this: an edit at an
+            /// in-between changes the recipe on the `Cel`, not a `VectorCanvas`. IDs rather than
+            /// count, so undo/redo (remove/re-add the same edit) are told apart from a new one.
             let localEditIDs: [UUID]
-            /// The guides driving this recipe.
-            ///
-            /// Guides live on `CanvasManager`, not on any `VectorCanvas`, so no `referenceVersions`
-            /// entry moves when one is edited — and `updateGuideStroke` replaces a guide **keeping
-            /// its id**, which makes reuse across frames a reference rather than a copy and also
-            /// stops an id list from noticing. So the whole guides go in, compared by value.
-            ///
-            /// That deep compare is cheaper than it looks and much cheaper than being wrong: a guide
-            /// is tens of samples, a recipe names one or two, and the alternative is re-rendering the
-            /// frame on every SwiftUI pass. `CanvasManager.guides(driving:)` produces this list *and*
-            /// the one the evaluator gets, so the two cannot drift apart.
+            /// Guides live on `CanvasManager`, not any `VectorCanvas`, so no `referenceVersions`
+            /// entry moves when one is edited — and `updateGuideStroke` keeps a guide's id on
+            /// replace, so an id list wouldn't notice either. Compared by value instead.
             let guides: [GuideStroke]
         }
         private var interpolationPreviewKeys: [UUID: InterpolationPreviewKey] = [:]
 
         /// Renders each layer's interpolated frame, where it has one at the current frame, and clears
-        /// it everywhere else.
-        ///
-        /// `.preview` quality while the slider is being dragged and `.full` on release — the two
-        /// cache in separate slots on `VectorCanvas`, so switching between them does not throw the
-        /// other away, and `.full` on every tick of a drag is several times the cost per tick.
+        /// it everywhere else. `.preview` quality while scrubbing, `.full` on release — cached in
+        /// separate slots on `VectorCanvas` so switching doesn't throw the other away.
         func updateInterpolationPreviews() {
             for (layerIndex, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
@@ -866,10 +766,8 @@ struct CanvasView: UIViewRepresentable {
                     continue
                 }
                 guard let recipe = layer.cels[celIndex].interpolation else {
-                    // No recipe here, so this cel is a *keyframe* or an ordinary drawing — and the
-                    // same seam carries the tinted "what did it decide?" overlay, which only ever
-                    // applies to a cel with its own tagged strokes. The two can never contend: an
-                    // interpolated cel has a recipe and takes the branch below.
+                    // No recipe here, so this cel is a keyframe or ordinary drawing; the same seam
+                    // carries the tinted motion-group overlay for it instead.
                     updateMotionGroupOverlay(layer: layer, celIndex: celIndex, host: host)
                     continue
                 }
@@ -896,13 +794,10 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// The tinted "what did it decide?" overlay, memoized on the same key as the in-between preview.
-        ///
-        /// It has to be memoized for exactly the reason that one is: `updateInterpolationPreviews`
-        /// runs on every SwiftUI pass, so an un-keyed render here would re-rasterise every keyframe
-        /// on screen at every pass. `t: 0` and `overlay: true` keep it from ever colliding with a
-        /// preview key for the same cel, and the cel's own `version` is what a retag moves — which is
-        /// how tapping a stroke recolours it with no invalidation call anywhere.
+        /// The tinted motion-group overlay, memoized on the same key as the in-between preview so an
+        /// un-keyed render doesn't re-rasterise every keyframe on every SwiftUI pass. `t: 0` and
+        /// `overlay: true` keep it from colliding with a preview key for the same cel; the cel's own
+        /// `version` is what a retag moves.
         private func updateMotionGroupOverlay(layer: Layer, celIndex: Int, host: LayerHostView) {
             let cel = layer.cels[celIndex]
             guard canvasManager.isInterpolateMode, canvasManager.showMotionGroupOverlay,
@@ -922,17 +817,10 @@ struct CanvasView: UIViewRepresentable {
                 canvasManager.motionGroupOverlayImage(forCel: cel.id, inLayer: layer.id))
         }
 
-        /// The guide render pass — the guides bound to the frame under the playhead, plus whatever
-        /// is under the pen.
-        ///
-        /// Not memoized on `InterpolationPreviewKey`, deliberately: that key guards an ARAP solve
-        /// and two canvas-sized rasterisations, while this sets two `CGPath`s. `GuideOverlayView.update`
-        /// does its own equality check, so a pass where nothing moved costs one array compare.
-        ///
-        /// Grips are shown only while the Guide toggle is **off** — see `GuideOverlayView`'s type
-        /// comment. Armed, every canvas drag is a new guide and nothing may carve an exception out of
-        /// that; disarmed is the artist saying they are done drawing them. Which editor they belong
-        /// to is `isEditingGuideSpacing`, the bar's own toggle.
+        /// The guide render pass — guides bound to the frame under the playhead, plus whatever is
+        /// under the pen. Not memoized like `InterpolationPreviewKey`: this only sets two `CGPath`s,
+        /// and `GuideOverlayView.update` does its own equality check. Grips show only while the
+        /// Guide toggle is off — armed, every drag is a new guide with no exceptions.
         func updateGuideOverlay() {
             guard let guideOverlay else { return }
             let editing: GuideOverlayView.Editing =
@@ -944,22 +832,15 @@ struct CanvasView: UIViewRepresentable {
                                        grips: grips(for: guide, editing: editing))
             }
             guideOverlay.update(guides: guides, live: liveGuidePoints, editing: editing)
-            // **Re-asserted every pass, exactly as `updateShapeOverlay` does, and it is not
-            // redundant.** `makeUIView` adds this overlay last, but `reconcileLayers` calls
-            // `bringSubviewToFront` on every layer host whenever the layer order changes — which puts
-            // every host above it. A transparent host still lets the dashes show through, so the
-            // guide went on *looking* right while `hitTest` never reached it: the active layer's
-            // `StrokeCanvasView` claimed the touch first and the handles were dead. Found by the e2e,
-            // and invisible to every logic test by construction.
+            // Re-asserted every pass: `reconcileLayers` brings every layer host to front whenever
+            // layer order changes, which puts hosts above this overlay. A transparent host still
+            // lets the dashes show through visually while `hitTest` never reaches the handles.
             guideOverlay.superview?.bringSubviewToFront(guideOverlay)
         }
 
         /// A guide's grips for the active editor: sample-indexed shape handles, or the spacing
-        /// chart's stops placed along the path.
-        ///
-        /// The chart's two end stops are the keyframes and are not draggable — they are dropped here
-        /// rather than drawn inert, since a dot that does not move when pulled is worse than one that
-        /// is not offered. `SpacingChart.draggable` is the one place that rule lives.
+        /// chart's stops placed along the path. The chart's two end stops are the keyframes and
+        /// aren't draggable, so they're dropped rather than drawn inert.
         private func grips(for guide: GuideStroke,
                            editing: GuideOverlayView.Editing) -> [GuideOverlayView.Guide.Grip] {
             switch editing {
@@ -985,9 +866,7 @@ struct CanvasView: UIViewRepresentable {
                 onionSkinView.isHidden = true
                 return
             }
-            // Interpolate mode wants the two reference keyframes rather than the previous cel, so
-            // the source is swapped by mode rather than by a flag inside one source — that's what
-            // `OnionSkinSource` is for.
+            // Interpolate mode wants the two reference keyframes rather than the previous cel.
             let source: OnionSkinSource = canvasManager.isInterpolateMode
                 ? InterpolationReferenceOnionSkinSource()
                 : onionSkinSource
@@ -998,8 +877,7 @@ struct CanvasView: UIViewRepresentable {
             }
 
             onionSkinView.image = OnionSkinFrame.composite(frames, size: canvasManager.canvasSize)
-            // The per-frame opacity is baked into the composite, so the view itself is opaque —
-            // otherwise two frames at 0.3 would come out at 0.09 through a 0.3 view.
+            // Per-frame opacity is baked into the composite, so the view stays opaque here.
             onionSkinView.alpha = frames.count == 1 ? frames[0].opacity : 1
             onionSkinView.isHidden = false
         }
@@ -1015,7 +893,7 @@ struct CanvasView: UIViewRepresentable {
             shapeLastPoint = nil
             shapeFollowFrame = nil
             shapeHoldTimer?.invalidate()
-            // The timer resets on meaningful moves — fires 0.8s after the finger stops.
+            // Resets on meaningful moves — fires 0.8s after the finger stops.
             shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
                 Task { @MainActor in
                     self?.fireShapeDetection()
@@ -1023,21 +901,15 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// Last position at which the hold timer was (re)started. Used to filter out sub-pixel
-        /// micro-moves that Apple Pencil generates even when held still, which would otherwise
-        /// prevent the timer from ever completing.
+        /// Last position the hold timer was (re)started at — filters out Apple Pencil's sub-pixel
+        /// micro-moves, which would otherwise prevent the timer from ever completing.
         private var shapeLastPoint: CGPoint?
 
-        /// Captured on the first sample after shape following begins, and held for the rest of that
-        /// drag: where the finger was relative to the shape's centre, how big the shape was, and the
-        /// rotation it was already detected at. Nil until then. See `ShapeGeometry.FollowFrame`,
-        /// which carries the math and the reason the shape's own rotation has to be part of it.
+        /// Captured on the first sample of shape following: finger position relative to the shape's
+        /// centre, its size, and its detected rotation. See `ShapeGeometry.FollowFrame`.
         private var shapeFollowFrame: ShapeGeometry.FollowFrame?
 
-        /// Writes a dragged geometry back onto the pending shape and repaints the overlay. The one
-        /// place a handle drag or a follow-the-finger sample lands, so each of those only has to
-        /// produce the new `ShapeGeometry` (see `ShapeGeometry`'s handle-dragging section).
-        ///
+        /// Writes a dragged geometry back onto the pending shape and repaints the overlay.
         /// `refreshOverlay: false` is for callers that update the overlay themselves right after.
         fileprivate func applyShapeDrag(_ geometry: ShapeGeometry, refreshOverlay: Bool = true) {
             canvasManager.updateInteractiveShape(startPoint: geometry.startPoint,
@@ -1051,8 +923,7 @@ struct CanvasView: UIViewRepresentable {
             guard let host, host === shapeDetectionHost else { return }
             shapeDetectionSamples.append(sample)
             let point = sample.point
-            // Only restart the timer if the finger / pencil moved more than 2pt — Apple Pencil
-            // generates continual micro-moves that would otherwise never let the timer fire.
+            // Only restart the timer past 2pt of movement — otherwise Pencil micro-moves never let it fire.
             if let last = shapeLastPoint {
                 let dx = point.x - last.x, dy = point.y - last.y
                 guard hypot(dx, dy) > 2 else { return }
@@ -1092,8 +963,7 @@ struct CanvasView: UIViewRepresentable {
             let points = samples.map(\.point)
             guard let shape = ShapeDetector.detect(from: points) else { return }
 
-            // Revert the partial stroke that was painted during the hold period.
-            // strokeBeforeSnapshot becomes nil, so the subsequent handleEnd bails out early.
+            // Revert the partial stroke painted during the hold period.
             if host.strokeView.vectorCanvas != nil {
                 host.strokeView.revertVectorStrokeToSnapshot()
             } else {
@@ -1102,8 +972,7 @@ struct CanvasView: UIViewRepresentable {
 
             canvasManager.beginInteractiveShape(shape, samples: samples)
             updateShapeOverlay()
-            // The snapping finger may already have been down before the hold timer fired, in which
-            // case no touch event is coming to engage the constraint — re-read the count instead.
+            // A snapping finger may already have been down before the timer fired, so re-read the count.
             canvasTouchCountChanged(touchCountRecognizer?.activeCount ?? 0)
         }
 
@@ -1127,9 +996,8 @@ struct CanvasView: UIViewRepresentable {
             applyTransform()
         }
 
-        /// The rotation actually used for rendering: snaps to the nearest right angle when the raw
-        /// angle is close to one, unless the user has held within that snap zone for over a second
-        /// (which releases the snap so they can keep rotating past it).
+        /// Snaps to the nearest right angle when close to one, unless held within the snap zone for
+        /// over a second (which releases it so the user can keep rotating past it).
         private func effectiveRotation() -> CGFloat {
             let raw = committedRotation + liveRotation
             let quarterTurn = CGFloat.pi / 2
@@ -1154,9 +1022,8 @@ struct CanvasView: UIViewRepresentable {
             let offset = CGSize(width: committedOffset.width + liveOffset.width, height: committedOffset.height + liveOffset.height)
 
             // Reassigning .transform/.center to identical values still forces a Core Animation
-            // update pass; guard it so it never happens on renders unrelated to the canvas transform
-            // (e.g. every point of an in-progress stroke), which could otherwise perturb the active
-            // stroke's touch tracking.
+            // update pass; guard it so unrelated renders (e.g. every point of a stroke) don't
+            // perturb the active stroke's touch tracking.
             if let last = lastAppliedTransform, last.scale == scale, last.rotation == rotation, last.offset == offset {
                 return
             }
@@ -1194,13 +1061,10 @@ struct CanvasView: UIViewRepresentable {
             twoFingerTap.cancelsTouchesInView = false
             view.addGestureRecognizer(twoFingerTap)
 
-            // Drives the shape constraint snap: it reports the live canvas touch count, and two or
-            // more touches engage the snap (after a short delay — see `canvasTouchCountChanged`).
-            // Unlike the two-finger long press this replaced, it also fires when the second touch
-            // joins a sequence the pen started seconds ago, which is exactly the "keep the pen down
-            // after the shape appears, then drop a finger to snap it" gesture — a long press with
-            // `numberOfTouchesRequired = 2` has already failed by then, because it starts its clock
-            // on the first touch and gives up when the fingers aren't all down in time.
+            // Drives the shape constraint snap: reports the live canvas touch count, and two or more
+            // engage the snap after a short delay (see `canvasTouchCountChanged`). Unlike a
+            // two-finger long press, it still fires when a second touch joins a sequence the pen
+            // started seconds ago — "keep the pen down, then drop a finger to snap it."
             let touchCounter = TouchCountRecognizer(target: self, action: nil)
             touchCounter.delegate = self
             touchCounter.onCountChanged = { [weak self] count in
@@ -1216,12 +1080,9 @@ struct CanvasView: UIViewRepresentable {
 
             twoFingerTap.require(toFail: threeFingerTap)
 
-            // One-finger press-drag that drives the fill tool: press applies the fill, then dragging
-            // adjusts gap-closing (vertical) and edge overlap (horizontal) live. `minimumPressDuration = 0`
-            // makes a plain tap register immediately (press + lift with no drag == a one-shot fill).
-            // Kept disabled except while the fill tool is selected (toggled in updateActiveLayerAndTool)
-            // rather than gated only inside the handler, so it never competes for single-finger touches
-            // with the active layer's own stroke capture while a drawing tool is active.
+            // One-finger press-drag driving the fill tool: press applies the fill, dragging adjusts
+            // settings live. `minimumPressDuration = 0` makes a plain tap a one-shot fill. Disabled
+            // except while the fill tool is selected, so it never competes with stroke capture.
             let fillPress = UILongPressGestureRecognizer(target: self, action: #selector(handleFillPress(_:)))
             fillPress.minimumPressDuration = 0
             fillPress.numberOfTouchesRequired = 1
@@ -1231,10 +1092,9 @@ struct CanvasView: UIViewRepresentable {
             view.addGestureRecognizer(fillPress)
             fillTapRecognizer = fillPress
 
-            // Catch-all gesture for when no layers or the active layer is hidden: fires immediately
-            // on any single-finger touch so we can surface an actionable alert instead of silently
-            // swallowing the touch. Disabled by default — enabled in reconcileLayers only when the
-            // canvas can't accept drawing input.
+            // Catch-all for when no layers or the active layer is hidden: fires on any single-finger
+            // touch to surface an alert instead of silently swallowing it. Disabled by default —
+            // enabled in reconcileLayers only when the canvas can't accept drawing input.
             let catchAll = UILongPressGestureRecognizer(target: self, action: #selector(handleCatchAllTap(_:)))
             catchAll.minimumPressDuration = 0
             catchAll.numberOfTouchesRequired = 1
@@ -1255,11 +1115,10 @@ struct CanvasView: UIViewRepresentable {
                    transformRecognizers.contains(where: { $0 === otherGestureRecognizer })
         }
 
-        /// Dynamically requires the transform recognizers to wait on the *currently active* layer's
-        /// drawing gesture recognizer only. A static `require(toFail:)` against every layer (including
-        /// inactive ones, whose recognizers never receive touches because isUserInteractionEnabled is
-        /// false and therefore never reach `.failed`) permanently deadlocks two-finger pan/zoom/rotate
-        /// as soon as a second layer exists. This is evaluated fresh for every gesture attempt instead.
+        /// Dynamically requires the transform recognizers to wait only on the currently active
+        /// layer's drawing recognizer. A static `require(toFail:)` against every layer, including
+        /// inactive ones that never reach `.failed`, would deadlock two-finger pan/zoom/rotate as
+        /// soon as a second layer exists.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
             guard transformRecognizers.contains(where: { $0 === gestureRecognizer }) else { return false }
@@ -1276,10 +1135,9 @@ struct CanvasView: UIViewRepresentable {
         private func beginAnchorIfNeeded(at location: CGPoint) {
             canvasManager.cancelInteractiveFillDrag()
             if canvasManager.shapeGestureActive {
-                // Two fingers on a pending shape mean "snap it" (the touch counter engages that),
-                // not "pan the canvas" — so don't set gesture anchors here. Panning only takes over
-                // once the user keeps moving, which `commitSnappedShapeIfTransforming` reads as
-                // "done editing", bakes the shape, and anchors from there.
+                // Two fingers on a pending shape mean "snap it," not "pan the canvas" — panning
+                // only takes over once `commitSnappedShapeIfTransforming` reads continued movement
+                // as "done editing" and anchors from there.
                 return
             }
             guard gestureAnchorCenter0 == nil, let container = containerView else { return }
@@ -1293,7 +1151,7 @@ struct CanvasView: UIViewRepresentable {
         private func updateLiveOffset(currentLocation: CGPoint) {
             guard let host0 = gestureAnchorHost0, let center0 = gestureAnchorCenter0 else { return }
             let d0 = CGPoint(x: host0.x - center0.x, y: host0.y - center0.y)
-            let theta = effectiveRotation() - committedRotation // this gesture's rotation contribution only
+            let theta = effectiveRotation() - committedRotation // this gesture's contribution only
             let s = liveScale
             let rotatedScaled = CGPoint(
                 x: s * (d0.x * cos(theta) - d0.y * sin(theta)),
@@ -1305,14 +1163,13 @@ struct CanvasView: UIViewRepresentable {
             )
         }
 
-        /// Folds live scale/rotation/offset into the committed baseline once *all* of pan/pinch/rotation
-        /// have ended, rather than each committing independently (fingers rarely lift in perfect sync,
-        /// and committing one gesture's contribution while another is still live would jump visually).
+        /// Folds live scale/rotation/offset into the committed baseline once all of pan/pinch/rotation
+        /// have ended, rather than each committing independently — fingers rarely lift in sync, and
+        /// committing one gesture's contribution while another is live would jump visually.
         private func commitLiveTransformIfAllEnded() {
             let states: [UIGestureRecognizer.State] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0?.state }
             guard !states.contains(.began), !states.contains(.changed) else { return }
-            // No upper bound — zoom is unlimited. The tiny floor only guards against the scale
-            // collapsing to zero/negative if a pinch's fingers cross, not a real zoom limit.
+            // No upper bound on zoom; the tiny floor only guards against a pinch's fingers crossing.
             committedScale = max(committedScale * liveScale, 0.01)
             committedRotation = effectiveRotation()
             committedOffset.width += liveOffset.width
@@ -1324,27 +1181,20 @@ struct CanvasView: UIViewRepresentable {
             gestureAnchorCenter0 = nil
             snapEngagedAt = nil
             // The shape snap isn't released here: it follows the touches themselves (see
-            // `canvasTouchCountChanged`), which is what lets the pen lift out of a snapped shape
-            // while the snapping finger is still down.
+            // `canvasTouchCountChanged`), letting the pen lift out of a snapped shape while the
+            // snapping finger is still down.
         }
 
-        /// The shared body of the three canvas-transform gestures. Pan, pinch and rotate run the
-        /// identical state machine and the identical side effects; the only thing that differs is
-        /// which live value each contributes, which `applyLiveValue` supplies (nothing, for pan —
-        /// its contribution is the offset `updateLiveOffset` derives from the touch location).
+        /// The shared body of the three canvas-transform gestures: identical state machine, only the
+        /// live value each contributes differs (`applyLiveValue`; pan contributes none of its own).
         ///
-        /// Two orderings inside here are load-bearing and must not be rearranged:
-        ///
-        /// 1. In `.changed`, the touch-count guard runs *before*
-        ///    `commitSnappedShapeIfTransforming`. A lifting finger can still produce one more
-        ///    `.changed` as the recognizer's geometry collapses from 2 touches to 1 (or 0), and
-        ///    that is not an intentional transform. With the two the other way round, simply
-        ///    lifting the second finger out of a two-finger snap baked the shape instead of just
-        ///    releasing the snap — a real shipped bug, fixed in session 49. Note the guard
-        ///    `return`s, so a collapsing event also contributes no live value and no offset.
-        /// 2. `applyLiveValue` runs *after* `beginAnchorIfNeeded` / the commit above and *before*
-        ///    `updateLiveOffset`, which reads `liveScale` to place the anchor — feeding it a stale
-        ///    scale would slip the content out from under the fingers by one event.
+        /// Two orderings here are load-bearing:
+        /// 1. In `.changed`, the touch-count guard runs before `commitSnappedShapeIfTransforming` —
+        ///    a lifting finger can still produce one more `.changed` as the recognizer collapses
+        ///    from 2 touches to fewer, which must not be read as an intentional transform (a real
+        ///    shipped bug otherwise: lifting the second finger baked the shape instead of releasing it).
+        /// 2. `applyLiveValue` runs before `updateLiveOffset`, which reads `liveScale` to place the
+        ///    anchor — a stale scale would slip the content out from under the fingers by one event.
         private func handleTransformGesture<Recognizer: UIGestureRecognizer>(
             _ recognizer: Recognizer, applyLiveValue: (Recognizer) -> Void) {
             guard let host = hostView else { return }
@@ -1367,7 +1217,6 @@ struct CanvasView: UIViewRepresentable {
         }
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            // Pan contributes no live value of its own; the offset comes from the touch location.
             handleTransformGesture(recognizer) { _ in }
         }
 
@@ -1380,18 +1229,15 @@ struct CanvasView: UIViewRepresentable {
         }
 
         @objc func handleTwoFingerTap() {
-            // A two-finger tap means undo. undo() itself resolves any in-flight fill first (a fill still
-            // under the finger is dropped; a lifted, adjustable one is committed so undo reverts it),
-            // so it does exactly one thing rather than both discarding a fill and undoing the prior step.
+            // undo() itself resolves any in-flight fill first, so this does exactly one thing.
             canvasManager.undo()
         }
 
         // MARK: - Two-finger snap constraint
 
-        /// The number of touches on the canvas changed. Two or more of them, while a shape is
-        /// pending, means the snap constraint: a rectangle becomes a square, an oval a circle, a
-        /// line jumps to the nearest 15°. Applies whether the shape is still following the pen
-        /// (finger added mid-stroke) or already adjustable (two fingers on the canvas).
+        /// Two or more touches, while a shape is pending, means the snap constraint: rectangle to
+        /// square, oval to circle, line to nearest 15°. Applies whether following the pen or already
+        /// adjustable.
         private func canvasTouchCountChanged(_ count: Int) {
             guard canvasManager.shapeGestureActive, count >= 2 else {
                 shapeConstraintTimer?.invalidate()
@@ -1411,15 +1257,11 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// Releases the snap one run-loop turn later rather than inline.
-        ///
-        /// The same touch event that drops the count below two can also be the pen leaving the
-        /// board, and it is the pen's lift — `CanvasManager.endInteractiveShape` — that makes a snap
-        /// permanent. Both arrive through recognizers attached to the same event, which UIKit fires
-        /// in no defined order, so releasing inline would be a coin flip on whether the circle the
-        /// user just settled springs back into the oval it was drawn as. Deferring lets the lift
-        /// land first however the event was ordered; the count is re-read on the way out so a finger
-        /// that came straight back down doesn't lose its snap.
+        /// Releases the snap one run-loop turn later rather than inline: the same touch event that
+        /// drops the count below two can also be the pen lifting, and `endInteractiveShape` is what
+        /// makes a snap permanent. UIKit fires both recognizers in no defined order, so deferring
+        /// lets the lift land first regardless of ordering; the count is re-read so a finger that
+        /// came straight back down doesn't lose its snap.
         private func releaseShapeConstraintAfterCurrentEvent() {
             guard isShapeConstraintEngaged else { return }
             DispatchQueue.main.async { [weak self] in
@@ -1428,7 +1270,6 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// Engages or releases the snap constraint on the pending shape.
         private func setShapeConstraint(_ on: Bool) {
             guard isShapeConstraintEngaged != on else { return }
             isShapeConstraintEngaged = on
@@ -1437,14 +1278,12 @@ struct CanvasView: UIViewRepresentable {
             updateShapeOverlay()
         }
 
-        /// While a shape is snapped, a two-finger *pan/zoom/rotate* means the user is done editing
-        /// it: bake it and hand the gesture over to the canvas transform. Shared by all three
-        /// transform recognizers, which otherwise carried three copies of this.
+        /// While a shape is snapped, a two-finger pan/zoom/rotate means the user is done editing it:
+        /// bake it and hand the gesture to the canvas transform.
         private func commitSnappedShapeIfTransforming(at location: CGPoint) {
             guard canvasManager.isShapeInAdjustableState, isShapeConstraintEngaged else { return }
-            // Commit without clearing the constraint first: the shape has to bake in the snapped
-            // form the user is looking at. `commitTransientsAndRefresh` drops the constraint on the
-            // way out, once there's no longer a shape for it to apply to.
+            // Commit without clearing the constraint first: the shape must bake in the snapped
+            // form shown. `commitTransientsAndRefresh` drops the constraint once there's no shape left.
             commitTransientsAndRefresh()
             if gestureAnchorCenter0 == nil, let container = containerView {
                 gestureAnchorHost0 = location
@@ -1458,7 +1297,6 @@ struct CanvasView: UIViewRepresentable {
 
         @objc func handleCatchAllTap(_ recognizer: UILongPressGestureRecognizer) {
             guard recognizer.state == .began else { return }
-            // Only respond for drawing tools — fill/select have their own paths.
             guard canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil || canvasManager.selectedTool == .eraser else { return }
             if canvasManager.layers.isEmpty {
                 canvasManager.needsLayerAlert = true
@@ -1472,22 +1310,17 @@ struct CanvasView: UIViewRepresentable {
             guard let container = containerView, let host = hostView else { return }
             switch recognizer.state {
             case .began:
-                // Continuing to fill dismisses whatever top-bar dropdown is open instead of the first
-                // touch being silently swallowed (see CanvasManager.interactionBegan).
+                // Continuing to fill dismisses whatever top-bar dropdown is open.
                 canvasManager.interactionBegan.send()
-                // container's bounds are exactly canvasSize (see hostBoundsDidChange), so location(in:)
-                // there yields canvas-pixel coordinates — the top-left-origin space the fill engine and
-                // the onion-skin/thumbnail renderers use. The drag delta, in contrast, is measured in
-                // fixed screen (host) space so the feel is independent of the canvas's current zoom.
+                // container's bounds equal canvasSize, so location(in:) there is canvas-pixel space.
+                // The drag delta is measured in fixed screen (host) space so feel is zoom-independent.
                 fillDragStartHost = recognizer.location(in: host)
                 fillDragStartGap = canvasManager.fillGapClosingDistance
                 fillDragStartThreshold = canvasManager.fillThreshold
                 fillDragStartEdge = canvasManager.fillExpand
                 let canvasPoint = recognizer.location(in: container)
-                // Pressing back inside the current adjustable fill (finger lifted, preview still
-                // live) resumes drag-adjusting it. A press anywhere else is a new fill, which bakes
-                // the adjustable one first — `beginInteractiveFill` goes through `beginCanvasEdit`,
-                // so this doesn't have to commit by hand.
+                // Pressing back inside the current adjustable fill resumes drag-adjusting it. A
+                // press elsewhere bakes it first via `beginInteractiveFill`'s `beginCanvasEdit`.
                 if canvasManager.isFillInAdjustableState, canvasManager.isPointInPendingFill(at: canvasPoint) {
                     canvasManager.resumeInteractiveFillDrag()
                 } else {
@@ -1496,8 +1329,7 @@ struct CanvasView: UIViewRepresentable {
             case .changed:
                 guard let start = fillDragStartHost else { return }
                 let dx = recognizer.location(in: host).x - start.x
-                // Horizontal-only: rightward travel raises the single selected setting across its range;
-                // the other two hold at their press-down baselines.
+                // Horizontal-only: rightward travel raises the selected setting; the others hold.
                 func perPoint(_ range: ClosedRange<CGFloat>) -> CGFloat {
                     (range.upperBound - range.lowerBound) / Self.fillDragSweepPoints
                 }

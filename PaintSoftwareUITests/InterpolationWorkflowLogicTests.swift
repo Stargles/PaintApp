@@ -2,8 +2,7 @@ import XCTest
 import UIKit
 import CoreGraphics
 
-/// Pure-logic tests for the interpolate-mode *workflow* — Phase 4 of
-/// VECTOR_INTERPOLATION_IMPLEMENTATION.md.
+/// Pure-logic tests for the interpolate-mode *workflow*.
 ///
 /// The division of labour with `InterpolationRenderLogicTests` is deliberate: that file owns "does a
 /// recipe produce the right pixels", this one owns "does the app build the right recipe, and let go
@@ -16,7 +15,7 @@ import CoreGraphics
 ///    transient selection. A recipe already attached to a cel must survive it, or an artist loses
 ///    work by tapping the wrong button twice.
 /// 2. **Generate attaches a recipe rather than baking a drawing.** An in-between is derived, never
-///    stored (`PLAN.md` §4). A test that only checked "the cel now looks right" would pass just as
+///    stored. A test that only checked "the cel now looks right" would pass just as
 ///    happily for the baked implementation that makes note 1 impossible.
 /// 3. **Undo is one step.** Both for Generate and for a whole slider drag.
 final class InterpolationWorkflowLogicTests: XCTestCase {
@@ -44,8 +43,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
     /// middle one empty — the shape the whole workflow is about.
     ///
     /// Assigns `cels` directly rather than calling `addCel`: `CanvasFixture.manager` gives each layer
-    /// one cel spanning the whole scene, so every `addCel` inside it collides and returns false
-    /// (`HANDOFF.md` §5).
+    /// one cel spanning the whole scene, so every `addCel` inside it collides and returns false.
     @discardableResult
     private func threeCels(_ manager: CanvasManager, layerIndex: Int,
                            aOffset: CGFloat = 0, cOffset: CGFloat = 24) -> [Cel] {
@@ -138,9 +136,9 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
 
     // MARK: - Creating a recipe
 
-    /// The load-bearing assertion of the phase. Generate must attach a recipe and leave the cel's own
-    /// display list alone: if it baked the frame instead, editing keyframe A could never update the
-    /// in-between (`PLAN.md` §4's "why derived and not generate-once").
+    /// The load-bearing assertion of the whole workflow. Generate must attach a recipe and leave the
+    /// cel's own display list alone: if it baked the frame instead, editing keyframe A could never
+    /// update the in-between — the reason it is derived and not generated once.
     func testGenerateAttachesARecipeAndWritesNoContentIntoTheCel() throws {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)
@@ -157,9 +155,8 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                       "The in-between is derived, never stored — the cel's own display list stays empty")
     }
 
-    /// Phase 4 creates exactly one automatic whole-layer group, and nothing needs tagging for the
-    /// warp to reach every stroke: untagged content rides the recipe's first binding
-    /// (`HANDOFF.md` §5.9).
+    /// Generate creates exactly one automatic whole-layer group, and nothing needs tagging for the
+    /// warp to reach every stroke: untagged content rides the recipe's first binding.
     func testGenerateCreatesOneWholeFrameBindingAndTagsNothing() throws {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)
@@ -240,9 +237,9 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                        .notAVectorLayer)
     }
 
-    /// Reproject is built now (Phase 6 item 1), but it still refuses out loud rather than quietly
-    /// behaving like Generate — `PLAN.md` §10 decision 3 says the two are never conflated, and the
-    /// way they would get conflated is Reproject inventing content when the cel has none.
+    /// Reproject refuses out loud rather than quietly behaving like Generate: the two must never be
+    /// conflated, and the way they would get conflated is Reproject inventing content when the cel
+    /// has none.
     ///
     /// The empty in-between is precisely the frame Generate is for.
     func testReprojectRefusesRatherThanBehavingLikeGenerate() {
@@ -255,7 +252,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         XCTAssertNil(manager.layers[1].cels[1].interpolation)
     }
 
-    // MARK: - Reproject (Phase 6 item 1)
+    // MARK: - Reproject
 
     /// A distinctly-shaped drawing of the artist's own in the middle cel. Deliberately *not* the same
     /// shape as either keyframe, so "the linework was preserved" is a claim the geometry can settle:
@@ -275,8 +272,8 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         return manager.layers[1].cels[1].interpolation
     }
 
-    /// The whole point of Reproject: the drawing is the artist's, and only its *pose* moves
-    /// (`PLAN.md` §5.5). So the recipe records `.reproject`, and the cel keeps its own strokes —
+    /// The whole point of Reproject: the drawing is the artist's, and only its *pose* moves.
+    /// So the recipe records `.reproject`, and the cel keeps its own strokes —
     /// unlike Generate, whose in-between is derived and never stored.
     func testReprojectKeepsTheCelsOwnDrawingAndRecordsTheMode() throws {
         let manager = manager()
@@ -352,9 +349,8 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
     }
 
     /// A cel carrying a `.generate` recipe holds no strokes of its own — an in-between is derived,
-    /// never stored (`PLAN.md` §4) — so Reproject has nothing to repose and says so. Commit is what
-    /// turns a generated frame into one Reproject can work on, which is how §5.5 says the two
-    /// commands compose.
+    /// never stored — so Reproject has nothing to repose and says so. Commit is what
+    /// turns a generated frame into one Reproject can work on.
     func testReprojectOnAGeneratedFrameRefusesBecauseThereIsNoLineworkYet() throws {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)
@@ -411,7 +407,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         return e.localEdits.compactMap(\.stroke).flatMap { $0.samples.map(\.point) }
     }
 
-    /// **The test `IMPLEMENTATION.md` Phase 6 names by hand**, and the one the inverse map exists to
+    /// The test the inverse map exists to
     /// pass: draw at `t`, then move the slider, and the stroke has to **follow the motion** rather
     /// than sit still.
     ///
@@ -440,7 +436,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                              "the edit rides the drawing's motion instead of sitting still")
     }
 
-    /// τ = `t` (`PLAN.md` §5.4 step 4). The edit belongs to the pose it was made at, so it does not
+    /// τ = `t`. The edit belongs to the pose it was made at, so it does not
     /// exist before it — and the comparison is one-sided, so it stays put from there on.
     func testAnEditAtAnInBetweenDoesNotExistBeforeTheFrameItWasDrawnAt() throws {
         let manager = manager()
@@ -478,7 +474,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
     }
 
     /// The edit goes into the **recipe**, never into the cel's display list. An in-between is
-    /// derived and never stored (`PLAN.md` §4); an edit that landed in `cel.vector` would both
+    /// derived and never stored; an edit that landed in `cel.vector` would both
     /// persist a frame meant to be recomputed and be invisible, since the view shows the evaluation
     /// rather than the canvas.
     func testAnEditAtAnInBetweenIsStoredOnTheRecipeAndNotInTheCel() throws {
@@ -513,7 +509,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
     }
 
     /// A stroke drawn well outside the group's lattice grows it by whole rings rather than being
-    /// clamped onto the boundary — `PLAN.md` §5.4 step 2. The tell that clamping is *not* what
+    /// clamped onto the boundary. The tell that clamping is *not* what
     /// happened is that the edit still evaluates back to where it was drawn: a clamped embedding
     /// folds every outside point onto the same edge and the stroke collapses.
     func testAStrokeDrawnOutsideTheLatticeGrowsItRatherThanBeingClamped() throws {
@@ -558,8 +554,8 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                       + "keyframe A and nothing else in the suite would notice")
     }
 
-    /// **Item 3's engine half: erasing at an in-between needs no eraser-specific code.** An eraser
-    /// *is* a stroke (`VECTOR_ERASER_PLAN.md` §2.1), so it rides `localEdits` like any other — and
+    /// **Erasing at an in-between needs no eraser-specific code.** An eraser
+    /// *is* a stroke, so it rides `localEdits` like any other — and
     /// `composite(_:size:quality:)` already draws local edits over the *blended* result, which is
     /// what lets it reach both keyframes' ink rather than only one set's.
     func testErasingAtAnInBetweenRecordsAnEraserStrokeLikeAnyOtherEdit() throws {
@@ -617,7 +613,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         XCTAssertEqual(manager.inBetweenCelID(inLayer: manager.layers[1].id), cels[1].id)
     }
 
-    /// **The transform half of item 3 is a refusal, not a routing** (`HANDOFF.md` §5.13). Vector
+    /// **Transforming an in-between is a refusal, not a routing.** Vector
     /// Move is a whole-content transform written onto the cel's own `VectorCanvas`, and an
     /// in-between's canvas is not where its pixels come from — so on one the handle box would drag
     /// a drawing that never moved. `activeCelIsInBetween` is what the three call sites check.
@@ -684,8 +680,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
 
     /// **And the interior case is lossy in exactly the way `flattened` documents.** Both sets come
     /// through as ordinary strokes carrying their cross-fade weight as their own opacity, because a
-    /// display list has no per-set alpha to put it in (`PLAN.md` §5.6, and the amendment recording
-    /// why Commit cannot honour it).
+    /// display list has no per-set alpha to put it in, and Commit cannot invent one.
     ///
     /// Pinned because it is the *accepted* loss: if this ever changes, the artist's committed drawing
     /// changes with it, and that must be a decision rather than a side effect.
@@ -723,9 +718,8 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                      "τ is a parameter of a derived frame; a committed drawing has no `t` left to gate on")
     }
 
-    /// **The composition `PLAN.md` §5.5 describes, and the reason item 17 called Commit the missing
-    /// middle.** Reproject refuses on a generated cel because it holds no linework of its own; Commit
-    /// is what gives it some.
+    /// **Commit is the missing middle between Generate and Reproject.** Reproject refuses on a
+    /// generated cel because it holds no linework of its own; Commit is what gives it some.
     func testCommitIsWhatMakesAGeneratedFrameReprojectable() throws {
         let manager = manager()
         generated(manager, cels: threeCels(manager, layerIndex: 1))
@@ -946,7 +940,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
     }
 
     /// The recipe is by identity, so editing a keyframe changes what the in-between evaluates to
-    /// with nothing to invalidate by hand (`PLAN.md` §4). This is the test that would fail if
+    /// with nothing to invalidate by hand. This is the test that would fail if
     /// Generate had baked.
     func testEditingAKeyframeChangesTheInBetweenWithNoReInterpolation() throws {
         let manager = manager()
@@ -970,7 +964,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         XCTAssertNil(manager.interpolatedImage(forCel: cels[1].id, inLayer: manager.layers[1].id))
     }
 
-    /// "Not yet", not an error (`HANDOFF.md` §5.9). A recipe can be broken by editing *around* it,
+    /// "Not yet", not an error. A recipe can be broken by editing *around* it,
     /// and the UI is supposed to fall back to the cel's own content rather than show a failure.
     func testAMalformedRecipeEvaluatesToNilRatherThanCrashing() {
         let manager = manager()
@@ -1006,8 +1000,8 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                      "One undo returns to the pre-interpolation state — Phase 4's definition of done")
     }
 
-    /// A whole drag is one step, not one per tick — the trap `PLAN.md` §9 calls out by name. `t`
-    /// lives in the `Cel` struct, so the plain structure bracket is enough here (`HANDOFF.md` §5).
+    /// A whole drag is one step, not one per tick. `t`
+    /// lives in the `Cel` struct, so the plain structure bracket is enough here.
     func testAWholeSliderDragIsOneUndoStep() throws {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)
@@ -1042,7 +1036,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         let layerID = manager.layers[1].id
 
         // `t` outside 0...1 extrapolates rather than clamping in the evaluator, because
-        // `ARAPInterpolation` does — so the clamp has to be here, on the way in (`HANDOFF.md` §5.9).
+        // `ARAPInterpolation` does — so the clamp has to be here, on the way in.
         manager.setInterpolationT(2.5, forCel: cels[1].id, inLayer: layerID)
         XCTAssertEqual(manager.layers[1].cels[1].interpolation?.t ?? -1, 1, accuracy: 1e-9)
         manager.setInterpolationT(-3, forCel: cels[1].id, inLayer: layerID)
@@ -1051,9 +1045,8 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
 
     // MARK: - Onion skin
 
-    /// Interpolate mode's onion skin is the two references, not the previous cel (`PLAN.md` §5.0
-    /// step 4) — and they are tinted apart, because a twelve-frame span with both in one colour is
-    /// unreadable.
+    /// Interpolate mode's onion skin is the two references, not the previous cel — and they are
+    /// tinted apart, because a twelve-frame span with both in one colour is unreadable.
     func testTheInterpolateOnionSkinShowsBothReferencesTintedApart() {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)

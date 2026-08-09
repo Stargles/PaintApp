@@ -323,7 +323,7 @@ class PaintUITestCase: XCTestCase {
 
     /// Reads a layer row's ".vector" marker, formatted "isVector,paintStrokes,erasePunches" (see
     /// `LayerRowModel`). `strokes` counts `.paint` strokes only: Mode 1 commits by *appending* an
-    /// `.erase` punch (VECTOR_ERASER_PLAN.md §1), so against a single combined total "the stroke was
+    /// `.erase` punch, so against a single combined total "the stroke was
     /// cut in two" and "a punch was added over it" are the same number, and the distinction is the
     /// entire thing the vector-eraser tests are checking.
     func readVectorMarker(_ app: XCUIApplication, layerIndex: Int) -> (isVector: Bool, strokes: Int, erases: Int)? {

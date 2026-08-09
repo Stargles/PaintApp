@@ -1,8 +1,7 @@
 import XCTest
 import CoreGraphics
 
-/// Pure-logic tests for the deformation solver — Phase 1 of
-/// `VECTOR_INTERPOLATION_IMPLEMENTATION.md`, the ARAP half.
+/// Pure-logic tests for the deformation solver's ARAP half.
 ///
 /// The first two tests are the ones the rest of the feature is built on. `t = 0` must reproduce
 /// lattice A and `t = 1` must reproduce lattice C, *exactly*, through the general code path rather
@@ -382,26 +381,14 @@ final class ARAPLogicTests: XCTestCase {
             + (1..<8).map { CGPoint(x: 0, y: CGFloat($0) * 5) }
     }
 
-    /// **This test used to demand an exact recovery, and that is the price of `icpRestarts: 1`.**
+    /// `icpRestarts: 1` means ICP without a correspondence recovers a rigid motion only
+    /// approximately, not exactly — the old 8-way multi-start happened to seed a restart that
+    /// landed exactly on this L's 20°, but even eight restarts missed other angles (45°, 120°) by
+    /// tens of points, so "exact" was never really a property of the method. The 1:1 arc-length
+    /// correspondence (tested below) is what now delivers exact recovery, to a far tighter bar.
     ///
-    /// It passed because the 8-way multi-start happened to seed a restart that landed on the exact
-    /// 20°. Dropping the multi-start was `HANDOFF.md` §8 item 32's decision — it is what stops a
-    /// straight line being offered the 180° solution it ties with — and this is the bill. Measured
-    /// worst-point displacement on this L, over the whole flag matrix:
-    ///
-    /// | restarts | 20° | 45° | 90° | 120° | 180° |
-    /// |---|---|---|---|---|---|
-    /// | 1 | 3.47 | 5.55 | 78.3 | 78.2 | 74.3 |
-    /// | 8 (the old default) | 3.47 | 0.00 | 0.00 | 3.47 | 0.00 |
-    ///
-    /// Note what the table also says: even eight restarts missed 20° and 120°, so "exact" was never
-    /// a property of the method — it was a property of which seeds happened to be tried. What ICP
-    /// without a correspondence can honestly be held to is *close*, and that is what this asserts.
-    /// The exact recovery is now the job of the 1:1 arc-length correspondence, which the companion
-    /// test below holds to a far tighter bar than this one ever did.
-    ///
-    /// Do not "fix" this by restoring `icpRestarts: 8` — that reintroduces §8 item 27. §8 item 37
-    /// is the way back to large rotations: escalate the search only when a *coverage* test fails.
+    /// Do not "fix" this by restoring `icpRestarts: 8`. Large rotations should instead be recovered
+    /// by escalating the search only when a coverage test fails (`VECTOR_INTERPOLATION.md` §4 item 37).
     func testICPWithoutACorrespondenceRecoversARigidMotionOnlyApproximately() {
         let source = rigidMotionL
         let truth = Similarity(angle: 0.35, scale: 1, translation: CGPoint(x: 22, y: 17))
@@ -456,8 +443,8 @@ final class ARAPLogicTests: XCTestCase {
     /// source point, so thinning the fit must not thin the report.
     ///
     /// The cap is set low here rather than feeding in a thousand real samples, because this tier
-    /// builds unoptimised and a big fit costs minutes in it (`HANDOFF.md` §5) — the property is the
-    /// same at 20 as at 250, and the cost curve is the benchmark's job.
+    /// is unoptimised and a big fit costs minutes — the property holds the same at 20 as at 250,
+    /// and the cost curve is a benchmark's job, not this test's.
     func testCappingTheRegistrationCloudStillReportsEverySourcePoint() {
         var options = ARAPRegistration.Options()
         options.maxRegistrationSamples = 20
@@ -632,24 +619,13 @@ final class ARAPLogicTests: XCTestCase {
     }
 
     func testTwoBodiesMovingDifferentlySplitIntoExactlyTwoGroups() {
-        // One body moves *along the line joining them*, the other stays. Both parts of that matter:
+        // One body moves along the line joining them, the other stays put. Motion along that line
+        // changes the distance between the two bodies, which no single rigid motion can explain, so
+        // the fit is forced to split. (A sideways or opposing move would fit as one rigid motion and
+        // correctly stay one group — this fixture isolates the case that must split.)
         //
-        // - "the two move opposite ways" is a rigid rotation of the pair, which one similarity
-        //   explains perfectly and which the algorithm is right to call one motion group;
-        // - "one moves sideways, one stays" is *nearly* a rotation about the still one, and at a
-        //   displacement small against the separation the leftover error is only a few points —
-        //   measured at 4.1 for a 70-point sideways move across a 180-point gap, which is inside any
-        //   sane residual threshold.
-        //
-        // Motion along the joining line changes the distance between the two bodies, and no rigid
-        // motion can do that, so the best global fit has to split the difference and both bodies end
-        // up with a residual of about half the displacement. This is the honest shape of "two
-        // motions", and worth stating plainly: a great many two-body scenarios really are
-        // explainable as one rigid motion, and grouping them together is the right answer, not a miss.
-        //
-        // The displacement is kept to two thirds of the body's own width for a second reason: ICP
-        // needs the source and its target to still overlap to converge on a subgroup, and a body
-        // shifted clear of itself has no overlap to start from.
+        // The displacement is kept to two thirds of the body's own width because ICP needs source
+        // and target to still overlap to converge on a subgroup.
         let rect = rectangleBody(at: CGPoint(x: 40, y: 60))
         let tri = triangleBody(at: CGPoint(x: 220, y: 60))
         let source = rect + tri
@@ -666,12 +642,10 @@ final class ARAPLogicTests: XCTestCase {
         // Characterisation of a known limitation, not an aspiration.
         //
         // A limb attached to a torso has no spatial gap to cut on, so splitting it has to come from
-        // the residuals — and residuals are a weak signal there, because the group's fitted motion
-        // is itself part rotation, which makes the residual position-dependent across the torso.
-        // Left to itself the algorithm cuts this fixture into three groups with the arm's base
-        // landing among torso strokes. `PLAN.md` §5.3 calls automatic grouping the highest-risk part
-        // of the project and designs for artist correction; this is the shape that correction takes,
-        // and the tag-seeded path — the one-tap-per-body-part workflow — handles it today.
+        // residuals — a weak signal here, because the group's fitted motion is itself part
+        // rotation, which makes the residual position-dependent across the torso. Left to itself
+        // the algorithm cuts this fixture into three groups with the arm's base landing among torso
+        // strokes; the tag-seeded, one-tap-per-body-part workflow is what handles it instead.
         let joint = CGPoint(x: 130, y: 120)
         let torso = rectangleBody(at: CGPoint(x: 60, y: 100), width: 70, height: 40)
         let arm = [bar(from: joint, to: CGPoint(x: 190, y: 120), count: 11),
@@ -744,17 +718,10 @@ final class ARAPLogicTests: XCTestCase {
         XCTAssertEqual(groups.flatMap(\.strokes).sorted(), Array(0..<source.count))
     }
 
-    /// The open, hand-drawn version of `testOneRigidBodyDoesNotSplit` — and the fixture class the
-    /// whole logic tier was blind to (`HANDOFF.md` §8 item 43).
-    ///
-    /// Every other grouping fixture here is a *closed* outline drawn twice identically, which pins its
-    /// own orientation and translates cleanly. Both properties hide the bug: put a few points of hand
-    /// jitter on a second keyframe and the whole-drawing fit used to come out at 118° with a mean
-    /// residual of 22 against the true motion's 5.6, because `.sourceToTarget` seeds the search where
-    /// the source already sits and an L 120 points across that moved 400 is outside ICP's basin from
-    /// every one of the eight restarts. Every stroke's residual was then large and the L was cut into
-    /// its two legs — each a lone straight segment, which is the 180° tie §5 proves no objective can
-    /// break.
+    /// The open, hand-drawn version of `testOneRigidBodyDoesNotSplit`. Every other grouping fixture
+    /// here is a *closed* outline drawn twice identically, which pins its own orientation and
+    /// translates cleanly; a little hand jitter on an open shape removes that crutch, so this is
+    /// what pins over-splitting from staying fixed by an easier fixture.
     func testAHandJitteredBodyThatMovedFurtherThanItsOwnSizeStaysOneGroup() {
         func wobble(_ points: [CGPoint], seed: CGFloat) -> [CGPoint] {
             points.enumerated().map { i, p in

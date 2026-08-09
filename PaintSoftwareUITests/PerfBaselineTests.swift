@@ -2,13 +2,8 @@ import XCTest
 import UIKit
 import Darwin
 
-/// The **pre-refactor performance baseline**: drives synthetic strokes through the real brush
+/// The **performance baseline**: drives synthetic strokes through the real brush
 /// pipeline and records wall-clock, peak resident memory, and thumbnail-regeneration count.
-///
-/// Written for Stage 0 of the CanvasManager/CanvasView decomposition so the later performance stage
-/// has "before" numbers to compare against. That stage's session will not have this session's test
-/// output, so the numbers measured here are also written into the Stage 0 commit message and
-/// `SESSION_LOG.md`.
 ///
 /// **These are not tight perf assertions.** Simulator timings swing by large factors with host
 /// load, so every assertion here is a generous order-of-magnitude ceiling whose only job is to

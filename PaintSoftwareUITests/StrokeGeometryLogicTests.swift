@@ -2,7 +2,7 @@ import XCTest
 import CoreGraphics
 
 /// Pure-logic tests for `StrokeGeometry` and `StrokeSpatialIndex` — the shared geometry foundation
-/// all three vector-eraser modes are built on (Phase 0 of `VECTOR_ERASER_PLAN.md`). Plain
+/// all three vector-eraser modes are built on. Plain
 /// `XCTestCase`, no `XCUIApplication`, so they run in milliseconds against exactly the maths the
 /// eraser will cut with.
 ///

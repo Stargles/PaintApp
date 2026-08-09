@@ -2,19 +2,18 @@ import XCTest
 import UIKit
 import CoreGraphics
 
-/// Pure-logic tests for guide strokes — Phase 7 of VECTOR_INTERPOLATION_IMPLEMENTATION.md.
+/// Pure-logic tests for guide strokes.
 ///
-/// A guide carries two signals out of one gesture (`PLAN.md` §6.1) and they are tested apart before
+/// A guide carries two signals out of one gesture, and they are tested apart before
 /// they are tested together, because the whole design rests on them being independent: geometry is
 /// read by **arc length**, timing by **stylus time**, and neither may leak into the other.
 ///
 /// What is being pinned, in descending order of how expensive it would be to discover later:
 ///
 /// 1. **A guide never breaks the endpoint invariant.** `t = 0` reproduces keyframe A and `t = 1`
-///    keyframe C, bit for bit, with any guide attached. Phase 1 paid a change of variables for that
-///    property and every phase since has kept it; a trajectory constraint is the first thing with a
-///    real opportunity to spoil it, and `chordDeviation` is shaped the way it is to make it fall out
-///    rather than be guarded.
+///    keyframe C, bit for bit, with any guide attached. A trajectory constraint is the first thing
+///    with a real opportunity to spoil that, and `chordDeviation` is shaped the way it is to make it
+///    fall out rather than be guarded.
 /// 2. **Speed does not move the arc, and shape does not retime the motion.** If the two signals were
 ///    coupled, hesitating mid-stroke would bend the path.
 /// 3. **The three ways of binding a guide agree.** The model offers a binding list, a recipe list and
@@ -146,7 +145,7 @@ final class InterpolationGuideLogicTests: XCTestCase {
         }
     }
 
-    /// `PLAN.md` §6.1's headline claim, and the reason the brief's idea is worth building: drawing
+    /// The headline claim, and the reason the whole feature is worth building: drawing
     /// the guide **fast at the start and slow at the end** gives ease-out with no graph editor.
     /// Most of the arc is covered early, so the curve is above the diagonal throughout.
     func testDrawingFastThenSlowlyGivesEaseOut() throws {
@@ -239,9 +238,9 @@ final class InterpolationGuideLogicTests: XCTestCase {
         XCTAssertTrue(GuideSet(binding: recipe.groups[1], recipe: recipe, guides: [g]).isEmpty)
     }
 
-    /// `PLAN.md` §10 decision 6's whole-frame binding: a guide on the recipe with an empty
-    /// `boundGroups` drives every group, and the decision's "almost nothing" cost is exactly this —
-    /// no new field, no new mechanism, just the two lists meeting.
+    /// The whole-frame binding: a guide on the recipe with an empty
+    /// `boundGroups` drives every group, at almost no cost — no new field, no new mechanism, just the
+    /// two lists meeting.
     func testAWholeFrameGuideDrivesEveryGroup() {
         let a = UUID(), b = UUID()
         let g = guideStroke(arched(), boundGroups: [])
@@ -551,8 +550,8 @@ final class InterpolationGuideLogicTests: XCTestCase {
         XCTAssertFalse(manager.isDrawingGuide)
     }
 
-    /// A guide edit keeps the guide's id (`PLAN.md` §6.4 — reuse across frames is a reference, not a
-    /// copy), so the resolved list has to differ by **value** or the preview would keep the stale
+    /// A guide edit keeps the guide's id — reuse across frames is a reference, not a
+    /// copy — so the resolved list has to differ by **value** or the preview would keep the stale
     /// frame. This is the assertion standing in for the fourth `InterpolationPreviewKey` bug.
     func testEditingAGuideChangesTheResolvedListWhileKeepingItsID() throws {
         let manager = manager()
@@ -730,7 +729,7 @@ final class InterpolationGuideLogicTests: XCTestCase {
         XCTAssertEqual(try soleGuide(manager).samples, expected)
     }
 
-    /// One gesture, one undo step — the trap `PLAN.md` §9 names and the same bracket the `t` slider
+    /// One gesture, one undo step — the same bracket the `t` slider
     /// uses. A step per touch sample would make undo useless exactly where the artist is fiddling.
     ///
     /// The single `undo()` has to put the geometry back *and* leave the guide itself in place, which
@@ -850,7 +849,7 @@ final class InterpolationGuideLogicTests: XCTestCase {
         XCTAssertTrue(manager.linkableGuideStrokes.isEmpty, "already here, so no longer on offer")
     }
 
-    /// **Link is a reference**, which is the whole of `PLAN.md` §6.4: reshape the arc on either frame
+    /// **Link is a reference**: reshape the arc on either frame
     /// and both move. Fix a walk cycle's arc once and every frame of the walk follows.
     func testALinkedGuideIsOneGuideInTwoPlaces() throws {
         let manager = try twoIntervals()
@@ -1053,8 +1052,8 @@ final class InterpolationGuideLogicTests: XCTestCase {
 
     // MARK: - The chart through the document
 
-    /// The chart's stop count is the **timeline's** in-between frames, not a fixed number — which is
-    /// what "each in-between frame" means to the artist (`PLAN.md` §6.2). `generated` puts its
+    /// The chart's stop count is the **timeline's** in-between frames, not a fixed number — that is
+    /// what "each in-between frame" means to the artist. `generated` puts its
     /// keyframes at frames 0 and 8, so the chart is nine stops: two pinned keyframes and seven
     /// in-betweens to place.
     func testTheChartSpansTheKeyframesOwnFrames() throws {
