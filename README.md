@@ -17,7 +17,13 @@ toolset, and a frame-by-frame animation timeline.
 - **Layers**: raster and vector layers, opacity, visibility, fill-reference toggle, object (photo)
   layers with on-canvas transform handles
 - **Canvas**: adjustable padding margin, flip horizontal/vertical, custom size presets
+- **Vector eraser**: three CSP-style modes (erase, cut points, cut to intersection). An eraser *is* a
+  stroke — it is an `.erase` element in the same z-ordered display list as the paint it eats, so it
+  is non-destructive and undoable, and Mode 1 splits a cleanly severed stroke into real pieces
 - **Animation Timeline**: multi-cel frame-by-frame animation, scrub/play, per-cel copy/clear/extend
+- **Keyframe interpolation** on vector layers: mark two cels as references and the cels between them
+  become derived (lattice + ARAP warp), with motion groups, guide strokes, editing at an in-between
+  and Commit — see [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md)
 - **Color**: a Procreate-style HSB picker (SV square, hue bar, hex field) plus a custom palette
   builder (named palettes, swatch grid, persisted across launches)
 - **Gallery**: a project browser with thumbnails, backed by on-disk project packages
@@ -35,9 +41,13 @@ PaintSoftware/
 │   ├── BrushStamper.swift       #   shared stamp pipeline (shape/dynamics/grain)
 │   ├── Brush.swift / BrushLibrary.swift
 │   ├── StrokeInput.swift / StrokeStabilizer.swift
+│   ├── StrokeGeometry.swift / VectorEraser.swift  # vector eraser geometry + the three modes
+│   ├── InterpolationEvaluator.swift / GuidePath.swift
+│   ├── Deform/                  #   lattice + ARAP deformation (app-type-free)
 │   ├── Fill.metal / MetalFillEngine.swift  # GPU flood-fill
 ├── Models/
 │   ├── CanvasManager.swift      # Core state/operations (layers, cels, tools, undo)
+│   ├── InterpolationRecipe.swift / MotionGroup.swift / GuideStroke.swift
 │   ├── SelectionModels.swift    # Select & Move tool operations
 │   ├── Palette.swift            # Custom color palettes
 │   └── ProjectManifest.swift    # On-disk project schema
