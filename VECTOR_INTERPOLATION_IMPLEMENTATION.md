@@ -707,15 +707,17 @@ display list, which is the one claim no logic test reaches.
 1. **Timestamp capture.** `UITouch.timestamp` is currently discarded; add a capture path for guides
    only (`StrokeInput` / `StrokeGestureRecognizer`). ***DONE (Session 18)***
 2. Guide tool: draw, render only in interpolate mode, edit geometry with handles.
-   ***Draw and render done (Session 18); handles NOT built.***
+   ***DONE — draw and render (Session 18), handles (Session 19).***
 3. **Geometry → trajectory constraint** on the bound group's lattice. ***DONE (Session 18)***
 4. **Stylus velocity → spacing curve** (easing). Tune against real strokes; expect this to feel
    twitchy before it feels good. ***DONE (Session 18) — not yet tuned on real strokes.***
 5. Spacing chart drawn *as dots along the guide path*; drag a dot to retime that frame.
+   ***DONE (Session 19).***
 6. **Per-group binding**, plus a whole-frame option **if cheap** — if binding is a set of group IDs,
    "all groups" is nearly free. If it turns out not to be, drop it and say so. ***DONE (Session 18)
    — it was cheap, exactly as decision 6 predicted.***
 7. Fetch a guide from another frame: **link** and **duplicate** (requirement 7).
+   ***DONE (Session 19).***
 
 **Definition of done.** Brief workflow step 6 and requirements 6 and 7 work.
 
@@ -758,7 +760,45 @@ drawn accurately anchor-to-anchor gives the literal reading straight back. See
 
 **What is not built, and is the next session's work:** item 2's editable handles, item 5's spacing
 chart, item 7's link/duplicate. Item 4 works and is pinned by tests but has **not been tuned against
-real strokes on an iPad**, which its own wording asks for.
+real strokes on an iPad**, which its own wording asks for. *(All three were built in Session 19 —
+see below. Item 4's tuning is still owed.)*
+
+### What Session 19 built — items 2, 5 and 7, and the phase closed
+
+Three commits. 47 new `InterpolationGuideLogicTests` (32 → 79); wider pure-logic tier green.
+
+**The overlay now has two editors and shows one at a time, and that was the design call.** Shape
+handles (item 2) and spacing dots (item 5) both live on the same polyline, so offering both at once
+puts two meanings under one touch. `PLAN.md` §6.2 asks for them as *separate* controls anyway
+("geometric adjustment → handles", "timing adjustment → the chart"), so `GuideOverlayView.Editing`
+picks one and `InterpolateBar`'s Shape/Spacing toggle is where the artist says which. A third state,
+`.none`, is what the Guide toggle being **armed** means: while it is lit every canvas drag is a new
+guide, with no exception carved out of it for a hitbox.
+
+- **Item 2 — `GuideHandles`**, in `Engine/GuidePath.swift`, so all of it is fast-tier. A handle is a
+  **sample index** rather than an arc fraction, so a dragged handle lands exactly under the finger.
+  The falloff reaches **to the adjacent handle, per side** — a fixed radius was the first attempt and
+  a test caught it, because handles snap to samples and the gap differs on each side, so one handle
+  dragged its neighbour. Per-side reach makes "one handle never moves another" true by construction,
+  and with it an interior drag leaves **both endpoints exactly where they were** — the chord
+  `chordDeviation` measures against never moves, so reshaping the middle of an arc cannot re-aim
+  where the motion starts and ends.
+- **Item 5 — `SpacingChart`**, one stop per timeline frame across the interval, drawn as dots on the
+  guide. It is a *view* of whichever curve is in force rather than a second store of the timing, and
+  a dot drag writes `binding.spacing`, which outranks the guide's derived stylus timing. That
+  precedence was already built and tested in Session 18 and is exactly what makes the item work.
+  `GuidePath.arcFraction(nearest:)` is the new inverse that turns a finger near the guide into a
+  position along it.
+- **Item 7 — link and duplicate**, plus the guide list they needed. Link is `guideIDs.append(id)`;
+  duplicate copies the samples and the `role` under a fresh id, taking **this** interval and binding
+  **whole-frame** rather than inheriting `boundGroups` that may name no group in this recipe — the
+  silent no-op this feature has now declined four times. `GuideRow` is the list: a chip per guide,
+  a link glyph on the ones another interval also uses, and the Fetch menu offering both commands per
+  guide and never one.
+- **Both drags are one undo step**, on `beginStructureGesture`/`commitStructureGesture` — the `t`
+  slider's bracket, sufficient because `StructureSnapshot` carries `guideStrokes` outright. Each is
+  also a pure function of the state at touch-down, held on `CanvasManager`, or the falloff and the
+  curve compound and a slow drag does more than a quick one.
 
 ---
 

@@ -1361,6 +1361,69 @@ the code was written.
   input; the velocity may not. This was not measured, only anticipated, so measure before concluding
   the easing is broken on device.
 
+### From Phase 7 (items 2, 5 and 7 — the phase closed)
+
+- **Two editors on one polyline is the problem item 5 actually poses, and the answer is that only
+  one is offered at a time.** Item 2's shape handles and item 5's spacing dots both sit on the guide,
+  and both want a drag. Building the second one revealed that the first had quietly claimed the
+  path. `GuideOverlayView.Editing` is the fix and `PLAN.md` §6.2 turns out to have said so all along
+  — it lists "geometric adjustment" and "timing adjustment" as *separate* controls, which is easy to
+  read as two features rather than as two modes. **Read §6.2's list as a statement about the
+  interaction, not just about scope.**
+
+- **A per-side falloff, not a radius — and a test is what found it.** `GuideHandles.dragged` first
+  used a fixed radius of `length / (handleCount - 1)`, the even share of the arc, and
+  `testDraggingAHandleMovesNoOtherHandle` failed immediately. Handles **snap to samples**, so the
+  actual gap to the next handle is only *near* an even share and differs on each side; on an
+  11-sample guide the handles landed at arc 0/20/50/70/100 and dragging the middle one reached 20
+  past its right neighbour. Measuring the reach to the adjacent handle **per side** makes the
+  property true by construction rather than nearly true. The general lesson: when a placement rule
+  snaps to existing data, no derived spacing is uniform, and anything computed from the *nominal*
+  spacing is wrong by however much the snapping moved.
+
+- **A gesture that writes a whole-value field must snapshot the value at touch-down, not read it
+  back.** Both drags this session hit it. A handle drag that applied a delta to the path it last
+  produced compounds the falloff, so the same drag made slowly bends further than one made quickly;
+  a chart drag that re-read the curve would read the curve it had just written. `guideHandleDrag`
+  and `guideSpacingDrag` hold the touch-down state on `CanvasManager` and every move re-derives from
+  it. `testMovesWithinOneDragDoNotCompound` and its spacing twin are the tripwires, and they look
+  like tests of nothing until you know the failure.
+
+- **`beginStructureGesture` is sufficient for guides, and it is worth knowing why**, because §5's
+  Phase 2 entry warns at length that the structure bracket is a trap. It is a trap for *stroke*
+  content, which `StructureSnapshot` shares by class reference. `guideStrokes` is a plain value on
+  the snapshot, so a guide edit is covered outright — the same reason the `t` slider is fine on it.
+  The test for this is `testAWholeHandleDragIsOneUndoStep`: one undo restores the geometry and
+  **leaves the guide there**, which is what tells "one step for the drag" apart from "no step".
+
+- **A drag that changed nothing must drop its step, not record an identical one.**
+  `recordStructureChange` records unconditionally, so a tap on a grip would otherwise leave an undo
+  step that restores the same geometry — and the artist presses undo twice to get anywhere.
+  `cancelStructureGesture` is the discard, and both commits check before recording.
+
+- **The chart's stop count comes off the timeline, not the recipe.** `PLAN.md` §6.2's "each
+  in-between frame" is a statement about frames, and `interpolationFrameSpan` resolves the two
+  keyframes' `startFrame`s to get it. Note the consequence: the number of dots changes when the
+  artist re-times the *blocks*, which is correct and is also the only place in this feature where a
+  timeline edit changes a guide's appearance.
+
+- **`SpacingChart.curve` is `.sampled` at exactly the chart's own stops, and that is load-bearing.**
+  Reading a chart back off that curve samples it at exactly those inputs, so the round trip is
+  exact. Any other resolution would round-trip through interpolation and the dots would creep every
+  time one was touched. `testAChartRoundTripsThroughItsCurve` pins it.
+
+- **Duplicate does not inherit `boundGroups`, and that is the fourth time this feature has refused
+  the same shape.** A copy carrying a group binding that names no group in *this* recipe would drive
+  nothing — the artist fetches an arc, presses nothing wrong, and the frame does not move. The other
+  three are §5.13's transform, Phase 4's Reproject stub and `.noInterpolationToGuide`. `role` *is*
+  carried, because which signal the arc means is a property of the drawing rather than of where it
+  is used.
+
+- **Item 7 was UI, exactly as predicted, and the widget was the work.** `linkGuideStroke` is one
+  line because a recipe has named guides by id since Phase 2. What took the time was `GuideRow`,
+  and it was worth doing once: §8 items 47, 48 and 49 all wanted the same list, and two of them are
+  now a single control away (see §8).
+
 ### 5.17 One resolver for both the evaluation and the memo — the `InterpolationPreviewKey` rule, generalised
 
 `InterpolationPreviewKey` has now bitten four times, and Phase 7 is the first where it was designed
@@ -2588,26 +2651,43 @@ Session 12 rather than optional extras. **31, 32 and 35 are DONE** (commits `b91
     the motion, the absolute reading can be offered as an option on top of this, but not instead of
     it.
 
-47. **Guides are never deleted, only unbound.** `removeGuideStroke` exists and strips the id from
-    every recipe, but nothing in the UI calls it — the bar has no way to remove a guide, so an artist
-    who draws a bad arc can only undo it. Once item 2's handles land, a delete belongs next to them
-    (long-press a guide, or a control on the selected guide's own handle set). Small, and deliberately
-    not invented this session because it wants the selection model item 2's handles introduce.
+47. **Guides are never deleted, only unbound — and the row to put a delete on now exists.**
+    `removeGuideStroke` is built and strips the id from every recipe; nothing in the UI calls it, so
+    an artist who draws a bad arc can only undo it. Session 19 built `GuideRow`, which lists the
+    frame's guides as chips, so this is now **one control on an existing row** rather than a design
+    question: a context menu on the chip with Delete, and probably Unbind (drop it from this frame,
+    keep it in the registry) beside it, since those are different acts on a shared guide. Left to the
+    product owner per §3.3 — it is not part of item 7.
 
-48. **A second guide on the same frame silently averages with the first.** `GuideSet` averages
-    trajectories, which is the least surprising rule for two (§5's Phase 7 entry), but nothing tells
-    the artist it happened — they draw a second arc and the motion moves half as far as it looks like
-    it should. The honest fix is a guide *list* in the UI, which is also what item 7's link/duplicate
-    needs and what would give item 47 somewhere to live. Recorded rather than built because all three
-    want the same widget and it should be designed once.
+48. **A second guide on the same frame averages with the first, and the row now says so — barely.**
+    `GuideSet` averages trajectories, which is the least surprising rule for two (§5's Phase 7
+    entry). `GuideRow` shows one chip per guide plus the word "averaged" when there is more than one,
+    which is enough to explain a motion that moved half as far as expected *if the artist looks at
+    the bar*. The stronger fix, if it turns out to matter on an iPad, is to draw the two guides in
+    different colours and the effective averaged path in a third — but that is three dashed paths on
+    the canvas and should be judged on real art before it is built.
 
 49. **`visibleGuideStrokes` shows only the frame under the playhead's guides, which is right and is
     not the guide *library* §6.4 anticipates.** Scrubbing off the in-between hides the arc being
     worked on, which is correct — a scene accumulates guides and showing all of them would bury the
     live one — but it means the artist cannot see a guide while looking at the keyframe it was drawn
-    between. If that turns out to matter, the fix is to widen the property to guides whose
-    `KeyframeInterval` contains the current frame, which is the field's whole purpose and is unused
-    today.
+    between. Item 7's `linkableGuideStrokes` is now the smallest possible library (every guide the
+    frame does not already use, offered by number), and it exposes the gap rather than closing it:
+    the entries are named "Guide from elsewhere 1, 2, 3…" because **a guide has no name and no
+    thumbnail**. With three or four in a scene that is a guessing game. The fix when it bites is a
+    thumbnail of the arc on the menu row, not a naming scheme.
+
+50. **A guide's stylus timing is silently discarded the moment a dot is dragged.** Item 5 writes
+    `binding.spacing`, which by design outranks the guide's derived easing — that precedence is what
+    makes the chart work at all. But there is no way back: once a dot has been touched, redrawing the
+    guide at a different speed changes nothing, and nothing on screen says why. A "Use the guide's own
+    timing" reset on the guide chip would be a few lines and would close it.
+
+51. **A handle drag on a *shared* guide moves every frame that uses it, and the only warning is the
+    link glyph on the chip.** That is the point of a link (§6.4) and is correct, but the feedback is
+    on the bar while the artist is looking at the canvas. If it surprises anyone on an iPad, the
+    cheap answer is to draw a shared guide's dashed path in a distinct colour, so the canvas itself
+    carries the warning.
 
 35. **DONE (Session 12).** Subsample the registration point cloud. `Options.maxRegistrationSamples`
     is 250 and caps what *drives* the fit; residuals are still reported for every source point,

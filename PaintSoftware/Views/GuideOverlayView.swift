@@ -15,59 +15,78 @@ import UIKit
 /// *capture* stays where every other canvas gesture lives — `StrokeCanvasView`; the only touches
 /// this view ever claims are the ones that land on a handle of an existing guide.
 ///
-/// **Handles are live only while the Guide toggle is off, and they are drawn only then too.** The
+/// **Grips are live only while the Guide toggle is off, and they are drawn only then too.** The
 /// toggle's whole promise is that a canvas drag draws a guide, with no exceptions — the artist arms
 /// it, draws an arc, and it stays armed for the next one. Claiming a hitbox out of the middle of
 /// that would mean a second guide started too near the first one's handle silently reshaped the
-/// first instead. Disarming is what says "I am done drawing these", and that is the moment the
-/// handles appear. Showing them while they cannot be grabbed would be the worse half of both.
+/// first instead. Disarming is what says "I am done drawing these", and that is the moment the grips
+/// appear. Showing them while they cannot be grabbed would be the worse half of both.
+///
+/// **One editor at a time**, `Editing` says which. Shape handles and spacing dots both live on the
+/// same polyline, so offering both at once would put two different meanings under one touch;
+/// `PLAN.md` §6.2 asks for them as separate controls anyway, and the bar is where the artist picks.
 final class GuideOverlayView: UIView {
 
-    /// One drawn guide: the path, plus the handles that edit it.
+    /// Which editor the grips belong to — and therefore what dragging one means.
+    enum Editing: Equatable {
+        /// Guides are drawn, nothing is grabbable.
+        case none
+        /// Item 2: reshape the path. `Grip.index` is a **sample index**.
+        case handles
+        /// Item 5: retime a frame. `Grip.index` is a **spacing-chart stop**.
+        case spacing
+    }
+
+    /// One drawn guide: the path, plus whatever grips the active editor puts on it.
     ///
-    /// Carries the guide's `id` and each handle's **sample index** because that is all this view
-    /// reports — it does no geometry. `CanvasManager.guideHandlePositions` places the handles and
-    /// `GuideHandles.dragged` decides what moving one means; both are in the fast tier, and would not
-    /// be if this view worked out either for itself.
+    /// Carries the guide's `id` and each grip's index because that is all this view reports — it does
+    /// no geometry of its own. `CanvasManager.guideHandlePositions` and `spacingChart(forGuide:)`
+    /// place the grips and `GuideHandles.dragged` / `SpacingChart.moving` decide what moving one
+    /// means; all of it is in the fast tier, and none of it would be if this view worked any of it out.
     struct Guide: Equatable {
-        struct Handle: Equatable {
-            let sampleIndex: Int
+        struct Grip: Equatable {
+            /// A sample index under `.handles`, a chart stop under `.spacing`.
+            let index: Int
             let position: CGPoint
         }
         let id: UUID
         let points: [CGPoint]
-        let handles: [Handle]
+        let grips: [Grip]
     }
 
     // MARK: - Callbacks
 
-    var onHandleDragBegan: ((UUID) -> Void)?
-    /// Guide id, the sample index that handle edits, and where the finger is now — an absolute
-    /// destination rather than a delta, exactly as `ShapeOverlayView` reports its own drags.
-    var onHandleDragged: ((UUID, Int, CGPoint) -> Void)?
-    var onHandleDragEnded: (() -> Void)?
-    var onHandleDragCancelled: (() -> Void)?
+    /// Every callback carries the `Editing` mode **captured at touch-down** rather than letting the
+    /// receiver re-read it. The bar can be tapped mid-drag, and a gesture that began as a reshape and
+    /// committed as a retime would be silent — the same reasoning as `StrokeCanvasView`'s
+    /// `guideStartTime` and Phase 6's `inBetweenCelID`.
+    var onGripDragBegan: ((UUID, Editing) -> Void)?
+    /// Guide id, the mode, the grip's index, and where the finger is now — an absolute destination
+    /// rather than a delta, exactly as `ShapeOverlayView` reports its own drags.
+    var onGripDragged: ((UUID, Editing, Int, CGPoint) -> Void)?
+    var onGripDragEnded: ((Editing) -> Void)?
+    var onGripDragCancelled: ((Editing) -> Void)?
 
     /// The committed guides to draw, in canvas coordinates.
     private var guides: [Guide] = []
     /// The guide currently under the pen, if any — drawn brighter, since it is the one being made.
     private var live: [CGPoint] = []
-    /// Whether the handles are shown and grabbable — see the type comment.
-    private var editable = false
+    /// Which editor is offered — see the type comment.
+    private var editing: Editing = .none
 
-    private var activeHandle: (guideID: UUID, sampleIndex: Int)?
+    private var activeGrip: (guideID: UUID, index: Int, editing: Editing)?
 
-    private static let handleRadius: CGFloat = 5
-    /// How far from a handle's centre a touch still counts. Smaller than `ShapeOverlayView`'s 28,
-    /// because a guide has five handles strung along a path the artist may also want to draw on,
-    /// where a pending shape has a handful around content that is not editable yet.
-    private static let handleReach: CGFloat = 18
+    private static let gripRadius: CGFloat = 5
+    /// How far from a grip's centre a touch still counts. Smaller than `ShapeOverlayView`'s 28,
+    /// because a guide's grips are strung along a path the artist may also want to draw on, where a
+    /// pending shape has a handful around content that is not editable yet.
+    private static let gripReach: CGFloat = 18
 
     private let committedLayer = CAShapeLayer()
     private let liveLayer = CAShapeLayer()
     /// Dots at each end, so a guide reads as a *path with a direction* rather than a stray line.
     private let endpointLayer = CAShapeLayer()
-    private let handleLayer = CAShapeLayer()
+    private let gripLayer = CAShapeLayer()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -101,17 +120,17 @@ final class GuideOverlayView: UIView {
         endpointLayer.strokeColor = UIColor.white.withAlphaComponent(0.9).cgColor
         endpointLayer.lineWidth = 1
 
-        // White-filled and teal-ringed, the same read as `ShapeOverlayView`'s handles: a filled dot
-        // in the overlay's own colour would be indistinguishable from the endpoint dots, which are
-        // not draggable and mean something else.
-        handleLayer.fillColor = UIColor.white.cgColor
-        handleLayer.strokeColor = UIColor.systemTeal.cgColor
-        handleLayer.lineWidth = 2
+        // White-filled and ringed, the same read as `ShapeOverlayView`'s handles: a filled dot in the
+        // overlay's own colour would be indistinguishable from the endpoint dots, which are not
+        // draggable and mean something else. The ring colour is what tells the two editors apart —
+        // set in `redraw`, since it changes with the mode.
+        gripLayer.fillColor = UIColor.white.cgColor
+        gripLayer.lineWidth = 2
 
         layer.addSublayer(committedLayer)
         layer.addSublayer(liveLayer)
         layer.addSublayer(endpointLayer)
-        layer.addSublayer(handleLayer)
+        layer.addSublayer(gripLayer)
     }
 
     // MARK: - Content
@@ -119,15 +138,15 @@ final class GuideOverlayView: UIView {
     /// Replaces everything drawn. Cheap enough to call from the coordinator's per-pass update, which
     /// is why it takes the whole set rather than diffing: a guide is tens of points and there are one
     /// or two of them.
-    func update(guides newGuides: [Guide], live newLive: [CGPoint], editable newEditable: Bool) {
-        guard guides != newGuides || live != newLive || editable != newEditable else { return }
+    func update(guides newGuides: [Guide], live newLive: [CGPoint], editing newEditing: Editing) {
+        guard guides != newGuides || live != newLive || editing != newEditing else { return }
         guides = newGuides
         live = newLive
-        editable = newEditable
-        // A guide that went away mid-drag (undo, a scrub off the in-between) must not leave a handle
+        editing = newEditing
+        // A guide that went away mid-drag (undo, a scrub off the in-between) must not leave a grip
         // latched, or the next touch anywhere would move a guide that is no longer on screen.
-        if activeHandle.map({ hit in !newGuides.contains { $0.id == hit.guideID } }) == true {
-            activeHandle = nil
+        if activeGrip.map({ hit in !newGuides.contains { $0.id == hit.guideID } }) == true {
+            activeGrip = nil
         }
         redraw()
     }
@@ -144,7 +163,10 @@ final class GuideOverlayView: UIView {
         committedLayer.path = path(through: polylines)
         liveLayer.path = live.count >= 2 ? path(through: [live]) : nil
         endpointLayer.path = endpointDots(for: polylines)
-        handleLayer.path = editable ? handleDots(for: guides) : nil
+        gripLayer.path = editing == .none ? nil : gripDots(for: guides)
+        // Teal for geometry, matching the path it reshapes; amber for timing, which is not a
+        // statement about where the line goes and should not read as one.
+        gripLayer.strokeColor = (editing == .spacing ? UIColor.systemOrange : UIColor.systemTeal).cgColor
         isHidden = guides.isEmpty && live.count < 2
     }
 
@@ -173,13 +195,13 @@ final class GuideOverlayView: UIView {
         return drew ? path : nil
     }
 
-    private func handleDots(for guides: [Guide]) -> CGPath? {
-        let radius = Self.handleRadius
+    private func gripDots(for guides: [Guide]) -> CGPath? {
+        let radius = Self.gripRadius
         let path = CGMutablePath()
         var drew = false
         for guide in guides {
-            for handle in guide.handles {
-                path.addEllipse(in: CGRect(x: handle.position.x - radius, y: handle.position.y - radius,
+            for grip in guide.grips {
+                path.addEllipse(in: CGRect(x: grip.position.x - radius, y: grip.position.y - radius,
                                            width: radius * 2, height: radius * 2))
                 drew = true
             }
@@ -189,58 +211,59 @@ final class GuideOverlayView: UIView {
 
     // MARK: - Hit testing
 
-    /// The handle *nearest* the point, across every guide — not the first one in reach.
+    /// The grip *nearest* the point, across every guide — not the first one in reach.
     /// `ShapeOverlayView` learned this the expensive way: taking the first match on overlapping
-    /// hitboxes means one of them can never be grabbed at all, and five handles on a short guide
-    /// overlap constantly.
-    private func handle(at point: CGPoint) -> (guideID: UUID, sampleIndex: Int)? {
-        var best: (hit: (guideID: UUID, sampleIndex: Int), distance: CGFloat)?
+    /// hitboxes means one of them can never be grabbed at all, and grips on a short guide overlap
+    /// constantly.
+    private func grip(at point: CGPoint) -> (guideID: UUID, index: Int)? {
+        var best: (hit: (guideID: UUID, index: Int), distance: CGFloat)?
         for guide in guides {
-            for handle in guide.handles {
-                let distance = hypot(point.x - handle.position.x, point.y - handle.position.y)
-                guard distance <= Self.handleReach else { continue }
+            for grip in guide.grips {
+                let distance = hypot(point.x - grip.position.x, point.y - grip.position.y)
+                guard distance <= Self.gripReach else { continue }
                 if best == nil || distance < best!.distance {
-                    best = ((guide.id, handle.sampleIndex), distance)
+                    best = ((guide.id, grip.index), distance)
                 }
             }
         }
         return best?.hit
     }
 
-    /// Claims only the handles, and only while they are shown. Everywhere else the overlay is
+    /// Claims only the grips, and only while they are shown. Everywhere else the overlay is
     /// transparent to touch, so the canvas underneath keeps receiving strokes, guide capture and
     /// two-finger gestures with a guide on screen.
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard editable, !isHidden, isUserInteractionEnabled, handle(at: point) != nil else { return nil }
+        guard editing != .none, !isHidden, isUserInteractionEnabled,
+              grip(at: point) != nil else { return nil }
         return self
     }
 
-    // MARK: - Handle dragging
+    // MARK: - Grip dragging
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
-        guard let touch = touches.first, let hit = handle(at: touch.location(in: self)) else { return }
-        activeHandle = hit
-        onHandleDragBegan?(hit.guideID)
+        guard let touch = touches.first, let hit = grip(at: touch.location(in: self)) else { return }
+        activeGrip = (hit.guideID, hit.index, editing)
+        onGripDragBegan?(hit.guideID, editing)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
-        guard let hit = activeHandle, let touch = touches.first else { return }
-        onHandleDragged?(hit.guideID, hit.sampleIndex, touch.location(in: self))
+        guard let hit = activeGrip, let touch = touches.first else { return }
+        onGripDragged?(hit.guideID, hit.editing, hit.index, touch.location(in: self))
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
-        guard activeHandle != nil else { return }
-        activeHandle = nil
-        onHandleDragEnded?()
+        guard let hit = activeGrip else { return }
+        activeGrip = nil
+        onGripDragEnded?(hit.editing)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesCancelled(touches, with: event)
-        guard activeHandle != nil else { return }
-        activeHandle = nil
-        onHandleDragCancelled?()
+        guard let hit = activeGrip else { return }
+        activeGrip = nil
+        onGripDragCancelled?(hit.editing)
     }
 }

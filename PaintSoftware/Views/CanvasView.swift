@@ -70,17 +70,45 @@ struct CanvasView: UIViewRepresentable {
         guideOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(guideOverlay)
         context.coordinator.guideOverlay = guideOverlay
-        guideOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] id in
-            coordinator?.canvasManager.beginGuideHandleDrag(guideID: id)
+        guideOverlay.onGripDragBegan = { [weak coordinator = context.coordinator] id, editing in
+            guard let manager = coordinator?.canvasManager else { return }
+            switch editing {
+            case .handles: manager.beginGuideHandleDrag(guideID: id)
+            case .spacing: manager.beginGuideSpacingDrag(guideID: id)
+            case .none: break
+            }
         }
-        guideOverlay.onHandleDragged = { [weak coordinator = context.coordinator] _, sampleIndex, point in
-            coordinator?.canvasManager.dragGuideHandle(sampleIndex: sampleIndex, to: point)
+        guideOverlay.onGripDragged = { [weak coordinator = context.coordinator] id, editing, index, point in
+            guard let manager = coordinator?.canvasManager else { return }
+            switch editing {
+            case .handles:
+                manager.dragGuideHandle(sampleIndex: index, to: point)
+            case .spacing:
+                // The finger is somewhere near the guide; the chart wants a position *along* it, so
+                // the drag is projected onto the path. Doing it here rather than in the view keeps
+                // `GuideOverlayView` free of geometry — `arcFraction(nearest:)` is fast-tier.
+                guard let guide = manager.guideStrokes.first(where: { $0.id == id }),
+                      let path = GuidePath(samples: guide.samples) else { return }
+                manager.dragGuideSpacingStop(index: index, to: path.arcFraction(nearest: point))
+            case .none:
+                break
+            }
         }
-        guideOverlay.onHandleDragEnded = { [weak coordinator = context.coordinator] in
-            coordinator?.canvasManager.commitGuideHandleDrag()
+        guideOverlay.onGripDragEnded = { [weak coordinator = context.coordinator] editing in
+            guard let manager = coordinator?.canvasManager else { return }
+            switch editing {
+            case .handles: manager.commitGuideHandleDrag()
+            case .spacing: manager.commitGuideSpacingDrag()
+            case .none: break
+            }
         }
-        guideOverlay.onHandleDragCancelled = { [weak coordinator = context.coordinator] in
-            coordinator?.canvasManager.cancelGuideHandleDrag()
+        guideOverlay.onGripDragCancelled = { [weak coordinator = context.coordinator] editing in
+            guard let manager = coordinator?.canvasManager else { return }
+            switch editing {
+            case .handles: manager.cancelGuideHandleDrag()
+            case .spacing: manager.cancelGuideSpacingDrag()
+            case .none: break
+            }
         }
 
         // Paper is inset from the container by `canvasPadding` on each side (the artwork rect); the
@@ -905,21 +933,46 @@ struct CanvasView: UIViewRepresentable {
         /// and two canvas-sized rasterisations, while this sets two `CGPath`s. `GuideOverlayView.update`
         /// does its own equality check, so a pass where nothing moved costs one array compare.
         ///
-        /// The handles are shown only while the Guide toggle is **off** — see `GuideOverlayView`'s
-        /// type comment. Armed, every canvas drag is a new guide and nothing may carve an exception
-        /// out of that; disarmed is the artist saying they are done drawing them.
+        /// Grips are shown only while the Guide toggle is **off** — see `GuideOverlayView`'s type
+        /// comment. Armed, every canvas drag is a new guide and nothing may carve an exception out of
+        /// that; disarmed is the artist saying they are done drawing them. Which editor they belong
+        /// to is `isEditingGuideSpacing`, the bar's own toggle.
         func updateGuideOverlay() {
             guard let guideOverlay else { return }
+            let editing: GuideOverlayView.Editing =
+                canvasManager.isDrawingGuide ? .none
+                : canvasManager.isEditingGuideSpacing ? .spacing : .handles
             let guides = canvasManager.visibleGuideStrokes.map { guide in
-                GuideOverlayView.Guide(
-                    id: guide.id,
-                    points: guide.samples.map(\.point),
-                    handles: canvasManager.guideHandlePositions(for: guide).map {
-                        GuideOverlayView.Guide.Handle(sampleIndex: $0.sampleIndex, position: $0.position)
-                    })
+                GuideOverlayView.Guide(id: guide.id,
+                                       points: guide.samples.map(\.point),
+                                       grips: grips(for: guide, editing: editing))
             }
-            guideOverlay.update(guides: guides, live: liveGuidePoints,
-                                editable: !canvasManager.isDrawingGuide)
+            guideOverlay.update(guides: guides, live: liveGuidePoints, editing: editing)
+        }
+
+        /// A guide's grips for the active editor: sample-indexed shape handles, or the spacing
+        /// chart's stops placed along the path.
+        ///
+        /// The chart's two end stops are the keyframes and are not draggable — they are dropped here
+        /// rather than drawn inert, since a dot that does not move when pulled is worse than one that
+        /// is not offered. `SpacingChart.draggable` is the one place that rule lives.
+        private func grips(for guide: GuideStroke,
+                           editing: GuideOverlayView.Editing) -> [GuideOverlayView.Guide.Grip] {
+            switch editing {
+            case .none:
+                return []
+            case .handles:
+                return canvasManager.guideHandlePositions(for: guide).map {
+                    GuideOverlayView.Guide.Grip(index: $0.sampleIndex, position: $0.position)
+                }
+            case .spacing:
+                guard let chart = canvasManager.spacingChart(forGuide: guide.id),
+                      let path = GuidePath(samples: guide.samples) else { return [] }
+                let positions = chart.positions(on: path)
+                return chart.draggable.map {
+                    GuideOverlayView.Guide.Grip(index: $0, position: positions[$0])
+                }
+            }
         }
 
         func updateOnionSkin() {

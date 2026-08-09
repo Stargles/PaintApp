@@ -38,6 +38,9 @@ struct InterpolateBar: View {
             // hides itself when there is nothing to show, so a single-part drawing's bar is exactly
             // Phase 4.6's.
             MotionGroupRow(canvasManager: canvasManager)
+            // Item 7's list, under the groups and on the same terms: it hides itself when there is
+            // nothing to show, so a bar on a frame with no guides is unchanged.
+            GuideRow(canvasManager: canvasManager)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -67,6 +70,7 @@ struct InterpolateBar: View {
                 }
                 Spacer(minLength: 12)
                 guideButton
+                spacingButton
                 commitButton
                 removeButton
             }
@@ -171,6 +175,27 @@ struct InterpolateBar: View {
         }
     }
 
+    /// Swaps the guide overlay between its two editors — Phase 7 item 5, `PLAN.md` §6.2's "timing
+    /// adjustment", against item 2's "geometric adjustment".
+    ///
+    /// A toggle and not a third arming state: shape handles and spacing dots sit on the same
+    /// polyline, so both at once would put two meanings under one touch. Off means handles, which is
+    /// the state an artist who has never pressed this button is in.
+    ///
+    /// Shown only when there is a guide on the frame *and* a chart to draw — keyframes one frame
+    /// apart have no in-betweens to space, and a button that reveals nothing is worse than no button.
+    @ViewBuilder
+    private var spacingButton: some View {
+        if hasASpacingChart {
+            Button(canvasManager.isEditingGuideSpacing ? "Spacing" : "Shape") {
+                canvasManager.isEditingGuideSpacing.toggle()
+            }
+            .buttonStyle(.bordered)
+            .tint(canvasManager.isEditingGuideSpacing ? .orange : .gray)
+            .accessibilityIdentifier("interpolate.guideSpacing")
+        }
+    }
+
     /// Drops the recipe, leaving whatever content the cel already had — which for a derived
     /// in-between is nothing, so this reads as "undo the interpolation" without being undo.
     @ViewBuilder
@@ -252,6 +277,13 @@ struct InterpolateBar: View {
     private var targetCelIsEmpty: Bool {
         guard let at = canvasManager.interpolationTarget else { return true }
         return canvasManager.layers[at.layer].cels[at.cel].vector?.elements.isEmpty ?? true
+    }
+
+    /// Whether any visible guide has in-between frames to space. Cheap — it resolves a frame span and
+    /// samples a curve; no evaluation, so it is safe in a `body`.
+    private var hasASpacingChart: Bool {
+        !canvasManager.isDrawingGuide
+            && canvasManager.visibleGuideStrokes.contains { canvasManager.spacingChart(forGuide: $0.id) != nil }
     }
 
     private var targetIsReference: Bool {

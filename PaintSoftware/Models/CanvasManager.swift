@@ -148,6 +148,21 @@ final class CanvasManager: ObservableObject {
     /// a second object change per touch sample would only cost SwiftUI passes.
     var guideHandleDrag: (guideID: UUID, samples: [TimedSample])?
 
+    /// Whether the guide overlay is showing its **spacing chart** instead of its geometry handles —
+    /// Phase 7 item 5.
+    ///
+    /// Two editors on one path cannot both own it: a chart dot and a shape handle would sit on the
+    /// same polyline and fight for the same touch. `PLAN.md` §6.2 asks for both as *separate*
+    /// controls ("geometric adjustment → handles", "timing adjustment → the chart"), so the overlay
+    /// shows one at a time and the bar says which. Transient, like the rest of this mode's view state.
+    @Published var isEditingGuideSpacing: Bool = false
+
+    /// The guide whose chart is under the finger, the chart as it stood at touch-down, and the recipe
+    /// it was read from — Phase 7 item 5, and the same shape as `guideHandleDrag` for the same
+    /// reasons. The recipe is what a cancelled drag is put back to; `cancelStructureGesture` drops
+    /// the undo snapshot but deliberately does not restore from it.
+    var guideSpacingDrag: (guideID: UUID, chart: SpacingChart, recipe: InterpolationRecipe)?
+
     @Published var currentLayerIndex: Int = 0 {
         didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
     }

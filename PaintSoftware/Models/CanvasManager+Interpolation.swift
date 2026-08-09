@@ -689,6 +689,10 @@ extension CanvasManager {
         armedMotionGroupID = nil
         hiddenMotionGroups.removeAll()
         isDrawingGuide = false
+        // Not in that list — nothing outside the mode reads it, and the overlay it switches is gone.
+        // Reset anyway so re-entering starts on the shape editor, which is where an artist who has
+        // never pressed the button expects to be.
+        isEditingGuideSpacing = false
     }
 
     func isInterpolationReference(celID: UUID, inLayer layerID: UUID) -> Bool {
@@ -1760,6 +1764,220 @@ extension CanvasManager {
         guideHandleDrag = nil
         if let index = guideStrokes.firstIndex(where: { $0.id == drag.guideID }) {
             guideStrokes[index].samples = drag.samples
+        }
+        cancelStructureGesture()
+    }
+
+    // MARK: - The guide list, link and duplicate (Phase 7 item 7)
+
+    /// One guide on the bar's list.
+    struct GuideChip: Identifiable {
+        var guide: GuideStroke
+        /// 1-based, in the order the recipe names them. A guide has no name and does not want one —
+        /// it is identified by the arc drawn on the canvas, and the number is only there so the row
+        /// and the drawing can be talked about together.
+        var number: Int
+        /// True when some *other* interval references this same guide. Worth showing, because it is
+        /// exactly the difference between link and duplicate: editing a shared guide's handles moves
+        /// the motion on every frame that uses it, which is the point of a link and a nasty surprise
+        /// if you thought you had a copy.
+        var isShared: Bool
+        var id: UUID { guide.id }
+    }
+
+    /// The guides bound to the frame under the playhead, as the bar shows them.
+    var guideChips: [GuideChip] {
+        let visible = visibleGuideStrokes
+        guard !visible.isEmpty else { return [] }
+        var uses: [UUID: Int] = [:]
+        for layer in layers {
+            for cel in layer.cels {
+                guard let recipe = cel.interpolation else { continue }
+                for id in Set(recipe.guideIDs + recipe.groups.flatMap(\.guideIDs)) {
+                    uses[id, default: 0] += 1
+                }
+            }
+        }
+        return visible.enumerated().map { index, guide in
+            GuideChip(guide: guide, number: index + 1, isShared: (uses[guide.id] ?? 0) > 1)
+        }
+    }
+
+    /// Guides elsewhere in the document that this frame does not already use — `PLAN.md` §6.4's
+    /// library at the smallest size that answers requirement 7.
+    ///
+    /// Every guide in the registry rather than only those whose `KeyframeInterval` matches, and that
+    /// is the point of the feature: fetching the arc from *another* frame is what requirement 7 asks
+    /// for. The interval scopes a guide to where it was authored, never to where it may be used.
+    var linkableGuideStrokes: [GuideStroke] {
+        guard let at = interpolationTarget,
+              let recipe = layers[at.layer].cels[at.cel].interpolation else { return [] }
+        let alreadyHere = Set(recipe.guideIDs + recipe.groups.flatMap(\.guideIDs))
+        return guideStrokes.filter { !alreadyHere.contains($0.id) }
+    }
+
+    /// Requirement 7's **link**: the same guide drives this interval too.
+    ///
+    /// One line, and that is Phase 2's model work paying off — a recipe has named guides by **id**
+    /// since then, so "the same guide in two places" needs no new field and no copy. Editing it
+    /// anywhere moves the motion everywhere, which is precisely what `PLAN.md` §6.4 wants for a
+    /// repeating cycle: fix the arc once and every frame of the walk follows.
+    @discardableResult
+    func linkGuideStroke(id: UUID) -> InterpolationRefusal? {
+        guard let at = interpolationTarget,
+              let recipe = layers[at.layer].cels[at.cel].interpolation,
+              guideStrokes.contains(where: { $0.id == id }) else { return .noInterpolationToGuide }
+        guard !recipe.guideIDs.contains(id),
+              !recipe.groups.contains(where: { $0.guideIDs.contains(id) }) else { return nil }
+        withInterpolationUndo(name: "Link Guide") {
+            layers[at.layer].cels[at.cel].interpolation?.guideIDs.append(id)
+        }
+        return nil
+    }
+
+    /// Requirement 7's **duplicate**: an independent copy of the same arc, for a one-off.
+    ///
+    /// Three things are deliberately *not* copied, and each is the same judgement `recordGuideStroke`
+    /// makes about a freshly drawn guide:
+    ///
+    /// - **A fresh `id`**, which is the whole difference from a link.
+    /// - **This interval, not the source's.** The copy was authored here, in the sense the field
+    ///   means (`GuideStroke.interval` scopes the library, it does not bind).
+    /// - **Whole-frame, not the source's `boundGroups`.** A group binding carried across would
+    ///   silently make the copy drive nothing whenever that group is not part of *this* recipe — the
+    ///   silent no-op this feature has now declined four times. Narrowing to a group stays a later,
+    ///   deliberate act.
+    ///
+    /// `role` *is* carried, because it says which of the two signals the artist meant the arc to
+    /// carry, and that is a property of the drawing rather than of where it is used.
+    @discardableResult
+    func duplicateGuideStroke(id: UUID) -> InterpolationRefusal? {
+        guard let source = guideStrokes.first(where: { $0.id == id }),
+              let at = interpolationTarget,
+              let recipe = layers[at.layer].cels[at.cel].interpolation,
+              let first = recipe.references.first?.cels.first,
+              let last = recipe.references.last?.cels.last else { return .noInterpolationToGuide }
+
+        let copy = GuideStroke(samples: source.samples,
+                               interval: KeyframeInterval(start: first, end: last),
+                               boundGroups: [], role: source.role)
+        withInterpolationUndo(name: "Duplicate Guide") {
+            guideStrokes.append(copy)
+            layers[at.layer].cels[at.cel].interpolation?.guideIDs.append(copy.id)
+        }
+        return nil
+    }
+
+    // MARK: - The spacing chart (Phase 7 item 5)
+
+    /// Frames from the first keyframe to the last, inclusive — the chart's stop count.
+    ///
+    /// Read off the **timeline**, not off the recipe, because that is what "each in-between frame"
+    /// means to the artist (`PLAN.md` §6.2). Nil when the span cannot be resolved or the keyframes
+    /// are adjacent, which is a keyframe pair with no in-betweens to space.
+    func interpolationFrameSpan(of recipe: InterpolationRecipe) -> Int? {
+        guard let first = recipe.references.first?.cels.first,
+              let last = recipe.references.last?.cels.last,
+              let a = celIndices(forCel: first.celID, inLayer: first.layerID),
+              let b = celIndices(forCel: last.celID, inLayer: last.layerID) else { return nil }
+        let start = layers[a.layer].cels[a.cel].startFrame
+        let end = layers[b.layer].cels[b.cel].startFrame
+        guard end > start else { return nil }
+        return end - start + 1
+    }
+
+    /// True when this guide's timing is what `binding` reads — the two ways the model can say so.
+    ///
+    /// The same pairing `GuideSet` performs, and it has to stay that way: this decides where a dot
+    /// drag *writes*, and `GuideSet` decides where the result is *read*. If they disagreed, the chart
+    /// would move and the frame would not.
+    private func binding(_ binding: MotionGroupBinding, isDrivenBy guide: GuideStroke,
+                         in recipe: InterpolationRecipe) -> Bool {
+        binding.guideIDs.contains(guide.id)
+            || (recipe.guideIDs.contains(guide.id) && guide.drives(binding.groupID))
+    }
+
+    /// The easing actually in force for `guide`'s groups, mirroring the evaluator's precedence —
+    /// `binding.spacing ?? the guide's derived timing ?? recipe.spacing`.
+    ///
+    /// Mirrored rather than shared because the evaluator resolves per binding and this question is
+    /// per *guide*: the chart is drawn on one guide and has to show one curve. Where a guide drives
+    /// several groups whose bindings disagree, the first is what is shown — and a drag then writes
+    /// all of them, so the disagreement resolves the moment the artist touches it.
+    private func spacingInForce(for guide: GuideStroke, in recipe: InterpolationRecipe) -> SpacingCurve {
+        if let driven = recipe.groups.first(where: { binding($0, isDrivenBy: guide, in: recipe) }),
+           let explicit = driven.spacing {
+            return explicit
+        }
+        if guide.role != .trajectory, let derived = GuidePath(samples: guide.samples)?.spacingCurve() {
+            return derived
+        }
+        return recipe.spacing
+    }
+
+    /// The chart to draw on `guideID`, or nil when there is nothing to space.
+    func spacingChart(forGuide guideID: UUID) -> SpacingChart? {
+        guard let at = interpolationTarget,
+              let recipe = layers[at.layer].cels[at.cel].interpolation,
+              let guide = guideStrokes.first(where: { $0.id == guideID }),
+              let frames = interpolationFrameSpan(of: recipe), frames >= 3 else { return nil }
+        return SpacingChart(curve: spacingInForce(for: guide, in: recipe), frames: frames)
+    }
+
+    /// Writes a chart back as the easing for every group `guide` drives.
+    ///
+    /// **`binding.spacing` is the field, and that is what makes the chart work at all**: it outranks
+    /// the guide's derived stylus timing, so a dot the artist has placed by hand is not overwritten
+    /// by the velocity they happened to draw the arc at. A recipe with no bindings — the honest
+    /// whole-frame degenerate case — takes it on `recipe.spacing` instead, which is the same rule one
+    /// level up.
+    func setSpacing(_ curve: SpacingCurve, forGuide guideID: UUID) {
+        guard let at = interpolationTarget,
+              var recipe = layers[at.layer].cels[at.cel].interpolation,
+              let guide = guideStrokes.first(where: { $0.id == guideID }) else { return }
+        var wroteABinding = false
+        for index in recipe.groups.indices where binding(recipe.groups[index], isDrivenBy: guide, in: recipe) {
+            recipe.groups[index].spacing = curve
+            wroteABinding = true
+        }
+        if !wroteABinding { recipe.spacing = curve }
+        withInterpolationUndo(name: "Adjust Spacing") {
+            layers[at.layer].cels[at.cel].interpolation = recipe
+        }
+    }
+
+    /// A chart dot's touch-down. Same bracket and the same touch-down snapshot as a handle drag, for
+    /// the same two reasons: one undo step per gesture, and a drag that is a pure function of where
+    /// the finger *is* rather than of the curve it has been writing as it went.
+    func beginGuideSpacingDrag(guideID: UUID) {
+        guard let chart = spacingChart(forGuide: guideID),
+              let at = interpolationTarget,
+              let recipe = layers[at.layer].cels[at.cel].interpolation else { return }
+        guideSpacingDrag = (guideID, chart, recipe)
+        beginStructureGesture()
+    }
+
+    /// Moves one frame's dot to `fraction` along the guide. Records nothing — the bracket owns it.
+    func dragGuideSpacingStop(index: Int, to fraction: CGFloat) {
+        guard let drag = guideSpacingDrag else { return }
+        setSpacing(drag.chart.moving(index, to: fraction).curve, forGuide: drag.guideID)
+    }
+
+    func commitGuideSpacingDrag() {
+        guard let drag = guideSpacingDrag, let at = interpolationTarget else { return }
+        guideSpacingDrag = nil
+        let moved = layers[at.layer].cels[at.cel].interpolation.map { current in
+            current.spacing != drag.recipe.spacing
+                || current.groups.map(\.spacing) != drag.recipe.groups.map(\.spacing)
+        } ?? false
+        if moved { commitStructureGesture(name: "Adjust Spacing") } else { cancelStructureGesture() }
+    }
+
+    func cancelGuideSpacingDrag() {
+        guard let drag = guideSpacingDrag else { return }
+        guideSpacingDrag = nil
+        if let at = interpolationTarget {
+            layers[at.layer].cels[at.cel].interpolation = drag.recipe
         }
         cancelStructureGesture()
     }

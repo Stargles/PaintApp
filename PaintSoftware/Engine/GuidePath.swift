@@ -88,6 +88,30 @@ struct GuidePath {
         return CGPoint(x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f)
     }
 
+    /// The arc fraction of the point on this path closest to `point` — the inverse of
+    /// `point(atArcFraction:)`, and what turns a finger somewhere near the guide into a position
+    /// along it.
+    ///
+    /// Projects onto every segment rather than snapping to the nearest sample, so a drag reads
+    /// continuously instead of in sample-sized steps. Nearest wins outright: a guide that loops back
+    /// on itself has two answers for the same finger, and the near one is the one the artist means.
+    func arcFraction(nearest point: CGPoint) -> CGFloat {
+        var bestDistance = CGFloat.greatestFiniteMagnitude
+        var bestArc: CGFloat = 0
+        for i in 1..<points.count {
+            let a = points[i - 1], b = points[i]
+            let vx = b.x - a.x, vy = b.y - a.y
+            let squared = vx * vx + vy * vy
+            guard squared > GuidePath.coincident else { continue }
+            let f = min(max(((point.x - a.x) * vx + (point.y - a.y) * vy) / squared, 0), 1)
+            let distance = hypot(point.x - (a.x + vx * f), point.y - (a.y + vy * f))
+            guard distance < bestDistance else { continue }
+            bestDistance = distance
+            bestArc = distances[i - 1] + (distances[i] - distances[i - 1]) * f
+        }
+        return min(max(bestArc / length, 0), 1)
+    }
+
     /// How far the guide departs from its own straight chord at arc fraction `u`.
     ///
     /// **This, rather than the absolute path, is the trajectory constraint** — the one genuine
@@ -301,6 +325,80 @@ enum GuideHandles {
             if step > GuidePath.coincident { total += step }
             out.append(total)
         }
+        return out
+    }
+}
+
+/// The animator's spacing chart for one A→C interval — Phase 7 item 5, `PLAN.md` §6.2.
+///
+/// One stop per frame from the first keyframe to the last, each saying **how far along the motion
+/// that frame lands**. Drawn as dots on the guide it belongs to, it is the classic chart drawn in
+/// place: bunched dots are a slow stretch, spread dots a fast one, and the shape of the easing is
+/// legible without a graph editor or a legend.
+///
+/// It is a *view* of whichever `SpacingCurve` is in force rather than a second store of the timing.
+/// Reading it off the curve means the chart the artist first sees is what they already have — a
+/// guide's derived stylus timing, or the recipe's own easing — and dragging a dot writes a curve
+/// back. Nothing new persists.
+///
+/// **The ends are pinned and the stops are kept monotone**, both by construction. The end stops are
+/// the keyframes, which are where they are by definition; and a chart that dipped would run the
+/// in-between backwards mid-scrub, which is the same property `GuidePath.spacingCurve` gets for free
+/// from cumulative arc length and this one has to enforce, since a finger can drag anywhere.
+struct SpacingChart: Equatable {
+
+    /// Where each frame lands along the motion, `0...1`, non-decreasing, `stops[0] == 0` and the last
+    /// `== 1`.
+    let stops: [CGFloat]
+
+    /// Reads the chart off the curve in force.
+    ///
+    /// `frames` counts the first keyframe and the last, so a keyframe pair four frames apart is
+    /// `frames == 5`: two pinned ends and three draggable in-betweens.
+    init(curve: SpacingCurve, frames: Int) {
+        let n = max(frames, 2)
+        var out = (0..<n).map { i -> CGFloat in
+            let tau = CGFloat(i) / CGFloat(n - 1)
+            return min(max(curve.eased(tau), 0), 1)
+        }
+        out[0] = 0
+        out[n - 1] = 1
+        stops = SpacingChart.madeMonotone(out)
+    }
+
+    private init(stops: [CGFloat]) {
+        self.stops = stops
+    }
+
+    /// The stops the artist can drag — everything but the two pinned keyframes.
+    var draggable: Range<Int> { 1..<max(stops.count - 1, 1) }
+
+    /// The chart with stop `index` moved to `fraction`, clamped to its neighbours so the motion can
+    /// never be made to run backwards. Dragging past a neighbour parks the frame *on* it, which is a
+    /// hold — a real thing to want — rather than a reordering, which is not.
+    func moving(_ index: Int, to fraction: CGFloat) -> SpacingChart {
+        guard draggable.contains(index) else { return self }
+        var out = stops
+        out[index] = min(max(fraction, stops[index - 1]), stops[index + 1])
+        return SpacingChart(stops: out)
+    }
+
+    /// The curve this chart means.
+    ///
+    /// `.sampled` at exactly the chart's own stops, which is what makes `SpacingChart(curve:frames:)`
+    /// of it give the identical chart back: `eased` reads a `.sampled` curve at evenly spaced inputs,
+    /// and the stops are evenly spaced in time by construction. A different resolution here would
+    /// round-trip through interpolation and the dots would creep every time one was touched.
+    var curve: SpacingCurve { SpacingCurve(kind: .sampled, samples: stops) }
+
+    /// Where the stops sit on `path` — the dots, in canvas coordinates.
+    func positions(on path: GuidePath) -> [CGPoint] {
+        stops.map { path.point(atArcFraction: $0) }
+    }
+
+    private static func madeMonotone(_ values: [CGFloat]) -> [CGFloat] {
+        var out = values
+        for i in 1..<out.count { out[i] = max(out[i], out[i - 1]) }
         return out
     }
 }

@@ -797,6 +797,427 @@ final class InterpolationGuideLogicTests: XCTestCase {
         XCTAssertEqual(try soleGuide(manager).samples, before.samples)
     }
 
+    // MARK: - Link and duplicate (item 7)
+
+    /// A scene with **two** interpolated frames, which is the premise requirement 7 is about: an arc
+    /// drawn once on one interval, fetched onto the next.
+    ///
+    /// Five cels four frames apart — keyframes at 0, 8 and 16, in-betweens generated at 4 and 12.
+    /// Returns the manager sitting on the *second* in-between, with a guide already on the first.
+    private func twoIntervals() throws -> CanvasManager {
+        let manager = manager()
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        let cels = (0..<5).map { i in
+            Cel(id: UUID(), startFrame: i * 4, frameCount: 4, raster: .empty(size: size),
+                vector: .empty(size: size))
+        }
+        manager.layers[1].cels = cels
+        for (index, x) in [(0, CGFloat(10)), (2, 34), (4, 58)] {
+            cels[index].vector?.addStroke(stroke([CGPoint(x: x, y: 20), CGPoint(x: x + 20, y: 20),
+                                                  CGPoint(x: x + 20, y: 40)]))
+        }
+        manager.enterInterpolateMode()
+        manager.currentLayerIndex = 1
+
+        for cel in [cels[0], cels[2]] {
+            manager.toggleInterpolationReference(celID: cel.id, inLayer: manager.layers[1].id)
+        }
+        XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1))
+        manager.currentFrame = 4
+        manager.recordGuideStroke(samples: arched())
+
+        for cel in [cels[0], cels[2]] {   // swap the pair over to the second interval
+            manager.toggleInterpolationReference(celID: cel.id, inLayer: manager.layers[1].id)
+        }
+        for cel in [cels[2], cels[4]] {
+            manager.toggleInterpolationReference(celID: cel.id, inLayer: manager.layers[1].id)
+        }
+        XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 3))
+        manager.currentFrame = 12
+        return manager
+    }
+
+    /// A guide on one interval is offered to the next, and is not offered to the interval that
+    /// already has it — the library is "what you could fetch", not "everything that exists".
+    func testAGuideFromAnotherIntervalIsOfferedAndItsOwnFrameIsNot() throws {
+        let manager = try twoIntervals()
+        let existing = try soleGuide(manager)
+        XCTAssertTrue(manager.visibleGuideStrokes.isEmpty, "the second in-between has none yet")
+        XCTAssertEqual(manager.linkableGuideStrokes.map(\.id), [existing.id])
+
+        XCTAssertNil(manager.linkGuideStroke(id: existing.id))
+        XCTAssertEqual(manager.visibleGuideStrokes.map(\.id), [existing.id])
+        XCTAssertTrue(manager.linkableGuideStrokes.isEmpty, "already here, so no longer on offer")
+    }
+
+    /// **Link is a reference**, which is the whole of `PLAN.md` §6.4: reshape the arc on either frame
+    /// and both move. Fix a walk cycle's arc once and every frame of the walk follows.
+    func testALinkedGuideIsOneGuideInTwoPlaces() throws {
+        let manager = try twoIntervals()
+        let existing = try soleGuide(manager)
+        XCTAssertNil(manager.linkGuideStroke(id: existing.id))
+        XCTAssertEqual(manager.guideStrokes.count, 1, "a link copies nothing")
+
+        // Reshape it from the frame that fetched it.
+        let index = GuideHandles.indices(in: existing.samples)[1]
+        manager.beginGuideHandleDrag(guideID: existing.id)
+        manager.dragGuideHandle(sampleIndex: index, to: CGPoint(x: 25, y: -70))
+        manager.commitGuideHandleDrag()
+
+        let edited = try soleGuide(manager)
+        XCTAssertNotEqual(edited.samples, existing.samples)
+        for cel in manager.layers[1].cels where cel.interpolation?.guideIDs.contains(existing.id) == true {
+            let recipe = try XCTUnwrap(cel.interpolation)
+            XCTAssertEqual(manager.guides(driving: recipe), [edited],
+                           "both intervals read the one guide, so both moved")
+        }
+    }
+
+    /// **Duplicate is a copy**: same arc, new identity, and editing one leaves the other alone.
+    func testADuplicatedGuideIsIndependentOfItsSource() throws {
+        let manager = try twoIntervals()
+        let source = try soleGuide(manager)
+        XCTAssertNil(manager.duplicateGuideStroke(id: source.id))
+        XCTAssertEqual(manager.guideStrokes.count, 2)
+
+        let copy = try XCTUnwrap(manager.visibleGuideStrokes.first)
+        XCTAssertNotEqual(copy.id, source.id)
+        XCTAssertEqual(copy.samples, source.samples)
+
+        let index = GuideHandles.indices(in: copy.samples)[1]
+        manager.beginGuideHandleDrag(guideID: copy.id)
+        manager.dragGuideHandle(sampleIndex: index, to: CGPoint(x: 25, y: -70))
+        manager.commitGuideHandleDrag()
+
+        XCTAssertEqual(manager.guideStrokes.first { $0.id == source.id }?.samples, source.samples,
+                       "the source is untouched — that is the difference from a link")
+    }
+
+    /// A copy is authored *here*, and binds whole-frame rather than inheriting group bindings that
+    /// may name no group in this recipe — the silent no-op this feature keeps declining.
+    func testADuplicateTakesThisIntervalAndBindsWholeFrame() throws {
+        let manager = try twoIntervals()
+        let sourceID = try soleGuide(manager).id
+        manager.guideStrokes[0].boundGroups = [UUID()]   // a group that is not in this recipe
+        manager.guideStrokes[0].role = .timing
+
+        XCTAssertNil(manager.duplicateGuideStroke(id: sourceID))
+        let copy = try XCTUnwrap(manager.visibleGuideStrokes.first)
+        XCTAssertTrue(copy.boundGroups.isEmpty, "whole-frame, like a freshly drawn guide")
+        XCTAssertEqual(copy.role, .timing, "which signal it carries is a property of the drawing")
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[3].interpolation)
+        XCTAssertEqual(copy.interval.start, recipe.references.first?.cels.first)
+        XCTAssertEqual(copy.interval.end, recipe.references.last?.cels.last)
+    }
+
+    /// The chip says when a guide is shared, because that is exactly what makes a handle drag on it
+    /// move a frame the artist is not looking at.
+    func testAChipSaysWhetherAGuideIsShared() throws {
+        let manager = try twoIntervals()
+        let existing = try soleGuide(manager)
+
+        XCTAssertNil(manager.duplicateGuideStroke(id: existing.id))
+        XCTAssertEqual(manager.guideChips.map(\.isShared), [false], "a copy is this frame's alone")
+
+        XCTAssertNil(manager.linkGuideStroke(id: existing.id))
+        let chips = manager.guideChips
+        XCTAssertEqual(chips.map(\.number), [1, 2])
+        XCTAssertEqual(chips.map(\.isShared), [false, true])
+    }
+
+    /// Fetching the same guide twice would leave a duplicate id on the recipe and, with two entries
+    /// in the trajectory average, halve nothing — a no-op is the honest answer.
+    func testLinkingAGuideThatIsAlreadyHereChangesNothing() throws {
+        let manager = try twoIntervals()
+        let existing = try soleGuide(manager)
+        XCTAssertNil(manager.linkGuideStroke(id: existing.id))
+        let before = manager.layers[1].cels[3].interpolation?.guideIDs
+
+        XCTAssertNil(manager.linkGuideStroke(id: existing.id))
+        XCTAssertEqual(manager.layers[1].cels[3].interpolation?.guideIDs, before)
+    }
+
+    /// One artist action, one undo step — and for duplicate that has to cover the registry *and* the
+    /// binding, or undo leaves a guide nobody can see bound to nothing.
+    func testLinkAndDuplicateAreEachOneUndoStep() throws {
+        let manager = try twoIntervals()
+        let existing = try soleGuide(manager)
+
+        XCTAssertNil(manager.linkGuideStroke(id: existing.id))
+        manager.undo()
+        XCTAssertTrue(manager.visibleGuideStrokes.isEmpty)
+        XCTAssertEqual(manager.guideStrokes.count, 1, "undoing a link deletes nothing")
+
+        XCTAssertNil(manager.duplicateGuideStroke(id: existing.id))
+        manager.undo()
+        XCTAssertEqual(manager.guideStrokes.count, 1)
+        XCTAssertTrue(manager.visibleGuideStrokes.isEmpty)
+    }
+
+    /// Same refusal as drawing one: a guide is a constraint on a motion, so there has to be a motion.
+    func testFetchingAGuideOntoAFrameWithNoRecipeIsRefused() throws {
+        let manager = try twoIntervals()
+        let existing = try soleGuide(manager)
+        manager.currentFrame = 0   // a keyframe: content, no recipe
+
+        XCTAssertTrue(manager.linkableGuideStrokes.isEmpty)
+        XCTAssertEqual(manager.linkGuideStroke(id: existing.id), .noInterpolationToGuide)
+        XCTAssertEqual(manager.duplicateGuideStroke(id: existing.id), .noInterpolationToGuide)
+        XCTAssertEqual(manager.guideStrokes.count, 1)
+    }
+
+    // MARK: - The spacing chart (item 5)
+
+    /// A finger somewhere near the guide has to read as a position *along* it. Round-tripping through
+    /// `point(atArcFraction:)` is the property that makes a dot drag land where it was aimed.
+    func testTheNearestArcFractionInvertsThePointLookup() throws {
+        let p = try path(arched())
+        for u in stride(from: CGFloat(0), through: 1, by: 0.05) {
+            XCTAssertEqual(p.arcFraction(nearest: p.point(atArcFraction: u)), u, accuracy: 1e-6)
+        }
+    }
+
+    /// Off the path, the answer is the projection — and past either end it clamps, so a drag that
+    /// overshoots parks on the keyframe rather than wrapping around.
+    func testAPointOffThePathProjectsOntoIt() throws {
+        let p = try path(straight())
+        XCTAssertEqual(p.arcFraction(nearest: CGPoint(x: 30, y: 500)), 0.3, accuracy: 1e-6)
+        XCTAssertEqual(p.arcFraction(nearest: CGPoint(x: -900, y: -900)), 0, accuracy: 1e-9)
+        XCTAssertEqual(p.arcFraction(nearest: CGPoint(x: 900, y: 900)), 1, accuracy: 1e-9)
+    }
+
+    /// The chart of a linear curve is evenly spaced — the animator's chart for an unaccelerated move.
+    /// Five frames means two pinned keyframes and three draggable in-betweens.
+    func testAChartOfALinearCurveIsEvenlySpaced() {
+        let chart = SpacingChart(curve: .linear, frames: 5)
+        XCTAssertEqual(chart.stops, [0, 0.25, 0.5, 0.75, 1])
+        XCTAssertEqual(Array(chart.draggable), [1, 2, 3])
+    }
+
+    /// The chart reads whatever curve is in force, so what the artist first sees is what they already
+    /// have — a guide's own stylus timing included. Ease-out bunches the late frames.
+    func testAChartReadsTheCurveItWasBuiltFrom() throws {
+        let easeOut = SpacingChart(curve: SpacingCurve(kind: .easeOut), frames: 5)
+        XCTAssertEqual(easeOut.stops.first, 0)
+        XCTAssertEqual(easeOut.stops.last, 1)
+        for i in 1..<easeOut.stops.count {
+            XCTAssertGreaterThan(easeOut.stops[i], easeOut.stops[i - 1])
+        }
+        // Past the halfway point in time, ease-out is already past halfway along the motion.
+        XCTAssertGreaterThan(easeOut.stops[2], 0.5)
+    }
+
+    /// **The round trip is exact**, which is what stops the dots creeping every time one is touched:
+    /// the curve a chart means is `.sampled` at the chart's own stops, and reading a chart back off
+    /// that curve samples it at exactly those inputs.
+    func testAChartRoundTripsThroughItsCurve() {
+        let chart = SpacingChart(curve: SpacingCurve(kind: .easeInOut), frames: 7)
+            .moving(2, to: 0.1)
+            .moving(4, to: 0.9)
+        XCTAssertEqual(SpacingChart(curve: chart.curve, frames: 7).stops, chart.stops)
+    }
+
+    /// A dot goes where it is put, and only that dot moves.
+    func testMovingAStopMovesOnlyThatStop() {
+        let chart = SpacingChart(curve: .linear, frames: 5)
+        let moved = chart.moving(2, to: 0.3)
+        XCTAssertEqual(moved.stops, [0, 0.25, 0.3, 0.75, 1])
+    }
+
+    /// **The motion can never be made to run backwards.** Dragging past a neighbour parks the frame
+    /// *on* it — a hold, which is a real thing to want — rather than reordering the frames, which is
+    /// not. A chart that dipped would run the in-between backwards mid-scrub.
+    func testAStopCannotBeDraggedPastItsNeighbours() {
+        let chart = SpacingChart(curve: .linear, frames: 5)
+        XCTAssertEqual(chart.moving(2, to: -5).stops[2], 0.25, accuracy: 1e-9)
+        XCTAssertEqual(chart.moving(2, to: 5).stops[2], 0.75, accuracy: 1e-9)
+    }
+
+    /// The keyframes are where they are by definition, so their stops are not offered.
+    func testTheEndStopsArePinnedAndNotDraggable() {
+        let chart = SpacingChart(curve: .linear, frames: 5)
+        XCTAssertEqual(chart.moving(0, to: 0.5).stops, chart.stops)
+        XCTAssertEqual(chart.moving(4, to: 0.5).stops, chart.stops)
+        XCTAssertTrue(SpacingChart(curve: .linear, frames: 2).draggable.isEmpty)
+    }
+
+    /// The dots sit on the guide, at the arc fraction each frame reaches — which is the same
+    /// parameter the trajectory constraint is read on, so the chart shows where the motion actually
+    /// is rather than a separate diagram of it.
+    func testTheDotsSitOnTheGuideWhereEachFrameLands() throws {
+        let p = try path(straight())
+        let positions = SpacingChart(curve: .linear, frames: 5).positions(on: p)
+        XCTAssertEqual(positions.map(\.x), [0, 25, 50, 75, 100])
+    }
+
+    // MARK: - The chart through the document
+
+    /// The chart's stop count is the **timeline's** in-between frames, not a fixed number — which is
+    /// what "each in-between frame" means to the artist (`PLAN.md` §6.2). `generated` puts its
+    /// keyframes at frames 0 and 8, so the chart is nine stops: two pinned keyframes and seven
+    /// in-betweens to place.
+    func testTheChartSpansTheKeyframesOwnFrames() throws {
+        let manager = guidedFrame()
+        let guide0 = try soleGuide(manager)
+        let chart = try XCTUnwrap(manager.spacingChart(forGuide: guide0.id))
+        XCTAssertEqual(chart.stops.count, 9)
+        XCTAssertEqual(Array(chart.draggable), [1, 2, 3, 4, 5, 6, 7])
+    }
+
+    /// A guide's own stylus timing is what the chart starts from — the chart is a view of the easing
+    /// in force, not a second store of it.
+    func testTheChartStartsFromTheGuidesOwnTiming() throws {
+        let manager = manager()
+        generated(manager)
+        manager.currentFrame = 4
+        manager.currentLayerIndex = 1
+        // Fast then slow: most of the arc is covered early, which is ease-out.
+        manager.recordGuideStroke(samples: [
+            TimedSample(point: CGPoint(x: 0, y: 0), pressure: 1, time: 0),
+            TimedSample(point: CGPoint(x: 80, y: 0), pressure: 1, time: 0.02),
+            TimedSample(point: CGPoint(x: 100, y: 0), pressure: 1, time: 0.2),
+        ])
+        let chart = try XCTUnwrap(manager.spacingChart(forGuide: try soleGuide(manager).id))
+        XCTAssertGreaterThan(chart.stops[2], 0.5, "an ease-out chart is past halfway at the midpoint")
+    }
+
+    /// **The precedence item 5 depends on**: a dot the artist placed by hand outranks the velocity
+    /// they happened to draw the arc at, because it is written to `binding.spacing`. Without that,
+    /// the guide's derived timing would overwrite every retime on the next evaluation.
+    func testADotDragOutranksTheGuidesDerivedTiming() throws {
+        let manager = guidedFrame()
+        let guide0 = try soleGuide(manager)
+
+        manager.beginGuideSpacingDrag(guideID: guide0.id)
+        manager.dragGuideSpacingStop(index: 4, to: 0.6)   // the middle frame, halfway through in time
+        manager.commitGuideSpacingDrag()
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        let written = try XCTUnwrap(recipe.groups.first?.spacing ?? recipe.spacing)
+        XCTAssertEqual(written.eased(0.5), 0.6, accuracy: 1e-6)
+        XCTAssertEqual(manager.spacingChart(forGuide: guide0.id)?.stops[4] ?? 0, 0.6, accuracy: 1e-6)
+    }
+
+    /// Retiming a frame moves the drawing at that `t`, which is the whole point — and it moves it
+    /// *along the guide*, since the trajectory is read at the eased parameter.
+    func testRetimingAFrameMovesTheInBetween() throws {
+        let manager = guidedFrame()
+        let guide0 = try soleGuide(manager)
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        let before = try forwardPoints(manager, at: 0.5, guides: manager.guides(driving: recipe))
+
+        manager.beginGuideSpacingDrag(guideID: guide0.id)
+        manager.dragGuideSpacingStop(index: 4, to: 0.6)
+        manager.commitGuideSpacingDrag()
+
+        let after = try forwardPoints(manager, at: 0.5,
+                                      guides: manager.guides(driving: try XCTUnwrap(
+                                        manager.layers[1].cels[1].interpolation)))
+        XCTAssertNotEqual(before.map(\.x), after.map(\.x),
+                          "the frame should now sit 60% of the way along the motion")
+    }
+
+    /// One gesture, one undo step — the same bracket as the handles and the `t` slider.
+    func testAWholeSpacingDragIsOneUndoStep() throws {
+        let manager = guidedFrame()
+        let guide0 = try soleGuide(manager)
+        let before = try XCTUnwrap(manager.layers[1].cels[1].interpolation).groups.first?.spacing
+
+        manager.beginGuideSpacingDrag(guideID: guide0.id)
+        for v in stride(from: CGFloat(0.45), through: 0.6, by: 0.05) {
+            manager.dragGuideSpacingStop(index: 4, to: v)
+        }
+        manager.commitGuideSpacingDrag()
+        XCTAssertNotEqual(manager.layers[1].cels[1].interpolation?.groups.first?.spacing, before)
+
+        manager.undo()
+        XCTAssertEqual(manager.layers[1].cels[1].interpolation?.groups.first?.spacing, before)
+        XCTAssertEqual(manager.guideStrokes.count, 1, "one undo is the drag, not the guide")
+    }
+
+    /// A drag is a pure function of the chart at touch-down. Reading the chart back mid-drag would
+    /// read the curve the drag itself just wrote, and each move would compound the last.
+    func testMovesWithinOneSpacingDragDoNotCompound() throws {
+        let manager = guidedFrame()
+        let guide0 = try soleGuide(manager)
+
+        manager.beginGuideSpacingDrag(guideID: guide0.id)
+        manager.dragGuideSpacingStop(index: 4, to: 0.45)
+        manager.dragGuideSpacingStop(index: 4, to: 0.6)
+        manager.dragGuideSpacingStop(index: 4, to: 0.55)
+        manager.commitGuideSpacingDrag()
+
+        XCTAssertEqual(manager.spacingChart(forGuide: guide0.id)?.stops[4] ?? 0, 0.55, accuracy: 1e-6)
+    }
+
+    /// A tap on a dot is not a retime, and a second finger mid-drag puts the easing back.
+    func testASpacingDragThatMovedNothingOrWasCancelledRecordsNoStep() throws {
+        let manager = guidedFrame()
+        let guide0 = try soleGuide(manager)
+
+        manager.beginGuideSpacingDrag(guideID: guide0.id)
+        manager.commitGuideSpacingDrag()
+
+        manager.beginGuideSpacingDrag(guideID: guide0.id)
+        manager.dragGuideSpacingStop(index: 4, to: 0.6)
+        manager.cancelGuideSpacingDrag()
+        XCTAssertNil(manager.layers[1].cels[1].interpolation?.groups.first?.spacing)
+
+        manager.undo()
+        XCTAssertTrue(manager.guideStrokes.isEmpty, "the only step should be the guide's creation")
+    }
+
+    /// The smallest chart that means anything: keyframes two frames apart, one in-between to place.
+    func testTheSmallestChartHasOneDraggableFrame() throws {
+        let manager = manager()
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        let cels = (0..<3).map { i in
+            Cel(id: UUID(), startFrame: i, frameCount: 1, raster: .empty(size: size),
+                vector: .empty(size: size))
+        }
+        manager.layers[1].cels = cels
+        cels[0].vector?.addStroke(stroke([CGPoint(x: 10, y: 20), CGPoint(x: 30, y: 20)]))
+        cels[2].vector?.addStroke(stroke([CGPoint(x: 34, y: 20), CGPoint(x: 54, y: 20)]))
+        manager.enterInterpolateMode()
+        for cel in [cels[0], cels[2]] {
+            manager.toggleInterpolationReference(celID: cel.id, inLayer: manager.layers[1].id)
+        }
+        XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1))
+        manager.currentFrame = 1
+        manager.currentLayerIndex = 1
+        manager.recordGuideStroke(samples: dense())
+
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual(manager.interpolationFrameSpan(of: recipe), 3)
+        let chart = try XCTUnwrap(manager.spacingChart(forGuide: try soleGuide(manager).id))
+        XCTAssertEqual(Array(chart.draggable), [1])
+    }
+
+    /// No span, no chart. A recipe whose references collapse to one keyframe has no motion to lay
+    /// frames along, and drawing an empty overlay for it would be a control that does nothing.
+    func testAChartNeedsRoomForAnInBetween() throws {
+        let manager = guidedFrame()
+        let guideID = try soleGuide(manager).id
+        XCTAssertNotNil(manager.spacingChart(forGuide: guideID))
+
+        let references = try XCTUnwrap(manager.layers[1].cels[1].interpolation).references
+        manager.layers[1].cels[1].interpolation?.references = Array(references.prefix(1))
+        let recipe = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertNil(manager.interpolationFrameSpan(of: recipe))
+        XCTAssertNil(manager.spacingChart(forGuide: guideID))
+    }
+
+    /// Leaving the mode puts the overlay back on the shape editor, which is where an artist who has
+    /// never pressed the button expects to be.
+    func testLeavingTheModeResetsTheSpacingEditor() {
+        let manager = manager()
+        manager.enterInterpolateMode()
+        manager.isEditingGuideSpacing = true
+        manager.exitInterpolateMode()
+        XCTAssertFalse(manager.isEditingGuideSpacing)
+    }
+
     /// The loop item 2 exists to close: pull a handle, and the in-between moves. The handle positions
     /// the overlay draws come from the same place the drag writes to, so what is grabbed is what is
     /// seen.
