@@ -3,8 +3,8 @@ import Foundation
 
 /// Splitting a drawing into parts that move together.
 ///
-/// `PLAN.md` §5.3's coarse-to-fine algorithm, and the reason automatic grouping and one-tap-per-body-part
-/// are the same code rather than two systems: they differ only in what the recursion is seeded with.
+/// A coarse-to-fine algorithm, and the reason automatic grouping and one-tap-per-body-part are the
+/// same code rather than two systems: they differ only in what the recursion is seeded with.
 /// Seed it with one group covering everything and it is fully automatic; seed it with the artist's
 /// tags and it refines those instead.
 ///
@@ -32,10 +32,9 @@ import Foundation
 /// is itself partly a rotation, which makes each stroke's residual depend on where it sits, so
 /// residuals inside one rigid part vary systematically across it. On a torso with a swinging arm
 /// this currently cuts in the wrong place. Seeding with the artist's tags — the one-tap-per-body-part
-/// workflow, which is the same code path — handles it, and `PLAN.md` §5.3 already names automatic
-/// grouping the highest-risk part of the project and designs for correction rather than perfection.
-/// §5.3's bootstrap hints (a coarse flow field, matching tags) are the intended route to improving
-/// it; none of them are built yet.
+/// workflow, which is the same code path — handles it, since automatic grouping is the highest-risk
+/// part of the project and is designed for correction rather than perfection. A coarse flow field or
+/// matching tags could bootstrap a better cut; neither is built yet.
 ///
 /// Two caveats worth stating because they read as bugs and are not:
 ///
@@ -72,15 +71,11 @@ enum MotionGrouping {
         /// Grouping asks a different question from registration and the trade comes out the other
         /// way. Registration dropped the multi-start because a *symmetric* source — a straight line
         /// above all — ties exactly with its own 180° turn, so the extra seeds only ever added a
-        /// coin toss (`HANDOFF.md` §8 items 27 and 32). Here the fit is `.sourceToTarget` from a
-        /// *part* seeded where it already sits, and the whole point is to discover that some part
-        /// moved differently from the rest; without the extra seeds a body that turns is scored as
-        /// though it did not move, and the split it should have caused never happens
+        /// coin toss. Here the fit is `.sourceToTarget` from a *part* seeded where it already sits,
+        /// and the whole point is to discover that some part moved differently from the rest;
+        /// without the extra seeds a body that turns is scored as though it did not move, and the
+        /// split it should have caused never happens
         /// (`testTwoBodiesMovingDifferentlySplitIntoExactlyTwoGroups` is exactly that).
-        ///
-        /// Phase 4.7 measured registration, not grouping. Leaving this at 8 keeps Phase 5's
-        /// starting point the one Phase 1 tested, rather than moving it as a side effect of someone
-        /// else's decision. Phase 5 owns this dial.
         var icpRestarts: Int = 8
 
         init() {}
@@ -158,11 +153,9 @@ enum MotionGrouping {
             // untrustworthy.
             //
             // The cost is real and was weighed: automatic grouping can no longer discover a second
-            // part *inside* a group the artist tagged. That reading of the same behaviour ("it found
-            // another part in the one I tagged") is the one being given up, and the artist splits it
-            // themselves instead. Product owner's decision, 2026-08-05, taken on the characterisation
-            // in `InterpolationMotionGroupLogicTests`. Untagged content is unaffected: it arrives as
-            // the leftover group, which is not protected and is refined exactly as before.
+            // part *inside* a group the artist tagged, and the artist splits it themselves instead.
+            // Untagged content is unaffected: it arrives as the leftover group, which is not
+            // protected and is refined exactly as before.
             if seeded { accept(); continue }
 
             // Room left in the budget counts what is settled plus what is still queued.
@@ -195,15 +188,13 @@ enum MotionGrouping {
     /// whose points scatter 20 points in every direction is just a poor match, and its mean vector
     /// is near zero. Only the first is a reason to split, and only the vector form tells them apart.
     ///
-    /// **How the fit is matched depends on whether this group is a part or the whole drawing**, and
-    /// getting that wrong is what `HANDOFF.md` §8 item 43 was.
+    /// **How the fit is matched depends on whether this group is a part or the whole drawing.**
     ///
     /// A *part* matches source→target only: matching backwards would pair every other group's target
     /// points against this group's strokes, which is exactly the wrong thing when the source is only
     /// a part of what the target shows. But the group the recursion *starts* from is the entire
     /// drawing, and then the two clouds are the same content drawn twice — which is precisely
-    /// `.bidirectional`'s premise. Applying the part rule there cost the answer twice over, both
-    /// measured on the standalone harness (§5's Phase 4.7 entry):
+    /// `.bidirectional`'s premise. Applying the part rule there cost the answer twice over:
     ///
     /// - **`.sourceToTarget` seeds the search where the source already sits**, on the reasoning that
     ///   a part has usually moved a little. A whole drawing has not: an L 120 points across that

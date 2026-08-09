@@ -1,7 +1,10 @@
 #!/bin/sh
 # PreToolUse hook: point sessions at the graphify knowledge graph before they grep raw source.
 #
-# Wired up in .claude/settings.json for Bash|Grep (mode "search") and Read|Glob (mode "read").
+# Wired up in .claude/settings.json for Bash|Grep (mode "search") and Glob (mode "read").
+# `Read` was in the second matcher and was dropped: it fires on every targeted read during a
+# focused edit, where the graph has already done its job. Add it back if discovery matters more
+# than quiet.
 #
 # Three properties this script exists to guarantee, none of which a bare `graphify hook-guard`
 # call in settings.json can provide:

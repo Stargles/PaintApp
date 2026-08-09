@@ -15,7 +15,6 @@ import Foundation
 /// just the one being cut, so it takes them as an explicit parameter rather than reaching for a
 /// canvas — same rule, one more argument.
 ///
-/// See VECTOR_ERASER_PLAN.md §4.
 enum VectorEraser {
 
     /// One eraser gesture, resolved into the target canvas's **local** (pre-`transform`) space and
@@ -72,12 +71,11 @@ enum VectorEraser {
     ///
     /// ## Why probing rather than `StrokeGeometry.subdivided`
     ///
-    /// The plan (§4, Mode 2's third defect) called for densifying a coarse stroke to the eraser's
-    /// radius before deciding anything, so a sample-granularity verdict lands within a radius of the
-    /// truth. Densifying the *stored* samples achieves that but has two costs: the surviving pieces
-    /// inherit every inserted sample, permanently inflating the file for a stroke that was cut once,
-    /// and the parametric domain shifts, so cut positions have to be mapped back before they mean
-    /// anything to the original.
+    /// A coarse stroke needs densifying to the eraser's radius before a verdict is trustworthy at
+    /// sample granularity. Densifying the *stored* samples achieves that but has two costs: the
+    /// surviving pieces inherit every inserted sample, permanently inflating the file for a stroke
+    /// that was cut once, and the parametric domain shifts, so cut positions have to be mapped back
+    /// before they mean anything to the original.
     ///
     /// Walking probes along each original segment gets the same resolution with neither. The probes
     /// are transient, so nothing is inserted; the parameters come out in the original domain, so
@@ -174,86 +172,50 @@ enum VectorEraser {
 
     // MARK: - Mode 1 — the hybrid resolution
     //
-    // ## What the measurement changed about plan §1
+    // ## The resolution
     //
-    // §1 proposed: cut the spans the eraser fully covers, subtract those from the eraser's footprint,
-    // retain whatever is left as an alpha punch — and predicted that a hard round eraser swept across a
-    // line the way people normally erase would leave *nothing* to retain.
+    // A retained alpha punch is byte-identical to raster erasing (`RasterVectorParityLogicTests`, zero
+    // tolerance, across brushes/opacities/gestures/content kinds) — but a geometric split alone is not,
+    // even in its best case. A cut stroke re-renders as a **round cap** of its own half-width, while the
+    // eraser removed ink along a **straight band edge**; those differ by a lens of area ≈ 0.43·w²
+    // regardless of where the cut boundary lands, worth hundreds of stray pixels on a wide line.
     //
-    // The first half survives. The prediction does not, and `RasterVectorParityLogicTests` is why. Two
-    // measurements, both at zero tolerance against a raster layer erased identically:
+    // So the two representations are not interchangeable when clean:
     //
-    // 1. **A retained punch is byte-identical to raster erasing.** Every pixel, across hard/soft
-    //    brushes, full/partial opacity, square/diagonal/shave gestures, over a stroke, a fill and a
-    //    placed image. §1's fallback is exactly as strong as it claimed.
-    // 2. **A geometric split is not, even in its most favourable case.** A hard round eraser at full
-    //    opacity cutting square across a line left 498 stray pixels at delta 255.
-    //
-    // The second is not a tuning failure, it is geometry. A cut stroke is re-rendered by stamping the
-    // brush along the surviving samples, so its end is a **round cap of the stroke's own half-width**,
-    // while the eraser removed ink along a **straight band edge**. Those two shapes differ by a lens of
-    // area ≈ 0.43·w² however the cut boundary is placed — pushing the boundary out past the footprint
-    // trades stray ink for missing ink and cannot reach zero. For a 2pt line that is sub-pixel; for the
-    // 24pt line in the parity matrix it is hundreds of pixels.
-    //
-    // So the two representations are not interchangeable-when-clean, and the resolution changes shape:
-    //
-    // - **The punch is always retained**, which makes Mode 1 pixel-exact by construction rather than by
-    //   a threshold nobody can defend.
-    // - **A stroke the eraser wholly covers is deleted** (`isEntirelyCovered`). No new geometry, so
+    // - **The punch is always retained**, making Mode 1 pixel-exact by construction rather than by a
+    //   threshold.
+    // - **A stroke the eraser wholly covers is deleted** (`isEntirelyCovered`) — no new geometry, so
     //   nothing re-stamps and nothing can move; every pixel it contributed was under the punch.
     // - **A stroke the eraser covers full-width over a stretch is cut there**, inset by its own
     //   half-width (`conservativeCuts`), into pieces that render on the parent's dab lattice
-    //   (`DabLattice`). That is the plan's geometric split, and it took two things to make exact — see
-    //   below.
+    //   (`DabLattice`) — the geometric split, made exact by the two fixes below.
     //
-    // ## What the split needed, and why it was unwired for three sessions
+    // ## What makes the split exact
     //
-    // The obvious reading is that a cut hidden under the eraser cannot be seen, so a conservatively
-    // inset cut is free. That is true of the ink *at* the cut and was false of the stroke as a whole,
-    // because a surviving piece used not to be edited — it was **re-stamped from scratch as a new
-    // stroke**, and `BrushStamper.stampStroke` anchors its **dab lattice** at `samples[0]`: dabs every
-    // `stampSpacing` from the first sample, remainder carried across segments.
+    // A surviving piece is not re-stamped from scratch: `BrushStamper.stampStroke` anchors its dab
+    // lattice at `samples[0]`, so a piece beginning at the cut would re-anchor it and every dab past
+    // that point would land somewhere new along the piece's whole length — most visibly at the far tip,
+    // the end the punch cannot cover.
     //
-    // A piece that began at the cut re-anchored that, so its dabs landed somewhere new along its
-    // *entire length*, most visibly at its far tip — the end furthest from the eraser and therefore the
-    // one the punch cannot cover. Measured on the parity harness, a 24pt line cut by a 48pt hard round
-    // nib: split-versus-whole differed across x ∈ [41, 115] while the punch covered only x ∈ [40, 88],
-    // leaving 118 stray pixels at up to 183/255 after the punch. Widening the eraser did not help; it
-    // moves the artefact further away rather than covering it, because the artefact's size is set by the
-    // *stroke's* spacing and width.
+    // `DabLattice` fixes this by not re-deriving the lattice: a piece stores the parent's samples and
+    // the parameters its own samples sit at, and the renderer walks the *parent* whole, drawing only the
+    // dabs inside the piece's range — the same calls with the same arguments, which is what a
+    // zero-tolerance comparison needs. `conservativeCuts` fixes the other half: a cut end is a round cap
+    // while the eraser removed ink along a straight edge, so a cut loses ink up to half a width *past*
+    // the span measured as covered; insetting until the lost ink is a subset of the covered span puts
+    // it back under the punch. `testTheSplitIsExactOnlyBecauseThePiecesShareTheParentsLattice` pins
+    // both: pieces without the lattice diverge, pieces with it are exact. The pressure ramp needed no
+    // fix — `splitStroke` interpolates pressure linearly at the boundary, so a piece already reports the
+    // parent's pressure everywhere.
     //
-    // `DabLattice` is the fix and it is deliberately not a re-derivation: a piece stores the parent's
-    // samples and the parameters its own samples sit at, and the renderer walks the *parent* whole,
-    // drawing only the dabs inside the piece's range. The dabs that land are the same calls with the
-    // same arguments, which is the only thing that survives a comparison asserted at zero tolerance.
-    //
-    // Two problems, not one, and both have to be solved together:
-    //
-    // 1. the re-phased lattice above — `DabLattice`;
-    // 2. a cut end is a round cap of the stroke's half-width while the eraser removed ink along a
-    //    straight band edge, so a cut loses ink up to half a width *past* the span measured as covered
-    //    — `conservativeCuts`, by insetting until the lost ink is a subset of the covered span, which
-    //    the punch removes anyway.
-    //
-    // `testTheSplitIsExactOnlyBecauseThePiecesShareTheParentsLattice` pins both halves: pieces without
-    // the lattice still diverge, pieces with it are exact.
-    //
-    // The **pressure ramp** is anchored at `samples[0]` too, and it needed nothing: `splitStroke`
-    // interpolates the boundary sample's pressure, and pressure interpolates linearly, so a piece
-    // already reported the parent's pressure at every position. Only the lattice moved.
-    // - **The growth §1 worried about is answered by retain-or-drop and GC instead.** An element is
-    //   kept only when some part of the gesture still has something beneath it (`hasResidue`), and
-    //   `VectorCanvas` collects it later once nothing does. Scribbling a stroke out completely — the
-    //   common case §1 wanted to cost nothing — costs nothing: the stroke is deleted outright, so
-    //   nothing is left to punch and no element is retained at all.
-    //
-    //   The decision is a *bit*, not a set of spans, and the retained punch carries the gesture whole.
-    //   Keeping only the stretches that had a backdrop moves every dab after the first retained one
-    //   onto a different lattice and is measurably not pixel-exact; `hasResidue` carries the numbers.
-    //   That is the same defect as the one that unwired the split, reached from the other side.
+    // - **Display-list growth is bounded by retain-or-drop plus GC, not by trimming spans.** An element
+    //   is kept only when some part of the gesture still has something beneath it (`hasResidue`), and
+    //   `VectorCanvas` collects it once nothing does — so scribbling a stroke out completely costs
+    //   nothing, the stroke is deleted outright. The decision is a *bit*, not a set of spans: keeping
+    //   only the stretches that had a backdrop moves every dab after the first retained one onto a
+    //   different lattice, the same phase defect the split needed fixing.
 
-    /// Plan §1's alpha gate: whether this eraser brush is capable of a clean cut *at all*, before any
+    /// The alpha gate: whether this eraser brush is capable of a clean cut *at all*, before any
     /// geometry is considered.
     ///
     /// A clean cut asserts that the ink it deletes was going to be removed completely anyway. Anything
@@ -271,15 +233,13 @@ enum VectorEraser {
     /// `.square`/`.custom` are excluded because `BrushStamper.stampApproximateSquare` reaches
     /// `diameter/2 · √2` at the corners while the chain models `diameter/2`. That errs toward retaining
     /// a punch, which is the safe direction, and a square eraser therefore essentially never splits.
+    ///
     /// `minPressure` is the **lightest pressure the gesture actually carried**, not a property of the
-    /// brush. Judging `opacityPressure` against pressure 0 instead — which is what this did first —
-    /// bottoms `opacityFraction` out at `1 - opacityPressure` and rejects every brush that reacts to
-    /// pressure at all. That is not a conservative gate, it is a dead one: `hardRound` ships with
-    /// `opacityPressure: 0.1` and `pen` with `0.05`, so no built-in brush could ever clean-cut and the
-    /// entire split path was unreachable. The gesture's pressures are known at the call site, dab
-    /// pressure interpolates linearly between samples so the minimum over the dabs is the minimum over
-    /// the samples, and a drag from a finger or a mouse reports full pressure throughout — which is
-    /// the common case the split exists for.
+    /// brush — judging `opacityPressure` against pressure 0 instead would bottom `opacityFraction` out
+    /// at `1 - opacityPressure` and reject every pressure-reactive brush, including both built-in
+    /// defaults, making the split path unreachable. Dab pressure interpolates linearly, so the minimum
+    /// over the dabs is the minimum over the samples; a finger or mouse drag reports full pressure
+    /// throughout, which is the common case the split exists for.
     static func supportsCleanCut(brush: Brush, opacity: Double, minPressure: CGFloat) -> Bool {
         switch brush.shape {
         case .square, .custom: return false
@@ -339,10 +299,10 @@ enum VectorEraser {
     }
 
     /// How far past the stroke's geometric half-width the eraser must reach before a span counts as
-    /// cleanly cut. Plan §1's margin, for anti-aliased fringe at the very edge of the ink.
+    /// cleanly cut — margin for anti-aliased fringe at the very edge of the ink.
     static let cleanCutMargin: CGFloat = 0.05
 
-    /// Parametric spans of `samples` where the eraser covers the stroke's **entire width** — §1's
+    /// Parametric spans of `samples` where the eraser covers the stroke's **entire width** — the
     /// clean-cut test, as opposed to `cutRanges`, which only asks whether the centreline is under the
     /// footprint.
     ///
@@ -416,9 +376,8 @@ enum VectorEraser {
     /// being deleted rather than moved, and the only ink at stake is the existing cap — which
     /// `StrokeGeometry.capsules(_:contain:radius:)` has just confirmed the eraser removes anyway.
     /// Without this a stroke scribbled out from end to end can never be deleted: both boundaries are
-    /// pushed half a width inward, so two invisible stubs survive under the punch, they keep the punch
-    /// alive through garbage collection, and plan §1's "erasing a stroke away completely costs
-    /// nothing" is false for the one gesture it was written about.
+    /// pushed half a width inward, so two invisible stubs survive under the punch and keep it alive
+    /// through garbage collection.
     static func conservativeCuts(_ ranges: [ClosedRange<CGFloat>], in samples: [VectorSample],
                                  brush: Brush, size: CGFloat,
                                  by erasers: [StrokeGeometry.Capsule]) -> [ClosedRange<CGFloat>] {
@@ -458,30 +417,23 @@ enum VectorEraser {
         return StrokeGeometry.stampRadius(forPressure: pressure, brush: brush, size: size)
     }
 
-    /// Whether *any* of the eraser's gesture still has something under it, given `hasBackdrop` — plan
-    /// §1's "subtract the resolved span from the eraser's footprint", reduced to the one bit
-    /// `VectorCanvas` is allowed to act on.
+    /// Whether *any* of the eraser's gesture still has something under it, given `hasBackdrop` —
+    /// reduced to the one bit `VectorCanvas` is allowed to act on.
     ///
     /// This is what keeps Mode 1 from growing the display list on every stroke. A drag that passed over
     /// nothing at all, or over ink the split has since removed entirely, has nothing left to punch and
     /// no element is kept; an erase that resolved completely retains nothing.
     ///
-    /// **It reports a bit rather than the spans, and the punch keeps the whole gesture.** Retaining a
-    /// sub-run instead was measurably wrong, which is worth stating plainly because the spans are right
-    /// there and re-deriving the reason costs a day. `BrushStamper.stampStroke` lays its dabs on a
-    /// lattice that starts at `samples[0]` and steps one `stampSpacing` at a time, carrying the
-    /// remainder across segments. Start the run somewhere else and *every* dab after that point moves,
-    /// including the ones over the ink that justified retaining the punch at all. The union of full-alpha
-    /// dabs is unchanged in its interior, so this is invisible in the easy case — but at an
-    /// anti-aliased edge, and at any eraser opacity below 1 where alpha never saturates, it is not:
-    /// measured against the raster tier, trimming cost 4/255 over 22 pixels for a hard round eraser
-    /// crossing diagonally and 27/255 over 81 pixels for the same gesture at opacity 0.4. Snapping the
-    /// span boundary to a lattice position would fix the phase in exact arithmetic and not in
-    /// floating-point, and §8 is asserted at *zero* tolerance.
-    ///
-    /// The cost of keeping the whole gesture is dabs that punch nothing, which is render time and no
-    /// pixels. It is also not obviously a cost at all in display-list terms: trimming *split* a gesture
-    /// that crossed two separated strokes into two retained elements, where this keeps one.
+    /// **It reports a bit rather than the spans, and the punch keeps the whole gesture — trimming to a
+    /// sub-run is measurably wrong.** `BrushStamper.stampStroke` lays its dabs on a lattice anchored at
+    /// `samples[0]`, stepping one `stampSpacing` at a time with the remainder carried across segments.
+    /// Starting the run somewhere else moves *every* dab after that point, including ones over the ink
+    /// that justified retaining the punch. That is invisible where full-alpha dabs overlap, but not at
+    /// an anti-aliased edge or any eraser opacity below 1 — measured against the raster tier, trimming
+    /// cost several pixels of visible delta at multiple opacities, and the parity tests assert zero
+    /// tolerance. The cost of keeping the whole gesture instead is dabs that punch nothing — render
+    /// time, no pixels — and it can even shrink the display list versus trimming, which would split one
+    /// gesture crossing two separated strokes into two retained elements instead of one.
     ///
     /// `hasBackdrop` is asked at a parametric position along the gesture and answers "is there anything
     /// beneath the dab there" — it needs the display list, so `VectorCanvas` supplies it.
@@ -546,8 +498,8 @@ enum VectorEraser {
     /// Turns a stream of eraser positions into Mode 3 cuts: cut on entering a stroke, then stay quiet
     /// until the tip is over nothing again.
     ///
-    /// The plan (§4, Mode 3) asks for a cut on touch-**down** and a re-query per crossing, so one drag
-    /// across three lines cuts three spans. Cutting on *every* sample instead gets the three-line case
+    /// Mode 3 wants a cut on touch-**down** and a re-query per crossing, so one drag across three lines
+    /// cuts three spans. Cutting on *every* sample instead gets the three-line case
     /// right and everything else wrong: the span Mode 3 removes runs between the target's neighbouring
     /// crossings, which can be anywhere — including a few points from the finger — so a tip left
     /// sitting on a line would chew it away span by span, one per touch sample, from a stationary

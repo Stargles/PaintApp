@@ -41,10 +41,9 @@ struct InterpolatePanel: View {
 
     /// Thickness cross-fade, exposed as a toggle rather than shipped on or off.
     ///
-    /// `IMPLEMENTATION.md` Phase 4 item 5 and the product owner's steer of 2026-07-31: the mechanism
-    /// works, the default is `.none`, and which is better is a judgement to make on real drawings.
-    /// Deliberately view-level and not persisted per recipe — where it eventually lives (global
-    /// preference, per recipe, per group) is a decision to take *after* looking at it.
+    /// The mechanism works, the default is `.none`, and which is better is a judgement to make on
+    /// real drawings. Deliberately view-level and not persisted per recipe — where it eventually
+    /// lives (global preference, per recipe, per group) is a decision to take *after* looking at it.
     private var options: some View {
         Toggle(isOn: $canvasManager.interpolationThicknessFade) {
             VStack(alignment: .leading, spacing: 2) {
@@ -58,12 +57,12 @@ struct InterpolatePanel: View {
         .accessibilityIdentifier("interpolate.thicknessFadeToggle")
     }
 
-    /// The tinted per-group overlay — `IMPLEMENTATION.md` Phase 5 item 4.
+    /// The tinted per-group overlay.
     ///
-    /// On by default, because "what did it decide?" is the question the phase exists to answer and an
-    /// overlay nobody switches on answers nothing. The switch is here rather than on the bar because
-    /// it is set once and not reached for mid-flow, which is this popover's whole remit — and because
-    /// a drawing with one motion group is not tinted at all, so most artists will never need it.
+    /// On by default: "what did it decide?" is the question this exists to answer, and an overlay
+    /// nobody switches on answers nothing. The switch is here rather than on the bar because it's
+    /// set once and not reached for mid-flow, this popover's whole remit — and a drawing with one
+    /// motion group is not tinted at all, so most artists will never need it.
     private var groupOverlayOption: some View {
         Toggle(isOn: $canvasManager.showMotionGroupOverlay) {
             VStack(alignment: .leading, spacing: 2) {

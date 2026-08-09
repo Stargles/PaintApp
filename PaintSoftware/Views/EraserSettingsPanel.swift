@@ -30,8 +30,8 @@ struct EraserSettingsPanel: View {
 
     // MARK: - Vector mode
 
-    /// The three-way vector-eraser mode control (VECTOR_ERASER_PLAN.md §5), occupying the accessory
-    /// slot the brush panel uses for custom-texture import.
+    /// The three-way vector-eraser mode control, occupying the accessory slot the brush panel uses
+    /// for custom-texture import.
     ///
     /// Shown only on a `.vector` layer: on a raster layer the eraser is a plain `.destinationOut`
     /// brush with no modes to pick between, and the panel stays exactly as it was before this

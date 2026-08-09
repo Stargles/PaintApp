@@ -806,44 +806,41 @@ struct CanvasView: UIViewRepresentable {
         /// makes the preview affordable: `updateUIView` runs on every SwiftUI pass, and evaluating a
         /// recipe is two lattice embeddings, an ARAP solve and two canvas-sized renders.
         ///
-        /// The referenced canvases' versions are in the key on purpose — that is what makes "edit
-        /// keyframe A and the in-between updates for free" (PLAN §4) actually happen, rather than
-        /// requiring an invalidation call at every site that can touch a keyframe.
+        /// The referenced canvases' versions are in the key on purpose — that's what makes "edit
+        /// keyframe A and the in-between updates for free" actually happen, rather than requiring an
+        /// invalidation call at every site that can touch a keyframe.
         private struct InterpolationPreviewKey: Equatable {
             let celID: UUID
             let t: CGFloat
             let preview: Bool
-            /// True for Phase 5's tinted group overlay rather than an in-between. One cel can only
-            /// ever be one of the two — an interpolated cel has a recipe, a keyframe does not — but
-            /// they share this dictionary, so the key has to keep them apart.
+            /// True for the tinted group overlay rather than an in-between. One cel can only ever be
+            /// one of the two — an interpolated cel has a recipe, a keyframe does not — but they
+            /// share this dictionary, so the key has to keep them apart.
             let overlay: Bool
             let thicknessFade: Bool
-            /// Solo/mute. In the key because it is an input to the evaluation, and anything that is
-            /// an input and not in the key appears to do nothing until an unrelated change forces a
-            /// re-render — the trap this struct's own comment above describes, from the other side.
+            /// Solo/mute. In the key because it's an input to the evaluation, and anything that is an
+            /// input and not in the key appears to do nothing until an unrelated change forces a
+            /// re-render.
             let hiddenGroups: Set<UUID>
             let referenceVersions: [Int]
-            /// The recipe's local edits, by identity — Phase 6 items 2 and 3.
+            /// The recipe's local edits, by identity.
             ///
-            /// In the key for the same reason `hiddenGroups` is, and it is the one input that no
-            /// *version* number covers: an edit at an in-between changes the recipe, which lives in
-            /// the `Cel` struct, while every version here belongs to a `VectorCanvas` that the edit
-            /// never touches. Without it the artist draws at `t` and nothing appears until some
-            /// unrelated change forces a re-render.
+            /// In the key for the same reason `hiddenGroups` is, and it's the one input no *version*
+            /// number covers: an edit at an in-between changes the recipe, which lives in the `Cel`
+            /// struct, while every version here belongs to a `VectorCanvas` the edit never touches.
+            /// Without it the artist draws at `t` and nothing appears until an unrelated change
+            /// forces a re-render.
             ///
-            /// The ids rather than the count, so that undo (which removes the last edit) and redo
-            /// (which puts the same one back) are told apart from each other and from a *different*
-            /// edit appended in between.
+            /// The ids rather than the count, so undo (which removes the last edit) and redo (which
+            /// puts the same one back) are told apart from each other and from a *different* edit
+            /// appended in between.
             let localEditIDs: [UUID]
-            /// The guides driving this recipe — Phase 7, and the **fourth** input this key has had to
-            /// learn about the hard way, so it is stated as the rule rather than the instance: ask
-            /// what changed and whether anything already here can see it.
+            /// The guides driving this recipe.
             ///
-            /// Nothing could. Guides live on `CanvasManager`, not on any `VectorCanvas`, so no
-            /// `referenceVersions` entry moves when one is edited — and `updateGuideStroke` replaces
-            /// a guide **keeping its id**, which is what makes reuse across frames a reference rather
-            /// than a copy (`PLAN.md` §6.4) and also what stops an id list from noticing. So the
-            /// whole guides go in, compared by value.
+            /// Guides live on `CanvasManager`, not on any `VectorCanvas`, so no `referenceVersions`
+            /// entry moves when one is edited — and `updateGuideStroke` replaces a guide **keeping
+            /// its id**, which makes reuse across frames a reference rather than a copy and also
+            /// stops an id list from noticing. So the whole guides go in, compared by value.
             ///
             /// That deep compare is cheaper than it looks and much cheaper than being wrong: a guide
             /// is tens of samples, a recipe names one or two, and the alternative is re-rendering the
@@ -856,10 +853,9 @@ struct CanvasView: UIViewRepresentable {
         /// Renders each layer's interpolated frame, where it has one at the current frame, and clears
         /// it everywhere else.
         ///
-        /// `.preview` quality while the slider is being dragged and `.full` on release — the two cache
-        /// in separate slots on `VectorCanvas`, so switching between them does not throw the other
-        /// away, and `.full` on every tick of a drag is several times the cost per tick
-        /// (`HANDOFF.md` §5.9).
+        /// `.preview` quality while the slider is being dragged and `.full` on release — the two
+        /// cache in separate slots on `VectorCanvas`, so switching between them does not throw the
+        /// other away, and `.full` on every tick of a drag is several times the cost per tick.
         func updateInterpolationPreviews() {
             for (layerIndex, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
@@ -871,9 +867,9 @@ struct CanvasView: UIViewRepresentable {
                 }
                 guard let recipe = layer.cels[celIndex].interpolation else {
                     // No recipe here, so this cel is a *keyframe* or an ordinary drawing — and the
-                    // same seam carries Phase 5's tinted "what did it decide?" overlay, which only
-                    // ever applies to a cel with its own tagged strokes. The two can never contend:
-                    // an interpolated cel has a recipe and takes the branch below.
+                    // same seam carries the tinted "what did it decide?" overlay, which only ever
+                    // applies to a cel with its own tagged strokes. The two can never contend: an
+                    // interpolated cel has a recipe and takes the branch below.
                     updateMotionGroupOverlay(layer: layer, celIndex: celIndex, host: host)
                     continue
                 }
@@ -900,7 +896,7 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// Phase 5 item 4's tinted overlay, memoized on the same key as the in-between preview.
+        /// The tinted "what did it decide?" overlay, memoized on the same key as the in-between preview.
         ///
         /// It has to be memoized for exactly the reason that one is: `updateInterpolationPreviews`
         /// runs on every SwiftUI pass, so an un-keyed render here would re-rasterise every keyframe
@@ -926,10 +922,10 @@ struct CanvasView: UIViewRepresentable {
                 canvasManager.motionGroupOverlayImage(forCel: cel.id, inLayer: layer.id))
         }
 
-        /// Phase 7 item 2's render pass — the guides bound to the frame under the playhead, plus
-        /// whatever is under the pen.
+        /// The guide render pass — the guides bound to the frame under the playhead, plus whatever
+        /// is under the pen.
         ///
-        /// Not memoized on `InterpolationPreviewKey`, and deliberately: that key guards an ARAP solve
+        /// Not memoized on `InterpolationPreviewKey`, deliberately: that key guards an ARAP solve
         /// and two canvas-sized rasterisations, while this sets two `CGPath`s. `GuideOverlayView.update`
         /// does its own equality check, so a pass where nothing moved costs one array compare.
         ///
@@ -989,9 +985,9 @@ struct CanvasView: UIViewRepresentable {
                 onionSkinView.isHidden = true
                 return
             }
-            // Interpolate mode wants the two reference keyframes rather than the previous cel
-            // (PLAN §5.0 step 4), so the source is swapped by mode rather than by a flag inside one
-            // source — that is what `OnionSkinSource` is for.
+            // Interpolate mode wants the two reference keyframes rather than the previous cel, so
+            // the source is swapped by mode rather than by a flag inside one source — that's what
+            // `OnionSkinSource` is for.
             let source: OnionSkinSource = canvasManager.isInterpolateMode
                 ? InterpolationReferenceOnionSkinSource()
                 : onionSkinSource

@@ -1,15 +1,15 @@
 import Foundation
 import CoreGraphics
 
-// `HANDOFF.md` §8 item 28: Generate froze for ~1 minute on a two-stroke drawing. A stroke drawn on
-// an iPad carries hundreds of samples, so the number that matters is how the fit scales with sample
-// count — not how it does on a two-dozen-point fixture.
+// Generate once froze for ~1 minute on a two-stroke drawing. A stroke drawn on an iPad carries
+// hundreds of samples, so the number that matters is how the fit scales with sample count — not
+// how it does on a two-dozen-point fixture.
 //
-// Three separate changes landed against that number and this measures all of them together:
+// Three separate changes bear on that number and this measures all of them together:
 //   - `PointCloudIndex.nearest` walks the ring instead of the (2·ring+1)² block;
-//   - `Options.maxRegistrationSamples` caps what drives the fit at 250 (§8 item 35);
+//   - `Options.maxRegistrationSamples` caps what drives the fit at 250;
 //   - the 1:1 arc-length correspondence, which is about quality rather than cost but is on the
-//     same path and has to be measured on it (§8 item 31).
+//     same path and has to be measured on it.
 
 func polyline(_ a: CGPoint, _ b: CGPoint, n: Int) -> [CGPoint] {
     (0...n).map { i in
@@ -34,7 +34,7 @@ func cellSize(_ p: [CGPoint]) -> CGFloat {
 /// Fraction of the target with some part of the warped *polyline* within `tolerance`.
 ///
 /// Coverage and not mean residual, because mean residual lies: the fit that piles the source onto
-/// the middle of the target scores 3.6 points while covering a quarter of it (`HANDOFF.md` §5).
+/// the middle of the target scores 3.6 points while covering a quarter of it.
 /// Segments and not samples, because a stroke stretched five times over carries its samples far
 /// enough apart that sampling would score continuous ink as a dotted line.
 func coverage(of target: [CGPoint], by warped: [CGPoint], tolerance: CGFloat) -> CGFloat {
@@ -53,7 +53,7 @@ func coverage(of target: [CGPoint], by warped: [CGPoint], tolerance: CGFloat) ->
     return CGFloat(target.filter { distance($0) <= tolerance }.count) / CGFloat(target.count)
 }
 
-print("Registration — a vertical line fitted to a C that encompasses it (§8 items 28/29/35).")
+print("Registration — a vertical line fitted to a C that encompasses it.")
 print("")
 print("Before Phase 4.7:  24=34ms  100=1.3s  250=12s  500=45s  1000=94s  2000=285s,")
 print("and the fit it spent that on covered a quarter of the target.")

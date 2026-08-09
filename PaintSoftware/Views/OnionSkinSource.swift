@@ -1,9 +1,8 @@
 import UIKit
 
 /// What the onion-skin layer should display. The current implementation answers "the previous cel
-/// on the current layer"; interpolate mode will later answer "the two reference keyframes". Kept as
-/// a protocol because the whole onion-skin feature is provisional and will be replaced — see
-/// VECTOR_INTERPOLATION_PLAN.md §10 constraint B.
+/// on the current layer"; interpolate mode answers "the two reference keyframes". Kept as a
+/// protocol because the whole onion-skin feature is provisional and may be replaced.
 protocol OnionSkinSource {
     func frames(for manager: CanvasManager) -> [OnionSkinFrame]
 }
@@ -67,7 +66,7 @@ struct PreviousCelOnionSkinSource: OnionSkinSource {
 }
 
 /// Interpolate mode's onion skin: **the two reference keyframes**, tinted apart, rather than ±1
-/// frame (PLAN §5.0 step 4).
+/// frame.
 ///
 /// The references are what the in-between is being judged against, and they are frequently nowhere
 /// near the previous frame — a two-keyframe span can be twelve frames wide, which is exactly when

@@ -1,24 +1,19 @@
 import CoreGraphics
 import Foundation
 
-/// A stroke sample that also knows *when* it was made.
-///
-/// A separate type from `VectorSample`, decided in `PLAN.md` §6.3 and worth restating because the
-/// temptation to unify them is constant: `VectorSample` is in every saved project and on the hot
-/// path, so adding a timestamp to it would mean a `Codable` migration on the most numerous type in
-/// the format plus eight bytes on every sample of every ordinary stroke, for a field only guides
-/// read. Guides are not stamped by `BrushStamper` at all — they draw as a thin overlay path — so
-/// they share none of that hot path and gain nothing from sharing its type.
+/// A stroke sample that also knows *when* it was made. Kept separate from `VectorSample` — that
+/// type is in every saved project and on the hot path, so adding a timestamp would mean a
+/// `Codable` migration on the format's most numerous type plus eight bytes per sample, for a field
+/// only guides read. Guides aren't stamped by `BrushStamper` at all (they draw as a thin overlay
+/// path), so they share none of that hot path.
 struct TimedSample: Codable, Equatable {
     var x: CGFloat
     var y: CGFloat
     var pressure: CGFloat
 
-    /// Seconds since the first sample of the gesture. Relative rather than absolute so a guide means
-    /// the same thing after a save/load, and because only the *shape* of the timing matters — it is
-    /// normalised into a spacing curve.
-    ///
-    /// `UITouch.timestamp` already carries this at the recogniser; it is simply discarded today.
+    /// Seconds since the first sample of the gesture. Relative so a guide means the same thing
+    /// after a save/load; only the *shape* of the timing matters, since it's normalised into a
+    /// spacing curve.
     var time: TimeInterval
 
     var point: CGPoint { CGPoint(x: x, y: y) }
@@ -35,22 +30,18 @@ struct TimedSample: Codable, Equatable {
     }
 }
 
-/// Which of a guide's two signals are in play.
-///
-/// One gesture carries both — the path is a trajectory constraint, the stylus velocity along it is a
-/// spacing function (`PLAN.md` §6.1) — and they are independently useful, so which ones apply is a
-/// property of the guide rather than something inferred.
+/// Which of a guide's two signals are in play. One gesture carries both — the path is a trajectory
+/// constraint, the stylus velocity along it is a spacing function — and they are independently
+/// useful, so which ones apply is a property of the guide rather than something inferred.
 enum GuideRole: String, Codable {
     case trajectory
     case timing
     case both
 }
 
-/// The keyframe span a guide was authored against.
-///
-/// Scopes the guide library ("which guides were drawn on this interval") rather than binding a guide
-/// to a recipe — that binding runs the other way, from the recipe's `guideIDs`, which is what makes
-/// requirement 7's reuse across frames a reference and not a copy (`PLAN.md` §6.4).
+/// The keyframe span a guide was authored against. Scopes the guide library ("which guides were
+/// drawn on this interval") rather than binding a guide to a recipe — that binding runs the other
+/// way, from the recipe's `guideIDs`, making reuse across frames a reference rather than a copy.
 struct KeyframeInterval: Codable, Equatable, Hashable {
     var start: CelRef
     var end: CelRef
@@ -63,23 +54,22 @@ struct KeyframeInterval: Codable, Equatable, Hashable {
 
 /// A path the artist draws to say how the motion should arc, and how it should be spaced in time.
 ///
-/// Document-level, not cel content — the same choice as `MotionGroup` and for the same reason: a
-/// guide is meant to be reusable across frames and across a whole cycle, so recipes reference it by
-/// id. It is invisible outside interpolate mode.
+/// Document-level, not cel content — same choice as `MotionGroup`, for the same reason: a guide is
+/// meant to be reusable across frames and across a whole cycle, so recipes reference it by id. It
+/// is invisible outside interpolate mode.
 struct GuideStroke: Identifiable, Codable, Equatable {
 
     var id: UUID = UUID()
 
     /// The path, with stylus timing. Geometry gives the trajectory; arc length travelled per unit
-    /// stylus time gives the easing, which is the part of the brief's idea that gets ease-out for
-    /// free with no graph editor. Deriving a `SpacingCurve` from that timing is the evaluator's job,
-    /// not this type's — see `IMPLEMENTATION.md` Phase 7.
+    /// stylus time gives the easing — free ease-out with no graph editor. Deriving a `SpacingCurve`
+    /// from that timing is the evaluator's job, not this type's.
     var samples: [TimedSample]
 
     var interval: KeyframeInterval
 
-    /// The motion groups this guide drives. **Empty means every group** — the whole-frame binding of
-    /// `PLAN.md` §10 decision 6, which costs nothing precisely because the binding is a set of ids.
+    /// The motion groups this guide drives. **Empty means every group** — costs nothing since the
+    /// binding is just a set of ids.
     var boundGroups: [UUID]
 
     var role: GuideRole = .both

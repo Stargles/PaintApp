@@ -126,8 +126,8 @@ struct DeformDataRow {
 ///
 /// The matrix depends only on the lattice *topology*, the edge weights and which points are
 /// constrained — never on where anything is being pulled *to*. So it is built once per lattice and
-/// reused for every solve, and evaluating at a new *t* costs one back-substitution. That is the
-/// whole basis of the claim in `PLAN.md` §5.2 that the slider is real-time on the math side.
+/// reused for every solve, and evaluating at a new *t* costs one back-substitution — which is what
+/// keeps the slider real-time on the math side.
 ///
 /// Deliberately narrow: assemble, factorise, solve. Nothing else reaches into Accelerate, so
 /// swapping in a hand-rolled iterative solver later is a change to this file alone.

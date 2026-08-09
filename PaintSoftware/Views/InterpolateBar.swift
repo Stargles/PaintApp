@@ -9,13 +9,12 @@ import SwiftUI
 /// clear references, leaving the mode) are the timeline's own interpolate button's popover: set once,
 /// not reached for mid-flow.
 ///
-/// The layout is fixed by the product owner (2026-08-01) and the reasons are worth keeping. The
-/// timing bar is the **top** row because it is the control that gets touched over and over, so it
-/// wants the edge nearest the artist's eye rather than to be buried under the buttons. The three
-/// commands are **centred on Generate** — it is the one that gets pressed, and a centred group sits
-/// under the thumb of a hand holding the iPad, the same reasoning the timeline's transport controls
-/// already use. The reference counter goes far left and Remove Interpolation far right, so the two
-/// things that are read rather than pressed frame the group without crowding it.
+/// The layout is fixed by the product owner and the reasons are worth keeping. The timing bar is
+/// the **top** row because it's the control that gets touched over and over, so it wants the edge
+/// nearest the artist's eye rather than being buried under the buttons. The three commands are
+/// **centred on Generate** — the one that gets pressed, and a centred group sits under the thumb of
+/// a hand holding the iPad. The reference counter goes far left and Remove Interpolation far right,
+/// so the two things that are read rather than pressed frame the group without crowding it.
 ///
 /// Setting a reference is a button here rather than a press-and-hold on the block. Press-and-hold
 /// was the first attempt and it was wrong — that gesture already means drag-reorder, so
@@ -33,18 +32,16 @@ struct InterpolateBar: View {
         VStack(alignment: .leading, spacing: 6) {
             if activeRecipe != nil { timing }
             commandRow
-            // Phase 5's group controls hang off the bar rather than off a timeline gesture
-            // (`HANDOFF.md` §5.10), and go *under* the settled two rows so neither moves. The row
-            // hides itself when there is nothing to show, so a single-part drawing's bar is exactly
-            // Phase 4.6's.
+            // The group controls hang off the bar rather than off a timeline gesture, and go *under*
+            // the settled two rows so neither moves. The row hides itself when there's nothing to
+            // show, so a single-part drawing's bar stays minimal.
             MotionGroupRow(canvasManager: canvasManager)
-            // Everything about guides — both toggles and item 7's list — on its own row under the
-            // groups. **They were on the command row and had to move**: the trailing cluster grew
-            // from {Commit, Remove} to {Guide, Shape, Commit, Remove} and overran the centred
-            // command group, which the `ZStack` draws last, so on a portrait iPad the Guide button
-            // ended up underneath Reproject and `isHittable` was false. Restoring the command row to
-            // exactly what Phase 4.6 settled is the point; grouping the guide controls with the guide
-            // list is the bonus.
+            // Everything about guides — both toggles and the list — on its own row under the groups.
+            // **They were on the command row and had to move**: the trailing cluster grew from
+            // {Commit, Remove} to {Guide, Shape, Commit, Remove} and overran the centred command
+            // group, which the `ZStack` draws last, so on a portrait iPad the Guide button ended up
+            // underneath Reproject and `isHittable` was false. Grouping the guide controls with the
+            // guide list is the bonus.
             GuideRow(canvasManager: canvasManager)
         }
         .padding(.horizontal, 12)
@@ -110,10 +107,10 @@ struct InterpolateBar: View {
         .accessibilityIdentifier("interpolate.setReference")
     }
 
-    /// Generate and Reproject are two buttons and never one, per `PLAN.md` §10 decision 3: they
-    /// answer different intents ("make me an in-between" vs "nudge this drawing's timing") and
-    /// conflating them is how the feature gets confusing. The likely one is emphasised from whether
-    /// the cel already has a drawing, and the other stays available.
+    /// Generate and Reproject are two buttons and never one: they answer different intents ("make
+    /// me an in-between" vs "nudge this drawing's timing") and conflating them is how the feature
+    /// gets confusing. The likely one is emphasised from whether the cel already has a drawing, and
+    /// the other stays available.
     ///
     /// Both act on the playhead rather than on a cel index, which is what lets Generate work from an
     /// empty slot — it creates the block first (`interpolateAtPlayhead`).
@@ -128,7 +125,7 @@ struct InterpolateBar: View {
         .accessibilityIdentifier("interpolate.\(mode == .generate ? "generate" : "reproject")")
     }
 
-    /// Bakes the frame into the cel and drops the recipe — `PLAN.md` §4's Commit.
+    /// Bakes the frame into the cel and drops the recipe — Commit.
     ///
     /// **Beside Remove rather than in the centred group**, and both halves of that matter. It is not
     /// in the group because a fourth button there would push Generate off the bar's centre, which is
@@ -196,7 +193,7 @@ struct InterpolateBar: View {
     /// `onEditingChanged` is the whole drag/release boundary: touch-down opens one undo step and
     /// selects `.preview` render quality, release closes the step and re-renders at `.full`. Both
     /// halves matter — a step per tick makes undo useless, and `.full` per tick makes the slider
-    /// unusable on real art (`HANDOFF.md` §5.9).
+    /// unusable on real art.
     private var timing: some View {
         HStack(spacing: 10) {
             Text("Timing")

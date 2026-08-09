@@ -3,13 +3,11 @@ import CoreGraphics
 
 /// Anything `BrushStamper` can lay dabs onto.
 ///
-/// Exists so a stroke can be stamped straight into a `CGContext` that someone else owns, not only
-/// into a `RasterLayerTexture` that owns its own bitmap. `VectorCanvas.renderLocalContent` is the
-/// case that needs it: re-rendering a vector layer used to allocate a whole throwaway
-/// `RasterLayerTexture` (a canvas-sized CGContext — ~16 MB at 2048², ~64 MB at 4000²), stamp into
-/// it, `makeImage()` a second canvas-sized copy out of it, blit that into the renderer's context,
-/// and drop both — once per visible vector layer per invalidation. Conforming a thin wrapper over
-/// the renderer's own context removes the allocation, the copy and the blit while keeping
+/// Exists so a stroke can be stamped straight into a `CGContext` someone else owns, not only into a
+/// `RasterLayerTexture` that owns its own bitmap. `VectorCanvas.renderLocalContent` needs this: it
+/// used to allocate a whole throwaway canvas-sized `RasterLayerTexture` (~16 MB at 2048², ~64 MB at
+/// 4000²) per visible vector layer per invalidation just to stamp into it and copy the result out.
+/// A thin wrapper over the renderer's own context removes that allocation and copy while keeping
 /// `BrushStamper` the single source of truth for how a stroke rasterizes.
 protocol DabTarget: AnyObject {
     func beginStroke()
@@ -26,23 +24,20 @@ protocol DabTarget: AnyObject {
 /// while drawing.
 ///
 /// **The key deliberately excludes `alpha`, and that is the whole reason the cache works.** `alpha`
-/// arrives from `BrushStamper.stampDab` as `brushOpacity × flow × opacityFraction(pressure)`, times
-/// a per-position grain multiplier for a pencil — i.e. a different float on essentially every dab,
-/// since pressure varies continuously along a stroke. Keying on it would hit approximately never.
-/// Instead the entry is built at full alpha and the per-dab alpha is applied by `CGContext.setAlpha`.
+/// is `brushOpacity × flow × opacityFraction(pressure)` times a per-position grain multiplier — a
+/// different float on essentially every dab, since pressure varies continuously. Keying on it would
+/// hit approximately never. Instead the entry is built at full alpha and the per-dab alpha is applied
+/// by `CGContext.setAlpha`.
 ///
-/// That substitution is exact, not an approximation. All three stops carry the *same* RGB and differ
-/// only in alpha, so the gradient never interpolates colour — under either premultiplied or
-/// unpremultiplied interpolation the result is constant RGB with linearly interpolated alpha. Baking
-/// `α` into the stops yields alpha `α` across the core and `α·(1-s)` through the falloff; a
-/// full-alpha gradient under `setAlpha(α)` yields `1` and `1·(1-s)` scaled by `α` — the same two
-/// functions. CG's global alpha multiplies *source* alpha, so this holds for `.destinationOut`
-/// erasing (`dst·(1 - src_a·α)`) as well as for `.normal` painting. `BrushEngineLogicTests` pins the
-/// resulting alpha profile so the equivalence can't silently drift.
+/// That substitution is exact, not an approximation: all three stops carry the *same* RGB and differ
+/// only in alpha, so the gradient never interpolates colour. Baking `α` into the stops yields alpha
+/// `α` across the core and `α·(1-s)` through the falloff; a full-alpha gradient under `setAlpha(α)`
+/// yields the same two functions scaled by `α`. CG's global alpha multiplies *source* alpha, so this
+/// holds for `.destinationOut` erasing as well as `.normal` painting. `BrushEngineLogicTests` pins
+/// the resulting alpha profile so the equivalence can't silently drift.
 ///
-/// What is left in the key — colour and hardness — is fixed for the entire duration of any one
-/// stroke, so the steady-state hit rate is one miss per stroke and a hit for every dab after it
-/// (measured: 2635 hits, 1 miss over 2636 dabs).
+/// What is left in the key — colour and hardness — is fixed for the duration of any one stroke, so
+/// the steady-state hit rate is one miss per stroke and a hit for every dab after it.
 ///
 /// **Not thread-safe, by design.** Each owner serializes access its own way: `RasterLayerTexture`
 /// only touches its cache while holding its `NSLock`, and `CGContextDabTarget` is created and used
@@ -142,30 +137,24 @@ final class CGContextDabTarget: DabTarget {
 
 /// Persistent raster backing store for one cel's live brush strokes, at canvas-native resolution.
 ///
-/// This replaces `PKDrawing`: instead of vector stroke geometry re-rasterized at whatever zoom
-/// happens to be current — the confirmed, unfixable source of this app's ink-blurs-when-zoomed
-/// bug, since PencilKit strokes stay vector-smooth at any magnification unlike the app's other
-/// raster tiers (see BUGS.md, 2026-07-21) — every stamp is rasterized once, directly, at native
-/// canvas resolution. Zooming in on the result is then a plain nearest-neighbor pixel zoom, the
-/// same fix already applied to `fillImage`/`bakedImage`.
+/// This replaces `PKDrawing`: instead of vector stroke geometry re-rasterized at whatever zoom is
+/// current (PencilKit strokes stay vector-smooth at any magnification, unlike this app's other
+/// raster tiers, which caused an ink-blurs-when-zoomed bug — see BUGS.md), every stamp is rasterized
+/// once, directly, at native canvas resolution. Zooming in is then a plain nearest-neighbor pixel
+/// zoom, same as `fillImage`/`bakedImage`.
 ///
 /// IMPLEMENTATION: a persistent CoreGraphics bitmap context that each stamp draws into
 /// *incrementally* — only the pixels under the stamp are touched (O(stamp area)), the whole canvas
-/// is never re-rendered per stamp. The context is created lazily (a blank cel holds no bitmap and
-/// costs no memory) and flipped to UIKit top-left coordinates so its output `UIImage` is
-/// orientation-identical to everything the rest of the app produces via `UIGraphicsImageRenderer`
-/// (fill/baked/thumbnail), which is what keeps FloodFillEngine/PixelOps/persistence working
-/// unchanged against `Cel.raster`.
+/// is never re-rendered per stamp. The context is created lazily (a blank cel holds no bitmap) and
+/// flipped to UIKit top-left coordinates so its output `UIImage` matches everything else the app
+/// produces via `UIGraphicsImageRenderer`, keeping FloodFillEngine/PixelOps/persistence unchanged
+/// against `Cel.raster`.
 ///
-/// PERFORMANCE NOTE: stamping is now O(stamp area) on the CPU, which is fine for real drawing. The
-/// remaining cost is `renderToUIImage()` doing an O(canvas) `makeImage()` when a fresh image is
-/// actually needed (a display refresh, a thumbnail, a fill reference) — cached per `version` so it
-/// happens at most once per change, not once per stamp. Replacing this whole store with a
-/// persistent `MTLTexture` + GPU-batched stamping (keeping this exact public API so no caller
-/// changes) is Worker A's deliverable: it eliminates even that per-frame CPU copy by letting the
-/// GPU draw the texture directly. The public API here (`renderToUIImage`, `stamp`, `beginStroke`/
-/// `endStroke`, `makeCopy`, `flipped`, `reset`/`clear`) is the seam every other piece of the engine
-/// and the rest of the app depends on — keep it stable even as the internals change.
+/// PERFORMANCE: stamping is O(stamp area) on the CPU. The remaining cost is `renderToUIImage()`
+/// doing an O(canvas) `makeImage()` when a fresh image is actually needed — cached per `version` so
+/// it happens at most once per change, not once per stamp. The public API here (`renderToUIImage`,
+/// `stamp`, `beginStroke`/`endStroke`, `makeCopy`, `flipped`, `reset`/`clear`) is the seam every
+/// other piece of the engine depends on — keep it stable even if the internals move to GPU.
 final class RasterLayerTexture: DabTarget {
     let size: CGSize
     let pixelWidth: Int
@@ -182,12 +171,10 @@ final class RasterLayerTexture: DabTarget {
 
     /// Guards `context`/`cachedImage`. Live strokes call `stampCircle` on the main thread, but a
     /// fill's reference composite (`CanvasManager.performFill`) reads a reference layer's texture via
-    /// `renderToUIImage()` on a background queue — without this, a stroke landing on that layer mid-
-    /// fill could mutate the `CGContext` while the background thread is concurrently calling
-    /// `makeImage()` on it (see BUGS.md). `ensureContext()`/`setContents()` are internal helpers only
-    /// ever called from a method that already holds this lock (or, for `setContents` from `init`,
-    /// before the instance is shared with any other thread), so they don't lock themselves —
-    /// otherwise this non-reentrant lock would deadlock.
+    /// `renderToUIImage()` on a background queue — without this a stroke landing on that layer mid-
+    /// fill could mutate the `CGContext` while the background thread concurrently calls `makeImage()`
+    /// on it. `ensureContext()`/`setContents()` are internal helpers only ever called from a method
+    /// that already holds this lock, so they don't lock themselves — this lock is non-reentrant.
     private let lock = NSLock()
 
     /// Thread-safe check of whether this texture has any backing bitmap at all, used by `makeCopy`/

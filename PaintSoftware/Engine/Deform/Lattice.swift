@@ -6,14 +6,13 @@ import Foundation
 /// This is the substrate the whole interpolation feature deforms: geometry is *embedded* in a
 /// lattice once (which cell am I in, and where inside it), and thereafter warping the geometry is
 /// nothing but re-evaluating a bilinear blend of four vertex positions. That split is the entire
-/// performance story — see `VECTOR_INTERPOLATION_PLAN.md` §5.2. An embedding is computed once per
-/// registration; `warp` runs per slider tick.
+/// performance story. An embedding is computed once per registration; `warp` runs per slider tick.
 ///
 /// Dependency-free on purpose — `CoreGraphics` + `Foundation` only, no UIKit, no app types, no
 /// drawing — for the reason `StrokeGeometry` and `ShapeGeometry` are: it compiles a second time
-/// straight into `PaintSoftwareUITests`, so every primitive here is unit-testable headlessly. It is
-/// also standing constraint A (`PLAN.md` §10): this module must know nothing about keyframes, cels
-/// or interpolation, because liquify and mesh-distort are meant to reuse it.
+/// straight into `PaintSoftwareUITests`, so every primitive here is unit-testable headlessly. It also
+/// must know nothing about keyframes, cels or interpolation, because liquify and mesh-distort are
+/// meant to reuse it.
 ///
 /// ## Two configurations
 ///
@@ -193,8 +192,7 @@ struct Lattice: Equatable {
     /// reason: a triangle's map from rest to deformed is *exactly* affine, so a per-triangle target
     /// transform can reproduce a given configuration with zero residual. A quad's is bilinear, and
     /// no single affine map reproduces a non-parallelogram quad — which would mean `t = 1` failed to
-    /// reproduce keyframe C, the one invariant `IMPLEMENTATION.md` calls the most important in the
-    /// feature.
+    /// reproduce keyframe C, the single most important invariant in the feature.
     ///
     /// Both diagonals rather than the usual one because a single diagonal makes the cell stiffer
     /// along it; averaging the two triangulations restores symmetry, and exactness at the endpoints
@@ -280,7 +278,7 @@ struct Lattice: Equatable {
 
     /// Where `embedding` lands in the **rest** configuration. Composed with `embedInCurrent`, this
     /// is the inverse lattice transform that carries a stroke drawn at an in-between frame back to
-    /// keyframe A's space (`PLAN.md` §5.4).
+    /// keyframe A's space.
     func warpToRest(_ embedding: LatticeEmbedding) -> [CGPoint] {
         warp(embedding, using: (0..<vertexCount).map { restVertex(at: $0) })
     }
@@ -298,8 +296,8 @@ struct Lattice: Equatable {
         return result
     }
 
-    /// Carry points drawn on the deformed lattice back to rest space — `PLAN.md` §5.4's inverse map,
-    /// as one call because that is always how it is used.
+    /// Carry points drawn on the deformed lattice back to rest space — the inverse map, as one call
+    /// because that is always how it is used.
     func carriedToRest(_ points: [CGPoint]) -> [CGPoint] {
         warpToRest(embedInCurrent(points))
     }
@@ -354,9 +352,9 @@ struct Lattice: Equatable {
     /// ARAP-relaxed with the original vertices pinned, and those vertices are written back exactly
     /// afterwards, so an expansion is guaranteed not to move any geometry that was already embedded.
     ///
-    /// This is the routine `PLAN.md` §5.4 needs when the artist draws at an in-between frame and the
-    /// stroke lands outside the group's lattice. Cell and vertex indices all shift when a ring is
-    /// added, so an existing embedding must be carried across with `LatticeExpansion.remap`.
+    /// This is the routine needed when the artist draws at an in-between frame and the stroke lands
+    /// outside the group's lattice. Cell and vertex indices all shift when a ring is added, so an
+    /// existing embedding must be carried across with `LatticeExpansion.remap`.
     func expanded(toContain points: [CGPoint], maxRings: Int = 8,
                   relaxIterations: Int = 2) -> LatticeExpansion {
         var current = self

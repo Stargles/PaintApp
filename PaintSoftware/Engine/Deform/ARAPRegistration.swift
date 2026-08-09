@@ -3,8 +3,8 @@ import Foundation
 
 /// A uniform bucket grid for nearest-point queries against a fixed point cloud.
 ///
-/// Registration has no correspondence to work from — `PLAN.md` §1: the two keyframes are drawn
-/// independently, so there is no "this sample maps to that sample". Every fit therefore has to ask
+/// Registration has no correspondence to work from: the two keyframes are drawn independently, so
+/// there is no "this sample maps to that sample". Every fit therefore has to ask
 /// "what is the nearest bit of the target drawing to where this bit of the source currently sits",
 /// once per point per iteration, which is the query this exists to make cheap.
 struct PointCloudIndex {
@@ -82,8 +82,8 @@ struct PointCloudIndex {
                 // to the ring spends O(ring²) per ring on cells that are not in the ring at all — and
                 // a *line*-shaped cloud is where that bites: the adaptive cell size gives it a grid
                 // one column wide and hundreds of rows tall, so `maxRing` runs into the hundreds and
-                // a single query costs millions of iterations. That was the ~1-minute freeze on a
-                // two-stroke drawing (`HANDOFF.md` §8 item 28), and a line is what the artist drew.
+                // a single query costs millions of iterations — a real freeze on a two-stroke
+                // drawing, and a line is exactly what the artist draws.
                 for c in (col - ring)...(col + ring) {
                     scan(row: row - ring, col: c, from: p, bestIndex: &bestIndex, bestDistance: &bestDistance)
                     scan(row: row + ring, col: c, from: p, bestIndex: &bestIndex, bestDistance: &bestDistance)
@@ -114,7 +114,7 @@ struct PointCloudIndex {
 
 /// A rigid motion plus a uniform scale: the cheapest useful description of how a drawing moved.
 ///
-/// Tier 1 of `PLAN.md` §5.2's escalation, and correct on its own for a large fraction of real
+/// Tier 1 of registration's escalation, and correct on its own for a large fraction of real
 /// motion — a prop sliding, a head bobbing, a whole layer drifting.
 struct Similarity: Equatable {
     var angle: CGFloat
@@ -133,7 +133,7 @@ struct Similarity: Equatable {
 
 /// Fitting a lattice to a target drawing.
 ///
-/// Two tiers, escalating only as far as needed (`PLAN.md` §5.2):
+/// Two tiers, escalating only as far as needed:
 ///
 /// 1. **Similarity.** Closed-form least squares over a correspondence, wrapped in ICP when there is
 ///    no correspondence to start from. Free, and the whole answer for rigid motion.
@@ -158,35 +158,34 @@ enum ARAPRegistration {
         var icpIterations: Int = 20
         /// Starting rotations the tier-1 ICP is tried from. See `similarityICP`.
         ///
-        /// **One, deliberately** (`HANDOFF.md` §8 item 32, decided 2026-08-01). A multi-start buys
-        /// genuinely large rotations and pays for them with a spurious 180° on any content with a
-        /// symmetry — and a straight line has one, exactly: a line segment maps onto itself under a
-        /// half turn, so upright and flipped score *identically* and the multi-start picks between
-        /// them on arithmetic noise. That is the "a line rotates 180° instead of bending" report
-        /// (§8 item 27). No rotation penalty can fix a tie; not offering the flipped seed can.
-        /// frite's registration has no multi-start at all (§5.11), which is the evidence that this
-        /// is the mainstream choice rather than a retreat.
+        /// **One, deliberately.** A multi-start buys genuinely large rotations and pays for them with
+        /// a spurious 180° on any content with a symmetry — and a straight line has one, exactly: a
+        /// line segment maps onto itself under a half turn, so upright and flipped score
+        /// *identically* and the multi-start picks between them on arithmetic noise, rotating a line
+        /// 180° instead of letting it bend. No rotation penalty can fix a tie; not offering the
+        /// flipped seed can. frite's own registration has no multi-start at all, which is evidence
+        /// this is the mainstream choice rather than a retreat.
         ///
         /// The cost is real and was accepted with the decision: a drawing that genuinely turns more
         /// than ICP's basin reaches now registers approximately rather than exactly — see
-        /// `ARAPLogicTests.testICPWithoutACorrespondenceRecoversARigidMotionOnlyApproximately`.
-        /// §8 item 37 records the way back (widen the search only when a *coverage* test fails)
-        /// without reintroducing the tie.
+        /// `ARAPLogicTests.testICPWithoutACorrespondenceRecoversARigidMotionOnlyApproximately`. A
+        /// coverage-gated escalation (widen the search only when a *coverage* test fails) is the way
+        /// back without reintroducing the tie — not built yet.
         var icpRestarts: Int = 1
 
         /// Whether tier 1 may fit a uniform scale as well as a rotation and translation.
         ///
-        /// **False, deliberately** (`HANDOFF.md` §8 item 32, decided 2026-08-01). A free scale can
-        /// drive itself toward zero and pile the whole source onto a handful of target points, which
-        /// scores a near-perfect *mean residual* while meaning nothing — two vertical lines fitted to
-        /// one between them collapsed to scale 0.15 and covered a quarter of the target's span
-        /// (§8 item 30). Locking it takes that span from 36.5 to 194.6 against the target's 200.
+        /// **False, deliberately.** A free scale can drive itself toward zero and pile the whole
+        /// source onto a handful of target points, which scores a near-perfect *mean residual* while
+        /// meaning nothing — two vertical lines fitted to one between them collapsed to scale 0.15
+        /// and covered a quarter of the target's span. Locking it takes that span from 36.5 to 194.6
+        /// against the target's 200.
         ///
         /// This flag and `icpRestarts` only work **together**: locking the scale while the
         /// multi-start is still in place trades the collapse for a 90° turn at triple the residual,
         /// which `testLockingTheScaleAloneTradesTheCollapseForADifferentWrongAnswer` pins so the
         /// half-fix cannot be applied by accident. frite likewise factors scale out of registration
-        /// rather than fitting it (§5.11).
+        /// rather than fitting it.
         var allowScale: Bool = false
         /// Pull toward the matched target, per source point.
         var dataWeight: CGFloat = 1
@@ -210,7 +209,7 @@ enum ARAPRegistration {
         /// Stop early once no vertex moves further than this in an iteration.
         var convergenceDistance: CGFloat = 1e-4
 
-        /// Ceiling on how many source points actually drive the fit (`HANDOFF.md` §8 item 35).
+        /// Ceiling on how many source points actually drive the fit.
         ///
         /// Registration cost is dominated by the point cloud, not the solve: the lattice is ~56
         /// vertices whatever the sample count, while every extra sample is another nearest-target
@@ -260,18 +259,16 @@ enum ARAPRegistration {
     /// The two keyframes' strokes, when there are the *same number* of them and they can therefore
     /// be paired one for one.
     ///
-    /// This is `IMPLEMENTATION.md`'s deferred `.clean` path, un-deferred for the 1:1 case only
-    /// (`HANDOFF.md` §8 item 31, decided 2026-08-01). The measurement that changed the premise:
-    /// nearest-point matching gives a short straight stroke **no reason** to wrap around a long
-    /// curved one at any rigidity — the pulls from the two sides of the arc cancel — so the product
-    /// owner's line-into-a-C drawing could not be fixed without it. Sweeping `rigidity` from 2.0 to
-    /// 0.01 moves the bend by 0.02; a correspondence moves it from 0.17 to 0.99.
+    /// This path exists because nearest-point matching gives a short straight stroke **no reason**
+    /// to wrap around a long curved one at any rigidity — the pulls from the two sides of the arc
+    /// cancel — so a line-into-a-C drawing could not be fixed without it. Sweeping `rigidity` from
+    /// 2.0 to 0.01 moves the bend by 0.02; a correspondence moves it from 0.17 to 0.99.
     ///
-    /// **N strokes → M strokes stays deferred** (§8 item 33). Neither of the two papers solves it
-    /// algorithmically — frite decomposes drawings into artist-defined parts and ships a lasso for
-    /// stating the matching — so the honest answer there is Phase 5's grouping UI, not a speculative
-    /// automatic matcher. When the counts differ, registration takes the point-cloud path it always
-    /// took.
+    /// **N strokes → M strokes stays deferred** — see `VECTOR_INTERPOLATION.md` §4 item 33. Neither
+    /// of the two papers solves it algorithmically — frite decomposes drawings into artist-defined
+    /// parts and ships a lasso for stating the matching — so the honest answer there is a grouping
+    /// UI, not a speculative automatic matcher. When the counts differ, registration takes the
+    /// point-cloud path it always took.
     struct StrokeCorrespondence {
         /// Keyframe A's strokes, in drawing order.
         var source: [[CGPoint]]
@@ -411,10 +408,10 @@ enum ARAPRegistration {
     /// output is a tie.
     ///
     /// So a reversal has to beat forward by `directionMargin` to be believed, and drawing order is
-    /// the tie-break. That is *not* the refuted tangent term (§5), which treated drawn direction as
-    /// evidence and lost to geometry that disagreed with it; here geometry decides whenever it has
-    /// anything to say, and drawn order only settles what geometry calls a draw. It is not evidence
-    /// either — but it is deterministic and it does not introduce a spin.
+    /// the tie-break. That is *not* a return to treating drawn direction as evidence — an earlier,
+    /// refuted approach that lost to geometry that disagreed with it; here geometry decides whenever
+    /// it has anything to say, and drawn order only settles what geometry calls a draw. It is not
+    /// evidence either — but it is deterministic and it does not introduce a spin.
     static func directionScores(_ correspondence: StrokeCorrespondence, under alignment: Similarity)
         -> [(pair: (source: Int, target: Int), reversed: Bool, forward: CGFloat, backward: CGFloat)] {
         pairings(correspondence, under: alignment).map { pair in
@@ -532,11 +529,11 @@ enum ARAPRegistration {
     ///   the seed can be tried at `restarts` rotations spread around the circle with the
     ///   lowest-residual fit winning. That buys large rotations and costs a spurious 180° on
     ///   symmetric content, which is why `Options.icpRestarts` is now 1 — see its comment for the
-    ///   whole trade. The machinery stays because §8 item 37's coverage-gated escalation will want
-    ///   it back, conditionally.
+    ///   whole trade. The machinery stays because a coverage-gated escalation (see
+    ///   `VECTOR_INTERPOLATION.md` §4 item 37) will want it back, conditionally.
     ///
-    /// Pass `initial` to skip the multi-start and refine one specific guess — that is the hook for
-    /// `PLAN.md` §5.3's bootstrap hints (matching tags, a coarse flow field) once they exist.
+    /// Pass `initial` to skip the multi-start and refine one specific guess — that is the hook for a
+    /// future bootstrap hint (matching tags, a coarse flow field) once one exists.
     static func similarityICP(source: [CGPoint], target: PointCloudIndex,
                               initial: Similarity? = nil,
                               iterations: Int = Options().icpIterations,
@@ -581,9 +578,8 @@ enum ARAPRegistration {
         ///
         /// **Check that the source really is only a part before choosing this.** It also seeds the
         /// search where the source already sits (see `seed`), which is a good prior for a part and a
-        /// bad one for a whole drawing that has travelled — `MotionGrouping.analyse` picked this for
-        /// its root group and cut single bodies into their strokes for a phase (`HANDOFF.md` §8
-        /// item 43).
+        /// bad one for a whole drawing that has travelled — using this for a root group once cut
+        /// single bodies into their individual strokes.
         case sourceToTarget
     }
 
@@ -660,8 +656,8 @@ enum ARAPRegistration {
         }
     }
 
-    /// Centroid and RMS-radius alignment at a given rotation: the right neighbourhood and the right
-    /// size, which is `PLAN.md` §5.3's cheapest bootstrap hint.
+    /// Centroid and RMS-radius alignment at a given rotation: the cheapest useful bootstrap for
+    /// the right neighbourhood and the right size.
     static func bootstrap(source: [CGPoint], target: [CGPoint], angle: CGFloat = 0) -> Similarity {
         guard !source.isEmpty, !target.isEmpty else { return .identity }
         func centroidAndRadius(_ points: [CGPoint]) -> (CGPoint, CGFloat) {
@@ -693,8 +689,8 @@ enum ARAPRegistration {
     ///
     /// Falls back to the tier-1 similarity applied to every vertex — reported as `refined == false` —
     /// when the system cannot be factorised. That is a real answer, not a failure: a global
-    /// similarity warp of the whole group is exactly the graceful-degradation case `PLAN.md` §5.3
-    /// says the design must always have.
+    /// similarity warp of the whole group is exactly the graceful-degradation floor the design must
+    /// always have.
     static func fit(lattice: Lattice, source: [CGPoint], target: PointCloudIndex,
                     constraints: [Constraint] = [],
                     correspondence: StrokeCorrespondence? = nil,

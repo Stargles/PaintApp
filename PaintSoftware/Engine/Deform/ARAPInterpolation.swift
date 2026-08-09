@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Given lattice A and lattice C — the same grid, deformed two different ways — produce the lattice
 /// at any *t* between them. This is the piece that decides whether a swinging arm swings or
-/// collapses, and it is the reason `PLAN.md` §5.2 insists rotations be interpolated *as rotations*.
+/// collapses, which is why rotations must be interpolated *as rotations*, not lerped as matrices.
 ///
 /// ## The method
 ///
@@ -24,8 +24,8 @@ import Foundation
 /// are therefore exact global minimisers, and the translation the edge energy cannot see is pinned
 /// by a tiny anchor toward the straight linear blend — which *is* A at `t = 0` and C at `t = 1`. So
 /// `t = 0` reproduces A and `t = 1` reproduces C to solver precision, structurally rather than by
-/// special-casing. `IMPLEMENTATION.md` calls that the single most important invariant in the
-/// feature, and it is the reason the energy is written over triangles instead of quads.
+/// special-casing — the single most important invariant in the feature, and the reason the energy is
+/// written over triangles instead of quads.
 ///
 /// ## Cost
 ///

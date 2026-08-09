@@ -604,9 +604,9 @@ struct LayerRowModel: Equatable {
     var hasBakedImage: Bool
     /// `.paint` strokes only — see `vectorEraseCount` for why the two are reported separately.
     var vectorStrokeCount: Int
-    /// Retained `.erase` punches (VECTOR_ERASER_PLAN.md §1). Counted apart from `vectorStrokeCount`
-    /// because Mode 1's whole point is that it *adds* an element rather than cutting one in two, and
-    /// a single total cannot tell those two outcomes apart — both read as "one more".
+    /// Retained `.erase` punches. Counted apart from `vectorStrokeCount` because Mode 1's whole
+    /// point is that it *adds* an element rather than cutting one in two, and a single total cannot
+    /// tell those two outcomes apart — both read as "one more".
     var vectorEraseCount: Int
     var folderName: String?
     var thumbnail: UIImage?

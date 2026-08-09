@@ -3,31 +3,27 @@ import Combine
 import UIKit
 
 // CanvasManager is decomposed across `CanvasManager+*.swift` files, each an `extension
-// CanvasManager` holding one subsystem's methods. It is deliberately NOT split into separate
-// service objects: every view in the app binds straight to the `@Published` properties below, and
-// re-homing them behind child objects would mean either rewriting all of those bindings or
-// hand-maintaining forwarding plus manual `objectWillChange` re-publishing for dozens of
-// properties — the exact failure mode sessions 47, 49 and 50 were spent fixing (stale display
-// after a commit, a missed republish, transient state not baked before an unrelated edit).
+// CanvasManager` holding one subsystem's methods. Deliberately NOT split into separate service
+// objects: every view binds straight to the `@Published` properties below, and re-homing them
+// behind child objects would mean rewriting all of those bindings or hand-maintaining forwarding
+// plus manual `objectWillChange` re-publishing for dozens of properties.
 //
-// So: **all stored state stays declared here**, on the class. The extension files hold only
-// functions. Swift also requires it — extensions cannot declare stored properties.
+// So: **all stored state stays declared here**, on the class — extensions cannot declare stored
+// properties, so the extension files hold only functions.
 //
 // One mechanical consequence: `private` in Swift is scoped to the *file*, not the type, so a
-// member an extension file calls cannot be `private` here. Such members are `internal` (no
-// keyword) rather than `private`; that widening is the only non-move change the decomposition
-// makes, and it does not widen anything past module scope.
+// member an extension file calls cannot be `private` here — such members are `internal` (no
+// keyword) instead, which does not widen anything past module scope.
 final class CanvasManager: ObservableObject {
-    /// The full working canvas size, *including* any padding margin — everything downstream (buffers,
-    /// container bounds, fill, thumbnails, fit-to-screen, persistence) keys off this. The artwork rect
-    /// is derived as this inset by `canvasPadding` on every side (see `canvasPadding`).
+    /// The full working canvas size, *including* any padding margin — everything downstream
+    /// (buffers, container bounds, fill, thumbnails, fit-to-screen, persistence) keys off this. The
+    /// artwork rect is derived as this inset by `canvasPadding` on every side.
     @Published var canvasSize: CGSize?
 
-    /// Light-grey drawable margin (in canvas pixels) around the artwork on every side, adjustable from
-    /// the Actions menu (default 0). It's folded into `canvasSize` — the margin is real, drawable
-    /// canvas, not a visual-only border — so the artwork rect is `canvasSize` inset by this amount:
-    /// origin `(padding, padding)`, size `canvasSize - 2*padding`. Changed only via `setCanvasPadding`,
-    /// which resizes every buffer to keep existing content centred.
+    /// Light-grey drawable margin (in canvas pixels) around the artwork, adjustable from the Actions
+    /// menu (default 0). Folded into `canvasSize` — real drawable canvas, not a visual-only border —
+    /// so the artwork rect is `canvasSize` inset by this amount. Changed only via
+    /// `setCanvasPadding`, which resizes every buffer to keep existing content centred.
     @Published var canvasPadding: CGFloat = 0
 
     /// Clamp range for `canvasPadding`; the Actions-menu slider mirrors it.
@@ -46,121 +42,116 @@ final class CanvasManager: ObservableObject {
     /// Every motion group in the document, in creation order. Strokes reference these by id
     /// (`VectorStroke.motionGroupID`); a recipe binds geometry to them (`MotionGroupBinding`).
     ///
-    /// Document-level rather than per-layer so a group can span layers, which is what stops a
-    /// lineart arm and its flat colour drifting apart — see `MotionGroup` and PLAN §5.1. Empty until
-    /// the artist tags something, so this costs nothing for a project that never interpolates.
+    /// Document-level rather than per-layer so a group can span layers — what stops a lineart arm
+    /// and its flat colour drifting apart. Empty until the artist tags something, so this costs
+    /// nothing for a project that never interpolates.
     @Published var motionGroups: [MotionGroup] = []
 
-    /// Every guide stroke in the document. Document-level for the same reason and one more: a guide
-    /// is meant to be *referenced* by several intervals rather than copied into each (requirement 7,
-    /// PLAN §6.4), which only works if it has one home and a stable id.
+    /// Every guide stroke in the document. Document-level for the same reason, and because a guide
+    /// is meant to be *referenced* by several intervals rather than copied into each, which only
+    /// works if it has one home and a stable id.
     @Published var guideStrokes: [GuideStroke] = []
 
     /// Whether the artist is in interpolate mode — the mode the whole interpolation workflow lives
-    /// inside (PLAN §5.0 step 1).
+    /// inside.
     ///
-    /// A mode on the manager rather than a `Tool` case, and the precedent is `vectorEraserMode`:
-    /// interpolating is not a thing you *draw with*, it is a state the timeline and the canvas are
-    /// in while you keep using whatever tool you had. Making it a tool would evict the brush every
-    /// time the artist set a reference.
+    /// A mode on the manager rather than a `Tool` case, same precedent as `vectorEraserMode`:
+    /// interpolating is not a thing you *draw with*, it is a state the timeline and canvas are in
+    /// while using whatever tool you had. Making it a tool would evict the brush on every reference.
     ///
     /// Leaving the mode clears `interpolationReferences` (see `exitInterpolateMode`) but never
     /// touches a recipe already attached to a cel — the recipe is document content, the selection is
     /// a transient.
     @Published var isInterpolateMode: Bool = false
 
-    /// The cels the artist has flagged as keyframes, in the order they were flagged — which is the
-    /// order they become `InterpolationRecipe.references`, so it is time order only because the
-    /// artist picks them that way. Highlighted yellow on the timeline (brief step 2).
+    /// The cels the artist has flagged as keyframes, in the order they were flagged — which is time
+    /// order only because the artist picks them that way. Highlighted yellow on the timeline.
     ///
-    /// Several cels on *different layers* may be flagged for one keyframe (requirement 5: lineart
-    /// and flats interpolate together). `interpolationKeyframes` is what groups them back into
+    /// Several cels on *different layers* may be flagged for one keyframe (lineart and flats
+    /// interpolate together). `interpolationKeyframes` groups them back into
     /// `InterpolationReference`s, by frame.
     @Published var interpolationReferences: [CelRef] = []
 
     /// View-level toggle for `InterpolationEvaluator.Options.thicknessFade`, so the two behaviours
-    /// can be compared on real drawings (`IMPLEMENTATION.md` Phase 4 item 5).
+    /// can be compared on real drawings.
     ///
     /// Deliberately **not** persisted and **not** per-recipe: where it eventually belongs is a
-    /// decision to take after looking at it. Off matches the evaluator's default, and the reason it
-    /// is off is in `InterpolationEvaluator.ThicknessFade`.
+    /// decision to take after looking at it. Off matches the evaluator's default; the reason it is
+    /// off is in `InterpolationEvaluator.ThicknessFade`.
     @Published var interpolationThicknessFade: Bool = false
 
-    /// True while a registration is running. Registration is the expensive step of the whole feature
-    /// (PLAN §5.0 step 1, §8) — an ARAP fit over the keyframes' point clouds — and it is synchronous,
-    /// so this exists for the UI to show that something is happening rather than to gate anything.
+    /// True while a registration is running. Registration is the expensive step of the feature — an
+    /// ARAP fit over the keyframes' point clouds — and it is synchronous, so this exists for the UI
+    /// to show that something is happening rather than to gate anything.
     @Published var isRegisteringInterpolation: Bool = false
 
     /// True between `beginInterpolationDrag` and `commitInterpolationDrag` — the `t` slider is being
     /// dragged. Selects `.preview` render quality for the duration; see `RenderQuality`.
     @Published var isScrubbingInterpolation: Bool = false
 
-    /// The motion group a canvas tap assigns to, or nil when tapping does nothing — Phase 5's
-    /// retagging gesture, armed from its chip on `InterpolateBar`.
+    /// The motion group a canvas tap assigns to, or nil when tapping does nothing — the retagging
+    /// gesture, armed from its chip on `InterpolateBar`.
     ///
     /// **Armed state rather than a tool**, for the same reason `isInterpolateMode` is not a `Tool`
-    /// case: the artist keeps whatever brush they had, and arming a group must not evict it. It is
-    /// also why this is transient and cleared on leaving the mode — an armed group left set would
-    /// turn the next ordinary tap into a silent document edit.
+    /// case: the artist keeps whatever brush they had, and arming a group must not evict it. Cleared
+    /// on leaving the mode — an armed group left set would turn the next ordinary tap into a silent
+    /// document edit.
     ///
-    /// Deliberately not a *selection* of strokes. §8 item 36's constraint is that a group's
-    /// membership stays "which ink is in this group" and never "which stroke pairs with which", and
-    /// arm-then-tap writes exactly that: one tag per stroke, no pairing anywhere.
+    /// Deliberately not a *selection* of strokes: a group's membership must stay "which ink is in
+    /// this group", never "which stroke pairs with which", and arm-then-tap writes exactly that —
+    /// one tag per stroke, no pairing anywhere.
     @Published var armedMotionGroupID: UUID? = nil
 
-    /// Motion groups hidden from the interpolated preview — the mute half of Phase 5's solo/mute.
+    /// Motion groups hidden from the interpolated preview — the mute half of solo/mute.
     ///
     /// A view filter, not document state: it changes what the in-between *shows* while the artist is
-    /// working out which part moves wrongly, and it must not survive the session or reach the file.
-    /// It feeds `InterpolationEvaluator.Options.hiddenGroups`, and it is in `InterpolationPreviewKey`
-    /// — without that the preview is memoized against inputs that do not mention it and muting
-    /// appears to do nothing until something unrelated forces a re-render (`HANDOFF.md` §5, Phase 4).
+    /// working out which part moves wrongly, and must not survive the session or reach the file. It
+    /// feeds `InterpolationEvaluator.Options.hiddenGroups`, and is in `InterpolationPreviewKey` —
+    /// without that the preview is memoized against inputs that don't mention it, and muting appears
+    /// to do nothing until something unrelated forces a re-render.
     @Published var hiddenMotionGroups: Set<UUID> = []
 
     /// Whether a keyframe's strokes are drawn in their motion groups' tag colours while interpolate
-    /// mode is on — `IMPLEMENTATION.md` Phase 5 item 4.
+    /// mode is on.
     ///
-    /// **On by default**, because "what did it decide?" is the question the phase exists to answer
-    /// and an overlay nobody switches on answers nothing. It shows only where there is a decision to
-    /// show — a drawing that grouped into one part is not tinted at all — and the switch is in the
-    /// mode's options popover for the artist who wants their own colours back for a moment.
-    /// Transient, like the rest of this mode's view state.
+    /// **On by default** — "what did it decide?" is the question this exists to answer, and an
+    /// overlay nobody switches on answers nothing. Shows only where there is a decision to show — a
+    /// drawing that grouped into one part is not tinted at all — and the switch is in the mode's
+    /// options popover for the artist who wants their own colours back for a moment.
     @Published var showMotionGroupOverlay: Bool = true
 
-    /// Whether the next canvas drag draws a **guide stroke** rather than ink — Phase 7 item 2.
+    /// Whether the next canvas drag draws a **guide stroke** rather than ink.
     ///
     /// Armed state rather than a `Tool` case, exactly like `armedMotionGroupID` and for the same
-    /// reason: the artist keeps the brush they had. It is cleared on leaving the mode for the same
-    /// reason too — left armed, the next ordinary stroke would silently become a guide instead of a
-    /// drawing, which is the louder half of that failure since a guide does not appear in the layer
-    /// at all.
+    /// reason: the artist keeps the brush they had. Cleared on leaving the mode — left armed, the
+    /// next ordinary stroke would silently become a guide instead of a drawing, which is the louder
+    /// half of that failure since a guide does not appear in the layer at all.
     @Published var isDrawingGuide: Bool = false
 
-    /// The guide a handle drag is reshaping, and its geometry as it stood at touch-down — Phase 7
-    /// item 2. Non-nil exactly while a handle is under the finger.
+    /// The guide a handle drag is reshaping, and its geometry as it stood at touch-down. Non-nil
+    /// exactly while a handle is under the finger.
     ///
     /// The samples are kept because every move re-derives the whole path from *these* rather than
     /// nudging the path it last produced. Applying each move as a delta to the already-deformed
     /// geometry compounds the falloff, so the same drag performed slowly (more touch samples) bends
-    /// the guide further than one performed quickly — see `GuideHandles`.
+    /// the guide further than one performed quickly.
     ///
     /// Deliberately not `@Published`: nothing renders from it, and the guide itself is published, so
     /// a second object change per touch sample would only cost SwiftUI passes.
     var guideHandleDrag: (guideID: UUID, samples: [TimedSample])?
 
-    /// Whether the guide overlay is showing its **spacing chart** instead of its geometry handles —
-    /// Phase 7 item 5.
+    /// Whether the guide overlay is showing its **spacing chart** instead of its geometry handles.
     ///
     /// Two editors on one path cannot both own it: a chart dot and a shape handle would sit on the
-    /// same polyline and fight for the same touch. `PLAN.md` §6.2 asks for both as *separate*
-    /// controls ("geometric adjustment → handles", "timing adjustment → the chart"), so the overlay
-    /// shows one at a time and the bar says which. Transient, like the rest of this mode's view state.
+    /// same polyline and fight for the same touch, so geometric adjustment gets handles and timing
+    /// adjustment gets the chart as *separate* controls — the overlay shows one at a time and the
+    /// bar says which.
     @Published var isEditingGuideSpacing: Bool = false
 
-    /// The guide whose chart is under the finger, the chart as it stood at touch-down, and the recipe
-    /// it was read from — Phase 7 item 5, and the same shape as `guideHandleDrag` for the same
-    /// reasons. The recipe is what a cancelled drag is put back to; `cancelStructureGesture` drops
-    /// the undo snapshot but deliberately does not restore from it.
+    /// The guide whose chart is under the finger, the chart as it stood at touch-down, and the
+    /// recipe it was read from — same shape as `guideHandleDrag`, same reasons. The recipe is what a
+    /// cancelled drag is put back to; `cancelStructureGesture` drops the undo snapshot but
+    /// deliberately does not restore from it.
     var guideSpacingDrag: (guideID: UUID, chart: SpacingChart, recipe: InterpolationRecipe)?
 
     @Published var currentLayerIndex: Int = 0 {
@@ -182,15 +173,15 @@ final class CanvasManager: ObservableObject {
     }
 
     /// The active layer's `LayerKind`, or nil when `currentLayerIndex` points at nothing — which it
-    /// legitimately does mid-edit, e.g. `deleteLayer` parks it at -1 while removing the layer that was
-    /// active. Views deciding what to show for the active layer should ask this rather than indexing
-    /// `layers` themselves, so that bounds check lives in one place.
+    /// legitimately does mid-edit, e.g. `deleteLayer` parks it at -1 while removing the active layer.
+    /// Views deciding what to show for the active layer should ask this rather than indexing
+    /// `layers` themselves, so the bounds check lives in one place.
     ///
-    /// Deliberately weaker than `activeLayerIsVector` above: this reports only what *kind* of layer is
-    /// selected, and says nothing about whether a `VectorCanvas` exists on the current frame. That is
-    /// what UI affordances want — `EraserSettingsPanel`'s mode picker should be visible on a vector
-    /// layer whose current frame is still empty, since the mode governs the erase you are about to
-    /// make. Operations that need geometry to actually be there still want `activeLayerIsVector`.
+    /// Deliberately weaker than `activeLayerIsVector` above: reports only what *kind* of layer is
+    /// selected, nothing about whether a `VectorCanvas` exists on the current frame. That's what UI
+    /// affordances want — `EraserSettingsPanel`'s mode picker should show on a vector layer whose
+    /// current frame is still empty. Operations needing geometry to actually be there still want
+    /// `activeLayerIsVector`.
     var activeLayerKind: LayerKind? {
         guard layers.indices.contains(currentLayerIndex) else { return nil }
         return layers[currentLayerIndex].kind
@@ -244,30 +235,26 @@ final class CanvasManager: ObservableObject {
 
     /// Applies an overall move/rotate/scale to the active vector layer's content, losslessly (the
     /// geometry is re-rasterized at the new transform, no resolution loss). Driven by the transform
-    /// overlay while `isVectorTransforming` is on. `pivot` is the fixed local-space point the overlay's
-    /// box is centered on — the content's own bounding box center, not the canvas center, so Move
-    /// only carries the actual content along rather than treating the whole canvas as the object.
+    /// overlay while `isVectorTransforming` is on. `pivot` is the content's own bounding-box center,
+    /// not the canvas center, so Move carries only the actual content rather than the whole canvas.
     func setVectorTransform(_ transform: LayerTransform, layerIndex: Int, pivot: CGPoint) {
         guard layers.indices.contains(layerIndex),
               let celIdx = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame),
               let vector = layers[layerIndex].cels[celIdx].vector else { return }
         vector.setTransform(VectorCanvas.affine(from: transform, pivot: pivot))
         // VectorCanvas is a reference type, so mutating it doesn't trip the @Published layers
-        // republish; the coordinator refreshes the canvas view directly (see objectTransformChanged),
-        // and this debounced regen updates the layer-panel thumbnail.
+        // republish; the coordinator refreshes the canvas view directly, and this debounced regen
+        // updates the layer-panel thumbnail.
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIdx)
     }
 
-    /// Converts a vector layer to raster in place: each cel's full content (vector strokes/images,
-    /// plus any existing fillImage/bakedImage — `PixelOps.rasterize` already flattens all of it into
-    /// one image) is folded into `raster` (not `bakedImage` — see `registerUndoableCelChange`'s doc
-    /// comment: a raster-layer cel holds its content in exactly one tier at rest, or the eraser can
-    /// never reach it), `vector` is cleared, and `kind` becomes `.raster`. A no-op if the layer isn't
-    /// currently `.vector`. `mergeLayers` also calls this, on both layers being merged, before
-    /// flattening them together — so a vector layer never comes out of a merge still labeled
-    /// `.vector` with stale/empty geometry. The nested `withStructureUndo` call below coalesces into
-    /// whichever undo scope is already open, so calling this from inside `mergeLayers`'s own
-    /// `withStructureUndo` doesn't add a second, separate undo step.
+    /// Converts a vector layer to raster in place: each cel's full content is folded into `raster`
+    /// (not `bakedImage` — a raster-layer cel must hold its content in exactly one tier at rest, or
+    /// the eraser can never reach it), `vector` is cleared, `kind` becomes `.raster`. No-op if the
+    /// layer isn't currently `.vector`. `mergeLayers` also calls this on both layers being merged
+    /// before flattening, so a vector layer never comes out of a merge still labeled `.vector` with
+    /// stale geometry. The nested `withStructureUndo` below coalesces into whichever scope is
+    /// already open, so calling this from inside `mergeLayers`'s own scope adds no extra step.
     func rasterizeLayer(layerIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .vector,
               let canvasSize else { return }
@@ -292,29 +279,24 @@ final class CanvasManager: ObservableObject {
     @Published var selection: Selection?
     @Published var floatingPiece: FloatingPiece?
     /// Single-slot clipboard for the timeline's Copy/Paste block menu — holds a cel's content (not
-    /// its position), set by `copyCel` and consumed (non-destructively; copy stays available for
-    /// repeated pastes) by `pasteCel`.
+    /// its position), set by `copyCel` and consumed non-destructively by `pasteCel`.
     @Published var copiedCel: CopiedCel?
     /// Whether painting/erasing/filling is allowed to touch pixels outside the active selection.
-    /// Defaults to false (deny) — matching Procreate-style selections, where drawing outside the
-    /// marching ants is blocked until you deselect. Shown as a toggle in the Select bottom bar; only
-    /// meaningful while `selection` is non-nil (see `StrokeCanvasView.selectionClipPath` and the fill
-    /// pipeline's own clip in `drainFillWork`).
+    /// Defaults to false (deny), matching Procreate-style selections. Shown as a toggle in the
+    /// Select bottom bar; only meaningful while `selection` is non-nil.
     @Published var allowsPaintingOutsideSelection: Bool = false
 
     @Published var brushSize: CGFloat = 5.0
     @Published var brushOpacity: Double = 1.0
     @Published var brushColor: Color = .black
     @Published var selectedTool: Tool = .pen
-    /// Defaults key for `pencilOnlyDrawing`. This one setting is about the user's *hardware* — do
-    /// they have a Pencil and rest a palm on the glass — not about any one drawing, so it belongs to
-    /// the app rather than to a project's manifest, and it has to survive reopening both.
+    /// Defaults key for `pencilOnlyDrawing`. About the user's *hardware*, not any one drawing, so it
+    /// belongs to the app rather than a project's manifest.
     static let pencilOnlyDefaultsKey = "paintapp.pencilOnlyDrawing"
 
-    // Absent a stored preference this is false: on a device/simulator with no Apple Pencil, an
-    // ON-by-default gate silently swallows every finger touch on the canvas with no feedback,
-    // reading as "drawing is broken" until the user finds the toggle in the Actions menu. Users with
-    // a Pencil who want to rest a palm on the canvas switch it on, and it stays on from then on.
+    // Absent a stored preference this is false: an ON-by-default gate would silently swallow every
+    // finger touch on a device with no Apple Pencil, reading as "drawing is broken". Users with a
+    // Pencil who want to rest a palm switch it on, and it stays on from then on.
     @Published var pencilOnlyDrawing: Bool = UserDefaults.standard.bool(forKey: CanvasManager.pencilOnlyDefaultsKey) {
         didSet {
             guard oldValue != pencilOnlyDrawing else { return }
@@ -323,27 +305,23 @@ final class CanvasManager: ObservableObject {
     }
 
     /// The full brush preset currently active (shape, hardness, spacing, stabilization, dynamics,
-    /// scatter/rotation jitter, grain, blend mode) — everything `StrokeCanvasView.stampOne` reads
-    /// beyond the live `brushSize`/`brushOpacity` above, which stay separate published properties
-    /// (rather than folded into this) because `SideToolbar`'s sliders already bind directly to them
-    /// and can move independently of whichever preset is selected, same as Procreate letting you
-    /// nudge a brush's size without that becoming a new saved preset.
+    /// scatter/rotation jitter, grain, blend mode). `brushSize`/`brushOpacity` above stay separate
+    /// published properties rather than folded into this because `SideToolbar`'s sliders bind
+    /// directly to them and can move independently of whichever preset is selected — nudging a
+    /// brush's size doesn't become a new saved preset.
     @Published var selectedBrush: Brush = BrushLibrary.softRound
-    /// User-imported custom brushes (see `BrushSettingsPanel`'s import flow), in the order added.
-    /// In-memory only here — persisting these across app launches is handled by `ProjectStore`/
-    /// `ProjectManifest`.
+    /// User-imported custom brushes, in the order added. In-memory only here — persisted across app
+    /// launches via `ProjectStore`/`ProjectManifest`.
     @Published var customBrushes: [Brush] = []
 
     /// Every brush offered in the picker: the 5 built-in presets followed by user imports.
     var availableBrushes: [Brush] { BrushLibrary.defaults + customBrushes }
 
-    /// Selects a brush preset (built-in or custom) as the active brush. Also re-baselines the live
-    /// `brushSize`/`brushOpacity` from the brush's own defaults — matching Procreate's behavior of
-    /// resetting size/opacity when you switch brushes — and keeps `selectedTool` on a paint tool
-    /// (`.pencil` for the Pencil preset, `.pen` for every other shape) so `TopToolbar`'s existing
-    /// pen/pencil/eraser/fill highlight logic keeps working unchanged. Leaves `selectedTool` alone
-    /// while the eraser or fill tool is active, so picking a brush from the panel while erasing
-    /// doesn't silently switch back to painting.
+    /// Selects a brush preset as the active brush. Also re-baselines the live
+    /// `brushSize`/`brushOpacity` from the brush's own defaults, and keeps `selectedTool` on a
+    /// paint tool (`.pencil` for the Pencil preset, `.pen` otherwise). Leaves `selectedTool` alone
+    /// while the eraser or fill tool is active, so picking a brush while erasing doesn't silently
+    /// switch back to painting.
     func selectBrush(_ brush: Brush) {
         selectedBrush = brush
         brushSize = brush.size
@@ -359,42 +337,39 @@ final class CanvasManager: ObservableObject {
         selectBrush(brush)
     }
 
-    // MARK: - Eraser (functions exactly like the brush tool — same shape/dynamics/spacing/grain —
-    // but `BrushStamper` composites its stamps with `.destinationOut` instead of painting `brushColor`,
-    // i.e. it "paints" with 0 opacity. Kept as entirely separate published state from the paint
-    // brush's, so adjusting the eraser's shape/size/opacity never disturbs whatever brush you paint
-    // with, and switching tools never clobbers either one's settings.)
+    // MARK: - Eraser (functions like the brush tool — same shape/dynamics/spacing/grain — but
+    // `BrushStamper` composites its stamps with `.destinationOut` instead of painting `brushColor`.
+    // Kept as entirely separate published state from the paint brush's, so adjusting the eraser
+    // never disturbs the paint brush, and switching tools never clobbers either one's settings.)
 
-    /// The eraser's own brush preset (shape/hardness/spacing/dynamics/scatter/grain) — everything
-    /// `BrushStamper` needs to shape an erase stamp exactly like a paint stamp. Defaults to Hard Round,
-    /// the crisp/predictable shape most paint apps default their eraser to.
+    /// The eraser's own brush preset. Defaults to Hard Round, the crisp/predictable shape most paint
+    /// apps default their eraser to.
     @Published var selectedEraserBrush: Brush = BrushLibrary.hardRound
-    /// Live-adjustable eraser diameter, separate from `brushSize` for the reason above. Defaults larger
-    /// than the paint brush's default — erasers are typically used broader than the pen/pencil.
+    /// Live-adjustable eraser diameter, separate from `brushSize`. Defaults larger than the paint
+    /// brush's default — erasers are typically used broader than the pen/pencil.
     @Published var eraserSize: CGFloat = 20
     @Published var eraserOpacity: Double = 1.0
 
-    /// Which of the three vector-eraser behaviours (see `VectorEraserMode` in Tool.swift, and
-    /// VECTOR_ERASER_PLAN.md §4) the eraser uses. Only consulted while the active layer is `.vector`:
-    /// on a raster layer the eraser is a plain `.destinationOut` brush and there is nothing to choose
-    /// between, so `EraserSettingsPanel` hides its picker there entirely (plan §5).
+    /// Which of the three vector-eraser behaviours (see `VectorEraserMode` in Tool.swift) the eraser
+    /// uses. Only consulted while the active layer is `.vector`: on a raster layer the eraser is a
+    /// plain `.destinationOut` brush, so `EraserSettingsPanel` hides its picker there entirely.
     ///
     /// Lives alongside the shape/size/opacity state rather than inside `selectedEraserBrush` because
-    /// it is not a property of the *stamp* — the same eraser preset cuts or shaves depending on this,
-    /// and switching eraser presets (which re-baselines size/opacity via `selectEraserBrush`) must not
-    /// silently change which mode you are erasing in. It is also what `VectorEraserMode.isStabilized`
-    /// is read off, so `StrokeCanvasView` can decide per-mode whether to smooth the input path.
+    /// it is not a property of the *stamp* — the same eraser preset cuts or shaves depending on
+    /// this, and switching presets (which re-baselines size/opacity) must not silently change which
+    /// mode you're erasing in. Also what `VectorEraserMode.isStabilized` reads, so
+    /// `StrokeCanvasView` can decide per-mode whether to smooth the input path.
     ///
     /// Defaults to `.erase`, the mode that behaves like the raster eraser users already know.
     @Published var vectorEraserMode: VectorEraserMode = .erase
 
-    /// Every shape offered in the eraser's picker — the same built-in shapes as the brush picker
-    /// (custom imported textures are a paint-brush-only feature for now, not offered here).
+    /// Every shape offered in the eraser's picker — the same built-ins as the brush picker (custom
+    /// imported textures are a paint-brush-only feature for now).
     var availableEraserBrushes: [Brush] { BrushLibrary.defaults }
 
     /// Eraser analogue of `selectBrush`: re-baselines `eraserSize`/`eraserOpacity` from the chosen
-    /// preset. Never touches `selectedTool` — picking an eraser shape only makes sense while already
-    /// erasing, unlike `selectBrush` which also has to *switch into* a paint tool from the picker.
+    /// preset. Never touches `selectedTool` — unlike `selectBrush`, picking an eraser shape only
+    /// makes sense while already erasing.
     func selectEraserBrush(_ brush: Brush) {
         selectedEraserBrush = brush
         eraserSize = brush.size
@@ -425,9 +400,8 @@ final class CanvasManager: ObservableObject {
     @Published var isOnionSkinEnabled: Bool = true
     @Published var onionSkinOpacity: Double = 0.3
     @Published var isLoopEnabled: Bool = true
-    /// The frame range playback loops within, set via the ruler's frame-number tap menu (ToonSquid-
-    /// style start/end loop markers). Nil means "the whole scene" — highlighted blue across its span
-    /// in the ruler once set, independent of whether `isLoopEnabled` currently gates playback.
+    /// The frame range playback loops within, set via the ruler's frame-number tap menu. Nil means
+    /// "the whole scene"; highlighted blue across its span once set, independent of `isLoopEnabled`.
     @Published var loopStartFrame: Int?
     @Published var loopEndFrame: Int?
 
@@ -453,11 +427,9 @@ final class CanvasManager: ObservableObject {
         return cg.width * cg.height * 4
     }
 
-    /// Fires whenever a real drawing/fill interaction begins on the canvas (a stroke or a fill press
-    /// touching down) — `DrawingView` uses this to auto-dismiss whatever top-bar dropdown is open, so
-    /// opening a tool's settings menu never blocks you from just continuing to draw: the first touch
-    /// both closes the menu and performs the stroke/fill, instead of the touch being swallowed and
-    /// requiring a separate dismiss tap first.
+    /// Fires whenever a real drawing/fill interaction begins on the canvas — `DrawingView` uses this
+    /// to auto-dismiss whatever top-bar dropdown is open, so the first touch both closes the menu
+    /// and performs the stroke/fill, rather than being swallowed by a dismiss tap first.
     let interactionBegan = PassthroughSubject<Void, Never>()
 
     // MARK: - Canvas-edit chokepoint
@@ -472,19 +444,15 @@ final class CanvasManager: ObservableObject {
     /// erase, a fill, making or acting on a selection, Move/Duplicate, any layer/folder/timeline
     /// edit, a canvas flip or resize, and saving.
     ///
-    /// A transient smart shape or fill is not part of the document yet: it lives in this manager's
-    /// private gesture state and is drawn by an overlay above the layer stack. An edit that runs
-    /// while one is still pending reads layer content that doesn't include it — and the transient
-    /// then bakes *later*, at whatever geometry it happens to hold by then, landing out of order on
-    /// the undo stack and on the wrong side of the edit that logically preceded it. That one
-    /// mis-ordering is the shared root cause of the shape/fill "teleports back", "gets duplicated",
-    /// and "disappears then reappears" bugs, which is why this is a single chokepoint invoked from
-    /// inside the mutating operations themselves rather than a rule each view call site has to
-    /// remember.
+    /// A transient smart shape or fill lives in this manager's private gesture state until baked. An
+    /// edit that runs while one is pending would read layer content that doesn't include it, and the
+    /// transient would then bake *later* at whatever geometry it holds by then, landing out of order
+    /// on the undo stack — the root cause behind shape/fill "teleports back"/"duplicates"/
+    /// "disappears then reappears" bugs. Hence a single chokepoint invoked from inside the mutating
+    /// operations themselves, not a rule each view call site has to remember.
     ///
-    /// Fill commits before shape: a shape stroke is drawn over the fill in the same cel, so baking
-    /// in that order preserves what the user was looking at. Both self-guard when nothing is
-    /// pending, so calling this unconditionally costs nothing.
+    /// Fill commits before shape: a shape stroke is drawn over the fill in the same cel, so this
+    /// order preserves what the user was looking at. Both self-guard when nothing is pending.
     ///
     /// A floating Move/Duplicate piece is deliberately *not* settled here — Move stays engaged
     /// across its own nudges and mode changes, which are canvas edits in their own right. Use
@@ -514,20 +482,15 @@ final class CanvasManager: ObservableObject {
     @Published var needsVisibilityAlert: Bool = false
 
     /// Ticks the debounce. The *what* travels in `pendingThumbnailRegens` rather than in the value,
-    /// because `.debounce` keeps only the last element it saw: when this subject carried the
-    /// `(layerIndex, celIndex)` itself, scheduling two different cels inside the 400 ms window
-    /// regenerated only the second one and left the first showing a stale thumbnail indefinitely.
-    /// That was reachable before this stage (merge-down, then any other scheduled regen) and routing
-    /// the per-stroke path through here would have made it routine, so the queue is now a set that
-    /// the debounced sink drains in full.
+    /// because `.debounce` keeps only the last element it saw — carrying `(layerIndex, celIndex)`
+    /// directly would regenerate only the last-scheduled cel of a burst and leave earlier ones
+    /// showing a stale thumbnail indefinitely. The queue is a set the debounced sink drains in full.
     private let thumbnailRegenSubject = PassthroughSubject<Void, Never>()
 
-    /// Cels awaiting a debounced thumbnail regen, identified by `(layerID, celID)` rather than by
-    /// index. Indices are not stable across the debounce interval — deleting a layer or sorting a
-    /// layer's cels renumbers them, so an index queued 400 ms ago can now point at a different cel,
-    /// or at a valid index that simply isn't the cel whose content changed. Identity survives all of
-    /// that, and `flushPendingThumbnailRegens` resolves back to current indices at the moment it
-    /// renders. A cel that has since been deleted resolves to nothing and is dropped.
+    /// Cels awaiting a debounced thumbnail regen, identified by `(layerID, celID)` rather than
+    /// index — indices aren't stable across the debounce interval (deleting a layer or sorting cels
+    /// renumbers them). Identity survives that; `flushPendingThumbnailRegens` resolves back to
+    /// current indices at render time. A since-deleted cel resolves to nothing and is dropped.
     private var pendingThumbnailRegens: Set<CelLocation> = []
 
     struct CelLocation: Hashable {
@@ -557,10 +520,10 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Adds a `.vector` layer: brush strokes drawn here are stored as geometry (see `VectorCanvas`)
-    /// so they can be moved/rotated/scaled without resolution loss, and it can also host imported
-    /// images/shapes. Its cel still keeps an (empty) `raster` so every cel-lifecycle path that
-    /// assumes a non-optional raster keeps working — the live strokes just live in `vector` instead.
+    /// Adds a `.vector` layer: brush strokes are stored as geometry (see `VectorCanvas`) so they can
+    /// be moved/rotated/scaled without resolution loss, and it can also host imported images/shapes.
+    /// Its cel still keeps an (empty) `raster` so every cel-lifecycle path assuming a non-optional
+    /// raster keeps working — live strokes just live in `vector` instead.
     func addVectorLayer(name: String? = nil) {
         withStructureUndo(name: "Add Vector Layer") {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
@@ -574,20 +537,17 @@ final class CanvasManager: ObservableObject {
     func deleteLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
         withStructureUndo(name: "Delete Layer") {
-            // If the layer being deleted is the active one, currentLayerIndex's *numeric* value may end
-            // up unchanged (a later layer slides down into the same slot) — the didSet below won't fire,
-            // so handleActiveContextChanged() has to be called explicitly to invalidate any selection/
-            // floating piece that was tied to the now-deleted layer (they're keyed by that layer's UUID,
-            // so this correctly detects the identity change even though the index didn't move).
+            // If the deleted layer is the active one, currentLayerIndex's *numeric* value may end up
+            // unchanged (a later layer slides into the same slot) — didSet won't fire, so
+            // handleActiveContextChanged() must be called explicitly to invalidate any selection/
+            // floating piece keyed to the now-deleted layer's UUID.
             let deletingActiveLayerInPlace = index == currentLayerIndex
             layers.remove(at: index)
-            // No layers left — invalidate all per-layer state and set sentinel index -1.
             if layers.isEmpty {
                 currentLayerIndex = -1
             // Deleting a layer *below* the active one shifts every later index down by one, so
-            // currentLayerIndex must shift with it to keep pointing at the same layer. Without this,
-            // "active" silently jumps to whatever layer happened to slide into the old index —
-            // subsequent strokes land on the wrong layer.
+            // currentLayerIndex must shift too, or "active" silently jumps to whatever slid into the
+            // old index and subsequent strokes land on the wrong layer.
             } else if index < currentLayerIndex {
                 currentLayerIndex -= 1
             } else if currentLayerIndex >= layers.count {
@@ -645,10 +605,8 @@ final class CanvasManager: ObservableObject {
     // MARK: - Playback bounds
     //
     // An unset loop marker means "the end of the scene", not "no boundary": the first frame stands
-    // in for a missing loop start and the last frame for a missing loop end. That single
-    // substitution is what lets both modes share one rule — loop mode wraps at the end boundary back
-    // to the start boundary, normal mode stops there — instead of each needing its own special case
-    // for whether markers happen to be set.
+    // in for a missing loop start and the last frame for a missing loop end. That substitution lets
+    // both modes share one rule instead of each needing a special case for unset markers.
 
     /// Whether the user has placed either loop marker.
     var hasLoopBoundary: Bool { loopStartFrame != nil || loopEndFrame != nil }
@@ -681,31 +639,23 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Drawing updates
 
-    // Unlike PKCanvasView, the new engine's live strokes are stamped directly into the
-    // `RasterLayerTexture` instance already referenced by `Cel.raster` (a shared class, not a
-    // value type), so there's no separate "push the finished drawing back into the model" step
-    // needed mid-stroke the way `updateCelDrawing`/`canvasViewDrawingDidChange` used to do —
-    // `strokeEnded` below (called once per completed stroke) is the only hook the drawing surface
-    // needs, to trigger a thumbnail regen and force the `@Published layers` diff that in-place
-    // texture mutation alone wouldn't otherwise produce.
+    // Live strokes are stamped directly into the `RasterLayerTexture` instance already referenced by
+    // `Cel.raster` (a shared class, not a value type), so there's no separate "push the finished
+    // drawing back into the model" step mid-stroke — `strokeEnded` below is the only hook the
+    // drawing surface needs, to trigger a thumbnail regen and force the `@Published layers` diff
+    // that in-place texture mutation alone wouldn't otherwise produce.
 
     /// Called once per completed stroke. Any pending shape/fill was already baked at stroke *start*
-    /// (`beginCanvasEdit`, via the drawing surface's `onStrokeBegan`) — which is the correct point,
-    /// since that's when the canvas began changing — so there is nothing transient left to settle
-    /// here, only the thumbnail to refresh.
-    /// Goes through the debounce rather than rasterizing on the spot, which is what makes the
-    /// thumbnail stop being a per-stroke tax. Regenerating a 2048x2048 cel's thumbnail measures
-    /// ~4.3 ms against a ~14 ms stroke — roughly a quarter of the cost of finishing a stroke, paid on
-    /// every stroke, to refresh a 120x120 image in the timeline and layer panel that no one can be
-    /// looking at closely mid-drawing. Debounced, a burst of quick strokes on one cel pays it once
-    /// 400 ms after the user stops instead of once per stroke.
+    /// (`beginCanvasEdit`), so there's nothing transient left to settle, only the thumbnail to
+    /// refresh. Goes through the debounce rather than rasterizing on the spot: regenerating a
+    /// 2048x2048 cel's thumbnail costs ~4.3 ms against a ~14 ms stroke, so a burst of quick strokes
+    /// pays it once 400 ms after the user stops instead of once per stroke.
     ///
     /// Safe to defer because nothing reads `Cel.thumbnail`/`Layer.thumbnail` except the timeline and
-    /// layer-panel views. In particular **saving does not**: `ProjectStore.Snapshot` renders its own
-    /// gallery thumbnail from `PixelOps.compositeCanvas` and stores each cel's pixels via
-    /// `cel.raster.renderToUIImage()`, so no per-cel thumbnail is ever persisted and a pending regen
-    /// cannot put a stale image on disk. (`flushPendingThumbnailRegens()` exists for any future
-    /// caller that does need synchronous freshness.)
+    /// layer-panel views. In particular **saving does not** — `ProjectStore.Snapshot` renders its
+    /// own gallery thumbnail and stores each cel's pixels directly, so a pending regen can't put a
+    /// stale image on disk. (`flushPendingThumbnailRegens()` exists for callers needing sync
+    /// freshness.)
     func strokeEnded(layerIndex: Int, celIndex: Int) {
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
     }
@@ -717,8 +667,8 @@ final class CanvasManager: ObservableObject {
                                celID: layers[layerIndex].cels[celIndex].id)
     }
 
-    /// The ID-based entry point every scheduled regen funnels through — used directly by undo/redo
-    /// closures, which can fire long after other structural edits have shifted indices.
+    /// The ID-based entry point every scheduled regen funnels through — for undo/redo closures,
+    /// which can fire long after other structural edits have shifted indices.
     func scheduleThumbnailRegen(layerID: UUID, celID: UUID) {
         pendingThumbnailRegens.insert(CelLocation(layerID: layerID, celID: celID))
         thumbnailRegenSubject.send(())
@@ -739,10 +689,9 @@ final class CanvasManager: ObservableObject {
     }
 
     /// Deliberately *not* debounced: this is a whole-project fan-out over every cel (project load,
-    /// canvas resize), and every one of those thumbnails is a different cel that genuinely has to be
-    /// rendered. Queueing them would work — the queue is a set, so none would be dropped — but it
-    /// would only defer the same total work by 400 ms while leaving the whole timeline blank until
-    /// then. Any regen already queued is redundant once this has run, so the queue is cleared.
+    /// canvas resize) and every thumbnail genuinely has to be rendered. Queueing would only defer
+    /// the same work by 400 ms while leaving the timeline blank. Any queued regen is redundant once
+    /// this has run, so the queue is cleared.
     func regenerateAllThumbnails() {
         pendingThumbnailRegens.removeAll()
         for layerIndex in layers.indices {
@@ -752,11 +701,9 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// How many thumbnail re-renders have actually run (i.e. reached the renderer, not counting
-    /// calls that bail on a stale index). Pure instrumentation for `PerfBaselineTests`, which
-    /// records it as part of the pre-refactor performance baseline — thumbnail regeneration
-    /// rasterizes the whole cel, so how often one stroke triggers it is a real cost. Never read by
-    /// the app itself; monotonic, and deliberately not `@Published` so reading it can't drive a
+    /// How many thumbnail re-renders have actually run (reached the renderer, not bailed on a stale
+    /// index). Instrumentation for `PerfBaselineTests` — thumbnail regeneration rasterizes the whole
+    /// cel, a real cost. Never read by the app itself; not `@Published` so reading it can't drive a
     /// view update.
     private(set) var thumbnailRegenerationCount = 0
 
@@ -781,23 +728,18 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Fill state (the operations live in CanvasManager+Fill.swift)
     //
-    // These stay here rather than moving with the code that drives them: a Swift extension cannot
-    // declare stored properties. None can be `private` either — `private` is scoped to the file, and
-    // CanvasManager+Fill.swift reads and writes all of them. Nothing outside this class and its
-    // extensions touches any of it; the fill parameters the sliders actually bind to are the
-    // `@Published` properties further up.
+    // Stays here rather than moving with the code that drives it: extensions can't declare stored
+    // properties, and none can be `private` since CanvasManager+Fill.swift reads/writes all of them.
 
-    /// Slider ranges for the two fill settings, mirrored from `FillSettingsPanel`. The interactive drag
-    /// clamps to these and (in `CanvasView`) maps a full sweep of each onto a fixed amount of finger
-    /// travel.
+    /// Slider ranges for the two fill settings, mirrored from `FillSettingsPanel`. The interactive
+    /// drag clamps to these and maps a full sweep onto a fixed amount of finger travel.
     static let fillGapRange: ClosedRange<CGFloat> = 0...40
     static let fillThresholdRange: ClosedRange<CGFloat> = 0...1
     static let fillExpandRange: ClosedRange<CGFloat> = 0...6
 
-    /// Serial queue that owns every fill computation for the active gesture. Keeping it serial means the
-    /// GPU session (the reference is composited + uploaded exactly once, in `beginInteractiveFill`) and
-    /// the render bookkeeping below are only ever touched from one thread, and lets `drainFillWork`
-    /// coalesce a burst of drag updates down to a single render of the latest parameters.
+    /// Serial queue that owns every fill computation for the active gesture. Keeping it serial means
+    /// the GPU session and render bookkeeping below are only ever touched from one thread, letting
+    /// `drainFillWork` coalesce a burst of drag updates into a single render of the latest params.
     let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
     let fillLock = NSLock()
     var fillPending = FillKey(gap: 0, threshold: 0, edge: 0)
@@ -808,10 +750,9 @@ final class CanvasManager: ObservableObject {
     /// the main thread in `beginInteractiveFill` before any `fillQueue` work runs, then only read after.
     var fillSession: MetalFillSession?
     var fillSeedColor: SIMD4<Float> = .zero
-    /// True while an interactive fill exists — either a finger is actively dragging it, or it's in the
-    /// post-lift *adjustable* state (session still alive, preview still shown, not yet baked). Cleared
-    /// only on commit (`commitInteractiveFill`, triggered by a paint/erase action or a new fill) or a
-    /// cancel. Main-thread only.
+    /// True while an interactive fill exists — either a finger is dragging it, or it's in the
+    /// post-lift *adjustable* state (session still alive, preview shown, not yet baked). Cleared
+    /// only on commit or cancel. Main-thread only.
     var fillGestureActive = false
     /// True only while a finger is actively pressing/dragging the fill; false in the adjustable state.
     var fillFingerDown = false         // main-thread only
@@ -925,15 +866,12 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Smart Shapes state (the operations live in CanvasManager+Shape.swift)
     //
-    // These stay here rather than moving with the code that drives them: a Swift extension cannot
-    // declare stored properties. None can be `private` either — `private` is scoped to the file, and
-    // CanvasManager+Shape.swift reads and writes all of them. `shapeGestureActive` likewise gives up
-    // its `private(set)`: the extension has to be able to set it. Nothing here is written outside
-    // this class and its extensions.
+    // Stays here for the same reason the fill state above does: extensions can't declare stored
+    // properties, and none can be `private` since CanvasManager+Shape.swift reads/writes all of them.
 
-    /// True while an interactive shape exists — either the finger is still down adjusting it, or it's
-    /// in the post-lift *adjustable* state (preview shown, handles visible, not yet baked). Cleared
-    /// only on commit or cancel. Main-thread only.
+    /// True while an interactive shape exists — either the finger is still down, or it's in the
+    /// post-lift *adjustable* state (preview shown, handles visible, not yet baked). Cleared only on
+    /// commit or cancel. Main-thread only.
     var shapeGestureActive = false
     /// True only while the drawing finger is actively pressing; false in the adjustable state.
     var shapeFingerDown = false
@@ -970,10 +908,9 @@ final class CanvasManager: ObservableObject {
     /// What must happen when a cel's committed content changes without a live stroke driving it (a
     /// transient baking down, an undo/redo of one): refresh the layer-panel thumbnail and republish.
     ///
-    /// `RasterLayerTexture`/`VectorCanvas` are reference types mutated in place, so the `@Published
-    /// layers` value is unchanged and nothing would otherwise trigger a SwiftUI pass. The pass is
-    /// all that's needed — repainting the canvas itself is handled by the version check in
-    /// `reconcileLayers`, not by announcing the change from here.
+    /// `RasterLayerTexture`/`VectorCanvas` are reference types mutated in place, so `@Published
+    /// layers` is unchanged and nothing else would trigger a SwiftUI pass. Repainting the canvas
+    /// itself is handled separately by the version check in `reconcileLayers`.
     func celContentChangedOutsideStroke(layerID: UUID, celID: UUID) {
         scheduleThumbnailRegen(layerID: layerID, celID: celID)
         objectWillChange.send()
@@ -994,9 +931,8 @@ final class CanvasManager: ObservableObject {
     }
 
     /// An undo/redo can't operate on an interactive fill's or shape's private, off-stack state, so
-    /// both are resolved first: one still under the finger (a multi-finger undo/redo gesture is
-    /// taking over) is discarded; a lifted, still-adjustable one is committed so it becomes a real
-    /// "Fill"/"Shape" step the following `undo()` reverts (and `redo()` can restore) — instead of the
+    /// both are resolved first: one still under the finger is discarded; a lifted, still-adjustable
+    /// one is committed so it becomes a real step the following `undo()` reverts, instead of the
     /// undo silently hitting the previous action while it lingers.
     private func finalizePendingGesturesForHistoryAction() {
         if fillFingerDown {
@@ -1022,9 +958,8 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Structural undo state (the operations live in CanvasManager+Undo.swift)
     //
-    // Both properties stay here rather than moving with the code that drives them: a Swift extension
-    // cannot declare stored properties. They are internal rather than private for the same reason
-    // `private` never crosses a file — CanvasManager+Undo.swift reads and writes both.
+    // Both properties stay here for the same reason as above; internal rather than private since
+    // CanvasManager+Undo.swift reads and writes both.
 
     /// Nesting depth of `withStructureUndo`, so composite edits record exactly one step.
     var structureUndoDepth = 0

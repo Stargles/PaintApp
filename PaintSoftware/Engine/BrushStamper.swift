@@ -14,17 +14,14 @@ enum BrushStamper {
     /// Per-dab pseudo-randomness for scatter and rotation jitter, seeded explicitly so a stroke can
     /// be *replayed* to the same pixels rather than merely to the same statistics.
     ///
-    /// This exists because `CGFloat.random` cannot live in this pipeline. `VectorCanvas
-    /// .renderLocalContent` re-runs `stampStroke` over every stored stroke on every invalidation, so
-    /// with a global RNG a brush carrying `scatter > 0` or `rotationJitter > 0` landed its dabs in new
-    /// positions each time the layer was re-rendered: draw a second stroke and the first one visibly
-    /// jumps. That directly contradicts what a vector layer promises (see `VectorStroke` — geometry
-    /// re-rasterized losslessly on demand), and it would apply to an eraser stroke just the same, its
-    /// punched hole crawling on every render.
+    /// A global RNG would make a brush with `scatter > 0`/`rotationJitter > 0` re-roll its dabs on
+    /// every re-render (`VectorCanvas.renderLocalContent` re-runs `stampStroke` over every stored
+    /// stroke on each invalidation), visibly jumping an already-drawn stroke — including an eraser's
+    /// punched hole. That breaks the promise that vector geometry re-rasterizes losslessly.
     ///
-    /// splitmix64 — chosen because it is a handful of integer ops with no allocation and no shared
-    /// state, so seeding one per stroke costs nothing on a path that runs thousands of times per
-    /// stroke. Statistical quality far exceeds what jittering a brush dab needs.
+    /// splitmix64: a handful of integer ops, no allocation, no shared state — cheap enough to seed
+    /// once per stroke on a path that runs thousands of times per stroke, and far more statistical
+    /// quality than jittering a brush dab needs.
     struct DabRNG {
         private var state: UInt64
 
@@ -114,28 +111,23 @@ enum BrushStamper {
     ///
     /// ## `visibleRange` — showing a sub-run without re-phasing it
     ///
-    /// The dab lattice this walk lays down is anchored at `samples[0]`: dabs land every `spacing`
-    /// along the path, with the leftover carried across segments. Hand it a *sub-run* of a stroke —
-    /// which is what cutting a stroke and re-stamping the surviving piece does — and the anchor moves
-    /// to the cut, so the piece's ink lands somewhere new along its **whole length**, most visibly at
-    /// the far tip. That is the measurement that unwired Mode 1's geometric split (see
-    /// `VectorEraser`'s Mode 1 notes and VECTOR_ERASER_PLAN.md §1).
+    /// The dab lattice is anchored at `samples[0]`: dabs land every `spacing` along the path, leftover
+    /// carried across segments. Naively re-stamping just a cut stroke's surviving sub-run would move
+    /// the anchor to the cut, shifting the piece's ink along its whole length (most visibly at the far
+    /// tip) instead of leaving Mode 1's geometric split where it was.
     ///
-    /// `visibleRange` is the fix, and it is deliberately a *filter over the original walk* rather than
-    /// a re-derivation of it: the caller passes the **whole** stroke's samples, this walks all of them
-    /// exactly as before — same spacing arithmetic, same carry, same floating-point — and simply routes
-    /// the dabs outside the range to a sink that draws nothing. The dabs that do land are therefore not
-    /// approximately where the uncut stroke put them, they are bit-for-bit the same call with the same
-    /// arguments. Nothing else reproduces the lattice that exactly, which matters because §8's
-    /// acceptance criterion is asserted at *zero* tolerance.
+    /// `visibleRange` fixes this as a *filter over the original walk*, not a re-derivation: the caller
+    /// passes the **whole** stroke's samples, this walks all of them exactly as before — same spacing
+    /// arithmetic, same carry, same floating-point — and routes dabs outside the range to a sink that
+    /// draws nothing. The dabs that land are bit-for-bit what the uncut stroke produced, which matters
+    /// because the acceptance test for this is asserted at *zero* tolerance.
     ///
-    /// The range is in `StrokeGeometry`'s "sample index + fraction" domain, and a dab exactly on a
-    /// boundary is drawn — so two pieces cut at `low`/`high` render, between them, every dab of the
+    /// The range is in `StrokeGeometry`'s "sample index + fraction" domain; a dab exactly on a
+    /// boundary is drawn, so two pieces cut at `low`/`high` render, between them, every dab of the
     /// original except those strictly inside `(low, high)`.
     ///
-    /// The skipped dabs still go through `stampDab`, so they consume the RNG exactly as they would
-    /// have. Without that a piece of a scattering stroke would re-roll every dab after the first
-    /// skipped one — the same class of bug in a different place.
+    /// Skipped dabs still go through `stampDab` so they consume the RNG exactly as they would have —
+    /// otherwise a piece of a scattering stroke would re-roll every dab after the first skipped one.
     static func stampStroke(into raster: DabTarget, samples: [Sample], brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false,
                             seed: UInt64? = nil, visibleRange: ClosedRange<CGFloat>? = nil) {
@@ -145,10 +137,9 @@ enum BrushStamper {
         var rng = seed.map { DabRNG(seed: $0) } ?? DabRNG()
         var last: CGPoint?
         var lastPressure: CGFloat = samples[0].pressure
-        // The parameter of the *carry point* — which is a dab position, not a sample, whenever the
-        // previous segment placed one. Tracked alongside `last` so a dab's parameter is exact rather
-        // than inferred from its position: within a segment, position is affine in parameter, so the
-        // same `t` that ramps pressure maps the parameter too.
+        // The carry point's parameter — a dab position, not a sample, whenever the previous segment
+        // placed one. Tracked alongside `last` so a dab's parameter is exact: within a segment,
+        // position is affine in parameter, so the same `t` that ramps pressure maps the parameter too.
         var lastParameter: CGFloat = 0
 
         func sink(at parameter: CGFloat) -> DabTarget {

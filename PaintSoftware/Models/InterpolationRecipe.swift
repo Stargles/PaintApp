@@ -3,9 +3,8 @@ import Foundation
 
 /// One cel, addressed from anywhere in the document.
 ///
-/// A layer id as well as a cel id because a recipe's sources are allowed to span layers — lineart on
-/// one, flats on another (`PLAN.md` §5.0 step 2, requirement 5) — so "which cel" is not answerable
-/// from the owning layer alone.
+/// Carries a layer id as well as a cel id because a recipe's sources may span layers — lineart on
+/// one, flats on another — so "which cel" is not answerable from the owning layer alone.
 struct CelRef: Codable, Equatable, Hashable {
     var layerID: UUID
     var celID: UUID
@@ -14,10 +13,10 @@ struct CelRef: Codable, Equatable, Hashable {
 /// One keyframe a recipe reads from: the cels that together make up the drawing at that point in
 /// the motion.
 ///
-/// A list rather than a single cel because a keyframe pose is often spread across layers, and those
-/// layers must be interpolated *together* — a lineart arm and its flat colour have to be warped by
-/// one lattice or they drift apart. §5.1 is the other half of that guarantee (a shared motion group);
-/// this is the half that says which content is in play.
+/// A list rather than a single cel because a keyframe pose is often spread across layers, and
+/// those layers must be interpolated *together* — a lineart arm and its flat colour have to be
+/// warped by one lattice or they drift apart. A shared motion group is the other half of that
+/// guarantee; this is the half that says which content is in play.
 struct InterpolationReference: Codable, Equatable {
     var cels: [CelRef]
 
@@ -32,9 +31,9 @@ struct InterpolationReference: Codable, Equatable {
 
 /// Generate an in-between from the references, or re-pose a drawing this cel already has.
 ///
-/// Two commands, never conflated — `PLAN.md` §10 decision 3. In `.generate` every element is derived
-/// from the references; in `.reproject` the cel's own strokes are kept and only their pose slides
-/// along the A→C motion, so the artist's linework is never replaced.
+/// Two commands, never conflated. In `.generate` every element is derived from the references; in
+/// `.reproject` the cel's own strokes are kept and only their pose slides along the A→C motion, so
+/// the artist's linework is never replaced.
 enum InterpolationMode: String, Codable {
     case generate
     case reproject
@@ -43,8 +42,8 @@ enum InterpolationMode: String, Codable {
 /// How `t` is remapped before it is used — the easing of the in-between.
 ///
 /// Kept as data rather than a closure because it persists, and because a guide stroke's stylus
-/// velocity is *derived into* one of these (`PLAN.md` §6.1): arc length per unit stylus time is a
-/// spacing function, and `.sampled` is where that lands.
+/// velocity is *derived into* one of these: arc length per unit stylus time is a spacing function,
+/// and `.sampled` is where that lands.
 struct SpacingCurve: Codable, Equatable {
 
     enum Kind: String, Codable {
@@ -59,9 +58,9 @@ struct SpacingCurve: Codable, Equatable {
     var kind: Kind
 
     /// For `.sampled`: eased outputs at evenly spaced inputs — `samples[0]` is the value at `t = 0`,
-    /// `samples[count - 1]` the value at `t = 1`, everything between linearly interpolated. Empty
-    /// for every other kind, and a `.sampled` curve with fewer than two entries falls back to linear
-    /// rather than failing, because a half-recorded guide should not break the frame.
+    /// `samples[count - 1]` at `t = 1`, everything between linearly interpolated. Empty for every
+    /// other kind; a `.sampled` curve with fewer than two entries falls back to linear rather than
+    /// failing, since a half-recorded guide shouldn't break the frame.
     var samples: [CGFloat]
 
     init(kind: Kind = .linear, samples: [CGFloat] = []) {
@@ -104,9 +103,9 @@ struct MotionGroupBinding: Codable, Equatable {
     /// One lattice per entry in the recipe's `references`, **in the same order**.
     ///
     /// Aligned rather than named `latticeA`/`latticeC` for the same reason `references` is a list:
-    /// a spline across four keyframes (`PLAN.md` §10 decision 7) is four lattices, and a pair of
-    /// fields could not express it without a migration. A binding whose count does not match
-    /// `references` is malformed; `InterpolationRecipe.isWellFormed` is what says so.
+    /// a future spline across four keyframes is four lattices, which a pair of fields could not
+    /// express without a migration. A binding whose count doesn't match `references` is malformed;
+    /// `InterpolationRecipe.isWellFormed` is what says so.
     var lattices: [Lattice]
 
     /// Per-group easing override. Nil means the recipe's own `spacing` applies.
@@ -126,25 +125,24 @@ struct MotionGroupBinding: Codable, Equatable {
 
 /// Something the artist drew *at* the in-between, stored where it can survive the slider moving.
 ///
-/// The stroke's samples are in the **rest space of its group's lattice**, not in the space it was
+/// The stroke's samples are in the **rest space of its group's lattice**, not the space it was
 /// drawn in: `Lattice.carriedToRest` carries a stroke drawn at *t* back through the inverse map, and
-/// from there it re-warps with everything else on every subsequent tick (`PLAN.md` §5.4). Storing it
-/// as drawn would strand it in place while the rest of the frame moved on — the thing the brief
-/// means by "seamlessly".
+/// from there it re-warps with everything else on every subsequent tick. Storing it as drawn would
+/// strand it in place while the rest of the frame moved on.
 ///
-/// When it becomes visible is on the stroke itself (`VectorStroke.visibilityThreshold`), for the
-/// reason that field exists: a stroke that is later split or copied has to take its own visibility
-/// with it, and a side table would have to be mirrored at every one of those sites.
+/// Visibility lives on the stroke itself (`VectorStroke.visibilityThreshold`): a stroke that is
+/// later split or copied has to take its own visibility with it, which a side table couldn't do
+/// without being mirrored at every split/copy site.
 struct LocalEdit: Identifiable, Codable {
 
     var id: UUID = UUID()
 
-    /// The stroke, in rest space. Erasers included — an eraser is a stroke here as everywhere else
-    /// (`VECTOR_ERASER_PLAN.md` §2.1), so it warps and fades with no eraser-specific code.
+    /// The stroke, in rest space. Erasers included — an eraser is a stroke here as everywhere else,
+    /// so it warps and fades with no eraser-specific code.
     var stroke: VectorStroke
 
-    /// Whose lattice carries it. Nil for an edit made while nothing was grouped, which the evaluator
-    /// warps with the recipe's whole-frame lattice.
+    /// Whose lattice carries it. Nil for an edit made while nothing was grouped, which the
+    /// evaluator warps with the recipe's whole-frame lattice.
     var groupID: UUID?
 
     init(id: UUID = UUID(), stroke: VectorStroke, groupID: UUID? = nil) {
@@ -157,46 +155,43 @@ struct LocalEdit: Identifiable, Codable {
 /// What makes a cel an **interpolated** cel: its content is computed from `references` at time `t`
 /// rather than stored.
 ///
-/// This is `PLAN.md` §4's load-bearing decision in one type. An inbetween is *derived, never
-/// stored*, and every awkward requirement in the brief falls out of that: sliding the frame in time
-/// is a change to `t`; editing a keyframe updates the inbetween for free because the references are
-/// by identity; and editing the inbetween works because those edits live in keyframe space
-/// (`LocalEdit`).
+/// The load-bearing decision: an inbetween is *derived, never stored*. Sliding the frame in time is
+/// a change to `t`; editing a keyframe updates the inbetween for free because the references are by
+/// identity; editing the inbetween works because those edits live in keyframe space (`LocalEdit`).
 ///
 /// It is a value type inside `Cel`, which is a value type inside `Layer.cels`, which
 /// `CanvasManager.StructureSnapshot` copies wholesale — so undo covers everything here with no new
-/// machinery (`PLAN.md` §9). That placement is the reason the recipe is a struct and not a class.
+/// machinery. That placement is why the recipe is a struct and not a class.
 ///
 /// ## What is deliberately *not* here
 ///
 /// No embeddings, and no cell or vertex indices of any kind. A `LatticeEmbedding` is derivable from
 /// geometry plus its lattice, and `Lattice.expanded(toContain:)` shifts every cell and vertex index
-/// when the lattice grows (`LatticeExpansion` exists to translate them). Persisting an index would
-/// mean either re-mapping it on every expansion or version-stamping it to catch a stale one;
-/// re-deriving it on load costs a single pass and cannot be silently wrong. See `HANDOFF.md` §5.7.
+/// when the lattice grows. Persisting an index would mean either re-mapping it on every expansion
+/// or version-stamping it to catch a stale one; re-deriving it on load costs a single pass and
+/// cannot be silently wrong.
 struct InterpolationRecipe: Codable {
 
     /// The keyframes this cel is derived from, **in time order**.
     ///
-    /// A list, not a `(previous, next)` pair. Two entries is today's pairwise case; four entries is
-    /// the spline of `PLAN.md` §10 decision 7, with no model change. That constraint is load-bearing
-    /// — do not collapse it back into two fields.
+    /// A list, not a `(previous, next)` pair. Two entries is today's pairwise case; a future spline
+    /// is four entries with no model change — do not collapse this back into two fields.
     var references: [InterpolationReference]
 
     /// Where in the span this cel sits: `0` at the first reference, `1` at the last. With today's
     /// two-element list this is exactly the artist's slider.
     ///
-    /// Normalised across the *whole* span rather than indexed per segment, so that adding a
-    /// reference does not silently move existing cels. How a `t` between two interior references
-    /// maps onto a segment is the evaluator's business (uniform today); note that once a spline
-    /// ships, changing that mapping changes what an already-saved `t` means, so it is picked once.
+    /// Normalised across the *whole* span rather than indexed per segment, so adding a reference
+    /// does not silently move existing cels. How a `t` between two interior references maps onto a
+    /// segment is the evaluator's business (uniform today); a future spline mapping would change
+    /// what an already-saved `t` means, so it's picked once.
     var t: CGFloat
 
     /// Generate from the references, or re-pose this cel's own drawing. See `InterpolationMode`.
     var mode: InterpolationMode
 
-    /// Per-motion-group motion. A recipe with no bindings warps the whole frame as one group, which
-    /// is the honest degenerate case rather than an error (`PLAN.md` §10 decision 2).
+    /// Per-motion-group motion. A recipe with no bindings warps the whole frame as one group, the
+    /// honest degenerate case rather than an error.
     var groups: [MotionGroupBinding]
 
     /// Guides bound to the whole frame — every group. Per-group guides live on the binding.
@@ -228,9 +223,8 @@ struct InterpolationRecipe: Codable {
         case references, t, mode, groups, guideIDs, localEdits, spacing
     }
 
-    /// Hand-written for the reason every decoder in this repo is: a recipe saved by an earlier build
-    /// must not fail to load because a field added later is absent. Only `references` and `t` are
-    /// required — everything else has a meaningful empty value.
+    /// Hand-written so a recipe saved by an earlier build doesn't fail to load because a field
+    /// added later is absent. Only `references` and `t` are required.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         references = try c.decode([InterpolationReference].self, forKey: .references)
@@ -263,11 +257,9 @@ struct InterpolationRecipe: Codable {
     /// evaluator should be able to say "not yet" instead of indexing off the end of an array.
     var isWellFormed: Bool {
         guard references.count >= 2 else { return false }
-        // A `.generate` recipe with no bindings is the honest degenerate case — warp the whole frame
-        // as one group, i.e. cross-fade in place (`PLAN.md` §10 decision 2). A `.reproject` one is
-        // not: with no binding there is no motion path to slide the cel's pose along, so it would
-        // render the artist's drawing sitting perfectly still at every `t` and look like the slider
-        // was broken rather than like a frame that cannot be posed.
+        // A `.generate` recipe with no bindings is the honest degenerate case (cross-fade in place).
+        // A `.reproject` one is not: with no binding there's no motion path to slide the cel's pose
+        // along, so it would render sitting perfectly still and look like a broken slider.
         if mode == .reproject, groups.isEmpty { return false }
         return groups.allSatisfy { $0.lattices.count == references.count }
     }

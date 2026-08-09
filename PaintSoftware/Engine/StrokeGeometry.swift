@@ -7,11 +7,9 @@ import Foundation
 /// how to cut a sample run at an exact parametric position rather than at sample granularity.
 ///
 /// Dependency-free on purpose — `CoreGraphics` + `Foundation`, no UIKit, no reference types, no
-/// locks — for exactly the reason `ShapeGeometry` is: that is what lets this file be compiled a
-/// second time straight into `PaintSoftwareUITests` (see the project file's "App sources shared with
-/// PaintSoftwareUITests" group and the header comment on `BrushEngineLogicTests`), so every
-/// primitive here is unit-testable headlessly instead of only reachable through a simulator gesture.
-/// A `enum` namespace rather than a struct, mirroring `BrushStamper`: there is no state to carry.
+/// locks — same as `ShapeGeometry`: it lets this file compile a second time straight into
+/// `PaintSoftwareUITests`, so every primitive here is unit-testable headlessly instead of only
+/// reachable through a simulator gesture. An `enum` namespace rather than a struct: no state to carry.
 ///
 /// ## Parametric positions
 ///
@@ -137,8 +135,7 @@ enum StrokeGeometry {
     /// *look like* once they overlap, and it is what makes coverage a closed-form calculation instead
     /// of a per-dab rasterisation. The approximation is tight for any spacing under ~1 (dabs
     /// overlapping), and generous — it fills the gaps — for a deliberately gappy brush, which is why
-    /// Mode 1's clean-cut decision carries the separate alpha gate described in the plan's §1 rather
-    /// than trusting geometry alone.
+    /// Mode 1's clean-cut decision carries a separate alpha gate rather than trusting geometry alone.
     struct Capsule: Equatable {
         var a: CGPoint
         var b: CGPoint
@@ -365,9 +362,8 @@ enum StrokeGeometry {
     }
 
     /// How much of the paint stroke's own width at `index` the eraser capsules cover — the heart of
-    /// Mode 1's clean-cut decision (plan §1). `1` means the stroke is severed at this sample as far
-    /// as geometry is concerned; anything less is a partial-width shave that only the alpha-punch
-    /// path can express.
+    /// Mode 1's clean-cut decision. `1` means the stroke is severed at this sample as far as geometry
+    /// is concerned; anything less is a partial-width shave that only the alpha-punch path can express.
     ///
     /// Geometry only: the alpha gate (hardness, grain, opacity × flow) is the caller's, deliberately,
     /// because it is a property of the eraser brush rather than of the two footprints.
@@ -419,15 +415,15 @@ enum StrokeGeometry {
 
     /// Coverage at an arbitrary **parametric position** rather than at a stored sample.
     ///
-    /// Mode 1's clean-cut decision needs this for the same reason Mode 2's cut boundaries did (plan
-    /// §4, defect 2): judging coverage only at stored samples puts the verdict — and therefore the cut
-    /// — wherever the touch sampler happened to drop a point, which on a fast drag is tens of points
-    /// away from where the eraser's edge actually falls. Probing the parametric domain and bisecting
-    /// the crossing puts it within a fraction of a pixel instead.
+    /// Mode 1's clean-cut decision needs this for the same reason Mode 2's cut boundaries do:
+    /// judging coverage only at stored samples puts the verdict — and therefore the cut — wherever
+    /// the touch sampler happened to drop a point, which on a fast drag is tens of points away from
+    /// where the eraser's edge actually falls. Probing the parametric domain and bisecting the
+    /// crossing puts it within a fraction of a pixel instead.
     ///
-    /// `margin` inflates the half-width the eraser has to cover before this reports 1. Plan §1 asks
-    /// for exactly that: anti-aliased fringe means a stroke whose geometric half-width is *just*
-    /// covered still leaves a visible edge, so a clean cut requires the eraser to overshoot slightly.
+    /// `margin` inflates the half-width the eraser has to cover before this reports 1: anti-aliased
+    /// fringe means a stroke whose geometric half-width is *just* covered still leaves a visible
+    /// edge, so a clean cut requires the eraser to overshoot slightly.
     static func coverage(atParameter parameter: CGFloat, in samples: [VectorSample], brush: Brush,
                          size: CGFloat, by erasers: [Capsule], margin: CGFloat = 0,
                          scratch: inout [ClosedRange<CGFloat>]) -> CGFloat {
@@ -739,9 +735,8 @@ enum StrokeGeometry {
     /// - No cuts, or only cuts that miss the domain, returns `[samples]` unchanged — so a caller can
     ///   compare identity cheaply and skip the mutation.
     ///
-    /// Boundary samples produced here are the ones the plan's §2.1 note about pinning refers to: once
-    /// point decimation exists it must not move them, or the cut edge drifts away from where the user
-    /// erased.
+    /// If point decimation is ever added, it must not move these boundary samples, or the cut edge
+    /// drifts away from where the user erased.
     static func splitStroke(_ samples: [VectorSample], removing cuts: [ClosedRange<CGFloat>]) -> [[VectorSample]] {
         splitStrokeRuns(samples, removing: cuts).map(\.samples)
     }

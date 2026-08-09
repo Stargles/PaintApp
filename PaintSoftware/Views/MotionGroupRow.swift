@@ -1,19 +1,17 @@
 import SwiftUI
 
-/// The motion-group controls — `InterpolateBar`'s third row, and the whole of `IMPLEMENTATION.md`
-/// Phase 5 items 2 and 3 that the artist can touch.
+/// The motion-group controls — `InterpolateBar`'s third row.
 ///
-/// **A row on the bar rather than a timeline gesture**, per `HANDOFF.md` §5.10: press-and-hold on a
-/// block already means drag-reorder in every mode, and Phase 4 learned the hard way that
-/// mode-switching it costs the artist re-timing exactly while they are working on timing. Two long
-/// presses of equal duration competing for one touch have no stable winner and `require(toFail:)`
-/// does not help.
+/// **A row on the bar rather than a timeline gesture**: press-and-hold on a block already means
+/// drag-reorder in every mode, and mode-switching it would cost the artist re-timing exactly while
+/// they're working on timing. Two long presses of equal duration competing for one touch have no
+/// stable winner and `require(toFail:)` does not help.
 ///
-/// **Third row rather than folded into the second.** The two rows above are settled (Phase 4.6) and
-/// their positions are load-bearing — the timing slider is the control that gets touched over and
-/// over and wants the edge nearest the eye, and the commands are centred on Generate so it sits under
-/// the thumb. Adding a row underneath leaves both exactly where they were. The row hides itself when
-/// there is nothing to say, so a single-part drawing's bar is unchanged from Phase 4.6's.
+/// **Third row rather than folded into the second.** The two rows above have load-bearing
+/// positions — the timing slider is the control that gets touched over and over and wants the edge
+/// nearest the eye, and the commands are centred on Generate so it sits under the thumb. Adding a
+/// row underneath leaves both exactly where they were. The row hides itself when there's nothing to
+/// say, so a single-part drawing's bar stays minimal.
 ///
 /// **The chip is the whole gesture.** Tap it to arm, tap the canvas to assign, tap the chip again to
 /// disarm. Everything rarer — mode, solo, mute, delete — is in its context menu, so the common path
@@ -97,14 +95,13 @@ struct MotionGroupRow: View {
         .accessibilityIdentifier("interpolate.group.\(chip.id.uuidString)")
     }
 
-    /// **Phase 5 item 3, and the part of it that matters: `.clean` never degrades silently.**
+    /// **The part that matters: `.clean` never degrades silently.**
     ///
-    /// The matcher `.clean` needs is engine D work and is explicitly deferred
-    /// (`IMPLEMENTATION.md`), so a group set to `.clean` renders as a cross-fade today — every time,
-    /// not occasionally. Showing the mode the artist chose with no hint of that would be the silent
-    /// degradation the plan forbids, so `.clean` carries a warning glyph and says what it is actually
-    /// doing. `.auto` is the default and gets no badge, because a badge on everything is a badge on
-    /// nothing.
+    /// The matcher `.clean` needs is future work, so a group set to `.clean` renders as a cross-fade
+    /// today — every time, not occasionally. Showing the mode the artist chose with no hint of that
+    /// would be a silent degradation, so `.clean` carries a warning glyph and says what it is
+    /// actually doing. `.auto` is the default and gets no badge, since a badge on everything is a
+    /// badge on nothing.
     @ViewBuilder
     private func badge(for mode: GroupInterpolation) -> some View {
         switch mode {
@@ -132,8 +129,8 @@ struct MotionGroupRow: View {
         }
         Button("Solo") { canvasManager.soloMotionGroup(chip.id) }
         Divider()
-        // The mode is per group (`PLAN.md` §10 decision 1: rough *and* clean, chosen per group), so
-        // it belongs on the chip and nowhere else.
+        // The mode is per group (rough *and* clean, chosen per group), so it belongs on the chip and
+        // nowhere else.
         Picker("Interpolation", selection: Binding(
             get: { chip.group.mode },
             set: { canvasManager.setMotionGroupMode($0, forGroup: chip.id) })) {
@@ -149,9 +146,9 @@ struct MotionGroupRow: View {
 
     // MARK: - The rest of the row
 
-    /// `PLAN.md` §5.1.1's one-shot populate, and the mitigation the product owner named for the
-    /// attached-limb limitation (`HANDOFF.md` §8 item 1): art that already encodes structure in its
-    /// colours does not need tagging by hand.
+    /// A one-shot populate, and the mitigation for automatic grouping's inability to separate an
+    /// attached limb from its torso (see VECTOR_INTERPOLATION.md §4 item 1): art that already
+    /// encodes structure in its colours does not need tagging by hand.
     ///
     /// A *populate*, never a live binding — recolouring a stroke afterwards does not move it to
     /// another motion group — which is why the button says "Tag by Colour" rather than anything that
@@ -170,9 +167,9 @@ struct MotionGroupRow: View {
         .accessibilityIdentifier("interpolate.tagByColour")
     }
 
-    /// Phase 4's whole-frame binding is not an artist-facing object and gets no chip
-    /// (`HANDOFF.md` §5.10). Saying so in a sentence is better than an empty row that looks broken —
-    /// and it names the two ways out, which is the actual help.
+    /// The default whole-frame binding is not an artist-facing object and gets no chip. Saying so in
+    /// a sentence is better than an empty row that looks broken — and it names the two ways out,
+    /// which is the actual help.
     private var wholeFrameNote: some View {
         Text("Moving as one group. Tag by colour, or Generate on a drawing with parts that move differently.")
             .font(.caption2)

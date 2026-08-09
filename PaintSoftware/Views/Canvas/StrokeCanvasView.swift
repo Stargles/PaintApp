@@ -74,14 +74,14 @@ final class StrokeCanvasView: UIView {
     /// stroke, so the move and end handlers do nothing with it.
     private var consumedAsMotionGroupTap = false
 
-    /// The interpolated cel this gesture is editing, when the layer is showing one — Phase 6 items
-    /// 2 and 3. Non-nil means the finished stroke becomes a `LocalEdit` on that cel's recipe instead
-    /// of content in `vectorCanvas` (`PLAN.md` §5.4).
+    /// The interpolated cel this gesture is editing, when the layer is showing one. Non-nil means
+    /// the finished stroke becomes a `LocalEdit` on that cel's recipe instead of content in
+    /// `vectorCanvas`.
     ///
     /// Resolved once at touch-down and held for the whole gesture rather than re-asked at lift. The
     /// playhead can move under a drag — a running preview, a stray timeline touch — and a stroke
     /// that started as an edit at an in-between and committed as ordinary ink (or the reverse) would
-    /// be the worst kind of surprise: silent, and only visible one scrub later.
+    /// be the worst kind of surprise: silent, only visible one scrub later.
     private var inBetweenCelID: UUID?
     /// Reverts this stroke's raster changes to the pre-stroke snapshot. Used when the hold timer
     /// fires and the stroke is detected as a smart shape — the partial stroke is replaced by the
@@ -151,10 +151,10 @@ final class StrokeCanvasView: UIView {
         /// render. The canvas itself is untouched until lift.
         case overlay
         /// Mode 1: the scratch starts as a **copy** of the canvas render and dabs punch
-        /// `.destinationOut` into that copy, so it *replaces* the canvas render for the duration of the
-        /// stroke. This is literally the raster eraser's code path applied to the vector layer's
-        /// pixels, which is what makes the live feedback raster-identical by construction rather than
-        /// by a second approximation of it (VECTOR_ERASER_PLAN.md §4, Mode 1).
+        /// `.destinationOut` into that copy, so it *replaces* the canvas render for the duration of
+        /// the stroke. This is literally the raster eraser's code path applied to the vector layer's
+        /// pixels, making the live feedback raster-identical by construction rather than by a second
+        /// approximation of it.
         case replacement
         /// Modes 2 and 3: nothing is ever drawn into the scratch. Mode 3 commits during the drag and
         /// Mode 2 on lift, so the canvas render alone is always the truth — and going through this
@@ -173,10 +173,10 @@ final class StrokeCanvasView: UIView {
     }
     private var vectorScratchRole: VectorScratchRole = .overlay
 
-    /// Phase 7 item 2. Non-nil exactly while a guide gesture is in flight, and it is what every
-    /// handler branches on — rather than re-reading `isDrawingGuide`, so that toggling the bar
-    /// mid-drag cannot strand a half-captured guide. Same reasoning as `inBetweenCelID`: the gesture
-    /// resolves what it is at touch-down and holds it.
+    /// Non-nil exactly while a guide gesture is in flight, and what every handler branches on —
+    /// rather than re-reading `isDrawingGuide`, so toggling the bar mid-drag cannot strand a
+    /// half-captured guide. Same reasoning as `inBetweenCelID`: the gesture resolves what it is at
+    /// touch-down and holds it.
     private var guideStartTime: TimeInterval?
     private var currentGuideSamples: [TimedSample] = []
     /// Live feedback while a guide is being drawn — the coordinator hands these to the guide overlay.
@@ -219,9 +219,9 @@ final class StrokeCanvasView: UIView {
     private var vectorContentChanged = false
 
     private var currentVectorSamples: [VectorSample] = []
-    /// The whole display list as it stood before this gesture — `[VectorElement]`, not `[VectorStroke]`,
-    /// so undo restores z-position exactly rather than round-tripping through the kind-filtered
-    /// `strokes` accessor (which collapses each kind into one contiguous run). Phase 4's retained
+    /// The whole display list as it stood before this gesture — `[VectorElement]`, not
+    /// `[VectorStroke]`, so undo restores z-position exactly rather than round-tripping through the
+    /// kind-filtered `strokes` accessor (which collapses each kind into one contiguous run). Retained
     /// `.erase` elements make that distinction load-bearing.
     private var vectorElementsBeforeSnapshot: [VectorElement]?
 
@@ -265,10 +265,10 @@ final class StrokeCanvasView: UIView {
     /// A derived interpolated frame to show in place of this cel's own content.
     ///
     /// Non-nil exactly when the cel at the current frame carries an `InterpolationRecipe` that
-    /// evaluates. It is *not* stored in `vectorCanvas`: an in-between is derived, never stored
-    /// (VECTOR_INTERPOLATION_PLAN.md §4), so writing it into the display list would both persist a
-    /// frame that is supposed to be recomputed and break the two-isolated-composites structure the
-    /// evaluator needs (§5.6). The owner (`CanvasView.Coordinator`) recomputes it and pushes it here.
+    /// evaluates. It is *not* stored in `vectorCanvas`: an in-between is derived, never stored, so
+    /// writing it into the display list would both persist a frame that's supposed to be recomputed
+    /// and break the evaluator's two-isolated-composites structure. The owner
+    /// (`CanvasView.Coordinator`) recomputes it and pushes it here.
     private(set) var interpolationImage: UIImage?
 
     /// Replaces the interpolated frame and repaints if it actually changed.
@@ -320,19 +320,18 @@ final class StrokeCanvasView: UIView {
         imageView.image = raster?.renderToUIImage()
     }
 
-    /// **Phase 5's retagging gesture.** While interpolate mode is on and a motion group is armed from
-    /// its chip on `InterpolateBar`, a touch on this layer's canvas assigns the stroke under it to
-    /// that group instead of drawing.
+    /// **The retagging gesture.** While interpolate mode is on and a motion group is armed from its
+    /// chip on `InterpolateBar`, a touch on this layer's canvas assigns the stroke under it to that
+    /// group instead of drawing.
     ///
     /// The touch is consumed **even when it hits nothing**. Arming a group puts the canvas into
     /// tagging for as long as the chip stays lit, and a miss that quietly drew a dot instead would be
-    /// the worst of both — the artist gets ink where they were pointing at a stroke, and only notices
-    /// later. Disarming is one tap on the same chip.
+    /// the worst of both — the artist gets ink where they were pointing at a stroke, and only
+    /// notices later. Disarming is one tap on the same chip.
     ///
     /// Only the current layer's view answers, because the assignment resolves through
-    /// `interpolationTarget`, which is the cel under the playhead *on the current layer*
-    /// (`HANDOFF.md` §5.10). A tap routed to some other layer's view would silently tag a drawing the
-    /// artist is not looking at.
+    /// `interpolationTarget`, the cel under the playhead *on the current layer*. A tap routed to some
+    /// other layer's view would silently tag a drawing the artist is not looking at.
     ///
     /// A gesture rather than a `Tool` case, for the same reason interpolate mode itself is not one:
     /// tagging must not evict the brush the artist had.
@@ -346,21 +345,20 @@ final class StrokeCanvasView: UIView {
         return true
     }
 
-    /// **Phase 7 item 2's guide capture.** While interpolate mode is on and the bar's Guide toggle is
-    /// lit, a drag on this layer's canvas draws a guide stroke instead of ink.
+    /// **Guide capture.** While interpolate mode is on and the bar's Guide toggle is lit, a drag on
+    /// this layer's canvas draws a guide stroke instead of ink.
     ///
-    /// Timestamped, which is the whole reason `StrokeInput` now carries one: a guide's stylus velocity
-    /// *is* its easing curve (`PLAN.md` §6.1), so a capture path that dropped the timing would throw
-    /// away half of what the gesture is for.
+    /// Timestamped, the whole reason `StrokeInput` carries one: a guide's stylus velocity *is* its
+    /// easing curve, so a capture path that dropped the timing would throw away half of what the
+    /// gesture is for.
     ///
     /// Coalesced touches are read exactly as ordinary drawing reads them. A guide is short and read
     /// by arc length, so the extra samples barely change its shape — but they are most of the timing
     /// resolution, and the easing is the signal that has none to spare.
     ///
     /// Consumes the touch even when it will be refused at lift, on the same reasoning as
-    /// `consumeAsMotionGroupTap`: while the toggle is lit the canvas is drawing guides, and quietly
-    /// laying down a brush stroke instead would put ink on the drawing that the artist did not ask
-    /// for and would not notice until later. The bar greys the toggle out via `guideRefusal` so the
+    /// `consumeAsMotionGroupTap`: quietly laying down a brush stroke instead would put ink on the
+    /// drawing the artist did not ask for. The bar greys the toggle out via `guideRefusal` so the
     /// refused case is nearly unreachable anyway.
     private func beginGuideStrokeIfArmed(_ touch: UITouch) -> Bool {
         guard let manager = canvasManager, manager.isInterpolateMode, manager.isDrawingGuide,
@@ -638,14 +636,14 @@ final class StrokeCanvasView: UIView {
         vectorElementsBeforeSnapshot = vectorCanvas.elements
         vectorContentChanged = false
         inBetweenCelID = layerID.flatMap { canvasManager?.inBetweenCelID(inLayer: $0) }
-        // A fresh driver is armed, so Mode 3's very first sample cuts — the plan's "CSP cuts
-        // immediately" (§4, Mode 3), as opposed to the Phase 2 behaviour of resolving once on lift.
+        // A fresh driver is armed, so Mode 3's very first sample cuts immediately rather than
+        // resolving once on lift.
         intersectionDriver = VectorEraser.IntersectionDriver()
-        // **At an in-between the eraser is always Mode 1**, whatever mode is selected, because
-        // Modes 2 and 3 edit stored geometry — they split and cut the strokes in the display list —
-        // and an in-between has none: it is derived, never stored (`PLAN.md` §4). Mode 1 is the one
-        // that is *itself a stroke* (`VECTOR_ERASER_PLAN.md` §2.1), which is exactly why erasing at
-        // an in-between needs no eraser-specific code: it rides `localEdits` like any other stroke.
+        // **At an in-between the eraser is always Mode 1**, whatever mode is selected: Modes 2 and 3
+        // edit stored geometry — they split and cut the strokes in the display list — and an
+        // in-between has none, since it's derived, never stored. Mode 1 is the one that is *itself a
+        // stroke*, which is exactly why erasing at an in-between needs no eraser-specific code: it
+        // rides `localEdits` like any other stroke.
         vectorScratchRole = Self.scratchRole(isEraser: isEraser,
                                              mode: inBetweenCelID != nil ? .erase : vectorEraserMode)
         // Mode 1 previews by punching into a *copy of what is already on screen*, so the scratch is
@@ -778,14 +776,14 @@ final class StrokeCanvasView: UIView {
     }
 
     /// Hands the finished gesture to the recipe as a `LocalEdit` instead of committing it to the
-    /// cel's display list — `PLAN.md` §5.4, `IMPLEMENTATION.md` Phase 6 items 2 and 3.
+    /// cel's display list.
     ///
-    /// **The eraser needs no branch beyond its composite mode**, which is the whole payoff of "an
-    /// eraser is a stroke" (`VECTOR_ERASER_PLAN.md` §2.1): the punch is the same brush, size and
-    /// samples as a paint stroke and differs only in being composited `.destinationOut` at render.
-    /// So it goes back through the inverse map, gets the same τ, and rides the same lattice — and
-    /// `InterpolationEvaluator.composite` already draws local edits *over the blended result*, which
-    /// is exactly what an eraser at an in-between has to do to reach both keyframes' ink.
+    /// **The eraser needs no branch beyond its composite mode**, the whole payoff of "an eraser is a
+    /// stroke": the punch is the same brush, size and samples as a paint stroke and differs only in
+    /// being composited `.destinationOut` at render. So it goes back through the inverse map, gets
+    /// the same τ, and rides the same lattice — and `InterpolationEvaluator.composite` already draws
+    /// local edits *over the blended result*, exactly what an eraser at an in-between has to do to
+    /// reach both keyframes' ink.
     ///
     /// Nothing is committed when the recipe declines (it cannot evaluate, or the stroke is empty).
     /// Dropping the gesture is the right failure: the alternative is putting ink into a display list

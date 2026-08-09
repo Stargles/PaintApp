@@ -6,24 +6,22 @@ import CoreGraphics
 ///
 /// ## Why two sets and not one list
 ///
-/// `PLAN.md` §5.6, and it is the correctness point of this whole file. An `.erase` stroke lowers the
-/// alpha of everything beneath it *in the display list it is drawn in*
-/// (`VectorCanvas.renderLocalContent` rule 3). Concatenating the forward and backward sets would put
-/// keyframe A's eraser above keyframe C's strokes, and it would punch holes in geometry it has no
-/// business touching. Two `VectorCanvas` instances rendered separately and blended cannot do that: an
-/// eraser reaches only its own keyframe's content, by construction.
+/// This is the correctness point of this whole file. An `.erase` stroke lowers the alpha of
+/// everything beneath it *in the display list it is drawn in* (`VectorCanvas.renderLocalContent`
+/// rule 3). Concatenating the forward and backward sets would put keyframe A's eraser above
+/// keyframe C's strokes, and it would punch holes in geometry it has no business touching. Two
+/// `VectorCanvas` instances rendered separately and blended cannot do that: an eraser reaches only
+/// its own keyframe's content, by construction.
 ///
 /// That choice deliberately buys correctness with a second render rather than with a change to the
 /// renderer's isolation rules, which are load-bearing and heavily documented. Optimising it into a
-/// single `.group` element is a measurement away, not a guess away — see `IMPLEMENTATION.md` Phase 3
-/// item 2.
+/// single `.group` element is a measurement away, not a guess away.
 ///
 /// ## What this file does *not* keep
 ///
 /// No embeddings are cached anywhere, here or in the recipe. `Lattice.expanded(toContain:)` shifts
-/// every cell and vertex index when the lattice grows, so a persisted embedding would need re-mapping
-/// or version-stamping; deriving it costs one pass and cannot be silently stale. See `HANDOFF.md`
-/// §5.7 and §5.8.
+/// every cell and vertex index when the lattice grows, so a persisted embedding would need
+/// re-mapping or version-stamping; deriving it costs one pass and cannot be silently stale.
 enum InterpolationEvaluator {
 
     // MARK: - Inputs
@@ -36,17 +34,16 @@ enum InterpolationEvaluator {
 
     /// How a set's cross-fade weight reaches the width of the strokes in it.
     ///
-    /// `PLAN.md` §7.1 wants fading-out content to *thin* rather than only ghost — a shrinking line
-    /// (and, for an eraser, a shrinking hole) reads better than a translucent one. The mechanism is
-    /// here and works. It is **off by default**, and the reason is worth stating because it looks
-    /// like a missing feature:
+    /// Fading-out content can *thin* rather than only ghost — a shrinking line (and, for an eraser,
+    /// a shrinking hole) reads better than a translucent one. The mechanism is here and works. It is
+    /// **off by default**, and the reason is worth stating because it looks like a missing feature:
     ///
     /// Thinning is right for a stroke that exists at one keyframe and has no counterpart at the
     /// other. It is wrong for a stroke that exists at both — which, without correspondence, is every
     /// stroke, since each set carries the whole drawing. Scaling both sets by their weight would make
     /// every mid-frame thin *and* washed out instead of merely washed out. The moment a matcher can
-    /// say "this stroke has no counterpart" (engine D, `PLAN.md` §3), `.weighted` becomes right for
-    /// exactly those strokes and wrong for the rest.
+    /// say "this stroke has no counterpart", `.weighted` becomes right for exactly those strokes and
+    /// wrong for the rest.
     enum ThicknessFade: Equatable {
         /// Widths untouched; the (1−t)/t blend does all the fading.
         case none
@@ -65,14 +62,13 @@ enum InterpolationEvaluator {
         var thicknessFade: ThicknessFade = .none
         var arap = ARAPInterpolation.Options()
 
-        /// Motion groups to leave out of the evaluation entirely — Phase 5's solo/mute.
+        /// Motion groups to leave out of the evaluation entirely — solo/mute.
         ///
         /// A *view* filter and never document state: it answers "which part is moving wrongly" by
         /// taking the others away, and an artist who forgets to unmute must not find it in the file.
         /// `CanvasManager.hiddenMotionGroups` is the source, and it is also in
         /// `InterpolationPreviewKey` — the preview is memoized, so an input the key does not mention
-        /// appears to do nothing until something unrelated forces a re-render (`HANDOFF.md` §5,
-        /// Phase 4).
+        /// appears to do nothing until something unrelated forces a re-render.
         ///
         /// Content is hidden by the group it **would move as**, which for anything untagged is the
         /// recipe's first binding. Untagged ink is carried by that group's motion, so leaving it on
@@ -86,8 +82,8 @@ enum InterpolationEvaluator {
 
     /// What to draw at one `t`: three display lists and the two blend weights.
     ///
-    /// Three rather than the two `IMPLEMENTATION.md` names, because `localEdits` cannot join either
-    /// set. A stroke the artist drew *at* the in-between is not a keyframe's content being faded in
+    /// Three rather than two, because `localEdits` cannot join either set. A stroke the artist drew
+    /// *at* the in-between is not a keyframe's content being faded in
     /// or out — it is present at full strength from its threshold onward — and an `.erase` local edit
     /// has to reach **both** keyframes' ink, which only works if it is drawn after they are blended.
     /// `composite(_:size:quality:)` is where that ordering lives.
@@ -107,27 +103,26 @@ enum InterpolationEvaluator {
     /// The display lists for `recipe` at `t`, or nil when the recipe is not evaluable.
     ///
     /// `t` is the raw slider position, normalised across the **whole** reference span — `0` at the
-    /// first reference, `1` at the last, not per segment (`HANDOFF.md` §5.8). It is taken as a
-    /// parameter rather than read from `recipe.t` so a scrub can evaluate without mutating the
-    /// document.
+    /// first reference, `1` at the last, not per segment. It is taken as a parameter rather than read
+    /// from `recipe.t` so a scrub can evaluate without mutating the document.
     ///
     /// Returns nil rather than a best effort when `isWellFormed` is false. A recipe can be broken by
     /// editing *around* it — deleting a referenced cel, adding a reference without re-registering the
     /// groups — and "not yet" is the honest answer to that, where a partial render would look like a
     /// bug in the interpolation.
-    /// `subject` is the target cel's **own** display list, and it is read only in `.reproject`, where
-    /// it is the whole content of the frame. It is a parameter rather than a `CelRef` on the recipe
-    /// on purpose: the recipe lives *on* the cel it describes, so a stored self-reference is document
-    /// state that duplicates something the caller already knows and can silently go stale — copy a
-    /// cel and its recipe would point at the original's ink. Defaulted so every `.generate` call site
-    /// is unaffected.
+    ///
+    /// `subject` is the target cel's **own** display list, read only in `.reproject`, where it is the
+    /// whole content of the frame. It is a parameter rather than a `CelRef` on the recipe on purpose:
+    /// the recipe lives *on* the cel it describes, so a stored self-reference is document state that
+    /// duplicates something the caller already knows and can silently go stale — copy a cel and its
+    /// recipe would point at the original's ink. Defaulted so every `.generate` call site is
+    /// unaffected.
     ///
     /// `guides` is the document's guide registry, and it is a parameter for exactly the reason
     /// `subject` is: the recipe stores guide *ids*, the guides themselves are document-level so they
-    /// can be shared across frames (`PLAN.md` §6.4), and this file may not reach `CanvasManager`
-    /// (`HANDOFF.md` §5.9). Passing the whole registry rather than a pre-filtered list keeps the
-    /// binding rules in `GuideSet`, where they are testable. Defaulted, so a caller with no guides —
-    /// which is every call site before Phase 7 — is unaffected.
+    /// can be shared across frames, and this file may not reach `CanvasManager`. Passing the whole
+    /// registry rather than a pre-filtered list keeps the binding rules in `GuideSet`, where they are
+    /// testable. Defaulted, so a caller with no guides is unaffected.
     static func evaluate(recipe: InterpolationRecipe,
                          at t: CGFloat,
                          content: ContentProvider,
@@ -141,10 +136,9 @@ enum InterpolationEvaluator {
 
         // Which pair of references this `t` sits between, and where between them.
         //
-        // Uniform segments: each of the `count - 1` gaps takes an equal share of `0...1`. §5.8 leaves
-        // this to the evaluator and notes it is picked once — changing it later changes what an
-        // already-saved `t` means. With today's two references there is one segment and `local` is
-        // exactly the slider.
+        // Uniform segments: each of the `count - 1` gaps takes an equal share of `0...1`. This is
+        // picked once — changing it later changes what an already-saved `t` means. With today's two
+        // references there is one segment and `local` is exactly the slider.
         let frameT = recipe.spacing.eased(t)
         let index = min(max(Int((frameT * span).rounded(.down)), 0), count - 2)
         let local = min(max(frameT * span - CGFloat(index), 0), 1)
@@ -154,15 +148,14 @@ enum InterpolationEvaluator {
         // Untagged content — every stroke the app creates today, plus every fill and image, since
         // only `VectorStroke` carries a `motionGroupID` — rides the first binding.
         //
-        // With one binding that is the whole-frame group of §5.8 and this is exactly right. With
-        // several it is a choice, and it is the safe one: content left behind while its neighbours
-        // move is a much louder failure than content carried by a neighbouring group's motion. Phase
-        // 5, which is where several groups first exist, is responsible for tagging.
+        // With one binding that is the whole-frame group and this is exactly right. With several it
+        // is a choice, and it is the safe one: content left behind while its neighbours move is a
+        // much louder failure than content carried by a neighbouring group's motion.
         let fallbackID = recipe.groups.first?.groupID
         let fallback = fallbackID.flatMap { warps[$0] }
 
-        // **Reproject: one set, not two, and nothing is derived** (`PLAN.md` §5.5). The cel's own
-        // linework is the frame; all that slides is its pose. So there is no cross-fade to weight —
+        // **Reproject: one set, not two, and nothing is derived.** The cel's own linework is the
+        // frame; all that slides is its pose. So there is no cross-fade to weight —
         // the subject sits at full strength at every `t` — and `backward` is empty rather than
         // holding a second copy of the same drawing.
         //
@@ -233,10 +226,10 @@ enum InterpolationEvaluator {
                                   options: Options) -> GroupWarp {
         // Precedence: an explicit per-group curve, then this group's guide, then the frame's own.
         //
-        // The explicit override has to win, and that is what makes Phase 7 item 5 buildable — its
-        // spacing chart retimes a frame by *writing* `binding.spacing`, and a guide's derived timing
-        // that outranked it would make dragging a dot appear to do nothing. So the order is
-        // most-specific-explicit, then derived, then the frame default.
+        // The explicit override has to win: the spacing chart retimes a frame by *writing*
+        // `binding.spacing`, and a guide's derived timing that outranked it would make dragging a
+        // dot appear to do nothing. So the order is most-specific-explicit, then derived, then the
+        // frame default.
         let groupT = (binding.spacing ?? guideSet.spacing ?? recipe.spacing).eased(t)
         let u = min(max(groupT * span - CGFloat(segment), 0), 1)
         let from = lattices[segment]
@@ -266,8 +259,7 @@ enum InterpolationEvaluator {
 
     // MARK: - Editing at an in-between
 
-    /// Everything the document needs in order to store one stroke drawn *at* `t` — `PLAN.md` §5.4,
-    /// `IMPLEMENTATION.md` Phase 6 item 2.
+    /// Everything the document needs in order to store one stroke drawn *at* `t`.
     ///
     /// A plan rather than a mutation because the two halves live in different places: the geometry
     /// goes into the recipe's `localEdits` and the grown lattices go back into a *binding*, and only
@@ -278,8 +270,8 @@ enum InterpolationEvaluator {
         var restPoints: [CGPoint]
 
         /// Which binding carries the edit — an index into `recipe.groups`. Nil when the recipe has
-        /// no bindings at all, which is the legal degenerate "warp nothing" case (`HANDOFF.md`
-        /// §5.8): there is no lattice, so `restPoints` is the input unchanged.
+        /// no bindings at all, which is the legal degenerate "warp nothing" case: there is no
+        /// lattice, so `restPoints` is the input unchanged.
         var bindingIndex: Int?
 
         /// The id to record on the `LocalEdit`, so the evaluator re-warps it with the same group.
@@ -357,10 +349,10 @@ enum InterpolationEvaluator {
     /// group whose lattice is *centred* nearest the stroke, which is the one it is most plausibly
     /// part of.
     ///
-    /// Falls back to binding **0** when nothing contains it, which is the same rule untagged content
-    /// follows everywhere else (`HANDOFF.md` §5.9). Note the fallback is nearly unreachable in
-    /// practice: the expansion loop above grows whichever binding is chosen until the stroke does
-    /// fit, so "outside every lattice" only decides *which* group grows, never whether one does.
+    /// Falls back to binding **0** when nothing contains it, the same rule untagged content follows
+    /// everywhere else. Note the fallback is nearly unreachable in practice: the expansion loop above
+    /// grows whichever binding is chosen until the stroke does fit, so "outside every lattice" only
+    /// decides *which* group grows, never whether one does.
     private static func bindingCarrying(_ points: [CGPoint], recipe: InterpolationRecipe,
                                         at t: CGFloat, segment: Int, span: CGFloat,
                                         guides: [GuideStroke], options: Options) -> Int {
@@ -408,7 +400,7 @@ enum InterpolationEvaluator {
 
         /// A local edit is stored in rest space (`LocalEdit`), so it embeds in the rest grid and
         /// warps with whatever the lattice is doing now — which is what makes it follow the motion
-        /// instead of sitting still (`PLAN.md` §5.4).
+        /// instead of sitting still.
         func mapFromRest(_ points: [CGPoint]) -> [CGPoint] {
             current.warp(current.embedInRest(points))
         }
@@ -416,8 +408,8 @@ enum InterpolationEvaluator {
         /// The exact inverse of `mapFromRest`: where content sitting at the in-between *now* has to
         /// be stored so that re-warping puts it back here.
         ///
-        /// This is `PLAN.md` §5.4's inverse map and the whole reason editing at an in-between works.
-        /// It is an inverse in the strict sense rather than an approximation — `embedInCurrent`
+        /// This is the inverse map and the whole reason editing at an in-between works. It is an
+        /// inverse in the strict sense rather than an approximation — `embedInCurrent`
         /// solves the same bilinear cell coordinates `embedInRest` assigns, and `warpToRest`
         /// evaluates them against the rest vertices that `warp` evaluates against the current ones.
         func mapToRest(_ points: [CGPoint]) -> [CGPoint] {
@@ -441,7 +433,8 @@ enum InterpolationEvaluator {
         elements.compactMap { element in
             // Hidden by the group the element *would move as*: its own tag when it has one, and the
             // recipe's first binding when it does not. A fill or a placed image never has one
-            // (`HANDOFF.md` §8 item 11), so it is always the fallback that decides for them.
+            // (see `VECTOR_INTERPOLATION.md` §4 item 11), so it is always the fallback that decides
+            // for them.
             let hidden = { (tag: UUID?) in
                 (tag ?? fallbackID).map(options.hiddenGroups.contains) == true
             }
@@ -489,8 +482,8 @@ enum InterpolationEvaluator {
     /// gate: if every sample falls back to a τ above `t`, nothing survives and the stroke is dropped.
     ///
     /// Note that content which exists at one keyframe and not the other needs **no** threshold. It
-    /// lives in one set only, and that set's weight fades it. τ is for content that appears partway
-    /// through — `PLAN.md` §5.4's edits at the in-between — which is why the comparison is one-sided.
+    /// lives in one set only, and that set's weight fades it. τ is for edits drawn at the in-between,
+    /// which is why the comparison is one-sided.
     ///
     /// Surviving samples are re-joined in order, so a stroke whose visible samples are not contiguous
     /// shortcuts straight across the gap. Thresholds are expected to be monotone along a stroke,
@@ -551,13 +544,13 @@ enum InterpolationEvaluator {
 
     /// A fill warped by its group's lattice.
     ///
-    /// Control points, per `PLAN.md` §7.3 — a warped Bézier is not the Bézier through the warped
-    /// control points, but at the lattice scales this feature uses the difference is far below a
-    /// pixel, and subdividing every curve to fix it would cost more than the entire warp.
+    /// Warps the Bézier's control points directly — a warped Bézier is not the Bézier through the
+    /// warped control points, but at the lattice scales this feature uses the difference is far below
+    /// a pixel, and subdividing every curve to fix it would cost more than the entire warp.
     ///
     /// The id is carried across. Nothing in rendering reads a fill's id, but keeping it stable is
-    /// what lets a later matcher (§7.3's colour lerp between corresponded fills) recognise the same
-    /// fill at two keyframes.
+    /// what lets a future matcher recognise the same fill at two keyframes (e.g. to lerp colour
+    /// between corresponded fills).
     private static func warped(_ fill: VectorFillElement, by map: ([CGPoint]) -> [CGPoint]) -> VectorFillElement {
         guard let path = fill.cgPath else { return fill }
         var result = VectorFillElement(path: warped(path: path, by: map), color: fill.color,
@@ -664,17 +657,16 @@ enum InterpolationEvaluator {
 
     // MARK: - Commit
 
-    /// The single display list that **replaces** an evaluation when the artist commits it —
-    /// `PLAN.md` §4's Commit, `HANDOFF.md` §8 item 17.
+    /// The single display list that **replaces** an evaluation when the artist commits it.
     ///
     /// ## This is lossy at an interior `t`, and the loss is structural rather than a shortcut
     ///
-    /// `PLAN.md` §5.6 says the two sets "cannot be concatenated into one list", and it is right about
-    /// rendering: `composite` draws each set in isolation and blends the two images, because an
-    /// `.erase` stroke lowers the alpha of everything beneath it *in its list* and A's eraser has no
-    /// business reaching C's ink. Commit's whole job is to produce one list, so it cannot honour that.
-    /// Nor is there a way around it — `VectorElement` has no group case, so a display list has no
-    /// per-set alpha either, and the weights have to reach the elements themselves.
+    /// The two sets cannot be concatenated into one list without breaking `composite`'s rendering:
+    /// it draws each set in isolation and blends the two images, because an `.erase` stroke lowers
+    /// the alpha of everything beneath it *in its list* and A's eraser has no business reaching C's
+    /// ink. Commit's whole job is to produce one list, so it cannot honour that. Nor is there a way
+    /// around it — `VectorElement` has no group case, so a display list has no per-set alpha either,
+    /// and the weights have to reach the elements themselves.
     ///
     /// So this is the deliberate one-way flatten the artist asked for, and exactly three things
     /// change at an interior `t`:
@@ -686,7 +678,7 @@ enum InterpolationEvaluator {
     ///    forward set is emitted first, so its own erasers still see nothing but its own elements and
     ///    are exactly right. Only the later set leaks, and it leaks by its own weight (see below).
     /// 3. **A placed image cannot fade at all** — `VectorImageElement` has no opacity — so one in a
-    ///    partially-faded set commits at full strength. `HANDOFF.md` §8 records it.
+    ///    partially-faded set commits at full strength.
     ///
     /// **At `t = 0` and `t = 1` there is no loss whatsoever**, and that falls out rather than being
     /// special-cased: one weight is 0, so that set is dropped entirely, and the other is 1, so

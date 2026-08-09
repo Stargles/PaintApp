@@ -1,14 +1,12 @@
 import UIKit
 
-/// Draws the guide strokes bound to the frame under the playhead — Phase 7 item 2's "render only in
-/// interpolate mode".
+/// Draws the guide strokes bound to the frame under the playhead — render only in interpolate mode.
 ///
 /// A canvas-sized overlay above every layer, not cel content, which is the whole point of a guide:
-/// `PLAN.md` §6.1 makes it a **document-level object** so it can be shared across frames, and §0
-/// requirement 6 makes it invisible outside interpolate mode. Neither is expressible as ink in a
-/// layer, and drawing it through `setInterpolationImage` would be worse still — that seam *replaces*
-/// the cel's display (`HANDOFF.md` §5, Phase 5), so a guide drawn through it would blank the frame it
-/// is meant to annotate.
+/// it's a **document-level object** so it can be shared across frames, and invisible outside
+/// interpolate mode. Neither is expressible as ink in a layer, and drawing it through
+/// `setInterpolationImage` would be worse still — that seam *replaces* the cel's display, so a guide
+/// drawn through it would blank the frame it is meant to annotate.
 ///
 /// **Transparent to touch except on a handle**, which is `ShapeOverlayView`'s rule and is what lets
 /// the canvas underneath keep drawing, filling and panning while a guide is on screen. Guide
@@ -23,8 +21,8 @@ import UIKit
 /// appear. Showing them while they cannot be grabbed would be the worse half of both.
 ///
 /// **One editor at a time**, `Editing` says which. Shape handles and spacing dots both live on the
-/// same polyline, so offering both at once would put two different meanings under one touch;
-/// `PLAN.md` §6.2 asks for them as separate controls anyway, and the bar is where the artist picks.
+/// same polyline, so offering both at once would put two different meanings under one touch; they
+/// are separate controls, and the bar is where the artist picks.
 final class GuideOverlayView: UIView {
 
     /// Which editor the grips belong to — and therefore what dragging one means.
@@ -59,7 +57,7 @@ final class GuideOverlayView: UIView {
     /// Every callback carries the `Editing` mode **captured at touch-down** rather than letting the
     /// receiver re-read it. The bar can be tapped mid-drag, and a gesture that began as a reshape and
     /// committed as a retime would be silent — the same reasoning as `StrokeCanvasView`'s
-    /// `guideStartTime` and Phase 6's `inBetweenCelID`.
+    /// `guideStartTime` and `inBetweenCelID`.
     var onGripDragBegan: ((UUID, Editing) -> Void)?
     /// Guide id, the mode, the grip's index, and where the finger is now — an absolute destination
     /// rather than a delta, exactly as `ShapeOverlayView` reports its own drags.

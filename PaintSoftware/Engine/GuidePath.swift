@@ -1,8 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// One guide stroke's geometry, resampled so the two signals `PLAN.md` §6.1 gets out of a single
-/// gesture can be read independently.
+/// One guide stroke's geometry, resampled so the two signals a single gesture carries — trajectory
+/// and easing — can be read independently.
 ///
 /// The elegant part of the brief's idea is that one drawn path carries both a **trajectory** (its
 /// shape) and an **easing** (how fast the stylus moved along it), and the two really are independent
@@ -114,14 +114,11 @@ struct GuidePath {
 
     /// How far the guide departs from its own straight chord at arc fraction `u`.
     ///
-    /// **This, rather than the absolute path, is the trajectory constraint** — the one genuine
-    /// interpretation Phase 7 had to make, so it is worth stating why. `PLAN.md` §6.1 reads "the
-    /// bound group's anchor point follows this path instead of travelling in a straight line between
-    /// its A and C positions", which taken literally means placing the anchor *at*
-    /// `point(atArcFraction:)`. That reading needs the artist to start and end the guide exactly on
-    /// the group's own A and C anchors, to the pixel, or the drawing snaps at both ends of the
-    /// slider — and it would destroy the endpoint invariant Phase 1 paid a change of variables to
-    /// get, that `t = 0` reproduces keyframe A bit for bit.
+    /// **This, rather than the absolute path, is the trajectory constraint.** Placing the anchor
+    /// literally *at* `point(atArcFraction:)` would need the artist to start and end the guide exactly
+    /// on the group's own A and C anchors, to the pixel, or the drawing snaps at both ends of the
+    /// slider — and it would destroy the endpoint invariant that `t = 0` reproduces keyframe A bit
+    /// for bit.
     ///
     /// Taking the deviation from the chord keeps the thing the artist actually drew — the *shape* of
     /// the arc — and is **exactly zero at `u = 0` and `u = 1` by construction**, so the invariant
@@ -152,9 +149,8 @@ struct GuidePath {
         return min(max(d / length, 0), 1)
     }
 
-    /// The easing this guide's stylus velocity implies — `PLAN.md` §6.1's "arc length travelled per
-    /// unit stylus time *is* the spacing function", which is the part of the brief's idea that gets
-    /// ease-out for free with no graph editor.
+    /// The easing this guide's stylus velocity implies: arc length travelled per unit stylus time
+    /// *is* the spacing function, which gets ease-out for free with no graph editor.
     ///
     /// Read the result as: at time fraction τ the motion should be `s(τ)` of the way along. Drawing
     /// the guide fast at the start and slow at the end covers most of the arc early, so `s` rises
@@ -184,7 +180,7 @@ struct GuidePath {
     }
 }
 
-/// Editing a drawn guide's geometry — Phase 7 item 2's handles.
+/// Editing a drawn guide's geometry — the guide's drag handles.
 ///
 /// Pure geometry over `[TimedSample]`, kept out of the view for the usual reason: `GuideOverlayView`
 /// reports *which* handle moved and *where to*, and everything that decides what that means to the
@@ -329,7 +325,7 @@ enum GuideHandles {
     }
 }
 
-/// The animator's spacing chart for one A→C interval — Phase 7 item 5, `PLAN.md` §6.2.
+/// The animator's spacing chart for one A→C interval.
 ///
 /// One stop per frame from the first keyframe to the last, each saying **how far along the motion
 /// that frame lands**. Drawn as dots on the guide it belongs to, it is the classic chart drawn in
@@ -413,8 +409,7 @@ struct SpacingChart: Equatable {
 ///   there *is* the binding, so no further check applies.
 /// - A guide named on the **recipe** (`InterpolationRecipe.guideIDs`) drives every group the guide
 ///   itself admits to — `GuideStroke.drives(_:)`, where an empty `boundGroups` means all of them.
-///   That pairing is `PLAN.md` §10 decision 6's whole-frame binding, and it is as nearly free as
-///   the decision predicted precisely because a binding is a set of ids.
+///   That is the whole-frame binding case, nearly free since a binding is just a set of ids.
 /// - `GuideRole` then splits the two signals apart: only `.trajectory`/`.both` bend the path, only
 ///   `.timing`/`.both` retime it.
 struct GuideSet {

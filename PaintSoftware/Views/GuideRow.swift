@@ -1,27 +1,26 @@
 import SwiftUI
 
-/// The guides on the frame under the playhead, and the two ways to fetch one from elsewhere —
-/// Phase 7 item 7, `PLAN.md` §6.4, requirement 7.
+/// The guides on the frame under the playhead, and the two ways to fetch one from elsewhere.
 ///
-/// **A list rather than a menu command, and that is the design call this item required.** "Fetch a
-/// guide from another frame" is one line at the model layer (a recipe has named guides by id since
-/// Phase 2), so the work here is entirely about what the artist can see. Three separate problems all
-/// wanted the same widget and it was worth designing once rather than three times:
+/// **A list rather than a menu command, and that is the design call this required.** "Fetch a guide
+/// from another frame" is one line at the model layer (a recipe has named guides by id), so the
+/// work here is entirely about what the artist can see. Three separate problems all wanted the same
+/// widget and it was worth designing once rather than three times:
 ///
-/// - **Requirement 7 itself** needs somewhere to offer link and duplicate, and somewhere to say
-///   which guides a frame ended up with.
-/// - **A second guide averages with the first** (`GuideSet.trajectories`), which is the least
-///   surprising rule for two but is invisible: the artist draws a second arc and the motion moves
-///   half as far as it looks like it should. Two rows on screen is what makes that legible.
-/// - **A linked guide is shared**, so editing its handles moves every frame that uses it. That is
-///   the *point* of a link and a nasty surprise if you thought you had a copy, so the chip says so.
+/// - **Fetching itself** needs somewhere to offer link and duplicate, and somewhere to say which
+///   guides a frame ended up with.
+/// - **A second guide averages with the first** (`GuideSet.trajectories`), the least surprising rule
+///   for two but invisible: the artist draws a second arc and the motion moves half as far as it
+///   looks like it should. Two rows on screen is what makes that legible.
+/// - **A linked guide is shared**, so editing its handles moves every frame that uses it. That's the
+///   *point* of a link and a nasty surprise if you thought you had a copy, so the chip says so.
 ///
-/// **The two toggles live here rather than on the command row, and that is not tidiness.** They were
-/// on it, beside Commit and Remove; the trailing cluster grew from two buttons to four and overran
-/// the centred Set-as-Reference/Generate/Reproject group, which the command row's `ZStack` draws
-/// last — so on a portrait iPad the Guide button sat *underneath* Reproject and could not be pressed
-/// at all (`isHittable == false`, found by the e2e). Moving them restores the command row to exactly
-/// what Phase 4.6 settled, and puts every guide control on the row that lists the guides.
+/// **The two toggles live here rather than on the command row, and that is not tidiness.** They
+/// were on it, beside Commit and Remove; the trailing cluster grew from two buttons to four and
+/// overran the centred Set-as-Reference/Generate/Reproject group, which the command row's `ZStack`
+/// draws last — so on a portrait iPad the Guide button sat *underneath* Reproject and could not be
+/// pressed at all (`isHittable == false`, found by the e2e). Moving them puts every guide control on
+/// the row that lists the guides.
 ///
 /// It sits under `MotionGroupRow` and appears only when there is a recipe, which is exactly when a
 /// guide can exist — so a bar outside interpolate mode is unchanged.
@@ -52,11 +51,11 @@ struct GuideRow: View {
         }
     }
 
-    /// Arms guide drawing — Phase 7 item 2. A toggle rather than a command, because the artist draws
-    /// the guide on the *canvas* and the button only says which thing the next drag is.
+    /// Arms guide drawing. A toggle rather than a command, because the artist draws the guide on the
+    /// *canvas* and the button only says which thing the next drag is.
     ///
     /// The same arm-and-draw shape as `MotionGroupRow`'s chips, and a button rather than a timeline
-    /// gesture for §5.10's reason: press-and-hold already means drag-reorder, in every mode.
+    /// gesture: press-and-hold already means drag-reorder, in every mode.
     ///
     /// Gated on `guideRefusal`, which is cheap — a guide needs a recipe to attach to, and offering
     /// the toggle without one would let the artist draw an arc that had nowhere to go.
@@ -70,8 +69,8 @@ struct GuideRow: View {
         .accessibilityIdentifier("interpolate.guide")
     }
 
-    /// Swaps the guide overlay between its two editors — Phase 7 item 5, `PLAN.md` §6.2's "timing
-    /// adjustment", against item 2's "geometric adjustment".
+    /// Swaps the guide overlay between its two editors: "timing adjustment" against "geometric
+    /// adjustment".
     ///
     /// A toggle and not a third arming state: shape handles and spacing dots sit on the same
     /// polyline, so both at once would put two meanings under one touch. Off means handles, which is
@@ -149,11 +148,10 @@ struct GuideRow: View {
 
     /// **Link and duplicate, offered as two commands per guide and never as one.**
     ///
-    /// `PLAN.md` §6.4 recommends both and they answer different intents: link for a repeating cycle,
-    /// where fixing the arc once should fix every frame of the walk; duplicate for a one-off, where
-    /// the copy is a starting point to pull about. Collapsing them into a single "Use" would make the
-    /// artist find out which one they got by editing it — the same reason Generate and Reproject are
-    /// two buttons (`PLAN.md` §10 decision 3).
+    /// They answer different intents: link for a repeating cycle, where fixing the arc once should
+    /// fix every frame of the walk; duplicate for a one-off, where the copy is a starting point to
+    /// pull about. Collapsing them into a single "Use" would make the artist find out which one they
+    /// got by editing it — the same reason Generate and Reproject are two buttons.
     private func fetchMenu(from linkable: [GuideStroke]) -> some View {
         Menu {
             ForEach(Array(linkable.enumerated()), id: \.element.id) { index, guide in

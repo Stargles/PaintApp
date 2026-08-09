@@ -5,9 +5,8 @@ struct ProjectManifest: Codable {
     var name: String
     var canvasWidth: Double
     var canvasHeight: Double
-    /// Light-grey drawable margin around the artwork (see `CanvasManager.canvasPadding`). Folded into
-    /// canvasWidth/Height (the buffers are saved at the full padded size), so this only needs restoring
-    /// so the paper inset is drawn correctly — no resize happens on load.
+    /// Light-grey drawable margin around the artwork. Folded into canvasWidth/Height (buffers save
+    /// at the full padded size); restoring it just redraws the paper inset — no resize on load.
     var canvasPadding: Double
     var fps: Int
     var sceneFrameCount: Int
@@ -16,29 +15,23 @@ struct ProjectManifest: Codable {
     var backgroundColor: CodableColor
     var isBackgroundVisible: Bool
     /// The brush active when the project was last saved, and any custom (imported) brushes
-    /// associated with it. `Brush` (see Engine/Brush.swift) is already `Codable`, so this is just
-    /// metadata — the actual custom-brush stamp texture image files referenced by
-    /// `Brush.customTextureFileName` are copied into this project's own `brushes/` folder
-    /// alongside the manifest (see `ProjectStore.save`/`load`) so a saved project stays
+    /// associated with it. The actual custom-brush stamp texture image files are copied into this
+    /// project's own `brushes/` folder alongside the manifest so a saved project stays
     /// self-contained even if the shared `BrushLibrary.customBrushesDirectory` entry is later
-    /// renamed/deleted, or the project is moved to another device.
+    /// renamed/deleted, or the project moves to another device.
     var selectedBrush: Brush
     var customBrushes: [Brush]
-    /// The vector-eraser behaviour active when the project was last saved (see
-    /// `CanvasManager.vectorEraserMode` and VECTOR_ERASER_PLAN.md §5). Persisted per project rather
-    /// than app-wide because it is bound up with the artwork: a project drawn on vector layers with
-    /// `.cutToIntersection` should reopen still cutting to intersections, without the mode leaking
-    /// into the next project you open. Meaningless for all-raster projects, which simply save and
-    /// reload the default.
+    /// The vector-eraser behaviour active when the project was last saved. Persisted per project
+    /// rather than app-wide since it's bound up with the artwork: a project drawn with
+    /// `.cutToIntersection` should reopen still cutting to intersections, without leaking into the
+    /// next project. Meaningless for all-raster projects, which just save/reload the default.
     var vectorEraserMode: VectorEraserMode
     var folders: [FolderManifest] = []
     var viewPresets: [ViewPresetManifest] = []
-    /// The document-level interpolation registries (see `CanvasManager.motionGroups` /
-    /// `.guideStrokes`). They live in the manifest rather than beside a cel precisely because they
-    /// are *not* owned by one: a motion group spans layers and a guide is referenced by several
-    /// intervals. Both are small — a group is four fields, a guide a polyline — so keeping them
-    /// inline here costs the gallery's manifest read nothing, unlike the per-cel recipes, which are
-    /// written to their own files.
+    /// The document-level interpolation registries. Live in the manifest rather than beside a cel
+    /// because they are *not* owned by one: a motion group spans layers and a guide is referenced
+    /// by several intervals. Both are small, so keeping them inline costs the gallery's manifest
+    /// read nothing, unlike the per-cel recipes, which get their own files.
     var motionGroups: [MotionGroup] = []
     var guideStrokes: [GuideStroke] = []
 
@@ -91,15 +84,14 @@ struct ProjectManifest: Codable {
         vectorEraserMode = try container.decodeIfPresent(VectorEraserMode.self, forKey: .vectorEraserMode) ?? .erase
         folders = try container.decodeIfPresent([FolderManifest].self, forKey: .folders) ?? []
         viewPresets = try container.decodeIfPresent([ViewPresetManifest].self, forKey: .viewPresets) ?? []
-        // Absent for every project saved before interpolation existed, which is all of them — and
-        // absent for every project that never uses it, since an empty registry is not written.
+        // Absent for pre-interpolation projects and any project that never uses it (an empty
+        // registry is not written).
         motionGroups = try container.decodeIfPresent([MotionGroup].self, forKey: .motionGroups) ?? []
         guideStrokes = try container.decodeIfPresent([GuideStroke].self, forKey: .guideStrokes) ?? []
     }
 
-    /// Written explicitly so the two interpolation registries can be *omitted* when empty: a project
-    /// that never interpolates must encode exactly as it did before this existed, and a synthesized
-    /// encoder would write `"motionGroups":[]` into every manifest in the world.
+    /// Written explicitly so the two interpolation registries can be *omitted* when empty — a
+    /// synthesized encoder would write `"motionGroups":[]` into every manifest in the world.
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -161,10 +153,8 @@ struct LayerManifest: Codable {
     var name: String
     var opacity: Double
     var isVisible: Bool
-    /// Mirrors `Layer.kind` (raster/vector/compositing — see CanvasManager.swift). Only `.raster`
-    /// is actually produced by the app today; this persists the field now (defaulting missing
-    /// values to `.raster`) so that if/when vector or compositing layers land, no further
-    /// migration of already-saved projects is needed — see the project's vector-layer roadmap.
+    /// Mirrors `Layer.kind` (raster/vector/compositing). Persisted now (defaulting missing values
+    /// to `.raster`) so future layer kinds need no migration of already-saved projects.
     var kind: LayerKind
     /// The folder this layer belongs to, if any. Stored as a UUID string for forward compat.
     var parentFolderID: String? = nil
@@ -203,23 +193,18 @@ struct CelManifest: Codable {
     var id: UUID
     var startFrame: Int
     var frameCount: Int
-    /// PNG file holding this cel's live-stroke raster (`Cel.raster`, native canvas resolution) —
-    /// replaces the old PKDrawing-based `.drawing` file format. Not migrated: a project saved by
-    /// the previous PencilKit engine has no `rasterFileName` key and fails to decode gracefully
-    /// (skipped in the gallery list) rather than crash — see BUGS.md's engine-rewrite notes.
+    /// PNG file holding this cel's live-stroke raster (`Cel.raster`, native canvas resolution).
+    /// Projects from the previous PencilKit engine have no `rasterFileName` key and fail to decode
+    /// gracefully (skipped in the gallery list) rather than crash.
     var rasterFileName: String
     var fillImageFileName: String?
-    /// Raster content baked into this cel by a select/move/fill/clear operation (see
-    /// `Cel.bakedImage`). A plain optional: Swift's synthesized `Codable` already decodes a missing
-    /// key as `nil`, so projects saved before this feature existed still load fine.
+    /// Raster content baked into this cel by a select/move/fill/clear operation (`Cel.bakedImage`).
     var bakedImageFileName: String? = nil
-    /// JSON file holding this cel's vector content (`Cel.vector` → `VectorCanvasData`: strokes,
-    /// image element refs, and the overall transform) for `.vector` layers. Optional/decodeIfPresent-
-    /// friendly so raster-only projects (and pre-vector saves) load unchanged.
+    /// JSON file holding this cel's vector content (`Cel.vector` → `VectorCanvasData`) for
+    /// `.vector` layers. Optional so raster-only and pre-vector saves load unchanged.
     var vectorFileName: String? = nil
-    /// JSON file holding this cel's `InterpolationRecipe`, when it has one. Its own file rather than
-    /// inline in the manifest because a recipe carries lattices — one array of vertices per motion
-    /// group per keyframe — and `manifest.json` is read in full for every tile in the gallery. A
-    /// plain optional: a missing key decodes as `nil`, i.e. "an ordinary, non-interpolated cel".
+    /// JSON file holding this cel's `InterpolationRecipe`, when it has one. Its own file rather
+    /// than inline in the manifest because a recipe carries lattices (vertex arrays per motion
+    /// group per keyframe) and `manifest.json` is read in full for every gallery tile.
     var interpolationFileName: String? = nil
 }

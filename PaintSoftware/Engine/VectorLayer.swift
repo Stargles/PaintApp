@@ -12,7 +12,6 @@ extension CodableColor {
 /// The eraser being a mode on `VectorStroke` rather than its own element type is deliberate: an
 /// eraser is structurally a polyline with pressure and width, so interpolation, liquify and point
 /// decimation all get it for free from the one implementation they already have for paint strokes.
-/// See VECTOR_ERASER_PLAN.md §2.1.
 enum StrokeComposite: String, Codable {
     case paint
     case erase
@@ -60,15 +59,15 @@ struct VectorStroke: Identifiable, Codable {
     /// live. A piece cut out of a tagged stroke keeps the tag for free this way. The cost is a nil
     /// `UUID?` on strokes that have none, which `encodeIfPresent` keeps off disk entirely.
     ///
-    /// Independent of `color` on purpose — see `MotionGroup.tagColor` and PLAN §5.1.1.
+    /// Independent of `color` on purpose — see `MotionGroup.tagColor`.
     var motionGroupID: UUID? = nil
 
-    /// The interpolation parameter below which this stroke is not drawn at all — the τ of PLAN §5.4.
+    /// The interpolation parameter below which this stroke is not drawn at all — the τ threshold.
     ///
     /// Set on a stroke drawn *at* an in-between so it does not appear before the frame it was drawn
     /// at, and on content that exists at one keyframe but not the other, which is how "an eraser
-    /// exists on KF1 and is gone by KF2" needs no eraser-specific code (§7.1). Nil means "always
-    /// visible", which is every ordinary stroke.
+    /// exists on KF1 and is gone by KF2" needs no eraser-specific code. Nil means "always visible",
+    /// which is every ordinary stroke.
     var visibilityThreshold: CGFloat? = nil
 
     /// Per-sample overrides of `visibilityThreshold`, keyed by index into `samples`.
@@ -99,9 +98,8 @@ struct VectorStroke: Identifiable, Codable {
 /// `BrushStamper.stampStroke` anchors its dab lattice at `samples[0]` — dabs every `stampSpacing`
 /// along the path, remainder carried across segments. Re-stamping a *sub-run* therefore re-phases
 /// every dab in it, not merely the ones near the cut, and the divergence is worst at the piece's far
-/// tip: the end furthest from the eraser and so the one an erase punch cannot cover. Measured on a
-/// 24pt line cut by a 48pt nib, that was 118 stray pixels at up to 183/255. That measurement is what
-/// kept Mode 1 from cutting anything, and this type is what takes it back.
+/// tip: the end furthest from the eraser and so the one an erase punch cannot cover. That is what
+/// this type fixes.
 ///
 /// ## The representation
 ///
@@ -253,7 +251,7 @@ struct VectorImageElement: Identifiable {
 /// fills→images→strokes order. That fixed order cannot express z-position, and z-position is exactly
 /// what an eraser needs: an `.erase` stroke lowers the alpha of everything *beneath it in this list*,
 /// so if erasers could only ever be appended last, a stroke drawn after an erase would be eaten by
-/// it. See VECTOR_ERASER_PLAN.md §2.2.
+/// it.
 ///
 /// Not `Codable`: `.image`'s payload holds a runtime `UIImage`. Persistence has its own ordered
 /// representation that stores images by file name — see `VectorCanvasData.ElementData`.
@@ -294,7 +292,7 @@ enum VectorElement: Identifiable {
 /// affords five strokes, and an interpolated frame renders *two* canvases. Stroking each warped
 /// polyline as one `CGPath` instead is roughly two orders of magnitude cheaper and is what a rough
 /// animation preview should look like anyway — the artist scrubbing a slider is judging motion and
-/// spacing, not brush texture. See `VECTOR_INTERPOLATION_PLAN.md` §8.
+/// spacing, not brush texture.
 ///
 /// What `.preview` gives up, stated plainly: per-dab pressure ramping (one width per stroke, taken at
 /// the mean pressure), grain, scatter and rotation jitter, and the alpha build-up that overlapping
@@ -358,28 +356,25 @@ final class VectorCanvas {
     // **Setter contract.** Remove every element of that kind, then insert the new list at the index
     // the *first* removed element occupied. That is what makes a get→set round trip order-stable,
     // which the undo/redo path depends on — it snapshots `canvas.strokes`, then later assigns the
-    // snapshot back wholesale (`StrokeCanvasView.registerVectorUndo`,
-    // `CanvasManager+Shape.registerVectorStrokeUndo`, `CanvasManager+Fill.registerVectorFillUndo`).
-    // Any other splice point would drift strokes above or below a fill on every undo.
+    // snapshot back wholesale. Any other splice point would drift strokes above or below a fill on
+    // every undo.
     //
     // Round-tripping is exact while each kind occupies one contiguous run, which
     // `insertionIndex(forKind:in:)` guarantees for every list the app can currently build. A list that
-    // deliberately *interleaves* kinds — nothing produces one yet — collapses each kind into one run at
-    // its first position, so a later phase that starts interleaving must stop routing wholesale
-    // assignment through these accessors and use `elements` instead.
+    // deliberately *interleaves* kinds — nothing produces one yet — collapses each kind into one run
+    // at its first position, so code that starts interleaving must stop routing wholesale assignment
+    // through these accessors and use `elements` instead.
     //
     // When the canvas holds *none* of that kind there is no removed index to reuse, and the fallback
     // is `Self.insertionIndex(forKind:in:)` rather than a plain append. That deviation is load-bearing:
-    // `registerVectorFillUndo`'s redo does `canvas.fills = newFills` on a canvas whose fills were all
-    // removed by the matching undo, so a plain append would put a redone flood fill *above* the
-    // strokes it originally went under. Using the same ordering rule the `add…` methods use makes
-    // set-after-empty agree with add.
+    // a redo that does `canvas.fills = newFills` on a canvas whose fills were all removed by the
+    // matching undo would, with a plain append, put a redone flood fill *above* the strokes it
+    // originally went under. Using the same ordering rule the `add…` methods use makes set-after-empty
+    // agree with add.
     //
     // As with the previous stored-property accessors, the setters do **not** invalidate: every caller
-    // that assigns wholesale follows it with `bumpVersion()` (checked — nine assignments across six
-    // methods in `StrokeCanvasView`, `CanvasManager`, `CanvasManager+Shape`, `CanvasManager+Fill` and
-    // `SelectionModels`), and keeping that split means the version counter ticks exactly as often as
-    // it did before.
+    // that assigns wholesale follows it with `bumpVersion()`, and keeping that split means the version
+    // counter ticks exactly as often as it did before.
 
     var strokes: [VectorStroke] {
         get { lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.stroke) }
@@ -431,12 +426,10 @@ final class VectorCanvas {
     /// `strokeIndex()`. Version-keyed rather than cleared by `invalidate()`, because `version` only
     /// ever increases, so a stale index can never be mistaken for a current one.
     ///
-    /// This is also the answer to the plan's §3.2 "cached `bounds: CGRect` per stroke". A stored
-    /// per-stroke box would exist to reject strokes before testing their segments; the index rejects
-    /// them *without visiting them at all*, which strictly dominates, and it does so without adding a
-    /// derived stored property to a `Codable` struct whose `samples` are assigned from a dozen call
-    /// sites with no mutator to hang the invalidation off. That mutator seam is worth building when
-    /// Phase 5's decimation needs it anyway; until then this is the cache.
+    /// A stored per-stroke bounding box would exist to reject strokes before testing their segments;
+    /// the index rejects them *without visiting them at all*, which strictly dominates, and it does
+    /// so without adding a derived stored property to a `Codable` struct whose `samples` are assigned
+    /// from a dozen call sites with no mutator to hang the invalidation off.
     private var cachedIndex: StrokeSpatialIndex?
     private var cachedIndexVersion: Int = -1
 
@@ -512,17 +505,17 @@ final class VectorCanvas {
     /// Where a *newly added* element of `kind` belongs: after every element of the same or lower kind,
     /// before the first element of a higher one.
     ///
-    /// This is the one place the legacy fills→images→strokes z-order still lives, and it is why Phase 1
-    /// ships zero visible change. `addFill`/`addImage`/`addStroke` used to append into three separate
-    /// arrays that were *always* drawn in that order, so "flood-fill after drawing a line" put the fill
-    /// under the line. A naive append into one list would put it over the line — a real, visible
-    /// regression. Routing every add through here reproduces the old order exactly while the list stays
-    /// fully capable of arbitrary z-position, which is what the eraser needs (a stroke appended after an
-    /// `.erase` stroke lands above it and is not eaten by it).
+    /// This is the one place the legacy fills→images→strokes z-order still lives, so it can be
+    /// reproduced with zero visible change to existing content. `addFill`/`addImage`/`addStroke` used
+    /// to append into three separate arrays that were *always* drawn in that order, so "flood-fill
+    /// after drawing a line" put the fill under the line. A naive append into one list would put it
+    /// over the line — a real, visible regression. Routing every add through here reproduces the old
+    /// order exactly while the list stays fully capable of arbitrary z-position, which is what the
+    /// eraser needs (a stroke appended after an `.erase` stroke lands above it and is not eaten by it).
     ///
     /// Whether a *new* fill should keep going under existing strokes is a product question, not a
-    /// mechanical one; Phase 2 owns it. Assumes the list is kind-sorted, which it is as long as every
-    /// mutation goes through these helpers.
+    /// mechanical one. Assumes the list is kind-sorted, which it is as long as every mutation goes
+    /// through these helpers.
     private static func insertionIndex(forKind kind: Kind, in elements: [VectorElement]) -> Int {
         elements.firstIndex { Self.kind(of: $0).rawValue > kind.rawValue } ?? elements.count
     }
@@ -605,12 +598,10 @@ final class VectorCanvas {
     /// applies `transform` on top, so storing canvas-space samples verbatim puts the stroke through
     /// the transform twice and lands it away from where it was drawn, again with every later move.
     ///
-    /// This used to open with `guard !_transform.isIdentity else { append(stroke); return invalidate() }`.
-    /// That branch was *not* a behavioural difference — it was a duplicate of the general path:
-    /// `localSamples(_:through:)` already returns its input unchanged for an identity transform, and
-    /// `scale(of: .identity)` is `hypot(1, 0) == 1`, so `size / scale == size`. Two copies of one rule
-    /// with no test able to tell them apart is how the identity and non-identity cases silently drift,
-    /// so there is now one path; the no-op guards live in the mappers where they can't be forgotten.
+    /// One path handles both the identity and non-identity transform, rather than special-casing
+    /// identity: `localSamples(_:through:)` already returns its input unchanged for an identity
+    /// transform, and `scale(of: .identity)` is `hypot(1, 0) == 1`, so `size / scale == size` falls
+    /// out for free. The no-op guards live in the mappers, where they can't be forgotten.
     func addStroke(canvasSpaceStroke stroke: VectorStroke) {
         lock.lock()
         defer { lock.unlock() }
@@ -763,28 +754,27 @@ final class VectorCanvas {
     /// the user swept a wide one.
     ///
     /// Surviving pieces are spliced back **in place**, so they keep the z-position their parent held
-    /// relative to fills, images and other strokes. Id semantics match the pre-Phase-2 behaviour and
-    /// are load-bearing now that `BrushStamper`'s dab RNG is seeded from `stroke.id`: an untouched
-    /// stroke keeps its id and therefore its exact scatter/jitter pattern, while a split mints fresh
-    /// ids and re-rolls the pattern for both pieces (which is unavoidable — two strokes cannot share
-    /// one seed without sharing one dab sequence).
+    /// relative to fills, images and other strokes. Id semantics are load-bearing now that
+    /// `BrushStamper`'s dab RNG is seeded from `stroke.id`: an untouched stroke keeps its id and
+    /// therefore its exact scatter/jitter pattern, while a split mints fresh ids and re-rolls the
+    /// pattern for both pieces (which is unavoidable — two strokes cannot share one seed without
+    /// sharing one dab sequence).
     ///
     /// ## What this replaced
     ///
-    /// The pre-Phase-2 implementation compared every stroke sample against every raw eraser *touch
-    /// point* and dropped whole samples. All four of its defects (plan §4) are gone: a small nib no
-    /// longer passes between two coarse touches without erasing (the eraser is a continuous capsule
-    /// chain), cuts land at the footprint's edge instead of at the nearest stored sample, a coarse
-    /// stroke is probed along its segments instead of judged at its vertices, and the traversal is
-    /// bounded by the spatial index instead of being O(all samples × all touch points) over every
-    /// stroke on the layer.
+    /// An earlier implementation compared every stroke sample against every raw eraser *touch point*
+    /// and dropped whole samples. That is gone: a small nib no longer passes between two coarse
+    /// touches without erasing (the eraser is a continuous capsule chain), cuts land at the
+    /// footprint's edge instead of at the nearest stored sample, a coarse stroke is probed along its
+    /// segments instead of judged at its vertices, and the traversal is bounded by the spatial index
+    /// instead of being O(all samples × all touch points) over every stroke on the layer.
     ///
     /// ## `composite`
     ///
-    /// `.erase` strokes are skipped — the carry-over the display-list phase deliberately left open.
-    /// An eraser element is not ink; cutting a span out of one would *restore* the ink beneath it,
-    /// which is not what any of the three modes mean by erasing. Phase 4, which starts producing
-    /// `.erase` elements, garbage-collects them instead (plan §1).
+    /// `.erase` strokes are skipped — the display list deliberately leaves them alone here. An eraser
+    /// element is not ink; cutting a span out of one would *restore* the ink beneath it, which is not
+    /// what any of the three modes mean by erasing. Whatever produces `.erase` elements garbage-
+    /// collects them instead.
     @discardableResult
     func erase(alongPath canvasSpaceSamples: [VectorSample], brush: Brush, size: CGFloat,
                opacity: Double = 1, mode: VectorEraserMode) -> Bool {
@@ -819,9 +809,9 @@ final class VectorCanvas {
         return changed
     }
 
-    /// Mode 3 resolved against a **single** eraser position, which is what the plan means by cutting
-    /// on touch-down and re-querying per crossing (§4, Mode 3): one drag across three lines cuts three
-    /// spans, because the driver calls this once per touch sample rather than once per gesture.
+    /// Mode 3 resolved against a **single** eraser position: cutting on touch-down and re-querying
+    /// per crossing means one drag across three lines cuts three spans, because the driver calls this
+    /// once per touch sample rather than once per gesture.
     ///
     /// `cutting` is the driver's re-arming latch, not an optimisation. After a cut the eraser is still
     /// sitting on the stroke it just cut — right next to the surviving pieces if the crossing was
@@ -899,7 +889,7 @@ final class VectorCanvas {
             hasContentBeneath(atParameter: parameter, in: localSamples, brush: brush, size: size)
         }
         if hasResidue {
-            // The eraser *is* a stroke (plan §2.1): same brush, same size, same samples, same
+            // The eraser *is* a stroke: same brush, same size, same samples, same
             // pressure-driven dab chain, composited `.destinationOut` at render. Appended last, so it
             // punches everything already in the list and nothing drawn after it. The colour is
             // arbitrary — `.destinationOut` reads only the stamp's alpha coverage.
@@ -961,20 +951,20 @@ final class VectorCanvas {
     /// Cuts every candidate paint stroke at the spans the eraser covers **full width at full alpha**,
     /// inset by the stroke's own half-width. Caller must hold `lock`.
     ///
-    /// This is plan §1's geometric split, and it is wired up because `DabLattice` made it exact. The
-    /// two things that stood in its way were separate:
+    /// This is the geometric split, and it is wired up because `DabLattice` made it exact. Two
+    /// separate things had to be true first:
     ///
     /// 1. A surviving piece re-stamped as a fresh stroke re-anchors its dab lattice at the cut, moving
     ///    its ink along its whole length. `splitPreservingLattice` is the answer — the pieces render on
     ///    the parent's lattice, so their dabs are the parent's dabs.
     /// 2. A cut end is a round cap of the stroke's half-width while the eraser removed ink along a
     ///    straight band edge, so the ink a cut actually loses spills half a width past the span that
-    ///    was measured as covered. `VectorEraser.conservativeCuts` is the answer, and it is why it was
-    ///    written and kept unwired until now: insetting makes the lost ink a subset of the covered
-    ///    span, which the punch removes anyway, so the split changes nothing outside the punch.
+    ///    was measured as covered. `VectorEraser.conservativeCuts` insets until the lost ink is a
+    ///    subset of the covered span, which the punch removes anyway, so the split changes nothing
+    ///    outside the punch.
     ///
-    /// Both are needed. Either alone leaves stray ink outside the gesture, which is the thing §8 asserts
-    /// at zero tolerance.
+    /// Both are needed. Either alone leaves stray ink outside the gesture, which the parity tests
+    /// assert at zero tolerance.
     ///
     /// A span too short to survive its own two insets disappears — the eraser was narrower than the
     /// line it crossed, so there is no separation to be had and the punch handles it alone.
@@ -1089,7 +1079,7 @@ final class VectorCanvas {
         return false
     }
 
-    /// Plan §1's garbage collection: a retained `.erase` element is dropped once nothing *beneath it*
+    /// Garbage collection: a retained `.erase` element is dropped once nothing *beneath it*
     /// in the display list still reaches its bounding box. Caller must hold `lock`.
     ///
     /// Beneath, not anywhere — an element added after the punch is above it and was never affected by
@@ -1099,14 +1089,11 @@ final class VectorCanvas {
     ///
     /// ## Why the boxes are computed up front
     ///
-    /// This used to ask `anyContent(in: kept, reaching:)` per punch, and that helper derived every
-    /// element's bounding box from scratch each time it was asked — walking a stroke's samples, and
-    /// for a fill running `NSKeyedUnarchiver` over its archived `UIBezierPath`. With `p` punches over
-    /// `n` elements that is `O(p · n)` box derivations per erase, and since an erase-heavy layer
-    /// accumulates punches, `p` and `n` both grow with use: the cost of a gesture rose with how much
-    /// erasing had already been done. Measured over 200 strokes and 50 gestures, that trend was the
-    /// single largest term in the commit — the last ten gestures cost 2.05x the first ten while every
-    /// spatial-index-bounded pass around it stayed flat (`REFACTOR_BASELINE.md`, Phase 4d).
+    /// Deriving every element's bounding box from scratch per punch — walking a stroke's samples, and
+    /// for a fill running `NSKeyedUnarchiver` over its archived `UIBezierPath` — costs `O(p · n)` box
+    /// derivations per erase for `p` punches over `n` elements, and both grow with use on an
+    /// erase-heavy layer: cost rises with how much erasing has already been done (see
+    /// `REFACTOR_BASELINE.md`).
     ///
     /// Deriving each box once and testing the punch against the accumulated list is the same verdict
     /// by the same rule — a punch is kept exactly when some element **beneath it** reaches its box —
@@ -1246,7 +1233,7 @@ final class VectorCanvas {
         guard cutting else { return .unchanged }
 
         // Everything that could cross it, with a width-aware tolerance per pair: two lines whose ink
-        // visibly touches read as crossed even when the centrelines miss (plan §4, Mode 3).
+        // visibly touches read as crossed even when the centrelines miss.
         let targetReach = StrokeGeometry.stampRadius(forPressure: 1, brush: target.stroke.brush,
                                                      size: target.stroke.size)
         guard let targetBounds = StrokeGeometry.bounds(of: target.stroke.samples,
@@ -1302,7 +1289,7 @@ final class VectorCanvas {
     ///
     /// This is what takes the eraser off the "test everything against everything" path: a query
     /// returns only the segments in the eraser's swept box, so the cost scales with what the gesture
-    /// touched rather than with how much is on the layer. Mode 3's intersection search and Phase 4's
+    /// touched rather than with how much is on the layer. Mode 3's intersection search and Mode 1's
     /// coverage test and residue GC all query the same structure.
     ///
     /// Caller must hold `lock` — and that is not just the usual convention here. `segments(near:)`
@@ -1312,7 +1299,7 @@ final class VectorCanvas {
     ///
     /// Segment boxes are inserted with **no padding**, i.e. the index answers questions about stroke
     /// *centrelines*. That is exactly what Modes 2 and 3 ask (does the footprint cover this point?).
-    /// Phase 4's coverage test asks about a stroke's own *width*, so it must expand its query rect by
+    /// Mode 1's coverage test asks about a stroke's own *width*, so it must expand its query rect by
     /// the widest half-width on the layer rather than assume this rejects nothing it needed.
     private func strokeIndex() -> StrokeSpatialIndex {
         if let cachedIndex, cachedIndexVersion == version { return cachedIndex }
@@ -1331,7 +1318,7 @@ final class VectorCanvas {
     /// The **topmost** paint stroke whose ink covers `point`, or nil for a tap on bare canvas.
     ///
     /// Topmost, i.e. last in the display list, because that is the one the artist can see under their
-    /// finger — the same rule every other pick-what-I-touched affordance follows. Phase 5's retagging
+    /// finger — the same rule every other pick-what-I-touched affordance follows. The retagging
     /// gesture is the caller (`CanvasManager.assignArmedMotionGroup(atCanvasPoint:)`).
     ///
     /// Measured against the stroke's **ink**, not its centreline: the spatial index stores segment
@@ -1345,7 +1332,8 @@ final class VectorCanvas {
     ///
     /// Erasers are skipped. An eraser has no colour and no part — `tagMotionGroupsByStrokeColour`
     /// skips them for the same reason — and tagging one by tapping the hole it left would be
-    /// mystifying. Fills and placed images cannot carry a tag at all (`HANDOFF.md` §8 item 11).
+    /// mystifying. Fills and placed images cannot carry a tag at all (see
+    /// `VECTOR_INTERPOLATION.md` §4 item 11).
     func topmostStroke(atCanvasPoint point: CGPoint, slop: CGFloat = 6) -> VectorStroke? {
         lock.lock()
         defer { lock.unlock() }
@@ -1419,11 +1407,10 @@ final class VectorCanvas {
     /// at most once per change. Strokes are stamped straight into this renderer's own context via
     /// `CGContextDabTarget`, which holds no lock of its own and cannot re-enter this one.
     ///
-    /// It used to allocate a throwaway `RasterLayerTexture` here, stamp into that, `makeImage()` a
-    /// second canvas-sized copy out of it, and blit that in — a canvas-sized CGContext plus a
-    /// canvas-sized CGImage (~16 MB each at 2048², ~64 MB at 4000²) per visible vector layer per
-    /// invalidation, both immediately discarded, plus a lock acquisition per dab on the scratch
-    /// texture. Stamping direct removes all of it.
+    /// Stamping straight into this renderer's own context, rather than through a throwaway
+    /// `RasterLayerTexture` that gets `makeImage()`'d and blitted in, avoids a canvas-sized CGContext
+    /// plus a canvas-sized CGImage (~16 MB each at 2048², ~64 MB at 4000²) per visible vector layer
+    /// per invalidation, plus a lock acquisition per dab on the scratch texture.
     ///
     /// **Why the transparency layer.** Dropping the intermediate is not unconditionally
     /// behaviour-preserving. The scratch texture isolated the strokes: they blended against each
@@ -1450,9 +1437,9 @@ final class VectorCanvas {
     /// 3. An `.erase` stroke is never part of a run, so by construction no transparency layer is ever
     ///    open when one is stamped: it punches `.destinationOut` straight against the accumulated
     ///    context and therefore lowers the alpha of *everything* beneath it in the list — fills and
-    ///    placed images included, which is the confirmed product behaviour (VECTOR_ERASER_PLAN.md §1).
-    ///    Punching inside a transparency layer would only eat that group's own pixels, which is why
-    ///    rule 1 makes an eraser close the run rather than join it.
+    ///    placed images included, which is the intended product behaviour. Punching inside a
+    ///    transparency layer would only eat that group's own pixels, which is why rule 1 makes an
+    ///    eraser close the run rather than join it.
     ///
     /// On any content the previous renderer could represent this is exactly the old behaviour: fills
     /// and images all sorted ahead of the strokes means there is precisely one paint run, spanning
@@ -1465,23 +1452,17 @@ final class VectorCanvas {
     /// polyline. That separation is deliberate — the rules above are what make an eraser correct, and
     /// a preview that got them wrong would be worse than no preview.
     private func renderLocalContent(quality: RenderQuality = .full) -> UIImage {
-        // `.standard` is not a detail — it is load-bearing, and measuring 5.3 is what found it.
-        // `UIGraphicsImageRendererFormat.preferredRange` defaults to `.automatic`, which on a
-        // wide-colour iPad backs the context with an extended-range 16-bit-per-component bitmap.
-        // That was invisible while the dabs went into a scratch `RasterLayerTexture` (an explicit
-        // 8-bit deviceRGB context) and only the finished image was drawn in. Stamping thousands of
-        // radial gradients directly into an extended-range context instead measured **155 ms
-        // against the old 70 ms** — the memory win would have shipped with a 2.2x wall-clock
-        // regression behind it. Pinning standard range puts dab rasterization back on the same 8-bit
-        // path `RasterLayerTexture` uses and brings it to 62 ms, i.e. faster than before as well as
-        // lighter.
+        // `.standard` is not a detail — it is load-bearing. `UIGraphicsImageRendererFormat
+        // .preferredRange` defaults to `.automatic`, which on a wide-colour iPad backs the context
+        // with an extended-range 16-bit-per-component bitmap. Stamping thousands of radial gradients
+        // directly into an extended-range context is drastically slower than stamping into an 8-bit
+        // one, so pinning standard range keeps dab rasterization on the cheap 8-bit path.
         //
         // No fidelity is lost relative to what this app actually delivers: every raster tier already
         // renders and persists as 8-bit deviceRGB (`RasterLayerTexture.ensureContext`,
-        // `PixelOps.deviceRGBColorSpace`, the cel PNGs), and the strokes here were being stamped
-        // into an 8-bit texture before this change regardless. A wide-gamut imported image is the
-        // one thing that previously kept extended range through this pass, and it was clipped
-        // downstream anyway the moment it was composited or saved.
+        // `PixelOps.deviceRGBColorSpace`, the cel PNGs). A wide-gamut imported image is the one thing
+        // that would otherwise keep extended range through this pass, and it is clipped downstream
+        // anyway the moment it is composited or saved.
         let format = PixelOps.transparentFormat()
         format.preferredRange = .standard
         let elements = _elements
@@ -1570,11 +1551,12 @@ final class VectorCanvas {
     /// randomness a brush carrying `scatter`/`rotationJitter` re-scattered its dabs each time and the
     /// user watched finished artwork crawl. Deriving the seed from the stroke's own id keeps it stable
     /// across save/load and gives two strokes different scatter patterns. See `BrushStamper.DabRNG`.
+    ///
     /// The one place a stroke's `lattice` is read. A piece is stamped by replaying its **parent's**
     /// walk under the parent's seed and drawing only the dabs in the piece's range, so its ink is the
-    /// parent's ink restricted rather than a fresh lattice laid down from the cut — see `DabLattice`
-    /// for the measurement that makes the distinction load-bearing. A stroke with no lattice takes the
-    /// path it always took.
+    /// parent's ink restricted rather than a fresh lattice laid down from the cut — see `DabLattice`.
+    /// A stroke with no lattice takes the path it always took.
+    ///
     /// The one place `quality` branches. `target` is the dab sink for `.full`; `cg` is the context
     /// `.preview` strokes its polyline into — the same context `target` wraps, so both qualities put
     /// ink in the same place and under the same transparency layer.
@@ -1666,8 +1648,8 @@ struct VectorCanvasData: Codable {
 
     /// The persisted form of one `VectorElement`. Written with an explicit `kind` discriminator rather
     /// than relying on Swift's synthesized enum encoding, so the on-disk shape is something a human can
-    /// read and a future version can extend (shapes, video — VECTOR_ERASER_PLAN.md §2.2) without the
-    /// layout being an implementation detail of the compiler.
+    /// read and a future version can extend (shapes, video) without the layout being an implementation
+    /// detail of the compiler.
     enum ElementData: Codable {
         case stroke(VectorStroke)
         case fill(VectorFillElement)

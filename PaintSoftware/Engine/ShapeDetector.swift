@@ -7,11 +7,9 @@ import Foundation
 /// Detection strategy: **fit the candidates and keep the one the stroke actually lies on.** Every
 /// candidate is scored by the same quantity — the RMS distance from the stroke's points to that
 /// candidate's outline, divided by the candidate's own size — so the three scores live on one
-/// comparable scale and the winner is simply the smallest. (The previous detector scored each kind
-/// with a metric of its own invention — "fraction of points near a box edge" against "radial
-/// variance" — which are not comparable numbers; a hand-drawn square scored 1.00 as a rectangle and
-/// 0.94 as an oval, so any wobble at all flipped the answer. That is what made rectangles come out
-/// as ellipses.)
+/// comparable scale and the winner is simply the smallest. (A prior detector scored each kind with
+/// an incomparable metric of its own — a hand-drawn square scored 1.00 as a rectangle and 0.94 as an
+/// oval, so any wobble flipped the answer and rectangles came out as ellipses.)
 ///
 /// Three things make the fit reliable:
 ///
