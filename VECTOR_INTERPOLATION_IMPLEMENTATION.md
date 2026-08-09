@@ -821,6 +821,13 @@ which way it went, and baseline against the state *with* the guide — are in `H
 
 ## Feature definition of done
 
+***MET — Session 19, 2026-08-09.*** The whole suite is **665 tests, 664 passed, 0 failed, 1 skipped
+(by design), `** TEST SUCCEEDED **`**. `HANDOFF.md` §2's "The feature's definition of done, checked"
+is the item-by-item verification, including what each explicitly-deferred exception covers. Two
+things remain that are **product-owner judgements rather than implementation**: item 4's
+velocity→easing mapping has never met a real stylus, and §8 item 46's ergonomic consequence wants a
+look on an iPad. The branch is also not yet merged to `main`.
+
 **The feature is DONE when all of the following hold. When they do, stop and report — do not look for
 more work.** (See `HANDOFF.md` §3.3.)
 

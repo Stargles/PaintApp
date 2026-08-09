@@ -44,12 +44,48 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 7 (guide strokes) — all seven items built.** Session 19 added item 2's editable handles, item 5's spacing chart and item 7's link/duplicate, plus the phase's e2e coverage. The phase's definition of done (brief workflow step 6, requirements 6 and 7) is met. Read `IMPLEMENTATION.md`'s "What Session 19 built" before touching any of it, and **§5.16 before touching the trajectory constraint** — it is still the one genuine design call the phase required. **Item 4 (velocity→easing) works and is pinned but has never met a real stylus**, which its own wording asks for; that is a product-owner judgement, not a test. |
-| **Branch** | `claude/vector-interpolation-design-9d5b83`, tracks `origin/`. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | `b6a879c`. Wider pure-logic tier **549/549**, zero expected failures; `InterpolationGuideLogicTests` 32 → 79; the interpolate e2e green on its own. |
-| **The Phase 7 boundary full run — OWED, not attempted to a number** | Session 19 started it and **killed it deliberately**: the host had 27 leftover Xcode clone devices and **898 simulator processes on 8 cores**, load average 855 — far past what §5.15 already calls meaningless, so the run in flight could only have produced noise. §5.18 is the write-up and the cleanup, which is **new and corrects §5's existing advice**: `simctl erase` on `interp-ipad` does not touch the clone set, which is where the accumulation actually lives. After cleanup the host went 898 → 7 processes. **The next session should run it first**, on a settled machine, and it is the last thing standing between here and the feature's definition of done. |
+| **Current phase** | **FEATURE COMPLETE.** Phases 0–7 are done, each meeting its own definition of done, and the feature-level definition of done in `IMPLEMENTATION.md` is met and verified item by item (see "The feature's definition of done, checked" below). Phase 7's last three items — item 2's editable handles, item 5's spacing chart, item 7's link/duplicate — landed in Session 19 along with the phase's e2e. **Nothing is in progress and nothing is half-built.** Per §3.3 this is the end state: further ideas belong in §8 and are the product owner's call, not the next session's backlog. |
+| **Branch** | `claude/vector-interpolation-design-9d5b83`, tracks `origin/`. Rebased onto `origin/main` as of Session 8. **Not yet merged to `main`.** |
+| **Last known-green commit** | `90fda02` plus the doc commit after it. Wider pure-logic tier **549/549**, zero expected failures; `InterpolationGuideLogicTests` **79**. |
+| **The Phase 7 boundary full run — GREEN, first attempt** | **665 tests, 664 passed, 0 failed, 1 skipped, `** TEST SUCCEEDED **`.** The single skip is `FillUITests.testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, skipped by design and the same one every clean run has skipped since Phase 3. This is the first fully clean whole-suite number with Phase 7 in, and it came on the **first** attempt — after §5.18's cleanup, on a host at load 9.6 with zero leftover clones. The previous attempt was killed rather than diagnosed, at load 855 with 898 simulator processes; §5.18 is why that mattered and what to do about it. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
+
+### The feature's definition of done, checked
+
+Each numbered item is `IMPLEMENTATION.md`'s, with what was verified rather than assumed.
+
+1. **Phases 0–7 complete** — each meets its own definition of done. Phase 7's is brief workflow step
+   6 and requirements 6 and 7; all three work end to end, and the e2e drives the gesture path.
+2. **The brief's workflow (§0 steps 1–6) works end to end on a vector layer** — steps 1–4 and 6 in
+   full. Step 5's paint-and-erase-at-an-in-between half is Phase 6; its **liquify/mesh-distort tool
+   and lasso resize are on the explicit deferred list** (the brief itself calls liquify "yet to be
+   added"), and §5.13 records why the transform half is a refusal rather than a gap.
+3. **Requirements 1–9** — 1, 4, 5, 6, 7, 8 and 9 in full. Requirement 2's real-time feedback is the
+   preview tier; §8 item 24's ~10 fps scrub is a recorded follow-on and the GPU rasteriser it would
+   want is explicitly deferred. Requirement 3's multi-keyframe model is in place; the spline across
+   4+ keyframes is explicitly deferred, and the data model allows it as Phase 2 required.
+4. **Edge cases 1, 2, 3 and 5 behave as designed** — 1: an eraser is a stroke, so it warps and fades
+   with no eraser-specific code, exactly as §7.1 predicted (§8 item 34's temporal thresholds are the
+   refinement, not the mechanism). 2: by construction — the engine never claims stroke 1 becomes
+   stroke 2. 3: fills warp their control points through the lattice
+   (`InterpolationEvaluator.warped(_:by:)`) and cross-fade by opacity; §7.3's colour-matched fill
+   correspondence and compositing layers are both deferred. 5: Generate onto a blank frame, Reproject
+   onto a drawn one, never conflated (`PLAN.md` §10 decision 3).
+5. **Full undo, one step per user action** — every mutation goes through `withInterpolationUndo` or a
+   gesture bracket; each drag added this phase is pinned by a one-undo-restores-it test.
+6. **Old projects load; new projects round-trip** — `ProjectSaveLogicTests` green in the full run.
+7. **Full suite green, no regression in the raster/vector pixel-parity tests** — the row above;
+   `RasterVectorParityLogicTests` green.
+8. **§2 says "feature complete" and §8 lists suggested follow-on work** — this section and §8's 51
+   items.
+
+**What is left is not implementation.** Two things want the product owner on an iPad, and both are
+judgements a test cannot make: **item 4's velocity→easing mapping has never met a real stylus**
+(`IMPLEMENTATION.md` item 4 asks for tuning against real strokes and warns it will feel twitchy
+first), and **§8 item 46** — because only a guide's shape is read, an arc drawn in an empty corner
+moves the character exactly as one drawn over it, which is an ergonomic gain and a drift from §6.1's
+picture. Merging the branch to `main` is also still to do.
 
 **Papers: supplied and read — do not re-request.** [MoStyle/frite](https://github.com/MoStyle/frite)
 and [Inria RR-9559](https://inria.hal.science/hal-04797216/file/RR-9559.pdf). **§5.11 is the
