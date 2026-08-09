@@ -800,6 +800,23 @@ guide, with no exception carved out of it for a hitbox.
   also a pure function of the state at touch-down, held on `CanvasManager`, or the falloff and the
   curve compound and a slow drag does more than a quick one.
 
+**The e2e was extended a fourth time, and it found two bugs no logic test could.** Both made the
+feature unusable in the real app while every fast-tier test stayed green:
+
+- **The guide overlay never received touches.** `reconcileLayers` brings every layer host to the
+  front when the layer order changes, which put them all above an overlay added once in `makeUIView`.
+  Hosts are transparent, so the guide kept *drawing* correctly while `hitTest` never reached it and
+  the handles were dead. `updateGuideOverlay` now re-asserts the z-order every pass, as
+  `updateShapeOverlay` always did.
+- **The Guide button could not be pressed.** Item 5's Spacing toggle grew the command row's trailing
+  cluster to four buttons, which overran the centred command group the `ZStack` draws last — on a
+  portrait iPad Guide sat underneath Reproject, `isHittable == false`. Both guide toggles moved to
+  `GuideRow`, restoring the command row to exactly Phase 4.6's layout.
+
+The test asserts the **trajectory and not the easing**, as the phase's carry-over asked. Its own
+three lessons — aim at the guide's *start* handle, assert that the drag reached the frame rather than
+which way it went, and baseline against the state *with* the guide — are in `HANDOFF.md` §5.
+
 ---
 
 ## Feature definition of done

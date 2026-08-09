@@ -44,11 +44,10 @@ need. Read what §1 says to read; consult the rest on demand.
 
 | | |
 |---|---|
-| **Current phase** | **Phase 7 (guide strokes), items 1, 3, 4 and 6 done plus half of item 2.** An artist can arm Guide on the bar, draw an arc, and watch the in-between leave the straight line; the stylus velocity along that arc becomes the easing. **Not built: item 2's editable handles, item 5's spacing chart, item 7's link/duplicate.** Read `IMPLEMENTATION.md`'s "What Session 18 built" subsection before touching any of it — especially the chord-deviation interpretation (§5.16), which is the one genuine design call the phase required. Item 4 works and is pinned but has **never been tried on an iPad**, which its own wording asks for. |
+| **Current phase** | **Phase 7 (guide strokes) — all seven items built.** Session 19 added item 2's editable handles, item 5's spacing chart and item 7's link/duplicate, plus the phase's e2e coverage. The phase's definition of done (brief workflow step 6, requirements 6 and 7) is met. Read `IMPLEMENTATION.md`'s "What Session 19 built" before touching any of it, and **§5.16 before touching the trajectory constraint** — it is still the one genuine design call the phase required. **Item 4 (velocity→easing) works and is pinned but has never met a real stylus**, which its own wording asks for; that is a product-owner judgement, not a test. |
 | **Branch** | `claude/vector-interpolation-design-9d5b83`, tracks `origin/`. Rebased onto `origin/main` as of Session 8. |
-| **Last known-green commit** | Session 18's last. Wider pure-logic tier **517/517**, zero expected failures. On the **whole suite**, Session 18's first run (on Session 17's tree) was **592 / 591 / 0 / 1, `** TEST SUCCEEDED **`**, the skip being `testFillToolBridgesOpenContourGapWhenGapClosingEnabled`, by design — that is the last fully clean whole-suite number. See the row below for the second run. |
-| **The Session 17 full run — closed** | Session 17 left the boundary run unverified after two attempts on a host at load 129/272/412. **Session 18 re-ran it on a settled machine and it is green on the first attempt.** Nothing was wrong with the code; both bad runs were the host, exactly as §5.15 predicted. |
-| **The run with Phase 7 in — one environmental failure, diagnosed, not fixed** | 624 tests, 622 passed, **1 failed**, 1 skipped. The failure is `VectorEraserUITests.testMode1DeletesAStrokeItCoversEndToEndAndRetainsNothing`, and **both** of §5.15's reliable checks say environmental: it **passes alone** (32 s, on a settled erased device), and its assertion is *"The add menu should offer a Vector Layer option"* — the layer add menu, in a file this session's diff never touches (10 files, none in the layer panel). Its duration ratio was **29 s in-run against 32 s alone**, i.e. no slowdown, which is why §5.15 now downgrades that tell too. **Not re-run to a clean number, deliberately: Phase 7 is not finished, so this was a mid-phase check on the view-layer changes and not a boundary run.** The boundary run is still owed at the end of Phase 7. |
+| **Last known-green commit** | `b6a879c`. Wider pure-logic tier **549/549**, zero expected failures; `InterpolationGuideLogicTests` 32 → 79; the interpolate e2e green on its own. |
+| **The Phase 7 boundary full run — OWED, not attempted to a number** | Session 19 started it and **killed it deliberately**: the host had 27 leftover Xcode clone devices and **898 simulator processes on 8 cores**, load average 855 — far past what §5.15 already calls meaningless, so the run in flight could only have produced noise. §5.18 is the write-up and the cleanup, which is **new and corrects §5's existing advice**: `simctl erase` on `interp-ipad` does not touch the clone set, which is where the accumulation actually lives. After cleanup the host went 898 → 7 processes. **The next session should run it first**, on a settled machine, and it is the last thing standing between here and the feature's definition of done. |
 | **Tree state** | Clean. |
 | **Blocked on** | Nothing. |
 
@@ -307,6 +306,30 @@ reset *before* the phase-boundary run, not after it starts failing.
     topmost. **Handles are not built** — `hitTest` returns nil unconditionally and says so.
   - Tests: `InterpolationGuideLogicTests` (32). Wider pure-logic tier **517/517**, zero expected
     failures.
+
+- **Phase 7 — items 2, 5 and 7, and the phase closed (Session 19).** Three commits, `0017221`,
+  `4f2e23c` and `b6a879c`. 47 new `InterpolationGuideLogicTests` (32 → **79**); wider pure-logic tier
+  **549/549**. `IMPLEMENTATION.md`'s "What Session 19 built" is the record of the shape.
+  - **The design call was that two editors cannot share one polyline.** Shape handles and spacing
+    dots both sit on the guide and both want a drag, so `GuideOverlayView.Editing` offers one at a
+    time and the bar's Shape/Spacing toggle says which. `PLAN.md` §6.2 turns out to have said so all
+    along, listing them as separate controls. A third state, `.none`, is the Guide toggle being
+    **armed**: while it is lit every canvas drag is a new guide, with no exception carved out of it.
+  - **Item 2** — `GuideHandles`, in `Engine/GuidePath.swift`, so all of it is fast-tier. A handle is
+    a **sample index**, so a dragged handle lands exactly under the finger; the falloff reaches **to
+    the adjacent handle, per side**, which makes "one handle never moves another" true by
+    construction and leaves both endpoints — and therefore the chord — exactly where they were.
+  - **Item 5** — `SpacingChart`, one stop per timeline frame, drawn as dots along the guide. A view
+    of whichever curve is in force, never a second store of the timing; a dot drag writes
+    `binding.spacing`, the precedence Session 18 had already built and tested.
+    `GuidePath.arcFraction(nearest:)` is the new inverse.
+  - **Item 7** — link is one line (`guideIDs.append`); duplicate copies the samples and the `role`
+    under a fresh id, taking **this** interval and binding whole-frame. `GuideRow` is the list all of
+    it needed, and it is also where §8 items 47 and 48 now live.
+  - **The e2e found two view-layer bugs no logic test could**, both of which made the feature
+    unusable in the real app: the guide overlay never received touches (`reconcileLayers` brings
+    layer hosts to the front; the overlay must re-assert its z-order every pass), and the Guide
+    button was not hittable (item 5's toggle overran the command row's centred group). See §5.
 
 ### What is next
 
@@ -1419,6 +1442,50 @@ the code was written.
   carried, because which signal the arc means is a property of the drawing rather than of where it
   is used.
 
+- **A canvas overlay that only *draws* correctly proves nothing about whether it can be touched, and
+  this cost four runs to find.** `GuideOverlayView` is added last in `makeUIView`, but
+  `reconcileLayers` calls `bringSubviewToFront` on **every layer host** whenever the layer order
+  changes — so every host ends up above it. Hosts are transparent, so the dashed guide went on
+  looking exactly right while `hitTest` never reached it: the active layer's `StrokeCanvasView`
+  claimed the touch first and the handles were simply dead. `updateShapeOverlay` had this right all
+  along (it re-asserts `bringSubviewToFront` every pass) and the guide overlay copied its *drawing*
+  discipline without its *z-order* discipline. **Any new canvas overlay must re-assert its z-order on
+  every update, not once at construction.** No logic test can see this, by construction.
+
+- **Adding one button to `InterpolateBar`'s command row made an existing one unpressable.** The row
+  is a `ZStack`: a leading/trailing `HStack` with the centred command group drawn **on top**. Growing
+  the trailing cluster from {Commit, Remove} to {Guide, Shape, Commit, Remove} pushed Guide left far
+  enough to sit underneath Reproject on a portrait iPad — `isHittable == false`, `enabled == true`,
+  and nothing visibly wrong in a screenshot. The `ZStack` keeps Generate centred, which is what
+  Phase 4.6 wanted, and does **nothing** to stop the two groups overlapping. The fix was to move both
+  guide toggles onto `GuideRow`. **Treat that row as full**: anything new belongs on a row of its own.
+
+- **`isHittable` is the diagnostic, and asserting the *arming* step is what surfaced it.** Three runs
+  failed on "no guide was recorded", which reads as a broken capture path; the truth was that the
+  toggle tap never landed. An armed-state assertion immediately after the tap — carrying `label`,
+  `isHittable`, `frame` and `enabled` — turned a two-step-removed symptom into the answer in one run.
+  **When an XCUITest step is "press a control, then observe a consequence", assert the control's own
+  state change first.**
+
+- **A SwiftUI container with an `accessibilityIdentifier` and nothing else is not an element.** The
+  guide chip is an `HStack`, not a `Button`, so the identifier bound to nothing queryable and
+  `descendants(matching: .any)[...]` found nothing. `.accessibilityElement(children: .combine)` is
+  what promotes it — and it is the same fix VoiceOver needs. `MotionGroupRow`'s chips never hit this
+  because they are `Button`s.
+
+- **Three things an XCUITest driving guides has to know**, each of which cost a run:
+  - **Aim at the guide's *start* handle.** A synthetic drag's start point is exact; its end
+    undershoots by a timing-dependent amount (`performDrag`'s own note), so a guide drawn from A to B
+    does not have its midpoint where the test thinks, and the middle handle falls outside its hitbox.
+  - **Assert that the drag reached the frame, not which way it went.** Reshaping near an endpoint
+    tilts the chord, so the deviation at the midpoint has components in *both* axes and a
+    single-row pixel probe can come back empty. Direction is chord-relative geometry and is already
+    pinned at zero tolerance in the fast tier; the e2e's job is the routing.
+  - **Baseline against the state *with* the guide.** A guide's role is `.both`, so merely drawing one
+    hands the frame its stylus velocity as the easing — at `t = 0.5` an eased motion does not sit
+    where a linear one did. Comparing a later edit against the *no-guide* state charges it for that
+    shift too.
+
 - **Item 7 was UI, exactly as predicted, and the widget was the work.** `linkGuideStroke` is one
   line because a recipe has named guides by id since Phase 2. What took the time was `GuideRow`,
   and it was worth doing once: §8 items 47, 48 and 49 all wanted the same list, and two of them are
@@ -1480,6 +1547,37 @@ Three things follow that are worth keeping:
   boundaries the rest of the system holds fixed.** The literal reading was not wrong about the
   intent, it was wrong about the frame of reference — and the relative form is what makes the intent
   compatible with everything already built.
+
+### 5.18 `simctl erase` cleans the wrong device — the clones accumulate in a *different* device set
+
+§5's Phase 2 entry is right that the runner failures "build up over repeated runs that spawn parallel
+clones", and its fix — `simctl shutdown` + `erase` on `interp-ipad` — does **not** touch where they
+build up. Xcode's parallel clones live in their own device set at
+`~/Library/Developer/XCTestDevices`, not in the default one `simctl` addresses without `--set`. So
+erasing `interp-ipad` erases the *template* and leaves every clone running.
+
+Session 19 iterated the interpolate e2e six times in a row and finished with **27 leftover clone
+devices and 898 simulator processes on an 8-core machine**, load average 855 — far past the
+129/272/412 §5.15 already calls meaningless, and with a full run in flight that would have been pure
+noise. Erasing `interp-ipad` between attempts had been done and had changed nothing, because it was
+never the problem.
+
+```bash
+pkill -f "xcodebuild test"
+xcrun simctl --set ~/Library/Developer/XCTestDevices shutdown all
+xcrun simctl --set ~/Library/Developer/XCTestDevices delete all   # Xcode recreates one per run
+xcrun simctl shutdown all
+xcrun simctl erase 16B39106-1805-425B-BB75-02D436D36533
+```
+
+That took the host from 898 simulator processes to 7. The clone set holds nothing worth keeping —
+each entry is a per-run copy of the template — and the real simulators in the default set are
+untouched, which is worth checking after (`xcrun simctl list devices | grep interp-ipad`).
+
+**Do this before a phase-boundary run, and count the clones rather than trusting that an erase
+worked**: `xcrun simctl --set ~/Library/Developer/XCTestDevices list devices | grep -c Clone`. A
+healthy machine reports 0 or 1. Then wait for `uptime`'s one-minute average to come back under the
+core count before starting — it falls within a couple of minutes once the clones are gone.
 
 ### 5.15 Run `uptime` before diagnosing a failed full run — it is the cheapest signal and no earlier entry mentions it
 
@@ -2060,6 +2158,21 @@ What Phase 3 decided that Phase 4 inherits:
   the e2e's new Commit wait was `timeout: 5`, copied from the file's twenty other waits, all of
   which guard a cheap transition where this one guards the view catching up with a synchronous ARAP
   solve (`7045da3`). No subagents.
+
+- **Session 19 — 2026-08-09:** **Phase 7 closed — items 2, 5 and 7 built, and the phase's e2e
+  written.** Three commits: `0017221` (item 2's editable handles — `GuideHandles`, whose per-side
+  falloff makes "one handle never moves another" true by construction after a fixed radius failed a
+  test), `4f2e23c` (item 5's `SpacingChart` and item 7's link/duplicate plus `GuideRow`, with the
+  design call that the guide's two editors cannot share one polyline), and `b6a879c` (the e2e).
+  47 new `InterpolationGuideLogicTests`, 32 → **79**; wider pure-logic tier **549/549**.
+  **The e2e earned its cost twice**: the guide overlay never received touches (`reconcileLayers`
+  brings every layer host to the front, so the overlay drew correctly and `hitTest` never reached
+  it), and the Guide button was not hittable (item 5's toggle overran the command row's centred
+  group on a portrait iPad). Both were invisible to every logic test and both made the feature
+  unusable in the real app. **The boundary full run is still owed**: it was started and killed
+  deliberately at load 855 with 898 simulator processes, and §5.18 is the new carry-over — Xcode's
+  clone devices live in their own device set, so `simctl erase` on `interp-ipad` had never been
+  cleaning up what §5 said it was. No subagents.
 
 ---
 
