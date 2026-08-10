@@ -8,8 +8,7 @@ extension CodableColor {
 }
 
 /// Whether a `VectorStroke` *adds* ink or *removes* it. A mode on `VectorStroke` rather than its
-/// own element type, since an eraser is structurally a polyline with pressure and width, so
-/// interpolation, liquify and point decimation all get it for free.
+/// own element type, so an eraser gets interpolation, liquify and point decimation for free.
 enum StrokeComposite: String, Codable {
     case paint
     case erase
@@ -17,8 +16,7 @@ enum StrokeComposite: String, Codable {
 
 /// A brush stroke stored as geometry (input samples + brush/color/size), not baked pixels. Pixels
 /// are produced on demand by re-stamping the brush along these samples (`VectorCanvas.render` →
-/// `BrushStamper`), so a stroke can be moved/scaled and re-rasterized at native resolution with no
-/// quality loss. Fully `Codable` so it persists as JSON rather than a flattened PNG.
+/// `BrushStamper`), so a stroke can be moved/scaled and re-rasterized with no quality loss.
 struct VectorStroke: Identifiable, Codable {
     var id: UUID = UUID()
     var brush: Brush
@@ -26,70 +24,48 @@ struct VectorStroke: Identifiable, Codable {
     var size: CGFloat
     var opacity: Double
     var samples: [VectorSample]
-    /// `.erase` routes this stroke through `BrushStamper.stampStroke(..., isEraser: true)` at render
-    /// time — same pipeline as a paint stroke, composited `.destinationOut`, so it punches a hole in
-    /// everything beneath it in the display list.
+    /// `.erase` routes this stroke through `BrushStamper.stampStroke(..., isEraser: true)` — same
+    /// pipeline as paint, composited `.destinationOut`, punching a hole in everything beneath it.
     ///
-    /// The property default only covers construction. Decoding needs the explicit `init(from:)`
-    /// below since Swift's synthesized `Decodable` ignores property defaults and throws on a
-    /// missing key, which would break every project saved before this field existed.
+    /// Decoding uses the explicit `init(from:)` below: synthesized `Decodable` ignores property
+    /// defaults and throws on a missing key, which would break projects saved before this field existed.
     var composite: StrokeComposite = .paint
 
-    /// Set on a stroke that is a piece of another stroke: the lattice its dabs belong to. Nil for a
-    /// stroke drawn as itself.
-    ///
-    /// `samples` stays the truth about this stroke's geometry — bounds, spatial index, eraser
-    /// coverage, later cuts — so every geometric consumer works on a piece without knowing pieces
-    /// exist. The lattice answers only "where did the dabs go", which `samples` cannot for a piece.
-    /// See `DabLattice`.
+    /// The lattice a piece's dabs belong to, if this stroke is a piece cut from another. Nil for a
+    /// stroke drawn as itself. `samples` stays this stroke's geometric truth; the lattice answers
+    /// only "where did the dabs go". See `DabLattice`.
     var lattice: DabLattice?
 
-    /// The motion group this stroke belongs to while a keyframe interval is being interpolated —
-    /// nil means "not tagged".
-    ///
-    /// A field rather than a side table, because membership must survive copy, duplicate, split and
-    /// every undo snapshot; a side table keyed by stroke id would need mirroring at each of those
-    /// sites. A piece cut out of a tagged stroke keeps the tag for free this way.
-    ///
-    /// Independent of `color` on purpose — see `MotionGroup.tagColor`.
+    /// The motion group this stroke belongs to during keyframe interpolation. Nil means untagged.
+    /// A field, not a side table, so it survives copy/duplicate/split/undo automatically and a cut
+    /// piece keeps its parent's tag. Independent of `color` — see `MotionGroup.tagColor`.
     var motionGroupID: UUID? = nil
 
-    /// The interpolation parameter below which this stroke is not drawn at all — the τ threshold.
-    /// Set on a stroke drawn at an in-between so it doesn't appear before that frame, and on content
-    /// that exists at one keyframe but not the other. Nil means always visible.
+    /// The interpolation parameter below which this stroke is not drawn — the τ threshold. Set on a
+    /// stroke that appears at an in-between or exists at only one keyframe. Nil means always visible.
     var visibilityThreshold: CGFloat? = nil
 
-    /// Per-sample overrides of `visibilityThreshold`, keyed by index into `samples`. Absent in the
-    /// common case (a stroke that appears/vanishes all at once needs only the scalar above); lets a
-    /// stroke vanish progressively along its length instead of popping. A dictionary rather than a
-    /// parallel array since entries are few and an array would need resizing in lockstep.
+    /// Per-sample overrides of `visibilityThreshold`, keyed by index into `samples`. Absent unless a
+    /// stroke needs to vanish progressively along its length instead of all at once.
     var sampleVisibilityThresholds: [Int: CGFloat]? = nil
 
     var uiColor: UIColor { color.uiColor }
 
-    /// Spelled out so the hand-written `init(from:)` below can name the keys, without suppressing
-    /// the synthesized memberwise initialiser every construction site here uses.
+    /// Spelled out so `init(from:)` below can name the keys without suppressing the synthesized
+    /// memberwise initialiser every construction site here uses.
     enum CodingKeys: String, CodingKey {
         case id, brush, color, size, opacity, samples, composite, lattice
         case motionGroupID, visibilityThreshold, sampleVisibilityThresholds
     }
 }
 
-/// How a stroke cut out of another one reproduces the original's dabs instead of starting a lattice
-/// of its own.
-///
-/// `BrushStamper.stampStroke` anchors its dab lattice at `samples[0]`, spacing dabs along the whole
-/// path. Re-stamping a sub-run re-phases every dab in it, worst at the piece's far tip — the end an
-/// erase punch cannot cover. A piece instead stores the **parent's** samples and, for each of its
-/// own samples, the parameter it sits at in the parent's domain; rendering walks the parent whole and
-/// draws only the dabs inside `range`, so the piece's dabs are the same calls with the same
-/// arguments as the original, not a reconstruction.
-///
-/// `parameters` aligns with the piece's own `samples`; mapping a parameter from the piece's domain
-/// into the parent's is linear interpolation of this array (`parentParameter(of:)`), which is what
-/// lets a piece be cut again — the second cut composes with the first.
-///
-/// `seedID` is the parent's id, so the dab RNG replays the parent's sequence.
+/// How a stroke cut out of another one reproduces the original's dabs instead of starting a lattice of
+/// its own. `BrushStamper.stampStroke` anchors its dab lattice at `samples[0]`, so re-stamping a
+/// sub-run alone would re-phase every dab; instead a piece stores the **parent's** samples plus, per
+/// own sample, the parameter it sits at in the parent's domain, and rendering walks the parent whole,
+/// drawing only the dabs inside `range`. `parameters` maps into the parent's domain via linear
+/// interpolation (`parentParameter(of:)`), which lets a piece be cut again. `seedID` is the parent's
+/// id, so the dab RNG replays the parent's sequence.
 struct DabLattice: Codable, Equatable {
     /// The parent stroke's samples, whole — the walk that defines the lattice.
     var samples: [VectorSample]
@@ -116,9 +92,8 @@ struct DabLattice: Codable, Equatable {
     }
 }
 
-/// `init(from:)`/`encode(to:)` live in an extension because declaring any initialiser inside the
-/// struct body would suppress the memberwise initialiser every call site here builds with. A struct
-/// can satisfy `Decodable` from an extension, so this keeps both.
+/// `init(from:)`/`encode(to:)` live in an extension so declaring them doesn't suppress the
+/// memberwise initialiser every call site here builds with.
 extension VectorStroke {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -147,8 +122,7 @@ extension VectorStroke {
         try c.encode(opacity, forKey: .opacity)
         try c.encode(samples, forKey: .samples)
         try c.encode(composite, forKey: .composite)
-        // Written only when present, so an ordinary stroke's payload is byte-for-byte what it was
-        // before pieces existed. Same contract for the interpolation fields below.
+        // Written only when present, so an ordinary stroke's payload stays byte-for-byte unchanged.
         try c.encodeIfPresent(lattice, forKey: .lattice)
         try c.encodeIfPresent(motionGroupID, forKey: .motionGroupID)
         try c.encodeIfPresent(visibilityThreshold, forKey: .visibilityThreshold)
@@ -156,10 +130,9 @@ extension VectorStroke {
     }
 }
 
-/// A filled region stored as a vector path on a vector layer: the flood-fill tool's output when
-/// used on a `.vector` layer, instead of rasterizing into `Cel.bakedImage`. The path is a closed
-/// (possibly multi-loop, with holes) contour extracted from the GPU fill mask, stored as archived
-/// `UIBezierPath` data for `Codable` conformance.
+/// A filled region stored as a vector path on a vector layer: the flood-fill tool's output when used
+/// on a `.vector` layer, instead of rasterizing into `Cel.bakedImage`. A closed (possibly multi-loop,
+/// with holes) contour extracted from the GPU fill mask, stored as archived `UIBezierPath` data.
 struct VectorFillElement: Identifiable, Codable {
     var id: UUID = UUID()
     /// Archiver data for the fill path (supports multi-subpath via UIBezierPath's NSSecureCoding).
@@ -196,10 +169,9 @@ struct VectorImageElement: Identifiable {
     var fileName: String?
 }
 
-/// One entry in a `VectorCanvas`'s display list. Replaces the three parallel `strokes`/`fills`/
-/// `images` arrays that were drawn in a fixed order, which cannot express z-position — and
-/// z-position is what an eraser needs: an `.erase` stroke lowers the alpha of everything beneath it
-/// in this list.
+/// One entry in a `VectorCanvas`'s display list, drawn back to front. Not three parallel arrays,
+/// because z-position is what an eraser needs: an `.erase` stroke lowers the alpha of everything
+/// beneath it in this list.
 ///
 /// Not `Codable`: `.image`'s payload holds a runtime `UIImage`. Persistence has its own ordered
 /// representation that stores images by file name — see `VectorCanvasData.ElementData`.
@@ -232,16 +204,10 @@ enum VectorElement: Identifiable {
     }
 }
 
-/// How much fidelity a render is asked for.
-///
-/// `.preview` exists because rasterisation, not interpolation maths, is what makes scrubbing
-/// unusable: a dab is a Core Graphics radial-gradient fill and a stroke is hundreds of them, and an
-/// interpolated frame renders two canvases. Stroking each warped polyline as one `CGPath` instead is
-/// roughly two orders of magnitude cheaper — the artist scrubbing is judging motion, not texture.
-///
-/// What `.preview` gives up: per-dab pressure ramping (one width at mean pressure), grain, scatter,
-/// rotation jitter, and the alpha build-up overlapping dabs produce for a translucent brush. Shape,
-/// position, colour, blend mode and the eraser's punch are preserved.
+/// How much fidelity a render is asked for. `.preview` stamps one stroked `CGPath` per stroke instead
+/// of hundreds of dabs — ~100x cheaper, which is what makes scrubbing usable — at the cost of per-dab
+/// pressure ramping, grain, scatter, rotation jitter, and dab alpha build-up. Shape, position, colour,
+/// blend mode and the eraser's punch are preserved.
 enum RenderQuality {
     case full
     case preview
@@ -250,26 +216,21 @@ enum RenderQuality {
 /// The vector content of one cel on a `.vector` layer: strokes + placed images, plus one overall
 /// affine transform applied to the whole set. A class because it's a persistent mutable buffer the
 /// drawing surface stamps into; renders on demand to a canvas-native `UIImage` displayed with
-/// nearest-neighbor magnification, so it still looks pixelated when zoomed even though the source is
+/// nearest-neighbor magnification, so it stays pixelated when zoomed even though the source is
 /// resolution-independent.
 final class VectorCanvas {
     let size: CGSize
 
-    /// Guards `_elements`/`_transform` and `cachedImage`. Live drawing mutates this canvas on the
-    /// main thread, but `render()` is also reached from a background queue (the interactive fill's
-    /// reference composite), so without this a stroke landing mid-fill would race the array read.
+    /// Guards `_elements`/`_transform` and `cachedImage`. Live drawing mutates this canvas on the main
+    /// thread, but `render()` is also reached from a background queue (the interactive fill's
+    /// reference composite), which would otherwise race the array read.
     ///
-    /// Mirrors `RasterLayerTexture`'s lock rather than making `VectorCanvas` an actor, since an
-    /// actor would turn every call site async across `CanvasView`/`CanvasManager`.
-    ///
-    /// Every private/`static` helper below is only ever called from a method that already holds
-    /// this lock, so none of them lock themselves — this non-reentrant lock would deadlock
-    /// otherwise. The stored-property accessors below are the public seam: they lock, so existing
-    /// call sites (`canvas.strokes = snapshot`, `cel.vector?.strokes.count`) stay unchanged and safe.
+    /// Non-reentrant: every private/`static` helper below is only called from a method already
+    /// holding this lock. The stored-property accessors are the public seam that locks.
     private let lock = NSLock()
 
-    /// The one z-ordered display list, drawn back to front. Replaces the three parallel arrays; see
-    /// `VectorElement` for why, and `renderLocalContent()` for how it is walked.
+    /// The one z-ordered display list, drawn back to front. See `VectorElement` for why not three
+    /// parallel arrays, and `renderLocalContent()` for how it is walked.
     private var _elements: [VectorElement]
     private var _transform: CGAffineTransform
 
@@ -281,20 +242,10 @@ final class VectorCanvas {
 
     // MARK: - Kind-filtered compatibility accessors
     //
-    // Keep ~30 call sites across the app and test suite compiling and behaving unchanged. Getters
-    // filter the display list; setters splice.
-    //
-    // Setter contract: remove every element of that kind, then insert the new list at the index the
-    // first removed element occupied — what makes a get→set round trip order-stable, which undo/redo
-    // depends on. Round-tripping is exact while each kind occupies one contiguous run, which
-    // `insertionIndex(forKind:in:)` guarantees for every list the app can currently build.
-    //
-    // When the canvas holds none of that kind, the fallback is `insertionIndex(forKind:in:)` rather
-    // than a plain append — a redo that reassigns fills after the matching undo removed them all
-    // must land back at the same ordering rule `add…` uses, not above strokes it belongs under.
-    //
-    // The setters do not invalidate: every caller that assigns wholesale follows with
-    // `bumpVersion()`, keeping the version counter ticking exactly as often as before.
+    // Getters filter the display list; setters splice: remove every element of that kind, then insert
+    // the new list at the index the first removed element occupied, so a get→set round trip is
+    // order-stable (undo/redo depends on this). Setters do not invalidate — callers follow with
+    // `bumpVersion()`.
 
     var strokes: [VectorStroke] {
         get { lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.stroke) }
@@ -333,29 +284,24 @@ final class VectorCanvas {
     private(set) var version: Int = 0
     private var cachedImage: UIImage?
 
-    /// The `.preview` render, memoized separately from `cachedImage` — the two are wanted at
-    /// different moments, and evicting one to make the other is exactly the thrash to avoid:
-    /// releasing the slider renders `.full` and must not discard `.preview`, and starting a drag
-    /// must not discard `.full`. Two slots cost one pointer.
+    /// The `.preview` render, memoized separately from `cachedImage` — releasing the slider renders
+    /// `.full` and must not discard `.preview`, and starting a drag must not discard `.full`.
     private var cachedPreviewImage: UIImage?
 
     /// Broad phase for every geometric query against this canvas's strokes, rebuilt lazily — see
     /// `strokeIndex()`. Version-keyed rather than cleared by `invalidate()`, since `version` only
-    /// ever increases, so a stale index can never be mistaken for current.
+    /// increases, so a stale index can never be mistaken for current.
     private var cachedIndex: StrokeSpatialIndex?
     private var cachedIndexVersion: Int = -1
 
     init(size: CGSize, elements: [VectorElement], transform: CGAffineTransform = .identity) {
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
-        // Assigns backing storage directly: init runs before the instance is shared with any other
-        // thread, so there's nothing to lock against yet.
         self._elements = elements
         self._transform = transform
     }
 
     /// Three-array convenience, kept because most construction sites (tests, the display-list-free
-    /// load path) already say it this way. Builds the list in fills, then images, then strokes
-    /// order — the fixed order the pre-display-list renderer drew in.
+    /// load path) already say it this way. Builds fills, then images, then strokes.
     convenience init(size: CGSize, strokes: [VectorStroke] = [], fills: [VectorFillElement] = [],
                      images: [VectorImageElement] = [], transform: CGAffineTransform = .identity) {
         self.init(size: size,
@@ -374,15 +320,12 @@ final class VectorCanvas {
     func makeCopy() -> VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
-        // The new instance has its own lock and isn't shared yet, so constructing it under this one
-        // can't deadlock; taking the lock is what makes the copy a coherent snapshot.
         return VectorCanvas(size: size, elements: _elements, transform: _transform)
     }
 
     /// A new canvas sized to `newSize` with all content shifted by `offset`, used by the
     /// canvas-padding resize. Lossless: `render()` applies `transform` after drawing local content,
-    /// so appending a translation shifts the whole result with no resampling. `size` is immutable,
-    /// so this returns a fresh instance.
+    /// so appending a translation shifts the result with no resampling.
     func resized(to newSize: CGSize, offset: CGPoint) -> VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
@@ -392,8 +335,7 @@ final class VectorCanvas {
 
     // MARK: - Display-list ordering
     //
-    // All `static`, so a method holding the non-reentrant `lock` can call them without any chance of
-    // re-entering it — the same reason the geometry mappers below are static.
+    // All `static`, so a method holding the non-reentrant `lock` can call them without re-entering it.
 
     private enum Kind: Int {
         case fill = 0
@@ -410,9 +352,8 @@ final class VectorCanvas {
     }
 
     /// Where a newly added element of `kind` belongs: after every element of the same or lower kind,
-    /// before the first of a higher one. Reproduces the legacy fills→images→strokes z-order (so
-    /// "flood-fill after drawing a line" still lands under the line) while the list stays capable of
-    /// arbitrary z-position, which the eraser needs. Assumes the list is kind-sorted.
+    /// before the first of a higher one. Reproduces the legacy fills→images→strokes z-order while the
+    /// list stays capable of arbitrary z-position, which the eraser needs. Assumes the list is kind-sorted.
     private static func insertionIndex(forKind kind: Kind, in elements: [VectorElement]) -> Int {
         elements.firstIndex { Self.kind(of: $0).rawValue > kind.rawValue } ?? elements.count
     }
@@ -450,8 +391,8 @@ final class VectorCanvas {
         invalidate()
     }
 
-    /// True when a rendered image of either quality is memoized — what a cache-eviction policy
-    /// counts. A cel holding only a `.preview` render is just as much of a claim on memory.
+    /// True when a rendered image of either quality is memoized — what cache eviction counts. A cel
+    /// holding only a `.preview` render is just as much of a claim on memory.
     var hasCachedImage: Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -459,9 +400,8 @@ final class VectorCanvas {
     }
 
     /// Frees the memoized render without touching the content. Deliberately not `invalidate()`:
-    /// `version` means "the content changed," and bumping it would make every version-keyed
-    /// consumer believe an edit happened when nothing did — the next `render()` just recomputes the
-    /// same image. See `CanvasManager.evictDistantVectorRenderCaches` for the eviction policy.
+    /// `version` means "the content changed", and bumping it would make version-keyed consumers
+    /// believe an edit happened when nothing did. See `CanvasManager.evictDistantVectorRenderCaches`.
     func dropCachedImage() {
         lock.lock()
         defer { lock.unlock() }
@@ -479,16 +419,15 @@ final class VectorCanvas {
     }
 
     /// Adds a stroke whose samples were captured in canvas space — a live drag, or a smart shape's
-    /// collapsed outline — mapping both geometry and width into this canvas's local space. Stored
-    /// content is local-space and `render()` applies `transform` on top, so storing canvas-space
-    /// samples verbatim would put the stroke through the transform twice.
+    /// collapsed outline — mapping geometry and width into this canvas's local space (storage is
+    /// local-space; `render()` applies `transform` on top).
     func addStroke(canvasSpaceStroke stroke: VectorStroke) {
         lock.lock()
         defer { lock.unlock() }
         var mapped = stroke
         mapped.samples = Self.localSamples(stroke.samples, through: _transform)
-        // Width is canvas-space too: a stroke drawn at N points on a layer scaled by k must be
-        // stored at N/k to come back out N points wide after render() rescales it.
+        // Width is canvas-space too: a stroke at N points on a layer scaled by k must store N/k to
+        // come back out N points wide after render() rescales it.
         let scale = Self.scale(of: _transform)
         if scale > 0 { mapped.size = stroke.size / scale }
         _elements.insert(.stroke(mapped), at: Self.insertionIndex(forKind: .stroke, in: _elements))
@@ -511,9 +450,8 @@ final class VectorCanvas {
         return Self.localSamples(samples, through: _transform)
     }
 
-    // The geometry mappers are static functions of the transform they're given rather than methods
-    // reading `_transform`, so a locked method can call them while holding the lock without any
-    // chance of re-entering it — the reason the public wrappers above are thin.
+    // Static functions of the transform they're given, rather than methods reading `_transform`, so
+    // a locked method can call them without re-entering the lock.
 
     private static func scale(of t: CGAffineTransform) -> CGFloat { hypot(t.a, t.b) }
 
@@ -546,15 +484,9 @@ final class VectorCanvas {
         invalidate()
     }
 
-    /// Adds a fill whose path was captured in **canvas** space — where the flood-fill mask, the
-    /// lasso, and every other on-screen path are measured — mapping it into this canvas's own local
-    /// space first.
-    ///
-    /// `renderLocalContent` draws `fills` untransformed and `render()` then applies `transform` on
-    /// top, so storing a canvas-space path verbatim puts the fill through `transform` a second time:
-    /// on any layer that has ever been moved, the filled region lands detached from the contour it
-    /// was poured into, and shifts again with every subsequent move. `erase(alongPath:)` already
-    /// maps its input the same way; this exists so the fill paths can't drift back out of step.
+    /// Adds a fill whose path was captured in **canvas** space — where the flood-fill mask, the lasso,
+    /// and every other on-screen path are measured — mapping it into this canvas's local space first,
+    /// or it would go through `transform` twice at render time.
     func addFill(canvasSpacePath path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) {
         lock.lock()
         defer { lock.unlock() }
@@ -580,10 +512,9 @@ final class VectorCanvas {
     }
 
     /// The overall transform expressed as a `LayerTransform` (position/uniform-scale/rotation) about
-    /// `pivot` — a fixed point in the content's own local (untransformed) space, typically its
-    /// content bounding box's center rather than the canvas center, so the Move tool's on-canvas box
-    /// tracks the actual content instead of the whole canvas. Assumes `transform` is a
-    /// translate·rotate·uniform-scale (which is all the overlay can produce), so it decomposes cleanly.
+    /// `pivot`, a fixed point in the content's own local space (typically its bounding box's center),
+    /// so the Move tool's on-canvas box tracks the actual content. Assumes `transform` is
+    /// translate·rotate·uniform-scale.
     func layerTransform(pivot: CGPoint) -> LayerTransform {
         lock.lock()
         defer { lock.unlock() }
@@ -617,51 +548,29 @@ final class VectorCanvas {
     // MARK: - Erasing
     //
     // The adapter layer between a gesture in canvas space and `VectorEraser`'s pure geometry: map
-    // into local space, ask the spatial index which strokes are even candidates, delegate the actual
-    // "which spans go away" decision, splice the survivors back at their parent's z-position.
-    //
-    // Nothing below decides geometry itself. That is the point of the split — every rule about what
-    // an eraser covers lives in `VectorEraser`/`StrokeGeometry`, where it is compiled into the test
-    // target and checked headlessly, rather than in here behind a lock and a render cache.
+    // into local space, ask the spatial index which strokes are candidates, delegate the "which spans
+    // go away" decision to `VectorEraser`/`StrokeGeometry`, splice survivors back at their z-position.
 
     /// Removes stroke geometry along an eraser gesture, according to `mode`. Returns true if anything
     /// changed.
     ///
-    /// Eraser input is in **canvas** space (that is where touches are measured), so both the samples
-    /// and the brush diameter are mapped through the inverse layer transform before they meet the
-    /// stored, local-space geometry — otherwise erasing a scaled-up layer cuts a nib-sized hole where
-    /// the user swept a wide one.
+    /// Eraser input is in **canvas** space; samples and brush diameter are mapped through the inverse
+    /// layer transform before meeting the stored, local-space geometry, or erasing a scaled-up layer
+    /// would cut a nib-sized hole where the user swept a wide one.
     ///
-    /// Surviving pieces are spliced back **in place**, so they keep the z-position their parent held
-    /// relative to fills, images and other strokes. Id semantics are load-bearing now that
-    /// `BrushStamper`'s dab RNG is seeded from `stroke.id`: an untouched stroke keeps its id and
-    /// therefore its exact scatter/jitter pattern, while a split mints fresh ids and re-rolls the
-    /// pattern for both pieces (which is unavoidable — two strokes cannot share one seed without
-    /// sharing one dab sequence).
+    /// Surviving pieces are spliced back in place, keeping their parent's z-position. An untouched
+    /// stroke keeps its id (and so its scatter/jitter pattern, seeded from `stroke.id`); a split mints
+    /// fresh ids and re-rolls the pattern for both pieces.
     ///
-    /// ## What this replaced
-    ///
-    /// An earlier implementation compared every stroke sample against every raw eraser *touch point*
-    /// and dropped whole samples. That is gone: a small nib no longer passes between two coarse
-    /// touches without erasing (the eraser is a continuous capsule chain), cuts land at the
-    /// footprint's edge instead of at the nearest stored sample, a coarse stroke is probed along its
-    /// segments instead of judged at its vertices, and the traversal is bounded by the spatial index
-    /// instead of being O(all samples × all touch points) over every stroke on the layer.
-    ///
-    /// ## `composite`
-    ///
-    /// `.erase` strokes are skipped — the display list deliberately leaves them alone here. An eraser
-    /// element is not ink; cutting a span out of one would *restore* the ink beneath it, which is not
-    /// what any of the three modes mean by erasing. Whatever produces `.erase` elements garbage-
-    /// collects them instead.
+    /// `.erase` strokes are skipped: cutting a span out of one would *restore* the ink beneath it.
     @discardableResult
     func erase(alongPath canvasSpaceSamples: [VectorSample], brush: Brush, size: CGFloat,
                opacity: Double = 1, mode: VectorEraserMode) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard !canvasSpaceSamples.isEmpty else { return false }
-        // Mode 1 can leave a punch over a fill or a placed image, so unlike Modes 2 and 3 it has work
-        // to do on a layer with no strokes at all.
+        // Mode 1 can leave a punch over a fill or placed image, so unlike Modes 2/3 it has work to
+        // do on a layer with no strokes at all.
         guard mode == .erase || _elements.contains(where: { $0.stroke != nil }) else { return false }
 
         let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
@@ -679,27 +588,21 @@ final class VectorCanvas {
             changed = cutAlongFootprint(sweep: sweep)
         case .cutToIntersection:
             // Whole-gesture form, resolved once against the first sample. The live gesture driver
-            // uses `cutToIntersection(atCanvasPoint:…)` below instead, because Mode 3 cuts on
-            // touch-down and re-resolves per crossing; this stays as the one-shot API that the
-            // canvas offers for all three modes uniformly.
+            // uses `cutToIntersection(atCanvasPoint:…)` instead, since Mode 3 cuts on touch-down and
+            // re-resolves per crossing.
             changed = cutToIntersection(sweep: sweep, near: localSamples[0].point) == .cut
         }
         if changed { invalidate() }
         return changed
     }
 
-    /// Mode 3 resolved against a **single** eraser position: cutting on touch-down and re-querying
-    /// per crossing means one drag across three lines cuts three spans, because the driver calls this
-    /// once per touch sample rather than once per gesture.
+    /// Mode 3 resolved against a **single** eraser position: the driver calls this once per touch
+    /// sample, so a drag across three lines cuts three spans.
     ///
-    /// `cutting` is the driver's re-arming latch, not an optimisation. After a cut the eraser is still
-    /// sitting on the stroke it just cut — right next to the surviving pieces if the crossing was
-    /// nearby — so cutting again on the very next touch sample would walk down the line deleting span
-    /// after span from one stationary finger. The driver therefore disarms after a cut and re-arms only
-    /// once this reports `.missed`, i.e. once the tip has left ink entirely. Passing `cutting: false`
-    /// runs the same target search and reports the same outcome **without mutating the display list**,
-    /// so the driver learns it has left the ink from the query it was making anyway rather than from a
-    /// second one.
+    /// `cutting` is the driver's re-arming latch: after a cut the eraser is still sitting on the
+    /// stroke, so cutting again on the next sample would walk down the line deleting span after span
+    /// from one stationary finger. The driver disarms after a cut and re-arms only once this reports
+    /// `.missed`. `cutting: false` runs the same target search without mutating the display list.
     @discardableResult
     func cutToIntersection(atCanvasPoint canvasPoint: CGPoint, pressure: CGFloat, brush: Brush,
                            size: CGFloat, cutting: Bool = true) -> VectorEraser.CutOutcome {
@@ -711,8 +614,8 @@ final class VectorCanvas {
                                              through: _transform)
         let scale = Self.scale(of: _transform)
         let localSize = scale > 0 ? size / scale : size
-        // A one-sample sweep is the single dab the eraser has stamped so far: `capsuleChain` yields one
-        // zero-length capsule for it, so the footprint test below is the nib itself.
+        // A one-sample sweep is the single dab stamped so far: `capsuleChain` yields one zero-length
+        // capsule for it, so the footprint test below is the nib itself.
         guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: localSize,
                                              mode: .cutToIntersection) else { return .missed }
 
@@ -723,21 +626,13 @@ final class VectorCanvas {
 
     // MARK: - Mode 1 — the hybrid
     //
-    // The rules and the measurement that shaped them are documented on `VectorEraser`'s Mode 1
-    // section; this is the adapter that applies them to a display list. Three steps, in this order:
-    //
-    // 1. **Delete** every stroke the eraser covers end to end, so scribbling something out leaves
-    //    nothing behind.
-    // 2. **Split** every stroke it covers full-width over a stretch, at that stretch inset by the
-    //    stroke's own half-width, into pieces that keep rendering on the parent's dab lattice.
-    // 3. **Punch**, always, so the result is byte-identical to erasing the same content on a raster
-    //    layer — the gesture kept whole, and dropped entirely when no part of it has anything beneath.
-    //
-    // Step 3 is why Mode 1 is not just a better Mode 2 — it is what expresses a soft edge, a
-    // partial-width shave and an eraser opacity below 1, none of which geometry can. Steps 1 and 2 are
-    // why the list does not grow forever, and step 2 is what gives the user two halves they can move
-    // apart. Every step is invisible in the pixels by construction: 1 and 2 only ever remove ink that
-    // 3 was going to remove anyway.
+    // Rules documented on `VectorEraser`'s Mode 1 section; this is the adapter onto the display list.
+    // Three steps, in order: (1) delete every stroke the eraser covers end to end; (2) split every
+    // stroke it covers full-width over a stretch, inset by the stroke's own half-width, into pieces
+    // that keep rendering on the parent's dab lattice; (3) punch, always, matching raster-layer erasing
+    // exactly (soft edge, partial-width shave, opacity below 1 — none of which geometry alone can do).
+    // Steps 1–2 only remove ink step 3 would remove anyway, so they're pixel-invisible; they exist to
+    // keep the list from growing forever.
 
     /// Caller must hold `lock`.
     private func eraseHybrid(sweep: VectorEraser.Sweep, samples localSamples: [VectorSample],
@@ -745,16 +640,15 @@ final class VectorCanvas {
         var changed = false
 
         // The lightest dab in the gesture: pressure interpolates linearly between samples, so the
-        // minimum over the samples is the minimum over every dab the eraser stamped.
+        // minimum over samples is the minimum over every dab stamped.
         let minPressure = localSamples.map(\.pressure).min() ?? 1
         if VectorEraser.supportsCleanCut(brush: brush, opacity: opacity, minPressure: minPressure) {
             let erasers = VectorEraser.cleanCutCapsules(sweep.capsules, brush: brush, size: size)
             if !erasers.isEmpty {
                 if removeFullyErasedStrokes(sweep: sweep, erasers: erasers) {
                     changed = true
-                    // Bumps `version`, so everything downstream rebuilds its index against the
-                    // *survivors*. Without this the split below, and the residue query after it, would
-                    // ask a stale index whose element indices no longer address the same strokes.
+                    // Bumps `version` so downstream rebuilds its index against the *survivors* —
+                    // otherwise the split and residue query below address stale element indices.
                     invalidate()
                 }
                 if splitCleanlyErasedStrokes(sweep: sweep, erasers: erasers) {
@@ -768,14 +662,9 @@ final class VectorCanvas {
             hasContentBeneath(atParameter: parameter, in: localSamples, brush: brush, size: size)
         }
         if hasResidue {
-            // The eraser *is* a stroke: same brush, same size, same samples, same
-            // pressure-driven dab chain, composited `.destinationOut` at render. Appended last, so it
-            // punches everything already in the list and nothing drawn after it. The colour is
-            // arbitrary — `.destinationOut` reads only the stamp's alpha coverage.
-            //
-            // The samples are the gesture's, whole and unmodified, which is what makes this render the
-            // identical dab sequence the raster eraser would have stamped. See `hasResidue` for the
-            // measurement that ruled out retaining only the stretches that had a backdrop.
+            // The eraser *is* a stroke, composited `.destinationOut` at render. Appended last, so it
+            // punches everything already in the list and nothing drawn after it. Colour is arbitrary —
+            // `.destinationOut` reads only the stamp's alpha coverage.
             let punch = VectorStroke(brush: brush,
                                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                      size: size, opacity: opacity, samples: localSamples,
@@ -789,18 +678,13 @@ final class VectorCanvas {
     }
 
     /// Drops every candidate paint stroke the eraser covers **completely**. Caller must hold `lock`.
-    ///
-    /// Whole strokes only, and that restriction is the load-bearing part — `VectorEraser`'s Mode 1
-    /// notes carry the measurement. Deleting a stroke the eraser wholly covers is exactly pixel-neutral
-    /// because no new geometry is produced: nothing is re-stamped, so nothing can land anywhere new,
-    /// and every pixel the stroke contributed was under the punch anyway. Cutting a *piece* out of it
-    /// is not, because the surviving remainder is re-stamped as a fresh stroke and re-anchors its dab
-    /// lattice and its pressure ramp at the cut.
+    /// Whole strokes only, load-bearing: deleting a fully-covered stroke is pixel-neutral, but cutting
+    /// a *piece* out of one re-stamps the remainder and re-anchors its dab lattice and pressure ramp at
+    /// the cut.
     private func removeFullyErasedStrokes(sweep: VectorEraser.Sweep,
                                           erasers: [StrokeGeometry.Capsule]) -> Bool {
         // The index holds centrelines, so a stroke whose centreline sits outside the sweep's box can
-        // still have ink inside it. Grow the query by the widest half-width on the layer or the
-        // coverage test never gets asked about the strokes at the edge of the gesture.
+        // still have ink inside it. Grow the query by the widest half-width on the layer.
         let reach = maxPaintReach()
         let candidates = Set(strokeIndex().segments(near: sweep.bounds.insetBy(dx: -reach, dy: -reach))
             .map(\.elementIndex))
@@ -812,9 +696,8 @@ final class VectorCanvas {
         for (index, element) in _elements.enumerated() {
             guard candidates.contains(index), let stroke = element.stroke,
                   stroke.composite == .paint,
-                  // A scattering stroke throws dabs up to `radius · 2 · scatter` off its centreline, so
-                  // the capsule chain the coverage test uses does not bound its ink and "covered" would
-                  // be a claim about the wrong shape.
+                  // A scattering stroke throws dabs off its centreline, so the capsule chain the
+                  // coverage test uses does not bound its ink.
                   VectorEraser.supportsSplitting(strokeBrush: stroke.brush),
                   VectorEraser.isEntirelyCovered(stroke.samples, brush: stroke.brush, size: stroke.size,
                                                  by: erasers, sweep: sweep) else {
@@ -830,27 +713,15 @@ final class VectorCanvas {
     /// Cuts every candidate paint stroke at the spans the eraser covers **full width at full alpha**,
     /// inset by the stroke's own half-width. Caller must hold `lock`.
     ///
-    /// This is the geometric split, and it is wired up because `DabLattice` made it exact. Two
-    /// separate things had to be true first:
-    ///
-    /// 1. A surviving piece re-stamped as a fresh stroke re-anchors its dab lattice at the cut, moving
-    ///    its ink along its whole length. `splitPreservingLattice` is the answer — the pieces render on
-    ///    the parent's lattice, so their dabs are the parent's dabs.
-    /// 2. A cut end is a round cap of the stroke's half-width while the eraser removed ink along a
-    ///    straight band edge, so the ink a cut actually loses spills half a width past the span that
-    ///    was measured as covered. `VectorEraser.conservativeCuts` insets until the lost ink is a
-    ///    subset of the covered span, which the punch removes anyway, so the split changes nothing
-    ///    outside the punch.
-    ///
-    /// Both are needed. Either alone leaves stray ink outside the gesture, which the parity tests
-    /// assert at zero tolerance.
-    ///
-    /// A span too short to survive its own two insets disappears — the eraser was narrower than the
-    /// line it crossed, so there is no separation to be had and the punch handles it alone.
+    /// Exactness (zero tolerance in the parity tests) needs both: `splitPreservingLattice` renders
+    /// pieces on the parent's dab lattice so a cut doesn't re-anchor/re-scatter the remaining ink, and
+    /// `VectorEraser.conservativeCuts` insets the cut so the round-cap ink it loses stays a subset of
+    /// the covered span. A span too short to survive its own two insets disappears — the punch handles
+    /// it alone.
     private func splitCleanlyErasedStrokes(sweep: VectorEraser.Sweep,
                                            erasers: [StrokeGeometry.Capsule]) -> Bool {
-        // Same widened query as the deletion pass, and for the same reason: the index holds
-        // centrelines, and the coverage test asks about a stroke's whole width.
+        // Same widened query as the deletion pass: the index holds centrelines, and the coverage
+        // test asks about a stroke's whole width.
         let reach = maxPaintReach()
         let candidates = Set(strokeIndex().segments(near: sweep.bounds.insetBy(dx: -reach, dy: -reach))
             .map(\.elementIndex))
@@ -862,16 +733,11 @@ final class VectorCanvas {
         for (index, element) in _elements.enumerated() {
             guard candidates.contains(index), let stroke = element.stroke,
                   stroke.composite == .paint,
-                  // A lone dab has no length to cut, and letting it through would make this pass a
-                  // second, *weaker* deletion path for it: its whole domain is the single parameter
-                  // `0`, so a covered cross-section there removes it without anyone having checked
-                  // that the eraser also covers its round cap. That check is `isEntirelyCovered`'s,
-                  // in the deletion pass above, and it stays the only way a single-sample stroke goes.
+                  // A lone dab has no length to cut; `isEntirelyCovered` in the deletion pass above
+                  // is the only way a single-sample stroke goes.
                   stroke.samples.count > 1,
-                  // As in the deletion pass: a scattering stroke's ink is not bounded by the capsule
-                  // chain the coverage test measures, so "covered" would be a claim about the wrong
-                  // shape. The lattice would now carry such a stroke's dabs correctly; the coverage
-                  // test still cannot see where they landed.
+                  // As in the deletion pass: a scattering stroke's ink isn't bounded by the capsule
+                  // chain the coverage test measures.
                   VectorEraser.supportsSplitting(strokeBrush: stroke.brush) else {
                 result.append(element)
                 continue
@@ -894,22 +760,21 @@ final class VectorCanvas {
         return changed
     }
 
-    /// `stroke` cut into the pieces left by removing `cuts`, each rendering on the same dab lattice the
-    /// original did. Static, so it cannot re-enter `lock`.
+    /// `stroke` cut into pieces that keep rendering on the same dab lattice the original did. Static,
+    /// so it cannot re-enter `lock`.
     ///
-    /// A piece's `samples` are its own geometry — interpolated at the cut, exactly as `splitStroke`
-    /// has always produced — and its `lattice` says where in the parent's walk those samples came
-    /// from. Cutting a piece *again* composes rather than being forbidden: the new run's parameters
-    /// are in the piece's domain, so they are mapped back through the piece's own lattice before being
-    /// stored, and the grandchild ends up pointing at the original ancestor's samples directly.
+    /// A piece's `samples` are its own geometry (interpolated at the cut); its `lattice` says where in
+    /// the parent's walk those samples came from. Cutting a piece again composes: the new run's
+    /// parameters are mapped back through the piece's own lattice, so the grandchild points at the
+    /// original ancestor's samples directly.
     private static func splitPreservingLattice(_ stroke: VectorStroke,
                                                removing cuts: [ClosedRange<CGFloat>]) -> [VectorStroke] {
         let parentSamples = stroke.lattice?.samples ?? stroke.samples
         let seedID = stroke.lattice?.seedID ?? stroke.id
         return StrokeGeometry.splitStrokeRuns(stroke.samples, removing: cuts).map { run in
             var piece = stroke
-            // A fresh id, as every other split does: two pieces cannot share one. The dab seed no
-            // longer travels with the id for a piece — that is what `DabLattice.seedID` is for.
+            // Fresh id: two pieces cannot share one. The dab seed travels via `DabLattice.seedID`
+            // instead.
             piece.id = UUID()
             piece.samples = run.samples
             let parameters = stroke.lattice.map { run.parameters.map($0.parentParameter(of:)) }
@@ -927,10 +792,9 @@ final class VectorCanvas {
         let radius = StrokeGeometry.stampRadius(forPressure: dab.pressure, brush: brush, size: size)
         let box = CGRect(x: dab.x - radius, y: dab.y - radius, width: radius * 2, height: radius * 2)
 
-        // Fills and images have no geometry the split could have removed, so any overlap at all means
-        // the punch is still doing work. Bounding boxes rather than exact paths: conservative in the
-        // safe direction (an unnecessary punch is a retained element, a missing one is a visible
-        // artefact), and a fill's exact containment test per probe is not worth its cost here.
+        // Fills and images have no geometry the split could have removed, so any overlap means the
+        // punch is still doing work. Bounding boxes rather than exact paths: conservative in the safe
+        // direction, and cheaper than a fill's exact containment test per probe.
         for element in _elements {
             switch element {
             case .fill(let fill):
@@ -958,33 +822,19 @@ final class VectorCanvas {
         return false
     }
 
-    /// Garbage collection: a retained `.erase` element is dropped once nothing *beneath it*
-    /// in the display list still reaches its bounding box. Caller must hold `lock`.
-    ///
-    /// Beneath, not anywhere — an element added after the punch is above it and was never affected by
-    /// it, so its presence is no reason to keep one. Run on commit rather than per frame, which is why
-    /// a punch whose backdrop was deleted survives until the next erase; it renders as a hole in
-    /// nothing, so nothing is visibly wrong in the meantime.
-    ///
-    /// ## Why the boxes are computed up front
-    ///
-    /// Deriving every element's bounding box from scratch per punch — walking a stroke's samples, and
-    /// for a fill running `NSKeyedUnarchiver` over its archived `UIBezierPath` — costs `O(p · n)` box
-    /// derivations per erase for `p` punches over `n` elements, and both grow with use on an
-    /// erase-heavy layer: cost rises with how much erasing has already been done (see
-    /// `REFACTOR_BASELINE.md`).
-    ///
-    /// Deriving each box once and testing the punch against the accumulated list is the same verdict
-    /// by the same rule — a punch is kept exactly when some element **beneath it** reaches its box —
-    /// for `O(n)` derivations instead of `O(p · n)`.
+    /// Garbage collection: a retained `.erase` element is dropped once nothing *beneath it* (not
+    /// anywhere — elements added after the punch were never affected by it) in the display list still
+    /// reaches its bounding box. Caller must hold `lock`. Run on commit rather than per frame, since a
+    /// stale punch renders as an invisible hole in nothing in the meantime. Each element's box is
+    /// derived once and tested against the accumulated list — `O(n)` rather than `O(p · n)` for `p`
+    /// punches.
     private func collectResidueGarbage() -> Bool {
         guard _elements.contains(where: { $0.stroke?.composite == .erase }) else { return false }
         let reach = maxPaintReach()
         var kept: [VectorElement] = []
         kept.reserveCapacity(_elements.count)
-        // Boxes of the content already passed over, i.e. everything *beneath* the punch under
-        // consideration. Grows alongside `kept` and holds one entry per element that can be a
-        // backdrop, so `.erase` elements contribute nothing — a punch is not content for another punch.
+        // Boxes of content already passed over, i.e. everything *beneath* the punch under
+        // consideration. `.erase` elements contribute nothing — a punch is not content for another.
         var boxesBeneath: [CGRect] = []
         boxesBeneath.reserveCapacity(_elements.count)
         var dropped = false
@@ -1010,8 +860,7 @@ final class VectorCanvas {
     }
 
     /// An element's local-space bounding box as a *backdrop* — what a punch above it can be keeping
-    /// alive. Nil for anything that is not content: an `.erase` element punches ink, it never is any.
-    /// Static, so it cannot re-enter `lock`.
+    /// alive. Nil for anything that is not content (an `.erase` element punches ink, it never is any).
     private static func contentBounds(of element: VectorElement) -> CGRect? {
         switch element {
         case .stroke(let stroke):
@@ -1058,8 +907,7 @@ final class VectorCanvas {
         for (index, element) in _elements.enumerated() {
             guard candidates.contains(index), let stroke = element.stroke,
                   stroke.composite == .paint else {
-                // Fills and images are untouched by a geometric eraser, and so is anything the
-                // eraser's swept box never reached.
+                // Fills and images are untouched by a geometric eraser.
                 result.append(element)
                 continue
             }
@@ -1071,9 +919,8 @@ final class VectorCanvas {
                 var piece = stroke
                 piece.id = UUID()
                 piece.samples = run
-                // Mode 2 removes geometry rather than hiding it, so a piece is a stroke in its own
-                // right and re-stamps from its own first sample. Inheriting the parent's lattice would
-                // be worse than wrong — it would keep drawing dabs the user just cut away.
+                // Mode 2 removes geometry, so a piece re-stamps from its own first sample rather than
+                // inheriting the parent's lattice, which would keep drawing dabs just cut away.
                 piece.lattice = nil
                 result.append(.stroke(piece))
             }
@@ -1083,19 +930,16 @@ final class VectorCanvas {
     }
 
     /// Mode 3: the one stroke the eraser came down on loses the span between its two neighbouring
-    /// crossings. Caller must hold `lock`.
-    ///
-    /// `cutting: false` stops short of mutating anything and only reports whether a target was found —
-    /// see `cutToIntersection(atCanvasPoint:…)` for why the gesture driver needs that distinction.
+    /// crossings. Caller must hold `lock`. `cutting: false` reports whether a target was found
+    /// without mutating anything — see `cutToIntersection(atCanvasPoint:…)`.
     private func cutToIntersection(sweep: VectorEraser.Sweep, near hitPoint: CGPoint,
                                    cutting: Bool = true) -> VectorEraser.CutOutcome {
         let index = strokeIndex()
         let candidates = Set(index.segments(near: sweep.bounds).map(\.elementIndex))
         guard !candidates.isEmpty else { return .missed }
 
-        // The stroke the eraser came down on: nearest centreline among the candidates, and only if
-        // the eraser's footprint actually reaches it (a near miss should cut nothing, not cut the
-        // nearest thing on the layer).
+        // The stroke the eraser came down on: nearest centreline among the candidates, only if the
+        // eraser's footprint actually reaches it (a near miss cuts nothing).
         var target: (index: Int, stroke: VectorStroke, parameter: CGFloat)?
         var bestDistanceSquared = CGFloat.infinity
         for elementIndex in candidates.sorted() {
@@ -1108,10 +952,10 @@ final class VectorCanvas {
         }
         guard let target else { return .missed }
         // Past this point the tip *is* over ink, so every remaining exit says `.unchanged` rather than
-        // `.missed` — the driver must stay disarmed until the finger actually leaves the stroke.
+        // `.missed` — the driver must stay disarmed until the finger leaves the stroke.
         guard cutting else { return .unchanged }
 
-        // Everything that could cross it, with a width-aware tolerance per pair: two lines whose ink
+        // Everything that could cross it, with a width-aware tolerance per pair: lines whose ink
         // visibly touches read as crossed even when the centrelines miss.
         let targetReach = StrokeGeometry.stampRadius(forPressure: 1, brush: target.stroke.brush,
                                                      size: target.stroke.size)
@@ -1136,7 +980,7 @@ final class VectorCanvas {
             var piece = target.stroke
             piece.id = UUID()
             piece.samples = run
-            // As in Mode 2: this deletes geometry, so the piece is its own stroke from here on.
+            // As in Mode 2: deletes geometry, so the piece is its own stroke from here on.
             piece.lattice = nil
             pieces.append(.stroke(piece))
         }
@@ -1145,15 +989,11 @@ final class VectorCanvas {
     }
 
     /// `cuts` reduced to what actually removes something, so a graze that merely touches a stroke's
-    /// geometry doesn't churn it.
-    ///
-    /// Two filters. Ranges are merged and clamped to the run's domain first, so cuts that fall
-    /// entirely outside it disappear rather than being handed to `splitStroke` only to be dropped
-    /// there — the caller needs to know "nothing happened" to keep the stroke's id and skip the
-    /// invalidation. Then zero-width ranges go: on a multi-sample run they arise from a repeated
-    /// sample or a boundary graze and would otherwise rebuild the stroke, with a fresh id and a
-    /// re-rolled dab pattern, without deleting a thing. A single-sample run is exempt — its whole
-    /// domain *is* the zero-width range `0...0`, and removing that is how a lone dab gets erased.
+    /// geometry doesn't churn it (rebuild with a fresh id and re-rolled dab pattern) without deleting
+    /// anything. Ranges are merged/clamped to the run's domain first; then zero-width ranges are
+    /// dropped, since on a multi-sample run they only arise from a repeated sample or boundary graze. A
+    /// single-sample run is exempt — its whole domain *is* `0...0`, and removing that is how a lone dab
+    /// gets erased.
     private static func effectiveCuts(_ cuts: [ClosedRange<CGFloat>],
                                       in samples: [VectorSample]) -> [ClosedRange<CGFloat>] {
         guard !samples.isEmpty else { return [] }
@@ -1163,23 +1003,16 @@ final class VectorCanvas {
         return merged.filter { $0.upperBound - $0.lowerBound > StrokeGeometry.epsilon }
     }
 
-    /// A uniform grid over every stroke's segments, keyed by `version` so it survives as long as the
-    /// display list does and is rebuilt the first time anything asks after a mutation.
+    /// A uniform grid over every stroke's segments, keyed by `version` so it's rebuilt the first time
+    /// anything asks after a mutation. Bounds query cost to what the gesture touched; used by Mode 3's
+    /// intersection search, Mode 1's coverage test, and residue GC.
     ///
-    /// This is what takes the eraser off the "test everything against everything" path: a query
-    /// returns only the segments in the eraser's swept box, so the cost scales with what the gesture
-    /// touched rather than with how much is on the layer. Mode 3's intersection search and Mode 1's
-    /// coverage test and residue GC all query the same structure.
+    /// Caller must hold `lock`: `segments(near:)` stamps a per-query visit marker to de-duplicate refs
+    /// across cells, so it mutates during a *read*.
     ///
-    /// Caller must hold `lock` — and that is not just the usual convention here. `segments(near:)`
-    /// stamps a per-query visit marker into the index to de-duplicate refs across cells, so it
-    /// mutates during a *read*: two concurrent queries would interleave their markers and drop
-    /// results. The lock is what makes that safe; a future off-main reader needs its own index.
-    ///
-    /// Segment boxes are inserted with **no padding**, i.e. the index answers questions about stroke
-    /// *centrelines*. That is exactly what Modes 2 and 3 ask (does the footprint cover this point?).
-    /// Mode 1's coverage test asks about a stroke's own *width*, so it must expand its query rect by
-    /// the widest half-width on the layer rather than assume this rejects nothing it needed.
+    /// Segment boxes are inserted with **no padding** — the index answers questions about stroke
+    /// *centrelines*. Mode 1's coverage test asks about a stroke's own *width*, so it expands its query
+    /// rect by the widest half-width on the layer.
     private func strokeIndex() -> StrokeSpatialIndex {
         if let cachedIndex, cachedIndexVersion == version { return cachedIndex }
         let index = StrokeSpatialIndex()
@@ -1194,24 +1027,14 @@ final class VectorCanvas {
 
     // MARK: - Hit testing
 
-    /// The **topmost** paint stroke whose ink covers `point`, or nil for a tap on bare canvas.
+    /// The **topmost** paint stroke whose ink covers `point`, or nil for a tap on bare canvas. Used by
+    /// the retagging gesture (`CanvasManager.assignArmedMotionGroup(atCanvasPoint:)`).
     ///
-    /// Topmost, i.e. last in the display list, because that is the one the artist can see under their
-    /// finger — the same rule every other pick-what-I-touched affordance follows. The retagging
-    /// gesture is the caller (`CanvasManager.assignArmedMotionGroup(atCanvasPoint:)`).
+    /// Measured against the stroke's **ink**: the query rect is grown by the layer's widest half-width
+    /// and each candidate tested against its own stamp radius. `slop` widens the target beyond the ink
+    /// for a fingertip, added to the stroke's own radius so a hairline stays tappable.
     ///
-    /// Measured against the stroke's **ink**, not its centreline: the spatial index stores segment
-    /// boxes with no padding, so the query rect is grown by the layer's widest half-width and each
-    /// candidate is then tested against its own stamp radius. Without that a tap on the visible middle
-    /// of a fat stroke misses it, which reads as the gesture being broken.
-    ///
-    /// `slop` widens the target beyond the ink for a fingertip. It is added to the stroke's own
-    /// radius rather than replacing it, so a hairline is tappable without a fat stroke swallowing its
-    /// neighbours.
-    ///
-    /// Erasers are skipped. An eraser has no colour and no part — `tagMotionGroupsByStrokeColour`
-    /// skips them for the same reason — and tagging one by tapping the hole it left would be
-    /// mystifying. Fills and placed images cannot carry a tag at all (see
+    /// Erasers are skipped. Fills and placed images cannot carry a tag at all (see
     /// `VECTOR_INTERPOLATION.md` §4 item 11).
     func topmostStroke(atCanvasPoint point: CGPoint, slop: CGFloat = 6) -> VectorStroke? {
         lock.lock()
@@ -1239,13 +1062,11 @@ final class VectorCanvas {
     // MARK: - Rendering
 
     /// Rasterizes all content to a canvas-native `UIImage` (cached by `version`, one slot per
-    /// quality). Strokes are stamped via `BrushStamper` (identical to how they'd draw live); images
-    /// are drawn with their transforms; then the whole thing is drawn through the overall
-    /// `transform`. Always native resolution — the displaying image view magnifies it
-    /// nearest-neighbor, so it stays pixelated when zoomed.
+    /// quality). Strokes are stamped via `BrushStamper`; images drawn with their transforms; then the
+    /// whole thing is drawn through the overall `transform`.
     ///
-    /// `quality` changes only how a *stroke* is put down — see `RenderQuality`. Everything else about
-    /// the walk, including the isolation rules that make an eraser correct, is identical for both.
+    /// `quality` changes only how a *stroke* is put down — see `RenderQuality`. The isolation rules
+    /// that make an eraser correct are identical for both.
     func render(quality: RenderQuality = .full) -> UIImage {
         lock.lock()
         defer { lock.unlock() }
@@ -1276,80 +1097,40 @@ final class VectorCanvas {
         return final
     }
 
-    /// Just step 1 of `render()`: the layer's own content stamped at native resolution, before the
-    /// overall `transform` is applied. Not cached — only called from `render()` (once per
-    /// invalidation) and `localContentBounds()` (once per Move-tool overlay refresh).
+    /// Step 1 of `render()`: the layer's own content stamped at native resolution, before the overall
+    /// `transform` is applied. Not cached — only called from `render()` and `localContentBounds()`.
+    /// Caller must hold `lock` for the whole rasterization. Strokes stamp straight into this
+    /// renderer's own context via `CGContextDabTarget` rather than a throwaway `RasterLayerTexture`,
+    /// avoiding an extra canvas-sized `CGContext`+`CGImage` per invalidation.
     ///
-    /// Caller must hold `lock`. Note this means a rasterization holds the lock for its whole
-    /// duration, so a main-thread stroke can briefly block behind a background render — the same
-    /// trade-off `RasterLayerTexture.renderToUIImage()` already makes, and the cache means it happens
-    /// at most once per change. Strokes are stamped straight into this renderer's own context via
-    /// `CGContextDabTarget`, which holds no lock of its own and cannot re-enter this one.
+    /// **The isolation-group rule.** Strokes can be interleaved with fills, images and erasers, so
+    /// blend-mode isolation is scoped explicitly:
     ///
-    /// Stamping straight into this renderer's own context, rather than through a throwaway
-    /// `RasterLayerTexture` that gets `makeImage()`'d and blitted in, avoids a canvas-sized CGContext
-    /// plus a canvas-sized CGImage (~16 MB each at 2048², ~64 MB at 4000²) per visible vector layer
-    /// per invalidation, plus a lock acquisition per dab on the scratch texture.
+    /// 1. A *paint run* is a maximal stretch of consecutive `.paint` stroke elements; any fill, image,
+    ///    or `.erase` stroke ends it.
+    /// 2. If any stroke in a run has a non-`.normal` blend mode, the whole run is wrapped in one
+    ///    transparency layer so its strokes blend against each other but not what's beneath them. An
+    ///    all-`.normal` run opens no layer — source-over is associative, so drawing straight into the
+    ///    context is identical, and it's the common case.
+    /// 3. An `.erase` stroke is never inside a transparency layer: it punches `.destinationOut` against
+    ///    the accumulated context, lowering the alpha of everything beneath it — punching inside a
+    ///    layer would only eat that group's own pixels.
     ///
-    /// **Why the transparency layer.** Dropping the intermediate is not unconditionally
-    /// behaviour-preserving. The scratch texture isolated the strokes: they blended against each
-    /// other on transparent, and only the finished result was composited over the fills and images.
-    /// Stamping into this context instead exposes each dab to whatever is already underneath. For
-    /// `.normal` that is provably identical — source-over is associative, so
-    /// `(dab₂ over dab₁) over backdrop` equals `dab₂ over (dab₁ over backdrop)` — but a brush set to
-    /// multiply/screen/darken/lighten would start blending with the fills and images beneath it and
-    /// visibly change the render. So a group of strokes carrying a non-normal blend mode goes into a
-    /// transparency layer, which restores exactly the isolation the scratch texture provided
-    /// (composited once, source-over — the outer blend mode and alpha are `.normal`/1 at that point,
-    /// matching the old `draw(in:)`). The common all-normal case pays nothing for it.
-    ///
-    /// **The isolation-group rule**, now that strokes can be interleaved with fills, images and
-    /// erasers rather than always drawn last:
-    ///
-    /// 1. A *paint run* is a maximal stretch of consecutive `.paint` stroke elements. Any fill, any
-    ///    image, or any `.erase` stroke ends the run.
-    /// 2. If **any** stroke in a run has a non-`.normal` blend mode, the whole run is wrapped in one
-    ///    transparency layer, so its strokes blend against each other but not against the fills,
-    ///    images or earlier strokes beneath them. If every stroke in the run is `.normal`, no layer is
-    ///    opened at all — associativity of source-over (above) makes that provably identical, and it
-    ///    is the overwhelmingly common case.
-    /// 3. An `.erase` stroke is never part of a run, so by construction no transparency layer is ever
-    ///    open when one is stamped: it punches `.destinationOut` straight against the accumulated
-    ///    context and therefore lowers the alpha of *everything* beneath it in the list — fills and
-    ///    placed images included, which is the intended product behaviour. Punching inside a
-    ///    transparency layer would only eat that group's own pixels, which is why rule 1 makes an
-    ///    eraser close the run rather than join it.
-    ///
-    /// On any content the previous renderer could represent this is exactly the old behaviour: fills
-    /// and images all sorted ahead of the strokes means there is precisely one paint run, spanning
-    /// every stroke, and "any stroke non-normal → one layer around all of them" is what rule 2 reduces
-    /// to. `insertionIndex(forKind:in:)` is what keeps that sorting true.
-    ///
-    /// **`quality` does not reach this method's logic.** The run scan, the transparency-layer
-    /// decision and the index advance below are the same code for both qualities; the only thing that
-    /// branches is `Self.draw(stroke:…)`, which chooses between stamping dabs and stroking a
-    /// polyline. That separation is deliberate — the rules above are what make an eraser correct, and
-    /// a preview that got them wrong would be worse than no preview.
+    /// `insertionIndex(forKind:in:)` keeps fills/images ahead of strokes, so ordinary content has
+    /// exactly one paint run. `quality` doesn't reach this logic — only `Self.draw(stroke:…)` branches
+    /// on it — since the isolation rules must hold for a preview too.
     private func renderLocalContent(quality: RenderQuality = .full) -> UIImage {
-        // `.standard` is not a detail — it is load-bearing. `UIGraphicsImageRendererFormat
-        // .preferredRange` defaults to `.automatic`, which on a wide-colour iPad backs the context
-        // with an extended-range 16-bit-per-component bitmap. Stamping thousands of radial gradients
-        // directly into an extended-range context is drastically slower than stamping into an 8-bit
-        // one, so pinning standard range keeps dab rasterization on the cheap 8-bit path.
-        //
-        // No fidelity is lost relative to what this app actually delivers: every raster tier already
-        // renders and persists as 8-bit deviceRGB (`RasterLayerTexture.ensureContext`,
-        // `PixelOps.deviceRGBColorSpace`, the cel PNGs). A wide-gamut imported image is the one thing
-        // that would otherwise keep extended range through this pass, and it is clipped downstream
-        // anyway the moment it is composited or saved.
+        // `.standard` is load-bearing: `.preferredRange` defaults to `.automatic`, which on a
+        // wide-colour iPad backs the context with an extended-range 16-bit bitmap, and stamping
+        // thousands of radial gradients into that is drastically slower than into 8-bit. No fidelity
+        // is lost — every raster tier already renders and persists as 8-bit deviceRGB.
         let format = PixelOps.transparentFormat()
         format.preferredRange = .standard
         let elements = _elements
         return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             let cg = ctx.cgContext
-            // One target — and so one `DabGradientCache` — for the whole walk, exactly as before: the
-            // cache's steady state is one miss per stroke and a hit for every dab after it, and a
-            // per-run target would throw that away at every fill or eraser.
+            // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
+            // throw away the cache's hit rate at every fill or eraser.
             let target = CGContextDabTarget(cg)
             var index = 0
             while index < elements.count {
@@ -1385,12 +1166,11 @@ final class VectorCanvas {
         }
     }
 
-    // The per-kind drawing helpers. `static` for the same reason everything else here is: the caller
-    // holds the non-reentrant `lock`, so these must never take it, and taking only their inputs makes
-    // that structural rather than a promise.
+    // The per-kind drawing helpers are `static`, taking only their inputs, so they cannot re-enter
+    // the caller's non-reentrant `lock`.
 
-    /// The `.paint` stroke at `index`, or nil if that slot is out of range or holds anything else —
-    /// i.e. the run terminator for `renderLocalContent`'s scan.
+    /// The `.paint` stroke at `index`, or nil if out of range or another kind — the run terminator
+    /// for `renderLocalContent`'s scan.
     private static func paintStroke(at index: Int, in elements: [VectorElement]) -> VectorStroke? {
         guard index < elements.count, let stroke = elements[index].stroke,
               stroke.composite == .paint else { return nil }
@@ -1407,9 +1187,8 @@ final class VectorCanvas {
         } else {
             cg.fillPath()
         }
-        // Reset here rather than once after a whole block of fills. Those were equivalent only while
-        // nothing but fills could precede an image; in an interleaved list a leftover global alpha
-        // would dim whatever element came next.
+        // Reset here rather than after a whole block of fills: in an interleaved list a leftover
+        // global alpha would dim whatever element came next.
         cg.setAlpha(1.0)
     }
 
@@ -1425,20 +1204,14 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
-    /// Replays one stored stroke. `seed:` is what makes that a *replay* rather than a fresh roll:
-    /// this method runs again for every stroke on the layer on every invalidation, so with unseeded
-    /// randomness a brush carrying `scatter`/`rotationJitter` re-scattered its dabs each time and the
-    /// user watched finished artwork crawl. Deriving the seed from the stroke's own id keeps it stable
-    /// across save/load and gives two strokes different scatter patterns. See `BrushStamper.DabRNG`.
+    /// Replays one stored stroke. The seed is derived from the stroke's id so a `scatter`/
+    /// `rotationJitter` brush's dabs stay stable across invalidations and save/load — see
+    /// `BrushStamper.DabRNG`.
     ///
-    /// The one place a stroke's `lattice` is read. A piece is stamped by replaying its **parent's**
-    /// walk under the parent's seed and drawing only the dabs in the piece's range, so its ink is the
-    /// parent's ink restricted rather than a fresh lattice laid down from the cut — see `DabLattice`.
-    /// A stroke with no lattice takes the path it always took.
-    ///
-    /// The one place `quality` branches. `target` is the dab sink for `.full`; `cg` is the context
-    /// `.preview` strokes its polyline into — the same context `target` wraps, so both qualities put
-    /// ink in the same place and under the same transparency layer.
+    /// The one place a stroke's `lattice` is read: a piece is stamped by replaying its **parent's**
+    /// walk under the parent's seed, drawing only the dabs in the piece's range — see `DabLattice`.
+    /// `target` is the dab sink for `.full`; `cg` is the context `.preview` strokes into — the same
+    /// context `target` wraps, so both qualities land under the same transparency layer.
     private static func draw(stroke: VectorStroke, into cg: CGContext, target: DabTarget,
                              isEraser: Bool, quality: RenderQuality) {
         switch quality {
@@ -1449,13 +1222,11 @@ final class VectorCanvas {
 
     /// One stroked `CGPath` in place of the stroke's hundreds of dabs — the `.preview` tier.
     ///
-    /// Uses the stroke's **own** samples even for a piece carrying a `DabLattice`. That lattice
-    /// exists to reproduce the parent's dab *phase*, and there are no dabs here; the piece's samples
-    /// are its geometry and its geometry is all a polyline needs.
+    /// Uses the stroke's **own** samples even for a piece carrying a `DabLattice`: the lattice exists
+    /// to reproduce the parent's dab *phase*, and there are no dabs here.
     ///
-    /// Width and opacity are taken once, at the mean pressure, rather than ramped per dab. A varying
-    /// width would need one stroked path per segment, which gives most of the cost back for detail
-    /// nobody is judging mid-scrub.
+    /// Width and opacity are taken once, at the mean pressure, rather than ramped per dab — a varying
+    /// width would need one stroked path per segment, giving back most of the cost this tier saves.
     private static func strokePolyline(stroke: VectorStroke, into cg: CGContext, isEraser: Bool) {
         guard let first = stroke.samples.first else { return }
         let meanPressure = Double(stroke.samples.reduce(0) { $0 + $1.pressure })
@@ -1509,13 +1280,10 @@ final class VectorCanvas {
 
 // MARK: - Persistence payload
 
-/// Codable snapshot of a `VectorCanvas` for saving as JSON alongside the project.
-///
-/// Stores the **ordered display list**, so a saved project keeps the z-order it was drawn with rather
-/// than being re-flattened into three kind-buckets on every save. Images are still stored by file name
-/// only (their PNGs are written separately by `ProjectStore`, because `VectorImageElement.image` is a
-/// runtime `UIImage` and deliberately not `Codable`); strokes and fills are stored inline. That split
-/// is unchanged — it just travels per element instead of in a parallel array.
+/// Codable snapshot of a `VectorCanvas` for saving as JSON alongside the project. Stores the
+/// **ordered display list** so a saved project keeps its z-order rather than being re-flattened into
+/// three kind-buckets. Images are stored by file name only (PNGs written separately by
+/// `ProjectStore`, since `UIImage` isn't `Codable`); strokes and fills are stored inline.
 struct VectorCanvasData: Codable {
     struct ImageRef: Codable {
         var fileName: String
@@ -1526,9 +1294,7 @@ struct VectorCanvasData: Codable {
     }
 
     /// The persisted form of one `VectorElement`. Written with an explicit `kind` discriminator rather
-    /// than relying on Swift's synthesized enum encoding, so the on-disk shape is something a human can
-    /// read and a future version can extend (shapes, video) without the layout being an implementation
-    /// detail of the compiler.
+    /// than Swift's synthesized enum encoding, so the on-disk shape is human-readable and extensible.
     enum ElementData: Codable {
         case stroke(VectorStroke)
         case fill(VectorFillElement)
@@ -1566,9 +1332,8 @@ struct VectorCanvasData: Codable {
     /// Overall transform as [a, b, c, d, tx, ty]; missing/short → identity.
     var transform: [Double]
 
-    /// Kind-filtered reads of the display list, mirroring `VectorCanvas`'s compatibility accessors so
-    /// existing readers of `payload.strokes` / `.fills` / `.images` keep working. Read-only: a caller
-    /// that needs the order (i.e. the load path) should use `elements(resolvingImages:)`.
+    /// Kind-filtered reads of the display list, mirroring `VectorCanvas`'s compatibility accessors.
+    /// Read-only: a caller that needs the order should use `elements(resolvingImages:)`.
     var strokes: [VectorStroke] {
         elements.compactMap { if case .stroke(let stroke) = $0 { return stroke } else { return nil } }
     }
@@ -1596,8 +1361,8 @@ struct VectorCanvasData: Codable {
             case .stroke(let stroke): return .stroke(stroke)
             case .fill(let fill): return .fill(fill)
             case .image(let el):
-                // Unchanged contract: an image whose PNG was never written has no name to reference, so
-                // it is dropped rather than persisted as a dangling ref.
+                // An image whose PNG was never written has no name to reference, so it is dropped
+                // rather than persisted as a dangling ref.
                 guard let name = el.fileName ?? imageFileNames[el.id] else { return nil }
                 return .image(ImageRef(fileName: name, x: el.transform.position.x, y: el.transform.position.y,
                                        scale: el.transform.scale, rotation: el.transform.rotation))
@@ -1614,19 +1379,16 @@ struct VectorCanvasData: Codable {
             elements = ordered
             return
         }
-        // Legacy payload: three parallel arrays and no z-order at all. Rebuild the order the old
-        // renderer drew in — all fills, then all images, then all strokes — which is what makes an
-        // existing project open looking exactly as it did. It gains a real display list on first save.
+        // Legacy payload: three parallel arrays and no z-order. Rebuild the old draw order — fills,
+        // images, then strokes — so an existing project opens looking as it did.
         let strokes = try c.decode([VectorStroke].self, forKey: .strokes)
         let fills = try c.decode([VectorFillElement].self, forKey: .fills)
         let images = try c.decode([ImageRef].self, forKey: .images)
         elements = fills.map { .fill($0) } + images.map { .image($0) } + strokes.map { .stroke($0) }
     }
 
-    /// Written explicitly so it is unmistakable that only the new ordered form goes to disk. The legacy
-    /// arrays are deliberately *not* mirrored alongside it: a `.erase` stroke listed in a legacy
-    /// `strokes` array would render as paint in an older build, which is worse than that build seeing
-    /// no vector content at all.
+    /// Legacy arrays are deliberately *not* mirrored alongside the ordered form: an `.erase` stroke
+    /// listed in a legacy `strokes` array would render as paint in an older build.
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(elements, forKey: .elements)

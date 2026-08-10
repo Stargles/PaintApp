@@ -2,38 +2,26 @@ import SwiftUI
 
 // MARK: - Interpolation: registries, recipes and their undo mapping
 //
-// The document-level motion-group and guide registries live on `CanvasManager` itself (a Swift
-// extension cannot declare stored properties); everything that *edits* them lives here, so every
-// interpolation mutation goes through one file with its undo bracket already attached.
+// The document-level motion-group and guide registries live on `CanvasManager` itself (an
+// extension cannot declare stored properties); everything that edits them lives here with the
+// undo bracket attached.
 
 extension CanvasManager {
 
     // MARK: - Undo bracket
 
-    /// One undo step for an interpolation edit, covering the document-level registries, the layer
-    /// tree, **and** the contents of any vector canvases the edit touches.
-    ///
-    /// `withStructureUndo` is not sufficient alone: `StructureSnapshot` copies `[Layer]`, but
-    /// `Cel.vector` is a *class reference*, so the snapshot shares each canvas rather than copying
-    /// it. Restoring it restores frame ranges and recipes but nothing about the strokes inside —
-    /// right for a timeline edit, wrong for a retag, since a stroke's motion-group tag is a field on
-    /// `VectorStroke`. An edit spanning both tiers has to snapshot both, in one step.
-    ///
-    /// Pass only the canvases actually affected — cheap per canvas (value-type arrays whose heavy
-    /// parts are shared), but a document can hold many.
-    ///
-    /// Defers to an enclosing scope the way `withStructureUndo` does. The enclosing scope records
-    /// only the structure tier, so a vector-content edit nested inside a structural one would not be
-    /// undoable; nothing does that today, and the fix if needed is to widen the outer bracket rather
-    /// than record twice here.
+    /// One undo step for an interpolation edit: document-level registries, layer tree, and the
+    /// contents of any vector canvases the edit touches. `withStructureUndo` alone is not enough —
+    /// it copies `[Layer]`, but `Cel.vector` is a class reference and gets shared rather than
+    /// copied, wrong for a retag since a stroke's motion-group tag lives on `VectorStroke`. Pass
+    /// only the canvases actually affected. Defers to an enclosing scope like `withStructureUndo`.
     func withInterpolationUndo(name: String, touching canvases: [VectorCanvas] = [],
                                _ body: () -> Void) {
         guard structureUndoDepth == 0, gestureSnapshot == nil else {
             body()
             return
         }
-        // Bake a pending shape/fill first, so the transient lands as its own earlier step instead
-        // of being swallowed into this one.
+        // Bake a pending shape/fill first, so it lands as its own earlier step.
         beginCanvasEdit()
 
         let groupsBefore = motionGroups
@@ -41,8 +29,7 @@ extension CanvasManager {
         let layersBefore = layers
         let elementsBefore = canvases.map { $0.elements }
 
-        // `defer` guards against `body` exiting early — a depth that never comes back down would
-        // silently disable undo for everything after it.
+        // `defer` guards against `body` exiting early and leaving undo disabled.
         do {
             structureUndoDepth += 1
             defer { structureUndoDepth -= 1 }
@@ -74,8 +61,7 @@ extension CanvasManager {
         layers = restoredLayers
         for (canvas, list) in zip(canvases, elements) {
             canvas.elements = list
-            // Setters deliberately don't invalidate, so every wholesale assignment bumps the
-            // version itself.
+            // Setters don't invalidate, so a wholesale assignment bumps the version itself.
             canvas.bumpVersion()
         }
     }
@@ -105,12 +91,9 @@ extension CanvasManager {
     }
 
     /// Deletes a group, clears its tag off every stroke carrying it, and drops the per-keyframe
-    /// bindings that referenced it — all as one undo step, because they are one action.
-    ///
-    /// Guides bound to the group are left alone on purpose. Emptying a guide's `boundGroups` would
-    /// silently *promote* it to a whole-frame guide (empty means "every group"), a much worse
-    /// outcome than a dangling id, which simply makes the guide drive nothing — what deleting its
-    /// group should mean.
+    /// bindings that referenced it, all as one undo step. Guides bound to the group are left alone:
+    /// emptying a guide's `boundGroups` would silently promote it to a whole-frame guide (empty
+    /// means "every group"), worse than the dangling id.
     func removeMotionGroup(_ id: UUID) {
         guard motionGroups.contains(where: { $0.id == id }) else { return }
         let tagged = celsContainingStrokes { $0.motionGroupID == id }.map(\.canvas)
@@ -125,15 +108,11 @@ extension CanvasManager {
         }
     }
 
-    /// Assigns (or with a nil `groupID`, clears) the motion-group tag on the named strokes, wherever
-    /// in the document they live. One step, spanning as many layers and cels as the selection does —
-    /// the point of groups being document-level.
-    ///
-    /// **Re-registers every recipe that reads a touched cel, in the same step.** A tag is only half
-    /// of what a motion group is: the other half is the fitted lattice in the recipe, computed from
-    /// the *old* partition. Retagging without re-registering would change the colour-coding and
-    /// leave the motion exactly as it was — the tag reading as having done nothing. This is the line
-    /// that makes retagging show its result immediately.
+    /// Assigns (or with nil, clears) the motion-group tag on the named strokes, wherever in the
+    /// document they live, one step spanning every layer and cel touched. Re-registers every recipe
+    /// reading a touched cel in the same step — a tag is only half of a motion group, the other
+    /// half being the fitted lattice, so retagging alone would change the colour-coding but leave
+    /// the motion as it was.
     func setMotionGroup(_ groupID: UUID?, forStrokeIDs strokeIDs: Set<UUID>) {
         guard !strokeIDs.isEmpty else { return }
         let affected = celsContainingStrokes { strokeIDs.contains($0.id) }
@@ -147,15 +126,9 @@ extension CanvasManager {
     }
 
     /// Re-runs registration for every recipe reading any of `cels`, keeping each recipe's `t`, mode,
-    /// guides and local edits and replacing only its group bindings.
-    ///
-    /// Reads each recipe's **own** `references` rather than the transient reference selection, so it
-    /// is correct for a recipe built earlier and works with interpolate mode off.
-    ///
-    /// Records no undo step of its own — always part of a larger artist action, and the caller owns
-    /// the bracket. That bracket must be `touching: canvasesReached(byRetagging:)`, because
-    /// re-registration writes tags onto *every* keyframe of every recipe it re-runs, not only the
-    /// cel the artist touched.
+    /// guides and local edits, replacing only its group bindings. Records no undo step of its own —
+    /// the caller owns the bracket, and it must be `touching: canvasesReached(byRetagging:)`, since
+    /// re-registration writes tags onto every keyframe of every recipe it re-runs.
     func reregisterInterpolations(reading cels: Set<CelRef>) {
         let provider = interpolationContentProvider
         var targets: [(layer: Int, cel: Int)] = []
@@ -185,25 +158,18 @@ extension CanvasManager {
     /// actually in it.
     struct MotionGroupChip: Identifiable {
         var group: MotionGroup
-        /// Strokes carrying this group's id across every flagged keyframe. Zero is meaningful: it is
-        /// a group the artist made or deleted the last stroke out of, and hiding it would make it
-        /// unreachable rather than tidy.
+        /// Strokes carrying this group's id across every flagged keyframe. Zero is meaningful — a
+        /// group the artist emptied — so it stays shown rather than hidden as unreachable.
         var strokeCount: Int
         var isArmed: Bool
         var isHidden: Bool
         var id: UUID { group.id }
     }
 
-    /// The groups `InterpolateBar` puts on screen, in registry order.
-    ///
-    /// The registry rather than the active recipe's bindings, because a `MotionGroup` is
-    /// **document-level** by design — one group spans a lineart layer and a flats layer — so
-    /// scoping the chips to one recipe would hide the group an artist is about to tag content into
-    /// on a second layer. Counts are over the flagged keyframes, the drawing in front of them.
-    ///
-    /// The default whole-frame binding has a `groupID` with no registry entry and so contributes no
-    /// chip — deliberately, it is not an artist-facing object; `hasAnonymousWholeFrameGroup` is what
-    /// the bar uses to say so in words instead.
+    /// The groups `InterpolateBar` puts on screen, in registry order — the registry, not the active
+    /// recipe's bindings, since a `MotionGroup` is document-level (one group can span a lineart and
+    /// a flats layer). Counts are over the flagged keyframes. The default whole-frame binding has no
+    /// registry entry and contributes no chip; `hasAnonymousWholeFrameGroup` says so in words.
     var motionGroupChips: [MotionGroupChip] {
         let provider = interpolationContentProvider
         var counts: [UUID: Int] = [:]
@@ -229,33 +195,17 @@ extension CanvasManager {
         return motionGroup(withID: recipe.groups[0].groupID) == nil
     }
 
-    /// Arms a group for tap-to-assign, or disarms it when it is already armed.
-    ///
-    /// Toggling rather than a separate off switch: the chip is the only control, and an artist who
-    /// has finished tagging presses the thing they pressed to start. Arming a *different* group
-    /// while one is armed just moves the arming, matching how tagging several parts in a row looks.
+    /// Arms a group for tap-to-assign, or disarms it when already armed. Arming a different group
+    /// while one is armed just moves the arming.
     func toggleArmedMotionGroup(_ id: UUID) {
         armedMotionGroupID = armedMotionGroupID == id ? nil : id
     }
 
     /// The retagging gesture: assign the stroke under `point` on the current layer to the armed
-    /// group.
-    ///
-    /// Returns the stroke it tagged, or nil when nothing was armed, the layer isn't a vector layer,
-    /// or the tap landed on bare canvas — all "do nothing quietly" rather than errors.
-    ///
-    /// The cel it reaches is `interpolationTarget`, the same one every other command in this mode
-    /// acts on. In practice that's a *keyframe* — standing on the derived in-between there is
-    /// nothing to tap, correctly, since the in-between has no strokes of its own to belong to a
-    /// group.
-    ///
-    /// Tapping a stroke **already** in the armed group clears its tag instead, so one gesture both
-    /// adds and removes. Note what clearing means here: registration re-tags everything it
-    /// partitions, so the stroke is re-decided by geometry rather than left out
-    /// (`InterpolationMotionGroupLogicTests` pins this).
-    ///
-    /// Goes through `setMotionGroup`, so it re-registers and undoes in exactly one step like any
-    /// other retag.
+    /// group, or nil when nothing was armed, the layer isn't vector, or the tap landed on bare
+    /// canvas. Tapping a stroke already in the armed group clears its tag instead, so it is
+    /// re-decided by geometry on the next registration (`InterpolationMotionGroupLogicTests` pins
+    /// this). Goes through `setMotionGroup`, so it re-registers and undoes in one step.
     @discardableResult
     func assignArmedMotionGroup(atCanvasPoint point: CGPoint) -> UUID? {
         guard let armed = armedMotionGroupID, isInterpolateMode,
@@ -269,24 +219,10 @@ extension CanvasManager {
     // MARK: - "What did it decide?" — the tinted overlay
 
     /// A keyframe's own drawing, with every stroke repainted in its motion group's tag colour — the
-    /// "what did it decide?" legibility pass.
-    ///
-    /// Nil unless interpolate mode is on, the overlay is switched on, the cel is a vector cel and
-    /// something on it is actually tagged. A single-part drawing gets nothing, since tinting a whole
-    /// drawing one colour says nothing.
-    ///
-    /// **The whole display list, not just the tagged strokes**, because the seam it goes through
-    /// (`StrokeCanvasView.setInterpolationImage`) *replaces* the cel's display rather than drawing
-    /// over it. Returning only the tinted strokes would make every fill and placed image vanish
-    /// while the overlay was up.
-    ///
-    /// Untagged strokes are drawn grey rather than left in their own colour — a statement ("this
-    /// rides the first binding, along for someone else's ride") that's the state the artist is
-    /// looking for when they suspect a stroke is being carried by the wrong part. Black would be
-    /// indistinguishable from a stroke that's fine.
-    ///
-    /// Rendered at `.preview` quality: a diagram of a decision, not artwork, and the polyline tier
-    /// is several times cheaper per pass.
+    /// "what did it decide?" legibility pass. Nil unless interpolate mode and the overlay are on and
+    /// something is tagged. Returns the whole display list, not just tagged strokes: the seam it
+    /// renders through replaces the cel's display, so tinted strokes alone would make every fill and
+    /// placed image vanish. Untagged strokes are grey, to show they ride the first binding.
     func motionGroupOverlayImage(forCel celID: UUID, inLayer layerID: UUID) -> UIImage? {
         guard isInterpolateMode, showMotionGroupOverlay,
               let at = celIndices(forCel: celID, inLayer: layerID),
@@ -312,9 +248,8 @@ extension CanvasManager {
         else { hiddenMotionGroups.insert(id) }
     }
 
-    /// Solo: show only this group. Pressing it again on the group that is already alone clears the
-    /// filter rather than hiding everything, which is the only reading that lets solo be its own
-    /// off switch.
+    /// Solo: show only this group. Pressing it again on the already-alone group clears the filter
+    /// instead of hiding everything, so solo can be its own off switch.
     func soloMotionGroup(_ id: UUID) {
         let others = Set(motionGroups.map(\.id)).subtracting([id])
         hiddenMotionGroups = hiddenMotionGroups == others ? [] : others
@@ -322,28 +257,12 @@ extension CanvasManager {
 
     // MARK: - Tag by stroke colour
 
-    /// **Tag by stroke colour** — a one-shot populate.
-    ///
-    /// Clusters the strokes of `cels` by paint colour and writes one motion group per cluster into
-    /// `motionGroupID`, then re-registers so the new partition is what actually moves.
-    ///
-    /// A *populate*, never a live binding, and that distinction is the whole design. After it runs
-    /// the tags are ordinary tags: the artist can merge, split or reassign them, and recolouring a
-    /// stroke afterwards does **not** silently move it to a different motion group. A live binding
-    /// would be simpler to implement and much worse to use — every colour change would be a hidden
-    /// motion change.
-    ///
-    /// Exists because assigning tags by hand is tedious for art that already encodes structure in
-    /// its colours — the named mitigation for automatic grouping's inability to separate an attached
-    /// limb from its torso (see VECTOR_INTERPOLATION.md §4 item 1): distinguish the limbs by colour
-    /// in both reference frames and the grouping stops having to guess.
-    ///
-    /// **Erasers are skipped.** An eraser's colour says nothing about which part it belongs to, so
-    /// clustering on it would invent a group made of every eraser on the drawing. Left untagged they
-    /// ride the recipe's first binding, same as before this action existed. Making an eraser inherit
-    /// the group of the ink it overlaps is the right answer and is recorded rather than built.
-    ///
-    /// Returns the groups it created, in cluster order.
+    /// **Tag by stroke colour** — a one-shot populate. Clusters the strokes of `cels` by paint
+    /// colour and writes one motion group per cluster, then re-registers. A populate, never a live
+    /// binding: recolouring a stroke afterward does not move it to a different group. Mitigates
+    /// automatic grouping's inability to separate an attached limb from its torso
+    /// (VECTOR_INTERPOLATION.md §4 item 1). Erasers are skipped and left untagged, riding the
+    /// recipe's first binding. Returns the groups it created, in cluster order.
     @discardableResult
     func tagMotionGroupsByStrokeColour(in cels: [CelRef],
                                        tolerance: CGFloat = 0.08) -> [MotionGroup] {
@@ -354,8 +273,7 @@ extension CanvasManager {
         }
         guard !resolved.isEmpty else { return [] }
 
-        // One pass over every stroke in document order, so the clusters (and group names) come out
-        // the same on every run.
+        // One pass in document order, so clusters and group names come out the same every run.
         var representatives: [CodableColor] = []
         var clusterOfStroke: [UUID: Int] = [:]
         for (_, canvas) in resolved {
@@ -371,9 +289,7 @@ extension CanvasManager {
                 }
             }
         }
-        // One colour is not a grouping — it is the whole-frame group the drawing already had, and
-        // minting a single group for it would put an artist-facing object on screen that says
-        // nothing. Refusing here rather than in the UI keeps the rule in one place.
+        // One colour is not a grouping — it's the whole-frame group the drawing already had.
         guard representatives.count > 1 else { return [] }
 
         var created: [MotionGroup] = []
@@ -408,12 +324,9 @@ extension CanvasManager {
         return created
     }
 
-    /// How far apart two paint colours are, as the largest single-channel difference.
-    ///
-    /// Max-channel rather than Euclidean so the tolerance means one plain thing — "no channel differs
-    /// by more than this" — and a colour can't drift into a cluster by accumulating small
-    /// differences across channels. Alpha is included: a stroke at half opacity is a different paint
-    /// choice from the same hue at full, and on flats usually means a different pass.
+    /// How far apart two paint colours are, as the largest single-channel difference. Max-channel
+    /// rather than Euclidean, so the tolerance means "no channel differs by more than this". Alpha
+    /// is included: half opacity is a different paint choice from the same hue at full.
     private static func colourDistance(_ a: CodableColor, _ b: CodableColor) -> CGFloat {
         max(max(abs(a.red - b.red), abs(a.green - b.green)),
             max(abs(a.blue - b.blue), abs(a.alpha - b.alpha)))
@@ -476,8 +389,8 @@ extension CanvasManager {
     }
 
     /// Attaches, replaces or (with nil) removes a cel's recipe. Removing one leaves whatever content
-    /// the cel already had — the recipe is what *derives* content, not the content itself, so
-    /// dropping it must never delete a drawing.
+    /// the cel already had — a recipe derives content, it isn't the content, so dropping it must
+    /// never delete a drawing.
     func setInterpolation(_ recipe: InterpolationRecipe?, forCel celID: UUID, inLayer layerID: UUID) {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return }
         withInterpolationUndo(name: recipe == nil ? "Remove Interpolation" : "Interpolate") {
@@ -485,13 +398,9 @@ extension CanvasManager {
         }
     }
 
-    /// The slider's touch-down. Pairs with `commitInterpolationDrag` to make a whole drag **one**
-    /// undo step rather than one per tick — same bracket `resizeCelLeftEdge` uses for the timeline's
-    /// drags.
-    ///
-    /// `t` lives in the `Cel` struct, so the plain structure bracket is enough: no vector canvas
-    /// changes while the slider moves, since the display list is *derived* from the recipe rather
-    /// than rewritten by it.
+    /// The slider's touch-down. Pairs with `commitInterpolationDrag` to make a whole drag one undo
+    /// step. `t` lives in `Cel`, so the plain structure bracket suffices — the display list is
+    /// derived from the recipe, not rewritten, so no vector canvas changes while the slider moves.
     func beginInterpolationDrag() {
         isScrubbingInterpolation = true
         beginStructureGesture()
@@ -512,19 +421,10 @@ extension CanvasManager {
     // MARK: - Editing at an in-between
 
     /// The interpolated cel a layer is showing at the playhead, or nil when it is showing an
-    /// ordinary drawing.
-    ///
-    /// The gate is "the cel carries a recipe", **not** "interpolate mode is on". An interpolated cel
-    /// shows its derived in-between whatever mode the app is in, so a stroke committed to its own
-    /// `VectorCanvas` would land in a display list nothing on screen renders — the artist would draw
-    /// and watch the ink vanish. Routing on the recipe alone means an in-between behaves the same
-    /// way from every entry point.
-    ///
-    /// By layer rather than by cel because the caller is a layer's own canvas view, which knows
-    /// which layer it is and nothing about cels. Deliberately *not* `interpolationTarget` ("the cel
-    /// under the playhead on the **current** layer"): that one answers for the commands on the bar,
-    /// which act on the layer the artist has selected, while a touch is answered by the view it
-    /// landed in.
+    /// ordinary drawing. Gated on "the cel carries a recipe", not "interpolate mode is on" — an
+    /// interpolated cel shows its derived in-between in every mode. By layer, not by cel, since the
+    /// caller is a layer's own canvas view; deliberately not `interpolationTarget` (the current
+    /// layer's cel) — a touch is answered by the view it landed in.
     func inBetweenCelID(inLayer layerID: UUID) -> UUID? {
         guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame),
@@ -533,34 +433,21 @@ extension CanvasManager {
         return layers[layerIndex].cels[celIndex].id
     }
 
-    /// The current layer is showing an interpolated cel at the playhead.
-    ///
-    /// The whole-content vector transform (`isVectorTransforming`) is refused on one, deliberately.
-    /// A transform at `t` moves the *frame*, and an in-between's frame is derived:
-    /// `setVectorTransform` writes onto the cel's own `VectorCanvas`, which is empty and which the
-    /// evaluated image does not come from, so the handle box would drag around a drawing that never
-    /// moved. A silent no-op is worse than an unavailable control.
+    /// The current layer is showing an interpolated cel at the playhead. The whole-content vector
+    /// transform (`isVectorTransforming`) is refused on one: it writes onto the cel's own empty
+    /// `VectorCanvas`, which the evaluated image doesn't come from.
     var activeCelIsInBetween: Bool {
         guard layers.indices.contains(currentLayerIndex) else { return false }
         return inBetweenCelID(inLayer: layers[currentLayerIndex].id) != nil
     }
 
-    /// Records a stroke drawn *at* the in-between. Returns false when the recipe cannot take it, and
+    /// Records a stroke drawn at the in-between. Returns false when the recipe cannot take it, and
     /// the caller should fall back to committing the stroke normally.
-    ///
-    /// Four steps, in order: the stroke is embedded in the deformed lattice at `t`, the lattice
-    /// grows by whole rings if it falls outside, the inverse map carries it back to the lattice's
-    /// rest space, and it is given τ = `t` so it does not appear before the frame it was drawn at.
-    /// `InterpolationEvaluator.planLocalEdit` does the first three; this does the writing.
-    ///
-    /// **Why the samples go in without the canvas→local transform** the ordinary
-    /// `addStroke(canvasSpaceStroke:)` path applies. The whole interpolation pipeline works in one
-    /// space: registration reads the reference cels' display lists, and `composite` renders the
-    /// result into a fresh identity-transform `VectorCanvas` that the layer view shows as-is. So the
-    /// lattices live in whatever space those display lists are in, and the pixels the artist is
-    /// aiming at are placed by that same space — mapping the samples through *this* cel's transform
-    /// would put the edit somewhere other than where they drew it. The cost is inherited rather than
-    /// added: a moved or scaled reference layer is already unhandled by the evaluator.
+    /// `InterpolationEvaluator.planLocalEdit` embeds the stroke in the deformed lattice at `t`,
+    /// grows the lattice by whole rings if it falls outside, and maps it back to rest space; this
+    /// writes the result and gives it τ = `t` so it doesn't appear before the frame it was drawn at.
+    /// Samples go in without the canvas→local transform the ordinary stroke path applies, since the
+    /// pipeline works in the display lists' own space.
     @discardableResult
     func recordLocalEdit(canvasSpaceStroke stroke: VectorStroke,
                          forCel celID: UUID, inLayer layerID: UUID) -> Bool {
@@ -576,21 +463,17 @@ extension CanvasManager {
         stored.samples = zip(stroke.samples, plan.restPoints).map {
             VectorSample(x: $1.x, y: $1.y, pressure: $0.pressure)
         }
-        // τ = `t`: the edit belongs to the pose it was made at and does not exist before it. The
-        // evaluator's one-sided `t >= τ` test enforces it, so sliding the frame *earlier* than
-        // where the edit was drawn hides it again — designed behaviour, not a rounding artefact.
+        // τ = `t`: enforced by the evaluator's `t >= τ` test, so sliding earlier than where it was
+        // drawn hides the edit again.
         stored.visibilityThreshold = recipe.t
-        // A stroke's own tag is what *keyframe* content uses to find its group. A local edit's
-        // group lives on the `LocalEdit` instead, since the edit isn't part of either keyframe's
-        // drawing and a tag here would make it look like it were.
+        // Group lives on `LocalEdit`, not the stroke's own tag — the edit belongs to neither
+        // keyframe's drawing.
         stored.motionGroupID = nil
 
         let edit = LocalEdit(stroke: stored, groupID: plan.groupID)
         withInterpolationUndo(name: stroke.composite == .erase ? "Erase at In-Between"
                                                                : "Draw at In-Between") {
-            // The grown lattices go back into the binding they came from. No index anywhere needs
-            // remapping — the recipe stores geometry, never indices, and a ring shifts every cell
-            // and vertex index, so nothing here would survive holding one.
+            // Grown lattices go back by reference, never index: a ring shifts every index.
             if let grown = plan.grownLattices, let index = plan.bindingIndex {
                 layers[at.layer].cels[at.cel].interpolation?.groups[index].lattices = grown
             }
@@ -601,28 +484,16 @@ extension CanvasManager {
 
     // MARK: - Render-cache eviction
 
-    /// How many vector cels may keep a memoized render at once.
-    ///
-    /// A canvas-sized RGBA image is ~16 MB at 2048² and ~64 MB at 4000², so the bound is what keeps
-    /// a long animation on a vector layer from holding one per cel. Twelve covers the frames a
-    /// scrub or an onion skin actually reaches while leaving the rest evictable.
+    /// How many vector cels may keep a memoized render at once. A canvas-sized RGBA image is ~16 MB
+    /// at 2048² and ~64 MB at 4000²; twelve covers the frames a scrub or onion skin actually reaches.
     static let vectorRenderCacheLimit = 12
 
     /// Drops memoized renders from the vector cels furthest from the current frame, keeping at most
-    /// `limit` of them.
-    ///
-    /// `VectorCanvas.cachedImage` had no eviction at all, survivable while one cel per layer was
-    /// live — an interpolated cel is *derived*, so it multiplies how many canvases exist at once.
-    ///
-    /// The policy is distance from `currentFrame` rather than least-recently-used: it needs no
-    /// per-canvas bookkeeping, it is deterministic (so testable), and it matches how the caches are
-    /// actually reached — scrubbing and onion skin both work outward from the current frame.
-    /// Dropping a cache is never a correctness question; the next render recomputes it.
+    /// `limit` of them. Distance from `currentFrame` rather than LRU: no per-canvas bookkeeping, and
+    /// it matches how scrubbing and onion skin reach caches — outward from the current frame.
     func evictDistantVectorRenderCaches(limit: Int = CanvasManager.vectorRenderCacheLimit) {
-        // Counted before anything is locked, since this runs on **every** frame tick and
-        // `hasCachedImage` takes each canvas's lock — which a background `render()` holds for its
-        // entire rasterization, tens of milliseconds. Reading `cel.vector` locks nothing, so a
-        // document with fewer vector cels than the limit gets out without touching a lock at all.
+        // Counted before locking anything — `hasCachedImage` takes each canvas's lock, which a
+        // background `render()` can hold for tens of ms.
         let vectorCels = layers.reduce(0) { $0 + $1.cels.lazy.filter { $0.vector != nil }.count }
         guard vectorCels > max(0, limit) else { return }
 
@@ -634,8 +505,6 @@ extension CanvasManager {
             }
         }
         guard cached.count > max(0, limit) else { return }
-        // Stable by construction: `sorted(by:)` is not stable in Swift, but ties are broken only
-        // between canvases at the same distance, and which of those is dropped does not matter.
         for entry in cached.sorted(by: { $0.distance < $1.distance }).dropFirst(max(0, limit)) {
             entry.canvas.dropCachedImage()
         }
@@ -655,23 +524,16 @@ extension CanvasManager {
         isInterpolateMode = true
     }
 
-    /// Leaves the mode and drops the reference selection.
-    ///
-    /// Recipes already attached to cels are untouched: the selection is a transient, the recipe is
-    /// document content. Leaving and re-entering the mode therefore keeps every in-between working
-    /// and only asks the artist to re-pick references if they want to build a *new* one.
+    /// Leaves the mode and drops the reference selection. Recipes stay attached — the selection is a
+    /// transient, the recipe is document content — so re-entering keeps every in-between working.
     func exitInterpolateMode() {
         isInterpolateMode = false
         interpolationReferences.removeAll()
-        // All three are view state that only means anything inside the mode, and each left set would
-        // turn the next ordinary canvas gesture into something the artist did not ask for: a silent
-        // retag, a part of the drawing missing, or a stroke that becomes a guide and never appears in
-        // the layer at all.
+        // View state meaningful only inside the mode; left set, each would turn the next gesture
+        // into something unintended (silent retag, missing content, a stray guide).
         armedMotionGroupID = nil
         hiddenMotionGroups.removeAll()
         isDrawingGuide = false
-        // Not in that list — nothing outside the mode reads it, and the overlay it switches is gone.
-        // Reset anyway so re-entering starts on the shape editor, the default expectation.
         isEditingGuideSpacing = false
     }
 
@@ -679,11 +541,9 @@ extension CanvasManager {
         interpolationReferences.contains(CelRef(layerID: layerID, celID: celID))
     }
 
-    /// Flags or unflags a cel as a keyframe — `InterpolateBar`'s Set as Reference.
-    ///
-    /// Not undoable, deliberately: this is a selection, like which layer is current, and filling the
-    /// undo stack with selection steps makes undo useless. The recipe that *results* from a
-    /// selection is undoable, in one step (`interpolate(...)`).
+    /// Flags or unflags a cel as a keyframe — `InterpolateBar`'s Set as Reference. Not undoable:
+    /// this is a selection, like which layer is current. The recipe that results from a selection
+    /// is undoable, in one step (`interpolate(...)`).
     func toggleInterpolationReference(celID: UUID, inLayer layerID: UUID) {
         let ref = CelRef(layerID: layerID, celID: celID)
         if let existing = interpolationReferences.firstIndex(of: ref) {
@@ -693,15 +553,10 @@ extension CanvasManager {
         }
     }
 
-    /// The flagged cels grouped into keyframes, in time order.
-    ///
-    /// Cels that start on the same frame are one keyframe: flagging a lineart cel and the flats cel
-    /// underneath it produces one reference holding both, so they warp through one lattice instead
-    /// of drifting apart — no second gesture needed.
-    ///
-    /// Grouping is by `startFrame` rather than by overlap. Overlap would fold a long held cel in
-    /// with every short cel beside it, the wrong answer far more often than two same-length cels
-    /// starting a frame apart is.
+    /// The flagged cels grouped into keyframes, in time order. Cels that start on the same frame are
+    /// one keyframe: a flagged lineart cel and the flats cel under it become one reference holding
+    /// both, so they warp through one lattice. Grouped by `startFrame` rather than overlap, which
+    /// would fold a long held cel in with every short cel beside it.
     var interpolationKeyframes: [InterpolationReference] {
         var byFrame: [Int: [CelRef]] = [:]
         for ref in interpolationReferences {
@@ -712,9 +567,8 @@ extension CanvasManager {
     }
 
     /// Resolves a `CelRef` to the display list that cel holds — the evaluator's `ContentProvider`.
-    ///
-    /// The evaluator takes this as a closure rather than reaching for `CanvasManager` itself, which
-    /// lets every render test run without a document. This is the one place the two are joined.
+    /// Passed as a closure rather than the evaluator reaching for `CanvasManager` itself, so render
+    /// tests can run without a document.
     var interpolationContentProvider: InterpolationEvaluator.ContentProvider {
         { [weak self] ref in
             guard let self, let at = self.celIndices(forCel: ref.celID, inLayer: ref.layerID) else {
@@ -727,23 +581,15 @@ extension CanvasManager {
     var interpolationOptions: InterpolationEvaluator.Options {
         var options = InterpolationEvaluator.Options()
         options.thicknessFade = interpolationThicknessFade ? .weighted(exponent: 1) : .none
-        // Only inside the mode: solo/mute is a working view of an in-between being judged, and a
-        // group left muted must not follow the artist out and quietly blank part of every export.
+        // Only inside the mode: a group left muted must not follow the artist out and quietly
+        // blank part of every export.
         options.hiddenGroups = isInterpolateMode ? hiddenMotionGroups : []
         return options
     }
 
-    /// `interpolationOptions` with solo/mute forced off — what any evaluation whose result is
-    /// **written to the document** must use, which today means Commit.
-    ///
-    /// `hiddenGroups` is a view filter that must not reach a render outside the mode. Commit breaks
-    /// that rule from the other side — it runs *inside* the mode, where `hiddenGroups` is
-    /// legitimately populated, and it writes what it evaluates. Baking with a group muted would
-    /// delete that group's content from the drawing permanently, on a command that says nothing
-    /// about deleting.
-    ///
-    /// `thicknessFade` is deliberately kept: it's not a filter but a choice about what the
-    /// in-between *looks like*, one the artist toggled and can see when they press the button.
+    /// `interpolationOptions` with solo/mute forced off — required for any evaluation written to the
+    /// document (today, Commit), since baking with a group muted would delete that content for good.
+    /// `thicknessFade` is kept: it's a rendering choice, not a filter.
     var interpolationCommitOptions: InterpolationEvaluator.Options {
         var options = interpolationOptions
         options.hiddenGroups = []
@@ -770,11 +616,8 @@ extension CanvasManager {
         case nothingToCommit
         /// Commit was asked for on a recipe `evaluate` cannot render, so there is no frame *yet*.
         case interpolationNotEvaluable
-        /// A guide was drawn on a frame with no recipe to attach it to.
-        ///
-        /// A guide is a constraint *on a motion*, so there has to be a motion first. Storing it
-        /// unbound and hoping a later Generate adopted it would be a silent no-op — the artist would
-        /// draw an arc, press Generate, and get a straight line with nothing saying why.
+        /// A guide was drawn on a frame with no recipe to attach it to — a guide constrains a
+        /// motion, so a motion must exist first.
         case noInterpolationToGuide
 
         var message: String {
@@ -797,17 +640,8 @@ extension CanvasManager {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               layers[layerIndex].cels[celIndex].vector != nil else { return .notAVectorLayer }
-        // Generating on a cel that already derives from a recipe is never what was meant: the second
-        // Generate would silently replace the first, so a double tap looks like it interpolated
-        // twice and an artist who scrubbed to a `t` they like loses it. Retiming is the slider's
-        // job, starting over is Remove Interpolation's.
-        //
-        // **Reproject does not inherit it, deliberately.** Its whole subject is a cel that already
-        // has content, and re-running it is the honest way to pick up references that have changed
-        // — it re-registers the same linework and replaces nothing. What this does *not* let
-        // through: a cel carrying a `.generate` recipe holds no strokes of its own (an in-between is
-        // derived, never stored), so Reproject on one refuses with `.nothingToReproject`. Commit is
-        // what turns it into a frame Reproject can work on.
+        // Generate on a cel that already has a recipe would silently replace it. Reproject does not
+        // inherit this refusal: re-running it re-registers the same linework and replaces nothing.
         if mode == .generate, layers[layerIndex].cels[celIndex].interpolation != nil {
             return .alreadyInterpolated
         }
@@ -818,8 +652,8 @@ extension CanvasManager {
         return referenceRefusal(excludingTarget: target)
     }
 
-    /// The part of the refusal that is about the *references* rather than the target, so the
-    /// playhead check can reuse it for a cel that does not exist yet.
+    /// The refusal about the references rather than the target, reusable by the playhead check for
+    /// a cel that does not exist yet.
     private func referenceRefusal(excludingTarget target: CelRef?) -> InterpolationRefusal? {
         let keyframes = interpolationKeyframes
         guard keyframes.count >= 2 else { return .notEnoughReferences }
@@ -834,8 +668,7 @@ extension CanvasManager {
     // MARK: - The playhead as the target
 
     /// The cel every interpolate command acts on: the one under the playhead on the current layer.
-    /// Nil when the playhead sits over an empty slot — which Generate treats as "make one", not as
-    /// "refuse" (see `interpolateAtPlayhead`).
+    /// Nil for an empty slot, which Generate treats as "make one" (see `interpolateAtPlayhead`).
     var interpolationTarget: (layer: Int, cel: Int)? {
         let layerIndex = currentLayerIndex
         guard layers.indices.contains(layerIndex),
@@ -849,29 +682,19 @@ extension CanvasManager {
         if let at = interpolationTarget {
             return interpolationRefusal(mode: mode, layerIndex: at.layer, celIndex: at.cel)
         }
-        // No block at the playhead means no drawing to repose. Generate makes one; Reproject cannot,
-        // because the thing it acts on is the artist's own linework.
+        // No block at the playhead: Reproject has nothing of the artist's own to repose.
         if mode == .reproject { return .nothingToReproject }
-        // An empty slot between two references is the ordinary way to ask for an in-between, so the
-        // missing block is not a refusal — Generate makes it. Every target-side check is answered by
-        // construction for a cel that does not exist: it is empty, it carries no recipe, and nothing
-        // can have flagged it as a reference. What is left is the layer's kind and the references.
+        // A missing block is not a refusal for Generate — it creates one.
         guard layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].kind == .vector else { return .notAVectorLayer }
         return referenceRefusal(excludingTarget: nil)
     }
 
-    /// **Generate** — attach a recipe deriving this cel from the flagged keyframes.
-    ///
-    /// Note what this does *not* do: it does not write a display list into the cel. An in-between is
-    /// derived, never stored — the recipe is the frame, and moving the slider is a parameter change
-    /// rather than a regeneration. Baking is a separate, later, explicitly one-way **Commit** action.
-    ///
-    /// Registration happens here because this is the first moment both keyframes are known. It is
-    /// the expensive step — an ARAP fit per reference past the first — and it is synchronous, so the
-    /// caller sees `isRegisteringInterpolation` go true and back.
-    ///
-    /// Returns the refusal reason, or nil on success.
+    /// **Generate** — attach a recipe deriving this cel from the flagged keyframes. Does not write a
+    /// display list into the cel: an in-between is derived, never stored, so moving the slider is a
+    /// parameter change, not a regeneration. Baking is the separate, one-way **Commit** action.
+    /// Registration runs here — an ARAP fit per reference, synchronous, so
+    /// `isRegisteringInterpolation` brackets it for the caller. Returns the refusal reason, or nil.
     @discardableResult
     func interpolate(mode: InterpolationMode, layerIndex: Int, celIndex: Int) -> InterpolationRefusal? {
         if let refusal = interpolationRefusal(mode: mode, layerIndex: layerIndex, celIndex: celIndex) {
@@ -884,11 +707,7 @@ extension CanvasManager {
         let provider = interpolationContentProvider
         let frames = keyframes.map { Self.registrationFrame(of: $0.cels.flatMap(provider)) }
 
-        // **Reproject registers the cel's own drawing, not the keyframes' parts.** No grouping runs
-        // and no tags are written: motion groups partition a drawing that is being *derived* from
-        // two others, and here there is one drawing whose pose slides as a whole. A future mixed
-        // case (per-group Reproject vs. Generate) is already representable since a recipe's bindings
-        // are a list.
+        // Reproject registers the cel's own drawing, not the keyframes' parts; no grouping runs.
         if mode == .reproject {
             let subject = Self.registrationFrame(of: layers[layerIndex].cels[celIndex].vector?.elements ?? [])
             guard let binding = Self.registerReprojection(subject: subject, frames: frames) else {
@@ -896,9 +715,7 @@ extension CanvasManager {
             }
             let recipe = InterpolationRecipe(references: keyframes, t: 0.5, mode: .reproject,
                                              groups: [binding])
-            // The structural bracket is enough here, and only here: reprojection writes a value type
-            // into `Cel` and touches no stroke anywhere. Generate's wider bracket exists because its
-            // registration tags the *keyframes'* strokes — see below.
+            // The structural bracket suffices: reprojection writes a value type and touches no stroke.
             withStructureUndo(name: "Reproject") {
                 layers[layerIndex].cels[celIndex].interpolation = recipe
             }
@@ -909,11 +726,8 @@ extension CanvasManager {
 
         let recipe = InterpolationRecipe(references: keyframes, t: 0.5, mode: mode,
                                          groups: registration.bindings)
-        // `withInterpolationUndo`, not `withStructureUndo`: attaching a recipe writes a value type
-        // inside `Cel`, which the structure bracket covers — but registration also writes each
-        // stroke's motion-group tag back onto the *keyframes*, and a tag is a field on
-        // `VectorStroke`, which `StructureSnapshot` shares rather than copies. Undoing under the
-        // structure bracket would put the recipe back and leave the tags on.
+        // `withInterpolationUndo`: `StructureSnapshot` shares canvases rather than copying them, so
+        // the structure bracket would restore the recipe but leave the tags on.
         withInterpolationUndo(name: "Interpolate", touching: interpolationReferenceCanvases) {
             motionGroups.append(contentsOf: registration.invented)
             applyMotionGroupTags(registration.assignments, to: keyframes)
@@ -933,26 +747,14 @@ extension CanvasManager {
         }
     }
 
-    /// Writes registration's grouping decision back onto the keyframes' own strokes.
-    ///
-    /// This is the step that makes the grouping *visible and editable*. Without it the partition
-    /// would live only inside the recipe's bindings, where the artist can neither see which stroke
-    /// went where nor move one. It is also what the evaluator reads: `warped` resolves a stroke's
-    /// `motionGroupID` against the bindings, so an untagged stroke rides the *first* binding
-    /// whatever the grouping decided.
-    ///
-    /// Only strokes can carry a tag. A fill or a placed image takes part in the partition — its
-    /// points are in the cloud, so it lands in a part and that part's lattice is fitted with it in —
-    /// but it has nowhere to record which, so at render time it falls back to the first binding
-    /// (see VECTOR_INTERPOLATION.md §4 item 11).
-    ///
-    /// Call inside an undo bracket that is `touching:` these canvases.
+    /// Writes registration's grouping decision back onto the keyframes' own strokes, making the
+    /// grouping visible and editable. Only strokes can carry a tag; a fill or placed image takes
+    /// part in the partition but falls back to the first binding (VECTOR_INTERPOLATION.md §4 item
+    /// 11). Call inside an undo bracket `touching:` these canvases.
     func applyMotionGroupTags(_ assignments: [[UUID?]], to keyframes: [InterpolationReference]) {
         for (frameIndex, reference) in keyframes.enumerated() where frameIndex < assignments.count {
             let tags = assignments[frameIndex]
-            // The assignments are in the order `registrationFrame(of:)` saw the elements, which is
-            // `cels.flatMap(provider)` — so walking the cels in the same order and carrying a cursor
-            // is what lines them back up. Anything that changes one order must change the other.
+            // Assignments are in `cels.flatMap(provider)` order; a cursor lines them back up here.
             var cursor = 0
             for celRef in reference.cels {
                 guard let at = celIndices(forCel: celRef.celID, inLayer: celRef.layerID),
@@ -970,9 +772,7 @@ extension CanvasManager {
                 cursor += elements.count
                 if changed {
                     canvas.elements = elements
-                    // Setters deliberately don't invalidate, so a wholesale assignment bumps the
-                    // version itself. Also what re-keys the preview memo (`InterpolationPreviewKey`),
-                    // how a retag shows up on screen without an explicit invalidation call.
+                    // Bumps the version, which re-keys the preview memo so the retag shows up.
                     canvas.bumpVersion()
                 }
             }
@@ -980,19 +780,9 @@ extension CanvasManager {
     }
 
     /// **Generate/Reproject as the bar presses them** — act on the playhead, creating the block if
-    /// there is not one there yet.
-    ///
-    /// Standing on an empty slot between two references and pressing Generate should just work; the
-    /// alternative (add the block from the slot's own menu, then press Generate) is two steps for
-    /// one intent.
-    ///
-    /// The block and the recipe land as **one** undo step because they are one action. `addCel`
-    /// opens `withStructureUndo` and `interpolate` opens `withInterpolationUndo`; both defer to an
-    /// enclosing bracket rather than recording their own, so the outer bracket here is all it takes.
-    ///
-    /// It has to be the **interpolation** bracket, not the structure one — registration writes
-    /// motion-group tags onto the keyframes' strokes, and an inner vector-content edit nested inside
-    /// an outer structural bracket would not be undoable.
+    /// there is not one there yet. The block and recipe land as one undo step: `addCel` and
+    /// `interpolate` both defer to an enclosing bracket, so the outer bracket here is all it takes —
+    /// it must be the interpolation bracket, not the structure one, since registration tags strokes.
     @discardableResult
     func interpolateAtPlayhead(mode: InterpolationMode) -> InterpolationRefusal? {
         if let refusal = interpolationRefusalAtPlayhead(mode: mode) { return refusal }
@@ -1015,38 +805,20 @@ extension CanvasManager {
 
     // MARK: - Commit
 
-    /// **Commit** — bake the frame this cel currently derives at into the cel as ordinary content and
-    /// drop the recipe. One-way, explicit, never automatic; undoable like anything else, which is
-    /// what keeps "one-way" from meaning "unrecoverable".
-    ///
-    /// This is the counterpart to `interpolate`: that one makes a frame derived, this one makes it a
-    /// drawing again. It's also the missing link that lets Reproject work on an in-between: a
-    /// `.generate` cel stores no strokes of its own, so Reproject refuses on one with
-    /// `.nothingToReproject`, and Generate → **Commit** → Reproject is how it becomes something to
-    /// re-pose.
-    ///
-    /// **It is lossy at an interior `t`, and that's the artist's decision to make, not this
-    /// function's to prevent.** `InterpolationEvaluator.flattened` documents exactly what changes and
-    /// why no display list can avoid it; a commit at `t = 0` or `t = 1` is bit-exact. What matters
-    /// here is that the loss happens *once*, visibly, on a command the artist pressed.
-    ///
-    /// Deliberately does **not** care whether interpolate mode is on. A cel carries its recipe from
-    /// every entry point (same reasoning as `inBetweenCelID`), and a command that worked only in one
-    /// mode would be a second rule to learn.
-    ///
-    /// Returns the refusal reason, or nil on success.
+    /// **Commit** — bake the frame this cel currently derives at into ordinary content and drop the
+    /// recipe. One-way and explicit, but undoable. Also the missing link for Reproject on an
+    /// in-between: a `.generate` cel stores no strokes of its own, so Generate → Commit → Reproject
+    /// is how it becomes reposable. Lossy at an interior `t` (`t = 0`/`t = 1` are bit-exact) — see
+    /// `InterpolationEvaluator.flattened` for why. Returns the refusal reason, or nil on success.
     @discardableResult
     func commitInterpolation(layerIndex: Int, celIndex: Int) -> InterpolationRefusal? {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               let canvas = layers[layerIndex].cels[celIndex].vector else { return .notAVectorLayer }
         guard let recipe = layers[layerIndex].cels[celIndex].interpolation else { return .nothingToCommit }
-        // The cel's own display list is the subject of a reprojection and is ignored by a generation
-        // — the same join `interpolatedImage` makes, and for the same reason: the recipe holds no
-        // reference to the cel it lives on, so this is the one place that knows both.
+        // The cel's own display list is the subject for reprojection, ignored for generation.
         let subject = recipe.mode == .reproject ? canvas.elements : []
-        // `interpolationCommitOptions`, never `interpolationOptions` — see its comment. Committing
-        // with a group muted would delete that group's content from the drawing for good.
+        // `interpolationCommitOptions`: committing with a group muted would delete content for good.
         guard let evaluation = InterpolationEvaluator.evaluate(
             recipe: recipe, at: recipe.t, content: interpolationContentProvider,
             subject: subject, guides: guides(driving: recipe),
@@ -1054,27 +826,18 @@ extension CanvasManager {
         else { return .interpolationNotEvaluable }
 
         let baked = InterpolationEvaluator.flattened(evaluation)
-        // `withInterpolationUndo` rather than `withStructureUndo`: the structure bracket alone would
-        // restore the recipe and none of the ink, since `StructureSnapshot` shares each
-        // `VectorCanvas` by reference rather than copying it.
+        // `withInterpolationUndo`: the structure bracket would restore the recipe but none of the ink.
         withInterpolationUndo(name: "Commit Interpolation", touching: [canvas]) {
             canvas.elements = baked
-            // Setters don't invalidate, so a wholesale assignment bumps the version itself, or the
-            // cel would keep rendering the cached image of an empty display list.
             canvas.bumpVersion()
             layers[layerIndex].cels[celIndex].interpolation = nil
         }
         return nil
     }
 
-    /// Whether `commitInterpolation` would succeed, without performing it. Shares every check with
-    /// it, **including the evaluation** — a malformed recipe is the reachable failure (delete a
-    /// referenced cel and the frame stops being renderable while the recipe stays put).
-    ///
-    /// **Not what greys the bar's button out, deliberately** — most refusals are a cheap structural
-    /// test a view can afford to re-ask on every SwiftUI pass, but this one runs `evaluate`, an ARAP
-    /// solve per motion group. `InterpolateBar` gates the button on "there is a recipe" and reports
-    /// the refusal on tap instead. Call this from an event handler, never from a `body`.
+    /// Whether `commitInterpolation` would succeed, without performing it. Shares every check
+    /// including the evaluation. Runs `evaluate`, an ARAP solve per motion group, so it is too
+    /// expensive for a SwiftUI `body` — call only from an event handler.
     func commitRefusal(layerIndex: Int, celIndex: Int) -> InterpolationRefusal? {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
@@ -1108,37 +871,24 @@ extension CanvasManager {
 
     // MARK: - Registration
 
-    /// One binding covering the whole frame — the default, single automatic motion group.
-    ///
-    /// The group id is fresh per recipe and **no** `MotionGroup` is registered for it. A registered
-    /// group is an artist-facing object (name, tag colour, mode badge), and inventing one per recipe
-    /// would put document state in front of the artist that they never asked for. The binding is all
-    /// the evaluator needs: untagged content rides the recipe's first binding, and by default every
-    /// stroke is untagged.
-    ///
-    /// Nil when there is nothing to register, leaving a recipe with no bindings — legal, meaning
-    /// "warp nothing", the honest answer to two empty keyframes.
+    /// One binding covering the whole frame — the default, single automatic motion group. The group
+    /// id is fresh per recipe and no `MotionGroup` is registered for it, since inventing one per
+    /// recipe would surface document state nobody asked for. Nil when there is nothing to register,
+    /// leaving a recipe with no bindings — legal, meaning "warp nothing".
     static func registerWholeFrameGroup(frames: [RegistrationFrame]) -> MotionGroupBinding? {
         guard let first = frames.first, !first.cloud.isEmpty, frames.count >= 2 else { return nil }
 
-        // The lattice is built over the bounding region at the *first* keyframe and every later
-        // keyframe is a fit of it. Cell size is set from the content's own extent rather than fixed,
-        // so a thumbnail-sized doodle and a full-canvas drawing get comparable resolution; the floor
-        // keeps a tiny drawing from producing a needlessly huge grid.
+        // Lattice built over the first keyframe; later keyframes are fits of it.
         let rest = Lattice(covering: first.cloud,
                            targetCellSize: Self.latticeCellSize(covering: first.cloud), padding: 1)
         var lattices: [Lattice] = [rest]
         for frame in frames.dropFirst() {
             guard !frame.cloud.isEmpty else {
-                // A keyframe with no content has nothing to fit to, and "do not move" is the only
-                // answer that is not invented. Its set fades in or out on weight alone.
+                // Nothing to fit to — "do not move" is the only non-invented answer.
                 lattices.append(rest)
                 continue
             }
-            // The target cloud is capped here rather than inside `fit`, which only ever sees the
-            // index and not the points that went into it. Same reasoning and same ceiling as
-            // `ARAPRegistration.Options.maxRegistrationSamples`: past a couple of hundred samples
-            // the extra points buy no accuracy and cost a nearest query each, per iteration.
+            // Capped here, not inside `fit`: past a couple hundred samples, extra points buy no accuracy.
             let cloud = ARAPRegistration.subsampled(
                 frame.cloud, to: ARAPRegistration.Options().maxRegistrationSamples)
             let fit = ARAPRegistration.fit(lattice: rest, source: first.cloud,
@@ -1149,26 +899,12 @@ extension CanvasManager {
         return MotionGroupBinding(groupID: UUID(), lattices: lattices)
     }
 
-    /// **Reproject** — the target cel's own drawing, registered so its *pose* can slide along the
-    /// A→C motion while its linework is never touched.
-    ///
-    /// One structural difference from `registerWholeFrameGroup` carries the whole feature: **which
-    /// drawing the rest lattice covers.** Generate's rest lattice is drawn over keyframe A, and A's
-    /// content is what rides it. Here it is drawn over the *subject* — this cel's own cloud — and
-    /// every entry in `lattices`, including the first, is a fit of that grid to a reference. So
-    /// `lattices[0]` is the subject posed as keyframe A, `lattices[1]` is it posed as keyframe C, and
-    /// the evaluator's interpolation between them is the pose sliding. The subject embeds in the
-    /// lattice's **rest** configuration, where it was drawn, so nothing about its geometry is
-    /// derived — only where the grid carrying it currently sits.
-    ///
-    /// That first entry being a fit rather than the rest configuration is the invariant Generate's
-    /// array has and this one deliberately does not. For Generate, `t = 0` reproduces keyframe A to
-    /// the last bit precisely because `lattices[0]` *is* the rest grid its content was embedded in.
-    /// A reprojected cel has no such endpoint — it is neither keyframe — and giving it one would
-    /// show the drawing unposed at `t = 0` and snap the instant the slider moved.
-    ///
-    /// Nil when there is nothing to repose or nothing to repose it along; the caller turns that into
-    /// a refusal the artist can read.
+    /// **Reproject** — the target cel's own drawing, registered so its pose can slide along the A→C
+    /// motion while its linework is never touched. Differs from `registerWholeFrameGroup` in which
+    /// drawing the rest lattice covers: it's drawn over the subject, and every entry in `lattices`,
+    /// including the first, is a fit of that grid to a reference — a `t = 0` rest endpoint would
+    /// show a reprojected cel unposed and snap the instant the slider moved. Nil when there is
+    /// nothing to repose or nothing to repose it along.
     static func registerReprojection(subject: RegistrationFrame,
                                      frames: [RegistrationFrame]) -> MotionGroupBinding? {
         guard !subject.cloud.isEmpty, frames.count >= 2 else { return nil }
@@ -1178,8 +914,7 @@ extension CanvasManager {
         let ceiling = ARAPRegistration.Options().maxRegistrationSamples
         var lattices: [Lattice] = []
         for frame in frames {
-            // A keyframe with nothing in it gives the pose no target, and "stay where it was drawn"
-            // is the only answer that is not invented — the same rule the Generate path uses.
+            // Nothing to target — "stay where it was drawn", same rule as the Generate path.
             guard !frame.cloud.isEmpty else { lattices.append(rest); continue }
             let cloud = ARAPRegistration.subsampled(frame.cloud, to: ceiling)
             let fit = ARAPRegistration.fit(lattice: rest, source: subject.cloud,
@@ -1192,37 +927,26 @@ extension CanvasManager {
 
     // MARK: - Registration with motion groups
 
-    /// What registration decided about a drawing's parts.
-    ///
-    /// Three outputs rather than one because a grouping has to be *stored* in three places: the
-    /// geometry goes in the recipe (`bindings`), the artist-facing identity goes in the document
-    /// registry (`invented`), and membership goes on the strokes themselves (`assignments`). The
-    /// third is the one that is easy to leave out and the one that makes the feature usable —
-    /// without tags the decision would live only inside the recipe, where nothing can show it and
-    /// nothing can correct it.
+    /// What registration decided about a drawing's parts: geometry in the recipe (`bindings`),
+    /// artist-facing identity in the document registry (`invented`), and membership on the strokes
+    /// themselves (`assignments`) — without which the decision would live only inside the recipe,
+    /// invisible and uncorrectable.
     struct GroupRegistration {
         /// One per part, in the order the parts came back. A recipe's `groups`.
         var bindings: [MotionGroupBinding]
 
-        /// Groups registration had to create because the drawing turned out to have several parts.
-        /// **Empty when the answer was one whole-frame group**, which stays anonymous — a registered
-        /// group is an artist-facing object and inventing one for the degenerate case would put
-        /// document state in front of the artist that they never asked for.
+        /// Groups registration had to create. Empty when the answer was one whole-frame group.
         var invented: [MotionGroup]
 
         /// Per keyframe, per element, the group it landed in. Empty for the anonymous whole-frame
-        /// answer, which tags nothing.
+        /// answer.
         var assignments: [[UUID?]]
 
         static let none = GroupRegistration(bindings: [], invented: [], assignments: [])
     }
 
-    /// Tag colours for groups registration invents, cycled in order.
-    ///
-    /// Saturated and spread around the wheel, since their whole job is to be told apart at a glance
-    /// over linework that's usually black. Deliberately unrelated to any stroke's paint colour —
-    /// this is metadata, and "Tag by stroke colour" is a one-shot populate of membership, never a
-    /// live binding of appearance.
+    /// Tag colours for groups registration invents, cycled in order. Unrelated to any stroke's paint
+    /// colour — this is metadata, not a live binding of appearance.
     static let motionGroupPalette: [CodableColor] = [
         CodableColor(red: 1.00, green: 0.32, blue: 0.32, alpha: 1),   // red
         CodableColor(red: 0.30, green: 0.68, blue: 1.00, alpha: 1),   // blue
@@ -1234,20 +958,12 @@ extension CanvasManager {
         CodableColor(red: 0.72, green: 0.72, blue: 0.36, alpha: 1),   // olive
     ]
 
-    /// Split the drawing into parts that move together, and fit each part on its own.
-    ///
-    /// One algorithm with two seeds: the artist's tags if there are any, one group covering
-    /// everything if there are not. Both go through `MotionGrouping.group`, which refines a seeded
-    /// partition exactly as it splits an unseeded one, so tagging one limb does not switch the
-    /// artist onto a different code path — it only changes where the recursion starts.
-    ///
-    /// **The whole-frame answer is preserved exactly.** A drawing that groups into one part takes
-    /// the default path unchanged: one anonymous binding, no registered group, no tags written. Not
-    /// a special case bolted on — the honest reading of "this drawing has one part", and keeping it
-    /// identical stops a single-stroke test drawing acquiring document state.
-    ///
-    /// `existing` is the document's group registry, consulted so that re-registering after a retag
-    /// **reuses the artist's own groups** instead of minting a parallel set beside them.
+    /// Split the drawing into parts that move together, and fit each part on its own. One algorithm
+    /// with two seeds: the artist's tags if any, else one group covering everything, both going
+    /// through `MotionGrouping.group`, which refines a seeded partition exactly as it splits an
+    /// unseeded one. A drawing that groups into one part takes the default whole-frame path
+    /// unchanged. `existing` is the document's group registry, consulted so re-registering after a retag reuses
+    /// the artist's own groups instead of minting a parallel set.
     static func registerGroups(frames: [RegistrationFrame],
                                existing: [MotionGroup]) -> GroupRegistration {
         guard let first = frames.first, !first.cloud.isEmpty, frames.count >= 2,
@@ -1255,19 +971,14 @@ extension CanvasManager {
             return wholeFrameRegistration(frames: frames)
         }
 
-        // Grouping is measured against the **last** keyframe rather than the next one, because it's
-        // asking a question about the whole span: two parts that move differently are most separable
-        // where they've moved furthest apart. With today's two references the two are the same
-        // frame; with a future spline, grouping against the adjacent keyframe would let a part that
-        // barely moves in the first segment hide inside its neighbour.
+        // Measured against the last keyframe: two parts that move differently separate most there.
         let ceiling = ARAPRegistration.Options().maxRegistrationSamples
         let target = PointCloudIndex(ARAPRegistration.subsampled(last.cloud, to: ceiling))
         let parts = MotionGrouping.group(strokes: first.elements.map(\.points), target: target,
                                          seeds: tagSeeds(first.elements))
         guard parts.count > 1 else { return wholeFrameRegistration(frames: frames) }
 
-        // One id per part, reusing whatever the members already agree on so a retag survives a
-        // re-registration, and minting the rest.
+        // One id per part, reusing whatever the members agree on so a retag survives re-registration.
         var claimed = Set<UUID>()
         var invented: [MotionGroup] = []
         var ids: [UUID] = []
@@ -1285,8 +996,7 @@ extension CanvasManager {
             ids.append(group.id)
         }
 
-        // Frame 0's assignment is the partition itself; every later frame is assigned by geometry,
-        // honouring any tag the artist already put there.
+        // Frame 0's assignment is the partition itself; later frames are assigned by geometry.
         var assignments: [[UUID?]] = [Array(repeating: nil, count: first.elements.count)]
         for (partIndex, part) in parts.enumerated() {
             for element in part.strokes where assignments[0].indices.contains(element) {
@@ -1309,11 +1019,8 @@ extension CanvasManager {
                 let members = assignments[frameIndex].indices
                     .filter { assignments[frameIndex][$0] == id }
                 let slice = frame.restricted(to: Array(members))
-                // A part with no counterpart at this keyframe has nothing to fit to, and "do not
-                // move" is the only answer that is not invented — same rule the whole-frame path
-                // uses for an empty keyframe. Its ink fades on weight alone, the honest rendering of
-                // content not there at the other end (temporal visibility thresholds, see
-                // VECTOR_INTERPOLATION.md §4 item 34, would be the better answer, and are not built).
+                // No counterpart at this keyframe — "do not move", same as the whole-frame path
+                // (temporal visibility thresholds, VECTOR_INTERPOLATION.md §4 item 34, not built).
                 guard !slice.cloud.isEmpty else { lattices.append(rest); continue }
                 let cloud = ARAPRegistration.subsampled(slice.cloud, to: ceiling)
                 let fit = ARAPRegistration.fit(lattice: rest, source: source.cloud,
@@ -1324,9 +1031,7 @@ extension CanvasManager {
             bindings.append(MotionGroupBinding(groupID: id, lattices: lattices))
         }
 
-        // Every part that produced no binding — an empty one, which `guard` above skips — must not
-        // leave its tag behind, or a stroke would reference a group the recipe cannot warp and would
-        // silently fall through to the first binding instead of its own.
+        // A part with no binding must not leave its tag behind, or a stroke references a group the recipe cannot warp.
         let bound = Set(bindings.map(\.groupID))
         for frameIndex in assignments.indices {
             for element in assignments[frameIndex].indices
@@ -1345,12 +1050,9 @@ extension CanvasManager {
         return GroupRegistration(bindings: [binding], invented: [], assignments: [])
     }
 
-    /// The artist's tagging as a seed partition, or nil when nothing is tagged.
-    ///
-    /// Order is first-appearance rather than the registry's, so the seeds line up with the drawing
-    /// rather than with the order groups happened to be created in. Untagged elements are left out
-    /// entirely — `MotionGrouping.group` gathers them into one extra group, which is exactly right:
-    /// a partial tagging should still produce a complete partition.
+    /// The artist's tagging as a seed partition, or nil when nothing is tagged. Order is
+    /// first-appearance. Untagged elements are left out — `MotionGrouping.group` gathers them into
+    /// one extra group, so a partial tagging still produces a complete partition.
     private static func tagSeeds(_ elements: [RegistrationElement]) -> [[Int]]? {
         var order: [UUID] = []
         var members: [UUID: [Int]] = [:]
@@ -1363,13 +1065,9 @@ extension CanvasManager {
     }
 
     /// The tag a part's members already agree on, if any — the most common one not already taken by
-    /// an earlier part.
-    ///
-    /// Most common rather than unanimous because grouping is free to move an element between seeded
-    /// parts when the residuals say so, and a part that is nine tenths "Arm" is Arm. Excluding
-    /// already-claimed ids keeps two parts from collapsing onto one group when a seed splits in two:
-    /// the larger half keeps the name, the splinter gets a new one, which is what the artist sees as
-    /// "it found another part inside the one I tagged".
+    /// an earlier part. Not unanimous, since grouping can move an element between seeded parts.
+    /// Excluding already-claimed ids keeps two parts from collapsing onto one group when a seed
+    /// splits in two: the larger half keeps the name, the splinter gets a new one.
     private static func dominantTag(of members: [Int], in elements: [RegistrationElement],
                                     excluding claimed: Set<UUID>) -> UUID? {
         var counts: [UUID: Int] = [:]
@@ -1386,15 +1084,10 @@ extension CanvasManager {
 
     /// Which part each element of a later keyframe belongs to.
     ///
-    /// An element that already carries one of the parts' tags keeps it: that is the artist having
-    /// said so, at the keyframe where they said it, and geometry has no business overruling it.
-    /// Everything else is assigned by geometry — each part's fitted similarity is applied to its own
-    /// source points, and the element joins whichever part it then sits nearest to.
-    ///
-    /// Nearest-to-the-*moved*-source rather than nearest-to-the-source: the whole premise is that the
-    /// parts moved, so comparing against where they started would put an arm that swung across the
-    /// body into the torso's group. `MotionGrouping.Group.fit` is exactly that motion and it has
-    /// already been computed, so this costs one point-cloud index per part and no further fitting.
+    /// An element that already carries one of the parts' tags keeps it — the artist's say-so
+    /// overrules geometry. Everything else joins whichever part's *moved* source (each part's fitted
+    /// similarity applied to its own source points) it sits nearest to — nearest to the moved
+    /// source, not the original, or an arm that swung across the body would join the torso's group.
     private static func assign(_ frame: RegistrationFrame, toParts parts: [MotionGrouping.Group],
                                ids: [UUID], source: RegistrationFrame) -> [UUID?] {
         let moved = parts.map { part -> PointCloudIndex in
@@ -1420,50 +1113,33 @@ extension CanvasManager {
         }
     }
 
-    /// One element of one keyframe, as registration sees it.
-    ///
-    /// Elements rather than one summed point cloud because grouping has to *partition* a keyframe: a
-    /// motion group is a set of elements, and both the grouping algorithm and the per-group fit want
-    /// the frame sliced along that partition rather than added together.
+    /// One element of one keyframe, as registration sees it. Elements rather than one summed point
+    /// cloud, since grouping partitions a keyframe and both the grouping algorithm and the
+    /// per-group fit want the frame sliced along the partition.
     struct RegistrationElement {
-        /// What this element contributes to the point cloud. A stroke's samples, a fill's control
-        /// points, a placed image's centre — see `registrationPoints(of:)`.
+        /// What this element contributes to the point cloud. See `registrationPoints(of:)`.
         var points: [CGPoint]
 
-        /// Its polyline when it is a stroke, **nil** for a fill or a placed image. Tier 0's 1:1
-        /// correspondence needs the strokes kept apart so it can pair them; see
-        /// `RegistrationFrame.strokes` for why a non-stroke poisons the whole frame.
+        /// Its polyline when it is a stroke, nil for a fill or placed image — a non-stroke poisons
+        /// the whole frame's `RegistrationFrame.strokes` for 1:1 correspondence.
         var stroke: [CGPoint]?
 
-        /// The motion group it is tagged with, which is what seeds the grouping. Nil is untagged,
-        /// which is every stroke until this phase runs once.
+        /// The motion group it is tagged with, seeding the grouping. Nil is untagged.
         var groupID: UUID?
     }
 
-    /// One keyframe's geometry, as registration sees it.
-    ///
-    /// Three views of the same content, since the three things that read it want different shapes:
-    /// tier 1 and the fallback fit want every point whatever drew it, tier 0's 1:1 correspondence
-    /// wants the strokes kept apart so it can pair them, and grouping wants to slice the frame down
-    /// to one part at a time.
+    /// One keyframe's geometry, as registration sees it. Three views of the same content: the
+    /// fallback fit wants every point regardless of what drew it, 1:1 correspondence wants strokes
+    /// kept apart to pair them, and grouping wants the frame sliceable one part at a time.
     struct RegistrationFrame {
-        /// The frame's elements in display-list order. The partition is expressed as indices into
-        /// this, which is also the order tags are written back in.
+        /// The frame's elements in display-list order — also the order tags are written back in.
         var elements: [RegistrationElement]
 
-        /// Every point the display list contributes. Never nil — this is what registration always
-        /// had.
+        /// Every point the display list contributes.
         var cloud: [CGPoint]
 
-        /// The frame's strokes in drawing order, or **nil** when the frame holds anything that is
-        /// not a stroke.
-        ///
-        /// Nil rather than "the strokes among other things" on purpose. Dropping the point-cloud
-        /// data rows is what makes the correspondence work at all (see `ARAPRegistration.fit`), and
-        /// with them dropped a fill or a placed image would be left with nothing pulling it —
-        /// carried along by lattice rigidity alone. Its contour is also a closed loop, which needs a
-        /// phase offset rather than a direction bit, and that is not in scope. So a frame with a
-        /// fill in it takes the point-cloud path it always took.
+        /// The frame's strokes in drawing order, or nil when the frame holds anything that is not a
+        /// stroke — any fill or placed image forces the whole frame onto the point-cloud path.
         var strokes: [[CGPoint]]?
 
         init(elements: [RegistrationElement]) {
@@ -1477,12 +1153,10 @@ extension CanvasManager {
             self.strokes = runs
         }
 
-        /// The sub-frame holding only the elements at `indices`, in their original order.
-        ///
-        /// Sliced rather than re-derived so a part inherits the frame's own all-or-nothing stroke
-        /// rule: a group made entirely of strokes keeps its correspondence even when a *fill*
-        /// elsewhere on the keyframe made the whole frame's `strokes` nil. That is worth having —
-        /// it is precisely the lineart-plus-flats case requirement 5 is about.
+        /// The sub-frame holding only the elements at `indices`, in their original order. Sliced
+        /// rather than re-derived so a part inherits the frame's all-or-nothing stroke rule: a group
+        /// made entirely of strokes keeps its correspondence even when a fill elsewhere on the
+        /// keyframe made the whole frame's `strokes` nil (the lineart-plus-flats case).
         func restricted(to indices: [Int]) -> RegistrationFrame {
             RegistrationFrame(elements: indices.compactMap {
                 elements.indices.contains($0) ? elements[$0] : nil
@@ -1490,8 +1164,8 @@ extension CanvasManager {
         }
 
         /// The 1:1 correspondence between these two frames, or nil when they cannot be paired that
-        /// way — different stroke counts (the N:M case, still deferred — see VECTOR_INTERPOLATION.md
-        /// §4 item 33), or either frame holding something that is not a stroke.
+        /// way — different stroke counts (the N:M case, deferred, VECTOR_INTERPOLATION.md §4 item
+        /// 33), or either frame holding something that is not a stroke.
         func correspondence(to other: RegistrationFrame) -> ARAPRegistration.StrokeCorrespondence? {
             guard let mine = strokes, let theirs = other.strokes else { return nil }
             let candidate = ARAPRegistration.StrokeCorrespondence(source: mine, target: theirs)
@@ -1499,9 +1173,8 @@ extension CanvasManager {
         }
     }
 
-    /// Roughly ten cells across the longer side, floored so a small drawing does not get a grid
-    /// finer than its own strokes. The ARAP factorisation is over lattice vertices, so this is the
-    /// dial that sets registration cost.
+    /// Roughly ten cells across the longer side, floored so a small drawing doesn't get a grid finer
+    /// than its own strokes. Sets registration cost, since ARAP factorises over lattice vertices.
     private static func latticeCellSize(covering points: [CGPoint]) -> CGFloat {
         let xs = points.map(\.x), ys = points.map(\.y)
         guard let minX = xs.min(), let maxX = xs.max(),
@@ -1519,23 +1192,18 @@ extension CanvasManager {
                 return RegistrationElement(points: points, stroke: points,
                                            groupID: stroke.motionGroupID)
             default:
-                // A fill or a placed image contributes to the cloud but cannot carry a tag —
-                // `motionGroupID` is a field on `VectorStroke` only (see VECTOR_INTERPOLATION.md §4
-                // item 11). It is still *grouped*: its points take part in the partition, so it
-                // lands in a part and gets a lattice; it simply has nowhere to record which one, so
-                // at render time it rides the recipe's first binding like any untagged content.
+                // A fill or placed image cannot carry a tag (`motionGroupID` is a `VectorStroke`
+                // field only, VECTOR_INTERPOLATION.md §4 item 11), so it rides the first binding.
                 return RegistrationElement(points: registrationPoints(of: [element]), stroke: nil,
                                            groupID: nil)
             }
         })
     }
 
-    /// Every point a display list contributes to registration.
-    ///
-    /// Strokes contribute their samples; a fill contributes its path's control points; a placed image
-    /// contributes its centre, which is all of it that can travel (`InterpolationEvaluator`'s note on
-    /// warping one). A stroke's `lattice` parent walk is deliberately skipped — it duplicates the
-    /// stroke's own path and would weight a split piece's parent more heavily than the drawing.
+    /// Every point a display list contributes to registration: a stroke's samples, a fill's path
+    /// control points, a placed image's centre (all of it that can travel). A stroke's `lattice`
+    /// parent walk is skipped — it duplicates the stroke's own path and would overweight a split
+    /// piece's parent.
     static func registrationPoints(of elements: [VectorElement]) -> [CGPoint] {
         var points: [CGPoint] = []
         for element in elements {
@@ -1559,21 +1227,16 @@ extension CanvasManager {
     // MARK: - Evaluating for display
 
     /// The interpolated frame's pixels, or nil when the cel has no recipe or the recipe is not yet
-    /// evaluable.
-    ///
-    /// Nil is "not yet", not an error: a recipe can be broken by editing around it, and the caller
-    /// should fall back to the cel's own content rather than show a failure.
-    ///
-    /// `at` overrides the recipe's stored `t` so a live drag can render without writing to the
-    /// document on every tick.
+    /// evaluable. Nil is "not yet", not an error — the caller should fall back to the cel's own
+    /// content rather than show a failure. `at` overrides the recipe's stored `t` so a live drag can
+    /// render without writing to the document on every tick.
     func interpolatedImage(forCel celID: UUID, inLayer layerID: UUID, at t: CGFloat? = nil,
                            quality: RenderQuality = .full) -> UIImage? {
         guard let canvasSize,
               let at = celIndices(forCel: celID, inLayer: layerID),
               let recipe = layers[at.layer].cels[at.cel].interpolation else { return nil }
         // A reprojection's content is the cel's own display list, which no `ContentProvider` can
-        // reach — the recipe holds no reference to the cel it lives on, by design. Handing it over
-        // here is the one place that knows both.
+        // reach — the recipe holds no reference to the cel it lives on, by design.
         let subject = recipe.mode == .reproject ? (layers[at.layer].cels[at.cel].vector?.elements ?? []) : []
         return InterpolationEvaluator.render(recipe: recipe, at: t ?? recipe.t, size: canvasSize,
                                              content: interpolationContentProvider, subject: subject,
@@ -1585,14 +1248,10 @@ extension CanvasManager {
 
     /// The guides `recipe` references, deduplicated and in a stable order.
     ///
-    /// **One resolver, used by both the evaluation and the preview key**, deliberately rather than an
-    /// incidental tidiness. `InterpolationPreviewKey` memoizes the in-between on its inputs, and a
-    /// guide is an input that no *version* in that key can see — guides live here, not on any
-    /// `VectorCanvas`, and `updateGuideStroke` replaces one **keeping its id**, so even the id list is
-    /// unmoved by a geometry edit. This key has bitten three times for exactly this shape of reason;
-    /// having the key and the evaluator read the same list is what stops a fourth.
-    ///
-    /// Returns `[]` immediately for a recipe naming no guides — most recipes.
+    /// **One resolver, used by both the evaluation and the preview key**, deliberately. Guides live
+    /// here, not on any `VectorCanvas`, and `updateGuideStroke` replaces one **keeping its id**, so
+    /// no cache key can see a guide edit by version alone — having the key and the evaluator read
+    /// the same list is what keeps them in sync.
     func guides(driving recipe: InterpolationRecipe) -> [GuideStroke] {
         var wanted = recipe.guideIDs
         for binding in recipe.groups { wanted.append(contentsOf: binding.guideIDs) }
@@ -1607,13 +1266,11 @@ extension CanvasManager {
     /// Records a guide the artist just drew and binds it to the frame under the playhead.
     ///
     /// **Whole-frame by default** — `boundGroups` empty, and the id goes on the recipe rather than
-    /// on a binding: "bind this guide to every group at once" is the right default because the
-    /// artist drew one arc over the whole drawing; narrowing it to a group is a later, deliberate
-    /// act. `GuideSet` reads all three bindings, so nothing has to change when it's narrowed.
-    ///
-    /// The interval is the recipe's own span, first reference to last, which scopes the guide
-    /// library later (`GuideStroke.interval`) without binding the guide to this recipe — the binding
-    /// runs the other way, from `guideIDs`, making reuse a reference rather than a copy.
+    /// on a binding: the artist drew one arc over the whole drawing, and narrowing it to a group is
+    /// a later, deliberate act. The interval is the recipe's own span, first reference to last,
+    /// which scopes the guide library (`GuideStroke.interval`) without binding the guide to this
+    /// recipe — the binding runs the other way, from `guideIDs`, making reuse a reference rather
+    /// than a copy.
     ///
     /// Returns the refusal reason, or nil on success.
     @discardableResult
@@ -1628,8 +1285,8 @@ extension CanvasManager {
         let guide = GuideStroke(samples: samples,
                                 interval: KeyframeInterval(start: first, end: last),
                                 boundGroups: [], role: .both)
-        // One step covering both halves: the artist's action was "add a guide to this frame", and an
-        // undo that left the guide in the registry bound to nothing would be a leak they cannot see.
+        // One step covering both halves — an undo leaving the guide registered but unbound to
+        // anything would be a leak the artist cannot see.
         withInterpolationUndo(name: "Add Guide") {
             guideStrokes.append(guide)
             layers[at.layer].cels[at.cel].interpolation?.guideIDs.append(guide.id)
@@ -1644,11 +1301,9 @@ extension CanvasManager {
         return layers[at.layer].cels[at.cel].interpolation == nil ? .noInterpolationToGuide : nil
     }
 
-    /// The guides to *draw* right now: those bound to the frame under the playhead.
-    ///
-    /// Deliberately the recipe's own list rather than every guide in the document. A scene
-    /// accumulates guides across every interval it has ever had one on, and showing all of them at
-    /// once would bury the arc the artist is working on under every arc they have ever drawn.
+    /// The guides to *draw* right now: those bound to the frame under the playhead. Deliberately the
+    /// recipe's own list, not every guide in the document — showing all of them would bury the arc
+    /// the artist is working on under every arc they have ever drawn.
     var visibleGuideStrokes: [GuideStroke] {
         guard isInterpolateMode, let at = interpolationTarget,
               let recipe = layers[at.layer].cels[at.cel].interpolation else { return [] }
@@ -1682,14 +1337,11 @@ extension CanvasManager {
         GuideHandles.indices(in: guide.samples).map { ($0, guide.samples[$0].point) }
     }
 
-    /// A handle drag's touch-down.
-    ///
-    /// The bracket is `beginStructureGesture`, the same one the `t` slider uses and for the same
-    /// reason — a step per touch sample makes undo useless. It is *sufficient* here, unlike the
-    /// retag case, because `StructureSnapshot` carries `guideStrokes` outright: a guide is a
-    /// document-level value, not stroke content behind a class reference, so nothing about a vector
-    /// canvas moves while a handle does. `updateGuideStroke`'s own `withInterpolationUndo` then
-    /// defers to this gesture rather than recording per move.
+    /// A handle drag's touch-down. Uses `beginStructureGesture`, the same bracket the `t` slider
+    /// uses — sufficient here, unlike the retag case, because `StructureSnapshot` carries
+    /// `guideStrokes` outright: a guide is a document-level value, not stroke content behind a class
+    /// reference. `updateGuideStroke`'s own bracket defers to this gesture rather than recording per
+    /// move.
     func beginGuideHandleDrag(guideID: UUID) {
         guard let guide = guideStrokes.first(where: { $0.id == guideID }) else { return }
         guideHandleDrag = (guideID, guide.samples)
@@ -1708,8 +1360,7 @@ extension CanvasManager {
     }
 
     /// The lift. Records the step, or drops it when the handle came back to where it started — a tap
-    /// on a handle is not an edit, and an undo step that restores identical geometry is one the
-    /// artist has to press through twice to get anywhere.
+    /// is not an edit, and identical-geometry undo steps just make undo tedious.
     func commitGuideHandleDrag() {
         guard let drag = guideHandleDrag else { return }
         guideHandleDrag = nil
@@ -1718,9 +1369,7 @@ extension CanvasManager {
     }
 
     /// A second finger landing mid-drag. Puts the guide back exactly as it was and records nothing —
-    /// the same answer `StrokeCanvasView.handleCancel` gives a half-drawn stroke, and the reason
-    /// `cancelStructureGesture` exists: a snapshot left in place would be handed to whichever gesture
-    /// committed next.
+    /// a snapshot left in place would be handed to whichever gesture committed next.
     func cancelGuideHandleDrag() {
         guard let drag = guideHandleDrag else { return }
         guideHandleDrag = nil
@@ -1735,14 +1384,11 @@ extension CanvasManager {
     /// One guide on the bar's list.
     struct GuideChip: Identifiable {
         var guide: GuideStroke
-        /// 1-based, in the order the recipe names them. A guide has no name and does not want one —
-        /// it is identified by the arc drawn on the canvas, and the number is only there so the row
-        /// and the drawing can be talked about together.
+        /// 1-based, in the order the recipe names them — a guide has no name of its own.
         var number: Int
-        /// True when some *other* interval references this same guide. Worth showing, because it is
-        /// exactly the difference between link and duplicate: editing a shared guide's handles moves
-        /// the motion on every frame that uses it, which is the point of a link and a nasty surprise
-        /// if you thought you had a copy.
+        /// True when some *other* interval references this same guide: editing a shared guide's
+        /// handles moves the motion on every frame that uses it, a nasty surprise if you thought you
+        /// had a copy, so it's worth flagging.
         var isShared: Bool
         var id: UUID { guide.id }
     }
@@ -1766,10 +1412,8 @@ extension CanvasManager {
     }
 
     /// Guides elsewhere in the document that this frame does not already use — the reuse library.
-    ///
-    /// Every guide in the registry rather than only those whose `KeyframeInterval` matches — fetching
-    /// the arc from *another* frame is the whole point. The interval scopes a guide to where it was
-    /// authored, never to where it may be used.
+    /// Every guide in the registry, not only those whose `KeyframeInterval` matches — fetching the
+    /// arc from *another* frame is the whole point.
     var linkableGuideStrokes: [GuideStroke] {
         guard let at = interpolationTarget,
               let recipe = layers[at.layer].cels[at.cel].interpolation else { return [] }
@@ -1777,11 +1421,9 @@ extension CanvasManager {
         return guideStrokes.filter { !alreadyHere.contains($0.id) }
     }
 
-    /// **Link**: the same guide drives this interval too.
-    ///
-    /// One line, since a recipe names guides by **id** — "the same guide in two places" needs no new
-    /// field and no copy. Editing it anywhere moves the motion everywhere, exactly what a repeating
-    /// cycle wants: fix the arc once and every frame of the walk follows.
+    /// **Link**: the same guide drives this interval too. A recipe names guides by **id**, so
+    /// editing it anywhere moves the motion everywhere — fix the arc once and every frame of a
+    /// repeating cycle follows.
     @discardableResult
     func linkGuideStroke(id: UUID) -> InterpolationRefusal? {
         guard let at = interpolationTarget,
@@ -1797,18 +1439,11 @@ extension CanvasManager {
 
     /// **Duplicate**: an independent copy of the same arc, for a one-off.
     ///
-    /// Three things are deliberately *not* copied, the same judgement `recordGuideStroke` makes
-    /// about a freshly drawn guide:
-    ///
-    /// - **A fresh `id`**, the whole difference from a link.
-    /// - **This interval, not the source's.** The copy was authored here, in the sense the field
-    ///   means (`GuideStroke.interval` scopes the library, it does not bind).
-    /// - **Whole-frame, not the source's `boundGroups`.** A group binding carried across would
-    ///   silently make the copy drive nothing whenever that group isn't part of *this* recipe.
-    ///   Narrowing to a group stays a later, deliberate act.
-    ///
-    /// `role` *is* carried, because it says which of the two signals the artist meant the arc to
-    /// carry, and that is a property of the drawing rather than of where it is used.
+    /// Deliberately *not* copied, the same judgement `recordGuideStroke` makes: a fresh `id` (the
+    /// whole difference from a link); this interval, not the source's; and whole-frame, not the
+    /// source's `boundGroups` (carried across, it would silently make the copy drive nothing
+    /// whenever that group isn't part of *this* recipe). `role` *is* carried — it's a property of
+    /// the drawing, not of where it's used.
     @discardableResult
     func duplicateGuideStroke(id: UUID) -> InterpolationRefusal? {
         guard let source = guideStrokes.first(where: { $0.id == id }),
@@ -1829,11 +1464,9 @@ extension CanvasManager {
 
     // MARK: - The spacing chart
 
-    /// Frames from the first keyframe to the last, inclusive — the chart's stop count.
-    ///
-    /// Read off the **timeline**, not off the recipe, because that is what "each in-between frame"
-    /// means to the artist. Nil when the span cannot be resolved or the keyframes are adjacent — a
-    /// keyframe pair with no in-betweens to space.
+    /// Frames from the first keyframe to the last, inclusive — the chart's stop count. Read off the
+    /// **timeline**, not the recipe. Nil when the span cannot be resolved or the keyframes are
+    /// adjacent.
     func interpolationFrameSpan(of recipe: InterpolationRecipe) -> Int? {
         guard let first = recipe.references.first?.cels.first,
               let last = recipe.references.last?.cels.last,
@@ -1846,10 +1479,9 @@ extension CanvasManager {
     }
 
     /// True when this guide's timing is what `binding` reads — the two ways the model can say so.
-    ///
-    /// The same pairing `GuideSet` performs, and it has to stay that way: this decides where a dot
-    /// drag *writes*, and `GuideSet` decides where the result is *read*. If they disagreed, the chart
-    /// would move and the frame would not.
+    /// Must stay in sync with the pairing `GuideSet` performs: this decides where a dot drag
+    /// *writes*, `GuideSet` decides where the result is *read*. If they disagreed, the chart would
+    /// move and the frame would not.
     private func binding(_ binding: MotionGroupBinding, isDrivenBy guide: GuideStroke,
                          in recipe: InterpolationRecipe) -> Bool {
         binding.guideIDs.contains(guide.id)
@@ -1857,12 +1489,10 @@ extension CanvasManager {
     }
 
     /// The easing actually in force for `guide`'s groups, mirroring the evaluator's precedence —
-    /// `binding.spacing ?? the guide's derived timing ?? recipe.spacing`.
-    ///
-    /// Mirrored rather than shared because the evaluator resolves per binding and this question is
-    /// per *guide*: the chart is drawn on one guide and has to show one curve. Where a guide drives
-    /// several groups whose bindings disagree, the first is what is shown — and a drag then writes
-    /// all of them, so the disagreement resolves the moment the artist touches it.
+    /// `binding.spacing ?? the guide's derived timing ?? recipe.spacing`. Mirrored rather than
+    /// shared because the evaluator resolves per binding and this question is per *guide* — the
+    /// chart is drawn on one guide and has to show one curve. Where several bound groups disagree,
+    /// the first is shown, and a drag then writes all of them.
     private func spacingInForce(for guide: GuideStroke, in recipe: InterpolationRecipe) -> SpacingCurve {
         if let driven = recipe.groups.first(where: { binding($0, isDrivenBy: guide, in: recipe) }),
            let explicit = driven.spacing {
@@ -1885,11 +1515,9 @@ extension CanvasManager {
 
     /// Writes a chart back as the easing for every group `guide` drives.
     ///
-    /// **`binding.spacing` is the field, and that is what makes the chart work at all**: it outranks
-    /// the guide's derived stylus timing, so a dot the artist has placed by hand is not overwritten
-    /// by the velocity they happened to draw the arc at. A recipe with no bindings — the honest
-    /// whole-frame degenerate case — takes it on `recipe.spacing` instead, which is the same rule one
-    /// level up.
+    /// `binding.spacing` outranks the guide's derived stylus timing, so a dot the artist has placed
+    /// by hand is not overwritten by the velocity they happened to draw the arc at. A recipe with no
+    /// bindings takes it on `recipe.spacing` instead, the same rule one level up.
     func setSpacing(_ curve: SpacingCurve, forGuide guideID: UUID) {
         guard let at = interpolationTarget,
               var recipe = layers[at.layer].cels[at.cel].interpolation,
