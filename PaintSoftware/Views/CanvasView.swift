@@ -385,6 +385,12 @@ struct CanvasView: UIViewRepresentable {
                     // what lets drawing straight over a pending shape work in one touch — the first
                     // touch bakes the shape and then goes on to draw.
                     self.commitTransientsAndRefresh()
+                    // Drawing on a frame with no block spawns one, right here, before the stroke
+                    // reaches for its content tier. `handleBegin` calls this and *then* reads
+                    // `vectorCanvas`/`raster`, so attaching the new cel's tiers synchronously is
+                    // what lets the very touch that created the block also draw into it — a
+                    // deferred refresh would drop the first stroke on the floor.
+                    self.attachSpawnedCelIfFrameIsEmpty(host: host)
                     if let host { self.startShapeDetection(host: host) }
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
@@ -502,7 +508,12 @@ struct CanvasView: UIViewRepresentable {
                 // fully covers the container, so an inactive host still swallows touches via UIView's
                 // default hitTest, blocking an active layer underneath. Disabling the host itself
                 // lets hit-testing fall through. Select/Move also disable drawing while engaged.
-                let shouldInteract = (index == canvasManager.currentLayerIndex) && celIdx != nil
+                //
+                // Deliberately *not* gated on `celIdx != nil` any more: the active layer stays
+                // drawable on a frame no block covers, and the first stroke spawns the block (see
+                // `attachSpawnedCelIfFrameIsEmpty`). Gating it here was the outer half of the
+                // blank-frame bug — the touch never even reached the stroke view to be acted on.
+                let shouldInteract = (index == canvasManager.currentLayerIndex)
                     && canvasManager.selectedTool != .fill
                     && activePanel != .select && canvasManager.floatingPiece == nil
                     && !(canvasManager.isVectorTransforming && layer.kind == .vector)
@@ -575,6 +586,35 @@ struct CanvasView: UIViewRepresentable {
             // VectorCanvas is a reference type mutated in place, so refresh its host directly.
             let layerID = canvasManager.layers[index].id
             layerHosts[layerID]?.strokeView.refreshDisplay()
+        }
+
+        /// Spawns a block on the active layer when the stroke that is *just now beginning* landed on
+        /// a frame no block covers, and hands its content tiers straight to the stroke view.
+        ///
+        /// Called from `onStrokeBegan`, which `StrokeCanvasView.handleBegin` invokes before it reads
+        /// `vectorCanvas`/`raster` — so the tiers assigned here are the ones this very stroke stamps
+        /// into. Going through `reconcileLayers` instead would not do: it runs on the next SwiftUI
+        /// render, by which time `handleBegin` has already given up on a nil raster and the stroke
+        /// the artist drew to create the block would be the one stroke the block never receives.
+        ///
+        /// A no-op when the frame already has a block, which is the overwhelmingly common case.
+        private func attachSpawnedCelIfFrameIsEmpty(host: LayerHostView?) {
+            let index = canvasManager.currentLayerIndex
+            // The eraser is excluded: it only ever takes content away, so a touch with it on an
+            // empty frame has nothing to act on, and spawning a block would leave a blank one behind
+            // plus an undo step for a gesture that changed nothing the artist can see.
+            guard canvasManager.selectedTool != .eraser else { return }
+            guard let host, canvasManager.layers.indices.contains(index),
+                  host.strokeView.layerID == canvasManager.layers[index].id,
+                  canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) == nil,
+                  let celIdx = canvasManager.ensureCelAtCurrentFrame(layerIndex: index) else { return }
+
+            let cel = canvasManager.layers[index].cels[celIdx]
+            host.strokeView.raster = cel.raster
+            host.strokeView.vectorCanvas = cel.vector
+            host.fillImageView.image = cel.fillImage
+            host.bakedImageView.image = cel.bakedImage
+            host.bakedImageView.isHidden = cel.bakedImage == nil
         }
 
         /// What a layer's `bakedImageView` should show: the real `bakedImage`, or — while that cel's

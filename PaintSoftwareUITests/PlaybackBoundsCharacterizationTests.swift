@@ -4,23 +4,35 @@ import UIKit
 /// Characterization tests for `CanvasManager`'s playback bounds — `playbackStartFrame`,
 /// `playbackEndFrame`, `playbackEntryFrame()` and `advancePlayback()`.
 ///
-/// The one rule the whole group rests on: **an unset loop marker stands in for the scene's own
-/// boundary**, the first frame for a missing loop start and the last frame for a missing loop end.
-/// That substitution is what lets looping and normal playback share a single advance rule — wrap at
-/// the end boundary back to the start boundary when looping, stop there when not — instead of each
-/// mode needing its own special case for whether the markers happen to be set. Pinned here because
-/// the substitution is invisible at the call sites: nothing in `advancePlayback` mentions markers,
-/// so a change to `effectiveLoopRange` or to `hasLoopBoundary` could silently move where playback
-/// stops.
+/// The one rule the whole group rests on: **an unset loop marker stands in for the animation's own
+/// boundary**, the first frame for a missing loop start and the last *drawn* frame for a missing
+/// loop end. That substitution is what lets looping and normal playback share a single advance
+/// rule — wrap at the end boundary back to the start boundary when looping, stop there when not —
+/// instead of each mode needing its own special case for whether the markers happen to be set.
+/// Pinned here because the substitution is invisible at the call sites: nothing in
+/// `advancePlayback` mentions markers, so a change to `effectiveLoopRange`, to `hasLoopBoundary` or
+/// to `contentEndFrame` could silently move where playback stops.
+///
+/// "Last drawn frame" is `contentEndFrame`, not `sceneFrameCount`. The two are different numbers
+/// and the distinction is the whole point: `sceneFrameCount` is the laid-out length of the track,
+/// which starts at 12 and only ratchets upward, so keying playback to it made a short animation
+/// run out over empty frames before wrapping. `theBoundsFollowTheContent...` below is the pair of
+/// tests that pins that apart; everything above them keeps content and scene length equal so the
+/// marker arithmetic stays easy to read.
 ///
 /// See `CanvasManagerTestSupport.swift` for why these compile as plain unit tests inside the UI
 /// test target.
 final class PlaybackBoundsCharacterizationTests: XCTestCase {
 
-    /// A manager with one layer and an explicit scene length — the fixture's default is 12 frames,
-    /// which these tests shorten so the boundary arithmetic is easy to read.
+    /// A manager with one layer holding a single block that spans exactly `sceneFrameCount` frames.
+    ///
+    /// Both halves matter. `CanvasFixture.manager()` gives the layer a cel covering the default
+    /// 12-frame scene, so shortening `sceneFrameCount` alone would leave a 12-frame *block* behind
+    /// and every bound here would read 11 — the cel has to be trimmed with it.
     private func manager(sceneFrameCount: Int = 5) -> CanvasManager {
         let manager = CanvasFixture.manager()
+        manager.sceneFrameCount = sceneFrameCount
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: max(sceneFrameCount, 1))])
         manager.sceneFrameCount = sceneFrameCount
         return manager
     }
@@ -38,19 +50,99 @@ final class PlaybackBoundsCharacterizationTests: XCTestCase {
 
     // MARK: - Bounds with no markers set
 
-    func testWithNoMarkersTheBoundsAreTheWholeScene() {
+    func testWithNoMarkersTheBoundsAreTheWholeAnimation() {
         let manager = self.manager(sceneFrameCount: 5)
 
         XCTAssertFalse(manager.hasLoopBoundary)
         XCTAssertEqual(manager.playbackStartFrame, 0, "A missing loop start stands in as the first frame")
-        XCTAssertEqual(manager.playbackEndFrame, 4, "…and a missing loop end as the last frame")
+        XCTAssertEqual(manager.playbackEndFrame, 4, "…and a missing loop end as the last drawn frame")
     }
 
     func testWithNoMarkersAndAnEmptySceneTheBoundsCollapseToFrameZero() {
         let manager = self.manager(sceneFrameCount: 0)
 
         XCTAssertEqual(manager.playbackStartFrame, 0)
-        XCTAssertEqual(manager.playbackEndFrame, 0, "`max(sceneFrameCount - 1, 0)` must not go negative")
+        XCTAssertEqual(manager.playbackEndFrame, 0, "`max(contentEndFrame - 1, 0)` must not go negative")
+    }
+
+    func testWithNoLayersAtAllTheBoundsCollapseToFrameZero() {
+        let manager = CanvasManager()
+        manager.canvasSize = CanvasFixture.canvasSize
+
+        XCTAssertEqual(manager.contentEndFrame, 0, "Nothing drawn anywhere")
+        XCTAssertEqual(manager.playbackEndFrame, 0, "…and no negative bound comes out of it")
+    }
+
+    // MARK: - Content end vs. scene length
+    //
+    // The distinction this whole change turns on. `sceneFrameCount` is the laid-out track; the
+    // animation is however far the blocks actually reach.
+
+    func testTheBoundsFollowTheContentNotTheLaidOutSceneLength() {
+        let manager = self.manager(sceneFrameCount: 12)
+        // A three-frame animation sitting in a track still laid out to 12 frames — the exact shape
+        // that used to loop from frame 12.
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+
+        XCTAssertEqual(manager.sceneFrameCount, 12, "The track is untouched…")
+        XCTAssertEqual(manager.contentEndFrame, 3, "…but the animation is three frames long")
+        XCTAssertEqual(manager.playbackEndFrame, 2, "Playback ends on the last drawn frame")
+    }
+
+    func testTheContentEndIsTheFurthestBlockAcrossEveryLayer() {
+        let manager = self.manager(sceneFrameCount: 12)
+        manager.addLayer()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+        CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 4, length: 2)])
+
+        XCTAssertEqual(manager.contentEndFrame, 6, "Layer 1's block reaches furthest, to frame 5")
+        XCTAssertEqual(manager.playbackEndFrame, 5)
+    }
+
+    /// A gap before the last block counts as part of the animation: the bound is the furthest
+    /// block's *end*, not the total number of drawn frames.
+    func testATrailingBlockAfterAGapStillSetsTheEnd() {
+        let manager = self.manager(sceneFrameCount: 12)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 2), (start: 7, length: 1)])
+
+        XCTAssertEqual(manager.contentEndFrame, 8)
+        XCTAssertEqual(manager.playbackEndFrame, 7)
+    }
+
+    func testLoopingWithNoMarkersWrapsAtTheLastBlockNotTheSceneEnd() {
+        let manager = self.manager(sceneFrameCount: 12)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+        manager.isLoopEnabled = true
+        manager.currentFrame = 1
+
+        let (frames, stopped) = play(manager, steps: 4)
+
+        XCTAssertFalse(stopped)
+        XCTAssertEqual(frames, [2, 0, 1, 2], "Wraps 2 → 0; frame 3 onward is empty track")
+    }
+
+    func testWithLoopingOffPlaybackStopsAtTheLastBlock() {
+        let manager = self.manager(sceneFrameCount: 12)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+        manager.isLoopEnabled = false
+        manager.currentFrame = 1
+
+        let (frames, stopped) = play(manager, steps: 5)
+
+        XCTAssertTrue(stopped)
+        XCTAssertEqual(frames, [2], "Stops on the last drawn frame rather than running out to 11")
+    }
+
+    /// Markers win over the content: set them and they *are* the animation window, even when they
+    /// reach past every block into the empty track.
+    func testMarkersSetPastTheContentAreStillHonoured() {
+        let manager = self.manager(sceneFrameCount: 12)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+        manager.setLoopStart(1)
+        manager.setLoopEnd(9)
+
+        XCTAssertEqual(manager.playbackStartFrame, 1)
+        XCTAssertEqual(manager.playbackEndFrame, 9, "The window is the artist's call, not the content's")
     }
 
     // MARK: - Bounds with one marker set

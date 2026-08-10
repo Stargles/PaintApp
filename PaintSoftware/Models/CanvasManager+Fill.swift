@@ -48,7 +48,10 @@ extension CanvasManager {
         guard let canvasSize else { return }
         guard layers.indices.contains(currentLayerIndex) else { return }
         let layerIndex = currentLayerIndex
-        guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return }
+        // Filling a frame with no block spawns one, exactly as a brush stroke there does — the two
+        // are the same instruction ("put content on this frame") and it would be arbitrary for one
+        // to work and the other to sit inert. See `ensureCelAtCurrentFrame`.
+        guard let celIndex = ensureCelAtCurrentFrame(layerIndex: layerIndex) else { return }
 
         let references = fillReferenceSources()
         let width = Int(canvasSize.width.rounded())

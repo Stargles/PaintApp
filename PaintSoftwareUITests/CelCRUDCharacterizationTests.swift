@@ -567,4 +567,83 @@ final class CelCRUDCharacterizationTests: XCTestCase {
                       "One undo must pop the `addLayer` — if any of the three rejected calls had recorded a step, it would have been popped instead and the layer would still be here")
         XCTAssertFalse(manager.canUndo, "…and that was the only step on the stack")
     }
+
+    // MARK: - ensureCelAtCurrentFrame
+    //
+    // The blank-frame drawing path. Every drawing operation is gated on `activeCelIndex` finding
+    // something, so parking the playhead past the last block used to leave the canvas inert; this
+    // is the hook that turns "draw on an empty frame" into "make a block and draw on it".
+
+    func testEnsureCelReturnsTheExistingBlockWithoutCreatingAnything() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+        manager.currentFrame = 1
+
+        XCTAssertEqual(manager.ensureCelAtCurrentFrame(layerIndex: 0), 0)
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0], "No second block")
+    }
+
+    func testEnsureCelSpawnsAOneFrameBlockOnAnEmptyFrame() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 2)])
+        manager.currentFrame = 6
+
+        let celIndex = manager.ensureCelAtCurrentFrame(layerIndex: 0)
+
+        XCTAssertNotNil(celIndex)
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 6])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [2, 1],
+                       "One frame long — extending it is `Extend to End`'s job, not the first stroke's")
+        assertNoOverlappingCels(manager)
+    }
+
+    /// The spawned block is clamped by the next one, same as any other creation — a frame sitting in
+    /// a one-frame hole gets a one-frame block, not one that swallows its neighbour.
+    func testASpawnedBlockCannotOverlapTheBlockAfterIt() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 2), (start: 3, length: 4)])
+        manager.currentFrame = 2
+
+        XCTAssertNotNil(manager.ensureCelAtCurrentFrame(layerIndex: 0))
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 2, 3])
+        assertNoOverlappingCels(manager)
+    }
+
+    /// A block spawned on a `.vector` layer has to be a *vector* block. Without its own
+    /// `VectorCanvas` the stroke view silently falls back to raster mode and the drawing lands as
+    /// pixels on a vector layer — invisible to the geometric eraser, to the save payload's vector
+    /// half, and to interpolation, which reads `cel.vector` and finds nothing.
+    func testASpawnedBlockOnAVectorLayerGetsItsOwnVectorCanvas() {
+        let manager = CanvasFixture.manager()
+        manager.addVectorLayer()
+        let layerIndex = manager.layers.count - 1
+        CanvasFixture.setCelLayout(manager, layerIndex: layerIndex, [(start: 0, length: 2)])
+        manager.currentFrame = 5
+
+        guard let celIndex = manager.ensureCelAtCurrentFrame(layerIndex: layerIndex) else {
+            return XCTFail("No block spawned")
+        }
+
+        XCTAssertNotNil(manager.layers[layerIndex].cels[celIndex].vector)
+    }
+
+    func testSpawningABlockIsOneUndoStep() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 2)])
+        manager.currentFrame = 6
+
+        XCTAssertNotNil(manager.ensureCelAtCurrentFrame(layerIndex: 0))
+        manager.undo()
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0],
+                       "One undo takes the spawned block back off again")
+    }
+
+    func testEnsureCelOnAMissingLayerIsANoOp() {
+        let manager = CanvasFixture.manager()
+        manager.currentFrame = 3
+
+        XCTAssertNil(manager.ensureCelAtCurrentFrame(layerIndex: 7))
+    }
 }

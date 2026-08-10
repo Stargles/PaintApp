@@ -62,11 +62,10 @@ struct LayerStackListView: UIViewRepresentable {
         var pendingDragID: UUID?
         var dragSnapshot: UIView?
         var dragTouchOffset: CGFloat = 0
-        var dropLine: UIView?
         var dropTarget: DropTarget?
-        /// Set for the one `reload()` that immediately follows a drop. The rows are already sitting
-        /// in their post-drop positions (the drag left their preview transforms in place), so that
-        /// diff must be applied without animation — see `handleReorderDrag`'s `.ended` case.
+        /// Set for the one `reload()` that immediately follows a drop, which must not animate: the
+        /// finger has just put the row where it goes, and animating the diff on top of that slides
+        /// it in from wherever the old order had it. See `handleReorderDrag`'s `.ended` case.
         var isSettlingDrop = false
 
         init(canvasManager: CanvasManager) {
@@ -388,11 +387,14 @@ extension LayerStackListView.Coordinator {
 
         case .ended:
             let target = dropTarget
-            // The rows are already shifted into the arrangement the drop produces, so those
-            // transforms stay put across the restack. Clearing them here (as this used to) sent
-            // every row snapping back to its pre-drag position for one frame before the animated
-            // diff slid it out again — the "shuffle" the drop appeared to do on release.
-            finishDrag(keepingRowShifts: target != nil)
+            // Preview shifts come off *before* the reorder, never across it. A preview translation
+            // is an offset from the row's old position; once the model reorders, the table lays the
+            // same cell out at its new position and that stale offset is added on top of it, so
+            // every shifted row ends up one slot away from where it belongs — rows landing stacked
+            // on each other. Carrying them across was an attempt to hide a one-frame snap-back that
+            // no longer exists: the restack and the re-diff below both run synchronously inside
+            // this callback, so UIKit only ever renders the settled result.
+            finishDrag()
             guard let draggedID = pendingDragID, let target else {
                 pendingDragID = nil
                 return
@@ -405,15 +407,13 @@ extension LayerStackListView.Coordinator {
                 dropBetween(draggedID: draggedID, insertionIndex: insertionIndex)
             }
             // Re-diff straight away rather than waiting for SwiftUI's own `updateUIView`, so the
-            // shifted rows and the new row order land in the same frame; then drop the shifts, now
-            // that each cell's untransformed position is where the finger left it.
+            // new row order is on screen in the same frame the finger let go.
             isSettlingDrop = true
             reload()
             isSettlingDrop = false
-            clearRowShifts()
 
         default:
-            finishDrag(keepingRowShifts: false)
+            finishDrag()
             pendingDragID = nil
         }
     }
@@ -449,45 +449,20 @@ extension LayerStackListView.Coordinator {
         }
         guard resolved != dropTarget else { return }
         dropTarget = resolved
-        // Shift first: the insertion line's position is read off the cells' new translations, so
-        // drawing it before they move would place it against the *previous* drop target's layout.
         animateRowShifts()
         renderDropFeedback()
     }
 
-    /// Highlights the folder/layer a drop would land in, or draws a line where it would slot in.
+    /// Highlights the folder/layer a drop would land *into*. A drop landing *between* rows needs no
+    /// mark of its own: the rows have already slid apart to open the gap the row will drop into
+    /// (`animateRowShifts`), which shows the destination more directly than a line drawn across it.
     private func renderDropFeedback() {
         guard let tableView else { return }
         for case let cell as LayerStackCell in tableView.visibleCells { cell.setDropHighlight(false) }
 
-        guard let dropTarget else { dropLine?.isHidden = true; return }
-        switch dropTarget {
-        case .onto(let rowIndex):
-            dropLine?.isHidden = true
-            if let cell = tableView.cellForRow(at: IndexPath(row: rowIndex, section: 0)) as? LayerStackCell {
-                cell.setDropHighlight(true)
-            }
-        case .between(let insertionIndex):
-            let line = dropLine ?? {
-                let view = UIView()
-                view.backgroundColor = .systemBlue
-                view.layer.cornerRadius = 1
-                tableView.addSubview(view)
-                dropLine = view
-                return view
-            }()
-            // The line marks the gap the row will drop into, so it has to follow the rows that
-            // shifted to open that gap — `rectForRow` reports the unshifted layout, so add the
-            // neighbouring cell's translation on top of it.
-            let anchorRow = min(insertionIndex, max(rows.count - 1, 0))
-            let anchorRect = rows.isEmpty ? CGRect.zero : tableView.rectForRow(at: IndexPath(row: anchorRow, section: 0))
-            var y = insertionIndex >= rows.count ? anchorRect.maxY : anchorRect.minY
-            if let cell = tableView.cellForRow(at: IndexPath(row: anchorRow, section: 0)) as? LayerStackCell {
-                y += cell.transform.ty
-            }
-            line.frame = CGRect(x: 12, y: y - 1, width: tableView.bounds.width - 24, height: 2)
-            line.isHidden = false
-            tableView.bringSubviewToFront(line)
+        guard case .onto(let rowIndex)? = dropTarget else { return }
+        if let cell = tableView.cellForRow(at: IndexPath(row: rowIndex, section: 0)) as? LayerStackCell {
+            cell.setDropHighlight(true)
         }
     }
 
@@ -546,32 +521,22 @@ extension LayerStackListView.Coordinator {
         }
     }
 
-    /// Tears down the drag's chrome. `keepingRowShifts` leaves the preview translations on the cells
-    /// so a committed drop can hand them straight to the re-diffed layout; a cancelled drag clears
-    /// them here instead, since nothing is going to move.
-    private func finishDrag(keepingRowShifts: Bool) {
+    /// Tears down the drag's chrome and returns every cell to its untransformed position, whether
+    /// the drag committed or was cancelled. The caller applies the restack *after* this, so the
+    /// table never holds a preview offset and a reordered model at the same time.
+    private func finishDrag() {
         guard let tableView else { return }
         pendingDragID = dragRowID
         dragSnapshot?.removeFromSuperview()
         dragSnapshot = nil
-        dropLine?.isHidden = true
         for case let cell as LayerStackCell in tableView.visibleCells {
             cell.contentView.alpha = 1
             cell.setDropHighlight(false)
-            if !keepingRowShifts { cell.transform = .identity }
+            cell.transform = .identity
         }
         tableView.isScrollEnabled = true
         dragRowID = nil
         dropTarget = nil
-    }
-
-    /// Returns every cell to its untransformed position — called once the model has caught up, so
-    /// "untransformed" and "where the row visually sits" are already the same place.
-    private func clearRowShifts() {
-        guard let tableView else { return }
-        for cell in tableView.visibleCells where cell.transform != .identity {
-            cell.transform = .identity
-        }
     }
 }
 

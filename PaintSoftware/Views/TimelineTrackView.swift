@@ -25,6 +25,10 @@ struct TimelineTrackView: UIViewRepresentable {
     var onRequestBlockMenu: (Int, Int, CGRect) -> Void
     var onRequestGapMenu: (Int, Int, CGRect) -> Void
     var onRequestLoopMenu: (Int, CGRect) -> Void
+    /// A vector block was dropped on a raster layer. The drop is *not* applied here — the timeline
+    /// hands the request up so `AnimationTimeline` can ask about the rasterization first, and the
+    /// answer comes back through `CanvasManager.moveCelToLayer(…, rasterizing: true)`.
+    var onRequestRasterizeConfirm: (CanvasManager.CelDropRequest) -> Void
 
     func makeUIView(context: Context) -> UIScrollView {
         let scrollView = TimelineScrollView()
@@ -60,6 +64,7 @@ struct TimelineTrackView: UIViewRepresentable {
         context.coordinator.onRequestBlockMenu = onRequestBlockMenu
         context.coordinator.onRequestGapMenu = onRequestGapMenu
         context.coordinator.onRequestLoopMenu = onRequestLoopMenu
+        context.coordinator.onRequestRasterizeConfirm = onRequestRasterizeConfirm
         context.coordinator.relayout()
     }
 
@@ -75,6 +80,7 @@ struct TimelineTrackView: UIViewRepresentable {
         var onRequestBlockMenu: ((Int, Int, CGRect) -> Void)?
         var onRequestGapMenu: ((Int, Int, CGRect) -> Void)?
         var onRequestLoopMenu: ((Int, CGRect) -> Void)?
+        var onRequestRasterizeConfirm: ((CanvasManager.CelDropRequest) -> Void)?
 
         weak var scrollView: UIScrollView?
         weak var contentView: UIView?
@@ -93,6 +99,17 @@ struct TimelineTrackView: UIViewRepresentable {
         private var rowViews: [TimelineRowView] = []
         private var folderRowViews: [TimelineFolderRowView] = []
         private let playheadView = TimelinePlayheadView()
+
+        /// Which `layers` index each laid-out track row belongs to, and where that row sits
+        /// vertically — recorded on every `relayout` so a drag can turn a finger's y into a target
+        /// layer. Folder rows are absent by construction: a folder is a summary of its children and
+        /// has no track of its own to drop a block onto.
+        private var layerRowGeometry: [(layerIndex: Int, minY: CGFloat, maxY: CGFloat)] = []
+
+        /// The block currently picked up, if any. See `BlockDrag`.
+        private var blockDrag: BlockDrag?
+        private let dragGhostView = CelBlockView()
+        private let dropIndicatorView = TimelineDropIndicatorView()
 
         init(canvasManager: CanvasManager) {
             self.canvasManager = canvasManager
@@ -192,6 +209,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 rulerHeight + CGFloat(position) * (rowHeight + 2) + 4
             }
 
+            layerRowGeometry = []
             for (slot, entry) in layerEntries.enumerated() {
                 let row = rowViews[slot]
                 row.frame = CGRect(x: 0, y: rowY(entry.position), width: totalWidth, height: rowHeight)
@@ -199,7 +217,16 @@ struct TimelineTrackView: UIViewRepresentable {
                 row.layerID = layers[entry.layerIndex].id
                 row.pixelsPerFrame = pixelsPerFrame
                 row.isCurrentLayer = (entry.layerIndex == canvasManager.currentLayerIndex)
+                // Set before `update`, which is what applies it: the block being dragged is drawn by
+                // the ghost following the finger, so the copy still sitting in the row is hidden
+                // rather than reading as two copies of the same drawing.
+                row.hiddenCelID = (blockDrag?.sourceLayerIndex == entry.layerIndex) ? blockDrag?.celID : nil
                 row.update(cels: layers[entry.layerIndex].cels, sceneFrameCount: sceneFrameCount)
+                // The band a drop counts as landing on runs the full row *pitch*, gaps included, so
+                // there is no dead strip between rows where a drag resolves to nothing.
+                layerRowGeometry.append((layerIndex: entry.layerIndex,
+                                         minY: rowY(entry.position) - 1,
+                                         maxY: rowY(entry.position) + rowHeight + 1))
             }
 
             while folderRowViews.count < folderEntries.count {
@@ -237,6 +264,12 @@ struct TimelineTrackView: UIViewRepresentable {
                 height: totalHeight - 8
             )
             contentView.bringSubviewToFront(playheadView)
+            // A block in hand stays on top of everything, including the playhead — a re-layout in
+            // the middle of a drag (any `@Published` change triggers one) would otherwise bury it.
+            if blockDrag != nil {
+                contentView.bringSubviewToFront(dropIndicatorView)
+                contentView.bringSubviewToFront(dragGhostView)
+            }
         }
 
         // MARK: - Actions relayed from rows
@@ -249,9 +282,176 @@ struct TimelineTrackView: UIViewRepresentable {
             canvasManager.resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex, newEndFrame: newEndFrame)
         }
 
-        func moveCel(layerIndex: Int, celIndex: Int, newStartFrame: Int) {
+        // MARK: - Picking a block up
+
+        /// A block in flight: what was picked up, and where it would land if the finger lifted now.
+        ///
+        /// The block is addressed by id rather than by index for the same reason the drop request
+        /// is: a drag survives across `relayout` calls, and any of them may renumber `cels` (its own
+        /// commit sorts them) or `layers`.
+        struct BlockDrag {
+            let celID: UUID
+            let sourceLayerIndex: Int
+            let sourceLayerID: UUID
+            let frameCount: Int
+            /// How far into the block the finger grabbed it, in frames — so the block hangs off the
+            /// finger where it was picked up rather than snapping its leading edge under it.
+            let grabOffsetFrames: Int
+            let originStartFrame: Int
+            var targetLayerIndex: Int
+            var targetStartFrame: Int
+            var verdict: CanvasManager.CelDropVerdict
+        }
+
+        func beginBlockDrag(layerIndex: Int, celIndex: Int, at point: CGPoint) {
+            guard let contentView,
+                  canvasManager.layers.indices.contains(layerIndex),
+                  canvasManager.layers[layerIndex].cels.indices.contains(celIndex) else { return }
+            let cel = canvasManager.layers[layerIndex].cels[celIndex]
+            let grabbedFrame = Int(point.x / pixelsPerFrame)
+
+            blockDrag = BlockDrag(
+                celID: cel.id,
+                sourceLayerIndex: layerIndex,
+                sourceLayerID: canvasManager.layers[layerIndex].id,
+                frameCount: cel.frameCount,
+                grabOffsetFrames: min(max(grabbedFrame - cel.startFrame, 0), max(cel.frameCount - 1, 0)),
+                originStartFrame: cel.startFrame,
+                targetLayerIndex: layerIndex,
+                targetStartFrame: cel.startFrame,
+                verdict: .allowed
+            )
             canvasManager.currentLayerIndex = layerIndex
-            canvasManager.moveCel(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: newStartFrame)
+
+            if dragGhostView.superview == nil { contentView.addSubview(dragGhostView) }
+            if dropIndicatorView.superview == nil { contentView.addSubview(dropIndicatorView) }
+            dragGhostView.isUserInteractionEnabled = false
+            dragGhostView.configure(isCurrent: true, thumbnail: cel.thumbnail)
+            dragGhostView.setLifted(true)
+            dragGhostView.isHidden = false
+            dropIndicatorView.isHidden = false
+            // A block in hand owns the gesture outright. The long press has no `require(toFail:)`
+            // relationship with the scroll view's pan (only the row's resize pan does), so without
+            // this a drag that drifts sideways scrolls the track out from under itself.
+            scrollView?.isScrollEnabled = false
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+            relayout()
+            updateBlockDrag(at: point)
+        }
+
+        func updateBlockDrag(at point: CGPoint) {
+            guard var drag = blockDrag else { return }
+
+            let resolved = layerIndex(atY: point.y) ?? drag.sourceLayerIndex
+            drag.targetLayerIndex = canvasManager.layers.indices.contains(resolved) ? resolved : drag.sourceLayerIndex
+            let leadingFrame = Int((point.x / pixelsPerFrame).rounded(.down)) - drag.grabOffsetFrames
+            drag.targetStartFrame = max(leadingFrame, 0)
+            drag.verdict = drag.targetLayerIndex == drag.sourceLayerIndex
+                ? .allowed
+                : canvasManager.celDropVerdict(
+                    celID: drag.celID,
+                    fromLayer: drag.sourceLayerID,
+                    toLayer: canvasManager.layers[drag.targetLayerIndex].id)
+            blockDrag = drag
+
+            layoutDragChrome(for: drag)
+        }
+
+        /// Puts the block down. `cancelled` covers a gesture that failed rather than ended — the
+        /// block goes back exactly where it came from either way, since nothing has been committed
+        /// to the model during the drag itself.
+        func endBlockDrag(cancelled: Bool) {
+            guard let drag = blockDrag else { return }
+            blockDrag = nil
+            dragGhostView.setLifted(false)
+            dragGhostView.isHidden = true
+            dropIndicatorView.isHidden = true
+            scrollView?.isScrollEnabled = true
+
+            defer { relayout() }
+            guard !cancelled else { return }
+
+            if drag.targetLayerIndex == drag.sourceLayerIndex {
+                commitSameLayerDrop(drag)
+                return
+            }
+
+            guard canvasManager.layers.indices.contains(drag.targetLayerIndex) else { return }
+            let targetLayerID = canvasManager.layers[drag.targetLayerIndex].id
+            switch drag.verdict {
+            case .rejected:
+                // Refused drops just spring back. The ghost already showed this was going nowhere
+                // (see `TimelineDropIndicatorView`), so an alert here would only nag about a
+                // decision the artist can see they made.
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            case .allowed:
+                canvasManager.moveCelToLayer(celID: drag.celID, fromLayer: drag.sourceLayerID,
+                                             toLayer: targetLayerID, startFrame: drag.targetStartFrame)
+            case .needsRasterization:
+                // Not applied here: the artist is asked first, and the answer comes back through
+                // `AnimationTimeline`.
+                onRequestRasterizeConfirm?(.init(celID: drag.celID,
+                                                 sourceLayerID: drag.sourceLayerID,
+                                                 targetLayerID: targetLayerID,
+                                                 startFrame: drag.targetStartFrame))
+            }
+        }
+
+        /// A drop on the layer the block came from: either a re-time or a shuffle.
+        ///
+        /// Which one is decided by whether the block's *position in the running order* changed. A
+        /// nudge that leaves it the third block of five is a re-time and stays clamped between its
+        /// neighbours, exactly as it always has; dragging it past the middle of a neighbour changes
+        /// the order and repacks the run instead (see `shuffleCel`). Keeping both is what lets one
+        /// gesture serve both without a mode: small motions retime, large ones reorder.
+        private func commitSameLayerDrop(_ drag: BlockDrag) {
+            let layerIndex = drag.sourceLayerIndex
+            guard canvasManager.layers.indices.contains(layerIndex),
+                  let celIndex = canvasManager.layers[layerIndex].cels.firstIndex(where: { $0.id == drag.celID }),
+                  let currentOrder = canvasManager.celOrderIndex(layerIndex: layerIndex, celIndex: celIndex) else { return }
+
+            let targetOrder = canvasManager.celInsertionIndex(layerIndex: layerIndex, celIndex: celIndex,
+                                                              startFrame: drag.targetStartFrame)
+            if targetOrder != currentOrder {
+                canvasManager.shuffleCel(layerIndex: layerIndex, celIndex: celIndex, toOrderIndex: targetOrder)
+                return
+            }
+            guard drag.targetStartFrame != drag.originStartFrame else { return }
+            canvasManager.beginStructureGesture()
+            canvasManager.moveCel(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: drag.targetStartFrame)
+            canvasManager.commitStructureGesture(name: "Move Frame")
+        }
+
+        /// Which track row a y coordinate falls on, or nil above the first/below the last.
+        private func layerIndex(atY y: CGFloat) -> Int? {
+            if let hit = layerRowGeometry.first(where: { y >= $0.minY && y <= $0.maxY }) { return hit.layerIndex }
+            // Past either end of the stack, stick to the nearest row rather than losing the drag:
+            // the finger is often slightly outside the rows while crossing between them.
+            guard let first = layerRowGeometry.first, let last = layerRowGeometry.last else { return nil }
+            if y < first.minY { return first.layerIndex }
+            if y > last.maxY { return last.layerIndex }
+            return layerRowGeometry.min { abs(y - $0.minY) < abs(y - $1.minY) }?.layerIndex
+        }
+
+        /// Positions the ghost under the finger and the indicator over the frames the block would
+        /// occupy, tinted by whether the drop would be accepted.
+        private func layoutDragChrome(for drag: BlockDrag) {
+            guard let contentView else { return }
+            guard let row = layerRowGeometry.first(where: { $0.layerIndex == drag.targetLayerIndex }) else { return }
+
+            let rect = CGRect(x: CGFloat(drag.targetStartFrame) * pixelsPerFrame,
+                              y: row.minY + 1,
+                              width: CGFloat(drag.frameCount) * pixelsPerFrame,
+                              height: rowHeight).insetBy(dx: 2, dy: 2)
+            dragGhostView.setUntransformedFrame(rect)
+            dragGhostView.updateHandlePositions(handleWidth: 0)
+            dragGhostView.setDropVerdict(drag.verdict)
+            dropIndicatorView.frame = rect
+            dropIndicatorView.setVerdict(drag.verdict)
+
+            contentView.bringSubviewToFront(dropIndicatorView)
+            contentView.bringSubviewToFront(dragGhostView)
         }
 
         /// Tapping a frame that's already the current playhead position opens the block's options
@@ -442,6 +642,36 @@ private final class TimelineFolderRowView: UIView {
     }
 }
 
+/// The outline showing where a picked-up block would land, and whether it would be accepted.
+///
+/// Drawn *under* the dragged block's ghost rather than instead of it: the ghost says what is in
+/// hand, the outline says what the timeline will do with it. Colour carries the verdict — blue for
+/// an ordinary drop, amber for one that will rasterize, red for one that will be refused — so the
+/// answer is visible before the finger lifts rather than being reported afterwards.
+private final class TimelineDropIndicatorView: UIView {
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        layer.cornerRadius = 4
+        layer.borderWidth = 2
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func setVerdict(_ verdict: CanvasManager.CelDropVerdict) {
+        let tint: UIColor
+        switch verdict {
+        case .allowed: tint = .systemBlue
+        case .needsRasterization: tint = .systemOrange
+        case .rejected: tint = .systemRed
+        }
+        layer.borderColor = tint.cgColor
+        backgroundColor = tint.withAlphaComponent(0.15)
+    }
+}
+
 /// Non-interactive playhead indicator.
 private final class TimelinePlayheadView: UIView {
     override init(frame: CGRect) {
@@ -510,11 +740,10 @@ private final class TimelineRowView: UIView {
     private var pendingZone: Zone?
     private var activeZone: Zone?
 
-    private var longPressStartX: CGFloat = 0
-    private var longPressBaselineStart: Int = 0
-    private var longPressCelIndex: Int?
-    private var longPressCelID: UUID?
-    private var longPressMoved = false
+    /// A block that is currently picked up, drawn by the coordinator's ghost instead of by this row.
+    /// Set on every `relayout` while a drag is in flight — including on the rows the block is
+    /// merely passing over, which is why it is keyed by id rather than by a flag on one view.
+    var hiddenCelID: UUID?
 
     lazy var panRecognizer: UIPanGestureRecognizer = {
         let gr = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
@@ -593,6 +822,9 @@ private final class TimelineRowView: UIView {
             // which blocks are in play.
             view.accessibilityValue = "\(cel.startFrame),\(cel.frameCount)" + (isReference ? ",ref" : "")
             view.updateHandlePositions(handleWidth: Self.handleWidth(for: view.bounds.width))
+            // Only the ghost draws a picked-up block. The row keeps the view around (and keeps its
+            // accessibility identifier queryable) so nothing has to be rebuilt when it comes back.
+            view.alpha = (cel.id == hiddenCelID) ? 0 : 1
         }
     }
 
@@ -670,51 +902,44 @@ private final class TimelineRowView: UIView {
         }
     }
 
-    /// Press and hold a block for half a second to pick it up, then slide it along the timeline.
+    /// Press and hold a block for half a second to pick it up, then move it anywhere in the
+    /// timeline — along its own row to re-time or reorder it, or up and down onto another layer.
     /// The pan recognizer deliberately declines body touches (see `shouldReceive`) so a plain swipe
     /// there scrolls the timeline instead of dragging blocks.
     ///
     /// This means drag-reorder in every mode, interpolate included. Setting a block as an
     /// interpolation reference is `InterpolateBar`'s button, not a gesture here — overloading this
     /// recognizer by mode would take re-timing away exactly while the artist is working on timing.
+    ///
+    /// The whole drag is reported in the *content view's* coordinates, not this row's. A recognizer
+    /// keeps receiving its touch wherever it travels, so a press that began here still reports
+    /// positions once the finger is over another layer's row — which is exactly what makes one
+    /// gesture able to cross rows. Resolving those positions against the row that happened to start
+    /// the drag would put every cross-layer drop back on the source layer.
+    ///
+    /// Nothing is committed to the model until the finger lifts (`endBlockDrag`). The drag used to
+    /// call `moveCel` on every `.changed`, which cannot express a drop that might be *refused* — a
+    /// raster block over a vector layer has to be able to spring back untouched — and could not
+    /// preview a cross-layer landing without actually performing it first.
     @objc private func handleLongPress(_ gr: UILongPressGestureRecognizer) {
-        guard let coordinator else { return }
+        guard let coordinator, let contentView = superview else { return }
         switch gr.state {
         case .began:
             let point = gr.location(in: self)
-            guard let z = zone(at: point), case .body(let celIndex, let baselineStart) = z,
+            guard let z = zone(at: point), case .body(let celIndex, _) = z,
                   coordinator.canvasManager.layers.indices.contains(layerIndex),
                   coordinator.canvasManager.layers[layerIndex].cels.indices.contains(celIndex) else {
                 gr.isEnabled = false; gr.isEnabled = true
                 return
             }
-            longPressCelIndex = celIndex
-            // Hold onto the block's identity, not just its slot: the lift has to be cleared on the
-            // same view at the end of the drag even though the array may have been rebuilt since.
-            longPressCelID = coordinator.canvasManager.layers[layerIndex].cels[celIndex].id
-            longPressBaselineStart = baselineStart
-            longPressStartX = point.x
-            longPressMoved = false
-            coordinator.canvasManager.beginStructureGesture()
-            if let celID = longPressCelID { celViews[celID]?.setLifted(true) }
+            coordinator.beginBlockDrag(layerIndex: layerIndex, celIndex: celIndex,
+                                       at: gr.location(in: contentView))
         case .changed:
-            guard let celIndex = longPressCelIndex else { return }
-            let frameDelta = Int(((gr.location(in: self).x - longPressStartX) / pixelsPerFrame).rounded())
-            if frameDelta != 0 { longPressMoved = true }
-            coordinator.moveCel(layerIndex: layerIndex, celIndex: celIndex,
-                                newStartFrame: longPressBaselineStart + frameDelta)
-        case .ended, .cancelled, .failed:
-            if let celID = longPressCelID { celViews[celID]?.setLifted(false) }
-            // A hold that never moved anything must drop its snapshot rather than record an empty
-            // step — and leaving it open would fold the next gesture's undo into this one.
-            if gr.state == .ended, longPressMoved {
-                coordinator.canvasManager.commitStructureGesture(name: "Move Frame")
-            } else {
-                coordinator.canvasManager.cancelStructureGesture()
-            }
-            longPressCelIndex = nil
-            longPressCelID = nil
-            longPressMoved = false
+            coordinator.updateBlockDrag(at: gr.location(in: contentView))
+        case .ended:
+            coordinator.endBlockDrag(cancelled: false)
+        case .cancelled, .failed:
+            coordinator.endBlockDrag(cancelled: true)
         default:
             break
         }
@@ -854,6 +1079,26 @@ private final class CelBlockView: UIView {
         referenceWash.isHidden = !isReference
         thumbnailView.image = thumbnail
         thumbnailView.isHidden = thumbnail == nil
+    }
+
+    /// Tints a dragged block's ghost by what would happen if it were dropped where it is — matching
+    /// `TimelineDropIndicatorView`, so the block in hand and the slot under it agree.
+    ///
+    /// A refused drop fades the ghost as well as reddening it: "this is not going to land" reads
+    /// faster as the block visibly losing substance than as a colour the artist has to interpret.
+    func setDropVerdict(_ verdict: CanvasManager.CelDropVerdict) {
+        switch verdict {
+        case .allowed:
+            layer.borderColor = UIColor.systemBlue.cgColor
+            alpha = 1
+        case .needsRasterization:
+            layer.borderColor = UIColor.systemOrange.cgColor
+            alpha = 1
+        case .rejected:
+            layer.borderColor = UIColor.systemRed.cgColor
+            alpha = 0.45
+        }
+        layer.borderWidth = 2
     }
 
     private(set) var isLifted = false

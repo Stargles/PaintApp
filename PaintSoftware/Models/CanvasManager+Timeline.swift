@@ -14,6 +14,28 @@ extension CanvasManager {
         return layers[layerIndex].cels.firstIndex { frame >= $0.startFrame && frame < $0.startFrame + $0.frameCount }
     }
 
+    /// The cel at `currentFrame` on `layerIndex`, **creating a one-frame block there if the frame is
+    /// empty**. Returns nil only when the layer index is bad or there is genuinely no room.
+    ///
+    /// This is what makes drawing on a blank frame work. Every drawing path is gated on
+    /// `activeCelIndex` returning something, so parking the playhead on a frame no block covers used
+    /// to leave the canvas inert — the touch was swallowed by a layer host that had no raster behind
+    /// it and the stroke went nowhere, which reads as the app being broken rather than as "there is
+    /// nothing here to draw on". Drawing on an empty frame is a perfectly clear instruction, so it
+    /// now means what it says: the block is created and the stroke lands in it.
+    ///
+    /// One frame long, not stretched to fill the gap: a new drawing is a new drawing, and
+    /// `resizeCelRightEdge`/"Extend to End" are how it gets longer. `addCel` already clamps the
+    /// length against the next block and gives a `.vector` layer's cel its own `VectorCanvas`, so a
+    /// block spawned on a vector layer is a vector block.
+    @discardableResult
+    func ensureCelAtCurrentFrame(layerIndex: Int) -> Int? {
+        guard layers.indices.contains(layerIndex) else { return nil }
+        if let existing = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) { return existing }
+        addCel(layerIndex: layerIndex, startFrame: currentFrame, frameCount: 1)
+        return activeCelIndex(inLayer: layerIndex, atFrame: currentFrame)
+    }
+
     /// How long a new cel starting at `startFrame` may actually be: `maxLength`, cut short by the
     /// nearest cel that begins at or after it so the two can't overlap. Nil when there's no room at
     /// all (the caller then does nothing).

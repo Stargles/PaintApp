@@ -61,6 +61,12 @@ struct AnimationTimeline: View {
     // button (the first tap enters the mode).
     @State private var showInterpolateOptions = false
 
+    /// A vector block dropped on a raster layer, waiting on the artist's answer. Non-nil raises the
+    /// rasterize alert; the drop is only applied if they say yes. Held by identity (see
+    /// `CanvasManager.CelDropRequest`) because the indices it came from can be renumbered while the
+    /// alert is up.
+    @State private var pendingRasterizeDrop: CanvasManager.CelDropRequest?
+
     // Press-and-hold reorder state for the pinned name column.
     @State private var draggingRowID: UUID?
     @State private var dragTranslation: CGFloat = 0
@@ -114,6 +120,9 @@ struct AnimationTimeline: View {
                                 loopMenuFrame = frame
                                 loopMenuAnchor = anchor
                                 showLoopMenu = true
+                            },
+                            onRequestRasterizeConfirm: { request in
+                                pendingRasterizeDrop = request
                             }
                         )
                     }
@@ -125,6 +134,23 @@ struct AnimationTimeline: View {
         .frame(height: timelineHeight)
         .background(Color.black)
         .overlay(alignment: .topLeading) { menuAnchorLayer }
+        .alert("Rasterize this block?",
+               isPresented: Binding(get: { pendingRasterizeDrop != nil },
+                                    set: { if !$0 { pendingRasterizeDrop = nil } })) {
+            Button("Cancel", role: .cancel) { pendingRasterizeDrop = nil }
+            Button("Rasterize & Move") {
+                if let drop = pendingRasterizeDrop {
+                    canvasManager.moveCelToLayer(celID: drop.celID,
+                                                 fromLayer: drop.sourceLayerID,
+                                                 toLayer: drop.targetLayerID,
+                                                 startFrame: drop.startFrame,
+                                                 rasterizing: true)
+                }
+                pendingRasterizeDrop = nil
+            }
+        } message: {
+            Text("Moving a vector block onto a raster layer flattens its strokes to pixels. They can still be erased and painted over, but they can no longer be reshaped as vectors. This can be undone.")
+        }
         .onDisappear { stopPlayback() }
     }
 
@@ -339,7 +365,9 @@ struct AnimationTimeline: View {
             }
             .accessibilityIdentifier("timeline.stepForwardButton")
 
-            Button(action: { canvasManager.goToFrame(canvasManager.sceneFrameCount - 1) }) {
+            // The end of the *animation*, not of the laid-out track — jumping to frame 11 of a
+            // two-frame scene parked the playhead on empty space (see `contentEndFrame`).
+            Button(action: { canvasManager.goToFrame(max(canvasManager.contentEndFrame - 1, 0)) }) {
                 Image(systemName: "forward.end.fill")
             }
             .accessibilityIdentifier("timeline.toEndButton")

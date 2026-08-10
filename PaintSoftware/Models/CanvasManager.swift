@@ -590,12 +590,21 @@ final class CanvasManager: ObservableObject {
         loopEndFrame = nil
     }
 
+    /// Step/step-back, wrapping the same way playback does so the two agree about where the
+    /// animation ends — with no markers set that is the last drawn frame, not the last laid-out one
+    /// (see `contentEndFrame`).
+    ///
+    /// Only the looping branch wraps. With looping off this still walks out into the empty track up
+    /// to `sceneFrameCount`, which is how the playhead reaches a blank frame to start a new block on
+    /// in the first place; clamping it to the content would make those frames unreachable from the
+    /// transport buttons.
     func stepFrame(by delta: Int) {
         var next = currentFrame + delta
         if isLoopEnabled {
-            let range = effectiveLoopRange
-            if next < range.lowerBound { next = range.upperBound }
-            if next > range.upperBound { next = range.lowerBound }
+            let start = playbackStartFrame
+            let end = playbackEndFrame
+            if next < start { next = end }
+            if next > end { next = start }
         } else {
             next = max(0, min(next, sceneFrameCount - 1))
         }
@@ -604,9 +613,25 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Playback bounds
     //
-    // An unset loop marker means "the end of the scene", not "no boundary": the first frame stands
-    // in for a missing loop start and the last frame for a missing loop end. That substitution lets
-    // both modes share one rule instead of each needing a special case for unset markers.
+    // An unset loop marker means "the end of the *animation*", not "no boundary": the first frame
+    // stands in for a missing loop start and the last drawn frame for a missing loop end. That
+    // substitution lets both modes share one rule instead of each needing a special case for unset
+    // markers. Set both markers and they become the animation window outright, content or no.
+
+    /// One past the last frame any layer actually has a block on — where the animation ends, as
+    /// opposed to where the *track* ends.
+    ///
+    /// `sceneFrameCount` is not that number and never was. It is the laid-out length of the
+    /// timeline: it starts at 12 on a new document and only ever ratchets *upward* (every cel
+    /// creator and resizer does `max(sceneFrameCount, …)`, nothing lowers it). So a two-frame
+    /// animation still reported a 12-frame scene, and playback with no markers ran out over ten
+    /// empty frames before wrapping — the "loops from an arbitrary frame like 12" report.
+    ///
+    /// Zero when no layer holds a cel at all, which `contentEndFrame`'s callers turn back into
+    /// frame 0 rather than a negative bound.
+    var contentEndFrame: Int {
+        layers.flatMap(\.cels).map(\.endFrame).max() ?? 0
+    }
 
     /// Whether the user has placed either loop marker.
     var hasLoopBoundary: Bool { loopStartFrame != nil || loopEndFrame != nil }
@@ -614,8 +639,10 @@ final class CanvasManager: ObservableObject {
     /// The frame playback runs from: the loop start, or the first frame.
     var playbackStartFrame: Int { hasLoopBoundary ? effectiveLoopRange.lowerBound : 0 }
 
-    /// The last frame playback shows: the loop end, or the last frame of the scene.
-    var playbackEndFrame: Int { hasLoopBoundary ? effectiveLoopRange.upperBound : max(sceneFrameCount - 1, 0) }
+    /// The last frame playback shows: the loop end, or the last frame that has a drawing on it.
+    var playbackEndFrame: Int {
+        hasLoopBoundary ? effectiveLoopRange.upperBound : max(contentEndFrame - 1, 0)
+    }
 
     /// Where the playhead should sit when the play button is pressed. Pressing play while parked at
     /// (or past) the end replays from the start rather than stopping on the spot.
