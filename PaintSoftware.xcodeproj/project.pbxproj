@@ -294,6 +294,7 @@
 				DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */,
 				DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */,
 				DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */,
+				DEC0DE000000000000000092 /* BlockDragCharacterizationTests.swift */,
 			);
 			path = PaintSoftwareUITests;
 			sourceTree = "<group>";
@@ -324,7 +325,6 @@
 				DEC0DE000000000000000052 /* PaintSoftware/Models/CanvasManager+ViewPresets.swift */,
 				DEC0DE000000000000000050 /* PaintSoftware/Models/CanvasManager+Timeline.swift */,
 				DEC0DE000000000000000090 /* PaintSoftware/Models/CanvasManager+BlockDrag.swift */,
-				DEC0DE000000000000000092 /* BlockDragCharacterizationTests.swift */,
 				DEC0DE000000000000000030 /* PaintSoftware/Models/Tool.swift */,
 				DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */,
 				DEC0DE000000000000000034 /* PaintSoftware/Models/ViewPreset.swift */,
