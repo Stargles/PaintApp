@@ -11,6 +11,15 @@ import UIKit
 /// headlessly. Phase 3 deleted it from the app, so it now lives in this file as `flatWalkComposite`,
 /// the frozen oracle these tests measure against.
 ///
+/// **Phase 4 spent part of that oracle, deliberately.** A group's `isVisible` now gates its subtree
+/// and a group's opacity fades its finished composite, so for those two documents the tree walk and
+/// the flat walk *must* disagree — `flatWalkComposite` iterates `for layer in layers where
+/// layer.isVisible` and structurally cannot see a folder at all. The tests that changed assert
+/// against pixels directly instead (`assertCompositesAs(_:asIfFlat:)` re-asks the same frozen oracle
+/// about a *different* document, one whose per-layer flags describe the picture the gate should
+/// produce). What is not done is teaching the oracle about folders: it is the specification of what
+/// shipped, and an oracle edited to agree with the change it is measuring is not one.
+///
 /// **Why the leaves are painted rather than drawn.** Both sides call `PixelOps.rasterize` on the
 /// same cels, so leaf pixels are identical by construction and the only thing under test is the
 /// walk. Fixtures use flat `bakedImage` rectangles so a failure is legible as geometry — "the group
@@ -91,6 +100,37 @@ final class CompositorParityLogicTests: XCTestCase {
                               message, file: file, line: line)
     }
 
+    /// The tree walk's composite of one document, against the **frozen oracle's composite of a
+    /// different one** — a document with no folders in it, whose plain per-layer visibility says what
+    /// the first document's group gate is supposed to produce.
+    ///
+    /// This is how the two tests §4.1 changed keep an expectation that is not just "whatever the new
+    /// code does". The oracle cannot be asked about a hidden *group*, having no notion of one; it can
+    /// still be asked what a stack with those layers hidden looks like, and that is exactly the
+    /// picture. Both managers are built from the same fixture, so their leaves are identical bytes
+    /// and the only thing under comparison is again the walk.
+    private func assertCompositesAs(_ manager: CanvasManager, asIfFlat reference: CanvasManager,
+                                    atFrame frame: Int = 0, _ message: String = "",
+                                    file: StaticString = #filePath, line: UInt = #line) {
+        guard let request = manager.makeRenderRequest(atFrame: frame, includeBackground: false) else {
+            return XCTFail("The manager has no canvas size to composite into. \(message)", file: file, line: line)
+        }
+        assertPixelsIdentical(Compositor.composite(request), flatWalkComposite(reference, atFrame: frame),
+                              message, file: file, line: line)
+    }
+
+    /// The tree walk's own answer, for the cases where the oracle has nothing to say at all.
+    private func composite(_ manager: CanvasManager, atFrame frame: Int = 0) -> CGImage? {
+        manager.makeRenderRequest(atFrame: frame, includeBackground: false).flatMap(Compositor.composite)
+    }
+
+    /// The four channels of one pixel, as `Int` so a difference reads as arithmetic.
+    private func pixel(_ image: CGImage, _ x: Int, _ y: Int) -> [Int] {
+        guard let bytes = CanvasFixture.rgbaBytes(image) else { return [] }
+        let offset = (x + y * image.width) * 4
+        return bytes[offset..<(offset + 4)].map(Int.init)
+    }
+
     // MARK: - The flat case
 
     func testAnEmptyStackCompositesIdentically() {
@@ -166,32 +206,180 @@ final class CompositorParityLogicTests: XCTestCase {
         assertWalksAgree(manager, "`isExpanded` is a panel affordance and must never reach rendering")
     }
 
-    /// Characterization, and written to be changed. §4.1 makes a group gate its subtree in phase 4;
-    /// today `toggleFolderVisibility` writes through to descendants instead, so the folder's own flag
-    /// is a duplicate of its children's. `Compositor.draw` therefore does not consult a group's
-    /// `isVisible` — if it did, this case would diverge from the flat walk immediately, because a
-    /// child re-shown inside a hidden folder renders today.
+    // MARK: - Group visibility, which the oracle cannot see (§4.1)
+
+    /// **The behaviour phase 4 changed, asserted in pixels.** A child whose own flag says visible,
+    /// inside a group whose flag says hidden, does not draw. Before phase 4 it did: hiding a folder
+    /// wrote `false` through to every descendant, so re-showing one by hand un-hid it for real, and
+    /// this test asserted that by agreeing with the flat walk.
     ///
-    /// When phase 4 lands, this test should start failing and should be **updated deliberately**,
-    /// alongside `testAChildReShownInsideAHiddenFolderStillRendersToday`.
-    func testAChildReShownInsideAHiddenFolderStillCompositesToday() {
+    /// It cannot agree with the flat walk any more, and that is the point rather than an obstacle —
+    /// `flatWalkComposite` reads `layers[1].isVisible`, which is `true` here, so it would draw the
+    /// layer. Relaxing the oracle to make this pass would erase the record of what shipped. The
+    /// expectation is stated independently instead: the same document with that layer plainly
+    /// hidden, which is what the gate is supposed to look like.
+    func testAChildReShownInsideAHiddenFolderIsGatedByTheGroup() {
         let manager = overlappingManager()
         let folder = manager.addFolder(name: "Folder")
         manager.layers[1].parentFolderID = folder
-        manager.toggleFolderVisibility(folder)
-        manager.layers[1].isVisible = true
+        manager.layers[1].isVisible = false     // hidden by hand…
+        manager.toggleFolderVisibility(folder)  // …then the group is hidden around it…
+        manager.layers[1].isVisible = true      // …and it is re-shown, with the group still hidden
 
-        assertWalksAgree(manager, "The group's own flag must not gate its subtree until §4.1 says so")
+        // `makeRenderRequest` renders this layer's pixels, since its own flag is true — so what is
+        // under test is the compositor's gate and not the request's elision of hidden leaves.
+        let reference = overlappingManager()
+        reference.layers[1].isVisible = false
+
+        assertCompositesAs(manager, asIfFlat: reference,
+                           "A group's flag gates its subtree: the child's own switch decides nothing while the group is off")
     }
 
-    func testHidingAFolderHidesItsContentsIdentically() {
+    func testHidingAFolderHidesItsContents() {
         let manager = overlappingManager()
         let folder = manager.addFolder(name: "Folder")
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.toggleFolderVisibility(folder)
+        XCTAssertTrue(manager.layers[1].isVisible, "The children's own flags are untouched — the gate is the group's")
 
-        assertWalksAgree(manager, "Via the write-through to children, which both walks read the same way")
+        let reference = overlappingManager()
+        reference.layers[1].isVisible = false
+        reference.layers[2].isVisible = false
+
+        assertCompositesAs(manager, asIfFlat: reference, "Hiding a group removes its subtree, exactly and only")
+    }
+
+    /// The gate is a subtree that is not walked, so depth is not something it has to be told about.
+    /// Worth its own case because the obvious wrong implementation — checking the folder flag when
+    /// deciding whether to draw a *leaf* — passes the one-level test and fails this one.
+    func testAHiddenGroupGatesEveryDepthBeneathIt() {
+        let manager = overlappingManager()
+        let outer = manager.addFolder(name: "Outer")
+        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        manager.layers[1].parentFolderID = outer
+        manager.layers[2].parentFolderID = inner
+        manager.toggleFolderVisibility(outer)
+
+        let reference = overlappingManager()
+        reference.layers[1].isVisible = false
+        reference.layers[2].isVisible = false
+
+        assertCompositesAs(manager, asIfFlat: reference, "The layer two levels down goes with the group above it")
+    }
+
+    /// A hidden group costs nothing: the walk drops the subtree before it asks whether the group
+    /// wants a buffer, so hiding a *faded* group is not a canvas-sized buffer full of nothing.
+    func testAHiddenGroupIsGatedBeforeItsBufferIsConsidered() {
+        let manager = overlappingManager()
+        let folder = manager.addFolder(name: "Faded and hidden")
+        manager.layers[1].parentFolderID = folder
+        manager.setFolderOpacity(folder, to: 0.5)
+        manager.toggleFolderVisibility(folder)
+
+        let reference = overlappingManager()
+        reference.layers[1].isVisible = false
+
+        assertCompositesAs(manager, asIfFlat: reference, "An invisible group's opacity is nobody's business")
+    }
+
+    // MARK: - Group opacity, which is what the buffer buys (§4.1)
+
+    /// **Why a faded group costs an intermediate buffer**, stated as the picture it buys rather than
+    /// as a rule. Two *overlapping* children in a group at 0.5 is not the same image as those two
+    /// children at 0.5 each: the group fades its finished composite, in which the upper child has
+    /// already covered the lower one, while per-child fading leaves the lower one showing through a
+    /// half-transparent upper one. Every other fixture in this file uses opaque non-overlapping or
+    /// full-alpha content, where the two are indistinguishable — which is exactly why this one
+    /// overlaps.
+    func testGroupOpacityFadesTheGroupsCompositeRatherThanEachChild() {
+        func stackedSquares() -> CanvasManager {
+            let manager = CanvasFixture.manager(layerCount: 2)
+            let square = CGRect(x: 0, y: 0, width: 40, height: 40)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, CanvasFixture.solidImage(red, rect: square))
+            CanvasFixture.setBakedContent(manager, layerIndex: 1, CanvasFixture.solidImage(green, rect: square))
+            return manager
+        }
+
+        let grouped = stackedSquares()
+        let folder = grouped.addFolder(name: "Group")
+        grouped.layers[0].parentFolderID = folder
+        grouped.layers[1].parentFolderID = folder
+        grouped.setFolderOpacity(folder, to: 0.5)
+
+        let perChild = stackedSquares()
+        perChild.layers[0].opacity = 0.5
+        perChild.layers[1].opacity = 0.5
+
+        guard let groupImage = composite(grouped), let perChildImage = composite(perChild) else {
+            return XCTFail("Both fixtures must composite")
+        }
+        let group = pixel(groupImage, 20, 20), children = pixel(perChildImage, 20, 20)
+
+        XCTAssertEqual(group[0], 0,
+                       "Grouped: green covers red inside the group, so no red survives to be faded. Got RGBA \(group)")
+        XCTAssertEqual(group[3], 128, accuracy: 2,
+                       "…and the finished composite is faded once, to half alpha. Got RGBA \(group)")
+        XCTAssertGreaterThan(children[0], 0,
+                            "Per child: red is faded first, so it shows through the faded green. Got RGBA \(children)")
+        XCTAssertGreaterThan(children[3], 160,
+                            "…and two half-alpha draws accumulate past one. Got RGBA \(children)")
+    }
+
+    /// Nested groups multiply, because each one fades what the one inside it finished.
+    ///
+    /// A tolerance rather than an exact byte, and for a reason worth keeping: this is two buffers, so
+    /// the alpha is quantized to 8 bits twice. The flat cases in this file assert exact equality
+    /// precisely because they involve no intermediate — that difference is the same one
+    /// `CoreGraphicsCompositor.draw`'s comment is about, seen from the other side.
+    func testNestedGroupOpacityCompounds() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 40, height: 40)))
+        let outer = manager.addFolder(name: "Outer")
+        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        manager.layers[0].parentFolderID = inner
+        manager.setFolderOpacity(outer, to: 0.5)
+        manager.setFolderOpacity(inner, to: 0.5)
+
+        guard let image = composite(manager) else { return XCTFail("The fixture must composite") }
+        let value = pixel(image, 20, 20)
+
+        XCTAssertEqual(value[3], 64, accuracy: 2,
+                       "0.5 inside 0.5 is a quarter-alpha opaque square, not a half. Got RGBA \(value)")
+        XCTAssertEqual(value[0], 64, accuracy: 2, "Premultiplied, so the colour scales with it. Got RGBA \(value)")
+    }
+
+    /// **Isolation is stored, honoured, and changes no pixel — which is a measurement, not an
+    /// oversight.** With every child at `.normal` (and with one `BlendMode` case, every child is),
+    /// source-over is associative: children composited onto transparency and then drawn over the
+    /// backdrop equal children drawn straight onto it. So both settings take the direct path,
+    /// allocate nothing, and stay byte-identical to the frozen oracle. Phase 5 is where a blend mode
+    /// gives isolation something to isolate, and this test is where that will first show.
+    func testIsolatedAndPassThroughGroupsBothCompositeLikeTheFlatWalk() {
+        let manager = overlappingManager()
+        guard let folder = manager.groupLayers(manager.layers[2].id, with: manager.layers[1].id, name: "Group") else {
+            return XCTFail("Fixture needs the group to exist")
+        }
+
+        XCTAssertTrue(manager.folders[0].isIsolated, "Isolated is the default (§3 decision 2)")
+        assertWalksAgree(manager, "Isolated, and identical")
+
+        manager.setFolderIsolated(folder, isIsolated: false)
+        assertWalksAgree(manager, "Pass-through, and identical")
+    }
+
+    /// A group left at opacity 1 stays on the direct path — the boundary is the identity, and it is
+    /// worth pinning in pixels as well as in `RenderNode.needsOwnBuffer`, because this is the case
+    /// every document that has ever existed is made of.
+    func testAGroupAtFullOpacityStillCompositesLikeTheFlatWalk() {
+        let manager = overlappingManager()
+        let folder = manager.addFolder(name: "Group")
+        manager.layers[1].parentFolderID = folder
+        manager.layers[2].parentFolderID = folder
+        manager.setFolderOpacity(folder, to: 1)
+
+        assertWalksAgree(manager, "Setting the slider to where it already was must not cost a buffer's rounding")
     }
 
     // MARK: - The snapshot rule (§9.1 point 3)
@@ -368,33 +556,46 @@ final class CompositorParityLogicTests: XCTestCase {
 
     /// The backend declines rather than guesses when a group needs its own buffer, and `Compositor`
     /// turns that into a correct slow frame instead of a wrong fast one.
-    func testAnIsolatedGroupFallsBackToTheCPUInsteadOfRenderingWrong() throws {
+    ///
+    /// **The fixture is a real faded folder now.** It used to be a `fadingGroups` helper that rewrote
+    /// every node of a derived tree to opacity 0.5, because folders had no opacity to set and phase 2
+    /// needed *some* way to reach the branch; phase 4 gave them one, so the hand-built tree and its
+    /// helper are gone. The renaming that came with it is the honest part: the case this backend
+    /// declines is a faded group, not an isolated one — isolation is the default on every folder in
+    /// every document and needs no buffer at all while `BlendMode` has one case.
+    func testAFadedGroupFallsBackToTheCPUInsteadOfRenderingWrong() throws {
         try skipUnlessGPUAvailable()
         let manager = overlappingManager()
         let folder = manager.addFolder(name: "Faded")
         manager.layers[1].parentFolderID = folder
-        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+        guard let transparent = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
             return XCTFail("Fixture needs a canvas size")
         }
-        XCTAssertNotNil(MetalCompositor.composite(request), "A transparent group is still flattenable")
+        XCTAssertNotNil(MetalCompositor.composite(transparent), "A transparent group is still flattenable")
 
-        // Phase 4 gives folders a real opacity; until then this is the only way to build the case.
-        let isolated = RenderRequest(tree: manager.renderTree.map(Self.fadingGroups),
-                                     sources: request.sources, frame: request.frame,
-                                     canvasSize: request.canvasSize, background: request.background,
-                                     quality: request.quality)
-        XCTAssertNil(MetalCompositor.composite(isolated), "A group needing its own buffer must decline")
+        manager.setFolderOpacity(folder, to: 0.5)
+        guard let faded = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        XCTAssertNil(MetalCompositor.composite(faded), "A group needing its own buffer must decline")
 
         Compositor.backend = .metal
-        XCTAssertNotNil(Compositor.composite(isolated), "And the compositor must still return a frame")
+        assertPixelsIdentical(Compositor.composite(faded), CoreGraphicsCompositor.composite(faded),
+                              "And the compositor must still return a frame — the CPU reference's, to the byte")
     }
 
-    /// Rewrites every node to opacity 0.5, which is the phase-4 shape this backend does not handle.
-    private static func fadingGroups(_ node: RenderNode) -> RenderNode {
-        guard case .node(let op, let inputs) = node.content else { return node }
-        return RenderNode(id: node.id,
-                          content: .node(op: op, inputs: inputs.map { $0.map(fadingGroups) }),
-                          opacity: 0.5, isVisible: node.isVisible)
+    /// The other half of §4.1 on the GPU, and it needs no texture: a hidden group is a subtree the
+    /// flattening walk does not enter, so this stays on the fast path and still agrees exactly.
+    func testTheGPUGatesAHiddenGroupExactlyAsTheCPUDoes() throws {
+        try skipUnlessGPUAvailable()
+        let manager = overlappingManager()
+        let folder = manager.addFolder(name: "Folder")
+        manager.layers[1].parentFolderID = folder
+        manager.layers[2].parentFolderID = folder
+        manager.toggleFolderVisibility(folder)
+
+        guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
+        XCTAssertEqual(maxChannelDelta(gpu, cpu), 0, "Both backends drop the same subtree, neither pays for it")
     }
 
     func testAHiddenBackgroundLeavesTheStackOnTransparency() {

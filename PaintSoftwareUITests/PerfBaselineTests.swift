@@ -1222,10 +1222,30 @@ final class PerfBaselineTests: XCTestCase {
                           "4x the layers costing \(String(format: "%.1f", ratio))x suggests per-layer allocation or an O(n²) walk")
     }
 
-    /// Nesting every layer in folders must not change what a composite costs, because a transparent
-    /// group does not get its own buffer (`CoreGraphicsCompositor.draw`). If this regresses, someone
-    /// has started allocating per group — which §5.3 forbids and which would also break the
-    /// byte-identity `CompositorParityLogicTests` pins.
+    /// Nesting every layer in folders must not change what a composite costs, because a group that
+    /// carries nothing does not get its own buffer (`RenderNode.needsOwnBuffer`, which both backends
+    /// read). Phase 4 gave folders a real opacity, a blend mode and an isolation flag, and this test
+    /// is what says the defaults are still free. If it regresses, someone has started allocating per
+    /// group — which §5.3 forbids and which would also break the byte-identity
+    /// `CompositorParityLogicTests` pins.
+    ///
+    /// **What the other side of that branch costs, measured once and recorded here rather than
+    /// pinned by a test of its own: six *faded* levels — one canvas-sized intermediate each — came in
+    /// at 1071.7 ms, against the 46.0 ms nested and 41.6 ms flat this test reports.** Roughly 25x a
+    /// whole flat composite, which is the number §5.3's texture pool is sized by ("~2–3 live textures
+    /// per nesting depth, and depth is small") and a second argument for §5.2's sandwich caching
+    /// composites rather than recomputing them.
+    ///
+    /// **That measurement did have a test, for about an hour, and it was removed rather than kept:**
+    /// leaving ~400 MB of intermediates behind in the runner process made
+    /// `InterpolationRenderLogicTests.testPreviewIsSubstantiallyCheaperThanFull` — which times two
+    /// sub-5 ms renders and asserts a 4x ratio — fail every time they shared a process, and pass in
+    /// 0.073 s when they did not. A perf case that destabilises a neighbour costs this project more
+    /// than the number is worth (see CLAUDE.md on triaging mystery failures); the number is above,
+    /// and the guard that matters is the free path this test already holds.
+    ///
+    /// Peak memory here is process footprint, so it carries whatever the runner touched before — it
+    /// is a smoke alarm, not a per-composite figure, and it is not comparable between runs.
     @MainActor
     func testNestingLayersInFoldersDoesNotChangeCompositeCost() {
         Compositor.backend = .coreGraphics

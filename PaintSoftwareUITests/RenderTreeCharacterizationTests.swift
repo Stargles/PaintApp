@@ -16,8 +16,10 @@ import UIKit
 /// legitimately *differ*: collapsing, which hides rows but must not hide pixels, and direction.
 ///
 /// These are characterization, not specification (see `CanvasManagerTestSupport`): where a test
-/// pins behaviour that a later phase is going to change on purpose — folder visibility is the one
-/// that matters, §4.1 — it says so and asserts today's answer anyway.
+/// pins behaviour that a later phase is going to change on purpose it says so and asserts today's
+/// answer anyway. Folder visibility was the one that mattered, and phase 4 spent it —
+/// `testAChildReShownInsideAHiddenFolderIsGatedByTheGroup` is that test after the change it
+/// advertised, updated by hand rather than relaxed.
 final class RenderTreeCharacterizationTests: XCTestCase {
 
     /// Names the layers so failure messages read as stack order rather than as UUIDs.
@@ -209,26 +211,38 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         XCTAssertFalse(manager.renderTree[1].isVisible, "And the folder's onto its node")
     }
 
-    /// **Characterizing a divergence that phase 4 will resolve.** `toggleFolderVisibility` writes
-    /// through to every descendant today, so a folder's flag duplicates its children's rather than
-    /// gating them — and a child re-shown afterwards renders even though its folder reads hidden.
-    /// The tree records both flags and interprets neither, so §4.1's change ("the group's own
-    /// `isVisible` gates its subtree at composite time") is a change to the compositor, not a
-    /// re-derivation of the tree.
-    func testAChildReShownInsideAHiddenFolderStillRendersToday() {
+    /// **The divergence phase 4 resolved**, and the assertion that changed with it — this test was
+    /// `testAChildReShownInsideAHiddenFolderStillRendersToday`, said in its own comment that phase 4
+    /// would change it, and here it is changed.
+    ///
+    /// `toggleFolderVisibility` used to write through to every descendant, so a folder's flag
+    /// duplicated its children's rather than gating them, and a child re-shown afterwards drew even
+    /// though its folder read hidden. The write-through is gone: the two flags are now independent,
+    /// and the group's own is what gates the subtree at composite time.
+    ///
+    /// That gate is a claim about pixels, and is asserted as one in
+    /// `CompositorParityLogicTests.testAChildReShownInsideAHiddenFolderIsGatedByTheGroup`. What the
+    /// tree owes it is both flags, carried and unaltered — the derivation still interprets neither,
+    /// which is what kept phase 4 a change to the compositor rather than a re-derivation.
+    func testAChildReShownInsideAHiddenFolderIsGatedByTheGroup() {
         let manager = namedManager(["A", "B"])
         let folder = manager.addFolder(name: "Folder")
         manager.layers[0].parentFolderID = folder
         manager.layers[1].parentFolderID = folder
 
-        manager.toggleFolderVisibility(folder)
-        XCTAssertFalse(manager.layers[0].isVisible, "Hiding the folder wrote through to both children")
-        manager.toggleLayerVisibility(layerIndex: 0)
+        manager.toggleLayerVisibility(layerIndex: 0)    // the artist hides A by hand…
+        manager.toggleFolderVisibility(folder)          // …then hides the group around it
+        XCTAssertTrue(manager.layers[1].isVisible, "Hiding the folder leaves its children's own flags alone")
+        manager.toggleLayerVisibility(layerIndex: 0)    // …and re-shows A, with the group still hidden
 
         XCTAssertTrue(manager.layers[0].isVisible)
         XCTAssertFalse(manager.folders[0].isVisible)
-        XCTAssertEqual(visibleLeafNames(manager), ["A"],
-                       "Today the flat walk draws A: it never consults the folder. Phase 4 makes the group gate its subtree, and this assertion changes with it — deliberately.")
+        XCTAssertFalse(manager.renderTree[0].isVisible, "The folder's flag is carried onto its node…")
+        guard case .node(_, let inputs) = manager.renderTree[0].content else {
+            return XCTFail("A folder must derive to a node, not a leaf")
+        }
+        XCTAssertEqual(inputs[0].map(\.isVisible), [true, true],
+                       "…and both children's onto theirs, untouched. A hidden group is a subtree the compositor skips, not a set of children someone wrote hidden — which is why re-showing the group brings A back exactly as the artist left it.")
         assertRenderTreeMatchesFlatOrder(manager)
     }
 
@@ -250,6 +264,81 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
     private func visibleLeafNames(_ manager: CanvasManager) -> [String] {
         manager.renderLeafOrder.filter { manager.layers[$0].isVisible }.map { manager.layers[$0].name }
+    }
+
+    // MARK: - Group properties, and the one buffer rule (§4.1)
+
+    /// The derivation reads the folder's real fields now. Phase 1 stood constants in for them —
+    /// `opacity: 1` with a comment naming phase 4 as the removal — so this is the test that says the
+    /// constants are gone, and it asserts all three because a partial wiring would still let every
+    /// existing fixture pass.
+    func testAFoldersGroupPropertiesAreCarriedOntoItsNode() {
+        let manager = namedManager(["A"])
+        let folder = manager.addFolder(name: "Folder")
+        manager.layers[0].parentFolderID = folder
+        manager.setFolderOpacity(folder, to: 0.4)
+        manager.setFolderIsolated(folder, isIsolated: false)
+
+        let node = manager.renderTree[0]
+        XCTAssertEqual(node.opacity, 0.4, accuracy: 0.0001, "The slider's value, not the identity phase 1 hardcoded")
+        XCTAssertEqual(node.blendMode, .normal, "Read off the folder — there is one case to read")
+        XCTAssertFalse(node.isIsolated, "Pass-through is the folder's own flag")
+    }
+
+    /// What a leaf carries for the two properties a leaf has no source for, stated as a decision
+    /// rather than left to be inferred: `.normal` because `Layer` gains a blend mode in phase 5 and
+    /// there is nowhere else to get one, and `false` for isolation because a leaf encloses nothing.
+    /// The second is load-bearing — `needsOwnBuffer`'s isolation clause would otherwise be asking a
+    /// single draw whether it wants a buffer.
+    func testALeafCarriesNormalAndNoIsolation() {
+        let manager = namedManager(["A"])
+        manager.layers[0].opacity = 0.25
+
+        let leaf = manager.renderTree[0]
+        XCTAssertEqual(leaf.blendMode, .normal)
+        XCTAssertFalse(leaf.isIsolated)
+        XCTAssertFalse(leaf.needsOwnBuffer, "A leaf's opacity is an argument to one draw call, never a buffer")
+    }
+
+    /// **The predicate both backends now share**, at the only boundary that is reachable today.
+    /// `CoreGraphicsCompositor.draw` allocates on it and `MetalCompositor` declines on it, so a
+    /// folder crossing it in the wrong direction is either a wasted canvas-sized buffer per group or
+    /// group opacity silently applied per child.
+    func testOnlyAFadedGroupNeedsItsOwnBuffer() {
+        let manager = namedManager(["A"])
+        let folder = manager.addFolder(name: "Folder")
+        manager.layers[0].parentFolderID = folder
+
+        XCTAssertFalse(manager.renderTree[0].needsOwnBuffer,
+                       "An untouched folder is opacity 1, normal, and isolated over nothing that blends — the direct path, which is what keeps a folder byte-free")
+
+        manager.setFolderIsolated(folder, isIsolated: false)
+        XCTAssertFalse(manager.renderTree[0].needsOwnBuffer,
+                       "Pass-through changes nothing while every child is `.normal`, and with one blend mode every child is")
+
+        manager.setFolderIsolated(folder, isIsolated: true)
+        manager.setFolderOpacity(folder, to: 0.99)
+        XCTAssertTrue(manager.renderTree[0].needsOwnBuffer, "Not 1 is the test, not \"visibly faded\"")
+
+        manager.setFolderOpacity(folder, to: 1)
+        XCTAssertFalse(manager.renderTree[0].needsOwnBuffer, "…and putting the slider back puts the direct path back")
+    }
+
+    /// A faded group nested in an untouched one buffers alone: the outer group is still a
+    /// parenthesis and still allocates nothing, which is what `PerfBaselineTests` measures when it
+    /// nests six levels deep.
+    func testNestingDoesNotSpreadTheBufferRuleToTheOuterGroup() {
+        let manager = namedManager(["A"])
+        let outer = manager.addFolder(name: "Outer")
+        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        manager.layers[0].parentFolderID = inner
+        manager.setFolderOpacity(inner, to: 0.5)
+
+        guard case .node(_, let inputs) = manager.renderTree[0].content else {
+            return XCTFail("Outer must derive to a node")
+        }
+        XCTAssertFalse(manager.renderTree[0].needsOwnBuffer, "Outer carries nothing of its own")
+        XCTAssertTrue(inputs[0][0].needsOwnBuffer, "Inner is the one that was faded")
     }
 
     // MARK: - Malformed trees

@@ -28,7 +28,8 @@ enum MetalCompositor {
     /// nil as "use the CPU reference", so every nil here is a slower frame rather than a missing one.
     ///
     /// Returns nil when there is no GPU or no shader library, and when the request needs a group
-    /// rendered in isolation, which this backend does not do yet (see `flattenedLeaves`).
+    /// rendered into a buffer of its own — a faded group is the reachable case — which this backend
+    /// does not do yet (see `flattenedLeaves`).
     static func composite(_ request: RenderRequest) -> CGImage? {
         guard let engine = CompositorMetalEngine.shared,
               let leaves = flattenedLeaves(request) else { return nil }
@@ -42,18 +43,20 @@ enum MetalCompositor {
     }
 
     /// The tree flattened to the sequence of leaves to draw, or **nil if any group needs its own
-    /// buffer** — which today means a folder carrying an opacity other than 1, and in phase 4 will
-    /// also mean a blend mode, a mask, or isolation.
+    /// buffer** — `RenderNode.needsOwnBuffer`, the same predicate `CoreGraphicsCompositor.draw`
+    /// allocates on. It is one property rather than a rule restated here because it used to be
+    /// restated here: this backend tested `opacity >= 1` while the CPU one tested `opacity < 1`, two
+    /// spellings of one rule in two files, which is the drift §1 objects to and which phase 5's
+    /// extra clauses would have turned into a disagreement.
     ///
-    /// Bailing out is deliberate rather than lazy. Every group in a document today is a transparent
-    /// parenthesis (`RenderTree.swift` hardcodes folder opacity to 1), so the flattened sequence *is*
-    /// the composite for every document that exists, and the CPU reference already handles the case
-    /// this one declines. Phase 4 is where isolation becomes real for both backends at once; guessing
-    /// at it now would mean writing a scratch-texture path with nothing able to exercise it.
+    /// Bailing out is deliberate rather than lazy, and phase 4 did not change that. A group that
+    /// needs a buffer needs a scratch *texture* here, plus the ping-pong to composite it back, and
+    /// nothing yet renders a frame this backend is chosen for — `Compositor.backend` still defaults
+    /// to `.coreGraphics`, which handles every case this one declines. §5.3's texture pool is the
+    /// piece that makes the scratch path worth writing, and it lands with the sandwich in phase 5.
     ///
-    /// Mirrors `CoreGraphicsCompositor.draw`'s rules exactly, including that a group's own
-    /// `isVisible` does not gate its subtree — see the comment there for why that is today's
-    /// behaviour and not an oversight.
+    /// A group's own `isVisible` gates its subtree here as it does on the CPU (§4.1), and it needs no
+    /// texture to do it: a hidden group is a subtree this walk simply does not enter.
     private static func flattenedLeaves(_ request: RenderRequest) -> [Leaf]? {
         var leaves: [Leaf] = []
 
@@ -66,7 +69,8 @@ enum MetalCompositor {
                           let source = request.sources[layerIndex] else { continue }
                     leaves.append(Leaf(source: source, opacity: node.opacity))
                 case .node(_, let inputs):
-                    guard node.opacity >= 1 else { return false }
+                    guard node.isVisible else { continue }
+                    guard !node.needsOwnBuffer else { return false }
                     for input in inputs {
                         guard walk(input) else { return false }
                     }

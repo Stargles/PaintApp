@@ -88,16 +88,17 @@ enum CoreGraphicsCompositor {
     /// three deep rounds three more times. Against a gate that says "byte-identical", a scratch buffer
     /// per folder would fail on documents whose only sin is having folders in them.
     ///
-    /// So a group allocates only when it actually changes the result — when it carries an opacity
-    /// other than 1, and in phase 4 a blend mode, a mask, or isolation. Today `renderNodes` hardcodes
-    /// folder opacity to 1 (`RenderTree.swift`, "the identity that makes a group's presence in the
-    /// tree a no-op"), so every document takes the direct path and the derived tree provably composites
-    /// to what the flat walk composites. §5.3's "never allocate one per layer" wants this anyway.
+    /// So a group allocates only when it actually changes the result, and `RenderNode.needsOwnBuffer`
+    /// is that decision — stated once, for this backend and Metal's both. A folder now carries a real
+    /// opacity (§4.1), so the allocating path is reachable; a folder nobody has touched is opacity 1,
+    /// normal and isolated over nothing that blends, so it still takes the direct path and the derived
+    /// tree still provably composites to what the deleted flat walk composited. §5.3's "never allocate
+    /// one per layer" wants exactly this, and `PerfBaselineTests` measures it.
     private static func draw(_ nodes: [RenderNode], of request: RenderRequest, in bounds: CGRect) {
         for node in nodes {
             switch node.content {
             case .leaf(let layerIndex):
-                // Leaf visibility gates; **group visibility deliberately does not** (see the `.node`
+                // A leaf's flag gates the leaf; a group's gates its whole subtree (see the `.node`
                 // case). The deleted flat walk's `where layer.isVisible` is exactly this test, and
                 // `CompositorParityLogicTests.flatWalkComposite` still holds it to that.
                 guard node.isVisible,
@@ -110,27 +111,29 @@ enum CoreGraphicsCompositor {
                     .draw(in: bounds, blendMode: .normal, alpha: CGFloat(node.opacity))
 
             case .node(let op, let inputs):
-                // **A group's own `isVisible` is not consulted, and that is today's behaviour rather
-                // than an oversight.** `toggleFolderVisibility` writes through to every descendant
-                // (CanvasManager.swift:829), so a hidden folder is a folder whose children are each
-                // already hidden, and the flag on the folder is a duplicate of theirs rather than a
-                // gate over them. Honouring it here would change one shipped behaviour immediately:
-                // a child re-shown inside a hidden folder renders today, and is pinned doing so by
-                // `testAChildReShownInsideAHiddenFolderStillRendersToday`.
+                // **A group's own `isVisible` gates its subtree** (§4.1) — a hidden group is a
+                // subtree that is not walked, not a set of children that were each written hidden.
+                // `toggleFolderVisibility` used to write through to every descendant, which made the
+                // folder's flag a duplicate of its children's and made hide-then-show destroy the
+                // per-layer visibility the artist had set by hand; phase 4a stopped that, and this is
+                // the compositor's half of the same change. A child re-shown inside a hidden group
+                // therefore does not draw, which is a deliberate change to shipped behaviour and is
+                // pinned by `testAChildReShownInsideAHiddenFolderIsGatedByTheGroup`.
                 //
-                // §4.1 makes the group gate its subtree and stops the write-through — deliberately,
-                // in phase 4, together with the migration question §10 item 3 leaves open. Phase 2's
-                // gate is byte-identity with what ships now, so the change cannot be smuggled in here.
+                // Costs nothing to skip: the whole subtree is dropped before any buffer is
+                // considered, so hiding a group is the cheapest thing in this walk rather than a
+                // buffer full of nothing.
+                guard node.isVisible else { continue }
                 switch op {
                 case .stack:
-                    guard node.opacity < 1 else {
+                    guard node.needsOwnBuffer else {
                         for input in inputs { draw(input, of: request, in: bounds) }
                         continue
                     }
-                    // The isolated case: render the group's own composite, then apply its opacity
-                    // once to the finished thing. Unreachable until phase 4 gives folders an opacity,
-                    // and written now because the alternative — applying group opacity per child — is
-                    // a different and wrong picture wherever children overlap.
+                    // Render the group's own composite, then apply its opacity once to the finished
+                    // thing — the alternative, applying group opacity per child, is a different and
+                    // wrong picture wherever children overlap. Phase 5 applies the group's blend mode
+                    // to this same draw; `.normal` is today's only mode and so today's only answer.
                     let grouped = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
                         .image { _ in
                             for input in inputs { draw(input, of: request, in: bounds) }
