@@ -41,6 +41,12 @@ final class ViewPresetCharacterizationTests: XCTestCase {
         XCTAssertEqual(manager.viewPresets[0].layerVisibility[manager.layers[2].id], true)
     }
 
+    /// A preset snapshots layer *and* folder visibility, which is what let §4.1 change what hiding a
+    /// folder means without breaking presets saved before it. What changed here is the child's
+    /// entry: hiding a folder used to write `false` through to every descendant, so the snapshot
+    /// recorded them hidden too and a preset saved under the old rule still restores the same
+    /// picture. It no longer writes through — the folder's flag gates its subtree at composite time
+    /// — so the child records the flag the artist actually set, which is `true`.
     func testAddingAViewAlsoCapturesFolderVisibility() {
         let manager = CanvasFixture.manager(layerCount: 2)
         let folder = manager.addFolder(name: "Folder")
@@ -51,8 +57,8 @@ final class ViewPresetCharacterizationTests: XCTestCase {
         manager.addViewPreset()
 
         XCTAssertEqual(manager.viewPresets[0].folderVisibility[folder], false)
-        XCTAssertEqual(manager.viewPresets[0].layerVisibility[manager.layers[1].id], false,
-                       "Hiding a folder propagates to its children, so the snapshot records them hidden too")
+        XCTAssertEqual(manager.viewPresets[0].layerVisibility[manager.layers[1].id], true,
+                       "The child is hidden by the group, not by its own flag — and it is its own flag the preset stores, so restoring this view hides the group and leaves the child as it was")
     }
 
     func testViewNamesAreNumberedFromTheCurrentCountAndDoNotRenumberOnDelete() {
