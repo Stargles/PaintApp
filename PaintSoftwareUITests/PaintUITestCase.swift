@@ -347,6 +347,21 @@ class PaintUITestCase: XCTestCase {
         app.buttons["toolbar.layersButton"].tap()
     }
 
+    /// The mirror of `addVectorLayer`, for the tests that are about the **raster tier itself** — the
+    /// "ghost layer" guards, the shape-bake path, the eraser reaching committed pixels. Vector is the
+    /// default kind now (PLAN §8), so raster has to be asked for by name; rewriting those tests to
+    /// read the vector marker instead would quietly retarget what they guard.
+    func addRasterLayer(_ app: XCUIApplication) {
+        app.buttons["toolbar.layersButton"].tap()
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.2)
+        let rasterItem = app.buttons["Raster Layer"]
+        XCTAssertTrue(rasterItem.waitForExistence(timeout: 5), "The add menu should offer a Raster Layer option")
+        rasterItem.tap()
+        app.buttons["toolbar.layersButton"].tap()
+    }
+
     /// Opens the layer panel, reads the vector marker, and closes it again — the panel overlays the
     /// canvas, so tests that alternate between drawing and counting need it shut in between.
     func vectorMarkerViaPanel(_ app: XCUIApplication, layerIndex: Int) -> (isVector: Bool, strokes: Int, erases: Int)? {
@@ -377,8 +392,8 @@ class PaintUITestCase: XCTestCase {
         layersButton.tap()
     }
 
-    /// The panel's "+" is a Menu with a primaryAction (tap adds a raster layer), so reaching the
-    /// Folder item means long-pressing it to open the menu first.
+    /// The panel's "+" is a Menu with a primaryAction (tap adds a vector layer, the default kind),
+    /// so reaching the Folder item means long-pressing it to open the menu first.
     func addFolderFromAddMenu(_ app: XCUIApplication) {
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))

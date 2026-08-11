@@ -656,6 +656,114 @@ final class PerfBaselineTests: XCTestCase {
                        "The first commit ends the shape gesture, which is what makes every later call a no-op")
     }
 
+    /// **An empty vector layer must be free**, which is the prerequisite for vector becoming the
+    /// default layer kind: every new layer is empty, and `StrokeCanvasView.vectorCanvas`'s `didSet`
+    /// renders it the moment it is reconciled into the view tree. Before the early-out that render
+    /// produced and retained a canvas-sized sheet of transparent pixels per layer — 16.8 MB each at
+    /// this canvas size, which the default flip would have multiplied by every layer in every new
+    /// project.
+    ///
+    /// `StrokeCanvasView` is a view and so is not compiled into this target (see
+    /// `CanvasManagerTestSupport`), so the test drives the exact call its `refreshDisplay` now makes
+    /// rather than the view itself. The canvases are held in an array for the whole measurement
+    /// because *retention* is the claim — a peak reading would be satisfied by a bitmap that was
+    /// allocated and then dropped.
+    ///
+    /// The non-empty control is not decoration: eight canvases retaining nothing proves nothing
+    /// unless the same measurement can see eight that do. It runs the *same* shape — same count,
+    /// same call — with one stroke per canvas, so the two readings are directly comparable.
+    ///
+    /// **`phys_footprint` cannot carry this assertion, and that is the interesting part.** It counts
+    /// pages the process holds, not bytes it has live, and by the time this test runs its process
+    /// has churned dozens of canvas-sized bitmaps through the tests above it — so the allocator
+    /// satisfies 134 MB of fresh renders entirely out of its free pool and the reading moves by
+    /// 360 KB. Two earlier drafts of this test failed on exactly that, in both directions. What is
+    /// asserted instead is the retained *bitmap* itself, which is what "retains a canvas-sized
+    /// allocation" actually means and is exact. The footprint is still reported, as an observation.
+    func testEmptyVectorLayersRetainNothingWhenTheDisplayRefreshes() {
+        let layerCount = 8
+        let canvasBytes = Int(Self.canvasSize.width * Self.canvasSize.height) * 4
+
+        // Warm-up: the first render of either kind faults in shared renderer machinery that would
+        // otherwise be charged to whichever measurement ran first.
+        _ = autoreleasepool { VectorCanvas.empty(size: Self.canvasSize).renderIfNonEmpty() }
+        _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: [Self.emptyLayerProbeStroke()]).render() }
+
+        let footprintBefore = residentBytes()
+        var empties: [VectorCanvas] = []
+        for _ in 0..<layerCount {
+            let canvas = VectorCanvas.empty(size: Self.canvasSize)
+            XCTAssertNil(canvas.renderIfNonEmpty(),
+                         "The display path must get nil for an empty canvas, so the image view holds no image at all")
+            XCTAssertFalse(canvas.hasCachedImage,
+                           "And nothing is memoized, so eviction never spends its budget on a canvas that cost nothing")
+            empties.append(canvas)
+        }
+        var loaded: [VectorCanvas] = []
+        for _ in 0..<layerCount {
+            let canvas = VectorCanvas(size: Self.canvasSize, strokes: [Self.emptyLayerProbeStroke()])
+            XCTAssertNotNil(canvas.renderIfNonEmpty(), "Content still renders through the same call")
+            loaded.append(canvas)
+        }
+
+        let emptyBytes = empties.reduce(0) { $0 + Self.retainedBitmapBytes($1) }
+        let loadedBytes = loaded.reduce(0) { $0 + Self.retainedBitmapBytes($1) }
+
+        report("empty vector layer retention", [
+            ("layersPerSide", "\(layerCount)"),
+            ("canvas", "\(Int(Self.canvasSize.width))x\(Int(Self.canvasSize.height))"),
+            ("oneCanvas", megabytes(UInt64(canvasBytes))),
+            ("retainedByEmptyLayers", megabytes(UInt64(emptyBytes))),
+            ("retainedByLoadedLayers", megabytes(UInt64(loadedBytes))),
+            ("footprintDelta", megabytes(Self.growth(from: footprintBefore, to: residentBytes()))),
+        ])
+
+        XCTAssertLessThan(emptyBytes, canvasBytes,
+                          "Eight empty vector layers must together retain less than a single canvas. Before the early-out each held a full one — 8 x 16.8 MB here, 8 x 64 MB at 4000² — and that is what makes vector safe to default to.")
+        XCTAssertGreaterThan(loadedBytes, canvasBytes * layerCount / 2,
+                             "The control must retain its canvas-sized renders, or the assertion above is measuring nothing")
+
+        // The contract the ~10 non-display callers rely on: `render()` stays non-optional, and its
+        // empty answer is a shared 1x1 that every one of them stretches into a rect it already knows.
+        let empty = VectorCanvas.empty(size: Self.canvasSize)
+        let placeholder = empty.render()
+        XCTAssertEqual(placeholder.size, CGSize(width: 1, height: 1))
+        XCTAssertTrue(empty.render() === placeholder, "And every caller gets the same one image")
+
+        // Stretched over the canvas rect it is the transparent sheet it replaced, pixel for pixel.
+        let stretched = UIGraphicsImageRenderer(size: Self.canvasSize, format: PixelOps.transparentFormat()).image { _ in
+            placeholder.draw(in: CGRect(origin: .zero, size: Self.canvasSize))
+        }
+        XCTAssertNil(PixelOps.opaqueContentBounds(stretched),
+                     "A stretched 1x1 transparent pixel must leave no opaque pixel anywhere — this is what makes it a visual no-op at every draw-into-a-fixed-rect call site")
+        XCTAssertNil(empty.localContentBounds(), "And an empty canvas still bounds to nothing")
+    }
+
+    /// Bytes of bitmap a canvas is holding on to once rendered — the allocation an empty layer must
+    /// not have. Read off `cgImage` rather than inferred from the canvas size, so a render that
+    /// quietly went back to producing a full sheet is caught by its actual width and height.
+    private static func retainedBitmapBytes(_ canvas: VectorCanvas) -> Int {
+        guard let cg = canvas.render().cgImage else { return 0 }
+        return cg.bytesPerRow * cg.height
+    }
+
+    /// Footprint can fall as well as rise between two readings (the allocator returns pages, other
+    /// threads settle), and an unsigned subtraction that goes negative traps.
+    private static func growth(from baseline: UInt64, to current: UInt64) -> UInt64 {
+        current > baseline ? current - baseline : 0
+    }
+
+    /// One short stroke — enough to make a canvas non-empty and force a real render, without the
+    /// cost of the 20-stroke scene the measurement below uses.
+    private static func emptyLayerProbeStroke() -> VectorStroke {
+        let samples = (0..<20).map { step in
+            VectorSample(x: 128 + CGFloat(step) * 40, y: 128, pressure: 1)
+        }
+        return VectorStroke(brush: Brush(name: "Probe", shape: .softRound, size: 24),
+                            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                            size: 24, opacity: 1, samples: samples)
+    }
+
     /// `VectorCanvas.render()` — the path 5.3 changed. It used to allocate a canvas-sized throwaway
     /// `RasterLayerTexture`, stamp into it, `makeImage()` a second canvas-sized copy out, blit that
     /// in, and drop both, once per visible vector layer per invalidation. Now the strokes go straight

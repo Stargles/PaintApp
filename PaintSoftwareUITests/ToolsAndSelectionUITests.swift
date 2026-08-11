@@ -70,9 +70,13 @@ final class ToolsAndSelectionUITests: PaintUITestCase {
     func testRectangleSelectThenFillBakesPixels() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
+        // On a vector layer `fillSelection` correctly adds a `VectorFillElement` instead
+        // (SelectionModels.swift), so the raster tier this test is about is only reachable on a
+        // raster layer — which is no longer what a new canvas starts on (PLAN §8).
+        addRasterLayer(app)
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "A fresh layer shouldn't have baked content yet")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), false, "A fresh layer shouldn't have baked content yet")
         app.buttons["toolbar.layersButton"].tap() // close panel so it can't cover the canvas
 
         app.buttons["toolbar.selectButton"].tap()
@@ -89,8 +93,8 @@ final class ToolsAndSelectionUITests: PaintUITestCase {
         fillButton.tap()
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "Filling should land in the raster tier, not a separate baked-image tier")
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Filling the selection should register as raster content, so the eraser can reach it")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), false, "Filling should land in the raster tier, not a separate baked-image tier")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "Filling the selection should register as raster content, so the eraser can reach it")
     }
 
     /// Rectangle-select, Duplicate: a new layer should appear immediately (holding the floating
@@ -172,11 +176,16 @@ final class ToolsAndSelectionUITests: PaintUITestCase {
     func testMoveWithNoSelectionLiftsWholeLayerAndCommits() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
+        // The floating-piece path is raster-only by design: `TopToolbar.toggleMove` sends a vector
+        // layer down `isVectorTransforming` instead, which writes `VectorCanvas.transform` and never
+        // shows the Move bottom bar. Vector is the default kind now (PLAN §8), so this test has to
+        // ask for the raster layer whose lift-and-bake it is about.
+        addRasterLayer(app)
 
         dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Setup: the stroke should have landed as one PencilKit stroke")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "Setup: the stroke should have landed as one PencilKit stroke")
         app.buttons["toolbar.layersButton"].tap() // close panel so it can't cover the canvas
 
         app.buttons["toolbar.moveButton"].tap()
@@ -188,8 +197,8 @@ final class ToolsAndSelectionUITests: PaintUITestCase {
         doneButton.tap()
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "Committing the move should land in the raster tier, not a separate baked-image tier")
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "The moved content should still register as raster content, not disappear from the tier the eraser reaches")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), false, "Committing the move should land in the raster tier, not a separate baked-image tier")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "The moved content should still register as raster content, not disappear from the tier the eraser reaches")
     }
 
     /// Save -> relaunch -> reload round trip, exercising the real `ProjectStore.save`/`load` path
@@ -205,11 +214,14 @@ final class ToolsAndSelectionUITests: PaintUITestCase {
     /// (`LayerManifest.kind`, `ProjectManifest.selectedBrush`/`customBrushes`): every save now
     /// encodes those fields and every load decodes them, so a save/load cycle silently failing to
     /// decode (e.g. a typo'd CodingKeys case) would make this test hang or fail outright rather
-    /// than passing. It cannot exercise a *non-default* brush or a *non-raster* `LayerKind`
-    /// end-to-end, because neither is selectable through the UI yet on this foundation snapshot
-    /// (no `canvasManager.selectedBrush` control, no vector-layer creation flow) — that half of
-    /// the schema was instead verified directly at the `Codable` level with a standalone script
-    /// (ProjectManifest/Brush have no UIKit dependency), not as a checked-in test.
+    /// than passing.
+    ///
+    /// It now *does* cover a non-raster `LayerKind` end-to-end, which it could not when it was
+    /// written: vector is the default layer kind (PLAN §8), so the stroke below is geometry, and a
+    /// round trip that survives is `LayerManifest.kind` plus the whole vector payload surviving with
+    /// it. Reading the vector marker rather than `readLayerStrokeCount` is what makes that real —
+    /// the raster tier stays empty on a vector layer, so the old reader would now assert nothing.
+    /// A non-default *brush* is still out of reach here and still covered at the `Codable` level.
     func testSaveAndReloadPersistsStrokesAcrossAppRelaunch() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -217,7 +229,7 @@ final class ToolsAndSelectionUITests: PaintUITestCase {
         dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Setup: the stroke should have landed before saving")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "Setup: the stroke should have landed before saving")
         app.buttons["toolbar.layersButton"].tap() // close panel
 
         // Back to gallery, which triggers ContentView.saveIfNeeded() -> ProjectStore.save.
@@ -241,7 +253,7 @@ final class ToolsAndSelectionUITests: PaintUITestCase {
         XCTAssertTrue(frameLabel.waitForExistence(timeout: 10), "Reopening the project should land back in the editor")
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Stroke drawn before saving should survive a save -> relaunch -> load round trip")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "Stroke drawn before saving should survive a save -> relaunch -> load round trip")
     }
 
     /// Exercises all three color controls (hue bar, SV square, hex field) and confirms each one
@@ -431,6 +443,9 @@ final class ToolsAndSelectionUITests: PaintUITestCase {
     func testEraserCanEraseContentAfterMoveCommits() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
+        // Raster, for the same reason as `testMoveWithNoSelectionLiftsWholeLayerAndCommits`: the
+        // lift-and-bake path this exercises exists only on a raster layer.
+        addRasterLayer(app)
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))

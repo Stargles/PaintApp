@@ -83,7 +83,10 @@ final class VectorEraserUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        // The canvas starts with a single raster layer.
+        // A new canvas starts on a *vector* layer now (PLAN §8), so the raster half of this test has
+        // to ask for one by name — otherwise "hidden on a raster layer" would never be exercised.
+        addRasterLayer(app)
+
         openEraserPanel(app)
         XCTAssertFalse(modePicker(app).exists,
                        "The vector mode picker must not appear while a raster layer is active")

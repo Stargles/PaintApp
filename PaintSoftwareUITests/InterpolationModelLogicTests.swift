@@ -417,10 +417,13 @@ final class InterpolationModelLogicTests: XCTestCase {
         // Assigned directly rather than built with `addCel`: the fixture's layers start with one cel
         // spanning the whole scene, so every add would collide with it. The timeline here is the
         // premise of the test, not the thing under test.
+        // Each cel gets a stroke: an empty `VectorCanvas` renders to a shared 1x1 and memoizes
+        // nothing (PLAN §8.1), so a timeline of blank cels would have nothing for eviction to evict
+        // and the test would pass vacuously.
         manager.layers[layerIndex].cels = (0..<6).map { frame in
             Cel(id: UUID(), startFrame: frame, frameCount: 1,
                 raster: .empty(size: CanvasFixture.canvasSize),
-                vector: .empty(size: CanvasFixture.canvasSize))
+                vector: VectorCanvas(size: CanvasFixture.canvasSize, strokes: [sampleStroke()]))
         }
         let cels = manager.layers[layerIndex].cels
         for cel in cels { _ = cel.vector?.render() }

@@ -105,8 +105,8 @@ struct DrawingView: View {
             get: { canvasManager.needsLayerAlert },
             set: { if !$0 { canvasManager.needsLayerAlert = false } }
         )) {
-            Button("Add Raster Layer") {
-                canvasManager.addLayer()
+            Button("Add Vector Layer") {
+                canvasManager.addVectorLayer()
                 canvasManager.needsLayerAlert = false
             }
             Button("Cancel", role: .cancel) {

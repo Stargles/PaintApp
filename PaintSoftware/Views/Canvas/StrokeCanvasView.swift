@@ -247,8 +247,10 @@ final class StrokeCanvasView: UIView {
                 livePreviewFrames += 1
                 return
             }
-            // At an in-between the cel's own canvas is empty, so `interpolationImage` wins here too.
-            let base = interpolationImage ?? vectorCanvas.render()
+            // At an in-between the cel's own canvas is empty, so `interpolationImage` wins here too —
+            // and it must, or an in-between would display as nothing now that an empty canvas
+            // renders to nil rather than to a transparent sheet.
+            let base = interpolationImage ?? vectorCanvas.renderIfNonEmpty()
             guard case .overlay = vectorScratchRole, let scratch = vectorScratch else {
                 imageView.image = base
                 return
@@ -256,7 +258,7 @@ final class StrokeCanvasView: UIView {
             // Mid vector stroke: composite the live scratch preview over the committed content.
             let bounds = CGRect(origin: .zero, size: vectorCanvas.size)
             imageView.image = UIGraphicsImageRenderer(size: vectorCanvas.size, format: PixelOps.transparentFormat()).image { _ in
-                base.draw(in: bounds)
+                base?.draw(in: bounds)
                 scratch.renderToUIImage().draw(in: bounds)
             }
             return

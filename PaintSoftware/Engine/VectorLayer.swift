@@ -1061,6 +1061,16 @@ final class VectorCanvas {
 
     // MARK: - Rendering
 
+    /// What an empty canvas renders to instead of a canvas-sized sheet of transparent pixels. Every
+    /// `render()` caller draws the result into a rect it already knows (the canvas bounds, or a
+    /// texture's own size), so a 1×1 stretched over that rect is pixel-for-pixel the same nothing —
+    /// and `localContentBounds()`, the one caller that reads the image instead of drawing it, wants
+    /// nil for an empty canvas anyway.
+    private static let transparentPixel: UIImage = {
+        UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1),
+                                format: PixelOps.transparentFormat()).image { _ in }
+    }()
+
     /// Rasterizes all content to a canvas-native `UIImage` (cached by `version`, one slot per
     /// quality). Strokes are stamped via `BrushStamper`; images drawn with their transforms; then the
     /// whole thing is drawn through the overall `transform`.
@@ -1070,6 +1080,17 @@ final class VectorCanvas {
     func render(quality: RenderQuality = .full) -> UIImage {
         lock.lock()
         defer { lock.unlock() }
+        // An empty canvas is now the steady state of a freshly added layer, and it is reached
+        // eagerly: `StrokeCanvasView.vectorCanvas`'s `didSet` renders on assignment. Without this,
+        // every empty vector layer would retain 16.8 MB of transparent pixels at 2048², 64 MB at
+        // 4000², for nothing. `transform` deliberately isn't part of the test — an affine of nothing
+        // is still nothing, and `resized(to:offset:)` leaves empty canvases carrying a translation,
+        // which is exactly when a project has the most of them.
+        //
+        // Nothing is memoized here on purpose: there is no allocation to amortize, and caching would
+        // make `hasCachedImage` report a claim on memory that was never made, so eviction would
+        // spend its budget on canvases that cost nothing.
+        guard !_elements.isEmpty else { return Self.transparentPixel }
         switch quality {
         case .full: if let cachedImage { return cachedImage }
         case .preview: if let cachedPreviewImage { return cachedPreviewImage }
@@ -1097,6 +1118,14 @@ final class VectorCanvas {
         return final
     }
 
+    /// `render()` for the display path, which can say "no image" in a way the drawing paths cannot.
+    /// An empty layer's image view is left holding nil rather than a stretched transparent pixel:
+    /// Core Animation skips the layer's contents entirely instead of compositing a blank sheet over
+    /// every frame, and with vector as the default layer kind that is the common case, not the edge.
+    func renderIfNonEmpty(quality: RenderQuality = .full) -> UIImage? {
+        isEmpty ? nil : render(quality: quality)
+    }
+
     /// Step 1 of `render()`: the layer's own content stamped at native resolution, before the overall
     /// `transform` is applied. Not cached — only called from `render()` and `localContentBounds()`.
     /// Caller must hold `lock` for the whole rasterization. Strokes stamp straight into this
@@ -1120,6 +1149,10 @@ final class VectorCanvas {
     /// exactly one paint run. `quality` doesn't reach this logic — only `Self.draw(stroke:…)` branches
     /// on it — since the isolation rules must hold for a preview too.
     private func renderLocalContent(quality: RenderQuality = .full) -> UIImage {
+        // `render()` has already returned by the time an empty canvas would reach here, so this
+        // guard is for `localContentBounds()`: it spares the Move tool a canvas-sized rasterize plus
+        // a several-million-pixel alpha scan to conclude what emptiness already said.
+        guard !_elements.isEmpty else { return Self.transparentPixel }
         // `.standard` is load-bearing: `.preferredRange` defaults to `.automatic`, which on a
         // wide-colour iPad backs the context with an extended-range 16-bit bitmap, and stamping
         // thousands of radial gradients into that is drastically slower than into 8-bit. No fidelity

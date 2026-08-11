@@ -79,7 +79,7 @@ struct CanvasSizePickerView: View {
     private func createCanvas() {
         guard let width, let height, isValid else { return }
         canvasManager.canvasSize = CGSize(width: width, height: height)
-        canvasManager.addLayer()
+        canvasManager.addVectorLayer()
         onCreated()
     }
 }

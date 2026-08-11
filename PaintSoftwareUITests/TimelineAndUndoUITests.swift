@@ -108,20 +108,20 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         openLayerPanel(app)
         let addLayer = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addLayer.waitForExistence(timeout: 5)) // the panel has to finish presenting first
-        addLayer.tap() // layers: [Layer 1, Layer 2]
+        addLayer.tap() // layers: [Vector 1, Vector 2] — vector is the default kind
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
         app.buttons["toolbar.layersButton"].tap() // close the panel so it can't cover the timeline
 
         let topName = app.staticTexts["timeline.layerName.1"]
         XCTAssertTrue(topName.waitForExistence(timeout: 5))
-        XCTAssertEqual(topName.label, "Layer 2")
+        XCTAssertEqual(topName.label, "Vector 2")
 
         // One row down is rowHeight (34) + the 2pt gap between rows.
         let start = topName.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.9, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 40)),
                     withVelocity: .slow, thenHoldForDuration: 0.5)
 
-        XCTAssertEqual(app.staticTexts["timeline.layerName.0"].label, "Layer 2",
+        XCTAssertEqual(app.staticTexts["timeline.layerName.0"].label, "Vector 2",
                        "Dragging a timeline name down should restack that layer")
     }
 
@@ -155,8 +155,12 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         start.press(forDuration: 0.1, thenDragTo: end) // stroke on layer 1 (now active)
 
         layersButton.tap() // reopen to verify + switch active layer back
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1, "Layer 0 should have its own stroke")
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "Layer 1 should have its own stroke")
+        // Vector markers, not `readLayerStrokeCount`: both layers are vector now that it is the
+        // default kind, so their strokes are geometry and the raster tier reads 0 on both. What is
+        // under test — that one global undo stack walks back in action order regardless of which
+        // layer is active — does not change.
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "Layer 0 should have its own stroke")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 1, "Layer 1 should have its own stroke")
 
         // Switch the active layer back to layer 0 — under the old per-layer design this would
         // have repointed (and cleared) whatever stack "undo" operates on.
@@ -172,19 +176,19 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         XCTAssertTrue(undo.isEnabled)
         undo.tap()
 
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 0,
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 0,
                        "The first undo (with layer 0 active) should still undo the most recent action — layer 1's stroke — not silently no-op or hit layer 0's history")
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1,
                        "Layer 0's stroke should be untouched by the first undo")
 
         undo.tap()
         XCTAssertFalse(app.staticTexts["layerPanel.row.1"].exists,
                        "The second undo should reach back to adding layer 1 and remove it entirely")
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1,
                        "Layer 0's stroke should still be untouched by the second undo")
 
         undo.tap()
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 0,
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 0,
                        "The third undo should reach back further still and undo layer 0's stroke")
     }
 
@@ -206,7 +210,10 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         start.press(forDuration: 0.1, thenDragTo: end) // stroke on layer 0
 
         layersButton.tap() // reopen
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1)
+        // The vector marker, not `readLayerStrokeCount`: that reads the *raster* tier, and vector is
+        // the default layer kind now, so this stroke is geometry in the cel's display list. What the
+        // test is about — that undo brings the deleted layer's content back — is unchanged.
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1)
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
@@ -222,7 +229,7 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         undo.tap()
 
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5), "Undo should restore the deleted layer")
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1,
                        "The restored layer's stroke content should come back intact, not blank")
     }
 
@@ -236,22 +243,22 @@ final class TimelineAndUndoUITests: PaintUITestCase {
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
         addButton.tap()
         addButton.tap()
-        // layers bottom-to-top: [Layer 1, Layer 2, Layer 3]; displayed top-to-bottom: 3, 2, 1.
+        // layers bottom-to-top: [Vector 1, Vector 2, Vector 3]; displayed top-to-bottom: 3, 2, 1.
 
         let bottomRow = app.staticTexts["layerPanel.row.0"]
         XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
-        XCTAssertEqual(bottomRow.label, "Layer 1")
+        XCTAssertEqual(bottomRow.label, "Vector 1")
 
         dragRow(layerCell(app, layerIndex: 2), onto: layerCell(app, layerIndex: 0), dropDY: 0.95)
-        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 3", "Sanity-check the drag actually landed")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Vector 3", "Sanity-check the drag actually landed")
 
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         XCTAssertTrue(undo.isEnabled, "Reordering layers should be undoable")
         undo.tap()
 
-        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 1", "Undo should restore the original bottom-to-top order")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Layer 3", "Undo should restore the original top layer too")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Vector 1", "Undo should restore the original bottom-to-top order")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Vector 3", "Undo should restore the original top layer too")
     }
 
     /// A cel resize drag must register as ONE undo step for the whole gesture, not one per

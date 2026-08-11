@@ -88,7 +88,9 @@ struct LayerPanel: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
             } primaryAction: {
-                canvasManager.addLayer()
+                // Vector is the default kind — a tap on `+` gives one, and the menu above is where
+                // raster is asked for by name.
+                canvasManager.addVectorLayer()
             }
             .accessibilityIdentifier("layerPanel.addButton")
         }

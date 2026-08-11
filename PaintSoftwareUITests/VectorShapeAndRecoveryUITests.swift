@@ -224,6 +224,10 @@ final class VectorShapeAndRecoveryUITests: PaintUITestCase {
     func testHeldStrokeBecomesAShapeThatTheEraserCanRemove() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
+        // Asked for by name: vector is the default kind now (PLAN §8), and on a vector layer the
+        // baked shape is geometry rather than raster pixels — which is the sibling case
+        // `testHeldStrokeOnVectorLayerBecomesAVectorStrokeTheEraserActsOn` covers.
+        addRasterLayer(app)
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
@@ -240,7 +244,7 @@ final class VectorShapeAndRecoveryUITests: PaintUITestCase {
         // Not just "still looks inked" — the pixels have to be in the cel's own raster, which is the
         // whole point of rasterizing on the way out of the transient state.
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1,
                        "The shape should have been stamped into the raster layer as one stroke")
         app.buttons["toolbar.layersButton"].tap()
 
@@ -389,7 +393,9 @@ final class VectorShapeAndRecoveryUITests: PaintUITestCase {
                        "committing the shape must keep its ink, not discard it")
 
         app.buttons["toolbar.layersButton"].tap()
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 2,
+        // The default layer is vector now, so the baked shape and the stroke over it are both
+        // geometry. That two of them landed — the point of the test — reads the same either way.
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 2,
                        "the layer should hold both the baked shape and the stroke drawn over it")
     }
 
