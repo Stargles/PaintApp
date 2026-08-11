@@ -54,6 +54,10 @@
 		DEC0DE000000000000000093 /* BlockDragCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000092 /* BlockDragCharacterizationTests.swift */; };
 		DEC0DE000000000000000095 /* PaintSoftware/Models/RenderTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000094 /* PaintSoftware/Models/RenderTree.swift */; };
 		DEC0DE000000000000000097 /* RenderTreeCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */; };
+		DEC0DE000000000000000099 /* PaintSoftware/Engine/RenderRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000098 /* PaintSoftware/Engine/RenderRequest.swift */; };
+		DEC0DE00000000000000009B /* PaintSoftware/Engine/Compositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009A /* PaintSoftware/Engine/Compositor.swift */; };
+		DEC0DE00000000000000009D /* PaintSoftware/Engine/MetalCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */; };
+		DEC0DE00000000000000009F /* CompositorParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */; };
 		DEC0DE000000000000000018 /* PaintSoftware/Models/Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */; };
 		DEC0DE00000000000000001A /* PaintSoftware/Models/ProjectManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */; };
 		DEC0DE00000000000000001C /* PaintSoftware/Models/SelectionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */; };
@@ -158,6 +162,10 @@
 		DEC0DE000000000000000092 /* BlockDragCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BlockDragCharacterizationTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000094 /* PaintSoftware/Models/RenderTree.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/RenderTree.swift"; sourceTree = "<group>"; };
 		DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RenderTreeCharacterizationTests.swift; sourceTree = "<group>"; };
+		DEC0DE000000000000000098 /* PaintSoftware/Engine/RenderRequest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/RenderRequest.swift"; sourceTree = "<group>"; };
+		DEC0DE00000000000000009A /* PaintSoftware/Engine/Compositor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/Compositor.swift"; sourceTree = "<group>"; };
+		DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MetalCompositor.swift"; sourceTree = "<group>"; };
+		DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CompositorParityLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Palette.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ProjectManifest.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/SelectionModels.swift; sourceTree = "<group>"; };
@@ -300,6 +308,7 @@
 				DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */,
 				DEC0DE000000000000000092 /* BlockDragCharacterizationTests.swift */,
 				DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */,
+				DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */,
 			);
 			path = PaintSoftwareUITests;
 			sourceTree = "<group>";
@@ -331,6 +340,9 @@
 				DEC0DE000000000000000050 /* PaintSoftware/Models/CanvasManager+Timeline.swift */,
 				DEC0DE000000000000000090 /* PaintSoftware/Models/CanvasManager+BlockDrag.swift */,
 				DEC0DE000000000000000094 /* PaintSoftware/Models/RenderTree.swift */,
+				DEC0DE000000000000000098 /* PaintSoftware/Engine/RenderRequest.swift */,
+				DEC0DE00000000000000009A /* PaintSoftware/Engine/Compositor.swift */,
+				DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */,
 				DEC0DE000000000000000030 /* PaintSoftware/Models/Tool.swift */,
 				DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */,
 				DEC0DE000000000000000034 /* PaintSoftware/Models/ViewPreset.swift */,
@@ -519,6 +531,10 @@
 				DEC0DE000000000000000093 /* BlockDragCharacterizationTests.swift in Sources */,
 				DEC0DE000000000000000095 /* PaintSoftware/Models/RenderTree.swift in Sources */,
 				DEC0DE000000000000000097 /* RenderTreeCharacterizationTests.swift in Sources */,
+				DEC0DE000000000000000099 /* PaintSoftware/Engine/RenderRequest.swift in Sources */,
+				DEC0DE00000000000000009B /* PaintSoftware/Engine/Compositor.swift in Sources */,
+				DEC0DE00000000000000009D /* PaintSoftware/Engine/MetalCompositor.swift in Sources */,
+				DEC0DE00000000000000009F /* CompositorParityLogicTests.swift in Sources */,
 				DEC0DE000000000000000031 /* PaintSoftware/Models/Tool.swift in Sources */,
 				DEC0DE000000000000000033 /* PaintSoftware/Models/LayerFolder.swift in Sources */,
 				DEC0DE000000000000000035 /* PaintSoftware/Models/ViewPreset.swift in Sources */,

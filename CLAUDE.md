@@ -34,6 +34,19 @@ toolchain once: `xcodebuild -downloadComponent MetalToolchain`.
   silently falls back, and you spend the run wondering what you tested.
 - `Engine/Deform` compiles standalone with `swiftc` (~5 s a loop) — use it to test engine
   hypotheses instead of a 90 s `xcodebuild test`.
+- **`** TEST SUCCEEDED **` and exit 0 do not mean any test ran.** Read the count, never the banner:
+
+  ```bash
+  xcrun xcresulttool get test-results summary --path "$(ls -dt build/DerivedData/Logs/Test/*.xcresult | head -1)"
+  ```
+  `totalTestCount: 0` with `result: "unknown"` is what a malformed `-only-testing` produces — and the
+  shell is the usual cause, because **zsh does not word-split unquoted `$VAR`**. Building a list of
+  flags into a string and passing `$SUITES` sends xcodebuild one long bogus argument, which it
+  ignores while reporting success. Use an array and `"${SUITES[@]}"`. The whole fast tier is:
+
+  ```bash
+  SUITES=(); for s in $(ls PaintSoftwareUITests/*.swift | xargs -n1 basename | sed 's/\.swift$//' | grep -E "LogicTests$|CharacterizationTests$|^PerfBaselineTests$"); do SUITES+=(-only-testing:PaintSoftwareUITests/$s); done
+  ```
 
 ### Triaging a failed XCUITest — do this before suspecting your change
 

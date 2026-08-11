@@ -60,6 +60,50 @@ enum CanvasFixture {
     static func layer(_ layerID: UUID, in manager: CanvasManager) -> Layer? {
         manager.layers.first { $0.id == layerID }
     }
+
+    // MARK: - Pixel fixtures
+
+    /// A canvas-sized image with `rect` filled in `color` and the rest transparent.
+    ///
+    /// Content for the compositor tests is painted this way rather than stamped through
+    /// `BrushStamper` on purpose: a parity test between two *walks* over the same leaves wants leaves
+    /// whose bytes are known exactly and identical on both sides, not leaves whose bytes are the
+    /// brush engine's business. `BrushEngineLogicTests` is where dab output belongs.
+    static func solidImage(_ color: UIColor, rect: CGRect, size: CGSize = canvasSize) -> UIImage {
+        UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+            color.setFill()
+            ctx.cgContext.fill(rect)
+        }
+    }
+
+    /// Paints `image` into a layer's cel at `frame` as baked content.
+    ///
+    /// `bakedImage` rather than `raster`: it is the tier that takes a whole image directly, so the
+    /// fixture states the pixels instead of producing them.
+    static func setBakedContent(_ manager: CanvasManager, layerIndex: Int, frame: Int = 0, _ image: UIImage) {
+        guard let celIndex = manager.activeCelIndex(inLayer: layerIndex, atFrame: frame) else {
+            return XCTFail("No cel on layer \(layerIndex) at frame \(frame) to paint into.")
+        }
+        manager.layers[layerIndex].cels[celIndex].bakedImage = image
+    }
+
+    /// Raw RGBA bytes of an image — device RGB, premultiplied-last, 8 bits per component, row-major.
+    ///
+    /// That format is not a choice made here; it is the one every byte path in the app already agrees
+    /// on (`PixelOps.deviceRGBColorSpace`, `RasterLayerTexture`'s bitmap info, `MetalFillEngine`'s
+    /// buffers, and the fill's `imageFromRGBA` round-trip). Re-drawing through a context of exactly
+    /// that description is what makes two images comparable without either one's own backing store
+    /// having to match.
+    static func rgbaBytes(_ image: CGImage) -> [UInt8]? {
+        let width = image.width, height = image.height
+        guard width > 0, height > 0 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        guard let ctx = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8,
+                                  bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return bytes
+    }
 }
 
 extension XCTestCase {
@@ -99,6 +143,40 @@ extension XCTestCase {
         XCTAssertEqual(derived, Array(manager.layers.indices),
                        "The derived bottom-to-top leaf order is \(derived.map { manager.layers[$0].name }), which is not the flat `layers` order \(manager.layers.map(\.name)). \(message)",
                        file: file, line: line)
+    }
+
+    /// **Every pixel identical**, which is §11 phase 2's gate for the compositor stated literally.
+    ///
+    /// Not a tolerance: the two sides under comparison do the same source-over over the same leaf
+    /// images, so any difference at all is a difference in the *walk*, and a walk that is nearly
+    /// right is wrong. (The GPU backend is the case where a tolerance becomes a real question, since
+    /// its arithmetic rounds differently from CoreGraphics' — that is a separate assertion with a
+    /// separate justification, not a loosening of this one.)
+    ///
+    /// Reports the first differing pixel rather than a count, because the coordinate is what tells
+    /// you which layer or group was walked wrongly.
+    func assertPixelsIdentical(_ actual: CGImage?, _ expected: CGImage?,
+                               _ message: String = "",
+                               file: StaticString = #filePath, line: UInt = #line) {
+        guard let actual, let expected else {
+            return XCTFail("One side did not render: actual \(actual == nil ? "nil" : "ok"), expected \(expected == nil ? "nil" : "ok"). \(message)",
+                           file: file, line: line)
+        }
+        XCTAssertEqual(actual.width, expected.width, "Widths differ. \(message)", file: file, line: line)
+        XCTAssertEqual(actual.height, expected.height, "Heights differ. \(message)", file: file, line: line)
+        guard let a = CanvasFixture.rgbaBytes(actual), let b = CanvasFixture.rgbaBytes(expected),
+              a.count == b.count else {
+            return XCTFail("Could not read both images back as RGBA. \(message)", file: file, line: line)
+        }
+        guard let firstDifference = a.indices.first(where: { a[$0] != b[$0] }) else { return }
+        let pixel = firstDifference / 4
+        let (x, y) = (pixel % actual.width, pixel / actual.width)
+        let channel = ["R", "G", "B", "A"][firstDifference % 4]
+        XCTFail("""
+            Composites differ at (\(x), \(y)) channel \(channel): got \(a[firstDifference]), expected \(b[firstDifference]). \
+            Pixel got RGBA(\(a[pixel * 4]), \(a[pixel * 4 + 1]), \(a[pixel * 4 + 2]), \(a[pixel * 4 + 3])), \
+            expected RGBA(\(b[pixel * 4]), \(b[pixel * 4 + 1]), \(b[pixel * 4 + 2]), \(b[pixel * 4 + 3])). \(message)
+            """, file: file, line: line)
     }
 
     /// No cel in a layer may overlap another — two cels covering the same frame make

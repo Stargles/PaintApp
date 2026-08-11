@@ -46,13 +46,17 @@ enum PixelOps {
     /// Flattens a cel's fill-tool wash, baked raster content, and live strokes into one
     /// canvas-sized image — the full stack a select/move/fill-selection/clear op should treat as
     /// "the cel's pixels".
-    static func rasterize(cel: Cel, canvasSize: CGSize) -> UIImage {
+    /// `quality` reaches only the vector tier, which is the only one with a cheaper mode to offer:
+    /// `RasterLayerTexture` has a single rendering. Defaulted to `.full` so the ~10 existing callers
+    /// are unchanged — it is threaded through for `RenderRequest`, whose §9.1 contract is to carry a
+    /// quality, and a quality the snapshot then ignored would be a field that lies.
+    static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let strokesImage = cel.raster.renderToUIImage()
         // A vector cel's live strokes/images live in `vector` (rendered to a native-res image),
         // not in `raster` — include it so fill, select/move, and cross-layer fill references treat
         // a vector layer's content as pixels just like a raster layer's.
-        let vectorImage = cel.vector?.render()
+        let vectorImage = cel.vector?.render(quality: quality)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { _ in
             cel.fillImage?.draw(in: bounds)
