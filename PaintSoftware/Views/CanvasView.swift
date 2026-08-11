@@ -468,8 +468,14 @@ struct CanvasView: UIViewRepresentable {
                 if host.strokeView.pencilOnlyDrawing != canvasManager.pencilOnlyDrawing {
                     host.strokeView.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
                 }
-                if host.isHidden != !layer.isVisible { host.isHidden = !layer.isVisible }
-                let targetAlpha = CGFloat(layer.opacity)
+                // `layer.isVisible`/`.opacity` are the layer's own switches; whether it actually
+                // reaches the canvas also folds in every enclosing group's (§4.1) — Core Animation
+                // gets one flat sibling per layer, so these are where that folding has to happen
+                // for the live canvas. See `isLayerEffectivelyVisible`/`effectiveOpacity`'s doc
+                // comments — the latter is a documented approximation, not exact group opacity.
+                let effectivelyVisible = canvasManager.isLayerEffectivelyVisible(index)
+                if host.isHidden != !effectivelyVisible { host.isHidden = !effectivelyVisible }
+                let targetAlpha = CGFloat(canvasManager.effectiveOpacity(ofLayer: index))
                 if host.alpha != targetAlpha { host.alpha = targetAlpha }
 
                 let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame)
@@ -525,12 +531,13 @@ struct CanvasView: UIViewRepresentable {
                 }
             }
 
-            // Enable the catch-all gesture when no layers exist or the active layer is hidden.
+            // Enable the catch-all gesture when no layers exist or the active layer is hidden —
+            // by its own switch or by a group's gating it (§4.1), either reads as "hidden" here.
             let needsCatch: Bool
             if canvasManager.layers.isEmpty {
                 needsCatch = true
             } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) {
-                needsCatch = !canvasManager.layers[canvasManager.currentLayerIndex].isVisible
+                needsCatch = !canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex)
             } else {
                 needsCatch = false
             }
@@ -555,8 +562,10 @@ struct CanvasView: UIViewRepresentable {
             // Move only carries the drawn content, matching the raster Move tool. Also checks
             // `activeCelIsInBetween` since the playhead can move onto an interpolated cel while the
             // transform is already on, where the box would be handles over a frame it can't move.
-            if layer.kind == .vector, layer.isVisible, canvasManager.isVectorTransforming,
-               !canvasManager.activeCelIsInBetween,
+            // `isLayerEffectivelyVisible` rather than `layer.isVisible` (§4.1): a layer inside a
+            // hidden group isn't on screen either, and the handles shouldn't be either.
+            if layer.kind == .vector, canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex),
+               canvasManager.isVectorTransforming, !canvasManager.activeCelIsInBetween,
                let canvasSize = canvasManager.canvasSize,
                let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame),
                let vector = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].vector {
@@ -1341,7 +1350,7 @@ struct CanvasView: UIViewRepresentable {
             if canvasManager.layers.isEmpty {
                 canvasManager.needsLayerAlert = true
             } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
-                      !canvasManager.layers[canvasManager.currentLayerIndex].isVisible {
+                      !canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex) {
                 canvasManager.needsVisibilityAlert = true
             }
         }

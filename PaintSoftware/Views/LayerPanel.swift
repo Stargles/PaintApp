@@ -19,10 +19,14 @@ struct LayerPanel: View {
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
             backgroundRow
         }
-        // The options menu belongs to one layer — selecting a different one dismisses it rather
-        // than leaving a stale menu pointed at the layer you just navigated away from.
+        // A layer's options menu belongs to one layer — selecting a different one dismisses it
+        // rather than leaving a stale menu pointed at the layer you just navigated away from. A
+        // folder's options aren't tied to which layer is active at all (opening one doesn't change
+        // `currentLayerIndex`), so this has nothing to say about those — without the early return,
+        // `layers[index].id == openID` is never true for a folder id and an unrelated selection
+        // change elsewhere would silently close a folder options panel the artist still has open.
         .onChange(of: canvasManager.currentLayerIndex) { _, index in
-            guard let openID = optionsLayerID else { return }
+            guard let openID = optionsLayerID, !canvasManager.folders.contains(where: { $0.id == openID }) else { return }
             let stillSelected = canvasManager.layers.indices.contains(index) && canvasManager.layers[index].id == openID
             if !stillSelected { optionsLayerID = nil }
         }
@@ -177,27 +181,27 @@ struct LayerOptionsPanel: View {
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-                action("Rename", systemImage: "pencil", identifier: "layerOptions.rename") {
+                optionsAction("Rename", systemImage: "pencil", identifier: "layerOptions.rename") {
                     draftName = canvasManager.layers[index].name
                     isRenaming = true
                 }
-                action("Duplicate", systemImage: "plus.square.on.square", identifier: "layerOptions.duplicate") {
+                optionsAction("Duplicate", systemImage: "plus.square.on.square", identifier: "layerOptions.duplicate") {
                     canvasManager.duplicateLayer(at: index)
                     onClose()
                 }
                 if let target = mergeTargetIndex {
-                    action("Merge Down", systemImage: "arrow.triangle.merge", identifier: "layerOptions.mergeDown") {
+                    optionsAction("Merge Down", systemImage: "arrow.triangle.merge", identifier: "layerOptions.mergeDown") {
                         canvasManager.mergeLayers(canvasManager.layers[index].id, canvasManager.layers[target].id)
                         onClose()
                     }
                 }
                 if canvasManager.layers[index].kind == .vector {
-                    action("Rasterize", systemImage: "square.on.square", identifier: "layerOptions.rasterize") {
+                    optionsAction("Rasterize", systemImage: "square.on.square", identifier: "layerOptions.rasterize") {
                         canvasManager.rasterizeLayer(layerIndex: index)
                         onClose()
                     }
                 }
-                action("Delete", systemImage: "trash", identifier: "layerOptions.delete", role: .destructive) {
+                optionsAction("Delete", systemImage: "trash", identifier: "layerOptions.delete", role: .destructive) {
                     canvasManager.deleteLayer(at: index)
                     onClose()
                 }
@@ -242,23 +246,119 @@ struct LayerOptionsPanel: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
+}
 
-    private func action(_ title: String, systemImage: String, identifier: String,
-                        role: ButtonRole? = nil, perform: @escaping () -> Void) -> some View {
-        Button(role: role, action: perform) {
-            HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .frame(width: 20)
-                Text(title)
-                Spacer()
-            }
-            .foregroundColor(role == .destructive ? .red : .white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .contentShape(Rectangle())
+/// One row of an options menu's action list — shared by `LayerOptionsPanel` and
+/// `FolderOptionsPanel` so the two menus render identically.
+private func optionsAction(_ title: String, systemImage: String, identifier: String,
+                           role: ButtonRole? = nil, perform: @escaping () -> Void) -> some View {
+    Button(role: role, action: perform) {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .frame(width: 20)
+            Text(title)
+            Spacer()
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(identifier)
+        .foregroundColor(role == .destructive ? .red : .white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier(identifier)
+}
+
+// MARK: - Folder Options
+
+/// The per-group menu (§4.2): the pass-through toggle and Rename, opened from the folder row's own
+/// options button (`LayerStackCell.folderOptionsButton`) rather than "tap the already-selected row
+/// again" — a folder row's tap already means expand/collapse, so that gesture was taken. Presented
+/// the same way as `LayerOptionsPanel` (see `DrawingView.layerPanelRail`), and the two are mutually
+/// exclusive since both hang off the one `layerOptionsID`.
+struct FolderOptionsPanel: View {
+    @ObservedObject var canvasManager: CanvasManager
+    let folderID: UUID
+    var onClose: () -> Void
+
+    @State private var draftName: String = ""
+    @State private var isRenaming = false
+
+    private var folderIndex: Int? { canvasManager.folders.firstIndex { $0.id == folderID } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let index = folderIndex, canvasManager.folders.indices.contains(index) {
+                header(for: index)
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
+                // §4.2: isolated is the default — children blend only against each other — and
+                // pass-through is the toggle, off by default. The switch reads directly as
+                // `!isIsolated` so its "on" position matches its label rather than the model's.
+                Toggle(isOn: Binding(
+                    get: { canvasManager.folders.indices.contains(index) ? !canvasManager.folders[index].isIsolated : false },
+                    set: { canvasManager.setFolderIsolated(folderID, isIsolated: !$0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Pass Through").foregroundColor(.white)
+                        Text("Blend with layers below this group")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+                .tint(.blue)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .accessibilityIdentifier("layerOptions.passThroughToggle")
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
+                optionsAction("Rename", systemImage: "pencil", identifier: "layerOptions.rename") {
+                    draftName = canvasManager.folders[index].name
+                    isRenaming = true
+                }
+                optionsAction("Delete", systemImage: "trash", identifier: "layerOptions.deleteFolder", role: .destructive) {
+                    canvasManager.deleteFolder(folderID)
+                    onClose()
+                }
+            } else {
+                Text("Folder no longer exists.")
+                    .foregroundColor(.gray)
+                    .padding()
+            }
+        }
+        .frame(width: 240)
+        .background(Color.black.opacity(0.82))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 1))
+        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+        .alert("Rename Folder", isPresented: $isRenaming) {
+            TextField("Name", text: $draftName)
+                .accessibilityIdentifier("layerOptions.nameField")
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { canvasManager.renameFolder(folderID, to: trimmed) }
+            }
+        }
+    }
+
+    private func header(for index: Int) -> some View {
+        HStack {
+            Text(canvasManager.folders[index].name)
+                .font(.headline)
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .accessibilityIdentifier("layerOptions.title")
+            Spacer()
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            .accessibilityIdentifier("layerOptions.close")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 }
 
