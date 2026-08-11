@@ -242,4 +242,183 @@ final class ProjectSaveLogicTests: XCTestCase {
         let backups = ProjectBackupManager.listBackups(forProjectAt: url)
         XCTAssertFalse(backups.isEmpty, "Saving over a project should leave at least one restore point behind")
     }
+
+    // MARK: - Group properties, and the projects that predate them (§4.1, §10.3)
+
+    /// Rewrites the saved manifest to look like a **pre-phase-4 save**: every folder loses the
+    /// group-property keys, exactly as a project written before those fields existed would be.
+    ///
+    /// This is the point of doing it this way rather than asserting on the decoder. "All defaulted, so
+    /// existing projects decode unchanged" is a claim about JSON that has already been written to
+    /// disk, and the only way to test it honestly is to load JSON without those keys in it. A decoder
+    /// read back to itself would pass while `decodeIfPresent` was `decode`.
+    private func stripGroupPropertiesFromSavedManifest(at url: URL,
+                                                       file: StaticString = #filePath, line: UInt = #line) {
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              var folders = json["folders"] as? [[String: Any]] else {
+            return XCTFail("The saved package should carry a manifest with a folders array", file: file, line: line)
+        }
+        for index in folders.indices {
+            folders[index].removeValue(forKey: "opacity")
+            folders[index].removeValue(forKey: "blendMode")
+            folders[index].removeValue(forKey: "isIsolated")
+        }
+        json["folders"] = folders
+        guard let rewritten = try? JSONSerialization.data(withJSONObject: json) else {
+            return XCTFail("The stripped manifest should re-encode", file: file, line: line)
+        }
+        try? rewritten.write(to: manifestURL)
+    }
+
+    private func folder(_ manager: CanvasManager, named name: String) -> LayerFolder? {
+        manager.folders.first { $0.name == name }
+    }
+
+    func testGroupPropertiesSurviveARoundTrip() {
+        let manager = makeManager()
+        let group = manager.addFolder(name: "Inked")
+        manager.layers[0].parentFolderID = group
+        manager.setFolderOpacity(group, to: 0.4)
+        manager.setFolderIsolated(group, isIsolated: false)
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+
+        let restored = folder(reloaded, named: "Inked")
+        XCTAssertEqual(restored?.opacity ?? -1, 0.4, accuracy: 0.0001)
+        XCTAssertEqual(restored?.isIsolated, false, "Pass-through is a saved choice, not a session one")
+        XCTAssertEqual(restored?.blendMode, .normal)
+    }
+
+    /// The claim §4.1 makes in one line — "all defaulted, so existing projects decode unchanged" —
+    /// checked against a manifest that genuinely has no such keys.
+    func testAProjectSavedBeforeGroupPropertiesDecodesToTheIdentities() {
+        let manager = makeManager()
+        let group = manager.addFolder(name: "Inked")
+        manager.layers[0].parentFolderID = group
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        stripGroupPropertiesFromSavedManifest(at: url)
+
+        guard let reloaded = ProjectStore.load(from: url) else {
+            return XCTFail("A project written before phase 4 must still load")
+        }
+        let restored = folder(reloaded, named: "Inked")
+        XCTAssertEqual(restored?.opacity ?? -1, 1, accuracy: 0.0001, "A folder with no saved opacity is opaque")
+        XCTAssertEqual(restored?.isIsolated, true, "Isolated is the default (§4.2), so an old folder is one")
+        XCTAssertEqual(restored?.blendMode, .normal)
+    }
+
+    /// §10.3, decided: migrate rather than load as-is.
+    ///
+    /// The fixture is what the old `toggleFolderVisibility` actually left on disk — the folder hidden
+    /// **and** every descendant, layers and subfolders alike, independently flagged hidden by the
+    /// write-through. Loaded without the migration that document renders correctly and then comes back
+    /// empty the first time the artist un-hides the group, because each child is still hidden in its
+    /// own right.
+    func testAnOldHiddenGroupComesBackWholeWhenItIsUnhidden() {
+        let manager = makeManager()
+        let outer = manager.addFolder(name: "Outer")
+        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        manager.layers[0].parentFolderID = outer
+        manager.layers[1].parentFolderID = inner
+
+        // Reproduce the write-through by hand: it is the behaviour this build no longer has.
+        manager.toggleFolderVisibility(outer)
+        for index in manager.folders.indices { manager.folders[index].isVisible = false }
+        for index in manager.layers.indices where index < 2 {
+            manager.layers[index].isVisible = false
+            manager.layers[index].isFillReference = false
+        }
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        stripGroupPropertiesFromSavedManifest(at: url)
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        XCTAssertEqual(folder(reloaded, named: "Outer")?.isVisible, false,
+                       "The group stays hidden — that flag is the one the artist actually chose")
+        XCTAssertEqual(folder(reloaded, named: "Inner")?.isVisible, true,
+                       "A subfolder hidden only by the write-through is restored with the rest")
+        XCTAssertTrue(reloaded.layers[0].isVisible && reloaded.layers[1].isVisible,
+                      "Un-hiding the group must bring its contents back, at any depth")
+        XCTAssertTrue(reloaded.layers[0].isFillReference,
+                      "isFillReference moves with visibility, the pairing toggleLayerVisibility keeps")
+    }
+
+    /// The other half, and the reason the signal is the absence of a key rather than a version number:
+    /// a document this build saved must never be migrated, or a deliberately hidden layer inside a
+    /// hidden group would silently come back every time the project was opened.
+    func testAGroupHiddenUnderTheNewRuleIsNotMigrated() {
+        let manager = makeManager()
+        let group = manager.addFolder(name: "Outer")
+        manager.layers[0].parentFolderID = group
+        manager.layers[1].parentFolderID = group
+
+        manager.toggleFolderVisibility(group)
+        manager.toggleLayerVisibility(layerIndex: 1)   // hidden on purpose, inside a hidden group
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+
+        XCTAssertEqual(folder(reloaded, named: "Outer")?.isVisible, false)
+        XCTAssertTrue(reloaded.layers[0].isVisible, "Untouched under the new rule: the group gates it, nothing wrote to it")
+        XCTAssertFalse(reloaded.layers[1].isVisible, "And a layer hidden by hand stays hidden across a reload")
+    }
+
+    /// §4.1 says an old preset "still works, since presets snapshot both layer and folder visibility
+    /// already". That is true of what it renders and not of what it leaves behind: a preset written
+    /// under the write-through records every child of a hidden group as hidden, so applying one
+    /// re-creates the state the migration just cleared. Fixing the document alone would mean the group
+    /// comes back once and empties again the next time the artist flips views.
+    func testAnOldPresetDoesNotReintroduceTheClobberedVisibility() {
+        let manager = makeManager()
+        let group = manager.addFolder(name: "Outer")
+        manager.layers[0].parentFolderID = group
+        manager.layers[1].parentFolderID = group
+
+        // The write-through by hand, then a preset capturing it — which is what an artist who hid a
+        // group and saved a view under the old build has on disk.
+        manager.toggleFolderVisibility(group)
+        for index in manager.layers.indices where index < 2 {
+            manager.layers[index].isVisible = false
+            manager.layers[index].isFillReference = false
+        }
+        manager.addViewPreset()
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        stripGroupPropertiesFromSavedManifest(at: url)
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        guard let preset = reloaded.viewPresets.first else { return XCTFail("The preset should survive the round trip") }
+        XCTAssertEqual(preset.folderVisibility[group], false, "The preset still hides the group, which is its point")
+        XCTAssertEqual(preset.layerVisibility[reloaded.layers[0].id], true,
+                       "But not by hiding each child, which is what re-showing the group would trip over")
+        XCTAssertEqual(preset.layerVisibility[reloaded.layers[1].id], true)
+    }
+
+    /// A pre-phase-4 folder that was *visible* has children carrying their own honest flags, so the
+    /// migration must leave them exactly alone.
+    func testAnOldVisibleGroupKeepsItsChildrensOwnVisibility() {
+        let manager = makeManager()
+        let group = manager.addFolder(name: "Outer")
+        manager.layers[0].parentFolderID = group
+        manager.layers[1].parentFolderID = group
+        manager.toggleLayerVisibility(layerIndex: 1)
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        stripGroupPropertiesFromSavedManifest(at: url)
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        XCTAssertEqual(folder(reloaded, named: "Outer")?.isVisible, true)
+        XCTAssertTrue(reloaded.layers[0].isVisible)
+        XCTAssertFalse(reloaded.layers[1].isVisible, "The migration only fires under a hidden group")
+    }
 }

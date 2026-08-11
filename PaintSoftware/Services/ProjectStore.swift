@@ -593,17 +593,35 @@ enum ProjectStore {
     /// It cannot fire twice and cannot fire on anything this build wrote: the signal is the absence
     /// of `opacity` from the folder's JSON, and every save from here on writes it (see
     /// `FolderManifest.init(from:)`).
+    /// **The saved view presets need the same treatment, which §4.1 does not say.** It notes that
+    /// restoring an old preset "still works, since presets snapshot both layer and folder visibility
+    /// already" — true of what it renders, but a preset written under the write-through records every
+    /// child of a hidden group as hidden, so applying one re-creates on demand exactly the state this
+    /// migration exists to clear. Fixing the document and leaving the presets alone would mean the
+    /// group comes back once and then empties again the next time the artist flips views.
     @MainActor
     private static func migrateGroupVisibility(_ manager: CanvasManager, folders: [FolderManifest]) {
-        for folder in folders where folder.wasSavedBeforeGroupProperties && !folder.isVisible {
-            for index in manager.descendantLayerIndices(ofFolder: folder.id) {
+        guard folders.contains(where: \.wasSavedBeforeGroupProperties) else { return }
+
+        for folder in folders where !folder.isVisible {
+            let descendantFolders = manager.folderSubtree(folder.id).subtracting([folder.id])
+            let descendantLayerIDs = Set(manager.descendantLayerIndices(ofFolder: folder.id).map { manager.layers[$0].id })
+
+            for index in manager.layers.indices where descendantLayerIDs.contains(manager.layers[index].id) {
                 manager.layers[index].isVisible = true
                 manager.layers[index].isFillReference = true
             }
-            let subtree = manager.folderSubtree(folder.id)
-            for index in manager.folders.indices where subtree.contains(manager.folders[index].id)
-                && manager.folders[index].id != folder.id {
+            for index in manager.folders.indices where descendantFolders.contains(manager.folders[index].id) {
                 manager.folders[index].isVisible = true
+            }
+
+            for index in manager.viewPresets.indices where manager.viewPresets[index].folderVisibility[folder.id] == false {
+                for id in descendantLayerIDs where manager.viewPresets[index].layerVisibility[id] != nil {
+                    manager.viewPresets[index].layerVisibility[id] = true
+                }
+                for id in descendantFolders where manager.viewPresets[index].folderVisibility[id] != nil {
+                    manager.viewPresets[index].folderVisibility[id] = true
+                }
             }
         }
     }

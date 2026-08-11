@@ -846,16 +846,18 @@ final class CanvasManager: ObservableObject {
 
     /// Sets a group's opacity, applied once to its finished composite (§4.1).
     ///
-    /// No undo step, matching the per-layer opacity slider it sits beside (`LayerStackListView`
-    /// writes `layers[i].opacity` directly): a drag would otherwise register a step per frame, and
-    /// coalescing them is a change worth making for both sliders at once or neither.
+    /// Records no undo step of its own **because its caller already brackets the drag**: the slider
+    /// wraps a gesture in `beginStructureGesture`/`commitStructureGesture` (`LayerStackListView`),
+    /// and `captureStructure` snapshots `folders`, so one drag is one "Opacity" step. Taking a step
+    /// per set would nest inside that bracket and be swallowed anyway — see `withStructureUndo`'s
+    /// depth guard — which is why this is a bare write rather than an oversight.
     func setFolderOpacity(_ folderID: UUID, to opacity: Double) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
         folders[idx].opacity = min(max(opacity, 0), 1)
     }
 
-    /// Flips a group between isolated and pass-through (§4.2). Undoable, unlike the opacity slider
-    /// above: it is a single deliberate press rather than a drag, so there is nothing to coalesce.
+    /// Flips a group between isolated and pass-through (§4.2). Wrapped here rather than by a caller,
+    /// unlike the opacity slider above: it is a single press with no drag to bracket.
     func setFolderIsolated(_ folderID: UUID, isIsolated: Bool) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].isIsolated != isIsolated else { return }
         withStructureUndo(name: isIsolated ? "Isolate Group" : "Pass Through") {
