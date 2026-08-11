@@ -20,13 +20,13 @@ import UIKit
 /// for. The flag is here so the Metal path can be exercised and compared before anything depends on
 /// it, which is what "behind a flag" in §11 phase 2 means.
 ///
-/// **The fast tier cannot select `.metal`, for a structural reason worth writing down.** The
-/// `PaintSoftwareUITests` target opts out of the app's `PBXFileSystemSynchronizedRootGroup` and
-/// hand-lists its sources, so while `MetalFillEngine.swift` is compiled a second time into that
-/// bundle, `Fill.metal` is not — the test bundle has no `default.metallib` at all, and
-/// `device.makeDefaultLibrary()` there returns nil. `MetalFillEngine.shared` is therefore always nil
-/// in the fast tier, and `MetalCompositor` is too. That is why the CPU backend has to be a real
-/// implementation rather than a stub: it is the one the fast tier actually exercises.
+/// **The fast tier can select either, which is new.** The `PaintSoftwareUITests` target opts out of
+/// the app's `PBXFileSystemSynchronizedRootGroup` and hand-lists its sources, so it had no shader of
+/// any kind and `device.makeDefaultLibrary()` returned nil there — the reason `MetalFillEngine` has
+/// never been exercisable outside a real app process. `Composite.metal` is an explicit member of that
+/// target and `CompositorMetalEngine` asks for its library by `Bundle(for:)` rather than
+/// `Bundle.main`, so both backends run headlessly and `CompositorParityLogicTests` compares them
+/// directly. `Fill.metal` is still not a member, so `MetalFillEngine.shared` remains nil there.
 enum CompositorBackend {
     case coreGraphics
     case metal

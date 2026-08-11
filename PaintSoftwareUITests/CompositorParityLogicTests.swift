@@ -15,12 +15,14 @@ import UIKit
 /// walk. Fixtures use flat `bakedImage` rectangles so a failure is legible as geometry — "the group
 /// composited in the wrong order" — instead of as brush output.
 ///
-/// **The backend under test is the CoreGraphics one, necessarily.** The `PaintSoftwareUITests`
-/// bundle has no `default.metallib` (it opts out of the app's synchronized root group and hand-lists
-/// its sources, and no `.metal` file is listed), so `makeDefaultLibrary()` returns nil in this
-/// process and the Metal backend cannot run here at all. That is why `Compositor` falls back rather
-/// than failing, and why the GPU path's own parity assertion belongs in the XCUITest tier where a
-/// real app process supplies the shader.
+/// **Both backends run here, which took two fixes and had never been possible before.** This target
+/// opts out of the app's synchronized root group and hand-lists its sources, so it had no shader of
+/// any kind; `Composite.metal` is now an explicit member and the bundle gets its own
+/// `default.metallib`. That alone was not enough — `MTLDevice.makeDefaultLibrary()` reads
+/// `Bundle.main`, which under XCUITest is the *runner app*, not the `.xctest` plug-in the library was
+/// built into, so `CompositorMetalEngine` asks by `Bundle(for:)` instead. `MetalFillEngine` still
+/// does neither, which is why `FillUITests` remains the only place the fill's GPU path is exercised.
+///
 /// `@MainActor` because `makeRenderRequest` is: the app target compiles with
 /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` so the annotation is redundant there, but this target
 /// does not, and the annotation is worth keeping on the production API — it is the statement that
@@ -233,6 +235,141 @@ final class CompositorParityLogicTests: XCTestCase {
         let covered = (16 + 16 * composited.width) * 4
         XCTAssertEqual(Array(bytes[covered..<(covered + 4)]), [255, 0, 0, 255],
                        "Background is under the stack, not over it")
+    }
+
+    // MARK: - The GPU backend
+
+    override func tearDown() {
+        Compositor.backend = .coreGraphics
+        super.tearDown()
+    }
+
+    /// The GPU backend needs a device and a compiled `default.metallib` in *this* bundle.
+    ///
+    /// It has one because `Composite.metal` was added to this target's Sources phase — the app target
+    /// picks `.metal` files up automatically through its synchronized root group, but this target
+    /// hand-lists its sources and had no shader of any kind before. That is why `MetalFillEngine` has
+    /// never been exercisable here: `Fill.metal` is still not a member, so `MetalFillEngine.shared`
+    /// stays nil in this process even now, while `CompositorMetalEngine.shared` does not.
+    private func skipUnlessGPUAvailable() throws {
+        try XCTSkipIf(CompositorMetalEngine.shared == nil,
+                      "No Metal device or no compositor shader library in this test bundle")
+    }
+
+    /// Largest absolute difference on any channel of any pixel.
+    private func maxChannelDelta(_ a: CGImage, _ b: CGImage) -> Int {
+        guard let x = CanvasFixture.rgbaBytes(a), let y = CanvasFixture.rgbaBytes(b), x.count == y.count else {
+            return .max
+        }
+        return x.indices.reduce(0) { max($0, abs(Int(x[$1]) - Int(y[$1]))) }
+    }
+
+    private func gpuAndCPU(_ manager: CanvasManager, includeBackground: Bool = false) -> (gpu: CGImage, cpu: CGImage)? {
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: includeBackground) else {
+            XCTFail("Fixture needs a canvas size")
+            return nil
+        }
+        Compositor.backend = .coreGraphics
+        guard let cpu = Compositor.composite(request) else {
+            XCTFail("The CPU reference must always render")
+            return nil
+        }
+        guard let gpu = MetalCompositor.composite(request) else {
+            XCTFail("The GPU backend declined a request it should have handled")
+            return nil
+        }
+        return (gpu, cpu)
+    }
+
+    /// §11 phase 2's gate, and it holds **literally**: zero difference on any channel of any pixel.
+    ///
+    /// That was not the expected result and is worth recording as measured rather than assumed. The
+    /// kernel works in float32 and quantizes once on write; CoreGraphics composites in 8-bit
+    /// premultiplied and rounds at every layer. Two rounding regimes over the same algebra had no
+    /// obligation to agree to the byte, and a ±1 tolerance was the anticipated answer — the exact
+    /// assertion is here because the hardware gave one, not because the design guaranteed it.
+    ///
+    /// **Verified on the simulator's Metal implementation.** If a physical device ever disagrees this
+    /// fails loudly, which is the point: a tolerance written in advance would have hidden that
+    /// difference instead of reporting it.
+    func testTheGPUMatchesTheCPUReferenceExactly() throws {
+        try skipUnlessGPUAvailable()
+        guard let (gpu, cpu) = gpuAndCPU(overlappingManager()) else { return }
+
+        let delta = maxChannelDelta(gpu, cpu)
+        XCTAssertEqual(delta, 0, "GPU and CPU composites differ by \(delta) on some channel")
+    }
+
+    func testTheGPUMatchesTheCPUReferenceThroughFoldersAndOpacity() throws {
+        try skipUnlessGPUAvailable()
+        let manager = overlappingManager()
+        let outer = manager.addFolder(name: "Outer")
+        manager.layers[0].parentFolderID = outer
+        manager.layers[1].parentFolderID = outer
+        manager.layers[1].opacity = 0.4
+
+        guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
+        let delta = maxChannelDelta(gpu, cpu)
+        XCTAssertEqual(delta, 0, "GPU and CPU composites differ by \(delta) on some channel")
+    }
+
+    /// Kept as a separate case even though the test above now also asserts exact equality: an opaque
+    /// layer at full opacity involves no blending arithmetic at all, so a failure *here* is a format
+    /// or colour-space mistake — `rgba8Unorm_srgb` instead of `rgba8Unorm`, or a byte order swapped —
+    /// rather than a rounding difference. Keeping the two apart is what makes a future failure legible
+    /// instead of merely red.
+    func testTheGPUAndCPUBackendsAgreeExactlyOnOpaqueContent() throws {
+        try skipUnlessGPUAvailable()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
+
+        guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
+        assertPixelsIdentical(gpu, cpu, "An opaque layer over nothing is a copy, not a blend")
+    }
+
+    func testTheGPUDrawsTheBackgroundUnderTheStack() throws {
+        try skipUnlessGPUAvailable()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+        manager.canvasBackgroundColor = .white
+        manager.isCanvasBackgroundVisible = true
+
+        guard let (gpu, cpu) = gpuAndCPU(manager, includeBackground: true) else { return }
+        XCTAssertEqual(maxChannelDelta(gpu, cpu), 0,
+                       "The background is premultiplied on the GPU and set as a fill colour on the CPU")
+    }
+
+    /// The backend declines rather than guesses when a group needs its own buffer, and `Compositor`
+    /// turns that into a correct slow frame instead of a wrong fast one.
+    func testAnIsolatedGroupFallsBackToTheCPUInsteadOfRenderingWrong() throws {
+        try skipUnlessGPUAvailable()
+        let manager = overlappingManager()
+        let folder = manager.addFolder(name: "Faded")
+        manager.layers[1].parentFolderID = folder
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        XCTAssertNotNil(MetalCompositor.composite(request), "A transparent group is still flattenable")
+
+        // Phase 4 gives folders a real opacity; until then this is the only way to build the case.
+        let isolated = RenderRequest(tree: manager.renderTree.map(Self.fadingGroups),
+                                     sources: request.sources, frame: request.frame,
+                                     canvasSize: request.canvasSize, background: request.background,
+                                     quality: request.quality)
+        XCTAssertNil(MetalCompositor.composite(isolated), "A group needing its own buffer must decline")
+
+        Compositor.backend = .metal
+        XCTAssertNotNil(Compositor.composite(isolated), "And the compositor must still return a frame")
+    }
+
+    /// Rewrites every node to opacity 0.5, which is the phase-4 shape this backend does not handle.
+    private static func fadingGroups(_ node: RenderNode) -> RenderNode {
+        guard case .node(let op, let inputs) = node.content else { return node }
+        return RenderNode(id: node.id,
+                          content: .node(op: op, inputs: inputs.map { $0.map(fadingGroups) }),
+                          opacity: 0.5, isVisible: node.isVisible)
     }
 
     func testAHiddenBackgroundLeavesTheStackOnTransparency() {
