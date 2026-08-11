@@ -451,9 +451,9 @@ it is small and none of them fight a moving substrate.
 | ~~**0**~~ | ~~Empty-vector render early-out (§8.1), then vector-as-default (§8)~~ | **done** |
 | ~~**1**~~ | ~~`RenderNode` derivation + characterization tests~~ | **done** |
 | ~~**2**~~ | ~~Metal compositor behind a flag; snapshot-driven entry point (§9.1)~~ | **done** — both backends agree byte for byte, delta 0 |
-| **3** | ~~Delete `PixelOps.compositeCanvas`~~ **done**; swap in the sandwich (§5.2) — **not started** | thumbnail on one path ✓, `PerfBaselineTests` green ✓; sandwich outstanding |
+| ~~**3**~~ | ~~Delete `PixelOps.compositeCanvas`~~ | **done** — thumbnail on one path, `PerfBaselineTests` green |
 | **4** | Group properties: isolated/pass-through, opacity, visibility migration (§4.1–4.2) | groups composite as parentheses |
-| **5** | Tier 1 blend modes on layers and groups (§7) | the shader `switch` plus UI |
+| **5** | Tier 1 blend modes on layers and groups (§7), **and §5.2's sandwich with them** | the shader `switch` plus UI; the live canvas shows a blended layer |
 | **6** | Alpha masks (§6), incl. `MaskParityLogicTests` | raster and vector mask pixel-identically |
 | **7** | Tier 2 blend modes | |
 | **8** | Compositor nodes: slot-as-folder storage, panel chrome (§4.3) | a 2-input Mix node renders |
@@ -462,10 +462,16 @@ it is small and none of them fight a moving substrate.
 Phases 0–3 are the risky ones; 4 onward are additive. §9.2's background renderer stays deferred
 until the sequencer exists — only §9.1's substrate is in scope here, and it landed inside phase 2.
 
-**The sandwich is the open question in phase 3.** It rewrites the live canvas, which is the most
-latency-critical code in the app, and nothing consumes it until phase 5 gives a layer a blend mode —
-the compositor cannot drive the live canvas usefully before there is something Core Animation cannot
-already express. The measured case for deferring it to phase 5 is in `PerfBaselineTests`: at 2048²
-with six layers the `@MainActor` snapshot costs 276 ms against an 84 ms CPU composite, so the
-expensive half is building the snapshot, not compositing it, and a cache of composites does not
-address that. Deciding this is what phase 4 should start from.
+**The sandwich moved from phase 3 to phase 5 — decided, not drifted.** It rewrites the live canvas,
+which is the most latency-critical code in the app, and nothing consumes it until a layer has a blend
+mode: the compositor cannot drive the live canvas usefully before there is something Core Animation
+cannot already express. Building it in phase 3 would have meant restructuring
+`CanvasView.reconcileLayers` — and with it onion-skin z-order, the Move tool's floating piece, the
+fill preview, and per-layer touch routing — with no feature able to demonstrate the result, which is
+the "moving substrate" §11 opens by warning against.
+
+The measurement is the other half of the case. At 2048² with six layers the `@MainActor` snapshot
+costs 276 ms against an 84 ms CPU composite (`PerfBaselineTests`), so the expensive half is *building*
+the snapshot, not compositing it — and the sandwich caches composites. If live-canvas cost becomes
+the problem before phase 5 arrives, memoizing `PixelOps.rasterize` per cel version is the change that
+addresses the 276 ms, and it helps every consumer rather than only the live path.
