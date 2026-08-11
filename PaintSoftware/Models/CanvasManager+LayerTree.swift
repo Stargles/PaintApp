@@ -26,32 +26,48 @@ extension CanvasManager {
     }
 
     private func rows(inContainer container: UUID?, depth: Int) -> [LayerStackRow] {
-        // Everything directly inside this container, tagged with the topmost `layers` index it
-        // occupies so folders and loose layers can be ranked against each other top-to-bottom.
-        var ranked: [(top: Int, tieBreak: Int, folder: LayerFolder?, layerIndex: Int)] = []
+        var result: [LayerStackRow] = []
+        for entry in containerEntries(inContainer: container) {
+            switch entry {
+            case .folder(let folder):
+                result.append(.folder(id: folder.id, depth: depth))
+                // Collapsing hides rows and nothing else — it is a panel affordance, which is why
+                // the render tree (`RenderTree.swift`) descends unconditionally where this doesn't.
+                if folder.isExpanded {
+                    result.append(contentsOf: rows(inContainer: folder.id, depth: depth + 1))
+                }
+            case .layer(let index):
+                result.append(.layer(id: layers[index].id, index: index, depth: depth))
+            }
+        }
+        return result
+    }
+
+    /// One thing sitting directly inside a container — a loose layer, or a folder with everything
+    /// under it.
+    enum ContainerEntry {
+        case layer(index: Int)
+        case folder(LayerFolder)
+    }
+
+    /// Everything directly inside `container`, ranked top-to-bottom. **The one place the ordering
+    /// rule lives**, so the presented rows and the derived render tree cannot come to disagree about
+    /// what sits above what — they read the same answer and differ only in what they do with it.
+    func containerEntries(inContainer container: UUID?) -> [ContainerEntry] {
+        // Each entry is tagged with the topmost `layers` index it occupies, so folders and loose
+        // layers can be ranked against each other on one scale.
+        var ranked: [(top: Int, tieBreak: Int, entry: ContainerEntry)] = []
 
         for index in layers.indices where resolvedContainer(ofLayer: index) == container {
-            ranked.append((top: index, tieBreak: 0, folder: nil, layerIndex: index))
+            ranked.append((top: index, tieBreak: 0, entry: .layer(index: index)))
         }
         for (order, folder) in folders.enumerated() where resolvedContainer(ofFolder: folder.id) == container {
             // An empty folder has no span, so it sorts above everything else in its container.
             let top = descendantLayerIndices(ofFolder: folder.id).max() ?? Int.max
-            ranked.append((top: top, tieBreak: order, folder: folder, layerIndex: -1))
+            ranked.append((top: top, tieBreak: order, entry: .folder(folder)))
         }
         ranked.sort { ($0.top, $0.tieBreak) > ($1.top, $1.tieBreak) }
-
-        var result: [LayerStackRow] = []
-        for entry in ranked {
-            if let folder = entry.folder {
-                result.append(.folder(id: folder.id, depth: depth))
-                if folder.isExpanded {
-                    result.append(contentsOf: rows(inContainer: folder.id, depth: depth + 1))
-                }
-            } else {
-                result.append(.layer(id: layers[entry.layerIndex].id, index: entry.layerIndex, depth: depth))
-            }
-        }
-        return result
+        return ranked.map(\.entry)
     }
 
     /// A layer's folder, or nil if it has none — or if the folder it names no longer exists, in

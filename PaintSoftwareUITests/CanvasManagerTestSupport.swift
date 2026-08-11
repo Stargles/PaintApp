@@ -83,6 +83,24 @@ extension XCTestCase {
         }
     }
 
+    /// The invariant the render tree exists to be trusted on: **flattening the derived tree back to
+    /// its leaves reproduces `layers` exactly, in order and in count.** The tree reveals the nesting
+    /// the flat array already encodes; it must never reorder, drop, or duplicate anything while
+    /// doing so.
+    ///
+    /// Asserted after every mutation in `RenderTreeCharacterizationTests`, and worth stating as an
+    /// invariant rather than as one test's expectation because it is what makes phase 2 safe to
+    /// build: the compositor can replace `PixelOps.compositeCanvas`'s flat walk only for as long as
+    /// walking the tree means the same thing.
+    func assertRenderTreeMatchesFlatOrder(_ manager: CanvasManager,
+                                          _ message: String = "",
+                                          file: StaticString = #filePath, line: UInt = #line) {
+        let derived = manager.renderLeafOrder
+        XCTAssertEqual(derived, Array(manager.layers.indices),
+                       "The derived bottom-to-top leaf order is \(derived.map { manager.layers[$0].name }), which is not the flat `layers` order \(manager.layers.map(\.name)). \(message)",
+                       file: file, line: line)
+    }
+
     /// No cel in a layer may overlap another — two cels covering the same frame make
     /// `activeCelIndex` (a `firstIndex(where:)`) pick one arbitrarily, so the layer draws into one
     /// cel and renders the other.
