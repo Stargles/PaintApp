@@ -123,6 +123,64 @@ extension CanvasManager {
         layers.indices.filter { layers[$0].parentFolderID == folderID }
     }
 
+    // MARK: - What a group does to the layers under it (§4.1)
+    //
+    // These two exist because phase 4 split a question that used to have one answer. Until then
+    // `toggleFolderVisibility` wrote its flag through to every descendant, so `layers[i].isVisible`
+    // *was* whether the layer reached the canvas; now the folder's flag gates its subtree instead,
+    // and "is this layer switched on" and "does this layer reach the canvas" are different questions.
+    //
+    // `Compositor` never asks either of them — it walks the tree, where the gate is structural and
+    // group opacity applies once to a finished buffer, which is the correct picture. These are for
+    // the callers with no tree to walk: the live canvas, which hands Core Animation one flat sibling
+    // per layer, and the guards that decide whether a drawing touch lands on something the artist
+    // can actually see.
+
+    /// Every folder above a layer, innermost first.
+    ///
+    /// Cycle-safe by stopping at the first folder it revisits, which is the same call
+    /// `resolvedContainer(ofFolder:)` makes — a chain that loops resolves to top-level rather than
+    /// hanging. A `parentFolderID` naming a folder that no longer exists ends the walk, matching how
+    /// such a layer already shows up at the top of the stack rather than vanishing from it.
+    ///
+    /// **Not interchangeable with the tree's own containment in a cyclic document**, which is why
+    /// `makeRenderRequest`'s elision still asks only `layers[i].isVisible`. `containerEntries` breaks
+    /// a folder cycle by lifting *both* folders to top level, so it gates a layer inside one on fewer
+    /// ancestors than this walk reports — and an elision stricter than the compositing rule drops a
+    /// layer that should have drawn. The panel already refuses to build such a cycle
+    /// (`LayerStackListView` blocks dropping a folder into its own contents); this is about which of
+    /// two answers is safe to act on if one ever appears.
+    func ancestorFolders(ofLayer index: Int) -> [LayerFolder] {
+        guard layers.indices.contains(index) else { return [] }
+        var chain: [LayerFolder] = []
+        var seen: Set<UUID> = []
+        var next = layers[index].parentFolderID
+        while let id = next, seen.insert(id).inserted, let folder = folders.first(where: { $0.id == id }) {
+            chain.append(folder)
+            next = folder.parentFolderID
+        }
+        return chain
+    }
+
+    /// Whether a layer reaches the canvas: its own switch, gated by every group above it.
+    func isLayerEffectivelyVisible(_ index: Int) -> Bool {
+        guard layers.indices.contains(index), layers[index].isVisible else { return false }
+        return ancestorFolders(ofLayer: index).allSatisfy(\.isVisible)
+    }
+
+    /// A layer's opacity with every enclosing group's folded in.
+    ///
+    /// **An approximation, and the one place phase 4 knowingly ships one.** Group opacity means "fade
+    /// the group's finished composite", which differs from "fade each child" wherever children
+    /// overlap — the compositor does the former and `CoreGraphicsCompositor.draw` says why. Core
+    /// Animation, handed a flat row of siblings, can only do the latter. The alternative was a slider
+    /// the live canvas ignores entirely until §5.2's sandwich arrives in phase 5, which is a worse
+    /// lie than a close one. The thumbnail, which goes through the compositor, is already exact.
+    func effectiveOpacity(ofLayer index: Int) -> Double {
+        guard layers.indices.contains(index) else { return 1 }
+        return ancestorFolders(ofLayer: index).reduce(layers[index].opacity) { $0 * $1.opacity }
+    }
+
     // MARK: - Reorder
 
     /// What a dragged row came to rest on top of. Drops resolve into one of these rather than into

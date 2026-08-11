@@ -202,7 +202,9 @@ enum ProjectStore {
             vectorEraserMode = canvasManager.vectorEraserMode
             folders = canvasManager.folders.map { folder in
                 FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded,
-                               isVisible: folder.isVisible, parentFolderID: folder.parentFolderID)
+                               isVisible: folder.isVisible, parentFolderID: folder.parentFolderID,
+                               opacity: folder.opacity, blendMode: folder.blendMode,
+                               isIsolated: folder.isIsolated)
             }
             viewPresets = canvasManager.viewPresets.map { preset in
                 var vis: [String: Bool] = [:]
@@ -481,7 +483,8 @@ enum ProjectStore {
         // Restore folders.
         manager.folders = manifest.folders.map { f in
             LayerFolder(id: f.id, name: f.name, isExpanded: f.isExpanded, isVisible: f.isVisible,
-                        parentFolderID: f.parentFolderID)
+                        parentFolderID: f.parentFolderID, opacity: f.opacity,
+                        blendMode: f.blendMode, isIsolated: f.isIsolated)
         }
 
         // Restore view presets.
@@ -563,8 +566,45 @@ enum ProjectStore {
         }
 
         manager.layers = layers
+        migrateGroupVisibility(manager, folders: manifest.folders)
         manager.currentLayerIndex = 0
         manager.regenerateAllThumbnails()
         return manager
+    }
+
+    /// The one-time §4.1 / §10.3 visibility migration, run on load and only for projects that
+    /// predate phase 4.
+    ///
+    /// Until phase 4, hiding a folder *wrote through* to every descendant, so a saved hidden group
+    /// is a group whose children are each independently flagged hidden. Now the folder's own flag
+    /// gates its subtree instead, and those two states are no longer the same document: the old one
+    /// still renders correctly on load — everything under the group is hidden either way — but the
+    /// first time the artist un-hides that group, nothing comes back, because every child is still
+    /// hidden in its own right. Nothing on screen explains why.
+    ///
+    /// So a pre-phase-4 folder that is hidden has its descendants — layers *and* subfolders — shown.
+    /// **Nothing is lost that the old behaviour had not already lost**: the write-through clobbered
+    /// per-child visibility at the moment the folder was hidden, reaching subfolders as well, so
+    /// "everything under a hidden group is visible" is exactly the state the old code would itself
+    /// have restored on re-show. `isFillReference` moves with it, the same pairing
+    /// `toggleLayerVisibility` keeps. The hidden folder itself stays hidden — that flag is the one
+    /// piece of the old state that was the artist's own decision rather than a side effect.
+    ///
+    /// It cannot fire twice and cannot fire on anything this build wrote: the signal is the absence
+    /// of `opacity` from the folder's JSON, and every save from here on writes it (see
+    /// `FolderManifest.init(from:)`).
+    @MainActor
+    private static func migrateGroupVisibility(_ manager: CanvasManager, folders: [FolderManifest]) {
+        for folder in folders where folder.wasSavedBeforeGroupProperties && !folder.isVisible {
+            for index in manager.descendantLayerIndices(ofFolder: folder.id) {
+                manager.layers[index].isVisible = true
+                manager.layers[index].isFillReference = true
+            }
+            let subtree = manager.folderSubtree(folder.id)
+            for index in manager.folders.indices where subtree.contains(manager.folders[index].id)
+                && manager.folders[index].id != folder.id {
+                manager.folders[index].isVisible = true
+            }
+        }
     }
 }

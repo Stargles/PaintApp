@@ -136,6 +136,53 @@ struct FolderManifest: Codable {
     /// Set when this folder is nested inside another. Optional so projects saved before folders
     /// could nest still decode.
     var parentFolderID: UUID? = nil
+
+    /// The §4.1 group properties, each defaulted to its identity so a project saved before phase 4
+    /// decodes into folders that composite exactly as they did.
+    var opacity: Double = 1
+    var blendMode: BlendMode = .normal
+    var isIsolated: Bool = true
+
+    /// **Not persisted, and derived at decode time.** True when this folder arrived without the
+    /// group-property keys — which is to say it was written while `toggleFolderVisibility` still
+    /// wrote through to every descendant. `ProjectStore.load` is the only reader; see the §10.3
+    /// migration there for what it does with it.
+    var wasSavedBeforeGroupProperties = false
+
+    init(id: UUID, name: String, isExpanded: Bool, isVisible: Bool, parentFolderID: UUID? = nil,
+         opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true) {
+        self.id = id
+        self.name = name
+        self.isExpanded = isExpanded
+        self.isVisible = isVisible
+        self.parentFolderID = parentFolderID
+        self.opacity = opacity
+        self.blendMode = blendMode
+        self.isIsolated = isIsolated
+    }
+
+    // Custom decoding for the same reason `LayerManifest` has one: a synthesized decoder demands
+    // every non-optional key, so a property's default value is not a fallback for a missing one.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        isExpanded = try container.decode(Bool.self, forKey: .isExpanded)
+        isVisible = try container.decode(Bool.self, forKey: .isVisible)
+        parentFolderID = try container.decodeIfPresent(UUID.self, forKey: .parentFolderID)
+        opacity = try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
+        blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
+        isIsolated = try container.decodeIfPresent(Bool.self, forKey: .isIsolated) ?? true
+        // `opacity` stands in for the whole group-property set, so **it must keep being written
+        // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`
+        // plays with the interpolation registries — would make every untouched folder in every
+        // future save look pre-phase-4 and re-arm a one-time migration.
+        wasSavedBeforeGroupProperties = !container.contains(.opacity)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, isExpanded, isVisible, parentFolderID, opacity, blendMode, isIsolated
+    }
 }
 
 struct ViewPresetManifest: Codable {

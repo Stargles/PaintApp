@@ -824,23 +824,42 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Toggles a folder's own visibility and propagates it to every child layer.
-    /// When a view preset is active, each child change is saved into it.
+    /// Toggles a folder's own visibility. The flag **gates** the group's subtree rather than being
+    /// copied into it (§4.1): everything inside is hidden while the folder is, and comes back exactly
+    /// as it was when the folder does.
+    ///
+    /// It wrote through to every descendant until phase 4, which made hide-then-show destructive —
+    /// re-showing a group clobbered whichever layers inside it the artist had hidden individually.
+    /// The gate lives in three places now, one per consumer: `Compositor` walks the tree,
+    /// `isLayerEffectivelyVisible` answers for the live canvas, and `ProjectStore.load` migrates the
+    /// projects saved under the old rule.
+    ///
+    /// When a view preset is active the change is saved into it — the folder's own flag only, since
+    /// there are no longer child changes to record.
     func toggleFolderVisibility(_ folderID: UUID) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
         withStructureUndo(name: "Toggle Visibility") {
-            let nowVisible = !folders[idx].isVisible
-            folders[idx].isVisible = nowVisible
-            // Reaches subfolders too, so hiding an outer folder hides everything under it.
-            let subtree = folderSubtree(folderID)
-            for fi in folders.indices where subtree.contains(folders[fi].id) {
-                folders[fi].isVisible = nowVisible
-            }
-            for li in descendantLayerIndices(ofFolder: folderID) {
-                layers[li].isVisible = nowVisible
-                layers[li].isFillReference = nowVisible
-            }
+            folders[idx].isVisible.toggle()
             saveVisibilityToActiveView()
+        }
+    }
+
+    /// Sets a group's opacity, applied once to its finished composite (§4.1).
+    ///
+    /// No undo step, matching the per-layer opacity slider it sits beside (`LayerStackListView`
+    /// writes `layers[i].opacity` directly): a drag would otherwise register a step per frame, and
+    /// coalescing them is a change worth making for both sliders at once or neither.
+    func setFolderOpacity(_ folderID: UUID, to opacity: Double) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        folders[idx].opacity = min(max(opacity, 0), 1)
+    }
+
+    /// Flips a group between isolated and pass-through (§4.2). Undoable, unlike the opacity slider
+    /// above: it is a single deliberate press rather than a drag, so there is nothing to coalesce.
+    func setFolderIsolated(_ folderID: UUID, isIsolated: Bool) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].isIsolated != isIsolated else { return }
+        withStructureUndo(name: isIsolated ? "Isolate Group" : "Pass Through") {
+            folders[idx].isIsolated = isIsolated
         }
     }
 
