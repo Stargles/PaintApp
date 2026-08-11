@@ -193,8 +193,8 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
     /// Hiding things must not move them. Order is derived from containment and `layers` position
     /// alone, so a hidden layer keeps its place in the tree and the compositor is what decides to
-    /// skip it — the same split as today, where `PixelOps.compositeCanvas` filters at the point of
-    /// drawing rather than by reordering.
+    /// skip it — the same split the deleted flat walk had, filtering at the point of drawing rather
+    /// than by reordering.
     func testHiddenLayersAndFoldersKeepTheirPlaceInTheTree() {
         let manager = namedManager(["A", "B", "C"])
         let folder = manager.addFolder(name: "Folder")
@@ -232,10 +232,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         assertRenderTreeMatchesFlatOrder(manager)
     }
 
-    /// The order `PixelOps.compositeCanvas` actually walks — `for layer in layers where
-    /// layer.isVisible`, bottom-to-top. The tree filtered the same way must produce the same
-    /// sequence, because phase 3 deletes that function and routes the thumbnail through the
-    /// compositor instead.
+    /// The order the offline composite actually walked — `for layer in layers where layer.isVisible`,
+    /// bottom-to-top. The tree filtered the same way must produce the same sequence, which is what let
+    /// phase 3 delete that walk and route the thumbnail through the compositor. It survives as
+    /// `CompositorParityLogicTests.flatWalkComposite`, which checks the same claim in pixels.
     func testFilteringTheTreeByVisibilityReproducesTheOfflineCompositeOrder() {
         let manager = namedManager(["A", "B", "C", "D"])
         let folder = manager.addFolder(name: "Folder")

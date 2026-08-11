@@ -98,13 +98,14 @@ enum CoreGraphicsCompositor {
             switch node.content {
             case .leaf(let layerIndex):
                 // Leaf visibility gates; **group visibility deliberately does not** (see the `.node`
-                // case). `PixelOps.compositeCanvas`'s `where layer.isVisible` is exactly this test.
+                // case). The deleted flat walk's `where layer.isVisible` is exactly this test, and
+                // `CompositorParityLogicTests.flatWalkComposite` still holds it to that.
                 guard node.isVisible,
                       request.sources.indices.contains(layerIndex),
                       let source = request.sources[layerIndex] else { continue }
                 // Via `UIImage` rather than `CGContext.draw` so the top-left origin and the alpha
-                // application are literally the same call `PixelOps.compositeCanvas` makes. A
-                // byte-identical gate is not the place to hand-roll a coordinate flip.
+                // application are literally the same call the flat walk made. A byte-identical gate
+                // is not the place to hand-roll a coordinate flip.
                 UIImage(cgImage: source.image, scale: 1, orientation: .up)
                     .draw(in: bounds, blendMode: .normal, alpha: CGFloat(node.opacity))
 

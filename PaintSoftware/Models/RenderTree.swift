@@ -3,10 +3,11 @@ import Foundation
 // MARK: - The render tree
 //
 // The layer stack as a compositor has to see it: a tree, evaluated bottom-to-top, recursing into a
-// node before compositing its result into its parent — "groups are parentheses". Today nothing
-// composites that way. `PixelOps.compositeCanvas` walks `layers` flat and `CanvasView.reconcileLayers`
-// hands every layer to Core Animation as a sibling, so a folder is a panel affordance with nowhere
-// to hang a group opacity, a blend mode, or a mask. See LAYER_COMPOSITING.md §1.
+// node before compositing its result into its parent — "groups are parentheses". `Compositor` walks
+// it that way; `CanvasView.reconcileLayers` still does not, handing every layer to Core Animation as
+// a flat sibling, which is why a folder remains a panel affordance on the *live* canvas with nowhere
+// to hang a group opacity, a blend mode, or a mask. The offline half of that split is gone —
+// `PixelOps.compositeCanvas`'s flat walk was deleted in phase 3. See LAYER_COMPOSITING.md §1.
 //
 // **Derived, never stored.** `layers` stays a flat array with the contiguous-span folder invariant —
 // a contiguous span *is* a subtree in array form, so the tree is already there and has simply never
@@ -15,9 +16,9 @@ import Foundation
 // layer panel's rows are built from, which is why the derived leaf order can be — and is —
 // characterized as identical to the flat order it replaces.
 //
-// Nothing consumes this yet. It is the substrate the Metal compositor is built against (§11 phase 2),
-// and it is landed first and on its own precisely so that the compositor is not also moving the
-// definition of stack order underneath itself.
+// Landed on its own in phase 1, before anything consumed it, precisely so that the compositor built
+// against it in phase 2 was not also moving the definition of stack order underneath itself.
+// `Compositor` is that consumer now.
 
 /// How a node combines the inputs beneath it.
 ///

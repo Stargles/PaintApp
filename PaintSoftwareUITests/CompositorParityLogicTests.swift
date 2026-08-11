@@ -5,10 +5,11 @@ import UIKit
 ///
 /// Phase 1 proved the derived tree *lists* the same leaves in the same order as the flat `layers`
 /// walk (`RenderTreeCharacterizationTests`). That is a claim about indices. This file is the same
-/// claim about **pixels**: composite through the tree and composite through
-/// `PixelOps.compositeCanvas`, and compare every byte. §11's gate for phase 2 is "byte-identical to
-/// the Core Animation path for all-normal, no-mask documents", and `compositeCanvas` is the offline
-/// half of that path — the one a test can run headlessly and the one phase 3 deletes.
+/// claim about **pixels**: composite through the tree, composite through the flat walk, and compare
+/// every byte. §11's gate for phase 2 is "byte-identical to the Core Animation path for all-normal,
+/// no-mask documents", and the flat walk was the offline half of that path — the half a test can run
+/// headlessly. Phase 3 deleted it from the app, so it now lives in this file as `flatWalkComposite`,
+/// the frozen oracle these tests measure against.
 ///
 /// **Why the leaves are painted rather than drawn.** Both sides call `PixelOps.rasterize` on the
 /// same cels, so leaf pixels are identical by construction and the only thing under test is the
@@ -47,23 +48,47 @@ final class CompositorParityLogicTests: XCTestCase {
         return manager
     }
 
+    /// **`PixelOps.compositeCanvas`, verbatim, as it stood before phase 3 deleted it.**
+    ///
+    /// This is the oracle, and it lives here precisely because nothing in the app performs a flat
+    /// walk any more. Keeping a second compositing implementation in `PixelOps` "just for the tests"
+    /// would recreate the drift §1 objects to; keeping it here makes it a frozen specification —
+    /// changes to `Compositor` are measured against what shipped, not against a sibling that could
+    /// quietly be edited to agree.
+    ///
+    /// If a future phase deliberately changes composited output (§4.1's group visibility is the known
+    /// one), the tests that consult this oracle are the ones that must be updated by hand, which is
+    /// the intended friction.
+    private func flatWalkComposite(_ manager: CanvasManager, atFrame frame: Int) -> CGImage? {
+        let canvasSize = manager.canvasSize ?? .zero
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return nil }
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        return UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat()).image { _ in
+            for layer in manager.layers where layer.isVisible {
+                guard let cel = layer.cels.first(where: {
+                    frame >= $0.startFrame && frame < $0.startFrame + $0.frameCount
+                }) else { continue }
+                PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+                    .draw(in: bounds, blendMode: .normal, alpha: CGFloat(layer.opacity))
+            }
+        }.cgImage
+    }
+
     /// The two composites of the same manager at the same frame: tree walk versus flat walk.
     ///
-    /// `includeBackground: false` because `compositeCanvas` draws no background — it renders the
-    /// stack onto transparency, and always has. That asymmetry is real and is phase 3's to resolve
-    /// (the live canvas paints paper behind the stack, the thumbnail does not, which is why a default
-    /// white document shows the gallery's black through its own tile today). Passing a background
-    /// here would be testing a difference this phase did not introduce.
+    /// `includeBackground: false` because the flat walk draws none — it renders the stack onto
+    /// transparency, and always did. That asymmetry is real and outlives this phase: the thumbnail
+    /// still ships transparent-backed, which is why a default white document shows the gallery's
+    /// black through its own tile. Passing a background here would be testing a difference the
+    /// compositor did not introduce.
     private func assertWalksAgree(_ manager: CanvasManager, atFrame frame: Int = 0,
                                   _ message: String = "",
                                   file: StaticString = #filePath, line: UInt = #line) {
         guard let request = manager.makeRenderRequest(atFrame: frame, includeBackground: false) else {
             return XCTFail("The manager has no canvas size to composite into. \(message)", file: file, line: line)
         }
-        let throughTree = Compositor.composite(request)
-        let throughFlatWalk = PixelOps.compositeCanvas(layers: manager.layers, atFrame: frame,
-                                                       canvasSize: manager.canvasSize ?? .zero)?.cgImage
-        assertPixelsIdentical(throughTree, throughFlatWalk, message, file: file, line: line)
+        assertPixelsIdentical(Compositor.composite(request), flatWalkComposite(manager, atFrame: frame),
+                              message, file: file, line: line)
     }
 
     // MARK: - The flat case

@@ -1,31 +1,33 @@
 # Layer Compositing
 
 Plan for tree-ordered groups, **compositor nodes**, alpha masks, and blend / effect layers — which
-are all one project, because they all need the same missing thing. Status: **design settled,
-nothing built.** §3 is the decisions; §10 is what is still open.
+are all one project, because they all need the same missing thing. **Phases 0–3 of §11 are built and
+green.** §3 is the decisions; §10 is what is still open; §11 is what remains.
 
 ## 1. Why these are one project
 
-The app has no compositor. Today "compositing" is two unrelated implementations, neither of which
-can express any of this:
+The app had no compositor: "compositing" was two unrelated implementations, neither of which could
+express any of this. [`Compositor`](PaintSoftware/Engine/Compositor.swift) is now the offline one —
+a tree walk over an immutable `RenderRequest`, with a CoreGraphics reference and a Metal backend
+behind a flag that agree byte for byte. The live canvas is unchanged:
 
 | path | where | how |
 |---|---|---|
 | **Live canvas** | `CanvasView.reconcileLayers` ([CanvasView.swift:466](PaintSoftware/Views/CanvasView.swift:466)) | one `LayerHostView` per layer, all siblings in one flat container, z-order by `bringSubviewToFront`, per-layer `isHidden` + `alpha`. **Core Animation does the compositing**, always source-over. |
-| **Offline** | `PixelOps.compositeCanvas` ([PixelOps.swift:68](PaintSoftware/Services/PixelOps.swift:68)) | CPU CoreGraphics, flat walk of `layers`, hardcoded `blendMode: .normal`. One caller: the project thumbnail. |
+| **Offline** | `Compositor.composite` | tree walk over a snapshot. One consumer: the project thumbnail. |
 
-Consequences that block everything below:
+What still blocks everything below:
 
 - **Folders do not exist at render time.** `toggleFolderVisibility`
   ([CanvasManager.swift:829](PaintSoftware/Models/CanvasManager.swift:829)) *writes through* to every
   descendant's `isVisible`. A folder is a panel affordance, not a compositing unit — there is nowhere
-  to hang a group opacity, blend mode, or mask.
-- **There is no seam for a blend mode.** Core Animation offers no per-view Multiply against
-  arbitrary siblings; the CPU path hardcodes `.normal`.
-- **The two paths already disagree and nothing forces them to agree.** Adding masks and blends to
-  both, twice, guarantees drift.
+  to hang a group opacity, blend mode, or mask. The compositor carries both flags and interprets only
+  the leaf's, so §4.1 stays a phase-4 decision rather than a side effect.
+- **There is no seam for a blend mode on the live canvas.** Core Animation offers no per-view
+  Multiply against arbitrary siblings, and the compositor does not drive the live canvas yet — that
+  is §5.2's sandwich, still to build.
 
-Build one compositor, express groups / nodes / masks / blends in it, delete the second implementation.
+Express groups / nodes / masks / blends in the one compositor; do not grow a second.
 
 ## 2. What is *not* changing
 
@@ -188,10 +190,20 @@ Stamping a dab invalidates neither cached texture, so the drawing path never ent
 The textures rebuild only when something other than the live stroke changes — layer switch, blend
 change, mask edit, playhead move, undo.
 
-This is one compositor, not two: **`PixelOps.compositeCanvas` is deleted**, and thumbnails, export,
-`mergeLayers`, and the onion skin's cross-layer composite
-([OnionSkinSource.swift:106](PaintSoftware/Views/OnionSkinSource.swift:106)) all call the same
-headless entry point. Structural agreement instead of a convention.
+This is one compositor, not two: **`PixelOps.compositeCanvas` is deleted** (phase 3) and the thumbnail
+goes through `Compositor.composite`. The rest of that convergence list turned out to be smaller than
+written, which is worth recording so nobody goes looking for the work:
+
+- **Export does not exist.** There is no share sheet, photo-library write, or image-export feature in
+  the app — the only PNG writes are project persistence. Nothing to converge.
+- **`mergeLayers` is not a stack composite.** It flattens exactly two cels via `PixelOps.flatten`,
+  chosen by the merge rather than by the tree, and sits below the compositor beside
+  `PixelOps.rasterize` (§2).
+- **The onion skin is not one either.** `InterpolationReferenceOnionSkinSource`
+  ([OnionSkinSource.swift:106](PaintSoftware/Views/OnionSkinSource.swift:106)) flattens an arbitrary
+  *cel set* at alpha 1, deliberately ignoring layer opacity and visibility. Routing it through the
+  compositor would change what the onion skin shows, not merely how it is computed — a product
+  decision, still open.
 
 **Live stroke inside a blended group** (§10 decision 5, decided): recomposite **only the active
 node's subtree** per frame — in practice a handful of layers — and fall back to compositing the live
@@ -436,10 +448,10 @@ it is small and none of them fight a moving substrate.
 
 | # | work | done when |
 |---|---|---|
-| **0** | Empty-vector render early-out (§8.1), then vector-as-default (§8) | empty layer retains nothing; `+` makes a vector layer; suite green |
-| **1** | `RenderNode` derivation + characterization tests | derived leaf order is identical to today's flat `layers` order on every fixture |
-| **2** | Metal compositor behind a flag; snapshot-driven entry point (§9.1) | byte-identical to the Core Animation path for all-normal, no-mask documents |
-| **3** | Swap in the sandwich (§5.2); delete `PixelOps.compositeCanvas` | thumbnail / export / merge / onion-skin all on one path; `PerfBaselineTests` green |
+| ~~**0**~~ | ~~Empty-vector render early-out (§8.1), then vector-as-default (§8)~~ | **done** |
+| ~~**1**~~ | ~~`RenderNode` derivation + characterization tests~~ | **done** |
+| ~~**2**~~ | ~~Metal compositor behind a flag; snapshot-driven entry point (§9.1)~~ | **done** — both backends agree byte for byte, delta 0 |
+| **3** | ~~Delete `PixelOps.compositeCanvas`~~ **done**; swap in the sandwich (§5.2) — **not started** | thumbnail on one path ✓, `PerfBaselineTests` green ✓; sandwich outstanding |
 | **4** | Group properties: isolated/pass-through, opacity, visibility migration (§4.1–4.2) | groups composite as parentheses |
 | **5** | Tier 1 blend modes on layers and groups (§7) | the shader `switch` plus UI |
 | **6** | Alpha masks (§6), incl. `MaskParityLogicTests` | raster and vector mask pixel-identically |
@@ -448,4 +460,12 @@ it is small and none of them fight a moving substrate.
 | **9** | Tier 3 effects, as layer *and* node (§4.4, §7) | cheap per-pixel set first, then the multi-pass ones |
 
 Phases 0–3 are the risky ones; 4 onward are additive. §9.2's background renderer stays deferred
-until the sequencer exists — only §9.1's substrate is in scope here, and it lands inside phase 2.
+until the sequencer exists — only §9.1's substrate is in scope here, and it landed inside phase 2.
+
+**The sandwich is the open question in phase 3.** It rewrites the live canvas, which is the most
+latency-critical code in the app, and nothing consumes it until phase 5 gives a layer a blend mode —
+the compositor cannot drive the live canvas usefully before there is something Core Animation cannot
+already express. The measured case for deferring it to phase 5 is in `PerfBaselineTests`: at 2048²
+with six layers the `@MainActor` snapshot costs 276 ms against an 84 ms CPU composite, so the
+expensive half is building the snapshot, not compositing it, and a cache of composites does not
+address that. Deciding this is what phase 4 should start from.

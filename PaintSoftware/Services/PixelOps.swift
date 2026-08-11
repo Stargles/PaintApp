@@ -66,20 +66,16 @@ enum PixelOps {
         }
     }
 
-    /// Flattens every *visible* layer's content, bottom-to-top with each layer's own opacity, into
-    /// one canvas-sized image — used for the gallery/project thumbnail so a multi-layer drawing
-    /// shows the whole composited stack instead of just its bottom-most visible layer.
-    static func compositeCanvas(layers: [Layer], atFrame frame: Int, canvasSize: CGSize) -> UIImage? {
-        guard canvasSize.width > 0, canvasSize.height > 0 else { return nil }
-        let bounds = CGRect(origin: .zero, size: canvasSize)
-        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
-        return renderer.image { _ in
-            for layer in layers where layer.isVisible {
-                guard let cel = layer.cels.first(where: { frame >= $0.startFrame && frame < $0.startFrame + $0.frameCount }) else { continue }
-                rasterize(cel: cel, canvasSize: canvasSize).draw(in: bounds, blendMode: .normal, alpha: CGFloat(layer.opacity))
-            }
-        }
-    }
+    // `compositeCanvas` lived here: a flat walk of `layers` that drew each visible layer's active cel
+    // at its own opacity, always `.normal`, for the project thumbnail. It is deleted rather than
+    // deprecated — LAYER_COMPOSITING.md §5.2, phase 3 — because the whole argument of §1 is that two
+    // compositing implementations drift, and a second one kept "just for thumbnails" is exactly how
+    // that starts. `Compositor.composite` is the one path now; `ProjectStore.SaveSnapshot` calls it.
+    //
+    // The flat walk itself survives as `CompositorParityLogicTests.flatWalkComposite`, where it is
+    // the oracle rather than an implementation: the tree walk is required to reproduce it byte for
+    // byte, and freezing it in the test is what keeps that claim meaningful now that nothing in the
+    // app performs it.
 
     /// Finds the bounding rect (in point space, assuming scale 1 — which everything here renders at)
     /// of all non-transparent pixels in the image. Returns nil if the image has no visible content.

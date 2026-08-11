@@ -95,7 +95,6 @@ final class CompositorMetalEngine {
     private let queue: MTLCommandQueue
     private let psOver: MTLComputePipelineState
     private let psFill: MTLComputePipelineState
-    private let uploads: TextureCache
 
     private init?() {
         guard let device = MTLCreateSystemDefaultDevice(),
@@ -124,7 +123,6 @@ final class CompositorMetalEngine {
         self.queue = queue
         self.psOver = over
         self.psFill = fill
-        self.uploads = TextureCache()
     }
 
     func composite(leaves: [MetalCompositor.Leaf], request: RenderRequest) -> CGImage? {
@@ -155,7 +153,7 @@ final class CompositorMetalEngine {
         dispatch2D(encoder, psFill, width: width, height: height)
 
         for leaf in leaves {
-            guard let texture = uploads.texture(for: leaf.source, device: device) else {
+            guard let texture = Self.upload(leaf.source.image, device: device) else {
                 encoder.endEncoding()
                 return nil
             }
@@ -210,69 +208,19 @@ final class CompositorMetalEngine {
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
-}
 
-// MARK: - Upload cache
-
-/// Layer textures keyed on `LayerRenderSource.contentVersion`, so scrubbing a timeline re-uploads
-/// only the leaves that actually changed (§5.1).
-///
-/// **Each entry retains the `CGImage` it was keyed on, and that is the point.** The key is the
-/// image's `ObjectIdentifier`; holding a strong reference means the address cannot be recycled under
-/// a live entry, which is the ABA bug a cache keyed on a released identity would have.
-///
-/// Bounded by bytes rather than by count, because the entries are canvas-sized and the count tells
-/// you nothing: one texture is 16.8 MB at 2048² and 64 MB at 4000², so a "20 entry" cache is either
-/// trivial or fatal depending on the document. Evicts least-recently-used down to the budget, unlike
-/// `DabGradientCache`'s wholesale clear — that cache holds hundreds of tiny gradients where ordering
-/// is not worth tracking, and this one holds a handful of enormous textures where it plainly is.
-private final class TextureCache {
-
-    /// Roughly seven layers at 2048², or two at 4000². Sized to make scrubbing a normal document
-    /// cheap without letting the cache become the reason a large canvas runs out of memory — §5.3's
-    /// "memory is the constraint, not ALU".
-    private static let budget = 128 * 1024 * 1024
-
-    private struct Entry {
-        /// Retained solely to keep `ObjectIdentifier(image)` unambiguous. Never read.
-        let image: CGImage
-        let texture: MTLTexture
-        let bytes: Int
-    }
-
-    private var entries: [ObjectIdentifier: Entry] = [:]
-    /// Least-recently-used first.
-    private var order: [ObjectIdentifier] = []
-    private var bytes = 0
-    /// `Compositor.composite` is callable from any thread by design (§9.1), so this is too.
-    private let lock = NSLock()
-
-    func texture(for source: LayerRenderSource, device: MTLDevice) -> MTLTexture? {
-        let key = source.contentVersion
-        lock.lock()
-        defer { lock.unlock() }
-
-        if let hit = entries[key] {
-            order.removeAll { $0 == key }
-            order.append(key)
-            return hit.texture
-        }
-
-        guard let texture = Self.upload(source.image, device: device) else { return nil }
-        let cost = source.image.width * source.image.height * 4
-        entries[key] = Entry(image: source.image, texture: texture, bytes: cost)
-        order.append(key)
-        bytes += cost
-        while bytes > Self.budget, let oldest = order.first, order.count > 1 {
-            order.removeFirst()
-            bytes -= entries.removeValue(forKey: oldest)?.bytes ?? 0
-        }
-        return texture
-    }
-
-    /// Draws the image through a context of exactly the app's byte layout, then hands those bytes to
-    /// the texture — rather than trusting whatever backing store the `CGImage` happens to have, which
-    /// for something out of `UIGraphicsImageRenderer` may be a different order or alignment.
+    /// Uploads one leaf's pixels to a texture. **No cache**, deliberately — see the note in
+    /// `LayerRenderSource`: the request hands out a freshly rendered `CGImage` per leaf per frame, so
+    /// there is no stable identity to key on and the cache this replaced was measured never hitting.
+    ///
+    /// That makes the upload the dominant cost of a GPU composite (six canvas-sized layers is ~100 MB
+    /// moved per frame), which is exactly why §5.2's sandwich caches the composites above and below
+    /// the active layer rather than the leaves: the sandwich uploads nothing while a stroke is in
+    /// progress, where a per-leaf cache would still be re-uploading whatever the user just drew on.
+    ///
+    /// Draws through a context of exactly the app's byte layout rather than trusting whatever backing
+    /// store the `CGImage` happens to have, which for something out of `UIGraphicsImageRenderer` may
+    /// be a different order or alignment.
     private static func upload(_ image: CGImage, device: MTLDevice) -> MTLTexture? {
         let width = image.width, height = image.height
         guard width > 0, height > 0 else { return nil }

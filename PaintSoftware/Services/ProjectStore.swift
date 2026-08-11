@@ -176,12 +176,17 @@ enum ProjectStore {
         let thumbnail: UIImage?
 
         /// Reads published state and renders the per-cel images; deliberately does no encoding, so it
-        /// stays the cheap half. The thumbnail composite stays here too rather than moving to the
-        /// background queue: it goes through `PixelOps.compositeCanvas`, which reads the live
-        /// `RasterLayerTexture`/`VectorCanvas` of every visible layer, and running it here keeps the
-        /// rule that the background queue sees no shared mutable state. It is a handful of
-        /// canvas-sized draws over caches this initialiser has just warmed — nothing like the
-        /// multi-second PNG encode that is being moved off main.
+        /// stays the cheap half. It is a handful of canvas-sized draws over caches this initialiser
+        /// has just warmed — nothing like the multi-second PNG encode that is being moved off main.
+        ///
+        /// The thumbnail composite stays here too, but the reason has changed since the compositor
+        /// landed. It used to be forced: `PixelOps.compositeCanvas` read the live
+        /// `RasterLayerTexture`/`VectorCanvas` of every visible layer, so running it anywhere but the
+        /// main actor would have broken the rule that the background queue sees no shared mutable
+        /// state. Now only `makeRenderRequest` reads live objects, and `Compositor.composite` is pure
+        /// — so the composite *could* move off main, and stays because the snapshot it needs is built
+        /// here anyway and the work is small. LAYER_COMPOSITING.md §9.1 point 3 is what bought that
+        /// freedom, and §9.2 is what will eventually spend it.
         @MainActor
         init(_ canvasManager: CanvasManager) {
             projectID = canvasManager.projectID
@@ -223,9 +228,19 @@ enum ProjectStore {
 
             // The composited stack of every visible layer (not just the bottom-most one) at the
             // current frame, downscaled for the gallery tile.
+            //
+            // `includeBackground: false` is what shipped and is kept deliberately: this thumbnail has
+            // always been transparent-backed. That is a real defect — the gallery draws tiles on
+            // black, so a default white document shows black around its artwork — but it is a defect
+            // about what the thumbnail *should* contain, not about which code composites it, and
+            // rolling it into the phase that removes the second compositor would make a behaviour
+            // change look like a refactor.
             if let size = canvasManager.canvasSize,
-               let composited = PixelOps.compositeCanvas(layers: canvasManager.layers, atFrame: canvasManager.currentFrame, canvasSize: size) {
-                thumbnail = ThumbnailRenderer.render(composited, canvasSize: size, thumbnailSize: CGSize(width: 320, height: 320))
+               let request = canvasManager.makeRenderRequest(atFrame: canvasManager.currentFrame,
+                                                             includeBackground: false),
+               let composited = Compositor.composite(request) {
+                thumbnail = ThumbnailRenderer.render(UIImage(cgImage: composited, scale: 1, orientation: .up),
+                                                     canvasSize: size, thumbnailSize: CGSize(width: 320, height: 320))
             } else {
                 thumbnail = nil
             }

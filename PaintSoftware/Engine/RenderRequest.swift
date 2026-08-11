@@ -39,29 +39,30 @@ struct LayerRenderSource {
     /// comparison has no business guessing at a `UIImage`'s scale or orientation.
     let image: CGImage
 
-    /// Identity of the pixels in `image`, for the compositor's texture cache.
-    ///
-    /// This is `ObjectIdentifier(image)` rather than the `version: Int` that `RasterLayerTexture` and
-    /// `VectorCanvas` each expose, and the difference is deliberate. A leaf's pixels are a function of
-    /// *four* things (fill wash, baked image, raster strokes, vector canvas), only two of which carry
-    /// a version, so a composite key would have to mix two `Int`s with the identities of two
-    /// `UIImage?`s — and an identity that its owner may have released is an ABA bug waiting for a
-    /// texture cache to hold a stale entry against a recycled address.
-    ///
-    /// Keying on the resolved image sidesteps that entirely: the cache retains the `CGImage` it keyed
-    /// on, so that address cannot be reused while the entry is live. The cost is that a leaf
-    /// re-renders to a fresh `CGImage` whenever its cel is *touched* rather than whenever its pixels
-    /// actually change, which re-uploads a texture that a version-based key would have kept. That is
-    /// the right way round: a redundant upload is a frame of work, a stale one is a wrong picture.
-    var contentVersion: ObjectIdentifier { ObjectIdentifier(image) }
+    // **There is deliberately no `contentVersion` here, and the reason is a measurement.**
+    //
+    // §9.1 point 1 asks for propagating content versions so cached composites can key on them, and
+    // this type first carried one as `ObjectIdentifier(image)` — safe against ABA, because whoever
+    // cached it retained the image. It was also useless: `PixelOps.rasterize` builds a fresh
+    // `UIImage` on every call, so `makeRenderRequest` mints new `CGImage`s for every leaf on every
+    // request and an identity key cannot hit, ever. `MetalCompositor`'s upload cache was measured at
+    // a zero hit rate and removed.
+    //
+    // A key that *would* hit has to come from the model rather than from the rendered result — the
+    // cel's ID with `RasterLayerTexture.version`, `VectorCanvas.version`, and the identities of
+    // `fillImage`/`bakedImage`, plus the request's quality, since `.preview` and `.full` are
+    // different pixels. That is real work with an ABA hazard to handle, and it belongs with the cache
+    // that needs it. §5.2's sandwich is that cache, and it caches *composites* of everything above
+    // and below the active layer rather than one texture per layer — which is both the thing §5.3
+    // asks for and a far better ratio than caching leaves.
 }
 
 /// The canvas backdrop, when the request wants one drawn under the stack.
 ///
-/// Optional because the two existing consumers disagree and both are right: the live canvas paints a
-/// background view behind the layer host, while `PixelOps.compositeCanvas` composites the stack alone
-/// onto transparency for the project thumbnail. Phase 3 moves both onto this one entry point, so the
-/// difference has to be expressible rather than assumed.
+/// Optional because the two consumers disagree and both are right: the live canvas paints a
+/// background view behind the layer host, while the project thumbnail composites the stack alone onto
+/// transparency. That difference has to be expressible rather than assumed, which is why this is a
+/// request-level choice and not a property the compositor reads for itself.
 /// Visibility is carried by the request's `background` being nil, not by a flag in here — this type
 /// exists only when there is something to draw.
 struct RenderBackground: Equatable {

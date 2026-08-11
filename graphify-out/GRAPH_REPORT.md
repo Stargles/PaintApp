@@ -1,16 +1,16 @@
 # Graph Report - laptop-tailscale-connection-78ec13  (2026-08-11)
 
 ## Corpus Check
-- 151 files · ~285,508 words
+- 157 files · ~295,979 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3770 nodes · 11516 edges · 141 communities (131 shown, 10 thin omitted)
-- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 1376 edges (avg confidence: 0.8)
+- 3870 nodes · 11781 edges · 143 communities (132 shown, 11 thin omitted)
+- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 1385 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b999fc53`
+- Built from commit: `2eb3eb3e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -19,7 +19,7 @@
 - .launchIntoEditor
 - ParityScenario
 - Coordinator
-- layers
+- CanvasManager
 - VectorCanvas
 - PerfBaselineTests
 - StrokeCanvasView
@@ -28,16 +28,16 @@
 - CGPoint
 - ColorPickerPanel
 - CanvasManager
-- CanvasManager
+- FloatingPiece
 - .manager
-- Brush
+- CompositorParityLogicTests
 - PointCloudIndex
 - VectorEraserLogicTests
 - Lattice
 - BrushEngineLogicTests
 - .transparentFormat
 - AnimationTimeline
-- LayerFolder
+- ViewPreset
 - VectorEraserHybridLogicTests
 - CanvasManager
 - RasterLayerTexture
@@ -49,14 +49,14 @@
 - UIKit
 - ARAPLogicTests
 - .setUpGestures
-- .group
-- .withStructureUndo
+- .analyse
+- layers
 - ShapeGeometry
 - PlaybackBoundsCharacterizationTests
-- DeformFactorization
-- Codable
+- BrushBlendMode
+- ProjectManifest
 - StrokeSpatialIndex
-- StrokeGeometry
+- VectorSample
 - GuideOverlayView
 - LayerTreeCharacterizationTests
 - MetalFillEngine
@@ -64,7 +64,7 @@
 - BackupManagerLogicTests
 - FillParams
 - FloatingPieceOverlayView
-- CGFloat
+- CanvasManager
 - TouchCountRecognizer
 - Coordinator
 - Layer Compositing
@@ -83,24 +83,24 @@
 - BlockDragCharacterizationTests
 - .indices
 - CanvasManager
-- .validateProject
+- ProjectSaveLogicTests
 - SelectionOverlayView
-- Equatable
-- ShapeDetectorLogicTests
+- RenderRequest
+- CompositorMetalEngine
 - .manager
 - ContentView
-- RenderTreeCharacterizationTests
-- InterpolationRefusal
+- XCTestCase
+- Foundation
 - Color
-- BrushSettingsPanel
+- EraserSettingsPanel
 - InterpolationEngineDiagnosticsLogicTests
 - PerfMonitor
 - .stampStroke
 - CodingKeys
 - InterpolateBar
-- DrawingView
+- SelectPanel
 - .arched
-- ShapeDetector
+- CGFloat
 - TimedSample
 - CanvasSizePickerView
 - SwiftUI
@@ -108,16 +108,16 @@
 - SideToolbar
 - UndoHistory
 - ObjectTransformOverlayView
-- UIView
-- VectorEraserMode
+- TransformOverlaySupport.swift
+- Tool
 - CanvasHostView
-- XCTestCase
-- GuidePath
+- OnionSkinLogicTests
+- .assertCut
 - SpacingChart
-- URL
+- LayerStackRow
 - Coordinator
-- .registerGroups
-- HandleKind
+- .composite
+- TransformMode
 - RenderNode
 - 4. Future upgrades — the deferred list
 - CGContextDabTarget
@@ -125,40 +125,41 @@
 - Is the brush engine ready for `.ABR` / Procreate brush import?
 - LayerStackListView.Coordinator
 - StrokeStabilizer
-- .setCanvasPadding
+- .refreshUndoRedoState
 - PaintSoftware - iPad Drawing and Animation App
 - LayerStackListView
-- LayerKind
+- Layer
 - VectorScratchRole
 - Usage Guide
 - CutOutcome
-- Edge
-- CodingKeys
+- DrawingView
+- BrushSettingsPanel
 - LayerRowModel
 - CLAUDE.md
 - Known Issues
 - Atomic
 - ManifestSkeleton
 - ProjectStore.swift
-- GalleryView
+- ProjectSummary
 - What needs to change
 - Multi-Session Protocol
 - parallel_test.sh
-- CodingKeys
+- Kind
 - Performance baseline
-- Corner
+- InterpolatePanel
 - cleanup_session.sh
 - screenshot.sh
 - graphify-guard.sh
 - run.sh
 - fast_test.sh
 - status.sh
-- CopiedCel
-- .encode
+- Deterministic
+- MetalCompositor.swift
+- FillAxis
 
 ## God Nodes (most connected - your core abstractions)
 1. `CGPoint` - 533 edges
-2. `CGFloat` - 405 edges
+2. `CGFloat` - 407 edges
 3. `VectorCanvas` - 122 edges
 4. `layers` - 107 edges
 5. `CanvasManager` - 100 edges
@@ -171,19 +172,19 @@
 ## Surprising Connections (you probably didn't know these)
 - `PerfBaselineTests` --calls--> `Brush`  [INFERRED]
   PaintSoftwareUITests/PerfBaselineTests.swift → PaintSoftware/Engine/Brush.swift
+- `.fixedBrush` --calls--> `Brush`  [EXTRACTED]
+  PaintSoftwareUITests/StrokeGeometryLogicTests.swift → PaintSoftware/Engine/Brush.swift
 - `StrokeGeometryLogicTests` --calls--> `CGPoint`  [INFERRED]
   PaintSoftwareUITests/StrokeGeometryLogicTests.swift → PaintSoftware/Engine/Deform/MotionGrouping.swift
 - `InterpolationRenderLogicTests` --calls--> `CelRef`  [INFERRED]
   PaintSoftwareUITests/InterpolationRenderLogicTests.swift → PaintSoftware/Models/InterpolationRecipe.swift
 - `ParityScenario` --references--> `Brush`  [EXTRACTED]
   PaintSoftwareUITests/RasterVectorParityLogicTests.swift → PaintSoftware/Engine/Brush.swift
-- `StrokeGeometryLogicTests` --references--> `Brush`  [EXTRACTED]
-  PaintSoftwareUITests/StrokeGeometryLogicTests.swift → PaintSoftware/Engine/Brush.swift
 
 ## Import Cycles
 - None detected.
 
-## Communities (141 total, 10 thin omitted)
+## Communities (143 total, 11 thin omitted)
 
 ### Community 0 - "cels"
 Cohesion: 0.06
@@ -199,159 +200,159 @@ Nodes (33): CustomStringConvertible, UUID, Backdrop, fill, image, none, Gesture,
 
 ### Community 3 - "Coordinator"
 Cohesion: 0.06
-Nodes (42): BlockDrag, CelBlockView, Coordinator, Kind, cel, gap, Segment, Bool (+34 more)
+Nodes (43): BlockDrag, CelBlockView, Coordinator, Kind, cel, gap, Segment, Bool (+35 more)
 
-### Community 4 - "layers"
-Cohesion: 0.07
-Nodes (27): CanvasManager, .activeCelIsInBetween, .guideChips, .guideRefusal, .hasAnonymousWholeFrameGroup, .interpolationCommitOptions, .interpolationContentProvider, .interpolationKeyframes (+19 more)
+### Community 4 - "CanvasManager"
+Cohesion: 0.05
+Nodes (39): CanvasManager, .guideChips, .guideRefusal, .hasAnonymousWholeFrameGroup, .interpolationCommitOptions, .interpolationContentProvider, .interpolationKeyframes, .interpolationReferenceCanvases (+31 more)
 
 ### Community 5 - "VectorCanvas"
-Cohesion: 0.07
-Nodes (42): Identifiable, CodableColor, .uiColor, image, kind, Kind, fill, image (+34 more)
+Cohesion: 0.06
+Nodes (50): AnyObject, Identifiable, DabTarget, CodableColor, .uiColor, image, kind, DabLattice (+42 more)
 
 ### Community 6 - "PerfBaselineTests"
-Cohesion: 0.20
+Cohesion: 0.19
 Nodes (7): PerfBaselineTests, CanvasManager, Double, Int, String, UInt64, VectorStroke
 
 ### Community 7 - "StrokeCanvasView"
 Cohesion: 0.09
-Nodes (24): StrokeInput, TimeInterval, UITouch, UIView, StrokeCanvasView, .brush, .isNoScratchRole, .pencilOnlyDrawing (+16 more)
+Nodes (25): StrokeInput, TimeInterval, UITouch, UIView, NSCoder, StrokeCanvasView, .brush, .isNoScratchRole (+17 more)
 
 ### Community 8 - "bash"
-Cohesion: 0.06
-Nodes (56): agent, orchestrator, worker-bugfix, worker-feature, worker-integration, worker-research, worker-test, worker-ui (+48 more)
+Cohesion: 0.05
+Nodes (63): agent, orchestrator, worker-bugfix, worker-feature, worker-integration, worker-research, worker-test, worker-ui (+55 more)
 
 ### Community 9 - "ProjectBackupManager"
-Cohesion: 0.13
-Nodes (16): DateFormatter, name, ProjectBackupManager, .backupsRootDirectory, .currentAppSignature, .documentsDirectory, .projectsDirectory, .trashDirectory (+8 more)
+Cohesion: 0.11
+Nodes (21): DateFormatter, name, ProjectBackup, .id, ProjectBackupManager, .backupsRootDirectory, .currentAppSignature, .documentsDirectory (+13 more)
 
 ### Community 10 - "CGPoint"
-Cohesion: 0.11
-Nodes (9): CGPoint, .length, GroupWarp, .point, LatticeLogicTests, Int, StaticString, String (+1 more)
+Cohesion: 0.09
+Nodes (8): CGPoint, .length, LatticeLogicTests, Int, StaticString, String, UInt, .samples
 
 ### Community 11 - "ColorPickerPanel"
-Cohesion: 0.07
+Cohesion: 0.08
 Nodes (37): Palette, PaletteColor, .color, PaletteStore, .palettes, .selectedIndex, .selectedPalette, .selectedPaletteID (+29 more)
 
 ### Community 12 - "CanvasManager"
-Cohesion: 0.06
-Nodes (35): CanvasManager, .activeLayerIsVector, .activeLayerKind, .availableBrushes, .availableEraserBrushes, .contentEndFrame, .currentFrame, .currentLayerIndex (+27 more)
+Cohesion: 0.05
+Nodes (40): CanvasManager, .activeLayerKind, .availableBrushes, .availableEraserBrushes, .contentEndFrame, .effectiveLoopRange, .hasLoopBoundary, .isFillInAdjustableState (+32 more)
 
-### Community 13 - "CanvasManager"
-Cohesion: 0.07
-Nodes (32): CanvasManager, FloatingPiece, .transformedBounds, FloatingPieceKind, duplicate, move, FloatingTransform, .affineTransform (+24 more)
+### Community 13 - "FloatingPiece"
+Cohesion: 0.12
+Nodes (19): FloatingPiece, .transformedBounds, FloatingPieceKind, duplicate, move, FloatingTransform, .affineTransform, Selection (+11 more)
 
 ### Community 14 - ".manager"
 Cohesion: 0.13
-Nodes (6): CanvasFixture, CanvasManager, Int, CelCRUDCharacterizationTests, CanvasManager, Int
+Nodes (5): CanvasManager, Int, CelCRUDCharacterizationTests, CanvasManager, Int
 
-### Community 15 - "Brush"
-Cohesion: 0.15
-Nodes (9): Brush, Sweep, Bool, CGRect, ClosedRange, Double, VectorEraser, samples (+1 more)
+### Community 15 - "CompositorParityLogicTests"
+Cohesion: 0.11
+Nodes (15): CanvasFixture, CGImage, CGRect, CGSize, UIColor, UIImage, UInt8, CompositorParityLogicTests (+7 more)
 
 ### Community 16 - "PointCloudIndex"
 Cohesion: 0.11
-Nodes (17): ARAPRegistration, Constraint, Matching, bidirectional, sourceToTarget, Options, PointCloudIndex, .isEmpty (+9 more)
+Nodes (16): ARAPRegistration, Constraint, Matching, bidirectional, sourceToTarget, Options, PointCloudIndex, .isEmpty (+8 more)
 
 ### Community 17 - "VectorEraserLogicTests"
-Cohesion: 0.11
-Nodes (6): ClosedRange, StaticString, UInt, VectorStroke, VectorEraserLogicTests, .horizontalRun
+Cohesion: 0.18
+Nodes (3): VectorStroke, VectorEraserLogicTests, .horizontalRun
 
 ### Community 18 - "Lattice"
-Cohesion: 0.10
-Nodes (22): vertices, DeformedCellIndex, Hit, Lattice, .cellCount, .currentBounds, .restBounds, .restConfiguration (+14 more)
+Cohesion: 0.05
+Nodes (39): Accelerate, Interpolator, Options, Bool, DeformDataRow, DeformEdgeTerm, DeformFactorization, Matrix2x2 (+31 more)
 
 ### Community 19 - "BrushEngineLogicTests"
-Cohesion: 0.05
-Nodes (43): CaseIterable, BrushBlendMode, .cgBlendMode, darken, .id, lighten, multiply, normal (+35 more)
+Cohesion: 0.14
+Nodes (12): BrushEngineLogicTests, Any, CodableColor, Data, Double, Int, String, T (+4 more)
 
 ### Community 20 - ".transparentFormat"
-Cohesion: 0.12
-Nodes (20): IntPoint, PixelOps, Bool, Cel, CGPath, CGRect, CGSize, Color (+12 more)
+Cohesion: 0.15
+Nodes (15): IntPoint, PixelOps, Bool, Cel, CGPath, CGRect, CGSize, Color (+7 more)
 
 ### Community 21 - "AnimationTimeline"
-Cohesion: 0.06
-Nodes (42): Gesture, LayerStackRow, .depth, folder, .folderID, .id, .isFolder, layer (+34 more)
+Cohesion: 0.07
+Nodes (31): Gesture, AnimationTimeline, .blockMenu, .collapsedBar, .contentHeight, .dragHandle, .frameLabel, .gapMenu (+23 more)
 
-### Community 22 - "LayerFolder"
-Cohesion: 0.11
-Nodes (14): CanvasManager, .activeViewName, Int, String, LayerFolder, Bool, String, UUID (+6 more)
+### Community 22 - "ViewPreset"
+Cohesion: 0.18
+Nodes (9): CanvasManager, .activeViewName, Int, String, viewPresets, Bool, String, UUID (+1 more)
 
 ### Community 23 - "VectorEraserHybridLogicTests"
 Cohesion: 0.13
-Nodes (14): VectorStroke, Gesture, diagonalCut, edgeShave, .label, .samples, squareCut, Bool (+6 more)
+Nodes (13): Gesture, diagonalCut, edgeShave, .label, .samples, squareCut, Bool, Double (+5 more)
 
 ### Community 24 - "CanvasManager"
-Cohesion: 0.09
-Nodes (17): CanvasManager, FillKey, Bool, Cel, Float, Int, Layer, SIMD4 (+9 more)
+Cohesion: 0.14
+Nodes (11): CanvasManager, FillKey, Bool, Cel, Float, Int, Layer, SIMD4 (+3 more)
 
 ### Community 25 - "RasterLayerTexture"
-Cohesion: 0.14
-Nodes (13): RasterLayerTexture, .dabGradientCacheHits, .dabGradientCacheMisses, .hasContent, .strokeDirtyRect, Bool, CGRect, CGSize (+5 more)
+Cohesion: 0.16
+Nodes (12): RasterLayerTexture, .dabGradientCacheHits, .dabGradientCacheMisses, .hasContent, .strokeDirtyRect, Bool, CGRect, CGSize (+4 more)
 
 ### Community 26 - "InterpolationRenderLogicTests"
-Cohesion: 0.15
-Nodes (13): StrokeComposite, erase, paint, ID, InterpolationRenderLogicTests, CGSize, CodableColor, Double (+5 more)
+Cohesion: 0.16
+Nodes (11): fill, ID, InterpolationRenderLogicTests, CGSize, CodableColor, Double, Int, UIImage (+3 more)
 
 ### Community 27 - ".load"
-Cohesion: 0.16
-Nodes (18): CelContent, LayerContent, ProjectStore, .projectsDirectory, ProjectSummary, SaveSnapshot, Bool, CanvasManager (+10 more)
+Cohesion: 0.15
+Nodes (19): BrushLibrary, .customBrushesDirectory, URL, CelContent, LayerContent, ProjectStore, .projectsDirectory, SaveSnapshot (+11 more)
 
 ### Community 28 - "StrokeGeometryLogicTests"
-Cohesion: 0.10
-Nodes (6): Intersection, StrokeGeometryLogicTests, .ramp, StaticString, String, UInt
+Cohesion: 0.11
+Nodes (6): StrokeGeometryLogicTests, .fixedBrush, .ramp, StaticString, String, UInt
 
 ### Community 29 - "InterpolationRecipe"
 Cohesion: 0.06
-Nodes (27): InterpolationRecipe, .isWellFormed, .referencedCels, InterpolationReference, Kind, easeIn, easeInOut, easeOut (+19 more)
+Nodes (37): Codable, Equatable, Hashable, GuideRole, both, timing, trajectory, GuideStroke (+29 more)
 
 ### Community 30 - ".evaluate"
 Cohesion: 0.12
-Nodes (21): CGPathElementType, ContentProvider, Direction, backward, forward, fromRest, Evaluation, InterpolationEvaluator (+13 more)
+Nodes (22): CGPathElementType, ContentProvider, Direction, backward, forward, fromRest, Evaluation, GroupWarp (+14 more)
 
 ### Community 31 - "UIKit"
-Cohesion: 0.06
-Nodes (11): CoreGraphics, Darwin, Foundation, LayerTransform, Notification.Name, AppVersion, .versionString, String (+3 more)
+Cohesion: 0.08
+Nodes (5): CoreGraphics, Darwin, ThumbnailRenderer, UIKit, XCTest
 
 ### Community 32 - "ARAPLogicTests"
-Cohesion: 0.13
-Nodes (9): ARAPInterpolation, Interpolator, Options, Bool, ARAPLogicTests, .rigidMotionL, StaticString, String (+1 more)
+Cohesion: 0.11
+Nodes (8): ARAPInterpolation, groups, ARAPLogicTests, .rigidMotionL, Int, StaticString, String, UInt
 
 ### Community 33 - ".setUpGestures"
-Cohesion: 0.15
+Cohesion: 0.14
 Nodes (8): CGSize, UILongPressGestureRecognizer, UIPanGestureRecognizer, UIPinchGestureRecognizer, UIView, Void, Recognizer, UIRotationGestureRecognizer
 
-### Community 34 - ".group"
-Cohesion: 0.18
-Nodes (6): Group, MotionGrouping, Options, Int, Set, groups
+### Community 34 - ".analyse"
+Cohesion: 0.29
+Nodes (6): Group, MotionGrouping, Options, Bool, Int, Set
 
-### Community 35 - ".withStructureUndo"
-Cohesion: 0.14
-Nodes (11): .interpolationTarget, Bool, CanvasManager, Bool, Int, Void, Cel, .endFrame (+3 more)
+### Community 35 - "layers"
+Cohesion: 0.12
+Nodes (14): .activeLayerIsVector, .currentFrame, .currentLayerIndex, .activeCelIsInBetween, CanvasManager, Bool, Int, Void (+6 more)
 
 ### Community 36 - "ShapeGeometry"
-Cohesion: 0.11
-Nodes (14): FollowFrame, ShapeGeometry, .boundingRect, .center, .cgPath, .constrained, .isClosed, .outlineLength (+6 more)
+Cohesion: 0.05
+Nodes (28): Int, Corner, bottomLeft, bottomRight, topLeft, topRight, Edge, bottom (+20 more)
 
 ### Community 37 - "PlaybackBoundsCharacterizationTests"
 Cohesion: 0.13
 Nodes (4): PlaybackBoundsCharacterizationTests, Bool, CanvasManager, Int
 
-### Community 38 - "DeformFactorization"
-Cohesion: 0.11
-Nodes (14): Accelerate, DeformDataRow, DeformEdgeTerm, DeformFactorization, Matrix2x2, .determinant, .isFinite, .polar (+6 more)
+### Community 38 - "BrushBlendMode"
+Cohesion: 0.07
+Nodes (28): CaseIterable, BrushBlendMode, .cgBlendMode, darken, .id, lighten, multiply, normal (+20 more)
 
-### Community 39 - "Codable"
-Cohesion: 0.37
-Nodes (15): Codable, CelManifest, CodableColor, FolderManifest, LayerManifest, ProjectManifest, Bool, CodableColor (+7 more)
+### Community 39 - "ProjectManifest"
+Cohesion: 0.14
+Nodes (27): LayerKind, compositing, raster, vector, CelManifest, CodableColor, FolderManifest, LayerManifest (+19 more)
 
 ### Community 40 - "StrokeSpatialIndex"
-Cohesion: 0.14
-Nodes (12): Int64, SegmentRef, StrokeSpatialIndex, .count, .isEmpty, Bool, CGRect, Int (+4 more)
+Cohesion: 0.18
+Nodes (10): Int64, SegmentRef, StrokeSpatialIndex, .count, .isEmpty, Bool, CGRect, Int (+2 more)
 
-### Community 41 - "StrokeGeometry"
-Cohesion: 0.13
-Nodes (6): Capsule, .boundingBox, StrokeGeometry, Bool, CGRect, Int
+### Community 41 - "VectorSample"
+Cohesion: 0.09
+Nodes (18): Brush, VectorSample, .point, Capsule, .boundingBox, StrokeGeometry, Bool, CGRect (+10 more)
 
 ### Community 42 - "GuideOverlayView"
 Cohesion: 0.12
@@ -359,31 +360,31 @@ Nodes (16): Editing, handles, none, spacing, Grip, Guide, GuideOverlayView, CGPa
 
 ### Community 43 - "LayerTreeCharacterizationTests"
 Cohesion: 0.21
-Nodes (6): Layer, UInt, UUID, LayerTreeCharacterizationTests, CanvasManager, String
+Nodes (5): Layer, UUID, LayerTreeCharacterizationTests, CanvasManager, String
 
 ### Community 44 - "MetalFillEngine"
-Cohesion: 0.15
-Nodes (18): Metal, MTLBuffer, MTLCommandBuffer, MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState, MTLDevice, FillParams (+10 more)
+Cohesion: 0.18
+Nodes (16): MTLBuffer, MTLCommandBuffer, FillParams, MetalFillEngine, .pipelines, MetalFillSession, Bool, Float (+8 more)
 
 ### Community 45 - "CanvasManager"
 Cohesion: 0.16
-Nodes (15): CanvasManager, .layerStackRows, ContainerEntry, folder, layer, StackAnchor, bottom, folder (+7 more)
+Nodes (16): CanvasManager, .layerStackRows, ContainerEntry, folder, layer, StackAnchor, bottom, folder (+8 more)
 
 ### Community 46 - "BackupManagerLogicTests"
-Cohesion: 0.14
-Nodes (6): BackupManagerLogicTests, Int, String, UInt8, URL, UUID
+Cohesion: 0.16
+Nodes (7): UUID, BackupManagerLogicTests, Int, String, UInt8, URL, UUID
 
 ### Community 47 - "FillParams"
 Cohesion: 0.18
-Nodes (28): constant, device, float4, kernel, colourDistance(), computeWalls(), edgeDilate(), FillParams (+20 more)
+Nodes (28): device, float4, colourDistance(), computeWalls(), edgeDilate(), FillParams, edgeOverlap, fillColor (+20 more)
 
 ### Community 48 - "FloatingPieceOverlayView"
-Cohesion: 0.13
-Nodes (15): FloatingTransform, FloatingPieceOverlayView, Bool, CGRect, CGSize, Int, NSCoder, UIPanGestureRecognizer (+7 more)
+Cohesion: 0.18
+Nodes (10): FloatingTransform, FloatingPieceOverlayView, Bool, CGRect, CGSize, Int, NSCoder, UIPanGestureRecognizer (+2 more)
 
-### Community 49 - "CGFloat"
-Cohesion: 0.11
-Nodes (13): bendRatio(), cellSize(), coverage(), cShape(), polyline(), Int, CGFloat, VectorSample (+5 more)
+### Community 49 - "CanvasManager"
+Cohesion: 0.26
+Nodes (5): CanvasManager, Bool, Int, UIImage, UUID
 
 ### Community 50 - "TouchCountRecognizer"
 Cohesion: 0.12
@@ -391,19 +392,19 @@ Nodes (16): StrokeGestureRecognizer, Bool, Set, UIEvent, UITouch, Void, Any, Int
 
 ### Community 51 - "Coordinator"
 Cohesion: 0.08
-Nodes (24): LayerHostView, NSCoder, AppliedTool, CanvasView, Coordinator, InterpolationPreviewKey, Bool, CanvasManager (+16 more)
+Nodes (23): LayerHostView, AppliedTool, CanvasView, Coordinator, InterpolationPreviewKey, Bool, CanvasManager, Color (+15 more)
 
 ### Community 52 - "Layer Compositing"
 Cohesion: 0.07
 Nodes (28): 10. Still open, 11. Build order, 1. Why these are one project, 2. What is *not* changing, 3. Settled decisions, 4.1 Structure, 4.2 Isolated groups, 4.3 Compositor nodes (+20 more)
 
 ### Community 53 - "CodingKeys"
-Cohesion: 0.15
-Nodes (13): CodingKey, CodingKeys, activeCells, cellSize, cols, originX, originY, rows (+5 more)
+Cohesion: 0.08
+Nodes (26): CodingKey, CodingKeys, activeCells, cellSize, cols, originX, originY, rows (+18 more)
 
 ### Community 54 - "ActivePanel"
 Cohesion: 0.13
-Nodes (18): ActivePanel, actions, adjust, brush, color, eraser, fill, layers (+10 more)
+Nodes (17): ActivePanel, actions, adjust, brush, color, eraser, fill, move (+9 more)
 
 ### Community 55 - "ViewPresetCharacterizationTests"
 Cohesion: 0.12
@@ -414,42 +415,42 @@ Cohesion: 0.12
 Nodes (10): LayerStackCell, Bool, Double, Int, NSCoder, NSLayoutConstraint, String, UIView (+2 more)
 
 ### Community 58 - "StrokeSettingsPanel"
-Cohesion: 0.10
-Nodes (26): Accessory, KeyPath, CheckerboardPattern, .body, EraserSettingsPanel, .body, .preview, .vectorModePicker (+18 more)
+Cohesion: 0.15
+Nodes (19): Accessory, KeyPath, StrokeSettingsPanel, .body, .brush, .grainDepthBinding, .opacityBinding, .presetPicker (+11 more)
 
 ### Community 59 - "ShapeOverlayView"
-Cohesion: 0.15
-Nodes (14): CALayer, CornerHandle, EdgeHandle, EndpointHandle, end, start, HandleInfo, ShapeOverlayView (+6 more)
+Cohesion: 0.08
+Nodes (29): CALayer, CornerHandle, EdgeHandle, EndpointHandle, end, start, HandleInfo, HandleKind (+21 more)
 
 ### Community 60 - "View"
-Cohesion: 0.08
-Nodes (26): GuideRow, .averagingNote, .body, .guideButton, .hasASpacingChart, .hasRecipe, .spacingButton, Bool (+18 more)
+Cohesion: 0.13
+Nodes (17): GuideRow, .averagingNote, .body, .guideButton, .hasASpacingChart, .hasRecipe, .spacingButton, Bool (+9 more)
 
 ### Community 61 - "String"
 Cohesion: 0.07
-Nodes (34): CodingKeys, brush, color, composite, elements, fill, fills, id (+26 more)
+Nodes (35): CodingKeys, brush, color, composite, elements, fill, fills, id (+27 more)
 
 ### Community 62 - "CanvasManager"
 Cohesion: 0.18
 Nodes (11): CanvasManager, CelDropRequest, CelDropVerdict, allowed, needsRasterization, rejected, Bool, Cel (+3 more)
 
 ### Community 63 - "LayerOptionsPanel"
-Cohesion: 0.15
-Nodes (18): .layerPanelRail, LayerOptionsPanel, .body, .layerIndex, .mergeTargetIndex, LayerPanel, .backgroundRow, .body (+10 more)
+Cohesion: 0.16
+Nodes (17): .layerPanelRail, LayerOptionsPanel, .body, .layerIndex, .mergeTargetIndex, LayerPanel, .backgroundRow, .header (+9 more)
 
 ### Community 64 - "StructureSnapshot"
 Cohesion: 0.18
-Nodes (6): CanvasManager, StructureSnapshot, Int, Layer, String, guideStrokes
+Nodes (5): CanvasManager, StructureSnapshot, Int, Layer, String
 
 ### Community 65 - "BlockDragCharacterizationTests"
-Cohesion: 0.21
+Cohesion: 0.22
 Nodes (4): BlockDragCharacterizationTests, Bool, CanvasManager, Int
 
 ### Community 67 - "CanvasManager"
-Cohesion: 0.15
+Cohesion: 0.16
 Nodes (11): CanvasManager, .activeShape, .activeShapePreviewImage, .isActiveShapePreviewStale, .resolvedShape, .shapeStampSpacing, Bool, String (+3 more)
 
-### Community 68 - ".validateProject"
+### Community 68 - "ProjectSaveLogicTests"
 Cohesion: 0.25
 Nodes (6): ProjectSaveLogicTests, Bool, CanvasManager, Cel, String, URL
 
@@ -457,13 +458,13 @@ Nodes (6): ProjectSaveLogicTests, Bool, CanvasManager, Cel, String, URL
 Cohesion: 0.17
 Nodes (10): SelectionOverlayView, .isCapturingGestures, Bool, CGPath, CGRect, NSCoder, UIColor, UIPanGestureRecognizer (+2 more)
 
-### Community 70 - "Equatable"
-Cohesion: 0.19
-Nodes (12): Equatable, Hashable, GuideRole, both, timing, trajectory, GuideStroke, KeyframeInterval (+4 more)
+### Community 70 - "RenderRequest"
+Cohesion: 0.21
+Nodes (12): Leaf, MetalCompositor, Double, CanvasManager, LayerRenderSource, RenderBackground, RenderRequest, Bool (+4 more)
 
-### Community 71 - "ShapeDetectorLogicTests"
-Cohesion: 0.19
-Nodes (3): ShapeDetectorLogicTests, CGRect, Int
+### Community 71 - "CompositorMetalEngine"
+Cohesion: 0.27
+Nodes (8): MTLTexture, CompositorMetalEngine, CGImage, Int, MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState, MTLDevice
 
 ### Community 72 - ".manager"
 Cohesion: 0.21
@@ -473,21 +474,21 @@ Nodes (3): CanvasManager, Cel, VectorStroke
 Cohesion: 0.12
 Nodes (14): App, task, AppScreen, editor, gallery, sizePicker, ContentView, .body (+6 more)
 
-### Community 74 - "RenderTreeCharacterizationTests"
-Cohesion: 0.24
-Nodes (5): StaticString, String, RenderTreeCharacterizationTests, CanvasManager, String
+### Community 74 - "XCTestCase"
+Cohesion: 0.21
+Nodes (7): StaticString, String, UInt, XCTestCase, RenderTreeCharacterizationTests, CanvasManager, String
 
-### Community 75 - "InterpolationRefusal"
-Cohesion: 0.16
-Nodes (14): InterpolationRefusal, alreadyInterpolated, interpolationNotEvaluable, .message, noInterpolationToGuide, notAVectorLayer, notEnoughReferences, nothingToCommit (+6 more)
+### Community 75 - "Foundation"
+Cohesion: 0.15
+Nodes (5): Foundation, Notification.Name, AppVersion, .versionString, String
 
 ### Community 76 - "Color"
 Cohesion: 0.16
 Nodes (10): Color, .hexString, .hsbaComponents, .rgbaComponents, Double, String, UIColor, ColorMath (+2 more)
 
-### Community 77 - "BrushSettingsPanel"
-Cohesion: 0.13
-Nodes (15): BrushSettingsPanel, .body, .importCustomBrushRow, .preview, CanvasManager, PhotosPickerItem, String, .panelView (+7 more)
+### Community 77 - "EraserSettingsPanel"
+Cohesion: 0.12
+Nodes (15): .panelView, CheckerboardPattern, .body, EraserSettingsPanel, .body, .preview, .vectorModePicker, CanvasManager (+7 more)
 
 ### Community 78 - "InterpolationEngineDiagnosticsLogicTests"
 Cohesion: 0.27
@@ -498,8 +499,8 @@ Cohesion: 0.14
 Nodes (15): CADisplayLink, CFTimeInterval, ObservableObject, PerfHUDOverlay, .body, .hudBody, .toggleButton, .totalCelCount (+7 more)
 
 ### Community 80 - ".stampStroke"
-Cohesion: 0.15
-Nodes (13): AnyObject, BrushStamper, DabRNG, DiscardedDabTarget, Sample, Bool, CGBlendMode, ClosedRange (+5 more)
+Cohesion: 0.13
+Nodes (12): BrushStamper, DabRNG, DiscardedDabTarget, Sample, Bool, CGBlendMode, ClosedRange, Double (+4 more)
 
 ### Community 81 - "CodingKeys"
 Cohesion: 0.11
@@ -509,33 +510,33 @@ Nodes (18): CodingKeys, backgroundColor, canvasHeight, canvasPadding, canvasWidt
 Cohesion: 0.13
 Nodes (16): .body, InterpolateBar, .activeRecipe, .commandRow, .commands, .commitButton, .referenceButton, .referenceSummary (+8 more)
 
-### Community 83 - "DrawingView"
-Cohesion: 0.12
-Nodes (14): Alignment, DrawingView, .body, .panelAlignment, Bool, CanvasManager, UUID, Void (+6 more)
+### Community 83 - "SelectPanel"
+Cohesion: 0.11
+Nodes (16): .body, MoveTransformBottomBar, .body, .divider, CanvasManager, String, Void, SelectPanel (+8 more)
 
 ### Community 84 - ".arched"
-Cohesion: 0.29
-Nodes (4): GuideSet, .isEmpty, Bool, UUID
+Cohesion: 0.25
+Nodes (5): GuideSet, .isEmpty, Bool, CGVector, UUID
 
-### Community 85 - "ShapeDetector"
-Cohesion: 0.21
-Nodes (5): ClosedFit, ShapeDetector, Bool, CGRect, Int
+### Community 85 - "CGFloat"
+Cohesion: 0.10
+Nodes (13): bendRatio(), cellSize(), coverage(), cShape(), polyline(), Int, CGFloat, ClosedFit (+5 more)
 
 ### Community 86 - "TimedSample"
-Cohesion: 0.18
-Nodes (4): TimeInterval, TimedSample, .point, TimeInterval
+Cohesion: 0.12
+Nodes (8): GuidePath, .end, .start, TimeInterval, TimeInterval, TimedSample, .point, TimeInterval
 
 ### Community 87 - "CanvasSizePickerView"
 Cohesion: 0.14
 Nodes (14): CanvasSizePickerView, .body, .height, .isValid, .width, Field, height, width (+6 more)
 
 ### Community 88 - "SwiftUI"
-Cohesion: 0.12
-Nodes (9): Combine, .interpolateButton, InterpolatePanel, .body, .groupOverlayOption, .options, CanvasManager, PhotosUI (+1 more)
+Cohesion: 0.18
+Nodes (3): Combine, PhotosUI, SwiftUI
 
 ### Community 89 - "MotionGroup"
-Cohesion: 0.23
-Nodes (9): Layer, GroupInterpolation, auto, clean, crossFade, MotionGroup, CodableColor, Decoder (+1 more)
+Cohesion: 0.19
+Nodes (10): GroupRegistration, Layer, GroupInterpolation, auto, clean, crossFade, MotionGroup, CodableColor (+2 more)
 
 ### Community 90 - "SideToolbar"
 Cohesion: 0.17
@@ -546,51 +547,51 @@ Cohesion: 0.21
 Nodes (8): Action, Bool, Int, String, Void, UndoHistory, .canRedo, .canUndo
 
 ### Community 92 - "ObjectTransformOverlayView"
+Cohesion: 0.13
+Nodes (16): ObjectTransformOverlayView, CGRect, CGSize, LayerTransform, NSCoder, UIPanGestureRecognizer, Void, Kind (+8 more)
+
+### Community 93 - "TransformOverlaySupport.swift"
 Cohesion: 0.28
-Nodes (7): ObjectTransformOverlayView, CGRect, CGSize, LayerTransform, NSCoder, UIPanGestureRecognizer, Void
+Nodes (7): FloatingTransform, .effectiveScaleX, .effectiveScaleY, LayerTransform, .effectiveScaleX, .effectiveScaleY, OverlayTransformProjecting
 
-### Community 93 - "UIView"
-Cohesion: 0.16
-Nodes (11): FloatingTransform, .effectiveScaleX, .effectiveScaleY, LayerTransform, .effectiveScaleX, .effectiveScaleY, OverlayTransformProjecting, Bool (+3 more)
-
-### Community 94 - "VectorEraserMode"
-Cohesion: 0.14
-Nodes (13): Bool, Tool, eraser, fill, pen, pencil, VectorEraserMode, cutPoints (+5 more)
+### Community 94 - "Tool"
+Cohesion: 0.33
+Nodes (5): Tool, eraser, fill, pen, pencil
 
 ### Community 95 - "CanvasHostView"
 Cohesion: 0.15
 Nodes (9): CanvasHostView, .accessibilityValue, .canBecomeFirstResponder, .keyCommands, Bool, CanvasManager, String, Void (+1 more)
 
-### Community 96 - "XCTestCase"
-Cohesion: 0.22
-Nodes (7): OnionSkinSource, PreviousCelOnionSkinSource, XCTestCase, OnionSkinLogicTests, Bool, UIImage, VectorStroke
+### Community 96 - "OnionSkinLogicTests"
+Cohesion: 0.16
+Nodes (10): OnionSkinFrame, OnionSkinSource, PreviousCelOnionSkinSource, CGSize, UIColor, UIImage, OnionSkinLogicTests, Bool (+2 more)
 
-### Community 97 - "GuidePath"
-Cohesion: 0.22
-Nodes (5): GuidePath, .end, .start, CGVector, TimeInterval
+### Community 97 - ".assertCut"
+Cohesion: 0.27
+Nodes (3): ClosedRange, StaticString, UInt
 
 ### Community 98 - "SpacingChart"
 Cohesion: 0.21
 Nodes (3): SpacingChart, .curve, .draggable
 
-### Community 99 - "URL"
-Cohesion: 0.21
-Nodes (6): ProjectBackup, .id, Bool, Int, URL, UUID
+### Community 99 - "LayerStackRow"
+Cohesion: 0.17
+Nodes (11): LayerStackRow, .depth, folder, .folderID, .id, .isFolder, layer, .layerIndex (+3 more)
 
 ### Community 100 - "Coordinator"
-Cohesion: 0.25
+Cohesion: 0.26
 Nodes (8): NSObject, Coordinator, CanvasManager, Int, Set, UIView, UUID, UITableViewDiffableDataSource
 
-### Community 101 - ".registerGroups"
-Cohesion: 0.23
-Nodes (3): GroupRegistration, RegistrationElement, RegistrationFrame
+### Community 101 - ".composite"
+Cohesion: 0.27
+Nodes (7): Compositor, CompositorBackend, coreGraphics, metal, CoreGraphicsCompositor, CGImage, CGRect
 
-### Community 102 - "HandleKind"
-Cohesion: 0.13
-Nodes (15): HandleKind, axisBottom, axisLeft, axisRight, axisTop, cornerBL, cornerBR, cornerTL (+7 more)
+### Community 102 - "TransformMode"
+Cohesion: 0.22
+Nodes (8): TransformMode, .displayName, distort, freeform, .id, .isImplemented, uniform, warp
 
 ### Community 103 - "RenderNode"
-Cohesion: 0.16
+Cohesion: 0.15
 Nodes (16): Array, .leafLayerIndices, CanvasManager, .renderLeafOrder, .renderTree, CompositorOp, stack, Content (+8 more)
 
 ### Community 104 - "4. Future upgrades — the deferred list"
@@ -598,7 +599,7 @@ Cohesion: 0.17
 Nodes (12): 1. What it does, 2. Architecture, 3. Settled decisions and hard-won facts, 4. Future upgrades — the deferred list, 5. Open judgement calls for the product owner, Explicitly deferred — do not build without being asked, Model and correctness gaps, Performance (+4 more)
 
 ### Community 105 - "CGContextDabTarget"
-Cohesion: 0.27
+Cohesion: 0.25
 Nodes (7): CGGradient, CGContextDabTarget, DabGradientCache, Key, CGBlendMode, CGContext, UIColor
 
 ### Community 106 - "ActionsMenu"
@@ -614,11 +615,11 @@ Cohesion: 0.29
 Nodes (6): DropTarget, between, onto, LayerStackListView.Coordinator, UIGestureRecognizerDelegate, UITableViewDelegate
 
 ### Community 109 - "StrokeStabilizer"
-Cohesion: 0.32
+Cohesion: 0.36
 Nodes (3): StrokeStabilizer, .stabilization, Double
 
-### Community 110 - ".setCanvasPadding"
-Cohesion: 0.33
+### Community 110 - ".refreshUndoRedoState"
+Cohesion: 0.21
 Nodes (4): CanvasManager, Bool, CGSize, UIImage
 
 ### Community 111 - "PaintSoftware - iPad Drawing and Animation App"
@@ -626,12 +627,12 @@ Cohesion: 0.22
 Nodes (9): Building and Running, Deploying to a physical iPad, Features, Known limitations / open work, License, PaintSoftware - iPad Drawing and Animation App, Project Structure, Requirements (+1 more)
 
 ### Community 112 - "LayerStackListView"
-Cohesion: 0.18
-Nodes (8): IndexPath, LayerStackListView, Context, Coordinator, Void, UISwipeActionsConfiguration, UITableView, UIViewRepresentable
+Cohesion: 0.16
+Nodes (9): IndexPath, .body, LayerStackListView, Context, Coordinator, Void, UISwipeActionsConfiguration, UITableView (+1 more)
 
-### Community 113 - "LayerKind"
-Cohesion: 0.15
-Nodes (11): Layer, Bool, Cel, Double, String, UIImage, UUID, LayerKind (+3 more)
+### Community 113 - "Layer"
+Cohesion: 0.25
+Nodes (7): Layer, Bool, Cel, Double, String, UIImage, UUID
 
 ### Community 114 - "VectorScratchRole"
 Cohesion: 0.33
@@ -645,13 +646,13 @@ Nodes (8): Animation, Canvas, Creating a Canvas, Drawing, Fill, Layers, Select &
 Cohesion: 0.29
 Nodes (5): CutOutcome, cut, missed, unchanged, IntersectionDriver
 
-### Community 117 - "Edge"
+### Community 117 - "DrawingView"
 Cohesion: 0.25
-Nodes (5): Edge, bottom, left, right, top
+Nodes (7): Alignment, DrawingView, .panelAlignment, Bool, CanvasManager, UUID, Void
 
-### Community 118 - "CodingKeys"
-Cohesion: 0.29
-Nodes (7): CodingKeys, guideIDs, localEdits, mode, references, spacing, t
+### Community 118 - "BrushSettingsPanel"
+Cohesion: 0.32
+Nodes (7): BrushSettingsPanel, .body, .importCustomBrushRow, .preview, CanvasManager, PhotosPickerItem, String
 
 ### Community 119 - "LayerRowModel"
 Cohesion: 0.18
@@ -673,9 +674,9 @@ Nodes (6): Decodable, Cel, Layer, ManifestSkeleton, Cel, Layer
 Cohesion: 0.47
 Nodes (5): CodableColor, .color, Color, .codable, CodableColor
 
-### Community 125 - "GalleryView"
-Cohesion: 0.15
-Nodes (12): ProjectVersionsView, .body, RecentlyDeletedView, .body, Void, GalleryTileView, .body, Void (+4 more)
+### Community 125 - "ProjectSummary"
+Cohesion: 0.14
+Nodes (14): ProjectSummary, Date, ProjectVersionsView, .body, RecentlyDeletedView, .body, Void, GalleryTileView (+6 more)
 
 ### Community 126 - "What needs to change"
 Cohesion: 0.40
@@ -689,40 +690,40 @@ Nodes (6): Build and test, Deploy to iPad, Docs, graphify, Multi-Session Protoco
 Cohesion: 0.70
 Nodes (4): claim_sim(), log(), release_sim(), parallel_test.sh script
 
-### Community 129 - "CodingKeys"
-Cohesion: 0.33
-Nodes (6): CodingKeys, boundGroups, id, interval, role, samples
+### Community 129 - "Kind"
+Cohesion: 0.29
+Nodes (6): Kind, easeIn, easeInOut, easeOut, linear, sampled
 
 ### Community 130 - "Performance baseline"
 Cohesion: 0.40
 Nodes (4): Known remaining costs, Performance baseline, Traps — read before measuring anything, Where it stands
 
-### Community 131 - "Corner"
-Cohesion: 0.40
-Nodes (5): Corner, bottomLeft, bottomRight, topLeft, topRight
+### Community 131 - "InterpolatePanel"
+Cohesion: 0.29
+Nodes (6): .interpolateButton, InterpolatePanel, .body, .groupOverlayOption, .options, CanvasManager
 
-### Community 138 - "CopiedCel"
+### Community 141 - "FillAxis"
 Cohesion: 0.50
-Nodes (3): CopiedCel, Int, UIImage
+Nodes (4): FillAxis, edgeOverlap, gapClosing, threshold
 
 ## Knowledge Gaps
 - **490 isolated node(s):** `graphify-guard.sh script`, `gallery`, `sizePicker`, `editor`, `softRound` (+485 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **10 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **11 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `CGFloat` connect `CGFloat` to `cels`, `.launchIntoEditor`, `ParityScenario`, `Coordinator`, `layers`, `VectorCanvas`, `PerfBaselineTests`, `StrokeCanvasView`, `CGPoint`, `CanvasManager`, `CanvasManager`, `Brush`, `PointCloudIndex`, `VectorEraserLogicTests`, `Lattice`, `BrushEngineLogicTests`, `.transparentFormat`, `AnimationTimeline`, `VectorEraserHybridLogicTests`, `CanvasManager`, `RasterLayerTexture`, `InterpolationRenderLogicTests`, `.load`, `StrokeGeometryLogicTests`, `InterpolationRecipe`, `.evaluate`, `UIKit`, `ARAPLogicTests`, `.setUpGestures`, `.group`, `ShapeGeometry`, `DeformFactorization`, `StrokeSpatialIndex`, `StrokeGeometry`, `GuideOverlayView`, `FloatingPieceOverlayView`, `Coordinator`, `LayerStackCell`, `InterpolationGuideLogicTests`, `StrokeSettingsPanel`, `ShapeOverlayView`, `String`, `CanvasManager`, `.indices`, `CanvasManager`, `ShapeDetectorLogicTests`, `.manager`, `Color`, `InterpolationEngineDiagnosticsLogicTests`, `.stampStroke`, `InterpolateBar`, `DrawingView`, `.arched`, `ShapeDetector`, `TimedSample`, `SideToolbar`, `UIView`, `XCTestCase`, `GuidePath`, `SpacingChart`, `Coordinator`, `.registerGroups`, `CGContextDabTarget`, `ActionsMenu`, `StrokeStabilizer`, `.setCanvasPadding`, `LayerStackListView`?**
-  _High betweenness centrality (0.316) - this node is a cross-community bridge._
-- **Why does `CGPoint` connect `CGPoint` to `cels`, `ParityScenario`, `Coordinator`, `layers`, `VectorCanvas`, `PerfBaselineTests`, `StrokeCanvasView`, `ColorPickerPanel`, `CanvasManager`, `CanvasManager`, `Brush`, `PointCloudIndex`, `VectorEraserLogicTests`, `Lattice`, `BrushEngineLogicTests`, `.transparentFormat`, `AnimationTimeline`, `VectorEraserHybridLogicTests`, `CanvasManager`, `RasterLayerTexture`, `InterpolationRenderLogicTests`, `StrokeGeometryLogicTests`, `InterpolationRecipe`, `.evaluate`, `UIKit`, `ARAPLogicTests`, `.setUpGestures`, `.group`, `.withStructureUndo`, `ShapeGeometry`, `DeformFactorization`, `StrokeSpatialIndex`, `StrokeGeometry`, `GuideOverlayView`, `FloatingPieceOverlayView`, `CGFloat`, `Coordinator`, `InterpolationGuideLogicTests`, `ShapeOverlayView`, `String`, `.indices`, `CanvasManager`, `.validateProject`, `SelectionOverlayView`, `ShapeDetectorLogicTests`, `.manager`, `InterpolationEngineDiagnosticsLogicTests`, `.stampStroke`, `.arched`, `ShapeDetector`, `TimedSample`, `ObjectTransformOverlayView`, `UIView`, `GuidePath`, `.registerGroups`, `HandleKind`, `CGContextDabTarget`, `LayerStackListView.Coordinator`, `StrokeStabilizer`, `.setCanvasPadding`, `Edge`?**
-  _High betweenness centrality (0.238) - this node is a cross-community bridge._
-- **Why does `XCTestCase` connect `XCTestCase` to `cels`, `.launchIntoEditor`, `ParityScenario`, `PerfBaselineTests`, `CGPoint`, `.manager`, `VectorEraserLogicTests`, `BrushEngineLogicTests`, `VectorEraserHybridLogicTests`, `InterpolationRenderLogicTests`, `StrokeGeometryLogicTests`, `InterpolationRecipe`, `UIKit`, `ARAPLogicTests`, `PlaybackBoundsCharacterizationTests`, `LayerTreeCharacterizationTests`, `BackupManagerLogicTests`, `ViewPresetCharacterizationTests`, `InterpolationGuideLogicTests`, `BlockDragCharacterizationTests`, `.validateProject`, `ShapeDetectorLogicTests`, `RenderTreeCharacterizationTests`, `InterpolationEngineDiagnosticsLogicTests`?**
-  _High betweenness centrality (0.090) - this node is a cross-community bridge._
+- **Why does `CGFloat` connect `CGFloat` to `cels`, `Kind`, `.launchIntoEditor`, `Coordinator`, `CanvasManager`, `VectorCanvas`, `PerfBaselineTests`, `StrokeCanvasView`, `ParityScenario`, `CGPoint`, `Deterministic`, `CanvasManager`, `FloatingPiece`, `CompositorParityLogicTests`, `PointCloudIndex`, `VectorEraserLogicTests`, `Lattice`, `BrushEngineLogicTests`, `.transparentFormat`, `AnimationTimeline`, `VectorEraserHybridLogicTests`, `CanvasManager`, `RasterLayerTexture`, `InterpolationRenderLogicTests`, `.load`, `StrokeGeometryLogicTests`, `InterpolationRecipe`, `.evaluate`, `ARAPLogicTests`, `.setUpGestures`, `.analyse`, `ShapeGeometry`, `BrushBlendMode`, `StrokeSpatialIndex`, `VectorSample`, `GuideOverlayView`, `Coordinator`, `LayerStackCell`, `InterpolationGuideLogicTests`, `StrokeSettingsPanel`, `ShapeOverlayView`, `String`, `CanvasManager`, `.indices`, `CanvasManager`, `.manager`, `Color`, `EraserSettingsPanel`, `InterpolationEngineDiagnosticsLogicTests`, `.stampStroke`, `InterpolateBar`, `.arched`, `TimedSample`, `SideToolbar`, `ObjectTransformOverlayView`, `TransformOverlaySupport.swift`, `OnionSkinLogicTests`, `.assertCut`, `SpacingChart`, `Coordinator`, `.composite`, `CGContextDabTarget`, `ActionsMenu`, `StrokeStabilizer`, `.refreshUndoRedoState`, `LayerStackListView`, `DrawingView`?**
+  _High betweenness centrality (0.329) - this node is a cross-community bridge._
+- **Why does `CGPoint` connect `CGPoint` to `cels`, `ParityScenario`, `Coordinator`, `CanvasManager`, `VectorCanvas`, `PerfBaselineTests`, `StrokeCanvasView`, `ColorPickerPanel`, `CanvasManager`, `FloatingPiece`, `PointCloudIndex`, `VectorEraserLogicTests`, `Lattice`, `BrushEngineLogicTests`, `.transparentFormat`, `AnimationTimeline`, `VectorEraserHybridLogicTests`, `CanvasManager`, `RasterLayerTexture`, `InterpolationRenderLogicTests`, `StrokeGeometryLogicTests`, `InterpolationRecipe`, `.evaluate`, `ARAPLogicTests`, `.setUpGestures`, `.analyse`, `layers`, `ShapeGeometry`, `StrokeSpatialIndex`, `VectorSample`, `GuideOverlayView`, `FloatingPieceOverlayView`, `Coordinator`, `InterpolationGuideLogicTests`, `ShapeOverlayView`, `.indices`, `CanvasManager`, `ProjectSaveLogicTests`, `SelectionOverlayView`, `.manager`, `InterpolationEngineDiagnosticsLogicTests`, `.stampStroke`, `.arched`, `CGFloat`, `TimedSample`, `ObjectTransformOverlayView`, `TransformOverlaySupport.swift`, `.assertCut`, `CGContextDabTarget`, `LayerStackListView.Coordinator`, `StrokeStabilizer`, `.refreshUndoRedoState`?**
+  _High betweenness centrality (0.221) - this node is a cross-community bridge._
+- **Why does `XCTestCase` connect `XCTestCase` to `cels`, `.launchIntoEditor`, `ParityScenario`, `PerfBaselineTests`, `CGPoint`, `.manager`, `CompositorParityLogicTests`, `VectorEraserLogicTests`, `BrushEngineLogicTests`, `VectorEraserHybridLogicTests`, `InterpolationRenderLogicTests`, `StrokeGeometryLogicTests`, `InterpolationRecipe`, `UIKit`, `ARAPLogicTests`, `ShapeGeometry`, `PlaybackBoundsCharacterizationTests`, `LayerTreeCharacterizationTests`, `BackupManagerLogicTests`, `ViewPresetCharacterizationTests`, `InterpolationGuideLogicTests`, `BlockDragCharacterizationTests`, `ProjectSaveLogicTests`, `InterpolationEngineDiagnosticsLogicTests`, `OnionSkinLogicTests`?**
+  _High betweenness centrality (0.097) - this node is a cross-community bridge._
 - **Are the 54 inferred relationships involving `CGPoint` (e.g. with `.init()` and `.finish()`) actually correct?**
   _`CGPoint` has 54 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 9 inferred relationships involving `CGFloat` (e.g. with `.celInsertionIndex()` and `.load()`) actually correct?**
-  _`CGFloat` has 9 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 11 inferred relationships involving `CGFloat` (e.g. with `.draw()` and `.celInsertionIndex()`) actually correct?**
+  _`CGFloat` has 11 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 11 inferred relationships involving `VectorCanvas` (e.g. with `.composite()` and `.testEvictionKeepsTheCelsNearestTheCurrentFrameAndDropsTheRest()`) actually correct?**
   _`VectorCanvas` has 11 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 106 inferred relationships involving `layers` (e.g. with `.celDropVerdict()` and `.celInsertionIndex()`) actually correct?**

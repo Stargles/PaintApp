@@ -1115,4 +1115,145 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertGreaterThan(rate, 0.99,
                              "The cache exists to serve the overwhelming majority of dabs; a rate this far below 100% means it is not doing its job")
     }
+
+    // MARK: - The compositor (LAYER_COMPOSITING.md §5.3)
+
+    /// A stack of `layerCount` layers, each carrying one canvas-sized baked image at a different
+    /// offset so the composite has real overlap to resolve rather than a single opaque cover.
+    @MainActor
+    private func compositorManager(layerCount: Int) -> CanvasManager {
+        let manager = CanvasManager()
+        manager.canvasSize = Self.canvasSize
+        for index in 0..<layerCount {
+            manager.addLayer(name: "Layer \(index)")
+            let inset = CGFloat(index) * 64
+            let image = UIGraphicsImageRenderer(size: Self.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+                UIColor(hue: CGFloat(index) / CGFloat(layerCount), saturation: 0.8, brightness: 0.9, alpha: 0.6).setFill()
+                ctx.cgContext.fill(CGRect(x: inset, y: inset,
+                                          width: Self.canvasSize.width - 2 * inset,
+                                          height: Self.canvasSize.height - 2 * inset))
+            }
+            manager.layers[index].cels[0].bakedImage = image
+        }
+        return manager
+    }
+
+    /// **What one composited frame costs at the app's real canvas size**, split into the two halves
+    /// that §9.1 separated: the `@MainActor` snapshot, and the pure composite.
+    ///
+    /// The split is the number worth having. The snapshot is main-thread work and cannot move; the
+    /// composite is pure and could go to §9.2's background renderer, or be cached by §5.2's sandwich.
+    /// Which of the two dominates is what decides whether either is worth building — so this reports
+    /// both rather than one total.
+    ///
+    /// **First measurement, for whoever reads this next: the snapshot dominates, and the GPU loses.**
+    /// Six layers at 2048² came in at snapshot 276 ms, CPU composite 84 ms, GPU composite 1189 ms.
+    /// The snapshot number is the interesting one — it is six `PixelOps.rasterize` calls building
+    /// canvas-sized images, it happens on the main actor, and it is more than three times the cost of
+    /// compositing what it produces. Any optimisation that targets the composite before the snapshot
+    /// is aimed at the smaller half.
+    ///
+    /// The GPU figure is **simulator-bound and should not be read as a verdict on Metal**: the
+    /// simulator does not model a real GPU's bandwidth, and with no upload cache this uploads ~100 MB
+    /// per frame. It is recorded so the number exists, not because it predicts a device.
+    @MainActor
+    func testCompositeCostAndMemoryAtCanvasResolution() {
+        let manager = compositorManager(layerCount: 6)
+
+        var request: RenderRequest?
+        let snapshot = measuringPeakMemory { request = manager.makeRenderRequest(atFrame: 0, includeBackground: true) }
+        guard let request else { return XCTFail("The perf manager must produce a request") }
+
+        Compositor.backend = .coreGraphics
+        var cpuImage: CGImage?
+        let cpu = measuringPeakMemory { autoreleasepool { cpuImage = Compositor.composite(request) } }
+
+        Compositor.backend = .metal
+        var gpuImage: CGImage?
+        let gpu = measuringPeakMemory { autoreleasepool { gpuImage = Compositor.composite(request) } }
+        Compositor.backend = .coreGraphics
+
+        report("compositor, 6 layers at 2048x2048", [
+            ("snapshot", milliseconds(snapshot.seconds)),
+            ("compositeCPU", milliseconds(cpu.seconds)),
+            ("compositeGPU", milliseconds(gpu.seconds)),
+            ("gpuAvailable", "\(CompositorMetalEngine.shared != nil)"),
+            ("peakSnapshot", megabytes(snapshot.peakBytes)),
+            ("peakCPU", megabytes(cpu.peakBytes)),
+            ("peakGPU", megabytes(gpu.peakBytes)),
+        ])
+
+        XCTAssertNotNil(cpuImage, "The CPU reference must always render")
+        XCTAssertEqual(cpuImage?.width, Int(Self.canvasSize.width))
+        if CompositorMetalEngine.shared != nil {
+            XCTAssertNotNil(gpuImage, "With a device present the GPU backend must render a 6-layer flat stack")
+        }
+        // Order-of-magnitude ceilings, in this file's house style — read the reported numbers, do not
+        // tighten these. A composited frame is a handful of canvas-sized draws; seconds means
+        // something has gone structurally wrong, not that the host was busy.
+        XCTAssertLessThan(snapshot.seconds, 10.0, "Snapshotting six cels should not take seconds")
+        XCTAssertLessThan(cpu.seconds, 10.0, "One 6-layer 2048x2048 composite taking over 10s is a catastrophic regression")
+    }
+
+    /// Composite cost must track the number of layers, not blow up on them — the check that would
+    /// catch an accidental per-layer canvas allocation or an O(n²) walk once groups start nesting.
+    @MainActor
+    func testCompositeCostGrowsRoughlyLinearlyWithLayerCount() {
+        Compositor.backend = .coreGraphics
+        func composite(layerCount: Int) -> Double {
+            let manager = compositorManager(layerCount: layerCount)
+            guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else { return 0 }
+            return measuringPeakMemory { autoreleasepool { _ = Compositor.composite(request) } }.seconds
+        }
+
+        let two = composite(layerCount: 2)
+        let eight = composite(layerCount: 8)
+        let ratio = two > 0 ? eight / two : 0
+
+        report("compositor scaling", [
+            ("twoLayers", milliseconds(two)),
+            ("eightLayers", milliseconds(eight)),
+            ("ratio", String(format: "%.2f", ratio)),
+        ])
+
+        // 4x the layers should cost on the order of 4x, not 16x. Generous because simulator timings
+        // swing hard and the fixed per-composite cost (one canvas-sized renderer) flatters small n.
+        XCTAssertLessThan(ratio, 12.0,
+                          "4x the layers costing \(String(format: "%.1f", ratio))x suggests per-layer allocation or an O(n²) walk")
+    }
+
+    /// Nesting every layer in folders must not change what a composite costs, because a transparent
+    /// group does not get its own buffer (`CoreGraphicsCompositor.draw`). If this regresses, someone
+    /// has started allocating per group — which §5.3 forbids and which would also break the
+    /// byte-identity `CompositorParityLogicTests` pins.
+    @MainActor
+    func testNestingLayersInFoldersDoesNotChangeCompositeCost() {
+        Compositor.backend = .coreGraphics
+        let flat = compositorManager(layerCount: 6)
+        guard let flatRequest = flat.makeRenderRequest(atFrame: 0, includeBackground: true) else {
+            return XCTFail("The perf manager must produce a request")
+        }
+        let flatCost = measuringPeakMemory { autoreleasepool { _ = Compositor.composite(flatRequest) } }
+
+        let nested = compositorManager(layerCount: 6)
+        var parent: UUID?
+        for index in 0..<6 {
+            parent = nested.addFolder(name: "Depth \(index)", parentFolderID: parent)
+            nested.layers[index].parentFolderID = parent
+        }
+        guard let nestedRequest = nested.makeRenderRequest(atFrame: 0, includeBackground: true) else {
+            return XCTFail("The perf manager must produce a request")
+        }
+        let nestedCost = measuringPeakMemory { autoreleasepool { _ = Compositor.composite(nestedRequest) } }
+
+        report("compositor, six levels of nesting", [
+            ("flat", milliseconds(flatCost.seconds)),
+            ("nested", milliseconds(nestedCost.seconds)),
+            ("peakFlat", megabytes(flatCost.peakBytes)),
+            ("peakNested", megabytes(nestedCost.peakBytes)),
+        ])
+
+        XCTAssertLessThan(nestedCost.seconds, max(flatCost.seconds * 6, 10.0),
+                          "Six levels of transparent nesting should cost about what a flat stack costs")
+    }
 }

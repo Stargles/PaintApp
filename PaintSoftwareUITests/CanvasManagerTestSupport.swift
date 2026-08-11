@@ -133,9 +133,9 @@ extension XCTestCase {
     /// doing so.
     ///
     /// Asserted after every mutation in `RenderTreeCharacterizationTests`, and worth stating as an
-    /// invariant rather than as one test's expectation because it is what makes phase 2 safe to
-    /// build: the compositor can replace `PixelOps.compositeCanvas`'s flat walk only for as long as
-    /// walking the tree means the same thing.
+    /// invariant rather than as one test's expectation because it is what made phase 2 safe to build
+    /// and phase 3 safe to land: the compositor replaced the flat walk, and may go on standing in for
+    /// it only for as long as walking the tree means the same thing.
     func assertRenderTreeMatchesFlatOrder(_ manager: CanvasManager,
                                           _ message: String = "",
                                           file: StaticString = #filePath, line: UInt = #line) {
