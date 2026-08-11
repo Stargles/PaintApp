@@ -26,10 +26,44 @@ toolchain once: `xcodebuild -downloadComponent MetalToolchain`.
 
 - **Fast tier (~1–2 min)** — the pure-logic `*LogicTests` run headless. Use constantly.
 - **Full run (~22 min)** — XCUITests are 99% of the runtime. Phase boundaries only, and
-  `simctl shutdown` + `erase` the simulator *immediately before* it: leftover parallel clones are
-  the cause of nearly every mystery failure. Run `uptime` before diagnosing one.
+  `simctl shutdown all` + `erase` the simulator *immediately before* it: leftover parallel clones
+  are the cause of nearly every mystery failure.
+- Use the dedicated simulator by UDID: `eraser-mutex-test`,
+  `75C8B97E-47AF-484B-B7D2-CA7EB1B51B03`. Passing `-destination name=...` for a device this Mac
+  doesn't have (there is no "iPad Pro 13-inch (M4)" — it is an M5) does **not** error; xcodebuild
+  silently falls back, and you spend the run wondering what you tested.
 - `Engine/Deform` compiles standalone with `swiftc` (~5 s a loop) — use it to test engine
   hypotheses instead of a 90 s `xcodebuild test`.
+
+### Triaging a failed XCUITest — do this before suspecting your change
+
+A one-off XCUITest failure here is environmental far more often than it is real, and re-running the
+full suite to check costs 22 minutes for an answer a 30-second run gives. **The isolated re-run is
+the confirmation. Do not re-run the suite to decide whether a failure was real.**
+
+```bash
+xcrun simctl shutdown all; xcrun simctl erase 75C8B97E-47AF-484B-B7D2-CA7EB1B51B03
+xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
+  -destination 'platform=iOS Simulator,id=75C8B97E-47AF-484B-B7D2-CA7EB1B51B03' \
+  -only-testing:PaintSoftwareUITests/<Suite>/<test> -derivedDataPath build/DerivedData
+```
+
+Passes clean → environmental. Say so in the summary, name the test, and move on; it is not a
+finding and does not need a fix. Fails clean → now it is yours, and you have a 30-second loop to
+debug it in instead of a 22-minute one.
+
+The erase is the whole trick: session 23 watched `testDroppingFolderOntoFolderNestsIt` fail twice
+and pass three times, and the split was exactly whether the simulator had been erased first —
+nothing to do with the code under test. Two of those five runs were spent bisecting against the
+previous commit for a regression that did not exist.
+
+**`uptime` is not a usable signal on this Mac** and earlier guidance to check it was wrong. Its load
+average is a slowly-decaying artifact of simulator churn: it read 404, then 382, with zero booted
+simulators, zero uninterruptible processes, and 94.6% idle CPU. Read the real number instead:
+
+```bash
+top -l 2 -n 0 -s 2 | grep "CPU usage" | tail -1
+```
 
 ## Deploy to iPad
 
