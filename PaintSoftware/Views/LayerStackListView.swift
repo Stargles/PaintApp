@@ -87,9 +87,19 @@ struct LayerStackListView: UIViewRepresentable {
                         guard let folderID = model.folderID else { return }
                         self?.canvasManager.toggleFolderExpanded(folderID)
                     }
+                    // A folder row's tap is already spoken for (expand/collapse) — unlike a layer
+                    // row's, which opens options on a second tap of the already-selected row — so
+                    // its options live behind this row-local button instead. Same destination
+                    // (`onRequestOptions`/`layerOptionsID`) either way; which panel renders is
+                    // resolved from the id in `DrawingView.layerPanelRail`.
+                    cell.onOpenFolderOptions = { [weak self] in self?.onRequestOptions?(model.id) }
                     cell.onOpacityChange = { [weak self] value in
-                        guard let self, self.canvasManager.layers.indices.contains(model.layerIndex) else { return }
-                        self.canvasManager.layers[model.layerIndex].opacity = value
+                        guard let self else { return }
+                        if let folderID = model.folderID {
+                            self.canvasManager.setFolderOpacity(folderID, to: value)
+                        } else if self.canvasManager.layers.indices.contains(model.layerIndex) {
+                            self.canvasManager.layers[model.layerIndex].opacity = value
+                        }
                     }
                     cell.onOpacityChangeBegan = { [weak self] in self?.canvasManager.beginStructureGesture() }
                     cell.onOpacityChangeEnded = { [weak self] in
@@ -592,7 +602,7 @@ struct LayerRowModel: Equatable {
             parentFolderID = folder?.parentFolderID
             layerIndex = -1
             isCurrent = false
-            opacity = 1
+            opacity = folder?.opacity ?? 1
             isVector = false
             isFillReference = false
             strokeCount = 0

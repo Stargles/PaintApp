@@ -115,14 +115,25 @@ struct DrawingView: View {
         } message: {
             Text("Create a layer to start drawing.")
         }
-        // Alert shown when the user tries to draw but the active layer is hidden.
+        // Alert shown when the user tries to draw but the active layer is hidden — by its own eye
+        // or by an enclosing group's (§4.1); `needsVisibilityAlert` no longer distinguishes which.
         .alert("Hidden Layer", isPresented: Binding(
             get: { canvasManager.needsVisibilityAlert },
             set: { if !$0 { canvasManager.needsVisibilityAlert = false } }
         )) {
             Button("Show Layer") {
-                guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
-                canvasManager.toggleLayerVisibility(layerIndex: canvasManager.currentLayerIndex)
+                let index = canvasManager.currentLayerIndex
+                guard canvasManager.layers.indices.contains(index) else { return }
+                // Flip only whichever switch(es) are actually off. Unconditionally toggling the
+                // layer's own flag (the pre-§4.1 behavior) would do nothing when a group is what's
+                // hiding it — worse, if the layer's own eye was already on it would switch it off,
+                // leaving the layer just as invisible with one more thing now wrong.
+                if !canvasManager.layers[index].isVisible {
+                    canvasManager.toggleLayerVisibility(layerIndex: index)
+                }
+                for folder in canvasManager.ancestorFolders(ofLayer: index) where !folder.isVisible {
+                    canvasManager.toggleFolderVisibility(folder.id)
+                }
                 canvasManager.needsVisibilityAlert = false
             }
             Button("Cancel", role: .cancel) {
@@ -143,11 +154,21 @@ struct DrawingView: View {
             HStack(alignment: .top, spacing: 10) {
                 Spacer(minLength: 0)
 
+                // `layerOptionsID` names either a layer or a folder — which options panel it opens
+                // is resolved here rather than carried alongside the id, since only one is ever
+                // shown at a time and both close the same way.
                 if let layerOptionsID {
-                    LayerOptionsPanel(canvasManager: canvasManager, layerID: layerOptionsID) {
-                        self.layerOptionsID = nil
+                    if canvasManager.folders.contains(where: { $0.id == layerOptionsID }) {
+                        FolderOptionsPanel(canvasManager: canvasManager, folderID: layerOptionsID) {
+                            self.layerOptionsID = nil
+                        }
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    } else {
+                        LayerOptionsPanel(canvasManager: canvasManager, layerID: layerOptionsID) {
+                            self.layerOptionsID = nil
+                        }
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
 
                 LayerPanel(canvasManager: canvasManager, optionsLayerID: $layerOptionsID)

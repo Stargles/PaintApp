@@ -22,6 +22,10 @@ final class LayerStackCell: UITableViewCell {
     /// see `CanvasManager.beginStructureGesture`'s doc comment.
     var onOpacityChangeBegan: (() -> Void)?
     var onOpacityChangeEnded: (() -> Void)?
+    /// A folder row's tap already means expand/collapse, so its options menu (§4.2's pass-through
+    /// toggle, Rename) hangs off this button instead of "tap the already-selected row again", which
+    /// is how a layer row opens the same menu.
+    var onOpenFolderOptions: (() -> Void)?
 
     private let guideContainer = UIView()
     private var guideLines: [UIView] = []
@@ -34,6 +38,7 @@ final class LayerStackCell: UITableViewCell {
     private let subtitleLabel = UILabel()
     private let opacitySlider = UISlider()
     private let currentMarker = UIImageView()
+    private let folderOptionsButton = UIButton(type: .system)
 
     // Invisible probes so UI tests can read per-row state that isn't rendered as text.
     private let bakedMarker = UIView()
@@ -60,7 +65,7 @@ final class LayerStackCell: UITableViewCell {
 
     private func buildHierarchy() {
         for view in [guideContainer, disclosureButton, visibilityButton, thumbnailView, folderIconView,
-                     nameLabel, subtitleLabel, opacitySlider, currentMarker,
+                     nameLabel, subtitleLabel, opacitySlider, currentMarker, folderOptionsButton,
                      bakedMarker, vectorMarker, folderMarker] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
@@ -108,6 +113,10 @@ final class LayerStackCell: UITableViewCell {
         currentMarker.isAccessibilityElement = true
         currentMarker.accessibilityTraits = .image
 
+        folderOptionsButton.setImage(UIImage(systemName: "ellipsis.circle"), for: .normal)
+        folderOptionsButton.tintColor = .white
+        folderOptionsButton.addTarget(self, action: #selector(openFolderOptions), for: .touchUpInside)
+
         for marker in [bakedMarker, vectorMarker, folderMarker] {
             marker.isAccessibilityElement = true
             marker.isUserInteractionEnabled = false
@@ -143,7 +152,6 @@ final class LayerStackCell: UITableViewCell {
             folderIconView.widthAnchor.constraint(equalToConstant: 22),
             folderIconView.heightAnchor.constraint(equalToConstant: 22),
 
-            opacitySlider.trailingAnchor.constraint(equalTo: currentMarker.leadingAnchor, constant: -8),
             opacitySlider.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             opacitySlider.widthAnchor.constraint(equalToConstant: 90),
 
@@ -151,6 +159,11 @@ final class LayerStackCell: UITableViewCell {
             currentMarker.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             currentMarker.widthAnchor.constraint(equalToConstant: 20),
             currentMarker.heightAnchor.constraint(equalToConstant: 20),
+
+            folderOptionsButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
+            folderOptionsButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            folderOptionsButton.widthAnchor.constraint(equalToConstant: 30),
+            folderOptionsButton.heightAnchor.constraint(equalToConstant: 30),
 
             subtitleLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
             subtitleLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
@@ -181,6 +194,13 @@ final class LayerStackCell: UITableViewCell {
         folderNameCenterY = nameLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
         layerNameLeading.isActive = true
         layerNameCenterY.isActive = true
+
+        // The opacity slider ends before whichever trailing control the row has — the invisible
+        // `currentMarker` probe on a layer row, `folderOptionsButton` on a folder row (§4.1's group
+        // opacity gets the same slider the layer rows already have).
+        opacitySliderTrailingToMarker = opacitySlider.trailingAnchor.constraint(equalTo: currentMarker.leadingAnchor, constant: -8)
+        opacitySliderTrailingToOptions = opacitySlider.trailingAnchor.constraint(equalTo: folderOptionsButton.leadingAnchor, constant: -8)
+        opacitySliderTrailingToMarker.isActive = true
     }
 
     private var guideWidth: NSLayoutConstraint!
@@ -188,6 +208,8 @@ final class LayerStackCell: UITableViewCell {
     private var folderNameLeading: NSLayoutConstraint!
     private var layerNameCenterY: NSLayoutConstraint!
     private var folderNameCenterY: NSLayoutConstraint!
+    private var opacitySliderTrailingToMarker: NSLayoutConstraint!
+    private var opacitySliderTrailingToOptions: NSLayoutConstraint!
 
     // MARK: - Configuration
 
@@ -200,12 +222,15 @@ final class LayerStackCell: UITableViewCell {
 
         visibilityButton.setImage(UIImage(systemName: model.isVisible ? "eye" : "eye.slash"), for: .normal)
         visibilityButton.tintColor = model.isVisible ? .white : .gray
+        visibilityButton.accessibilityIdentifier = model.isFolder
+            ? "layerPanel.folder.\(model.name).visibility" : "layerPanel.row.\(model.layerIndex).visibility"
 
         if model.isFolder {
             thumbnailView.isHidden = true
             folderIconView.isHidden = false
-            opacitySlider.isHidden = true
+            opacitySlider.isHidden = false
             currentMarker.isHidden = true
+            folderOptionsButton.isHidden = false
             subtitleLabel.isHidden = true
             disclosureButton.isHidden = false
             disclosureButton.setImage(UIImage(systemName: model.isExpanded ? "chevron.down" : "chevron.right"), for: .normal)
@@ -214,10 +239,17 @@ final class LayerStackCell: UITableViewCell {
             layerNameCenterY.isActive = false
             folderNameLeading.isActive = true
             folderNameCenterY.isActive = true
+            opacitySliderTrailingToMarker.isActive = false
+            opacitySliderTrailingToOptions.isActive = true
+            if !opacitySlider.isTracking {
+                opacitySlider.value = Float(model.opacity)
+            }
+            opacitySlider.accessibilityIdentifier = "layerPanel.folder.\(model.name).opacity"
             setCurrentRow(false)
             nameLabel.textColor = model.isVisible ? .white : .gray
             nameLabel.accessibilityIdentifier = "layerPanel.folder.\(model.name)"
             nameLabel.accessibilityValue = "\(model.depth)"
+            folderOptionsButton.accessibilityIdentifier = "layerPanel.folder.\(model.name).options"
 
             bakedMarker.accessibilityIdentifier = nil
             vectorMarker.accessibilityIdentifier = nil
@@ -230,11 +262,14 @@ final class LayerStackCell: UITableViewCell {
             opacitySlider.isHidden = false
             subtitleLabel.isHidden = false
             disclosureButton.isHidden = true
+            folderOptionsButton.isHidden = true
 
             folderNameLeading.isActive = false
             folderNameCenterY.isActive = false
             layerNameLeading.isActive = true
             layerNameCenterY.isActive = true
+            opacitySliderTrailingToOptions.isActive = false
+            opacitySliderTrailingToMarker.isActive = true
             nameLabel.textColor = .white
 
             thumbnailView.image = model.thumbnail
@@ -244,6 +279,9 @@ final class LayerStackCell: UITableViewCell {
             if !opacitySlider.isTracking {
                 opacitySlider.value = Float(model.opacity)
             }
+            // Overwrites whatever a recycled cell's last row left here — including a folder row's
+            // `.opacity` identifier above, which would otherwise linger on a reused cell.
+            opacitySlider.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).opacity"
             currentMarker.isHidden = !model.isCurrent
             currentMarker.isAccessibilityElement = model.isCurrent
             setCurrentRow(model.isCurrent)
@@ -344,4 +382,5 @@ final class LayerStackCell: UITableViewCell {
     @objc private func opacityChanged() { onOpacityChange?(Double(opacitySlider.value)) }
     @objc private func opacityDragBegan() { onOpacityChangeBegan?() }
     @objc private func opacityDragEnded() { onOpacityChangeEnded?() }
+    @objc private func openFolderOptions() { onOpenFolderOptions?() }
 }

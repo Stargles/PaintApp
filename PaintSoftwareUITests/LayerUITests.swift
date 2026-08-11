@@ -381,4 +381,96 @@ final class LayerUITests: PaintUITestCase {
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "The vector stroke should survive the merge")
     }
 
+    // MARK: - §4.1/§4.2 group properties
+
+    /// The regression phase 4b exists to fix: `toggleFolderVisibility` stopped writing through to
+    /// children (§4.1), so the live canvas has to consult `isLayerEffectivelyVisible` per layer
+    /// instead of the layer's own flag, or hiding a group does nothing on screen.
+    func testHidingFolderHidesContentsOnCanvasAndReshowingRestoresThem() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let point = safeOutsideCornerPoint(canvas)
+        drawLine(on: canvas, from: point, to: CGVector(dx: point.dx + 0.12, dy: point.dy))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: point.dx + 0.06, dy: point.dy)),
+                       "Setup: the stroke should be on the canvas")
+
+        openLayerPanel(app)
+        addFolderFromAddMenu(app) // Folder 1, empty, at the top
+        dragRow(layerCell(app, layerIndex: 0), onto: folderCell(app, named: "Folder 1"), dropDY: 0.5)
+        XCTAssertEqual(rowFolder(app, layerIndex: 0), "Folder 1", "Setup: the drawn layer should now be inside the folder")
+
+        app.buttons["layerPanel.folder.Folder 1.visibility"].tap()
+        app.buttons["toolbar.layersButton"].tap() // close panel to see the canvas
+
+        XCTAssertTrue(waitUntilBlank(canvas, dx: point.dx + 0.06, dy: point.dy, timeout: 5),
+                      "Hiding the folder should hide its contents on the live canvas, not just in the panel")
+
+        app.buttons["toolbar.layersButton"].tap() // reopen
+        app.buttons["layerPanel.folder.Folder 1.visibility"].tap() // show again
+        app.buttons["toolbar.layersButton"].tap() // close
+
+        XCTAssertTrue(waitUntilFilled(canvas, dx: point.dx + 0.06, dy: point.dy, timeout: 5),
+                      "Re-showing the folder should restore its contents")
+    }
+
+    /// A folder row's tap already means expand/collapse, so its options — the pass-through toggle
+    /// (§4.2) and Rename — live behind the row's own button instead of "tap the already-selected
+    /// row again", which is how a layer row opens the same menu.
+    func testFolderOptionsButtonOpensPassThroughToggleOffByDefault() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addFolderFromAddMenu(app)
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.switches["layerOptions.passThroughToggle"].exists,
+                       "The options menu should not be showing before the button is tapped")
+
+        app.buttons["layerPanel.folder.Folder 1.options"].tap()
+
+        let toggle = app.switches["layerOptions.passThroughToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "Tapping the folder's options button should open its menu")
+        XCTAssertEqual(toggle.value as? String, "0", "Isolated is the default (§4.2), so Pass Through starts off")
+
+        // Hit the switch itself — tapping a SwiftUI Toggle's label doesn't flip it.
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        XCTAssertEqual(toggle.value as? String, "1", "Toggling should flip the switch")
+
+        // Close and reopen to confirm the flip reached the model (`setFolderIsolated`), not just
+        // the switch's own transient state.
+        app.buttons["layerOptions.close"].tap()
+        app.buttons["layerPanel.folder.Folder 1.options"].tap()
+        XCTAssertEqual(app.switches["layerOptions.passThroughToggle"].value as? String, "1",
+                       "The toggle should reflect the folder's isIsolated flag, not reset when the panel reopens")
+    }
+
+    /// Folder rows get the same opacity slider layer rows already have (§4.1), routed through
+    /// `CanvasManager.setFolderOpacity` rather than the raw `layers[i].opacity = value` write the
+    /// layer rows use (folders have no such index).
+    func testFolderOpacitySliderPersistsThroughSetFolderOpacity() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addFolderFromAddMenu(app)
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
+
+        let slider = app.sliders["layerPanel.folder.Folder 1.opacity"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "Folder rows should show the same opacity slider layer rows have")
+        XCTAssertEqual(sliderNumericValue(slider), 100, "A fresh folder starts at full opacity")
+
+        slider.adjust(toNormalizedSliderPosition: 0.3)
+        let after = sliderNumericValue(slider)
+        XCTAssertLessThan(after, 100, "Dragging the slider down should lower the folder's opacity")
+
+        // Collapsing and re-expanding forces a fresh `configure()` from the model, which only
+        // shows the dragged value if it reached `setFolderOpacity` rather than staying local to
+        // the control (folder rows have no per-layer index for a raw write to land on).
+        app.staticTexts["layerPanel.folder.Folder 1"].tap() // collapse
+        app.staticTexts["layerPanel.folder.Folder 1"].tap() // expand
+        XCTAssertEqual(sliderNumericValue(app.sliders["layerPanel.folder.Folder 1.opacity"]), after, accuracy: 1,
+                       "The opacity should persist on the model, not reset when the row is reconfigured")
+    }
+
 }
