@@ -44,6 +44,9 @@ final class LayerStackCell: UITableViewCell {
     private let bakedMarker = UIView()
     private let vectorMarker = UIView()
     private let folderMarker = UIView()
+    /// Carries `blendMode.rawValue` — stable across localization, unlike `displayName` in the
+    /// subtitle/name suffix below, which is what a test should read instead of the visible label.
+    private let blendModeMarker = UIView()
 
     private var contentLeading: NSLayoutConstraint!
     private var isFolderRow = false
@@ -66,7 +69,7 @@ final class LayerStackCell: UITableViewCell {
     private func buildHierarchy() {
         for view in [guideContainer, disclosureButton, visibilityButton, thumbnailView, folderIconView,
                      nameLabel, subtitleLabel, opacitySlider, currentMarker, folderOptionsButton,
-                     bakedMarker, vectorMarker, folderMarker] {
+                     bakedMarker, vectorMarker, folderMarker, blendModeMarker] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -117,7 +120,7 @@ final class LayerStackCell: UITableViewCell {
         folderOptionsButton.tintColor = .white
         folderOptionsButton.addTarget(self, action: #selector(openFolderOptions), for: .touchUpInside)
 
-        for marker in [bakedMarker, vectorMarker, folderMarker] {
+        for marker in [bakedMarker, vectorMarker, folderMarker, blendModeMarker] {
             marker.isAccessibilityElement = true
             marker.isUserInteractionEnabled = false
             marker.backgroundColor = .clear
@@ -184,6 +187,11 @@ final class LayerStackCell: UITableViewCell {
             folderMarker.heightAnchor.constraint(equalToConstant: 1),
             folderMarker.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
             folderMarker.topAnchor.constraint(equalTo: contentView.topAnchor),
+
+            blendModeMarker.widthAnchor.constraint(equalToConstant: 1),
+            blendModeMarker.heightAnchor.constraint(equalToConstant: 1),
+            blendModeMarker.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            blendModeMarker.topAnchor.constraint(equalTo: contentView.topAnchor),
         ])
 
         // The name sits after the thumbnail on layer rows and after the folder icon on folder rows,
@@ -217,7 +225,13 @@ final class LayerStackCell: UITableViewCell {
         isFolderRow = model.isFolder
         updateGuides(depth: model.depth)
 
-        nameLabel.text = model.name
+        // A layer or group set to Multiply reads identically to Normal otherwise — the row is the
+        // only place an artist checks a stack at a glance, so the mode has to show without opening
+        // options (§7). Appended to the name rather than laid out as its own label: `.normal` (the
+        // common case) contributes nothing, so no row shifts, and `accessibilityLabel` below stays
+        // the bare name — VoiceOver/XCUITest read `blendModeMarker`'s stable rawValue instead of
+        // parsing this display string.
+        nameLabel.text = model.blendMode.isBlending ? "\(model.name)  ·  \(model.blendMode.displayName)" : model.name
         nameLabel.accessibilityLabel = model.name
 
         visibilityButton.setImage(UIImage(systemName: model.isVisible ? "eye" : "eye.slash"), for: .normal)
@@ -256,6 +270,8 @@ final class LayerStackCell: UITableViewCell {
             folderMarker.accessibilityIdentifier = nil
             subtitleLabel.accessibilityIdentifier = nil
             currentMarker.accessibilityIdentifier = nil
+            blendModeMarker.accessibilityIdentifier = "layerPanel.folder.\(model.name).blendMode"
+            blendModeMarker.accessibilityValue = model.blendMode.rawValue
         } else {
             thumbnailView.isHidden = false
             folderIconView.isHidden = true
@@ -299,6 +315,8 @@ final class LayerStackCell: UITableViewCell {
             vectorMarker.accessibilityValue = "\(model.isVector ? 1 : 0),\(model.vectorStrokeCount),\(model.vectorEraseCount)"
             folderMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).folder"
             folderMarker.accessibilityValue = model.folderName ?? ""
+            blendModeMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).blendMode"
+            blendModeMarker.accessibilityValue = model.blendMode.rawValue
         }
 
         isMergeHighlighted = false
