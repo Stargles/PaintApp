@@ -1,7 +1,7 @@
 # Layer Compositing
 
 Plan for tree-ordered groups, **compositor nodes**, alpha masks, and blend / effect layers — which
-are all one project, because they all need the same missing thing. **Phases 0–3 of §11 are built and
+are all one project, because they all need the same missing thing. **Phases 0–4 of §11 are built and
 green.** §3 is the decisions; §10 is what is still open; §11 is what remains.
 
 ## 1. Why these are one project
@@ -13,19 +13,20 @@ behind a flag that agree byte for byte. The live canvas is unchanged:
 
 | path | where | how |
 |---|---|---|
-| **Live canvas** | `CanvasView.reconcileLayers` ([CanvasView.swift:466](PaintSoftware/Views/CanvasView.swift:466)) | one `LayerHostView` per layer, all siblings in one flat container, z-order by `bringSubviewToFront`, per-layer `isHidden` + `alpha`. **Core Animation does the compositing**, always source-over. |
+| **Live canvas** | `CanvasView.reconcileLayers` ([CanvasView.swift:466](PaintSoftware/Views/CanvasView.swift:466)) | one `LayerHostView` per layer, all siblings in one flat container, z-order by `bringSubviewToFront`, per-layer `isHidden` + `alpha` — each now folding in every enclosing group's. **Core Animation does the compositing**, always source-over. |
 | **Offline** | `Compositor.composite` | tree walk over a snapshot. One consumer: the project thumbnail. |
 
-What still blocks everything below:
+A folder is a compositing unit as of phase 4: it carries an opacity, a blend mode and an isolation
+flag, and its `isVisible` gates its subtree instead of being written through to it. What is left is
+the live canvas half:
 
-- **Folders do not exist at render time.** `toggleFolderVisibility`
-  ([CanvasManager.swift:829](PaintSoftware/Models/CanvasManager.swift:829)) *writes through* to every
-  descendant's `isVisible`. A folder is a panel affordance, not a compositing unit — there is nowhere
-  to hang a group opacity, blend mode, or mask. The compositor carries both flags and interprets only
-  the leaf's, so §4.1 stays a phase-4 decision rather than a side effect.
-- **There is no seam for a blend mode on the live canvas.** Core Animation offers no per-view
-  Multiply against arbitrary siblings, and the compositor does not drive the live canvas yet — that
-  is §5.2's sandwich, still to build.
+- **Group opacity is exact offline and approximate on the live canvas.** `effectiveOpacity` folds a
+  group's opacity into each child, which differs from fading the group's finished composite wherever
+  children overlap. Core Animation, handed one flat sibling per layer, cannot do better; §5.2's
+  sandwich is what closes it.
+- **There is no seam for a blend mode on the live canvas at all.** Core Animation offers no per-view
+  Multiply against arbitrary siblings, and the compositor does not drive the live canvas yet — the
+  same sandwich, and the reason it now rides with phase 5's blend modes.
 
 Express groups / nodes / masks / blends in the one compositor; do not grow a second.
 
@@ -83,12 +84,28 @@ Built by the same recursion that already produces `layerStackRows`, invalidated 
 Evaluation is bottom-to-top, **recursing into a node before compositing its result into its parent** —
 which is exactly "groups are parentheses."
 
-`LayerFolder` gains `opacity`, `blendMode`, `isIsolated`, `alphaMask` (persisted in `FolderManifest`,
-all defaulted, so existing projects decode unchanged). `toggleFolderVisibility` stops writing through
-to children; the group's own `isVisible` gates its subtree at composite time. That is a change to
-shipped behaviour — hiding a group and re-showing it currently *clobbers* per-layer visibility, and
-after this it will not. Restoring a `ViewPreset` saved under the old behaviour still works, since
-presets snapshot both layer and folder visibility already.
+`LayerFolder` carries `opacity`, `blendMode` and `isIsolated`, persisted in `FolderManifest` and each
+defaulted to its identity, so existing projects decode unchanged. `alphaMask` is **not** among them —
+§6.2 puts a mask on `Layer` and `LayerFolder` together, and half of it early would only be reshaped
+there. Every field decodes with `decodeIfPresent`, so a later additive one costs no migration.
+
+`toggleFolderVisibility` no longer writes through to children: the group's own `isVisible` gates its
+subtree. That write-through was destructive all along — hiding a group and re-showing it clobbered
+whichever layers inside it the artist had hidden by hand.
+
+**The migration (§10 item 3, decided: migrate).** Loading an old project as-is looked safe because
+the write-through already happened at save time, so those documents are self-consistent — but only
+until the artist un-hides the group, at which point nothing comes back, because every child is still
+independently hidden and nothing on screen explains why. So a folder that decodes *without* the
+group-property keys and is hidden has its descendants shown, at any depth; the folder's own flag,
+the one piece the artist actually chose, is left alone. Nothing is lost that the write-through had
+not already destroyed. The signal is the absence of `opacity`, which is why `FolderManifest` writes
+it unconditionally — omitting it when it happens to be 1 would re-arm a one-time migration forever.
+
+Saved `ViewPreset`s need the same treatment, which is **a correction to an earlier draft of this
+section**: a preset written under the write-through records every child of a hidden group as hidden,
+so applying one re-creates exactly the state the migration cleared. Fixing the document alone would
+mean the group comes back once and empties again the next time the artist flips views.
 
 ### 4.2 Isolated groups
 
@@ -97,7 +114,20 @@ into the parent with the group's own opacity / blend / mask. A `multiply` child 
 group multiplies against nothing and therefore reads as normal — that is correct and intended.
 
 **Pass-through** (children blend against the backdrop below the group, as Photoshop and CSP default)
-is a per-group toggle in the options menu, off by default.
+is a per-group toggle in the folder's options panel, off by default.
+
+**The toggle currently changes no pixel, and that is arithmetic rather than a gap.** With every child
+at `.normal`, source-over is associative: children composited onto transparency and then drawn over
+the backdrop equal children drawn straight onto it. Isolation only becomes observable when something
+inside the group blends, i.e. in phase 5. It is stored, persisted and honoured by both backends now
+so that phase 5 adds blend modes and nothing else — but the control ships ahead of its effect, which
+is a product call worth revisiting if that reads badly.
+
+`RenderNode.needsOwnBuffer` is where "does this group cost an intermediate buffer" is decided, once,
+for both backends — previously it was two spellings of "opacity is not 1", one per backend, which
+phase 5's extra clauses would have turned from duplication into disagreement. A buffer is not a
+tunable: an intermediate re-quantizes to 8-bit once per nesting level, so allocating one where it is
+not needed changes bytes, not just cost.
 
 ### 4.3 Compositor nodes
 
@@ -222,6 +252,16 @@ Memory is the constraint, not ALU.
 - **Effect nodes render at display resolution when zoomed out**, native only for export.
 - Add compositor cases to `PerfBaselineTests`, which already asserts hard budgets on stroke cost,
   thumbnail regen, and undo memory.
+
+**What a buffer actually costs, measured in phase 4.** Six levels of nesting: 41.6 ms flat, 46.0 ms
+transparent, **1071.7 ms once every level buffers** — roughly 25× a whole flat composite, from ~400 MB
+of intermediates. That is the number behind "a buffer is not a tunable" (§4.2) and behind the texture
+pool above; it is also why `needsOwnBuffer` names only the cases that genuinely change the picture.
+
+The standing perf case was **deliberately not kept**: its ~400 MB of intermediates pushed
+`InterpolationRenderLogicTests.testPreviewIsSubstantiallyCheaperThanFull` from 0.073 s and passing to
+8.98 s and failing whenever the two shared a runner process. Worth knowing before adding any heavy
+case to the fast tier — the failure appears in an unrelated suite and looks nothing like its cause.
 
 ## 6. Alpha masks
 
@@ -437,9 +477,7 @@ later and rewriting for one.
 1. **Mask threshold constant** (§6.3) — starting at 0.5, tunable once there is something to look at.
 2. **Compositor node ops** — §7 lists the *effects*; the multi-input ops themselves (Mix, and which
    others take 2+ inputs) want a pass once the node UI exists and there is something to try them on.
-3. **Group visibility migration** (§4.1) — whether projects saved under the old write-through
-   behaviour need a one-time migration, or whether letting them load as-is is fine. Leaning as-is:
-   the write-through already happened at save time, so those projects are self-consistent.
+3. **Whether the pass-through toggle should ship before phase 5 makes it do anything** (§4.2).
 
 ## 11. Build order
 
@@ -452,7 +490,7 @@ it is small and none of them fight a moving substrate.
 | ~~**1**~~ | ~~`RenderNode` derivation + characterization tests~~ | **done** |
 | ~~**2**~~ | ~~Metal compositor behind a flag; snapshot-driven entry point (§9.1)~~ | **done** — both backends agree byte for byte, delta 0 |
 | ~~**3**~~ | ~~Delete `PixelOps.compositeCanvas`~~ | **done** — thumbnail on one path, `PerfBaselineTests` green |
-| **4** | Group properties: isolated/pass-through, opacity, visibility migration (§4.1–4.2) | groups composite as parentheses |
+| ~~**4**~~ | ~~Group properties: isolated/pass-through, opacity, visibility migration (§4.1–4.2)~~ | **done** — groups composite as parentheses, both backends on one buffer rule |
 | **5** | Tier 1 blend modes on layers and groups (§7), **and §5.2's sandwich with them** | the shader `switch` plus UI; the live canvas shows a blended layer |
 | **6** | Alpha masks (§6), incl. `MaskParityLogicTests` | raster and vector mask pixel-identically |
 | **7** | Tier 2 blend modes | |
