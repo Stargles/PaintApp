@@ -473,4 +473,75 @@ final class LayerUITests: PaintUITestCase {
                        "The opacity should persist on the model, not reset when the row is reconfigured")
     }
 
+    // MARK: - §7 blend modes
+
+    /// The picker (`blendModeRow` in LayerPanel.swift) is a `Menu` grouped by `BlendMode.menuGroups`;
+    /// picking an item should reach `CanvasManager.setLayerBlendMode` — not stay local to the control
+    /// — show on the row without closing the options panel (§7's whole point: a mode has to be
+    /// readable without opening options), and survive the panel closing and reopening.
+    func testSettingLayerBlendModeShowsOnRowAndPersists() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let row = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap() // select
+        row.tap() // open options
+
+        let picker = app.buttons["layerOptions.blendModeButton"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        XCTAssertEqual(picker.value as? String, "normal", "A fresh layer starts at Normal")
+
+        let rowBlendMode = app.otherElements["layerPanel.row.0.blendMode"]
+        XCTAssertEqual(rowBlendMode.value as? String, "normal", "Setup: the row's own marker should agree")
+
+        picker.tap()
+        let multiply = app.buttons["layerOptions.blendMode.multiply"]
+        XCTAssertTrue(multiply.waitForExistence(timeout: 5), "The menu should list Multiply, grouped under darkening (§7)")
+        multiply.tap()
+
+        XCTAssertEqual(picker.value as? String, "multiply", "Picking a mode should update the button's own state")
+        XCTAssertEqual(rowBlendMode.value as? String, "multiply",
+                       "The row should reflect the new mode immediately — LayerRowModel.blendMode is part of its Equatable conformance, so the diffable data source reconfigures the cell")
+
+        // Close and reopen to confirm the pick reached `setLayerBlendMode`, not just local control state.
+        app.buttons["layerOptions.close"].tap()
+        row.tap()
+        row.tap()
+        XCTAssertEqual(app.buttons["layerOptions.blendModeButton"].value as? String, "multiply",
+                       "The picker should reflect the layer's blendMode, not reset when the panel reopens")
+    }
+
+    /// Same contract as the layer picker above, routed through `setFolderBlendMode` instead — the
+    /// group side of §7, which is the same picker (`blendModeRow`) reused rather than a second one.
+    func testSettingFolderBlendModeShowsOnRowAndPersists() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addFolderFromAddMenu(app)
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
+
+        app.buttons["layerPanel.folder.Folder 1.options"].tap()
+        let picker = app.buttons["layerOptions.blendModeButton"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        XCTAssertEqual(picker.value as? String, "normal", "A fresh folder starts at Normal")
+
+        picker.tap()
+        let screen = app.buttons["layerOptions.blendMode.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 5), "The menu should list Screen, grouped under lightening (§7)")
+        screen.tap()
+
+        XCTAssertEqual(picker.value as? String, "screen")
+        let rowBlendMode = app.otherElements["layerPanel.folder.Folder 1.blendMode"]
+        XCTAssertEqual(rowBlendMode.value as? String, "screen",
+                       "The folder row should reflect the new mode the same way a layer row does")
+
+        // Close and reopen to confirm the pick reached `setFolderBlendMode`, not just local control state.
+        app.buttons["layerOptions.close"].tap()
+        app.buttons["layerPanel.folder.Folder 1.options"].tap()
+        XCTAssertEqual(app.buttons["layerOptions.blendModeButton"].value as? String, "screen",
+                       "The picker should reflect the folder's blendMode, not reset when the panel reopens")
+    }
+
 }

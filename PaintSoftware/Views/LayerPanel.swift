@@ -181,6 +181,12 @@ struct LayerOptionsPanel: View {
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
+                blendModeRow(current: canvasManager.layers[index].blendMode) { mode in
+                    canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
+                }
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
                 optionsAction("Rename", systemImage: "pencil", identifier: "layerOptions.rename") {
                     draftName = canvasManager.layers[index].name
                     isRenaming = true
@@ -248,6 +254,53 @@ struct LayerOptionsPanel: View {
     }
 }
 
+/// The blend-mode picker shared by `LayerOptionsPanel` and `FolderOptionsPanel` (§7's Tier 1) — a
+/// `Menu` grouped by `BlendMode.menuGroups`'s sections (darkening / lightening / contrast together),
+/// the same pull-down idiom the layer panel's own "+" button already uses (`LayerPanel.header`)
+/// rather than a new control for fourteen cases. `Section` gives SwiftUI's native inline dividers
+/// between groups for free, matching what `menuGroups` is *for* — no hand-drawn rule needed here the
+/// way the panel's own rows use one.
+///
+/// `current`'s raw value rides as the button's `accessibilityValue` — stable across a `displayName`
+/// wording change, unlike reading the visible label back — so a UI test can confirm a pick stuck
+/// after the panel closes and reopens, the same way `layerOptions.passThroughToggle` does.
+private func blendModeRow(current: BlendMode, onSelect: @escaping (BlendMode) -> Void) -> some View {
+    Menu {
+        ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
+            Section {
+                ForEach(BlendMode.menuGroups[groupIndex], id: \.self) { mode in
+                    Button {
+                        onSelect(mode)
+                    } label: {
+                        if mode == current {
+                            Label(mode.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(mode.displayName)
+                        }
+                    }
+                    .accessibilityIdentifier("layerOptions.blendMode.\(mode.rawValue)")
+                }
+            }
+        }
+    } label: {
+        HStack(spacing: 8) {
+            Text("Blend Mode").foregroundColor(.white)
+            Spacer()
+            Text(current.displayName)
+                .font(.caption)
+                .foregroundColor(.gray)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.gray)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+    .accessibilityIdentifier("layerOptions.blendModeButton")
+    .accessibilityValue(current.rawValue)
+}
+
 /// One row of an options menu's action list — shared by `LayerOptionsPanel` and
 /// `FolderOptionsPanel` so the two menus render identically.
 private func optionsAction(_ title: String, systemImage: String, identifier: String,
@@ -309,6 +362,12 @@ struct FolderOptionsPanel: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .accessibilityIdentifier("layerOptions.passThroughToggle")
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
+                blendModeRow(current: canvasManager.folders[index].blendMode) { mode in
+                    canvasManager.setFolderBlendMode(folderID, to: mode)
+                }
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 

@@ -573,6 +573,9 @@ struct LayerRowModel: Equatable {
     var layerIndex: Int
     var isCurrent: Bool
     var opacity: Double
+    /// §7's Tier 1 mode. Read by `LayerStackCell` to badge a non-normal row — the only way a mode
+    /// is visible without opening the row's options panel.
+    var blendMode: BlendMode
     var isVector: Bool
     var isFillReference: Bool
     var strokeCount: Int
@@ -603,6 +606,7 @@ struct LayerRowModel: Equatable {
             layerIndex = -1
             isCurrent = false
             opacity = folder?.opacity ?? 1
+            blendMode = folder?.blendMode ?? .normal
             isVector = false
             isFillReference = false
             strokeCount = 0
@@ -622,6 +626,7 @@ struct LayerRowModel: Equatable {
             layerIndex = index
             isCurrent = manager.currentLayerIndex == index
             opacity = layer?.opacity ?? 1
+            blendMode = layer?.blendMode ?? .normal
             isVector = layer?.kind == .vector
             isFillReference = layer?.isFillReference ?? false
             thumbnail = layer?.thumbnail
