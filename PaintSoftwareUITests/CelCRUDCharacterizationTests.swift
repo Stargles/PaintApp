@@ -646,4 +646,109 @@ final class CelCRUDCharacterizationTests: XCTestCase {
 
         XCTAssertNil(manager.ensureCelAtCurrentFrame(layerIndex: 7))
     }
+
+    // MARK: - The rasterize memo (LAYER_COMPOSITING.md §5.2)
+
+    /// `PixelOps.rasterize` memoizes its flatten on model state — cel id, both tier versions, both
+    /// image identities, size and quality. These pin the two halves that matter in opposite
+    /// directions: that it *hits* when nothing changed (or it is pointless), and that it *misses*
+    /// on every input that can change the pixels (or it is a stale-frame bug).
+    ///
+    /// The staleness half is the one worth having. A cache keyed on a version that fails to bump
+    /// serves last frame's ink forever, and the symptom — a stroke that lands everywhere except the
+    /// thumbnail — looks nothing like a caching problem.
+
+    private func size() -> CGSize { CGSize(width: 64, height: 64) }
+
+    func testFlatteningTheSameUntouchedCelTwiceReturnsTheMemoizedImage() {
+        PixelOps.clearRasterizeCache()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let cel = manager.layers[0].cels[0]
+
+        let first = PixelOps.rasterize(cel: cel, canvasSize: size())
+        let second = PixelOps.rasterize(cel: cel, canvasSize: size())
+        XCTAssertTrue(first === second, "An unchanged cel must not be flattened twice — that flatten is the 276 ms")
+    }
+
+    func testAStrokeOnTheRasterTierInvalidatesTheMemo() {
+        PixelOps.clearRasterizeCache()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let cel = manager.layers[0].cels[0]
+        let before = PixelOps.rasterize(cel: cel, canvasSize: size())
+
+        cel.raster.beginStroke()
+        cel.raster.stampCircle(at: CGPoint(x: 20, y: 20), radius: 6, color: .red, alpha: 1, hardness: 1)
+        cel.raster.endStroke()
+
+        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === before,
+                       "RasterLayerTexture.version bumped, so the flatten must be redone")
+    }
+
+    func testAVectorEditInvalidatesTheMemo() {
+        PixelOps.clearRasterizeCache()
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer()
+        let cel = manager.layers[0].cels[0]
+        guard let vector = cel.vector else { return XCTFail("A vector layer's cel carries a VectorCanvas") }
+        let before = PixelOps.rasterize(cel: cel, canvasSize: size())
+
+        vector.addStroke(VectorStroke(brush: manager.selectedBrush,
+                                      color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                      size: 8, opacity: 1,
+                                      samples: [VectorSample(x: 8, y: 8, pressure: 1),
+                                                VectorSample(x: 40, y: 40, pressure: 1)]))
+
+        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === before,
+                       "The vector tier has its own version and it is part of the key")
+    }
+
+    func testReplacingTheFillOrBakedImageInvalidatesTheMemo() {
+        PixelOps.clearRasterizeCache()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        var cel = manager.layers[0].cels[0]
+        let before = PixelOps.rasterize(cel: cel, canvasSize: size())
+
+        // Wholesale replacement is how a fill or a bake actually lands, which is why the key
+        // compares these by object identity rather than content.
+        cel.fillImage = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 20, height: 20))
+        let afterFill = PixelOps.rasterize(cel: cel, canvasSize: size())
+        XCTAssertFalse(afterFill === before, "A new fillImage is a new flatten")
+
+        cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 10, width: 20, height: 20))
+        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === afterFill,
+                       "And so is a new bakedImage")
+    }
+
+    /// The collision the key's object-identity half exists to prevent, in the form it actually
+    /// takes: a cel id outlives the buffers under it, so a reopened project presents the same id
+    /// with a `RasterLayerTexture` whose version counter has restarted at 0. A version-only key
+    /// would match an entry cached before the last edit and hand back pre-edit pixels.
+    func testAFreshBufferUnderTheSameCelIdIsNotAHit() {
+        PixelOps.clearRasterizeCache()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        var cel = manager.layers[0].cels[0]
+
+        cel.raster.beginStroke()
+        cel.raster.stampCircle(at: CGPoint(x: 20, y: 20), radius: 6, color: .red, alpha: 1, hardness: 1)
+        cel.raster.endStroke()
+        let drawn = PixelOps.rasterize(cel: cel, canvasSize: size())
+
+        // What a reload does: same cel id, a brand-new buffer, version back to 0.
+        cel.raster = .empty(size: size())
+        XCTAssertEqual(cel.raster.version, 0, "Fixture: a fresh texture starts its counter over")
+        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === drawn,
+                       "A new buffer must be a new key however its version happens to read")
+    }
+
+    func testQualityAndCanvasSizeAreBothPartOfTheKey() {
+        PixelOps.clearRasterizeCache()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let cel = manager.layers[0].cels[0]
+
+        let full = PixelOps.rasterize(cel: cel, canvasSize: size(), quality: .full)
+        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size(), quality: .preview) === full,
+                       "`.preview` resolves the vector tier differently, so it is a different flatten")
+        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: CGSize(width: 32, height: 32)) === full,
+                       "A different canvas size is a different image, not a scaled one")
+    }
 }

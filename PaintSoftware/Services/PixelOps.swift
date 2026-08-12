@@ -50,7 +50,106 @@ enum PixelOps {
     /// `RasterLayerTexture` has a single rendering. Defaulted to `.full` so the ~10 existing callers
     /// are unchanged — it is threaded through for `RenderRequest`, whose §9.1 contract is to carry a
     /// quality, and a quality the snapshot then ignored would be a field that lies.
+    ///
+    /// **Memoized per cel version (§5.2).** The two tiers underneath already cache — `renderToUIImage`
+    /// per `RasterLayerTexture.version`, `VectorCanvas.render` per its own — but the *flatten* did
+    /// not, so every call paid a canvas-sized `UIGraphicsImageRenderer` and up to four full-canvas
+    /// draws. That was measured as the expensive half of a composite: six layers at 2048² cost 276 ms
+    /// to snapshot against 84 ms to actually composite. §5.2 names this memo as the fix and notes it
+    /// "helps every consumer rather than only the live path", which is why it lives here rather than
+    /// in `makeRenderRequest`.
+    ///
+    /// This is **not** the texture cache phase 2 deleted. That one keyed on the identity of a
+    /// `UIImage` this function mints fresh every call, so it could never hit and was measured never
+    /// hitting. The key here comes from the model instead, exactly as that post-mortem prescribed:
+    /// cel id, both tier versions, both image identities, size and quality. It adds no new trust —
+    /// those versions are already what the two caches below it rely on.
     static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full) -> UIImage {
+        let key = RasterizeKey(cel: cel, canvasSize: canvasSize, quality: quality)
+        if let hit = rasterizeCache.value(for: key) { return hit }
+        let image = rasterizeUncached(cel: cel, canvasSize: canvasSize, quality: quality)
+        rasterizeCache.store(image, for: key)
+        return image
+    }
+
+    /// Identity of a flatten, drawn entirely from model state.
+    ///
+    /// The two `UIImage` tiers are compared by object identity rather than content because that is
+    /// how they change: a fill or a bake *replaces* `fillImage`/`bakedImage` wholesale rather than
+    /// drawing into them, so a new object is exactly the signal that the pixels are new.
+    private struct RasterizeKey: Hashable {
+        let celID: UUID
+        let raster: ObjectIdentifier
+        let rasterVersion: Int
+        let vector: ObjectIdentifier?
+        let vectorVersion: Int
+        let fillImage: ObjectIdentifier?
+        let bakedImage: ObjectIdentifier?
+        let width: Int
+        let height: Int
+        let quality: RenderQuality
+
+        init(cel: Cel, canvasSize: CGSize, quality: RenderQuality) {
+            celID = cel.id
+            // **Identity *and* version, for both tiers, and the identity is the load-bearing half.**
+            // A version alone is monotonic only within one object's lifetime, while a cel id outlives
+            // any number of them: reopening a project rebuilds every `RasterLayerTexture` with its
+            // counter back at 0 under the same cel id saved in the manifest, so a version-only key
+            // could match an entry cached before the last edit and serve pre-edit pixels. Undoing a
+            // cel-content change can swap in a texture object the same way. Keying on the object as
+            // well makes a fresh buffer a fresh key by construction, which is cheaper to guarantee
+            // than to remember to clear the cache at every point one can be replaced.
+            raster = ObjectIdentifier(cel.raster)
+            rasterVersion = cel.raster.version
+            vector = cel.vector.map(ObjectIdentifier.init)
+            // -1 rather than 0 for "no vector tier at all", so acquiring an empty one is a change.
+            vectorVersion = cel.vector?.version ?? -1
+            fillImage = cel.fillImage.map(ObjectIdentifier.init)
+            bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+            width = Int(canvasSize.width.rounded())
+            height = Int(canvasSize.height.rounded())
+            self.quality = quality
+        }
+    }
+
+    /// Small and bounded on purpose: one canvas-sized image is 16.8 MB at 2048² and 64 MB at 4000²
+    /// (§5.3), so this holds a working set — the layers of the current frame, plus the neighbours a
+    /// scrub touches — and not a history. Evicts in insertion order, which for a cache read in
+    /// bottom-to-top stack order is near enough to LRU to not be worth the bookkeeping.
+    private static let rasterizeCache = RasterizeCache(limit: 24)
+
+    private final class RasterizeCache {
+        private let limit: Int
+        private var entries: [RasterizeKey: UIImage] = [:]
+        private var order: [RasterizeKey] = []
+        private let lock = NSLock()
+
+        init(limit: Int) { self.limit = limit }
+
+        func value(for key: RasterizeKey) -> UIImage? {
+            lock.lock(); defer { lock.unlock() }
+            return entries[key]
+        }
+
+        func store(_ image: UIImage, for key: RasterizeKey) {
+            lock.lock(); defer { lock.unlock() }
+            if entries.updateValue(image, forKey: key) == nil { order.append(key) }
+            while order.count > limit {
+                entries.removeValue(forKey: order.removeFirst())
+            }
+        }
+
+        func removeAll() {
+            lock.lock(); defer { lock.unlock() }
+            entries.removeAll(); order.removeAll()
+        }
+    }
+
+    /// Drops every memoized flatten. For tests that need to measure the uncached cost, and for a
+    /// memory warning — nothing here is state, so throwing it away only costs time.
+    static func clearRasterizeCache() { rasterizeCache.removeAll() }
+
+    private static func rasterizeUncached(cel: Cel, canvasSize: CGSize, quality: RenderQuality) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let strokesImage = cel.raster.renderToUIImage()
         // A vector cel's live strokes/images live in `vector` (rendered to a native-res image),
