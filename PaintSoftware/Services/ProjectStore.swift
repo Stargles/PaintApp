@@ -154,6 +154,7 @@ enum ProjectStore {
             let isVisible: Bool
             let kind: LayerKind
             let parentFolderID: UUID?
+            let blendMode: BlendMode
             let cels: [CelContent]
         }
 
@@ -218,7 +219,7 @@ enum ProjectStore {
             layers = canvasManager.layers.map { layer in
                 LayerContent(id: layer.id, name: layer.name, opacity: layer.opacity,
                              isVisible: layer.isVisible, kind: layer.kind,
-                             parentFolderID: layer.parentFolderID,
+                             parentFolderID: layer.parentFolderID, blendMode: layer.blendMode,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                rasterImage: cel.raster.renderToUIImage(),
@@ -411,6 +412,7 @@ enum ProjectStore {
                 isVisible: layer.isVisible,
                 kind: layer.kind,
                 parentFolderID: layer.parentFolderID?.uuidString,
+                blendMode: layer.blendMode,
                 cels: celManifests
             ))
         }
@@ -560,6 +562,7 @@ enum ProjectStore {
                 opacity: layerManifest.opacity,
                 isVisible: layerManifest.isVisible,
                 kind: layerManifest.kind,
+                blendMode: layerManifest.blendMode,
                 parentFolderID: parentID,
                 cels: cels
             ))

@@ -55,6 +55,7 @@
 		DEC0DE000000000000000095 /* PaintSoftware/Models/RenderTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000094 /* PaintSoftware/Models/RenderTree.swift */; };
 		DEC0DE000000000000000097 /* RenderTreeCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */; };
 		DEC0DE000000000000000099 /* PaintSoftware/Engine/RenderRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000098 /* PaintSoftware/Engine/RenderRequest.swift */; };
+		DEC0DE00000000000000FF02 /* PaintSoftware/Models/BlendMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000FF01 /* PaintSoftware/Models/BlendMode.swift */; };
 		DEC0DE00000000000000009B /* PaintSoftware/Engine/Compositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009A /* PaintSoftware/Engine/Compositor.swift */; };
 		DEC0DE00000000000000009D /* PaintSoftware/Engine/MetalCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */; };
 		DEC0DE00000000000000009F /* CompositorParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */; };
@@ -164,6 +165,7 @@
 		DEC0DE000000000000000094 /* PaintSoftware/Models/RenderTree.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/RenderTree.swift"; sourceTree = "<group>"; };
 		DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RenderTreeCharacterizationTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000098 /* PaintSoftware/Engine/RenderRequest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/RenderRequest.swift"; sourceTree = "<group>"; };
+		DEC0DE00000000000000FF01 /* PaintSoftware/Models/BlendMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/BlendMode.swift"; sourceTree = "<group>"; };
 		DEC0DE00000000000000009A /* PaintSoftware/Engine/Compositor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/Compositor.swift"; sourceTree = "<group>"; };
 		DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MetalCompositor.swift"; sourceTree = "<group>"; };
 		DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CompositorParityLogicTests.swift; sourceTree = "<group>"; };
@@ -343,6 +345,7 @@
 				DEC0DE000000000000000090 /* PaintSoftware/Models/CanvasManager+BlockDrag.swift */,
 				DEC0DE000000000000000094 /* PaintSoftware/Models/RenderTree.swift */,
 				DEC0DE000000000000000098 /* PaintSoftware/Engine/RenderRequest.swift */,
+				DEC0DE00000000000000FF01 /* PaintSoftware/Models/BlendMode.swift */,
 				DEC0DE00000000000000009A /* PaintSoftware/Engine/Compositor.swift */,
 				DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */,
 				DEC0DE0000000000000000A2 /* PaintSoftware/Engine/Composite.metal */,
@@ -535,6 +538,7 @@
 				DEC0DE000000000000000095 /* PaintSoftware/Models/RenderTree.swift in Sources */,
 				DEC0DE000000000000000097 /* RenderTreeCharacterizationTests.swift in Sources */,
 				DEC0DE000000000000000099 /* PaintSoftware/Engine/RenderRequest.swift in Sources */,
+				DEC0DE00000000000000FF02 /* PaintSoftware/Models/BlendMode.swift in Sources */,
 				DEC0DE00000000000000009B /* PaintSoftware/Engine/Compositor.swift in Sources */,
 				DEC0DE00000000000000009D /* PaintSoftware/Engine/MetalCompositor.swift in Sources */,
 				DEC0DE00000000000000009F /* CompositorParityLogicTests.swift in Sources */,

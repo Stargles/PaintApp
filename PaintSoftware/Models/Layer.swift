@@ -11,6 +11,11 @@ struct Layer: Identifiable {
     /// on independently from the layer's Edit menu. See [[feedback-vector-layer-extensibility]].
     var isFillReference: Bool = true
     var kind: LayerKind = .raster
+    /// How this layer combines with everything beneath it *within its own container* — a layer inside
+    /// a group blends against that group's contents, not through it, which is what §4.2's isolation
+    /// means from the layer's side. Defaulted, so every existing project and every `Layer(...)` call
+    /// site is unchanged.
+    var blendMode: BlendMode = .normal
     /// If set, this layer belongs to the folder with this ID. Layer ordering in the `layers` array
     /// determines the stacking order within each folder. A folder's visibility/expand state lives on
     /// the corresponding `LayerFolder` in `CanvasManager.folders`.

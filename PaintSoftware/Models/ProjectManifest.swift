@@ -205,16 +205,19 @@ struct LayerManifest: Codable {
     var kind: LayerKind
     /// The folder this layer belongs to, if any. Stored as a UUID string for forward compat.
     var parentFolderID: String? = nil
+    /// Defaulted like `kind`, so a project saved before layers could blend loads as all-normal.
+    var blendMode: BlendMode = .normal
     var cels: [CelManifest]
 
     init(id: UUID, name: String, opacity: Double, isVisible: Bool, kind: LayerKind = .raster,
-         parentFolderID: String? = nil, cels: [CelManifest]) {
+         parentFolderID: String? = nil, blendMode: BlendMode = .normal, cels: [CelManifest]) {
         self.id = id
         self.name = name
         self.opacity = opacity
         self.isVisible = isVisible
         self.kind = kind
         self.parentFolderID = parentFolderID
+        self.blendMode = blendMode
         self.cels = cels
     }
 
@@ -229,10 +232,11 @@ struct LayerManifest: Codable {
         kind = try container.decodeIfPresent(LayerKind.self, forKey: .kind) ?? .raster
         cels = try container.decode([CelManifest].self, forKey: .cels)
         parentFolderID = try container.decodeIfPresent(String.self, forKey: .parentFolderID)
+        blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, opacity, isVisible, kind, parentFolderID, cels
+        case id, name, opacity, isVisible, kind, parentFolderID, blendMode, cels
     }
 }
 

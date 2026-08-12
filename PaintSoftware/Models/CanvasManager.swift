@@ -865,6 +865,23 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// Sets a layer's blend mode (§7). Undoable as one step, like every other discrete pick.
+    func setLayerBlendMode(layerIndex: Int, to mode: BlendMode) {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].blendMode != mode else { return }
+        withStructureUndo(name: "Blend Mode") {
+            layers[layerIndex].blendMode = mode
+        }
+    }
+
+    /// Sets a group's blend mode — applied once to the group's assembled composite, never per child,
+    /// which is the same rule its opacity follows and the reason both need an intermediate buffer.
+    func setFolderBlendMode(_ folderID: UUID, to mode: BlendMode) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].blendMode != mode else { return }
+        withStructureUndo(name: "Blend Mode") {
+            folders[idx].blendMode = mode
+        }
+    }
+
     /// Toggles whether a folder's child layers are shown in the layer panel.
     func toggleFolderExpanded(_ folderID: UUID) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }

@@ -1,19 +1,5 @@
 import Foundation
 
-/// How a layer or group combines with the backdrop beneath it.
-///
-/// One case so far, and deliberately an enum rather than nothing — the same call `CompositorOp`
-/// makes, for the same reason. LAYER_COMPOSITING.md §7 lists twenty-odd modes arriving in phases 5
-/// and 7 as "one `switch` in one shader"; what phase 4 needs from it now is a *name* for normal, so
-/// that `RenderNode.needsOwnBuffer` — the rule deciding when a group costs an intermediate buffer —
-/// can be written once and stay written when the cases land.
-///
-/// Lives beside `LayerFolder` because a folder is the only thing that has one yet. Phase 5 gives
-/// `Layer` one too, and that is the moment to move this into a file of its own.
-enum BlendMode: String, Codable, Equatable {
-    case normal
-}
-
 struct LayerFolder: Identifiable {
     let id: UUID
     var name: String
@@ -40,9 +26,9 @@ struct LayerFolder: Identifiable {
     /// blend mode. Pass-through — `false` — lets children blend against the backdrop below the
     /// group, which is Photoshop's and CSP's default and this app's *toggle* rather than its default.
     ///
-    /// **Nothing observes it yet, and that is expected.** With every child at `.normal`, isolation
-    /// changes no pixel: source-over is associative, so children composited onto transparency and
-    /// then drawn over the backdrop equal children drawn straight onto it. It is stored and honoured
-    /// now so that phase 5 adds blend modes and only blend modes.
+    /// Unobservable until phase 5 gave children something other than source-over to do — with every
+    /// child at `.normal`, isolation changes no pixel, since children composited onto transparency
+    /// and then drawn over the backdrop equal children drawn straight onto it. Storing and honouring
+    /// it a phase early is what let phase 5 add blend modes and only blend modes.
     var isIsolated: Bool = true
 }

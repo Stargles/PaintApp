@@ -68,9 +68,10 @@ struct RenderNode: Identifiable, Equatable {
 
     /// How this node combines with the backdrop beneath it.
     ///
-    /// **A leaf carries `.normal` because it has nowhere else to get one**, not because a layer is
-    /// declared unblendable: `Layer` gains a blend mode in phase 5 and this becomes one more field
-    /// read in the derivation. A node's comes off `LayerFolder`, which has had one since phase 4a.
+    /// A leaf's comes off `Layer` and a node's off `LayerFolder`, both since phase 5. The difference
+    /// is *where the mode is applied*, not whether: a leaf blends as it is drawn onto the backdrop,
+    /// while a node blends its assembled composite onto the backdrop once — which is why only the
+    /// node case implies a buffer (`needsOwnBuffer`).
     let blendMode: BlendMode
 
     /// Whether this node's inputs start from transparency and blend only against each other (§4.2),
@@ -185,7 +186,7 @@ extension CanvasManager {
                 let layer = layers[index]
                 return RenderNode(id: layer.id, content: .leaf(layerIndex: index),
                                   opacity: layer.opacity, isVisible: layer.isVisible,
-                                  blendMode: .normal, isIsolated: false)
+                                  blendMode: layer.blendMode, isIsolated: false)
             case .folder(let folder):
                 // Unconditional descent: `isExpanded` is a panel affordance and must not reach
                 // rendering. A collapsed folder still draws everything inside it.
