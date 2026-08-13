@@ -20,6 +20,19 @@ import UIKit
 /// produce). What is not done is teaching the oracle about folders: it is the specification of what
 /// shipped, and an oracle edited to agree with the change it is measuring is not one.
 ///
+/// **Phase 5 spent the rest of it, and the same rule applied.** The oracle draws every layer
+/// `blendMode: .normal`, so any document with a blend in it is outside what it can describe — and
+/// `testIsolatedAndPassThroughGroupsBothCompositeLikeTheFlatWalk`, which held both settings to the
+/// oracle, was only ever true because nothing blended. It now pins the all-normal case explicitly
+/// and `testIsolationAndPassThroughDivergeOnceAChildBlends` is the case that made the distinction
+/// real. The oracle itself is untouched, and the modes are asserted against arithmetic stated in
+/// each test instead.
+///
+/// **The GPU gate changed shape here too.** Phase 2 measured delta 0 between the backends and said
+/// in the same breath that it had no right to expect it. Source-over still holds at 0; the blend
+/// modes do not, and `testEveryBlendModeAgreesBetweenTheBackends` reports the measured per-mode
+/// figure rather than asserting a number chosen in advance.
+///
 /// **Why the leaves are painted rather than drawn.** Both sides call `PixelOps.rasterize` on the
 /// same cels, so leaf pixels are identical by construction and the only thing under test is the
 /// walk. Fixtures use flat `bakedImage` rectangles so a failure is legible as geometry — "the group
@@ -129,6 +142,73 @@ final class CompositorParityLogicTests: XCTestCase {
         guard let bytes = CanvasFixture.rgbaBytes(image) else { return [] }
         let offset = (x + y * image.width) * 4
         return bytes[offset..<(offset + 4)].map(Int.init)
+    }
+
+    /// A canvas-sized image in which **every pixel is a different (colour, alpha) combination**.
+    ///
+    /// The flat rectangles the rest of this file uses are the right fixture for a question about
+    /// stacking order — a failure reads as geometry. They are the wrong fixture for a question about
+    /// blend arithmetic, which is a claim about a whole domain: `colorDodge` at `cb = 0` and
+    /// `colorBurn` at `cs = 0` are hard-coded spec branches, `softLight` changes formula at
+    /// `cb = 0.25` and again at `cs = 0.5`, and every one of them behaves differently once alpha is
+    /// fractional on one side, the other, or both. One composite of this against another phase of it
+    /// covers 4096 combinations, which is what makes the per-mode delta a measurement rather than a
+    /// spot check.
+    ///
+    /// Built premultiplied by hand rather than drawn, because the point is to state the bytes: a
+    /// gradient rendered through CoreGraphics would be whatever its dithering produced.
+    private func spectrumImage(phase: Int) -> UIImage {
+        let side = Int(CanvasFixture.canvasSize.width)
+        var bytes = [UInt8](repeating: 0, count: side * side * 4)
+        for y in 0..<side {
+            for x in 0..<side {
+                // Two different sweeps so the two layers pair unlike values, and alpha steps in
+                // bands (including a fully transparent one and a fully opaque one) so both the
+                // `ab == 0` and `ab == 1` corners of the composite formula are covered.
+                let colour: (Int, Int, Int) = phase == 0
+                    ? (x * 4, y * 4, ((x + y) * 2) % 256)
+                    : (y * 4, ((x + y) * 2) % 256, x * 4)
+                let alpha = phase == 0 ? (x / 8) * 36 + 3 : (y / 8) * 36 + 3
+                let a = min(255, alpha)
+                let offset = (x + y * side) * 4
+                for (channel, value) in [colour.0, colour.1, colour.2].enumerated() {
+                    bytes[offset + channel] = UInt8((Double(min(value, 255)) * Double(a) / 255).rounded())
+                }
+                bytes[offset + 3] = UInt8(a)
+            }
+        }
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData),
+              let image = CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32,
+                                  bytesPerRow: side * 4, space: PixelOps.deviceRGBColorSpace,
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                                  provider: provider, decode: nil, shouldInterpolate: false,
+                                  intent: .defaultIntent) else {
+            XCTFail("The spectrum fixture must build")
+            return UIImage()
+        }
+        return UIImage(cgImage: image, scale: 1, orientation: .up)
+    }
+
+    /// Two spectrum layers, the upper one blending in `mode`.
+    private func spectrumManager(_ mode: BlendMode) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, spectrumImage(phase: 0))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, spectrumImage(phase: 1))
+        manager.setLayerBlendMode(layerIndex: 1, to: mode)
+        return manager
+    }
+
+    /// An opaque mid-grey floor with one square of `colour` blending over it in `mode` — the
+    /// smallest fixture in which a blend's arithmetic is a number you can write down.
+    private func blendOverGrey(_ mode: BlendMode, _ colour: UIColor) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(UIColor(white: 128.0 / 255, alpha: 1),
+                                                               rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(colour, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+        manager.setLayerBlendMode(layerIndex: 1, to: mode)
+        return manager
     }
 
     // MARK: - The flat case
@@ -350,12 +430,17 @@ final class CompositorParityLogicTests: XCTestCase {
         XCTAssertEqual(value[0], 64, accuracy: 2, "Premultiplied, so the colour scales with it. Got RGBA \(value)")
     }
 
-    /// **Isolation is stored, honoured, and changes no pixel — which is a measurement, not an
-    /// oversight.** With every child at `.normal` (and with one `BlendMode` case, every child is),
-    /// source-over is associative: children composited onto transparency and then drawn over the
-    /// backdrop equal children drawn straight onto it. So both settings take the direct path,
-    /// allocate nothing, and stay byte-identical to the frozen oracle. Phase 5 is where a blend mode
-    /// gives isolation something to isolate, and this test is where that will first show.
+    /// **Isolation still changes no pixel in an all-normal document, and that is now the narrower
+    /// claim it always should have been.** Source-over is associative: children composited onto
+    /// transparency and then drawn over the backdrop equal children drawn straight onto it. So with
+    /// every child at `.normal` both settings take the direct path, allocate nothing, and stay
+    /// byte-identical to the frozen oracle.
+    ///
+    /// Phase 4 wrote this test as evidence that isolation was "stored, honoured, and changes no
+    /// pixel", which was true of every document that could then exist. Phase 5 makes it false in
+    /// general — `testIsolationAndPassThroughDivergeOnceAChildBlends` is the counterpart — so what
+    /// this case is worth keeping for is the *other* direction: the default document, the one every
+    /// project is made of, must not start paying for a buffer just because blend modes now exist.
     func testIsolatedAndPassThroughGroupsBothCompositeLikeTheFlatWalk() {
         let manager = overlappingManager()
         guard let folder = manager.groupLayers(manager.layers[2].id, with: manager.layers[1].id, name: "Group") else {
@@ -380,6 +465,163 @@ final class CompositorParityLogicTests: XCTestCase {
         manager.setFolderOpacity(folder, to: 1)
 
         assertWalksAgree(manager, "Setting the slider to where it already was must not cost a buffer's rounding")
+    }
+
+    // MARK: - Blend modes (§7 Tier 1)
+
+    /// **A leaf blends as it is drawn**, against whatever the walk has accumulated beneath it.
+    ///
+    /// Asserted as arithmetic rather than against a golden image: multiply is `cb * cs`, the floor is
+    /// 128/255 on every channel, and red is (1, 0, 0), so the answer is 128 on red and 0 elsewhere and
+    /// a test that got a different one can say which channel and by how much.
+    func testALeafBlendsAgainstWhateverIsBeneathIt() {
+        guard let image = composite(blendOverGrey(.multiply, red)) else {
+            return XCTFail("The fixture must composite")
+        }
+        XCTAssertEqual(pixel(image, 16, 16), [128, 0, 0, 255],
+                       "Multiply of pure red onto mid-grey keeps the red channel and zeroes the others")
+        XCTAssertEqual(pixel(image, 48, 48), [128, 128, 128, 255],
+                       "And outside the square the floor is untouched — a blend applies where the layer has coverage")
+    }
+
+    /// The `ab == 0` corner of the composite formula, which is the one place a blend mode has to
+    /// *stop* being itself: with nothing beneath it, `Cr = (1 - ab) * Cs + ab * B` collapses to the
+    /// source and the layer reads as normal.
+    ///
+    /// §4.2 states this as a property of isolated groups ("a multiply child at the bottom of a group
+    /// multiplies against nothing and therefore reads as normal — that is correct and intended"), and
+    /// it is worth pinning at the top level too, because it is the same arithmetic and neither
+    /// backend special-cases it.
+    func testABlendingLayerOverNothingReadsAsNormal() {
+        let blended = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(blended, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+        blended.setLayerBlendMode(layerIndex: 0, to: .multiply)
+
+        let plain = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(plain, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+
+        assertCompositesAs(blended, asIfFlat: plain,
+                           "Multiply against a transparent backdrop is the source, exactly — no clamping to black")
+    }
+
+    /// The guard on the hand-rolled modes' byte round-trip.
+    ///
+    /// `add`, `subtract` and `linearLight` have no `CGBlendMode`, so `CoreGraphicsCompositor` reads
+    /// the whole canvas back, computes, and stamps the result over the context with `.copy`. That
+    /// round-trip has to be lossless or every mode that uses it drifts by a channel step for reasons
+    /// nothing to do with its arithmetic — and a fully transparent source is the case where the right
+    /// answer is *exactly* the backdrop, so any loss in the round-trip shows up here first and
+    /// unambiguously. Every mode is swept because the cheap CG-primitive path has to satisfy it too.
+    func testAFullyTransparentLayerLeavesTheBackdropExactlyAsItWasInEveryMode() {
+        let reference = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(reference, layerIndex: 0, spectrumImage(phase: 0))
+        guard let expected = composite(reference) else { return XCTFail("The reference must composite") }
+
+        for mode in BlendMode.allCases {
+            let manager = CanvasFixture.manager(layerCount: 2)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, spectrumImage(phase: 0))
+            CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                          CanvasFixture.solidImage(.clear, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+            manager.setLayerBlendMode(layerIndex: 1, to: mode)
+            assertPixelsIdentical(composite(manager), expected,
+                                  "\(mode.displayName) over a transparent layer must be the identity, byte for byte")
+        }
+    }
+
+    /// **A group blends its assembled composite once, not each child.**
+    ///
+    /// Two overlapping opaque children in a group set to multiply: where they overlap the group's
+    /// composite is the *upper* child, and that is what multiplies the floor — green onto mid-grey,
+    /// giving (0, 128, 0). Setting multiply on each child instead multiplies twice, red into the
+    /// floor and then green into that, and pure red times pure green is black. Non-overlapping
+    /// content cannot tell the two apart, which is why this fixture overlaps — the same reason
+    /// `testGroupOpacityFadesTheGroupsCompositeRatherThanEachChild` does.
+    func testAGroupBlendAppliesOnceToTheAssembledCompositeRatherThanPerChild() {
+        func floorAndTwoSquares() -> CanvasManager {
+            let manager = CanvasFixture.manager(layerCount: 3)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(UIColor(white: 128.0 / 255, alpha: 1),
+                                                                   rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+            let square = CGRect(x: 0, y: 0, width: 40, height: 40)
+            CanvasFixture.setBakedContent(manager, layerIndex: 1, CanvasFixture.solidImage(red, rect: square))
+            CanvasFixture.setBakedContent(manager, layerIndex: 2, CanvasFixture.solidImage(green, rect: square))
+            return manager
+        }
+
+        let grouped = floorAndTwoSquares()
+        guard let folder = grouped.groupLayers(grouped.layers[2].id, with: grouped.layers[1].id, name: "Group") else {
+            return XCTFail("Fixture needs the group to exist")
+        }
+        grouped.setFolderBlendMode(folder, to: .multiply)
+
+        let perChild = floorAndTwoSquares()
+        perChild.setLayerBlendMode(layerIndex: 1, to: .multiply)
+        perChild.setLayerBlendMode(layerIndex: 2, to: .multiply)
+
+        guard let groupImage = composite(grouped), let perChildImage = composite(perChild) else {
+            return XCTFail("Both fixtures must composite")
+        }
+        XCTAssertEqual(pixel(groupImage, 20, 20), [0, 128, 0, 255],
+                       "The group resolves to green first, then multiplies the floor once. Got RGBA \(pixel(groupImage, 20, 20))")
+        XCTAssertEqual(pixel(perChildImage, 20, 20), [0, 0, 0, 255],
+                       "Per child, red and then green multiply in turn and nothing survives. Got RGBA \(pixel(perChildImage, 20, 20))")
+    }
+
+    /// **The toggle that changed no pixel until now.** §4.2 said in phase 4 that isolation "is stored,
+    /// persisted and honoured by both backends now so that phase 5 adds blend modes and nothing else"
+    /// — this is the test that says the prediction held and the control finally does something.
+    ///
+    /// One multiply child in a group, over an opaque floor. Isolated, the child starts from
+    /// transparency, so it multiplies against nothing (reading as normal) and the finished group
+    /// draws source-over: pure red. Pass-through, it multiplies the floor directly: (128, 0, 0).
+    func testIsolationAndPassThroughDivergeOnceAChildBlends() {
+        func floorAndBlendingChild() -> (CanvasManager, UUID) {
+            let manager = CanvasFixture.manager(layerCount: 2)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(UIColor(white: 128.0 / 255, alpha: 1),
+                                                                   rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+            CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                          CanvasFixture.solidImage(self.red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+            manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
+            let folder = manager.addFolder(name: "Group")
+            manager.layers[1].parentFolderID = folder
+            return (manager, folder)
+        }
+
+        let (isolated, isolatedFolder) = floorAndBlendingChild()
+        isolated.setFolderIsolated(isolatedFolder, isIsolated: true)
+        let (passThrough, passThroughFolder) = floorAndBlendingChild()
+        passThrough.setFolderIsolated(passThroughFolder, isIsolated: false)
+
+        guard let isolatedImage = composite(isolated), let passThroughImage = composite(passThrough) else {
+            return XCTFail("Both fixtures must composite")
+        }
+        XCTAssertEqual(pixel(isolatedImage, 16, 16), [255, 0, 0, 255],
+                       "Isolated: the child multiplies against transparency, which is the child. Got RGBA \(pixel(isolatedImage, 16, 16))")
+        XCTAssertEqual(pixel(passThroughImage, 16, 16), [128, 0, 0, 255],
+                       "Pass-through: the child multiplies the floor below the group. Got RGBA \(pixel(passThroughImage, 16, 16))")
+    }
+
+    /// A hidden group is a subtree the walk never enters, and a blend inside it is not an exception —
+    /// worth its own case because a blend is the one kind of content that could plausibly reach the
+    /// backdrop without being *drawn* (it is arithmetic on what is already there), and because the
+    /// hidden group here also carries a mode of its own, so both the group's blend and the child's
+    /// have to come to nothing.
+    func testABlendInsideAHiddenGroupContributesNothing() {
+        let manager = overlappingManager()
+        let folder = manager.addFolder(name: "Hidden and blending")
+        manager.layers[1].parentFolderID = folder
+        manager.setLayerBlendMode(layerIndex: 1, to: .difference)
+        manager.setFolderBlendMode(folder, to: .colorDodge)
+        manager.toggleFolderVisibility(folder)
+
+        let reference = overlappingManager()
+        reference.layers[1].isVisible = false
+
+        assertCompositesAs(manager, asIfFlat: reference,
+                           "An invisible group's arithmetic is nobody's business, its children's included")
     }
 
     // MARK: - The snapshot rule (§9.1 point 3)
@@ -541,6 +783,103 @@ final class CompositorParityLogicTests: XCTestCase {
         assertPixelsIdentical(gpu, cpu, "An opaque layer over nothing is a copy, not a blend")
     }
 
+    /// The tolerance the blend modes hold to, **derived from the sweep below rather than chosen**.
+    /// See `testEveryBlendModeAgreesBetweenTheBackends` for the measured per-mode table and for why
+    /// zero is not available here the way it is for source-over.
+    /// One step, not the two an earlier draft assumed: with `colorDodge`, `colorBurn` and `softLight`
+    /// moved off `CGBlendMode` and onto the spec's formulas, `hardLight` is the only mode that still
+    /// differs at all. Kept at 1 rather than tightened to 0 per-mode because a single step is what
+    /// independent quantization can always produce; anything above it is a formula disagreement, and
+    /// this assertion exists to catch exactly that.
+    private static let blendTolerance = 1
+
+    /// **Every one of the fourteen modes, through both backends, over 4096 (colour, alpha) pairs.**
+    ///
+    /// This is the phase 5 counterpart to phase 2's delta-0 gate, and the headline is that the gate
+    /// does not survive contact with blend modes — which was the expected outcome this time, and is
+    /// recorded as measured. CoreGraphics composites in 8-bit premultiplied and rounds per operation;
+    /// the shader unpremultiplies to float32, blends, re-premultiplies and quantizes once. Two
+    /// rounding regimes over the same algebra agreed exactly for source-over because source-over is
+    /// linear in the quantized values. A blend function is not: `cb * cs` on two values that were each
+    /// rounded to 1/255 is not the rounding of the product, and `sqrt` in soft light spreads a
+    /// half-step input error further than that.
+    ///
+    /// Measured maximum channel delta, simulator, this fixture — identical for the leaf sweep and the
+    /// group sweep below it, which is itself worth knowing:
+    ///
+    ///     normal 0 · multiply 1 · screen 0 · overlay 0 · add 0 · subtract 0 · darken 0 · lighten 0
+    ///     colorDodge 1 · colorBurn 1 · softLight 0 · hardLight 1 · linearLight 0 · difference 0
+    ///
+    /// **The first run of this sweep is why three modes are computed by hand on the CPU.** Against
+    /// `CGBlendMode.colorDodge`, `.colorBurn` and `.softLight` the table read **141, 249 and 16**
+    /// while every other mode sat within one step. A number like 249 is not a rounding regime, it is
+    /// a different formula: CoreGraphics implements the PDF 1.4 originals, in which the two divisions
+    /// have no zero-backdrop guard — so Color Dodge lifts a black backdrop to white where the modern
+    /// rule keeps it black — and soft light uses a different `D(cb)` curve. W3C Compositing Level 1
+    /// added those guards and is what Photoshop and CSP do, which settles which one an artist
+    /// reaching for Color Dodge means. `BlendMode.handRolledChannel` follows the spec for all three.
+    ///
+    /// The four that remain at 1 are not a residue of that: `multiply` and `hardLight` still cross the
+    /// `CGBlendMode` boundary and so are quantized by CoreGraphics per operation and by the shader
+    /// once, while `colorDodge` and `colorBurn` are hand-rolled on both sides but divide, and a
+    /// division amplifies a half-step in the denominator. `softLight` reaching 0 is the sharpest
+    /// evidence the diagnosis was right — it has a `sqrt` in it and *still* agrees exactly, now that
+    /// both sides evaluate the same curve.
+    ///
+    /// Phase 2's delta-0 gate does not survive contact with blend modes in general. It survives
+    /// further than the first measurement suggested, and the gap was a bug rather than noise.
+    ///
+    /// **`.normal` keeps its exact assertion**, and `blendOver` in `Composite.metal` keeps the literal
+    /// expression phase 2 shipped rather than specialising the general path, precisely so that a
+    /// regression in source-over stays loud instead of hiding inside a tolerance written for
+    /// `colorDodge`.
+    func testEveryBlendModeAgreesBetweenTheBackends() throws {
+        try skipUnlessGPUAvailable()
+
+        var deltas: [(BlendMode, Int)] = []
+        for mode in BlendMode.allCases {
+            guard let (gpu, cpu) = gpuAndCPU(spectrumManager(mode)) else { return }
+            deltas.append((mode, maxChannelDelta(gpu, cpu)))
+        }
+        let table = deltas.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+        print("[compositor] GPU-vs-CPU max channel delta by mode: \(table)")
+
+        for (mode, delta) in deltas {
+            if mode == .normal {
+                XCTAssertEqual(delta, 0,
+                               "Source-over held at delta 0 in phase 2 and must keep holding — a tolerance for the blend modes is not a licence to drift here. Table: \(table)")
+            } else {
+                XCTAssertLessThanOrEqual(delta, Self.blendTolerance,
+                                         "\(mode.displayName) differs by \(delta), past the \(Self.blendTolerance) this file's comment derives from measurement. Table: \(table)")
+            }
+        }
+    }
+
+    /// The same fourteen through the *group* path, where each one is applied to an assembled scratch
+    /// buffer rather than to an uploaded leaf. Worth sweeping separately: it is a different texture
+    /// on the GPU and a different image on the CPU, and a mode wired up for leaves only would pass
+    /// the sweep above and repaint every grouped document.
+    func testEveryBlendModeAgreesBetweenTheBackendsOnAGroup() throws {
+        try skipUnlessGPUAvailable()
+
+        var deltas: [(BlendMode, Int)] = []
+        for mode in BlendMode.allCases {
+            let manager = spectrumManager(.normal)
+            let folder = manager.addFolder(name: "Group")
+            manager.layers[1].parentFolderID = folder
+            manager.setFolderBlendMode(folder, to: mode)
+            guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
+            deltas.append((mode, maxChannelDelta(gpu, cpu)))
+        }
+        let table = deltas.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+        print("[compositor] GPU-vs-CPU max channel delta by group mode: \(table)")
+
+        for (mode, delta) in deltas {
+            XCTAssertLessThanOrEqual(delta, Self.blendTolerance,
+                                     "Group \(mode.displayName) differs by \(delta). Table: \(table)")
+        }
+    }
+
     func testTheGPUDrawsTheBackgroundUnderTheStack() throws {
         try skipUnlessGPUAvailable()
         let manager = CanvasFixture.manager(layerCount: 1)
@@ -554,34 +893,67 @@ final class CompositorParityLogicTests: XCTestCase {
                        "The background is premultiplied on the GPU and set as a fill colour on the CPU")
     }
 
-    /// The backend declines rather than guesses when a group needs its own buffer, and `Compositor`
-    /// turns that into a correct slow frame instead of a wrong fast one.
+    /// **The backend no longer declines a group that needs its own buffer, which is phase 5's change
+    /// to it.** This test used to assert the opposite — `XCTAssertNil(MetalCompositor.composite(...))`
+    /// for a faded group — and the bail-out it pinned was affordable only while a faded group was the
+    /// single way to reach `needsOwnBuffer`. Blend modes make buffers ordinary, and §5.1's whole
+    /// argument for the GPU is blend math, so a document that blends falling back to the CPU would
+    /// leave the GPU handling everything except the case it exists for.
     ///
-    /// **The fixture is a real faded folder now.** It used to be a `fadingGroups` helper that rewrote
-    /// every node of a derived tree to opacity 0.5, because folders had no opacity to set and phase 2
-    /// needed *some* way to reach the branch; phase 4 gave them one, so the hand-built tree and its
-    /// helper are gone. The renaming that came with it is the honest part: the case this backend
-    /// declines is a faded group, not an isolated one — isolation is the default on every folder in
-    /// every document and needs no buffer at all while `BlendMode` has one case.
-    func testAFadedGroupFallsBackToTheCPUInsteadOfRenderingWrong() throws {
+    /// Both triggers are exercised, because they reach the scratch path through different clauses of
+    /// `needsOwnBuffer` and a backend could plausibly wire up one and miss the other.
+    func testTheGPURendersBufferedGroupsThroughScratchTexturesInsteadOfDeclining() throws {
+        try skipUnlessGPUAvailable()
+        for (label, apply) in [("a faded group", { (m: CanvasManager, f: UUID) in m.setFolderOpacity(f, to: 0.5) }),
+                               ("a blending group", { (m: CanvasManager, f: UUID) in m.setFolderBlendMode(f, to: .multiply) })] {
+            let manager = overlappingManager()
+            let folder = manager.addFolder(name: label)
+            manager.layers[1].parentFolderID = folder
+            apply(manager, folder)
+
+            guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
+            XCTAssertLessThanOrEqual(maxChannelDelta(gpu, cpu), Self.blendTolerance,
+                                     "\(label) must render on the GPU and match the CPU reference")
+        }
+    }
+
+    /// Nesting is what bounds the scratch pool's size (§5.3: "~2–3 live textures per nesting depth,
+    /// and depth is small"), so a nested buffered group is the fixture that would catch a pool
+    /// handing the same texture to two live groups at once — which would not crash, it would silently
+    /// composite the inner group into the outer one's accumulator.
+    func testTheGPUHandlesABufferedGroupInsideAnotherOne() throws {
         try skipUnlessGPUAvailable()
         let manager = overlappingManager()
-        let folder = manager.addFolder(name: "Faded")
-        manager.layers[1].parentFolderID = folder
-        guard let transparent = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
-            return XCTFail("Fixture needs a canvas size")
-        }
-        XCTAssertNotNil(MetalCompositor.composite(transparent), "A transparent group is still flattenable")
+        let outer = manager.addFolder(name: "Outer")
+        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        manager.layers[0].parentFolderID = outer
+        manager.layers[1].parentFolderID = inner
+        manager.layers[2].parentFolderID = inner
+        manager.setFolderOpacity(outer, to: 0.6)
+        manager.setFolderBlendMode(inner, to: .screen)
 
-        manager.setFolderOpacity(folder, to: 0.5)
-        guard let faded = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
-            return XCTFail("Fixture needs a canvas size")
-        }
-        XCTAssertNil(MetalCompositor.composite(faded), "A group needing its own buffer must decline")
+        guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
+        XCTAssertLessThanOrEqual(maxChannelDelta(gpu, cpu), Self.blendTolerance,
+                                 "Two live scratch pairs at once, and the inner one must not leak into the outer")
+    }
 
-        Compositor.backend = .metal
-        assertPixelsIdentical(Compositor.composite(faded), CoreGraphicsCompositor.composite(faded),
-                              "And the compositor must still return a frame — the CPU reference's, to the byte")
+    /// Sibling groups reuse the pool's textures rather than each taking their own — the within-frame
+    /// half of §5.3's pool, asserted where it is observable: if release-then-acquire handed back a
+    /// texture still being read, the second group would composite onto the first one's contents.
+    func testSequentialBufferedGroupsDoNotContaminateEachOther() throws {
+        try skipUnlessGPUAvailable()
+        let manager = overlappingManager()
+        let lower = manager.addFolder(name: "Lower")
+        let upper = manager.addFolder(name: "Upper")
+        manager.layers[0].parentFolderID = lower
+        manager.layers[1].parentFolderID = lower
+        manager.layers[2].parentFolderID = upper
+        manager.setFolderOpacity(lower, to: 0.5)
+        manager.setFolderBlendMode(upper, to: .difference)
+
+        guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
+        XCTAssertLessThanOrEqual(maxChannelDelta(gpu, cpu), Self.blendTolerance,
+                                 "Two groups in sequence share two textures, and neither may see the other's")
     }
 
     /// The other half of §4.1 on the GPU, and it needs no texture: a hidden group is a subtree the

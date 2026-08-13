@@ -5,10 +5,12 @@ import simd
 // MARK: - The GPU backend
 //
 // §5.1's argument for Metal is per-pixel blend math over 4.2M pixels at 2048² (16.8M at 4000²), per
-// node, per frame — which CoreGraphics cannot do at interactive rates. None of that math exists yet:
-// phase 2's job is the substrate and the flag, phases 5 and 7 are the blend modes that need the GPU,
-// and phase 9 the effects. What this file proves is that the seam is real — that a second backend
-// can be dropped behind `Compositor.composite` and produce the same picture.
+// node, per frame — which CoreGraphics cannot do at interactive rates. Phase 2 built the substrate
+// and the flag; phase 5 is the math arriving, which is also when the substrate stopped being enough.
+// This backend used to decline any request needing an intermediate buffer, and phase 4 could afford
+// that because a faded group was the only way to ask for one. Blend modes make buffers ordinary, so
+// declining them would have meant the GPU handling every document except the ones it exists for.
+// `CompositorMetalEngine.encode` is the scratch-texture walk that replaced the bail-out.
 //
 // **One correction to the plan's framing, recorded because it changes what this file costs.** §5.1
 // says "the infrastructure already ships: MetalFillEngine owns a device, queue, and nine compute
@@ -27,59 +29,104 @@ enum MetalCompositor {
     /// Composites `request` on the GPU, or returns nil if it cannot. `Compositor.composite` treats
     /// nil as "use the CPU reference", so every nil here is a slower frame rather than a missing one.
     ///
-    /// Returns nil when there is no GPU or no shader library, and when the request needs a group
-    /// rendered into a buffer of its own — a faded group is the reachable case — which this backend
-    /// does not do yet (see `flattenedLeaves`).
+    /// Returns nil when there is no GPU, no shader library, a degenerate canvas size, or an
+    /// allocation this device would not make. **It no longer declines a group that needs its own
+    /// buffer**, which is phase 5's change to this file: buffers were only reachable through a faded
+    /// group in phase 4, and blend modes are §5.1's entire argument for the GPU — a document that
+    /// blends falling back to the CPU would mean the GPU never runs the case it exists for. See
+    /// `CompositorMetalEngine.encode`.
     static func composite(_ request: RenderRequest) -> CGImage? {
-        guard let engine = CompositorMetalEngine.shared,
-              let leaves = flattenedLeaves(request) else { return nil }
-        return engine.composite(leaves: leaves, request: request)
+        CompositorMetalEngine.shared?.composite(request)
     }
+}
 
-    /// One leaf's contribution, in evaluation order.
-    struct Leaf {
-        let source: LayerRenderSource
-        let opacity: Double
-    }
+// MARK: - Blend modes on the GPU
 
-    /// The tree flattened to the sequence of leaves to draw, or **nil if any group needs its own
-    /// buffer** — `RenderNode.needsOwnBuffer`, the same predicate `CoreGraphicsCompositor.draw`
-    /// allocates on. It is one property rather than a rule restated here because it used to be
-    /// restated here: this backend tested `opacity >= 1` while the CPU one tested `opacity < 1`, two
-    /// spellings of one rule in two files, which is the drift §1 objects to and which phase 5's
-    /// extra clauses would have turned into a disagreement.
+extension BlendMode {
+
+    /// The `mode` this layer or group is dispatched with.
     ///
-    /// Bailing out is deliberate rather than lazy, and phase 4 did not change that. A group that
-    /// needs a buffer needs a scratch *texture* here, plus the ping-pong to composite it back, and
-    /// nothing yet renders a frame this backend is chosen for — `Compositor.backend` still defaults
-    /// to `.coreGraphics`, which handles every case this one declines. §5.3's texture pool is the
-    /// piece that makes the scratch path worth writing, and it lands with the sandwich in phase 5.
-    ///
-    /// A group's own `isVisible` gates its subtree here as it does on the CPU (§4.1), and it needs no
-    /// texture to do it: a hidden group is a subtree this walk simply does not enter.
-    private static func flattenedLeaves(_ request: RenderRequest) -> [Leaf]? {
-        var leaves: [Leaf] = []
-
-        func walk(_ nodes: [RenderNode]) -> Bool {
-            for node in nodes {
-                switch node.content {
-                case .leaf(let layerIndex):
-                    guard node.isVisible,
-                          request.sources.indices.contains(layerIndex),
-                          let source = request.sources[layerIndex] else { continue }
-                    leaves.append(Leaf(source: source, opacity: node.opacity))
-                case .node(_, let inputs):
-                    guard node.isVisible else { continue }
-                    guard !node.needsOwnBuffer else { return false }
-                    for input in inputs {
-                        guard walk(input) else { return false }
-                    }
-                }
-            }
-            return true
+    /// **Must match the `kBlend…` constants in `Composite.metal`, case for case.** Written out as
+    /// literals on both sides rather than derived from `allCases`, because `allCases` order is a
+    /// property of the declaration and a reordering there would silently repaint every document.
+    /// What catches a mismatch is `CompositorParityLogicTests` compositing all fourteen through both
+    /// backends: a wrong code renders as some *other* real mode, which no compiler would notice and
+    /// a per-mode parity table cannot miss.
+    var shaderCode: UInt32 {
+        switch self {
+        case .normal:      return 0
+        case .multiply:    return 1
+        case .screen:      return 2
+        case .overlay:     return 3
+        case .add:         return 4
+        case .subtract:    return 5
+        case .darken:      return 6
+        case .lighten:     return 7
+        case .colorDodge:  return 8
+        case .colorBurn:   return 9
+        case .softLight:   return 10
+        case .hardLight:   return 11
+        case .linearLight: return 12
+        case .difference:  return 13
         }
+    }
+}
 
-        return walk(request.tree) ? leaves : nil
+// MARK: - Scratch textures
+
+/// Canvas-sized `rgba8Unorm` scratch, handed out and taken back over the course of one composite.
+///
+/// **What §5.3 asks for is a pool "by size, reused across frames"; this is the within-frame half,
+/// and the split is deliberate.** Reuse within a frame is what the tree walk actually needs — a
+/// document with eight buffered groups side by side wants two textures, not sixteen — and it needs
+/// no lifetime policy at all, because the command buffer that read them has completed by the time
+/// this object is released. Reuse *across* frames needs an eviction rule (when does a 4000² texture
+/// stop being worth 64 MB of resident memory?), and nothing in the app can answer that yet: the
+/// consumer that would is §5.2's sandwich, which keeps composites between frames and therefore knows
+/// when one stops being wanted. Building the policy before that consumer exists would be guessing at
+/// its shape.
+///
+/// Nesting is what the count is bounded by, not layer count: bottom-to-top evaluation holds two
+/// textures per buffered level, and levels are few. `PerfBaselineTests` reports `scratchAllocated`
+/// so a regression that starts allocating per group is visible as a number rather than as a stall.
+private final class ScratchTexturePool {
+
+    private let device: MTLDevice
+    private let width: Int
+    private let height: Int
+    private var free: [MTLTexture] = []
+
+    /// How many textures were ever created — the pool's whole point, stated as a metric.
+    private(set) var allocated = 0
+
+    init(device: MTLDevice, width: Int, height: Int) {
+        self.device = device
+        self.width = width
+        self.height = height
+    }
+
+    /// A texture whose contents are **undefined**. Every caller either fills it (`compositeFill`) or
+    /// writes every pixel of it (`compositeOver` writes unconditionally), so there is no clear here
+    /// to pay for on a texture that is about to be overwritten anyway.
+    func acquire() -> MTLTexture? {
+        if let reused = free.popLast() { return reused }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        descriptor.storageMode = .shared // read back on the CPU without a blit
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        allocated += 1
+        return texture
+    }
+
+    /// Returns a texture for reuse. **Safe only because dispatches inside one
+    /// `MTLComputeCommandEncoder` are serial by default** (`MTLDispatchType.serial`, which inserts
+    /// the barriers between them): the next acquirer's first write is ordered after the last dispatch
+    /// that read this texture, so handing the same memory to two groups in sequence cannot race. A
+    /// `.concurrent` encoder would need explicit `memoryBarrier` calls here, which is worth knowing
+    /// before anyone reaches for one as an optimisation.
+    func release(_ texture: MTLTexture) {
+        free.append(texture)
     }
 }
 
@@ -129,17 +176,22 @@ final class CompositorMetalEngine {
         self.psFill = fill
     }
 
-    func composite(leaves: [MetalCompositor.Leaf], request: RenderRequest) -> CGImage? {
+    /// How many scratch textures the last composite allocated. Reported by `PerfBaselineTests`;
+    /// nothing in the render path reads it.
+    private(set) var lastScratchAllocated = 0
+
+    func composite(_ request: RenderRequest) -> CGImage? {
         let width = Int(request.canvasSize.width.rounded())
         let height = Int(request.canvasSize.height.rounded())
         guard width > 0, height > 0 else { return nil }
 
         // Ping-pong rather than one read_write accumulator: `access::read_write` on `rgba8Unorm`
         // needs the GPU family's read-write texture support, and two scratch textures cost 33.6 MB at
-        // 2048² against a correctness risk on older hardware. §5.3's texture pool is what makes this
-        // cheap across frames; phase 2 allocates per composite and leaves the pool to the sandwich.
-        guard var front = makeScratchTexture(width: width, height: height),
-              var back = makeScratchTexture(width: width, height: height),
+        // 2048² against a correctness risk on older hardware.
+        let pool = ScratchTexturePool(device: device, width: width, height: height)
+        defer { lastScratchAllocated = pool.allocated }
+
+        guard var front = pool.acquire(), var back = pool.acquire(),
               let commands = queue.makeCommandBuffer(),
               let encoder = commands.makeComputeCommandEncoder() else { return nil }
 
@@ -151,31 +203,97 @@ final class CompositorMetalEngine {
             colour.getRed(&r, green: &g, blue: &b, alpha: &a)
             background = SIMD4<Float>(Float(r * a), Float(g * a), Float(b * a), Float(a))
         }
-        encoder.setComputePipelineState(psFill)
-        encoder.setTexture(front, index: 0)
-        encoder.setBytes(&background, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
-        dispatch2D(encoder, psFill, width: width, height: height)
+        fill(front, with: background, encoder: encoder, width: width, height: height)
 
-        for leaf in leaves {
-            guard let texture = Self.upload(leaf.source.image, device: device) else {
-                encoder.endEncoding()
-                return nil
-            }
-            var opacity = Float(leaf.opacity)
-            encoder.setComputePipelineState(psOver)
-            encoder.setTexture(front, index: 0)
-            encoder.setTexture(texture, index: 1)
-            encoder.setTexture(back, index: 2)
-            encoder.setBytes(&opacity, length: MemoryLayout<Float>.stride, index: 0)
-            dispatch2D(encoder, psOver, width: width, height: height)
-            swap(&front, &back)
-        }
-
+        let encoded = encode(request.tree, of: request, front: &front, back: &back,
+                             encoder: encoder, pool: pool, width: width, height: height)
         encoder.endEncoding()
+        guard encoded else { return nil }
+
         commands.commit()
         commands.waitUntilCompleted()
         guard commands.error == nil else { return nil }
         return readBack(front, width: width, height: height)
+    }
+
+    /// Encodes one bottom-to-top stack, accumulating into `front` and ping-ponging through `back`.
+    ///
+    /// **The mirror of `CoreGraphicsCompositor.draw`, deliberately structured the same way** — same
+    /// visibility gates, same `needsOwnBuffer` question in the same place, same "a buffered group
+    /// starts from transparency" rule. Two backends that agree because they were written to the same
+    /// shape are cheaper to keep in agreement than two that happen to produce the same pixels, and
+    /// the CPU one carries the prose explaining *why* each of those choices is what it is; this one
+    /// says only what is different about doing it on a GPU.
+    ///
+    /// Returns false if an upload or an allocation failed, at which point `Compositor.composite`
+    /// falls back to the CPU and renders the frame slowly instead of not at all.
+    private func encode(_ nodes: [RenderNode], of request: RenderRequest,
+                        front: inout MTLTexture, back: inout MTLTexture,
+                        encoder: MTLComputeCommandEncoder, pool: ScratchTexturePool,
+                        width: Int, height: Int) -> Bool {
+        for node in nodes {
+            switch node.content {
+            case .leaf(let layerIndex):
+                guard node.isVisible,
+                      request.sources.indices.contains(layerIndex),
+                      let source = request.sources[layerIndex] else { continue }
+                guard let texture = Self.upload(source.image, device: device) else { return false }
+                over(source: texture, opacity: node.opacity, mode: node.blendMode,
+                     front: &front, back: &back, encoder: encoder, width: width, height: height)
+
+            case .node(_, let inputs):
+                // A hidden group is a subtree this walk does not enter, so it needs no texture to
+                // gate and costs nothing to skip (§4.1).
+                guard node.isVisible else { continue }
+                guard node.needsOwnBuffer else {
+                    for input in inputs {
+                        guard encode(input, of: request, front: &front, back: &back,
+                                     encoder: encoder, pool: pool, width: width, height: height) else { return false }
+                    }
+                    continue
+                }
+
+                guard var groupFront = pool.acquire(), var groupBack = pool.acquire() else { return false }
+                defer {
+                    pool.release(groupFront)
+                    pool.release(groupBack)
+                }
+                fill(groupFront, with: SIMD4<Float>(repeating: 0), encoder: encoder,
+                     width: width, height: height)
+                for input in inputs {
+                    guard encode(input, of: request, front: &groupFront, back: &groupBack,
+                                 encoder: encoder, pool: pool, width: width, height: height) else { return false }
+                }
+                over(source: groupFront, opacity: node.opacity, mode: node.blendMode,
+                     front: &front, back: &back, encoder: encoder, width: width, height: height)
+            }
+        }
+        return true
+    }
+
+    /// One `compositeOver` dispatch, and the swap that makes the result the new backdrop.
+    private func over(source: MTLTexture, opacity: Double, mode: BlendMode,
+                      front: inout MTLTexture, back: inout MTLTexture,
+                      encoder: MTLComputeCommandEncoder, width: Int, height: Int) {
+        var opacity = Float(opacity)
+        var mode = mode.shaderCode
+        encoder.setComputePipelineState(psOver)
+        encoder.setTexture(front, index: 0)
+        encoder.setTexture(source, index: 1)
+        encoder.setTexture(back, index: 2)
+        encoder.setBytes(&opacity, length: MemoryLayout<Float>.stride, index: 0)
+        encoder.setBytes(&mode, length: MemoryLayout<UInt32>.stride, index: 1)
+        dispatch2D(encoder, psOver, width: width, height: height)
+        swap(&front, &back)
+    }
+
+    private func fill(_ texture: MTLTexture, with colour: SIMD4<Float>,
+                      encoder: MTLComputeCommandEncoder, width: Int, height: Int) {
+        var colour = colour
+        encoder.setComputePipelineState(psFill)
+        encoder.setTexture(texture, index: 0)
+        encoder.setBytes(&colour, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+        dispatch2D(encoder, psFill, width: width, height: height)
     }
 
     private func dispatch2D(_ encoder: MTLComputeCommandEncoder, _ pipeline: MTLComputePipelineState,
@@ -184,14 +302,6 @@ final class CompositorMetalEngine {
         let th = min(16, max(1, pipeline.maxTotalThreadsPerThreadgroup / tw))
         encoder.dispatchThreads(MTLSize(width: width, height: height, depth: 1),
                                 threadsPerThreadgroup: MTLSize(width: tw, height: th, depth: 1))
-    }
-
-    private func makeScratchTexture(width: Int, height: Int) -> MTLTexture? {
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
-        descriptor.usage = [.shaderRead, .shaderWrite]
-        descriptor.storageMode = .shared // read back on the CPU without a blit
-        return device.makeTexture(descriptor: descriptor)
     }
 
     /// Reads the finished texture back as a `CGImage` in the app's standard format.

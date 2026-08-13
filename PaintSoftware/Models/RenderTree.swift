@@ -88,10 +88,10 @@ extension RenderNode {
     /// **Whether compositing this node needs an intermediate buffer of its own — one rule, both
     /// backends.** `CoreGraphicsCompositor.draw` allocates a scratch image when this is true and
     /// draws the node's contents straight onto the backdrop when it is false; `MetalCompositor`
-    /// declines the whole request when it is true, so the CPU reference handles it. It lives here
-    /// because it was previously written twice, once per backend, as two spellings of "opacity is
-    /// not 1" — the drift §1 objects to, in miniature, and two copies that would first *disagree* in
-    /// phase 5 when the clauses below start firing.
+    /// takes a pair of scratch textures from its pool on the same answer. It lives here because it
+    /// was previously written twice, once per backend, as two spellings of "opacity is not 1" — the
+    /// drift §1 objects to, in miniature, and two copies that would have *disagreed* in phase 5 when
+    /// the clauses below started firing.
     ///
     /// A buffer is not an optimisation to be traded away: it changes bytes as well as cost (see
     /// `draw`, which explains the extra 8-bit rounding), so the predicate names only the cases that
@@ -106,34 +106,42 @@ extension RenderNode {
     ///   transparency, which differs from starting from the backdrop only if one of them does
     ///   something other than source-over.
     ///
-    /// **Only the first clause is reachable today, and it is worth saying that plainly rather than
-    /// implying the other two are merely untested.** `BlendMode` has exactly one case, so
-    /// `blendMode != .normal` is false for every node the derivation can build and no fixture can
-    /// make it true — `LayerFolder.isIsolated` therefore changes no pixel either, which is what its
-    /// own comment says. They are written now because the rule is easier to state whole than to
-    /// finish later, and because phase 5 should be twenty blend cases and not also the commit that
-    /// discovers isolation needs a buffer.
+    /// **All three clauses are reachable as of phase 5**, which is the change `BlendMode`'s fourteen
+    /// cases made to this predicate without editing a line of it. Phase 4 wrote the rule whole while
+    /// only the first clause could fire, on the grounds that the rule is easier to state whole than
+    /// to finish later — the two that were dead are live now and each has a fixture in
+    /// `RenderTreeCharacterizationTests`.
     var needsOwnBuffer: Bool {
-        // A leaf is drawn, never assembled — its opacity is an argument to one draw call.
+        // A leaf is drawn, never assembled — its opacity is an argument to one draw call, and so is
+        // its blend mode. That is the whole difference between a leaf and a group: a leaf blends as
+        // it is drawn, a group blends its finished composite once.
         guard case .node = content else { return false }
         // `!= 1` rather than `< 1`: the identity is the thing being tested, and `setFolderOpacity`
         // clamps to 0...1 so the two are the same test for every value that can reach here.
-        return opacity != 1 || blendMode != .normal || (isIsolated && enclosesABlend)
+        return opacity != 1 || blendMode.isBlending || (isIsolated && enclosesABlend)
     }
 
-    /// Whether anything *inside* this node blends with something other than source-over.
+    /// Whether anything inside this node **blends against the backdrop this node is drawn onto** —
+    /// which is the only thing isolation can change, and therefore the only thing worth a buffer.
     ///
-    /// Deliberately conservative: it keeps descending through child groups that will render into
-    /// buffers of their own, where a tighter walk could stop — such a child resolves its contents
-    /// into its buffer, and all that reaches this backdrop is that buffer drawn with the child's own
-    /// mode. Answering true there costs a buffer that changes nothing; answering false where a blend
-    /// really does see the backdrop renders the wrong picture. With `BlendMode` at one case neither
-    /// answer is reachable, so the tightening belongs beside the first fixture that can tell them
-    /// apart, in phase 5.
+    /// **The walk stops at a child that buffers, and phase 5 is where that tightening belongs** —
+    /// phase 4's version descended unconditionally and said so, on the grounds that no fixture could
+    /// yet tell the two answers apart. One can now. A child with a buffer of its own resolves its
+    /// whole subtree inside it; all that reaches *this* backdrop is that buffer drawn with the
+    /// child's own mode, which the first half of this test already covers. So an isolated group
+    /// containing an isolated group containing a `multiply` layer needs one buffer, not two — and
+    /// since isolation is every folder's default, the untightened version would have charged the
+    /// full nesting depth for every blended layer in a tidily organised document. At 1071.7 ms for
+    /// six buffered levels (§5.3) that is not a rounding error in the cost.
+    ///
+    /// The conservative direction is still the safe one and that has not changed: answering true
+    /// where a buffer changes nothing costs time, answering false where a blend really does see the
+    /// backdrop renders the wrong picture. `testABufferedChildDoesNotForceItsParentToBuffer` and
+    /// `testAPassThroughChildDoesForceIt` are the two sides.
     private var enclosesABlend: Bool {
         guard case .node(_, let inputs) = content else { return false }
         return inputs.contains { input in
-            input.contains { $0.blendMode != .normal || $0.enclosesABlend }
+            input.contains { $0.blendMode.isBlending || (!$0.needsOwnBuffer && $0.enclosesABlend) }
         }
     }
 
