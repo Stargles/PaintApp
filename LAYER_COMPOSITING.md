@@ -279,6 +279,17 @@ Memory is the constraint, not ALU.
 - Add compositor cases to `PerfBaselineTests`, which already asserts hard budgets on stroke cost,
   thumbnail regen, and undo memory.
 
+**What a sandwich rebuild costs, measured in phase 5b.** 2048², six layers, CoreGraphics, warmed,
+median of nine: the `@MainActor` snapshot half is **0.1 ms** and the three composites are **~55 ms**.
+The snapshot is no longer the expensive half — memoizing `PixelOps.rasterize` (`1e4d7d1`) retired the
+276 ms that earlier drafts of this document quoted, because a layer switch, blend change or stroke
+lift touches no cel content and so hits the memo on every leaf.
+
+That leaves ~55 ms of composite as the whole cost, which is one dropped frame at 60 Hz and several at
+120 Hz — **so the off-main rebuild is load-bearing, not incidental**, and so is showing the previous
+images until the new ones land. Both grow with layer count and with canvas size, so the structure
+matters more at 4000², not less.
+
 **What a buffer actually costs, measured in phase 4.** Six levels of nesting: 41.6 ms flat, 46.0 ms
 transparent, **1071.7 ms once every level buffers** — roughly 25× a whole flat composite, from ~400 MB
 of intermediates. That is the number behind "a buffer is not a tunable" (§4.2) and behind the texture
