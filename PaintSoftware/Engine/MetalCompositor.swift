@@ -49,7 +49,7 @@ extension BlendMode {
     /// **Must match the `kBlend…` constants in `Composite.metal`, case for case.** Written out as
     /// literals on both sides rather than derived from `allCases`, because `allCases` order is a
     /// property of the declaration and a reordering there would silently repaint every document.
-    /// What catches a mismatch is `CompositorParityLogicTests` compositing all fourteen through both
+    /// What catches a mismatch is `CompositorParityLogicTests` compositing every mode through both
     /// backends: a wrong code renders as some *other* real mode, which no compiler would notice and
     /// a per-mode parity table cannot miss.
     var shaderCode: UInt32 {
@@ -70,6 +70,17 @@ extension BlendMode {
         case .hardLight:   return 11
         case .linearLight: return 12
         case .difference:  return 13
+        case .vividLight:   return 14
+        case .pinLight:     return 15
+        case .linearBurn:   return 16
+        case .hue:          return 17
+        case .saturation:   return 18
+        case .color:        return 19
+        case .luminosity:   return 20
+        case .divide:       return 21
+        case .exclusion:    return 22
+        case .lighterColor: return 23
+        case .darkerColor:  return 24
         }
     }
 }

@@ -26,7 +26,7 @@ using namespace metal;
 // **These must match `BlendMode.shaderCode` in MetalCompositor.swift, case for case.** The pair is
 // two literals in two languages with nothing but this comment between them, so it is deliberately
 // covered by a test rather than by a convention: `CompositorParityLogicTests` composites every one
-// of the fourteen through both backends, and a code that disagreed would show up there as one mode
+// of the modes through both backends, and a code that disagreed would show up there as one mode
 // rendering as another rather than as a compile error.
 constant uint kBlendNormal      = 0;
 constant uint kBlendMultiply    = 1;
@@ -42,6 +42,21 @@ constant uint kBlendSoftLight   = 10;
 constant uint kBlendHardLight   = 11;
 constant uint kBlendLinearLight = 12;
 constant uint kBlendDifference  = 13;
+// Tier 2 (§7). Vivid Light, Pin Light, Linear Burn, Divide and Exclusion are separable, like
+// everything above; Hue, Saturation, Color, Luminosity, Lighter Color and Darker Color are not, but
+// need no new plumbing here — see the note above `blendHue` for why `blendChannels` covers both
+// shapes through the one `float3 -> float3` call already.
+constant uint kBlendVividLight   = 14;
+constant uint kBlendPinLight     = 15;
+constant uint kBlendLinearBurn   = 16;
+constant uint kBlendHue          = 17;
+constant uint kBlendSaturation   = 18;
+constant uint kBlendColor        = 19;
+constant uint kBlendLuminosity   = 20;
+constant uint kBlendDivide       = 21;
+constant uint kBlendExclusion    = 22;
+constant uint kBlendLighterColor = 23;
+constant uint kBlendDarkerColor  = 24;
 
 // MARK: - The separable blend functions
 //
@@ -82,6 +97,94 @@ static inline float3 blendSoftLight(float3 cb, float3 cs) {
     return select(lighter, darker, cs <= 0.5f);
 }
 
+// MARK: - Tier 2's separable additions (§7)
+
+static inline float3 blendLinearBurn(float3 cb, float3 cs) {
+    // Linear Dodge (`kBlendAdd`) is `cb + cs`, clamped above at 1; this is its mirror, clamped below
+    // at 0 instead, since `cb + cs - 1` is the term that can go negative rather than over 1.
+    return max(float3(0.0f), cb + cs - 1.0f);
+}
+
+static inline float3 blendVividLight(float3 cb, float3 cs) {
+    // Color Burn below mid-grey, Color Dodge above it, each fed the doubled, re-centred source — the
+    // same split `blendHardLight` makes between Multiply and Screen.
+    float3 burned = blendColorBurn(cb, 2.0f * cs);
+    float3 dodged = blendColorDodge(cb, 2.0f * cs - 1.0f);
+    return select(dodged, burned, cs <= 0.5f);
+}
+
+static inline float3 blendPinLight(float3 cb, float3 cs) {
+    // Darken below mid-grey, Lighten above it — Vivid Light's family, with the ordinary pair instead
+    // of the dodge/burn pair.
+    float3 darkened = min(cb, 2.0f * cs);
+    float3 lightened = max(cb, 2.0f * cs - 1.0f);
+    return select(lightened, darkened, cs <= 0.5f);
+}
+
+static inline float3 blendDivide(float3 cb, float3 cs) {
+    // Mirrors `blendColorDodge`'s guard order exactly, with the pole moved from `1 - cs` to `cs`
+    // itself: a black backdrop stays black regardless of the source (applied last, so it wins), and
+    // a near-zero source saturates to white rather than dividing by it.
+    float3 divided = min(float3(1.0f), cb / max(cs, 1e-6f));
+    divided = select(divided, float3(1.0f), cs <= 0.0f);
+    return select(divided, float3(0.0f), cb <= 0.0f);
+}
+
+static inline float3 blendExclusion(float3 cb, float3 cs) { return cb + cs - 2.0f * cb * cs; }
+
+// MARK: - Tier 2's non-separable additions (§7)
+//
+// W3C Compositing and Blending Level 1's `Lum`/`Sat`/`ClipColor`/`SetLum`/`SetSat`, which
+// Hue/Saturation/Color/Luminosity are built from. Unlike every function above, these read or write
+// all three channels of one pixel together — which a `float3` already does, so they need no
+// different calling convention from the separable functions, only a different body. That is the
+// whole reason Tier 2's "non-separable" trap (see `Compositor.swift`'s `handRolledTriple`) is
+// CPU-only: `blendChannels` below hands every mode, separable or not, the same `(cb, cs) -> float3`
+// shape it always has.
+
+static inline float lum(float3 c) { return 0.3f * c.r + 0.59f * c.g + 0.11f * c.b; }
+static inline float sat(float3 c) { return max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b)); }
+
+/// Pulls an out-of-gamut colour back into `[0, 1]` along the line through it and its own `Lum`. The
+/// `max(_, 1e-6f)` guards matter only where both branches meet — a colour whose `Lum` equals its
+/// `min`/`max` has all three channels equal, so `c - l` is exactly zero there and the guard turns a
+/// `0 / 0` into a `0 / epsilon` rather than changing the result.
+static inline float3 clipColor(float3 c) {
+    float l = lum(c);
+    float n = min(c.r, min(c.g, c.b));
+    float x = max(c.r, max(c.g, c.b));
+    if (n < 0.0f) { c = l + (c - l) * (l / max(l - n, 1e-6f)); }
+    if (x > 1.0f) { c = l + (c - l) * ((1.0f - l) / max(x - l, 1e-6f)); }
+    return c;
+}
+
+static inline float3 setLum(float3 c, float l) { return clipColor(c + (l - lum(c))); }
+
+/// The spec states `SetSat` as a sort into min/mid/max followed by a per-slot rewrite. This is the
+/// same function stated as one affine remap of the whole triple: `(c - cMin) * s / (cMax - cMin)`
+/// sends `cMin` to 0 and `cMax` to `s` by construction, and the value in between lands exactly on the
+/// spec's `Cmid` formula — so there is no sort and no per-channel branch, on either backend.
+static inline float3 setSat(float3 c, float s) {
+    float cMax = max(c.r, max(c.g, c.b));
+    float cMin = min(c.r, min(c.g, c.b));
+    if (cMax <= cMin) { return float3(0.0f); }
+    return (c - cMin) * (s / (cMax - cMin));
+}
+
+/// Hue keeps the source's hue and saturation but the backdrop's luminosity.
+static inline float3 blendHue(float3 cb, float3 cs) { return setLum(setSat(cs, sat(cb)), lum(cb)); }
+/// Saturation keeps the backdrop's hue and luminosity but the source's saturation.
+static inline float3 blendSaturation(float3 cb, float3 cs) { return setLum(setSat(cb, sat(cs)), lum(cb)); }
+/// Color keeps the source's hue and saturation and the backdrop's luminosity, in one step.
+static inline float3 blendColor(float3 cb, float3 cs) { return setLum(cs, lum(cb)); }
+/// Luminosity is Color with backdrop and source swapped.
+static inline float3 blendLuminosity(float3 cb, float3 cs) { return setLum(cb, lum(cs)); }
+
+/// Whole-triple luminosity picks the whole-triple winner — not a per-channel max, which is what
+/// `kBlendLighten` already is and would not need a new mode to express.
+static inline float3 blendLighterColor(float3 cb, float3 cs) { return lum(cs) >= lum(cb) ? cs : cb; }
+static inline float3 blendDarkerColor(float3 cb, float3 cs) { return lum(cs) <= lum(cb) ? cs : cb; }
+
 /// The per-channel blend, unpremultiplied on both sides. `cb`/`cs` are backdrop and source colour.
 static inline float3 blendChannels(uint mode, float3 cb, float3 cs) {
     switch (mode) {
@@ -103,6 +206,17 @@ static inline float3 blendChannels(uint mode, float3 cb, float3 cs) {
         // one clamped add of the doubled, re-centred source.
         case kBlendLinearLight: return saturate(cb + 2.0f * cs - 1.0f);
         case kBlendDifference: return abs(cb - cs);
+        case kBlendVividLight:   return blendVividLight(cb, cs);
+        case kBlendPinLight:     return blendPinLight(cb, cs);
+        case kBlendLinearBurn:   return blendLinearBurn(cb, cs);
+        case kBlendHue:          return blendHue(cb, cs);
+        case kBlendSaturation:   return blendSaturation(cb, cs);
+        case kBlendColor:        return blendColor(cb, cs);
+        case kBlendLuminosity:   return blendLuminosity(cb, cs);
+        case kBlendDivide:       return blendDivide(cb, cs);
+        case kBlendExclusion:    return blendExclusion(cb, cs);
+        case kBlendLighterColor: return blendLighterColor(cb, cs);
+        case kBlendDarkerColor:  return blendDarkerColor(cb, cs);
         default:               return cs;
     }
 }

@@ -68,19 +68,33 @@ extension BlendMode {
     /// The `CGBlendMode` that computes this mode, or **nil when CoreGraphics has no equivalent** and
     /// `CoreGraphicsCompositor` has to compute it per pixel itself.
     ///
-    /// Eleven of the fourteen are CoreGraphics primitives, and that is worth leaning on rather than
-    /// hand-rolling for uniformity: `CGBlendMode` implements the PDF imaging model's separable blend
-    /// functions, which are the same formulas `Composite.metal` implements from the W3C spelling of
-    /// them. So the CPU reference is *Apple's* implementation of the blend, not a second copy of the
-    /// shader's — which is what makes the GPU-versus-CPU delta a real measurement instead of a test
-    /// of whether one author wrote the same expression twice.
+    /// Eleven of the fourteen Tier 1 modes are CoreGraphics primitives, and that is worth leaning on
+    /// rather than hand-rolling for uniformity: `CGBlendMode` implements the PDF imaging model's
+    /// separable blend functions, which are the same formulas `Composite.metal` implements from the
+    /// W3C spelling of them. So the CPU reference is *Apple's* implementation of the blend, not a
+    /// second copy of the shader's — which is what makes the GPU-versus-CPU delta a real measurement
+    /// instead of a test of whether one author wrote the same expression twice.
     ///
-    /// **The three that are hand-rolled (`add`, `subtract`, `linearLight`) are hand-rolled because
+    /// **The three Tier 1 hand-rolled modes (`add`, `subtract`, `linearLight`) are hand-rolled because
     /// they are absent, not because they are awkward.** CoreGraphics offers `.plusLighter`, which
     /// looks like Add and is not: it is Porter-Duff *plus*, summing premultiplied channels including
     /// alpha, so it agrees with linear dodge only where the backdrop is opaque and the sum does not
     /// clamp, and it inflates alpha everywhere else. Substituting it would be wrong in exactly the
     /// cases a blend mode is interesting.
+    ///
+    /// **Tier 2 was swept the same way, and the result was not the one Tier 1 found — worth recording
+    /// because the plan explicitly expected it might not be.** `vividLight`, `pinLight`, `linearBurn`,
+    /// `divide`, `lighterColor` and `darkerColor` have no `CGBlendMode` case at all — absent, the
+    /// `add`/`subtract`/`linearLight` category. `exclusion`, `hue`, `saturation`, `color` and
+    /// `luminosity` *do* have Apple cases, and — unlike `colorDodge`/`colorBurn`/`softLight` — every
+    /// one of the five measured **within the same one-step tolerance every surviving CG primitive
+    /// already carries** (`CompositorParityLogicTests.testEveryBlendModeAgreesBetweenTheBackends`'s
+    /// table: exclusion 0, hue 1, saturation 0, color 1, luminosity 1 — see the phase report for the
+    /// full table a run actually produced). A one-step delta is the signature of independent 8-bit
+    /// rounding, the same thing `multiply`'s own delta of 1 is; it is not the 141/249/16-style
+    /// signature of a different formula. So all five keep the primitive here, and `handRolledTriple`'s
+    /// `hue`/`saturation`/`color`/`luminosity` cases exist as the spec reference and as insurance
+    /// against a future OS regressing one of them, not because this backend reaches them today.
     var coreGraphicsBlendMode: CGBlendMode? {
         switch self {
         // `clipToBelow` is source-over plus a mask, and the tree has already turned it into exactly
@@ -94,58 +108,216 @@ extension BlendMode {
         case .lighten:     return .lighten
         case .hardLight:   return .hardLight
         case .difference:  return .difference
+        case .exclusion:   return .exclusion
         // Not "CoreGraphics lacks these" but "CoreGraphics disagrees about these" — see
-        // `handRolledChannel`, and the measured table in `CompositorParityLogicTests`.
+        // `handRolledChannel`/`handRolledTriple`, and the measured table in
+        // `CompositorParityLogicTests`.
         case .colorDodge, .colorBurn, .softLight: return nil
         case .add, .subtract, .linearLight: return nil
+        case .vividLight, .pinLight, .linearBurn, .divide, .lighterColor, .darkerColor: return nil
+        case .hue, .saturation, .color, .luminosity: return nil
         }
     }
 
-    /// The per-channel blend for every mode this backend computes itself, unpremultiplied on both
-    /// sides. Must agree with `blendChannels` in `Composite.metal`, and is the only place in this
-    /// backend where blend arithmetic is written out at all.
+    /// Whether this mode needs the whole RGB triple rather than one channel at a time — §7 Tier 2's
+    /// trap. `CoreGraphicsCompositor.drawHandRolled` reads this to decide which of `handRolledChannel`
+    /// (called three times, once per channel) or `handRolledTriple` (called once, given all three) is
+    /// the right shape of call for a hand-rolled mode. `Composite.metal` needs no such branch — its
+    /// `blendChannels` already takes and returns a `float3`, so a non-separable formula fits the exact
+    /// same call site a separable one does and the split is CPU-only.
+    fileprivate var isNonSeparable: Bool {
+        switch self {
+        case .hue, .saturation, .color, .luminosity, .lighterColor, .darkerColor: return true
+        default: return false
+        }
+    }
+
+    /// The per-channel blend for every *separable* hand-rolled mode, unpremultiplied on both sides.
+    /// Must agree with the matching case of `blendChannels` in `Composite.metal`, and is the only
+    /// place in this backend where separable blend arithmetic is written out.
     ///
     /// **Two different reasons a mode lands here, and the second one is a finding.**
     ///
-    /// `add`, `subtract` and `linearLight` are here because `CGBlendMode` has no case for them.
+    /// `add`, `subtract`, `linearLight`, and Tier 2's `vividLight`, `pinLight`, `linearBurn` and
+    /// `divide` are here because `CGBlendMode` has no case for them.
     ///
     /// `colorDodge`, `colorBurn` and `softLight` are here because Apple's cases *exist and disagree*.
-    /// Sweeping all fourteen modes over 4096 (colour, alpha) pairs put every other mode within one
-    /// step of the shader and these three at **141, 249 and 16**. That is not a rounding regime; it is
-    /// two different formulas. CoreGraphics implements the PDF 1.4 originals, where the divisions have
-    /// no zero-backdrop case — so `colorDodge` lifts a black backdrop to white at `cs == 1` where the
-    /// modern rule keeps it black, `colorBurn` does the mirror of that at `cs == 0`, and `softLight`
-    /// uses a different `D(cb)` curve altogether. W3C Compositing Level 1 (equivalently PDF 2.0) added
-    /// the guards, and it is what Photoshop and CSP do, which settles which of the two an artist
-    /// reaching for Color Dodge means.
+    /// Sweeping all fourteen Tier 1 modes over 4096 (colour, alpha) pairs put every other mode within
+    /// one step of the shader and these three at **141, 249 and 16**. That is not a rounding regime;
+    /// it is two different formulas. CoreGraphics implements the PDF 1.4 originals, where the
+    /// divisions have no zero-backdrop case — so `colorDodge` lifts a black backdrop to white at
+    /// `cs == 1` where the modern rule keeps it black, `colorBurn` does the mirror of that at
+    /// `cs == 0`, and `softLight` uses a different `D(cb)` curve altogether. W3C Compositing Level 1
+    /// (equivalently PDF 2.0) added the guards, and it is what Photoshop and CSP do, which settles
+    /// which of the two an artist reaching for Color Dodge means.
     ///
     /// So the shader is the correct one and this backend follows it, rather than the reference being
     /// "whatever Apple ships". Worth stating plainly because §5.1 calls the CoreGraphics path the
     /// byte-for-byte definition of correct: that holds for the *walk* — the order, the buffers, the
     /// alpha — and not for the blend functions themselves, where the spec is the authority and both
     /// backends are implementations of it.
+    ///
+    /// `vividLight` and `pinLight` route through `colorDodgeChannel`/`colorBurnChannel` and
+    /// `min`/`max` rather than restating dodge-and-burn or darken-and-lighten, for the same reason
+    /// `Composite.metal`'s versions call `blendColorDodge`/`blendColorBurn`: one definition of each,
+    /// so a future fix to Color Dodge cannot fix it in three places and miss a fourth.
     fileprivate func handRolledChannel(backdrop cb: Float, source cs: Float) -> Float {
         switch self {
         case .add:         return min(1, cb + cs)
         case .subtract:    return max(0, cb - cs)
         case .linearLight: return min(1, max(0, cb + 2 * cs - 1))
-        case .colorDodge:
+        case .colorDodge:  return colorDodgeChannel(backdrop: cb, source: cs)
+        case .colorBurn:   return colorBurnChannel(backdrop: cb, source: cs)
+        case .softLight:   return softLightChannel(backdrop: cb, source: cs)
+        // Vivid Light: Color Burn below mid-grey, Color Dodge above it, each fed the doubled,
+        // re-centred source — the same split Hard Light makes between Multiply and Screen.
+        case .vividLight:
+            return cs <= 0.5 ? colorBurnChannel(backdrop: cb, source: 2 * cs)
+                              : colorDodgeChannel(backdrop: cb, source: 2 * cs - 1)
+        // Pin Light: Darken below mid-grey, Lighten above it, same doubled-source split as above —
+        // the "which of two ordinary modes" family Vivid Light belongs to as well.
+        case .pinLight:
+            return cs <= 0.5 ? min(cb, 2 * cs) : max(cb, 2 * cs - 1)
+        // Linear Burn is Linear Dodge's mirror: `cb + cs - 1` where Add is `cb + cs`, clamped the
+        // same way at the end the arithmetic can leave the [0, 1] range rather than the start.
+        case .linearBurn:  return max(0, cb + cs - 1)
+        // Divide mirrors Color Dodge's guard order exactly, with the pole moved from `1 - cs` to
+        // `cs` itself: a black backdrop stays black regardless of the source (checked first, so it
+        // wins over the next guard even at `cs == 0`), and a near-zero source saturates to white
+        // rather than dividing by it.
+        case .divide:
             if cb <= 0 { return 0 }
-            if cs >= 1 { return 1 }
-            return min(1, cb / (1 - cs))
-        case .colorBurn:
-            if cb >= 1 { return 1 }
-            if cs <= 0 { return 0 }
-            return 1 - min(1, (1 - cb) / cs)
-        case .softLight:
-            if cs <= 0.5 { return cb - (1 - 2 * cs) * cb * (1 - cb) }
-            // The cubic below a quarter keeps the curve's slope finite at zero, where `sqrt` is
-            // vertical and would band on dark backdrops.
-            let d = cb <= 0.25 ? ((16 * cb - 12) * cb + 4) * cb : sqrt(cb)
-            return cb + (2 * cs - 1) * (d - cb)
+            if cs <= 0 { return 1 }
+            return min(1, cb / cs)
+        case .exclusion:   return cb + cs - 2 * cb * cs
         default:           return cs
         }
     }
+
+    /// The RGB-triple blend for the non-separable modes (`isNonSeparable`), unpremultiplied on both
+    /// sides. Must agree with the matching case of `blendChannels` in `Composite.metal` — which needs
+    /// no separate function for these the way this backend does, since a Metal `float3` already
+    /// carries all three channels through the one call site both shapes of formula share.
+    ///
+    /// **Only two of the six cases here are live in this backend today.** `lighterColor` and
+    /// `darkerColor` have no `CGBlendMode` case, so `draw` always reaches them through this function —
+    /// the same "absent, not awkward" reason `add` is hand-rolled. `hue`, `saturation`, `color` and
+    /// `luminosity` *were* swept against `CGBlendMode`'s cases the way `colorDodge`/`colorBurn`/
+    /// `softLight` were (see `coreGraphicsBlendMode`'s doc comment for the measured table), and unlike
+    /// those three, Apple's versions measured within the ordinary rounding tolerance — so
+    /// `coreGraphicsBlendMode` keeps the primitive for all four and `draw` never calls this function
+    /// for them. Their cases stay here anyway: they are what `Composite.metal`'s `blendHue` and
+    /// neighbours are checked against structurally, and they are the fallback this backend would need
+    /// if a future OS ever regressed one of Apple's four the way an earlier one evidently regressed
+    /// `colorDodge`.
+    ///
+    /// W3C Compositing and Blending Level 1's non-separable formulas, restated here rather than
+    /// summarised: `Lum`/`Sat` read a colour's luminosity and saturation, `ClipColor` pulls an
+    /// out-of-gamut colour back into `[0, 1]` along the axis that keeps its `Lum`, `SetLum`/`SetSat`
+    /// transplant one colour's luminosity or saturation onto another's channels. Hue keeps the
+    /// source's hue and saturation but the backdrop's luminosity; Saturation keeps the backdrop's hue
+    /// and luminosity but the source's saturation; Color keeps the source's hue and saturation *and*
+    /// the backdrop's luminosity in one step; Luminosity is Color with the two swapped.
+    ///
+    /// `setSat`'s spec pseudocode sorts the channels into min/mid/max and rewrites each in place; the
+    /// version below is the same function stated as one affine remap of the whole triple —
+    /// `(c - cMin) * s / (cMax - cMin)` sends `cMin` to 0, `cMax` to `s`, and everything between to the
+    /// spec's `Cmid` formula, by construction — which needs no sort and no per-channel branch, on
+    /// either backend.
+    fileprivate func handRolledTriple(backdrop cb: Triple, source cs: Triple) -> Triple {
+        switch self {
+        case .hue:          return setLum(setSat(cs, sat(cb)), lum(cb))
+        case .saturation:   return setLum(setSat(cb, sat(cs)), lum(cb))
+        case .color:        return setLum(cs, lum(cb))
+        case .luminosity:   return setLum(cb, lum(cs))
+        // Whole-triple luminosity picks whole-triple winner — not a per-channel max/min, which is
+        // what `lighten`/`darken` already are and would not need a new case to express.
+        case .lighterColor: return lum(cs) >= lum(cb) ? cs : cb
+        case .darkerColor:  return lum(cs) <= lum(cb) ? cs : cb
+        default:            return cs
+        }
+    }
+}
+
+/// `(r, g, b)`, unpremultiplied and in `[0, 1]` on the way in — the shape `handRolledTriple` and its
+/// W3C helpers pass around. A named tuple rather than `SIMD3<Float>`: nothing here is dispatched to
+/// the GPU, and elementwise arithmetic written out per component is what the rest of this file
+/// already does in `drawHandRolled`'s loop.
+private typealias Triple = (r: Float, g: Float, b: Float)
+
+/// Shared by `handRolledChannel`'s `colorDodge` case and its `vividLight` case, so Color Dodge has one
+/// definition instead of two that could drift apart. Body unchanged from phase 5a.
+private func colorDodgeChannel(backdrop cb: Float, source cs: Float) -> Float {
+    if cb <= 0 { return 0 }
+    if cs >= 1 { return 1 }
+    return min(1, cb / (1 - cs))
+}
+
+/// Shared by `handRolledChannel`'s `colorBurn` case and its `vividLight` case. Body unchanged from
+/// phase 5a.
+private func colorBurnChannel(backdrop cb: Float, source cs: Float) -> Float {
+    if cb >= 1 { return 1 }
+    if cs <= 0 { return 0 }
+    return 1 - min(1, (1 - cb) / cs)
+}
+
+/// Body unchanged from phase 5a; factored out alongside the other two so all three hand-rolled Tier 1
+/// formulas live at the same scope as the Tier 2 callers that might one day want them.
+private func softLightChannel(backdrop cb: Float, source cs: Float) -> Float {
+    if cs <= 0.5 { return cb - (1 - 2 * cs) * cb * (1 - cb) }
+    // The cubic below a quarter keeps the curve's slope finite at zero, where `sqrt` is vertical and
+    // would band on dark backdrops.
+    let d = cb <= 0.25 ? ((16 * cb - 12) * cb + 4) * cb : sqrt(cb)
+    return cb + (2 * cs - 1) * (d - cb)
+}
+
+// MARK: - W3C's non-separable helpers (§7 Tier 2)
+//
+// `Lum`, `Sat`, `ClipColor`, `SetLum`, `SetSat` — free functions rather than `Triple` methods because
+// nothing else in this file hangs functions off a tuple type, and because it keeps them visually
+// grouped with the spec section they come from rather than scattered through `BlendMode`'s extension.
+
+/// The perceptual weighting every one of Tier 2's non-separable formulas keys off — Hue, Saturation,
+/// Color and Luminosity all call it, and so do `lighterColor`/`darkerColor`, so "how bright is this
+/// colour" has exactly one definition in this file. Must agree with `lum` in `Composite.metal`.
+private func lum(_ c: Triple) -> Float { 0.3 * c.r + 0.59 * c.g + 0.11 * c.b }
+
+private func sat(_ c: Triple) -> Float { max(c.r, c.g, c.b) - min(c.r, c.g, c.b) }
+
+/// Pulls an out-of-gamut colour back into `[0, 1]` along the line through it and its own `Lum` —
+/// `SetLum` is the only caller, and always on a colour it just shifted uniformly, which is what can
+/// push a channel negative or past 1 in the first place.
+///
+/// The two `max(_, 1e-6)` guards exist only for the case both branches meet: a colour whose `Lum`
+/// equals its `min`/`max` is one whose three channels are already equal, and there `c - l` is exactly
+/// zero for every channel — so the guard changes a `0 / 0` into a `0 / epsilon`, not the result.
+private func clipColor(_ c: Triple) -> Triple {
+    let l = lum(c)
+    let n = min(c.r, c.g, c.b), x = max(c.r, c.g, c.b)
+    var result = c
+    if n < 0 {
+        let scale = l / max(l - n, 1e-6)
+        result = (l + (result.r - l) * scale, l + (result.g - l) * scale, l + (result.b - l) * scale)
+    }
+    if x > 1 {
+        let scale = (1 - l) / max(x - l, 1e-6)
+        result = (l + (result.r - l) * scale, l + (result.g - l) * scale, l + (result.b - l) * scale)
+    }
+    return result
+}
+
+private func setLum(_ c: Triple, _ l: Float) -> Triple {
+    let d = l - lum(c)
+    return clipColor((c.r + d, c.g + d, c.b + d))
+}
+
+/// See `handRolledTriple`'s doc comment for why this is one affine remap rather than the spec's
+/// sort-and-rewrite — the two are the same function.
+private func setSat(_ c: Triple, _ s: Float) -> Triple {
+    let cMax = max(c.r, c.g, c.b), cMin = min(c.r, c.g, c.b)
+    guard cMax > cMin else { return (0, 0, 0) }
+    let scale = s / (cMax - cMin)
+    return ((c.r - cMin) * scale, (c.g - cMin) * scale, (c.b - cMin) * scale)
 }
 
 // MARK: - The Core Graphics reference
@@ -285,8 +457,9 @@ enum CoreGraphicsCompositor {
         }
     }
 
-    /// `add`, `subtract` and `linearLight`, which CoreGraphics cannot express (see
-    /// `BlendMode.coreGraphicsBlendMode`), computed a pixel at a time and stamped over the context.
+    /// `add`, `subtract`, `linearLight` and Tier 2's hand-rolled modes, which CoreGraphics cannot
+    /// express (see `BlendMode.coreGraphicsBlendMode`), computed a pixel at a time and stamped over
+    /// the context.
     ///
     /// **This is slow on purpose, and the alternative was worse.** It snapshots the whole canvas,
     /// reads two buffers back, and writes a third — three canvas-sized allocations for one draw,
@@ -299,6 +472,15 @@ enum CoreGraphicsCompositor {
     /// unpremultiply–blend–re-premultiply that keeps antialiased edges from darkening. `.toNearestOrEven`
     /// rather than `.rounded()` because that is the rule Metal's float→unorm8 conversion uses, and a
     /// half-way value rounded the other way is a delta of 1 on a channel that should have been exact.
+    ///
+    /// **One call to the blend per pixel, not one per channel — this is §7 Tier 2's trap, met.** Before
+    /// Tier 2 this loop called `handRolledChannel` three times, once per channel, because every
+    /// hand-rolled mode was separable and a channel's blended value depended on nothing but that same
+    /// channel of `cb`/`cs`. Hue, Saturation, Color and Luminosity break that: the blended value of
+    /// the red channel depends on green and blue too (`Lum`/`Sat` read all three), so the loop now
+    /// builds the whole `(cb, cs)` triple first and asks `isNonSeparable` which one function can
+    /// answer for all three channels at once. `Composite.metal` never had this problem — its
+    /// `blendChannels` already takes a `float3` — which is exactly why the trap is CPU-only.
     private static func drawHandRolled(_ image: UIImage, mode: BlendMode, opacity: Double,
                                        in bounds: CGRect, context: UIGraphicsImageRendererContext) {
         let width = Int(bounds.width.rounded()), height = Int(bounds.height.rounded())
@@ -316,18 +498,35 @@ enum CoreGraphicsCompositor {
             source[index] = UInt8((Float(source[index]) * scale).rounded(.toNearestOrEven))
         }
 
+        let nonSeparable = mode.isNonSeparable
         var result = backdrop
         for pixel in stride(from: 0, to: source.count, by: 4) {
             let sa = Float(source[pixel + 3]) / 255, da = Float(backdrop[pixel + 3]) / 255
             guard sa > 0 else { continue }  // a transparent source is the identity, exactly
+
+            let sp = (Float(source[pixel]) / 255, Float(source[pixel + 1]) / 255, Float(source[pixel + 2]) / 255)
+            let dp = (Float(backdrop[pixel]) / 255, Float(backdrop[pixel + 1]) / 255, Float(backdrop[pixel + 2]) / 255)
+            let cs = (min(max(sp.0 / sa, 0), 1), min(max(sp.1 / sa, 0), 1), min(max(sp.2 / sa, 0), 1))
+            let cb = da > 0 ? (min(max(dp.0 / da, 0), 1), min(max(dp.1 / da, 0), 1), min(max(dp.2 / da, 0), 1))
+                            : (Float(0), Float(0), Float(0))
+            // Non-separable modes need `handRolledTriple`'s single call over all three channels;
+            // separable ones still go through `handRolledChannel`, once per channel, unchanged from
+            // before Tier 2 — `mode.isNonSeparable` picked once per pixel rather than per channel is
+            // just hoisting a loop-invariant, not a behaviour change.
+            let blended: (Float, Float, Float) = nonSeparable
+                ? mode.handRolledTriple(backdrop: cb, source: cs)
+                : (mode.handRolledChannel(backdrop: cb.0, source: cs.0),
+                   mode.handRolledChannel(backdrop: cb.1, source: cs.1),
+                   mode.handRolledChannel(backdrop: cb.2, source: cs.2))
+
+            // (1 - da) * cs + da * blended, then source-over — the same two lines `blendOver` in
+            // `Composite.metal` runs, written three times because this array holds `UInt8`es rather
+            // than a vector type.
+            let channelValues: [(dp: Float, cs: Float, blended: Float)] =
+                [(dp.0, cs.0, blended.0), (dp.1, cs.1, blended.1), (dp.2, cs.2, blended.2)]
             for channel in 0..<3 {
-                let sp = Float(source[pixel + channel]) / 255
-                let dp = Float(backdrop[pixel + channel]) / 255
-                let cs = min(max(sp / sa, 0), 1)
-                let cb = da > 0 ? min(max(dp / da, 0), 1) : 0
-                let blended = mode.handRolledChannel(backdrop: cb, source: cs)
-                let cr = cs + (blended - cs) * da            // (1 - da) * cs + da * blended
-                let out = dp * (1 - sa) + sa * cr
+                let cr = channelValues[channel].cs + (channelValues[channel].blended - channelValues[channel].cs) * da
+                let out = channelValues[channel].dp * (1 - sa) + sa * cr
                 result[pixel + channel] = UInt8((min(max(out, 0), 1) * 255).rounded(.toNearestOrEven))
             }
             let outAlpha = da * (1 - sa) + sa

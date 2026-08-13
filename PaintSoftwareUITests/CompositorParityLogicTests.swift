@@ -624,6 +624,128 @@ final class CompositorParityLogicTests: XCTestCase {
                            "An invisible group's arithmetic is nobody's business, its children's included")
     }
 
+    // MARK: - Blend modes (§7 Tier 2)
+    //
+    // Tier 1's arithmetic tests spot-check one mode's formula against a value you can write down
+    // (`testALeafBlendsAgainstWhateverIsBeneathIt` is Multiply at a corner) and leave exhaustive
+    // coverage to the sweeps below, which already iterate `BlendMode.allCases` and so picked up
+    // every Tier 2 case for free the moment it existed. These four do the same spot-checking for
+    // Tier 2 — one case per shape of formula (separable-with-a-guard, non-separable-and-degenerate,
+    // non-separable-and-general, whole-triple) rather than one per mode, since the sweeps already
+    // own "every mode, every pair".
+    //
+    // **Every expected value below was computed with a Python transcription of the same formula,
+    // not derived by hand** — worth stating because a previous session's phase report is on record
+    // for writing down a "measured" number it had never actually run, and the true figure turned out
+    // to be 70× larger. `Lum`'s 0.3/0.59/0.11 weights land most (backdrop, source) pairs on a
+    // repeating decimal in 8-bit, which is exactly the kind of arithmetic worth not trusting to
+    // mental math.
+
+    /// Vivid Light, Pin Light, Linear Burn, Divide and Exclusion are separable, so — like Multiply —
+    /// one corner of `blendOverGrey`'s fixture (pure red over the 128/255 floor) exercises every
+    /// formula's `cs == 1` branch on the red channel and `cs == 0` branch on green and blue.
+    /// Several land on the same numbers at this corner (Vivid Light and Pin Light both saturate to
+    /// 255 at `cs == 1`, the way Screen and Lighten would too) — that is the corner being a corner,
+    /// not the modes being indistinguishable in general, which is what the exhaustive sweep is for.
+    /// Divide is the one genuinely new thing a corner can show on its own: dividing the floor by the
+    /// source's zero channels hits `divide`'s `cs <= 0` guard and saturates to white, rather than
+    /// leaving the floor alone the way `cs == 0` does for every other mode in this file.
+    func testVividLightPinLightLinearBurnDivideAndExclusionMatchHandComputedValues() {
+        let cases: [(BlendMode, [Int])] = [
+            (.linearBurn, [128, 0, 0, 255]),
+            (.vividLight, [255, 0, 0, 255]),
+            (.pinLight,   [255, 0, 0, 255]),
+            (.divide,     [128, 255, 255, 255]),
+            (.exclusion,  [127, 128, 128, 255]),
+        ]
+        for (mode, expected) in cases {
+            guard let image = composite(blendOverGrey(mode, red)) else {
+                XCTFail("\(mode.displayName) fixture must composite"); continue
+            }
+            XCTAssertEqual(pixel(image, 16, 16), expected,
+                           "\(mode.displayName) of pure red onto mid-grey. Got RGBA \(pixel(image, 16, 16))")
+        }
+    }
+
+    /// A fully desaturated backdrop has no hue for Hue mode to borrow and no channel spread for
+    /// Saturation mode to redistribute into: `sat(gray) == 0` sends `setSat`'s affine remap to the
+    /// zero triple in both formulas (see `Compositor.swift`'s `setSat`), and the `setLum` that
+    /// follows puts the backdrop's own luminosity straight back onto it. So both modes reproduce a
+    /// grey backdrop exactly regardless of the source — the non-separable analogue of
+    /// `testABlendingLayerOverNothingReadsAsNormal`'s "nothing here for this mode to act on".
+    func testHueAndSaturationOverAGrayBackdropReproduceTheBackdropExactly() {
+        let gray = UIColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1)
+        let source = UIColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1)
+        for mode in [BlendMode.hue, .saturation] {
+            let manager = CanvasFixture.manager(layerCount: 2)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(gray, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+            CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                          CanvasFixture.solidImage(source, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+            manager.setLayerBlendMode(layerIndex: 1, to: mode)
+            guard let image = composite(manager) else {
+                XCTFail("\(mode.displayName) fixture must composite"); continue
+            }
+            XCTAssertEqual(pixel(image, 16, 16), [153, 153, 153, 255],
+                           "\(mode.displayName) over an achromatic backdrop must reproduce it exactly. Got RGBA \(pixel(image, 16, 16))")
+        }
+    }
+
+    /// The general non-separable case, where `setLum`'s shift actually moves a channel and the two
+    /// modes are no longer degenerate the way they are over grey. `accuracy: 1` covers the one 8-bit
+    /// rounding step the float-to-byte conversion costs; the expected values themselves are exact.
+    func testColorAndLuminosityOverAGrayBackdropMatchHandComputedValues() {
+        let gray = UIColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1)
+        let source = UIColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1)
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(gray, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(source, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+
+        manager.setLayerBlendMode(layerIndex: 1, to: .color)
+        guard let colorImage = composite(manager) else { return XCTFail("Color fixture must composite") }
+        let colorPixel = pixel(colorImage, 16, 16)
+        // Color keeps the source's hue and saturation but the backdrop's luminosity: `setLum(cs,
+        // lum(cb))` shifts (0.1, 0.2, 0.3) by `lum(gray) - lum(cs) = 0.6 - 0.181 = 0.419` uniformly,
+        // and the shifted triple stays in [0, 1] so `clipColor` never engages.
+        XCTAssertEqual(colorPixel[0], 132, accuracy: 1, "Color red channel. Got RGBA \(colorPixel)")
+        XCTAssertEqual(colorPixel[1], 158, accuracy: 1, "Color green channel. Got RGBA \(colorPixel)")
+        XCTAssertEqual(colorPixel[2], 183, accuracy: 1, "Color blue channel. Got RGBA \(colorPixel)")
+        XCTAssertEqual(colorPixel[3], 255, "Color must stay opaque. Got RGBA \(colorPixel)")
+
+        manager.setLayerBlendMode(layerIndex: 1, to: .luminosity)
+        guard let luminosityImage = composite(manager) else { return XCTFail("Luminosity fixture must composite") }
+        // Luminosity is Color with backdrop and source swapped: `setLum(cb, lum(cs))` on a uniform
+        // grey backdrop flattens to a uniform grey at the source's own Lum, exactly — no clipping is
+        // possible when every channel starts equal.
+        XCTAssertEqual(pixel(luminosityImage, 16, 16), [46, 46, 46, 255],
+                       "Luminosity over a grey backdrop is flat grey at the source's Lum. Got RGBA \(pixel(luminosityImage, 16, 16))")
+    }
+
+    /// **Whole-triple, not per-channel — the other half of Tier 2's non-separable trap.** A
+    /// per-channel max of pure red and pure green would be yellow, which is what `lighten` already
+    /// gives and would not need a new mode to express. Lighter Color instead compares the *triple's*
+    /// luminosity and keeps one source wholesale: green's Lum (0.59) beats red's (0.3) even though
+    /// neither of red's own channels is individually the larger one.
+    func testLighterColorAndDarkerColorPickTheWholeTripleByLuminosityNotPerChannel() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(green, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+
+        manager.setLayerBlendMode(layerIndex: 1, to: .lighterColor)
+        guard let lighterImage = composite(manager) else { return XCTFail("Lighter Color fixture must composite") }
+        XCTAssertEqual(pixel(lighterImage, 16, 16), [0, 255, 0, 255],
+                       "Green's Lum beats red's, so Lighter Color keeps green whole rather than maxing per channel into yellow. Got RGBA \(pixel(lighterImage, 16, 16))")
+
+        manager.setLayerBlendMode(layerIndex: 1, to: .darkerColor)
+        guard let darkerImage = composite(manager) else { return XCTFail("Darker Color fixture must composite") }
+        XCTAssertEqual(pixel(darkerImage, 16, 16), [255, 0, 0, 255],
+                       "…and Darker Color keeps the lower-Lum backdrop, red, whole. Got RGBA \(pixel(darkerImage, 16, 16))")
+    }
+
     // MARK: - The snapshot rule (§9.1 point 3)
 
     /// The guarantee the whole request type exists for: once a `RenderRequest` is built, it is a
@@ -795,12 +917,12 @@ final class CompositorParityLogicTests: XCTestCase {
 
     /// **Every mode in the picker, through both backends, over 4096 (colour, alpha) pairs.**
     ///
-    /// Fifteen entries since phase 6, and the fifteenth is not a blend: `clipToBelow` is resolved in
-    /// the render tree into source-over plus a mask (§7), so it rides this sweep as `.normal` with
-    /// the spectrum layer beneath clipping the one above. It clears the tolerance below for that
-    /// reason rather than for the ones the table gives; its own exact gate — delta 0 on a masked
-    /// leaf, a masked group, an antialiased mask edge and the implicit clip — is in
-    /// `MaskParityLogicTests`.
+    /// Twenty-six entries once Tier 2 landed alongside phase 6's masks, and one of them is not a
+    /// blend: `clipToBelow` is resolved in the render tree into source-over plus a mask (§7), so it
+    /// rides this sweep as `.normal` with the spectrum layer beneath clipping the one above. It
+    /// clears the tolerance below for that reason rather than for the ones the table gives — which
+    /// is also why the table has no row for it; its own exact gate — delta 0 on a masked leaf, a
+    /// masked group, an antialiased mask edge and the implicit clip — is in `MaskParityLogicTests`.
     ///
     /// This is the phase 5 counterpart to phase 2's delta-0 gate, and the headline is that the gate
     /// does not survive contact with blend modes — which was the expected outcome this time, and is
@@ -816,25 +938,40 @@ final class CompositorParityLogicTests: XCTestCase {
     ///
     ///     normal 0 · multiply 1 · screen 0 · overlay 0 · add 0 · subtract 0 · darken 0 · lighten 0
     ///     colorDodge 1 · colorBurn 1 · softLight 0 · hardLight 1 · linearLight 0 · difference 0
+    ///     vividLight 1 · pinLight 0 · linearBurn 0 · hue 1 · saturation 0 · color 1 · luminosity 1
+    ///     divide 0 · exclusion 0 · lighterColor 0 · darkerColor 0
     ///
-    /// **The first run of this sweep is why three modes are computed by hand on the CPU.** Against
-    /// `CGBlendMode.colorDodge`, `.colorBurn` and `.softLight` the table read **141, 249 and 16**
-    /// while every other mode sat within one step. A number like 249 is not a rounding regime, it is
-    /// a different formula: CoreGraphics implements the PDF 1.4 originals, in which the two divisions
-    /// have no zero-backdrop guard — so Color Dodge lifts a black backdrop to white where the modern
-    /// rule keeps it black — and soft light uses a different `D(cb)` curve. W3C Compositing Level 1
-    /// added those guards and is what Photoshop and CSP do, which settles which one an artist
+    /// **The first run of this sweep is why three Tier 1 modes are computed by hand on the CPU.**
+    /// Against `CGBlendMode.colorDodge`, `.colorBurn` and `.softLight` the table read **141, 249 and
+    /// 16** while every other mode sat within one step. A number like 249 is not a rounding regime, it
+    /// is a different formula: CoreGraphics implements the PDF 1.4 originals, in which the two
+    /// divisions have no zero-backdrop guard — so Color Dodge lifts a black backdrop to white where
+    /// the modern rule keeps it black — and soft light uses a different `D(cb)` curve. W3C Compositing
+    /// Level 1 added those guards and is what Photoshop and CSP do, which settles which one an artist
     /// reaching for Color Dodge means. `BlendMode.handRolledChannel` follows the spec for all three.
     ///
-    /// The four that remain at 1 are not a residue of that: `multiply` and `hardLight` still cross the
-    /// `CGBlendMode` boundary and so are quantized by CoreGraphics per operation and by the shader
-    /// once, while `colorDodge` and `colorBurn` are hand-rolled on both sides but divide, and a
-    /// division amplifies a half-step in the denominator. `softLight` reaching 0 is the sharpest
-    /// evidence the diagnosis was right — it has a `sqrt` in it and *still* agrees exactly, now that
-    /// both sides evaluate the same curve.
+    /// The four Tier 1 modes that remain at 1 are not a residue of that: `multiply` and `hardLight`
+    /// still cross the `CGBlendMode` boundary and so are quantized by CoreGraphics per operation and
+    /// by the shader once, while `colorDodge` and `colorBurn` are hand-rolled on both sides but
+    /// divide, and a division amplifies a half-step in the denominator. `softLight` reaching 0 is the
+    /// sharpest evidence the diagnosis was right — it has a `sqrt` in it and *still* agrees exactly,
+    /// now that both sides evaluate the same curve.
+    ///
+    /// **Tier 2's sweep found the opposite of what §7's build note told this session to expect.**
+    /// `exclusion`, `hue`, `saturation`, `color` and `luminosity` all cross `CGBlendMode` — the same
+    /// boundary `colorDodge`/`colorBurn`/`softLight` crossed and failed at — and every one of them
+    /// measured within the ordinary one-step rounding band instead: exclusion 0, hue 1, saturation 0,
+    /// color 1, luminosity 1. `BlendMode.coreGraphicsBlendMode` keeps the CoreGraphics primitive for
+    /// all five as a result; nothing in Tier 2 needed the hand-rolled escape hatch for disagreeing
+    /// with the spec, only for being absent from `CGBlendMode` altogether (`vividLight`, `pinLight`,
+    /// `linearBurn`, `divide`, `lighterColor`, `darkerColor` — five of those six land at delta 0, and
+    /// `vividLight` at 1 for the same division-amplifies-a-half-step reason `colorDodge` does, since
+    /// it calls the same hand-rolled function). This is the sweep doing its job either way: the brief
+    /// was right not to assume agreement, and the number that came back is the number that came back.
     ///
     /// Phase 2's delta-0 gate does not survive contact with blend modes in general. It survives
-    /// further than the first measurement suggested, and the gap was a bug rather than noise.
+    /// further than the first Tier 1 measurement suggested, and that gap was a bug rather than noise;
+    /// Tier 2 added eleven more modes to the same gate and every one of them held to one step.
     ///
     /// **`.normal` keeps its exact assertion**, and `blendOver` in `Composite.metal` keeps the literal
     /// expression phase 2 shipped rather than specialising the general path, precisely so that a
