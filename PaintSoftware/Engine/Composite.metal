@@ -159,3 +159,24 @@ kernel void compositeFill(texture2d<float, access::write> result [[texture(0)]],
 {
     result.write(color, gid);
 }
+
+/// One layer's pixels, or one group's assembled composite, clipped by a resolved alpha mask
+/// (LAYER_COMPOSITING.md §6.1 — at render time, never baked into the layer).
+///
+/// All four channels scale, for the reason this file's header gives about opacity: the input is
+/// premultiplied, so a pixel at half coverage is the same colour at half the coverage, while scaling
+/// `a` alone would brighten it as it faded.
+///
+/// **The mask itself is not computed here.** §6.3's threshold is a step function, so a source alpha
+/// that differed between the backends by the one channel step the blend modes are allowed would land
+/// on opposite sides of it — `MaskResolver` resolves through the CPU reference for both backends and
+/// this kernel receives the finished coverage. What is left is one multiply, and
+/// `MaskResolver.apply` performs the same one in the same order in Swift so the two round to the
+/// same byte.
+kernel void compositeMask(texture2d<float, access::read>  layer  [[texture(0)]],
+                          texture2d<float, access::read>  mask   [[texture(1)]],
+                          texture2d<float, access::write> result [[texture(2)]],
+                          uint2 gid [[thread_position_in_grid]])
+{
+    result.write(layer.read(gid) * mask.read(gid).r, gid);
+}

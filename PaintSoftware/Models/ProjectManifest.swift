@@ -143,6 +143,13 @@ struct FolderManifest: Codable {
     var blendMode: BlendMode = .normal
     var isIsolated: Bool = true
 
+    /// The group's own alpha mask (§6.2). Absent for every project saved before phase 6 and for
+    /// every group nobody has masked, which is the same thing as far as decoding is concerned: nil
+    /// means "no mask". Written only when it exists, so an unmasked document's manifest is byte-for
+    /// byte what it was — unlike `opacity`, which has to be written unconditionally because the
+    /// §10.3 migration reads its *absence* as a signal.
+    var alphaMask: AlphaMask? = nil
+
     /// **Not persisted, and derived at decode time.** True when this folder arrived without the
     /// group-property keys — which is to say it was written while `toggleFolderVisibility` still
     /// wrote through to every descendant. `ProjectStore.load` is the only reader; see the §10.3
@@ -150,7 +157,8 @@ struct FolderManifest: Codable {
     var wasSavedBeforeGroupProperties = false
 
     init(id: UUID, name: String, isExpanded: Bool, isVisible: Bool, parentFolderID: UUID? = nil,
-         opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true) {
+         opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true,
+         alphaMask: AlphaMask? = nil) {
         self.id = id
         self.name = name
         self.isExpanded = isExpanded
@@ -159,6 +167,7 @@ struct FolderManifest: Codable {
         self.opacity = opacity
         self.blendMode = blendMode
         self.isIsolated = isIsolated
+        self.alphaMask = alphaMask
     }
 
     // Custom decoding for the same reason `LayerManifest` has one: a synthesized decoder demands
@@ -173,6 +182,7 @@ struct FolderManifest: Codable {
         opacity = try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
         blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
         isIsolated = try container.decodeIfPresent(Bool.self, forKey: .isIsolated) ?? true
+        alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
         // `opacity` stands in for the whole group-property set, so **it must keep being written
         // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`
         // plays with the interpolation registries — would make every untouched folder in every
@@ -181,7 +191,7 @@ struct FolderManifest: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, isExpanded, isVisible, parentFolderID, opacity, blendMode, isIsolated
+        case id, name, isExpanded, isVisible, parentFolderID, opacity, blendMode, isIsolated, alphaMask
     }
 }
 
@@ -207,10 +217,14 @@ struct LayerManifest: Codable {
     var parentFolderID: String? = nil
     /// Defaulted like `kind`, so a project saved before layers could blend loads as all-normal.
     var blendMode: BlendMode = .normal
+    /// The layer's alpha mask (§6.2), written only when there is one — see `FolderManifest.alphaMask`
+    /// for why absence is the whole migration this field needs.
+    var alphaMask: AlphaMask? = nil
     var cels: [CelManifest]
 
     init(id: UUID, name: String, opacity: Double, isVisible: Bool, kind: LayerKind = .raster,
-         parentFolderID: String? = nil, blendMode: BlendMode = .normal, cels: [CelManifest]) {
+         parentFolderID: String? = nil, blendMode: BlendMode = .normal,
+         alphaMask: AlphaMask? = nil, cels: [CelManifest]) {
         self.id = id
         self.name = name
         self.opacity = opacity
@@ -218,6 +232,7 @@ struct LayerManifest: Codable {
         self.kind = kind
         self.parentFolderID = parentFolderID
         self.blendMode = blendMode
+        self.alphaMask = alphaMask
         self.cels = cels
     }
 
@@ -233,10 +248,11 @@ struct LayerManifest: Codable {
         cels = try container.decode([CelManifest].self, forKey: .cels)
         parentFolderID = try container.decodeIfPresent(String.self, forKey: .parentFolderID)
         blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
+        alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, opacity, isVisible, kind, parentFolderID, blendMode, cels
+        case id, name, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask, cels
     }
 }
 

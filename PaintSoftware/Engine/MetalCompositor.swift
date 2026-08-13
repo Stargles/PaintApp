@@ -54,7 +54,9 @@ extension BlendMode {
     /// a per-mode parity table cannot miss.
     var shaderCode: UInt32 {
         switch self {
-        case .normal:      return 0
+        // See `coreGraphicsBlendMode` for why `clipToBelow` shares Normal's code rather than getting
+        // one of its own: by the time a mode reaches a backend it has been through `compositedMode`.
+        case .normal, .clipToBelow: return 0
         case .multiply:    return 1
         case .screen:      return 2
         case .overlay:     return 3
@@ -146,6 +148,7 @@ final class CompositorMetalEngine {
     private let queue: MTLCommandQueue
     private let psOver: MTLComputePipelineState
     private let psFill: MTLComputePipelineState
+    private let psMask: MTLComputePipelineState
 
     private init?() {
         guard let device = MTLCreateSystemDefaultDevice(),
@@ -169,11 +172,13 @@ final class CompositorMetalEngine {
             guard let fn = library.makeFunction(name: name) else { return nil }
             return try? device.makeComputePipelineState(function: fn)
         }
-        guard let over = pipeline("compositeOver"), let fill = pipeline("compositeFill") else { return nil }
+        guard let over = pipeline("compositeOver"), let fill = pipeline("compositeFill"),
+              let mask = pipeline("compositeMask") else { return nil }
         self.device = device
         self.queue = queue
         self.psOver = over
         self.psFill = fill
+        self.psMask = mask
     }
 
     /// How many scratch textures the last composite allocated. Reported by `PerfBaselineTests`;
@@ -205,8 +210,13 @@ final class CompositorMetalEngine {
         }
         fill(front, with: background, encoder: encoder, width: width, height: height)
 
+        // One upload per distinct mask for this composite, not per masked node — the resolution is
+        // already shared (`MaskResolver`), and re-uploading the same 4.2 MB once per layer clipped
+        // to it would spend on the GPU exactly what that sharing saves on the CPU.
+        var maskTextures: [ObjectIdentifier: MTLTexture] = [:]
         let encoded = encode(request.tree, of: request, front: &front, back: &back,
-                             encoder: encoder, pool: pool, width: width, height: height)
+                             encoder: encoder, pool: pool, masks: &maskTextures,
+                             width: width, height: height)
         encoder.endEncoding()
         guard encoded else { return nil }
 
@@ -230,6 +240,7 @@ final class CompositorMetalEngine {
     private func encode(_ nodes: [RenderNode], of request: RenderRequest,
                         front: inout MTLTexture, back: inout MTLTexture,
                         encoder: MTLComputeCommandEncoder, pool: ScratchTexturePool,
+                        masks: inout [ObjectIdentifier: MTLTexture],
                         width: Int, height: Int) -> Bool {
         for node in nodes {
             switch node.content {
@@ -238,8 +249,23 @@ final class CompositorMetalEngine {
                       request.sources.indices.contains(layerIndex),
                       let source = request.sources[layerIndex] else { continue }
                 guard let texture = Self.upload(source.image, device: device) else { return false }
-                over(source: texture, opacity: node.opacity, mode: node.blendMode,
+                // A masked leaf takes one extra dispatch and one scratch texture: the mask multiply
+                // writes into `rgba8Unorm` before the composite reads it, which puts the GPU's
+                // quantization at the same point as `MaskResolver.apply`'s on the CPU. Folding the
+                // multiply into `compositeOver` instead would be one dispatch cheaper and would move
+                // that point, which is the whole of the byte-for-byte agreement.
+                var drawn = texture
+                var scratch: MTLTexture?
+                if let mask = maskTexture(for: node, of: request, cache: &masks) {
+                    guard let clipped = pool.acquire() else { return false }
+                    scratch = clipped
+                    apply(mask: mask, to: texture, into: clipped, encoder: encoder,
+                          width: width, height: height)
+                    drawn = clipped
+                }
+                over(source: drawn, opacity: node.opacity, mode: node.blendMode,
                      front: &front, back: &back, encoder: encoder, width: width, height: height)
+                if let scratch { pool.release(scratch) }
 
             case .node(_, let inputs):
                 // A hidden group is a subtree this walk does not enter, so it needs no texture to
@@ -248,7 +274,8 @@ final class CompositorMetalEngine {
                 guard node.needsOwnBuffer else {
                     for input in inputs {
                         guard encode(input, of: request, front: &front, back: &back,
-                                     encoder: encoder, pool: pool, width: width, height: height) else { return false }
+                                     encoder: encoder, pool: pool, masks: &masks,
+                                     width: width, height: height) else { return false }
                     }
                     continue
                 }
@@ -262,13 +289,50 @@ final class CompositorMetalEngine {
                      width: width, height: height)
                 for input in inputs {
                     guard encode(input, of: request, front: &groupFront, back: &groupBack,
-                                 encoder: encoder, pool: pool, width: width, height: height) else { return false }
+                                 encoder: encoder, pool: pool, masks: &masks,
+                                 width: width, height: height) else { return false }
                 }
-                over(source: groupFront, opacity: node.opacity, mode: node.blendMode,
+                // The group's mask clips the assembled composite, never the children — the same
+                // placement the CPU reference uses and the reason a masked group buffers at all.
+                // `groupBack` is free here (the loop above left the result in `groupFront`), so the
+                // clip costs a dispatch and no allocation.
+                var assembled = groupFront
+                if let mask = maskTexture(for: node, of: request, cache: &masks) {
+                    apply(mask: mask, to: groupFront, into: groupBack, encoder: encoder,
+                          width: width, height: height)
+                    assembled = groupBack
+                }
+                over(source: assembled, opacity: node.opacity, mode: node.blendMode,
                      front: &front, back: &back, encoder: encoder, width: width, height: height)
             }
         }
         return true
+    }
+
+    /// This node's resolved mask as a single-channel texture, uploaded once per composite.
+    private func maskTexture(for node: RenderNode, of request: RenderRequest,
+                             cache: inout [ObjectIdentifier: MTLTexture]) -> MTLTexture? {
+        guard !node.masks.isEmpty,
+              let resolved = MaskResolver.coverage(for: node.masks, of: request) else { return nil }
+        let key = ObjectIdentifier(resolved)
+        if let hit = cache[key] { return hit }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Unorm, width: resolved.width, height: resolved.height, mipmapped: false)
+        descriptor.usage = .shaderRead
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        texture.replace(region: MTLRegionMake2D(0, 0, resolved.width, resolved.height), mipmapLevel: 0,
+                        withBytes: resolved.coverage, bytesPerRow: resolved.width)
+        cache[key] = texture
+        return texture
+    }
+
+    private func apply(mask: MTLTexture, to source: MTLTexture, into result: MTLTexture,
+                       encoder: MTLComputeCommandEncoder, width: Int, height: Int) {
+        encoder.setComputePipelineState(psMask)
+        encoder.setTexture(source, index: 0)
+        encoder.setTexture(mask, index: 1)
+        encoder.setTexture(result, index: 2)
+        dispatch2D(encoder, psMask, width: width, height: height)
     }
 
     /// One `compositeOver` dispatch, and the swap that makes the result the new backdrop.

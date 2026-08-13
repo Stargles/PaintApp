@@ -55,6 +55,50 @@ struct LayerRenderSource {
     // that needs it. §5.2's sandwich is that cache, and it caches *composites* of everything above
     // and below the active layer rather than one texture per layer — which is both the thing §5.3
     // asks for and a far better ratio than caching leaves.
+    //
+    // Phase 6 is the second cache to need that key (`MaskResolver`), so the request carries it as
+    // `contentVersions` — beside the pixels rather than inside this type, because it is indexed the
+    // same way and a mask keys on the versions of a *set* of layers rather than of one.
+}
+
+/// One layer's pixels at one frame, **by model identity rather than by rendered result** — the key
+/// every cache downstream of a snapshot is allowed to use.
+///
+/// Deliberately the same identity `PixelOps.RasterizeKey` is built from, because it is the same
+/// question: that memo is what makes taking a snapshot cheap, and a second key that moved when it did
+/// not would re-render for nothing. The two `UIImage` tiers are compared by object identity because
+/// that is how they change — a fill or a bake replaces them wholesale rather than drawing into them.
+///
+/// **Identity *and* version, for both tiers, and the identity is the load-bearing half.** A version
+/// alone is monotonic only within one object's lifetime, while a cel id outlives any number of them:
+/// reopening a project rebuilds every `RasterLayerTexture` with its counter back at 0 under the same
+/// cel id, so a version-only key can match an entry cached before the last edit and serve pre-edit
+/// pixels. Undo can swap in a texture object the same way. This is the mistake §9.1's original
+/// `contentVersion` made from the other end — keying on the rendered `CGImage` that
+/// `PixelOps.rasterize` mints fresh every call, measured at a zero hit rate and deleted in phase 2.
+///
+/// Lifted out of `CanvasView.Coordinator` in phase 6, where it was `SandwichKey`'s private business
+/// until `MaskResolver` needed exactly the same answer. Two spellings of it would be two things to
+/// keep right.
+struct LayerContentVersion: Hashable {
+    let celID: UUID
+    let raster: ObjectIdentifier
+    let rasterVersion: Int
+    let vector: ObjectIdentifier?
+    let vectorVersion: Int
+    let fillImage: ObjectIdentifier?
+    let bakedImage: ObjectIdentifier?
+
+    init(cel: Cel) {
+        celID = cel.id
+        raster = ObjectIdentifier(cel.raster)
+        rasterVersion = cel.raster.version
+        vector = cel.vector.map(ObjectIdentifier.init)
+        // -1 rather than 0 for "no vector tier at all", so acquiring an empty one is a change.
+        vectorVersion = cel.vector?.version ?? -1
+        fillImage = cel.fillImage.map(ObjectIdentifier.init)
+        bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+    }
 }
 
 /// The canvas backdrop, when the request wants one drawn under the stack.
@@ -84,11 +128,27 @@ struct RenderRequest {
     /// cel covering `frame` and a layer that is hidden. Rendering a hidden layer's pixels would be
     /// work nothing reads.
     ///
-    /// **Phase 6 note.** §6.6 decision 9 is that a mask ignores its source's visibility — a hidden
-    /// layer still masks — so once masks exist, a hidden layer that is somebody's mask source has to
-    /// be snapshotted anyway. That is a change to `makeRenderRequest`'s elision rule, not to this
-    /// type; the nil case stays meaningful either way.
+    /// **Phase 6 made that elision narrower, exactly as this note predicted.** §6.6 is that a mask
+    /// ignores its source's visibility — a hidden layer still masks — so `renderSources` now
+    /// snapshots a hidden layer that is somebody's mask source. The nil case is unchanged and still
+    /// means "contributes nothing at this frame".
     let sources: [LayerRenderSource?]
+
+    /// Parallel to `sources`: what each leaf's pixels *are*, by model identity, for the caches
+    /// downstream of this request that key on content rather than on the image object. Nil where
+    /// `sources` is nil, and for the same reason.
+    let contentVersions: [LayerContentVersion?]
+
+    /// The stack each mask source resolves to (§6.2), keyed by source.
+    ///
+    /// **Derived from the whole document rather than from `tree`, and that is the point.** A
+    /// sandwich half is a pruned tree, so a masked layer in the `below` half can easily be clipped by
+    /// a source that lives in `above` — resolving masks out of `tree` would silently drop it. All
+    /// three sandwich requests therefore share one of these, built once from the full tree.
+    ///
+    /// Every node in these stacks has its visibility forced on, which is §6.6's "a hidden source
+    /// still contributes its alpha" expressed where the compositor cannot forget it.
+    let maskStacks: [MaskSource: [RenderNode]]
 
     let frame: Int
     let canvasSize: CGSize
@@ -139,9 +199,15 @@ extension CanvasManager {
                            includeBackground: Bool) -> RenderRequest? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
+        let tree = renderTree
+        let maskStacks = maskSourceStacks(of: tree)
+        let snapshot = renderSources(atFrame: frame, canvasSize: canvasSize, quality: quality,
+                                     alsoIncluding: maskedLayerIndices(in: maskStacks))
         return RenderRequest(
-            tree: renderTree,
-            sources: renderSources(atFrame: frame, canvasSize: canvasSize, quality: quality),
+            tree: tree,
+            sources: snapshot.sources,
+            contentVersions: snapshot.versions,
+            maskStacks: maskStacks,
             frame: frame,
             canvasSize: canvasSize,
             background: includeBackground && isCanvasBackgroundVisible
@@ -172,9 +238,13 @@ extension CanvasManager {
         let tree = renderTree
         guard let halves = tree.split(atLeaf: activeLayerIndex) else { return nil }
 
-        let sources = renderSources(atFrame: frame, canvasSize: canvasSize, quality: quality)
+        // From the *whole* tree, not from either half — see `RenderRequest.maskStacks`.
+        let maskStacks = maskSourceStacks(of: tree)
+        let snapshot = renderSources(atFrame: frame, canvasSize: canvasSize, quality: quality,
+                                     alsoIncluding: maskedLayerIndices(in: maskStacks))
         func request(_ tree: [RenderNode]) -> RenderRequest {
-            RenderRequest(tree: tree, sources: sources, frame: frame, canvasSize: canvasSize,
+            RenderRequest(tree: tree, sources: snapshot.sources, contentVersions: snapshot.versions,
+                          maskStacks: maskStacks, frame: frame, canvasSize: canvasSize,
                           background: nil, quality: quality)
         }
         return SandwichRequests(full: request(tree),
@@ -182,27 +252,81 @@ extension CanvasManager {
                                 above: request(halves.above))
     }
 
-    /// One resolved image per `layers` index, or nil where a layer contributes nothing at this frame.
+    /// One resolved image per `layers` index, and its content version, or nil where a layer
+    /// contributes nothing at this frame.
     ///
     /// Factored out of `makeRenderRequest` rather than copied into `makeSandwichRequests`, because a
-    /// second copy of the elision rule is a second thing to update when §6.6 decision 9 changes it —
-    /// a mask ignores its source's visibility, so a hidden layer that is somebody's mask source will
-    /// have to be snapshotted after all.
+    /// second copy of the elision rule is a second thing to update — which phase 6 proved by
+    /// changing it: `alsoIncluding` is §6.6's "a mask ignores its source's visibility", and a hidden
+    /// layer that clips something has to be rasterized after all.
     @MainActor
-    private func renderSources(atFrame frame: Int, canvasSize: CGSize,
-                               quality: RenderQuality) -> [LayerRenderSource?] {
-        layers.indices.map { index in
+    private func renderSources(atFrame frame: Int, canvasSize: CGSize, quality: RenderQuality,
+                               alsoIncluding maskSourceLayers: Set<Int> = [])
+    -> (sources: [LayerRenderSource?], versions: [LayerContentVersion?]) {
+        var sources: [LayerRenderSource?] = []
+        var versions: [LayerContentVersion?] = []
+        sources.reserveCapacity(layers.count)
+        versions.reserveCapacity(layers.count)
+        for index in layers.indices {
             let layer = layers[index]
             // The visibility check is an elision, not the compositing rule — `RenderNode.isVisible`
             // carries the flag and the compositor is what honours it. Skipping the render here only
-            // avoids rasterizing pixels that would then be multiplied by zero.
-            guard layer.isVisible,
+            // avoids rasterizing pixels that would then be multiplied by zero, which is precisely
+            // not true of a hidden mask source: its alpha is read even though it never draws.
+            guard layer.isVisible || maskSourceLayers.contains(index),
                   let celIndex = activeCelIndex(inLayer: index, atFrame: frame),
                   let image = PixelOps.rasterize(cel: layer.cels[celIndex],
                                                  canvasSize: canvasSize,
                                                  quality: quality).cgImage
-            else { return nil }
-            return LayerRenderSource(image: image)
+            else {
+                sources.append(nil)
+                versions.append(nil)
+                continue
+            }
+            sources.append(LayerRenderSource(image: image))
+            versions.append(LayerContentVersion(cel: layer.cels[celIndex]))
         }
+        return (sources, versions)
+    }
+
+    // MARK: - Mask sources (§6.2)
+
+    /// Every mask source named anywhere in `tree`, resolved to the stack that produces its alpha.
+    ///
+    /// A `.layer` source becomes a one-node stack and a `.folder` source the folder's whole node, so
+    /// the union in `MaskResolver` is a composite of ordinary render nodes rather than a second
+    /// notion of what a subtree means. Visibility is forced on throughout (§6.6) — including inside a
+    /// folder source, so that a mask shape parked in a hidden group behaves like a mask shape parked
+    /// on a hidden layer, and toggling an eye can never silently change where paint may land.
+    ///
+    /// A source naming something that is not in the tree is simply absent from the result, which the
+    /// resolver treats as contributing no alpha. That covers a stale id the same way
+    /// `resolvedContainer(ofFolder:)` covers a missing parent: by carrying on.
+    func maskSourceStacks(of tree: [RenderNode]) -> [MaskSource: [RenderNode]] {
+        var wanted: Set<MaskSource> = []
+        collectMaskSources(in: tree, into: &wanted)
+        guard !wanted.isEmpty else { return [:] }
+
+        var stacks: [MaskSource: [RenderNode]] = [:]
+        for source in wanted {
+            guard let node = RenderNode.find(source.id, in: tree) else { continue }
+            stacks[source] = [node.ignoringVisibility]
+        }
+        return stacks
+    }
+
+    private func collectMaskSources(in nodes: [RenderNode], into wanted: inout Set<MaskSource>) {
+        for node in nodes {
+            for mask in node.masks { wanted.formUnion(mask.sources) }
+            if case .node(_, let inputs) = node.content {
+                for input in inputs { collectMaskSources(in: input, into: &wanted) }
+            }
+        }
+    }
+
+    /// The `layers` indices those stacks read pixels from — what the snapshot has to rasterize even
+    /// where the layer is hidden.
+    private func maskedLayerIndices(in stacks: [MaskSource: [RenderNode]]) -> Set<Int> {
+        Set(stacks.values.flatMap(\.leafLayerIndices))
     }
 }

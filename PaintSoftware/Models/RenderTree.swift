@@ -48,8 +48,9 @@ enum CompositorOp: Equatable {
 /// both flags from phase 1 without acting on either is what let that be one deliberate change to the
 /// compositor rather than a side effect of deriving the tree.
 ///
-/// `mask` and `contentVersion` (§6.2, §9.1) join this struct when there is something in the model to
-/// populate them from and something in the compositor to read them.
+/// `masks` arrived in phase 6 on those terms — §6.2's `AlphaMask` in the model, `MaskResolver` in
+/// the compositor. `contentVersion` (§9.1) did not join it: the cache that wanted one keys on the
+/// snapshot's `LayerContentVersion` instead, which is the model's answer rather than the tree's.
 struct RenderNode: Identifiable, Equatable {
 
     enum Content: Equatable {
@@ -81,6 +82,22 @@ struct RenderNode: Identifiable, Equatable {
     /// the reading `needsOwnBuffer` needs — its isolation clause asks whether a node *encloses* a
     /// blend, and a leaf answering "I am isolated" would claim a buffer for a single draw.
     let isIsolated: Bool
+
+    /// The masks clipping this node, already resolved down to what actually applies (§6.2): disabled
+    /// masks, empty ones, sources that no longer exist and sources that would close a cycle are all
+    /// gone by the time a mask reaches here, so the compositor never asks any of those questions.
+    ///
+    /// **A list rather than one mask, and normally empty or one long.** A layer set to "Clip to
+    /// below" (§7 Tier 1) carries an *implicit* mask whose source is the entry directly beneath it,
+    /// and a layer that also has an explicit mask of its own carries both — applied in sequence,
+    /// which multiplies the coverages and therefore intersects the two clips. That is what picking
+    /// both plainly means, and it needs no precedence rule to say so. Sources *within* one mask union
+    /// instead; the two operations are different questions and it is worth keeping them apart.
+    ///
+    /// A small value type, so `Equatable` here stays cheap — which matters because
+    /// `CanvasView.SandwichKey` compares whole trees on every SwiftUI pass. The resolved *coverage*
+    /// deliberately does not live in the tree for that reason (see `MaskResolver`).
+    var masks: [AlphaMask] = []
 }
 
 extension RenderNode {
@@ -105,6 +122,10 @@ extension RenderNode {
     /// - **Isolated, over a subtree that blends.** An isolated group's children start from
     ///   transparency, which differs from starting from the backdrop only if one of them does
     ///   something other than source-over.
+    /// - **Masked** (§6.2, phase 6). A group's mask clips the group, so it applies to the assembled
+    ///   composite — masking each child on its own way in would clip the children instead, which is
+    ///   a different picture wherever they overlap, exactly as with opacity. A masked *leaf* still
+    ///   needs no buffer: its mask multiplies the one image it draws.
     ///
     /// **All three clauses are reachable as of phase 5**, which is the change `BlendMode`'s fourteen
     /// cases made to this predicate without editing a line of it. Phase 4 wrote the rule whole while
@@ -118,7 +139,7 @@ extension RenderNode {
         guard case .node = content else { return false }
         // `!= 1` rather than `< 1`: the identity is the thing being tested, and `setFolderOpacity`
         // clamps to 0...1 so the two are the same test for every value that can reach here.
-        return opacity != 1 || blendMode.isBlending || (isIsolated && enclosesABlend)
+        return opacity != 1 || blendMode.isBlending || !masks.isEmpty || (isIsolated && enclosesABlend)
     }
 
     /// Whether anything inside this node **blends against the backdrop this node is drawn onto** —
@@ -154,6 +175,38 @@ extension RenderNode {
             return inputs.flatMap { $0.leafLayerIndices }
         }
     }
+
+    /// This node and everything under it, switched on — §6.6's "a mask ignores its source's
+    /// visibility", applied where a mask source stack is built (`maskSourceStacks(of:)`).
+    ///
+    /// Recursive rather than top-level-only so a mask shape parked inside a hidden group works the
+    /// same way as one parked on a hidden layer. The alternative reads as an arbitrary depth limit:
+    /// the artist hid *something*, and which enclosing thing they hid should not decide whether the
+    /// clip still holds.
+    var ignoringVisibility: RenderNode {
+        let inner: Content
+        switch content {
+        case .leaf:
+            inner = content
+        case .node(let op, let inputs):
+            inner = .node(op: op, inputs: inputs.map { $0.map(\.ignoringVisibility) })
+        }
+        return RenderNode(id: id, content: inner, opacity: opacity, isVisible: true,
+                          blendMode: blendMode, isIsolated: isIsolated, masks: masks)
+    }
+
+    /// The node with this `Layer.id` or `LayerFolder.id`, anywhere in `nodes`. Nil when the id names
+    /// nothing in the tree, which for a mask source means it contributes no alpha.
+    static func find(_ id: UUID, in nodes: [RenderNode]) -> RenderNode? {
+        for node in nodes {
+            if node.id == id { return node }
+            guard case .node(_, let inputs) = node.content else { continue }
+            for input in inputs {
+                if let hit = find(id, in: input) { return hit }
+            }
+        }
+        return nil
+    }
 }
 
 extension Array where Element == RenderNode {
@@ -185,7 +238,12 @@ extension Array where Element == RenderNode {
     /// difference.
     var needsCompositorOnCanvas: Bool {
         contains { node in
-            if node.needsOwnBuffer || node.blendMode.isBlending { return true }
+            // The mask clause is the same shape as the blend one and is there for the same reason:
+            // Core Animation draws a flat row of hosts and cannot clip one sibling to another, so a
+            // masked document that stayed on that path would show the mask nowhere but the
+            // thumbnail. `needsOwnBuffer` answers false for a masked *leaf*, which is the common
+            // case, so asking only about buffers would leave the feature invisible on canvas.
+            if node.needsOwnBuffer || node.blendMode.isBlending || !node.masks.isEmpty { return true }
             guard case .node(_, let inputs) = node.content else { return false }
             return inputs.contains { $0.needsCompositorOnCanvas }
         }
@@ -201,7 +259,8 @@ extension Array where Element == RenderNode {
     /// which is what keeps the compositor off the drawing path.
     ///
     /// A group that *contains* the active leaf becomes two half-groups, one on each side, and **each
-    /// keeps the original's `id`, `opacity`, `isVisible`, `blendMode` and `isIsolated` verbatim.**
+    /// keeps the original's `id`, `opacity`, `isVisible`, `blendMode`, `isIsolated` and `masks`
+    /// verbatim.**
     /// Dropping them would be more wrong rather than less: the layer's own host already has every
     /// enclosing group's opacity folded into it by `effectiveOpacity(ofLayer:)`, so a half-group that
     /// forgot the group's properties would disagree with the one view sitting between the two halves.
@@ -270,7 +329,7 @@ extension RenderNode {
         guard case .node(let op, _) = content, inputs.contains(where: { !$0.isEmpty }) else { return nil }
         return RenderNode(id: id, content: .node(op: op, inputs: inputs),
                           opacity: opacity, isVisible: isVisible,
-                          blendMode: blendMode, isIsolated: isIsolated)
+                          blendMode: blendMode, isIsolated: isIsolated, masks: masks)
     }
 }
 
@@ -297,13 +356,25 @@ extension CanvasManager {
 
     private func renderNodes(inContainer container: UUID?) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.
-        containerEntries(inContainer: container).reversed().map { entry in
+        let stack = Array(containerEntries(inContainer: container).reversed())
+        return stack.enumerated().map { position, entry in
+            // What "Clip to below" clips to: the entry one step down in this same container, which
+            // after the reverse above is the previous element. Nothing below means nothing to clip
+            // to, and the layer simply draws — the same answer Photoshop gives.
+            let below: MaskSource? = position > 0 ? source(of: stack[position - 1]) : nil
             switch entry {
             case .layer(let index):
                 let layer = layers[index]
                 return RenderNode(id: layer.id, content: .leaf(layerIndex: index),
                                   opacity: layer.opacity, isVisible: layer.isVisible,
-                                  blendMode: layer.blendMode, isIsolated: false)
+                                  // **`.clipToBelow` never reaches the compositor as a mode.** It is
+                                  // not a blend (§7 says so while listing it among them); it is this
+                                  // machinery with an implicit source, so it is resolved here into a
+                                  // mask and a plain `.normal`. That is the whole of the feature —
+                                  // no shader case, no backend clause, nothing to keep in step.
+                                  blendMode: layer.blendMode.compositedMode, isIsolated: false,
+                                  masks: masks(ofNode: layer.id, declared: layer.alphaMask,
+                                               clippingTo: layer.blendMode == .clipToBelow ? below : nil))
             case .folder(let folder):
                 // Unconditional descent: `isExpanded` is a panel affordance and must not reach
                 // rendering. A collapsed folder still draws everything inside it.
@@ -318,8 +389,105 @@ extension CanvasManager {
                                   // identity, so an untouched folder remains a no-op in the tree —
                                   // that is `LayerFolder`'s doing now rather than this line's.
                                   opacity: folder.opacity, isVisible: folder.isVisible,
-                                  blendMode: folder.blendMode, isIsolated: folder.isIsolated)
+                                  blendMode: folder.blendMode.compositedMode,
+                                  isIsolated: folder.isIsolated,
+                                  masks: masks(ofNode: folder.id, declared: folder.alphaMask,
+                                               clippingTo: folder.blendMode == .clipToBelow ? below : nil))
             }
         }
+    }
+
+    private func source(of entry: ContainerEntry) -> MaskSource {
+        switch entry {
+        case .layer(let index): return .layer(layers[index].id)
+        case .folder(let folder): return .folder(folder.id)
+        }
+    }
+
+    // MARK: - What actually clips a node (§6.2)
+
+    /// One node's masks, reduced to the ones that clip anything: a declared mask that is enabled and
+    /// still names something, plus the implicit source of "Clip to below" when that is the mode.
+    ///
+    /// Every rule the compositor would otherwise have to know is spent here, which is why
+    /// `RenderNode.masks` can be read literally.
+    private func masks(ofNode nodeID: UUID, declared: AlphaMask?, clippingTo below: MaskSource?) -> [AlphaMask] {
+        var result: [AlphaMask] = []
+        if let declared, declared.isEnabled {
+            var usable = declared
+            usable.sources = declared.sources.filter { canMask(nodeID, with: $0) }
+            if !usable.sources.isEmpty { result.append(usable) }
+        }
+        if let below, canMask(nodeID, with: below) {
+            result.append(AlphaMask(sources: [below]))
+        }
+        return result
+    }
+
+    /// **Whether `source` may clip `nodeID`, or would close a cycle** — §6.2's "cycles are broken,
+    /// not diagnosed". A source that would create one is ignored, here and (phase 6b) in the picker
+    /// that offers them.
+    ///
+    /// The precedent is `resolvedContainer(ofFolder:)`, which treats a folder that contains itself as
+    /// top-level rather than hanging: a cyclic document is a document that renders, not an error
+    /// dialog. Three shapes to break, and they are one question rather than three — *does following
+    /// mask edges out of `source` lead back to `nodeID`* — so this is a reachability walk rather than
+    /// a list of special cases:
+    ///
+    /// - a layer masking itself (`source` covers `nodeID` immediately),
+    /// - a layer masked by a group that contains it (the group's cover includes its descendants),
+    /// - A masked by B while B is masked by A (found one edge further out).
+    func canMask(_ nodeID: UUID, with source: MaskSource) -> Bool {
+        var frontier = [source]
+        var seen: Set<UUID> = []
+        while let next = frontier.popLast() {
+            for id in covered(by: next) where seen.insert(id).inserted {
+                if id == nodeID { return false }
+                frontier.append(contentsOf: declaredMaskSources(ofNode: id))
+            }
+        }
+        return true
+    }
+
+    /// Every id a source *is* — itself, and for a folder everything under it at any depth, since
+    /// masking with a group is masking with its contents.
+    private func covered(by source: MaskSource) -> [UUID] {
+        switch source {
+        case .layer(let id):
+            return [id]
+        case .folder(let id):
+            let subtree = folderSubtree(id)
+            return Array(subtree) + layers.compactMap { layer in
+                guard let parent = layer.parentFolderID, subtree.contains(parent) else { return nil }
+                return layer.id
+            }
+        }
+    }
+
+    /// The mask sources a layer or folder declares, plus the implicit one its blend mode implies.
+    /// Read while walking for cycles, so it deliberately does *not* filter for cycles itself.
+    private func declaredMaskSources(ofNode id: UUID) -> [MaskSource] {
+        if let layer = layers.first(where: { $0.id == id }) {
+            var sources = layer.alphaMask?.isEnabled == true ? layer.alphaMask?.sources ?? [] : []
+            if layer.blendMode == .clipToBelow, let below = entryBelow(id) { sources.append(below) }
+            return sources
+        }
+        if let folder = folders.first(where: { $0.id == id }) {
+            var sources = folder.alphaMask?.isEnabled == true ? folder.alphaMask?.sources ?? [] : []
+            if folder.blendMode == .clipToBelow, let below = entryBelow(id) { sources.append(below) }
+            return sources
+        }
+        return []
+    }
+
+    /// The entry directly beneath the one with this id, inside whatever container holds it — the
+    /// implicit source of "Clip to below", re-derived here for the cycle walk because that walk
+    /// starts from an id rather than from a position in a stack.
+    private func entryBelow(_ id: UUID) -> MaskSource? {
+        let container = layers.first(where: { $0.id == id })?.parentFolderID
+            ?? folders.first(where: { $0.id == id })?.parentFolderID
+        let stack = Array(containerEntries(inContainer: container).reversed())
+        guard let position = stack.firstIndex(where: { source(of: $0).id == id }), position > 0 else { return nil }
+        return source(of: stack[position - 1])
     }
 }

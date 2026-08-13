@@ -542,7 +542,9 @@ final class CanvasManager: ObservableObject {
             // handleActiveContextChanged() must be called explicitly to invalidate any selection/
             // floating piece keyed to the now-deleted layer's UUID.
             let deletingActiveLayerInPlace = index == currentLayerIndex
+            let deletedID = layers[index].id
             layers.remove(at: index)
+            dropMaskSource(.layer(deletedID))
             if layers.isEmpty {
                 currentLayerIndex = -1
             // Deleting a layer *below* the active one shifts every later index down by one, so
@@ -882,6 +884,27 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// Sets (or clears) a layer's alpha mask — §6.2's model half of the §6.5 panel.
+    ///
+    /// One undo step per call, like every other discrete pick. §6.6 wants a whole mask-edit *session*
+    /// to coalesce into one step instead, and that bracket is the panel's to open
+    /// (`beginStructureGesture`/`commitStructureGesture`, which nests these the way the opacity
+    /// slider already nests `setFolderOpacity`) — so the rule lives with the mode that has a
+    /// beginning and an end, rather than being guessed at here.
+    func setAlphaMask(_ mask: AlphaMask?, forLayer index: Int) {
+        guard layers.indices.contains(index), layers[index].alphaMask != mask else { return }
+        withStructureUndo(name: "Mask") {
+            layers[index].alphaMask = mask
+        }
+    }
+
+    func setAlphaMask(_ mask: AlphaMask?, forFolder folderID: UUID) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].alphaMask != mask else { return }
+        withStructureUndo(name: "Mask") {
+            folders[idx].alphaMask = mask
+        }
+    }
+
     /// Toggles whether a folder's child layers are shown in the layer panel.
     func toggleFolderExpanded(_ folderID: UUID) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
@@ -918,6 +941,26 @@ final class CanvasManager: ObservableObject {
             for vi in viewPresets.indices {
                 viewPresets[vi].folderVisibility.removeValue(forKey: folderID)
             }
+            dropMaskSource(.folder(folderID))
+        }
+    }
+
+    /// Forgets a mask source that no longer exists (§6.6).
+    ///
+    /// **Called from inside the deletion's own `withStructureUndo`**, which is what makes one undo
+    /// restore the source and the masks that pointed at it together — the alternative, a separate
+    /// step, would restore a layer that nothing clips to any more.
+    ///
+    /// Deliberately unlike the render tree's own tolerance of a stale source, which carries on and
+    /// contributes no alpha: that is what keeps a document *rendering*, and this is what keeps the
+    /// document *true*. Both exist because either alone leaves a hole — dropping only here would
+    /// leave a mask pointing at nothing whenever a source vanishes some way this misses.
+    private func dropMaskSource(_ source: MaskSource) {
+        for index in layers.indices where layers[index].alphaMask?.sources.contains(source) == true {
+            layers[index].alphaMask = layers[index].alphaMask?.dropping(source)
+        }
+        for index in folders.indices where folders[index].alphaMask?.sources.contains(source) == true {
+            folders[index].alphaMask = folders[index].alphaMask?.dropping(source)
         }
     }
 

@@ -31,4 +31,10 @@ struct LayerFolder: Identifiable {
     /// and then drawn over the backdrop equal children drawn straight onto it. Storing and honouring
     /// it a phase early is what let phase 5 add blend modes and only blend modes.
     var isIsolated: Bool = true
+
+    /// The group's own mask (§6.2), applied once to its finished composite for the same reason its
+    /// opacity and blend mode are: masking each child instead clips the children rather than the
+    /// group, which is a different picture wherever they overlap. A group can be masked *and* be a
+    /// mask source.
+    var alphaMask: AlphaMask? = nil
 }

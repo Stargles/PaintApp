@@ -34,6 +34,17 @@ enum BlendMode: String, Codable, Equatable, CaseIterable {
     case linearLight
     case difference
 
+    /// **Not a blend, and in this enum anyway** — §7 lists it in Tier 1 while saying in the same
+    /// breath that it "clips to the alpha of the layer beneath; it is the mask machinery with an
+    /// implicit source". It is here because this is where the artist picks it: one control, one
+    /// list, rather than a second menu meaning "and also, separately, clip".
+    ///
+    /// **Nothing downstream of the render tree ever sees this case.** `CanvasManager.renderNodes`
+    /// resolves it into a node with `blendMode: .normal` and a mask whose source is the entry
+    /// directly below it, so there is no shader code for it, no `CGBlendMode` for it, and no branch
+    /// in either backend to keep in step. `compositedMode` is that translation, stated once.
+    case clipToBelow
+
     /// The label the layer panel shows. Written out rather than derived from the case name so
     /// "Color Dodge" and "Linear Light" read as artists expect and `add` can present as the name §7
     /// gives it.
@@ -53,8 +64,13 @@ enum BlendMode: String, Codable, Equatable, CaseIterable {
         case .hardLight:   return "Hard Light"
         case .linearLight: return "Linear Light"
         case .difference:  return "Difference"
+        case .clipToBelow: return "Clip to Below"
         }
     }
+
+    /// What the compositor is handed for this pick: every mode is itself, except `clipToBelow`, which
+    /// composites normally and expresses itself as a mask instead (see that case's own note).
+    var compositedMode: BlendMode { self == .clipToBelow ? .normal : self }
 
     /// Grouping for the picker, in the order artists expect to find them — darkening together,
     /// lightening together, contrast together. Presentation only; nothing in the compositor reads it.
@@ -64,6 +80,9 @@ enum BlendMode: String, Codable, Equatable, CaseIterable {
         [.screen, .colorDodge, .add, .lighten],
         [.overlay, .softLight, .hardLight, .linearLight],
         [.difference, .subtract],
+        // Its own section because it is its own kind of thing — see the case's note. The divider
+        // `Section` draws is the whole of the UI it needed.
+        [.clipToBelow],
     ]
 
     /// Whether this mode is anything other than plain source-over.
@@ -71,12 +90,11 @@ enum BlendMode: String, Codable, Equatable, CaseIterable {
     /// Reads better than `!= .normal` at the call sites that matter — `RenderNode.needsOwnBuffer` and
     /// its `enclosesABlend` walk — where the question really is "does this participate in blending",
     /// not "is this one particular case".
-    var isBlending: Bool { self != .normal }
+    ///
+    /// **`clipToBelow` answers false, and that is not a special case being smuggled in.** It really
+    /// does composite source-over; what it adds is a mask, and `needsOwnBuffer` asks about that
+    /// separately (`!masks.isEmpty`). Answering true here would claim a group buffer for the blend it
+    /// does not do, and — worse — would make `enclosesABlend` treat a clipped child as a reason to
+    /// isolate its parent.
+    var isBlending: Bool { compositedMode != .normal }
 }
-
-// **"Clip to below" is not here, and it is not an oversight.** §7 lists it in Tier 1 while saying in
-// the same breath that it is "not a blend — clips to the alpha of the layer beneath; it is the mask
-// machinery with an implicit source". Implementing it in phase 5 would mean building phase 6's mask
-// resolution early, to serve one mode, and then rebuilding it when §6.2's real `AlphaMask` arrives
-// with sources, inversion and the cycle rule. It lands in phase 6 as a mask with its source implied,
-// which is what the plan says it is. Same call phase 4 made about `alphaMask` itself.

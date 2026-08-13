@@ -155,6 +155,7 @@ enum ProjectStore {
             let kind: LayerKind
             let parentFolderID: UUID?
             let blendMode: BlendMode
+            let alphaMask: AlphaMask?
             let cels: [CelContent]
         }
 
@@ -205,7 +206,7 @@ enum ProjectStore {
                 FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded,
                                isVisible: folder.isVisible, parentFolderID: folder.parentFolderID,
                                opacity: folder.opacity, blendMode: folder.blendMode,
-                               isIsolated: folder.isIsolated)
+                               isIsolated: folder.isIsolated, alphaMask: folder.alphaMask)
             }
             viewPresets = canvasManager.viewPresets.map { preset in
                 var vis: [String: Bool] = [:]
@@ -220,6 +221,7 @@ enum ProjectStore {
                 LayerContent(id: layer.id, name: layer.name, opacity: layer.opacity,
                              isVisible: layer.isVisible, kind: layer.kind,
                              parentFolderID: layer.parentFolderID, blendMode: layer.blendMode,
+                             alphaMask: layer.alphaMask,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                rasterImage: cel.raster.renderToUIImage(),
@@ -413,6 +415,7 @@ enum ProjectStore {
                 kind: layer.kind,
                 parentFolderID: layer.parentFolderID?.uuidString,
                 blendMode: layer.blendMode,
+                alphaMask: layer.alphaMask,
                 cels: celManifests
             ))
         }
@@ -486,7 +489,7 @@ enum ProjectStore {
         manager.folders = manifest.folders.map { f in
             LayerFolder(id: f.id, name: f.name, isExpanded: f.isExpanded, isVisible: f.isVisible,
                         parentFolderID: f.parentFolderID, opacity: f.opacity,
-                        blendMode: f.blendMode, isIsolated: f.isIsolated)
+                        blendMode: f.blendMode, isIsolated: f.isIsolated, alphaMask: f.alphaMask)
         }
 
         // Restore view presets.
@@ -563,6 +566,7 @@ enum ProjectStore {
                 isVisible: layerManifest.isVisible,
                 kind: layerManifest.kind,
                 blendMode: layerManifest.blendMode,
+                alphaMask: layerManifest.alphaMask,
                 parentFolderID: parentID,
                 cels: cels
             ))

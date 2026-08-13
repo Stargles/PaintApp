@@ -60,6 +60,9 @@
 		DEC0DE00000000000000009D /* PaintSoftware/Engine/MetalCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */; };
 		DEC0DE00000000000000009F /* CompositorParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */; };
 		DEC0DE0000000000000000A5 /* SandwichLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000A4 /* SandwichLogicTests.swift */; };
+		DEC0DE6A0000000000000002 /* PaintSoftware/Models/AlphaMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE6A0000000000000001 /* PaintSoftware/Models/AlphaMask.swift */; };
+		DEC0DE6A0000000000000004 /* PaintSoftware/Engine/MaskResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE6A0000000000000003 /* PaintSoftware/Engine/MaskResolver.swift */; };
+		DEC0DE6A0000000000000006 /* MaskParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE6A0000000000000005 /* MaskParityLogicTests.swift */; };
 		DEC0DE0000000000000000A3 /* PaintSoftware/Engine/Composite.metal in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000A2 /* PaintSoftware/Engine/Composite.metal */; };
 		DEC0DE000000000000000018 /* PaintSoftware/Models/Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */; };
 		DEC0DE00000000000000001A /* PaintSoftware/Models/ProjectManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */; };
@@ -171,6 +174,9 @@
 		DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MetalCompositor.swift"; sourceTree = "<group>"; };
 		DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CompositorParityLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000A4 /* SandwichLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SandwichLogicTests.swift; sourceTree = "<group>"; };
+		DEC0DE6A0000000000000001 /* PaintSoftware/Models/AlphaMask.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/AlphaMask.swift"; sourceTree = "<group>"; };
+		DEC0DE6A0000000000000003 /* PaintSoftware/Engine/MaskResolver.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MaskResolver.swift"; sourceTree = "<group>"; };
+		DEC0DE6A0000000000000005 /* MaskParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MaskParityLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000A2 /* PaintSoftware/Engine/Composite.metal */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.metal; path = "PaintSoftware/Engine/Composite.metal"; sourceTree = "<group>"; };
 		DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Palette.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ProjectManifest.swift; sourceTree = "<group>"; };
@@ -316,6 +322,7 @@
 				DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */,
 				DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */,
 				DEC0DE0000000000000000A4 /* SandwichLogicTests.swift */,
+				DEC0DE6A0000000000000005 /* MaskParityLogicTests.swift */,
 			);
 			path = PaintSoftwareUITests;
 			sourceTree = "<group>";
@@ -360,6 +367,8 @@
 				DEC0DE00000000000000003A /* PaintSoftware/Models/CopiedCel.swift */,
 				DEC0DE00000000000000003C /* PaintSoftware/Models/LayerKind.swift */,
 				DEC0DE00000000000000003E /* PaintSoftware/Models/Layer.swift */,
+				DEC0DE6A0000000000000001 /* PaintSoftware/Models/AlphaMask.swift */,
+				DEC0DE6A0000000000000003 /* PaintSoftware/Engine/MaskResolver.swift */,
 				DEC0DE000000000000000040 /* PaintSoftware/Models/LayerTransform.swift */,
 				DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */,
 				DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */,
@@ -546,6 +555,9 @@
 				DEC0DE00000000000000009D /* PaintSoftware/Engine/MetalCompositor.swift in Sources */,
 				DEC0DE00000000000000009F /* CompositorParityLogicTests.swift in Sources */,
 				DEC0DE0000000000000000A5 /* SandwichLogicTests.swift in Sources */,
+				DEC0DE6A0000000000000006 /* MaskParityLogicTests.swift in Sources */,
+				DEC0DE6A0000000000000002 /* PaintSoftware/Models/AlphaMask.swift in Sources */,
+				DEC0DE6A0000000000000004 /* PaintSoftware/Engine/MaskResolver.swift in Sources */,
 				DEC0DE0000000000000000A3 /* PaintSoftware/Engine/Composite.metal in Sources */,
 				DEC0DE000000000000000031 /* PaintSoftware/Models/Tool.swift in Sources */,
 				DEC0DE000000000000000033 /* PaintSoftware/Models/LayerFolder.swift in Sources */,

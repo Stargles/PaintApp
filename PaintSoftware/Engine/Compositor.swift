@@ -83,7 +83,10 @@ extension BlendMode {
     /// cases a blend mode is interesting.
     var coreGraphicsBlendMode: CGBlendMode? {
         switch self {
-        case .normal:      return .normal
+        // `clipToBelow` is source-over plus a mask, and the tree has already turned it into exactly
+        // that (`compositedMode`) — so it cannot arrive here. Named rather than left to a `default`
+        // so that a genuinely new mode still fails to compile until someone decides what it draws.
+        case .normal, .clipToBelow: return .normal
         case .multiply:    return .multiply
         case .screen:      return .screen
         case .overlay:     return .overlay
@@ -196,7 +199,11 @@ enum CoreGraphicsCompositor {
                 // to this one draw, against whatever the walk has accumulated underneath. That is
                 // the whole difference from the `.node` case below, which blends once against the
                 // backdrop after assembling.
-                draw(UIImage(cgImage: source.image, scale: 1, orientation: .up),
+                //
+                // A masked leaf needs no buffer of its own: the mask multiplies the one image it is
+                // about to draw (§6.1 — at render time, never into the layer's own pixels).
+                let pixels = masked(source.image, by: node, of: request)
+                draw(UIImage(cgImage: pixels, scale: 1, orientation: .up),
                      mode: node.blendMode, opacity: node.opacity, in: bounds, context: context)
 
             case .node(let op, let inputs):
@@ -240,10 +247,28 @@ enum CoreGraphicsCompositor {
                         .image { inner in
                             for input in inputs { draw(input, of: request, in: bounds, context: inner) }
                         }
-                    draw(grouped, mode: node.blendMode, opacity: node.opacity, in: bounds, context: context)
+                    // The group's mask clips the group, so it lands on the assembled composite —
+                    // which is the same rule its opacity and its blend mode follow, and the reason
+                    // `needsOwnBuffer` counts a mask as a reason to allocate.
+                    let clipped = grouped.cgImage.map { masked($0, by: node, of: request) }
+                        .map { UIImage(cgImage: $0, scale: 1, orientation: .up) } ?? grouped
+                    draw(clipped, mode: node.blendMode, opacity: node.opacity, in: bounds, context: context)
                 }
             }
         }
+    }
+
+    /// `image` with this node's masks applied, or `image` unchanged when it has none.
+    ///
+    /// Falls back to the unmasked pixels if a resolution fails, which is the same direction every
+    /// other degenerate case in this file takes: show the artwork, not a hole. A mask that cannot
+    /// resolve is one whose sources have gone (§6.6), and an unmasked layer is what that is defined
+    /// to produce.
+    private static func masked(_ image: CGImage, by node: RenderNode, of request: RenderRequest) -> CGImage {
+        guard !node.masks.isEmpty,
+              let mask = MaskResolver.coverage(for: node.masks, of: request),
+              let clipped = MaskResolver.apply(mask, to: image) else { return image }
+        return clipped
     }
 
     /// One image onto the current context, at `opacity`, in `mode` — the single place this backend
@@ -323,7 +348,10 @@ enum CoreGraphicsCompositor {
     /// bit depth, or an extended range. `MetalCompositor.upload` normalises the same way for the same
     /// reason, and the two agreeing on this conversion is half of why the backends can be compared
     /// byte for byte at all.
-    private static func premultipliedBytes(_ image: CGImage, width: Int, height: Int) -> [UInt8]? {
+    ///
+    /// Shared with `MaskResolver` rather than copied there — a mask is resolved and applied in this
+    /// same byte layout, and a second spelling of the conversion would be the drift §1 objects to.
+    static func premultipliedBytes(_ image: CGImage, width: Int, height: Int) -> [UInt8]? {
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         guard let ctx = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8,
                                   bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
@@ -332,7 +360,7 @@ enum CoreGraphicsCompositor {
         return bytes
     }
 
-    private static func makeImage(fromPremultiplied bytes: [UInt8], width: Int, height: Int) -> CGImage? {
+    static func makeImage(fromPremultiplied bytes: [UInt8], width: Int, height: Int) -> CGImage? {
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
         return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
                        bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,

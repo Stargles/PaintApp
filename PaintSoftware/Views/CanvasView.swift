@@ -793,32 +793,10 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: The cache key
 
-        /// One layer's pixels at one frame, by identity rather than by content.
-        ///
-        /// Deliberately the same identity `PixelOps.RasterizeKey` is built from, because it is the
-        /// same question — that memo is what makes the snapshot half of a rebuild cheap, and a key
-        /// here that moved when its key did not would rebuild for nothing. The two `UIImage` tiers
-        /// are compared by object identity because that is how they change: a fill or a bake replaces
-        /// them wholesale rather than drawing into them.
-        private struct LayerContentVersion: Equatable {
-            let celID: UUID
-            let raster: ObjectIdentifier
-            let rasterVersion: Int
-            let vector: ObjectIdentifier?
-            let vectorVersion: Int
-            let fillImage: ObjectIdentifier?
-            let bakedImage: ObjectIdentifier?
-
-            init(cel: Cel) {
-                celID = cel.id
-                raster = ObjectIdentifier(cel.raster)
-                rasterVersion = cel.raster.version
-                vector = cel.vector.map(ObjectIdentifier.init)
-                vectorVersion = cel.vector?.version ?? -1
-                fillImage = cel.fillImage.map(ObjectIdentifier.init)
-                bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
-            }
-        }
+        // `LayerContentVersion` — one layer's pixels at one frame, by model identity — used to be
+        // declared here. It moved to `RenderRequest.swift` in phase 6, unchanged, when
+        // `MaskResolver`'s cache turned out to need exactly the same answer; the request carries it
+        // for both. Its doc comment carries the reasoning this key exists at all.
 
         /// What §5.2's three cached composites depend on — everything *except* the live stroke.
         ///

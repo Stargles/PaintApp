@@ -16,6 +16,10 @@ struct Layer: Identifiable {
     /// means from the layer's side. Defaulted, so every existing project and every `Layer(...)` call
     /// site is unchanged.
     var blendMode: BlendMode = .normal
+    /// Where this layer is allowed to show, clipped to the alpha of other layers or groups (§6.2).
+    /// Nil — the default, and what a manifest without the key decodes to — is "no mask"; the mask is
+    /// never baked into the pixels, so clearing it restores the whole buffer (§6.1).
+    var alphaMask: AlphaMask? = nil
     /// If set, this layer belongs to the folder with this ID. Layer ordering in the `layers` array
     /// determines the stacking order within each folder. A folder's visibility/expand state lives on
     /// the corresponding `LayerFolder` in `CanvasManager.folders`.
