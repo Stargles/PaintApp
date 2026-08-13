@@ -82,19 +82,26 @@ extension BlendMode {
     /// clamp, and it inflates alpha everywhere else. Substituting it would be wrong in exactly the
     /// cases a blend mode is interesting.
     ///
-    /// **Tier 2 was swept the same way, and the result was not the one Tier 1 found — worth recording
-    /// because the plan explicitly expected it might not be.** `vividLight`, `pinLight`, `linearBurn`,
-    /// `divide`, `lighterColor` and `darkerColor` have no `CGBlendMode` case at all — absent, the
-    /// `add`/`subtract`/`linearLight` category. `exclusion`, `hue`, `saturation`, `color` and
-    /// `luminosity` *do* have Apple cases, and — unlike `colorDodge`/`colorBurn`/`softLight` — every
-    /// one of the five measured **within the same one-step tolerance every surviving CG primitive
-    /// already carries** (`CompositorParityLogicTests.testEveryBlendModeAgreesBetweenTheBackends`'s
-    /// table: exclusion 0, hue 1, saturation 0, color 1, luminosity 1 — see the phase report for the
-    /// full table a run actually produced). A one-step delta is the signature of independent 8-bit
-    /// rounding, the same thing `multiply`'s own delta of 1 is; it is not the 141/249/16-style
-    /// signature of a different formula. So all five keep the primitive here, and `handRolledTriple`'s
-    /// `hue`/`saturation`/`color`/`luminosity` cases exist as the spec reference and as insurance
-    /// against a future OS regressing one of them, not because this backend reaches them today.
+    /// **Tier 2 was swept the same way, and only one of its five Apple-backed modes actually keeps the
+    /// primitive.** `vividLight`, `pinLight`, `linearBurn`, `divide`, `lighterColor` and `darkerColor`
+    /// have no `CGBlendMode` case at all — absent, the `add`/`subtract`/`linearLight` category.
+    /// `exclusion`, `hue`, `saturation`, `color` and `luminosity` *do* have Apple cases, but the switch
+    /// below only returns one of them: `.exclusion` keeps `.exclusion`, while `.hue`, `.saturation`,
+    /// `.color` and `.luminosity` return `nil` unconditionally, so `handRolledTriple` is the live path
+    /// for all four, not a fallback.
+    ///
+    /// That split is a choice, not a measured disagreement. `exclusion`'s delta of 0
+    /// (`CompositorParityLogicTests.testEveryBlendModeAgreesBetweenTheBackends`) is a genuine
+    /// CoreGraphics-versus-spec data point, the same kind `multiply`'s delta of 1 is. The other four's
+    /// reported deltas (hue 1, saturation 0, color 1, luminosity 1) are not: since this backend already
+    /// hand-rolls those four, that sweep compares the GPU shader's W3C formulas against this backend's
+    /// own W3C formulas — two implementations of the same spec agreeing to a float rounding step, which
+    /// says nothing about whether Apple's non-separable blends agree with the spec. That comparison has
+    /// never been run. Hand-rolling `hue`/`saturation`/`color`/`luminosity` here is the conservative
+    /// choice: it is independently cross-checked (against the GPU shader and against hand-computed
+    /// values from a Python transcription of the W3C formulas), where Apple's versions are unmeasured.
+    /// Measuring them against `CGBlendMode` directly is a real future experiment, not a foregone
+    /// conclusion — if they agree, these four could take the same faster path `exclusion` already does.
     var coreGraphicsBlendMode: CGBlendMode? {
         switch self {
         // `clipToBelow` is source-over plus a mask, and the tree has already turned it into exactly
@@ -109,12 +116,16 @@ extension BlendMode {
         case .hardLight:   return .hardLight
         case .difference:  return .difference
         case .exclusion:   return .exclusion
-        // Not "CoreGraphics lacks these" but "CoreGraphics disagrees about these" — see
-        // `handRolledChannel`/`handRolledTriple`, and the measured table in
+        // "CoreGraphics disagrees about these," not "CoreGraphics lacks these" — measured 141/249/16
+        // against the spec; see `handRolledChannel` and the measured table in
         // `CompositorParityLogicTests`.
         case .colorDodge, .colorBurn, .softLight: return nil
+        // Absent, not awkward: `CGBlendMode` has no case for any of these seven.
         case .add, .subtract, .linearLight: return nil
         case .vividLight, .pinLight, .linearBurn, .divide, .lighterColor, .darkerColor: return nil
+        // CoreGraphics *does* have cases for these four — hand-rolled by choice, not by measured
+        // disagreement. Apple's non-separable implementations have never been measured against the
+        // spec; see `handRolledTriple`'s doc comment for what the sweep below actually compared.
         case .hue, .saturation, .color, .luminosity: return nil
         }
     }
@@ -199,17 +210,23 @@ extension BlendMode {
     /// no separate function for these the way this backend does, since a Metal `float3` already
     /// carries all three channels through the one call site both shapes of formula share.
     ///
-    /// **Only two of the six cases here are live in this backend today.** `lighterColor` and
-    /// `darkerColor` have no `CGBlendMode` case, so `draw` always reaches them through this function —
-    /// the same "absent, not awkward" reason `add` is hand-rolled. `hue`, `saturation`, `color` and
-    /// `luminosity` *were* swept against `CGBlendMode`'s cases the way `colorDodge`/`colorBurn`/
-    /// `softLight` were (see `coreGraphicsBlendMode`'s doc comment for the measured table), and unlike
-    /// those three, Apple's versions measured within the ordinary rounding tolerance — so
-    /// `coreGraphicsBlendMode` keeps the primitive for all four and `draw` never calls this function
-    /// for them. Their cases stay here anyway: they are what `Composite.metal`'s `blendHue` and
-    /// neighbours are checked against structurally, and they are the fallback this backend would need
-    /// if a future OS ever regressed one of Apple's four the way an earlier one evidently regressed
-    /// `colorDodge`.
+    /// **All six cases here are live in this backend today.** `lighterColor` and `darkerColor` have no
+    /// `CGBlendMode` case, so `draw` always reaches them through this function — the same
+    /// "absent, not awkward" reason `add` is hand-rolled. `hue`, `saturation`, `color` and `luminosity`
+    /// *do* have `CGBlendMode` cases, but `coreGraphicsBlendMode` returns `nil` for all four regardless
+    /// — so `draw` reaches these four cases every time too, not as insurance against a future
+    /// regression but as the ordinary production path.
+    ///
+    /// That is a choice, not a measured disagreement: Apple's non-separable implementations have never
+    /// been checked against the W3C spec. The nearest measurement,
+    /// `CompositorParityLogicTests.testEveryBlendModeAgreesBetweenTheBackends`, compares the GPU shader
+    /// against this CPU backend — and since this backend already hand-rolls these four, that sweep
+    /// compares the app's own two implementations of the spec against each other, not against
+    /// CoreGraphics. Its reported deltas for them (hue 1, saturation 0, color 1, luminosity 1) are float
+    /// rounding between our own two paths and say nothing about Apple's versions (contrast `exclusion`,
+    /// which *does* cross `CGBlendMode` and whose delta of 0 is a real CoreGraphics-versus-spec
+    /// measurement — see `coreGraphicsBlendMode`'s doc comment). Whether Apple's cases agree with the
+    /// spec is a genuine open question and a future experiment, not yet run either direction.
     ///
     /// W3C Compositing and Blending Level 1's non-separable formulas, restated here rather than
     /// summarised: `Lum`/`Sat` read a colour's luminosity and saturation, `ClipColor` pulls an

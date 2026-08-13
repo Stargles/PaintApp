@@ -957,17 +957,24 @@ final class CompositorParityLogicTests: XCTestCase {
     /// sharpest evidence the diagnosis was right — it has a `sqrt` in it and *still* agrees exactly,
     /// now that both sides evaluate the same curve.
     ///
-    /// **Tier 2's sweep found the opposite of what §7's build note told this session to expect.**
-    /// `exclusion`, `hue`, `saturation`, `color` and `luminosity` all cross `CGBlendMode` — the same
-    /// boundary `colorDodge`/`colorBurn`/`softLight` crossed and failed at — and every one of them
-    /// measured within the ordinary one-step rounding band instead: exclusion 0, hue 1, saturation 0,
-    /// color 1, luminosity 1. `BlendMode.coreGraphicsBlendMode` keeps the CoreGraphics primitive for
-    /// all five as a result; nothing in Tier 2 needed the hand-rolled escape hatch for disagreeing
-    /// with the spec, only for being absent from `CGBlendMode` altogether (`vividLight`, `pinLight`,
-    /// `linearBurn`, `divide`, `lighterColor`, `darkerColor` — five of those six land at delta 0, and
-    /// `vividLight` at 1 for the same division-amplifies-a-half-step reason `colorDodge` does, since
-    /// it calls the same hand-rolled function). This is the sweep doing its job either way: the brief
-    /// was right not to assume agreement, and the number that came back is the number that came back.
+    /// **Tier 2's sweep needs a caveat the first read of it missed.** `exclusion`, `hue`, `saturation`,
+    /// `color` and `luminosity` all have `CGBlendMode` cases, but `BlendMode.coreGraphicsBlendMode`
+    /// only actually returns one of them: `.exclusion`. It returns `nil` unconditionally for `.hue`,
+    /// `.saturation`, `.color` and `.luminosity`, so this backend hand-rolls those four regardless of
+    /// what this sweep measures — they are not reached through `CGBlendMode` today.
+    ///
+    /// That makes `exclusion`'s delta of 0 a genuine CoreGraphics-versus-spec measurement, the same
+    /// kind `multiply`'s delta of 1 is. The other four's deltas (hue 1, saturation 0, color 1,
+    /// luminosity 1) are not: since the CPU backend already hand-rolls those four, this sweep compares
+    /// the GPU shader's W3C formulas against the CPU backend's own W3C formulas — two implementations
+    /// of the same spec agreeing to a float rounding step. It says nothing about whether Apple's own
+    /// `CGBlendMode` cases for hue/saturation/color/luminosity agree with the spec; that comparison has
+    /// never been run. Hand-rolling those four is the deliberate, conservative choice made ahead of
+    /// that measurement, not its conclusion. `vividLight`, `pinLight`, `linearBurn`, `divide`,
+    /// `lighterColor` and `darkerColor` needed no such caveat: none has a `CGBlendMode` case, so all
+    /// six are hand-rolled for being absent, and five of them land at delta 0 here — `vividLight` at 1
+    /// for the same division-amplifies-a-half-step reason `colorDodge` does, since it calls the same
+    /// hand-rolled function.
     ///
     /// Phase 2's delta-0 gate does not survive contact with blend modes in general. It survives
     /// further than the first Tier 1 measurement suggested, and that gap was a bug rather than noise;

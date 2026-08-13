@@ -93,7 +93,7 @@ there. Every field decodes with `decodeIfPresent`, so a later additive one costs
 subtree. That write-through was destructive all along — hiding a group and re-showing it clobbered
 whichever layers inside it the artist had hidden by hand.
 
-**The migration (§10 item 3, decided: migrate).** Loading an old project as-is looked safe because
+**The migration (decided: migrate).** Loading an old project as-is looked safe because
 the write-through already happened at save time, so those documents are self-consistent — but only
 until the artist un-hides the group, at which point nothing comes back, because every child is still
 independently hidden and nothing on screen explains why. So a folder that decodes *without* the
@@ -259,7 +259,7 @@ written, which is worth recording so nobody goes looking for the work:
   compositor would change what the onion skin shows, not merely how it is computed — a product
   decision, still open.
 
-**Live stroke inside a blended group** (§10 decision 5): phase 5b shipped the *fallback* — the live
+**Live stroke inside a blended group:** phase 5b shipped the *fallback* — the live
 stroke composites straight over the cached texture and snaps correct on lift — and not the
 per-frame subtree recomposite, which nothing has yet needed. `split(atLeaf:)` keeps an enclosing
 group's properties on **both** half-groups, so the middle view must carry the folded
@@ -531,12 +531,14 @@ colorBurn and softLight are the PDF 1.4 originals and disagree with W3C Composit
 249/255; the app follows the spec, which is what Photoshop and CSP do, and hand-rolls those three on
 the CPU (`BlendMode.handRolledChannel`).
 
-**It proved false for Tier 2.** Swept over the 4096-pair spectrum fixture, `CGBlendMode`'s exclusion,
-hue, saturation, color and luminosity all measured within the ordinary one-step rounding band against
-the spec (exclusion 0, saturation 0, hue 1, color 1, luminosity 1) — so `coreGraphicsBlendMode` keeps
-the CoreGraphics primitive for all five. The six hand-rolled Tier 2 modes — vividLight, pinLight,
-linearBurn, divide, lighterColor, darkerColor — are hand-rolled because `CGBlendMode` has no case for
-them at all, not because they disagree with it.
+**Tier 2 only rides the primitive once.** Six modes — vividLight, pinLight, linearBurn, divide,
+lighterColor, darkerColor — are hand-rolled because `CGBlendMode` has no case for them at all. Of the
+five that do have a case, `coreGraphicsBlendMode` keeps it for `exclusion` alone (measured delta 0, a
+real CoreGraphics-versus-spec result); hue, saturation, color and luminosity are hand-rolled by choice,
+not measured disagreement. The GPU-vs-CPU sweep's deltas for those four (hue 1, saturation 0, color 1,
+luminosity 1) compare the app's own shader against the app's own hand-rolled CPU, since the CPU already
+hand-rolls them — not against `CGBlendMode`. Apple's non-separable primitives remain unmeasured against
+the spec; that comparison is open, not concluded either way.
 
 **Deferring the sandwich to phase 5 was right, and the reason generalises.** It rewrites the most
 latency-critical code in the app, and until a layer had a blend mode there was nothing for it to
