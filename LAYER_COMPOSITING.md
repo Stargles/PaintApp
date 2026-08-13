@@ -207,18 +207,42 @@ ping-pong buffer for separable blurs).
 
 ### 5.2 The sandwich
 
-A naive "recomposite everything every frame" would be *slower* than today's Core Animation path for
-an ordinary all-normal document. The structure that avoids it:
+**Shipped in phase 5b, and it has two states rather than one.** The owner's scope decision is *exact
+at rest, snaps on lift* — not mid-stroke fidelity.
+
+At rest the canvas is a single `composite(full)` with every layer host blanked, so every blend mode
+and every nesting is exact and byte-identical to the thumbnail. Only while a dab is down does the
+three-view structure take over:
 
 ```
-[ composite of everything BELOW the active layer ]   ← cached GPU texture
+[ composite of everything BELOW the active layer ]   ← cached texture
 [ the active layer's live stroke view            ]   ← Core Animation, unchanged, zero added latency
-[ composite of everything ABOVE the active layer ]   ← cached GPU texture
+[ composite of everything ABOVE the active layer ]   ← cached texture
 ```
 
 Stamping a dab invalidates neither cached texture, so the drawing path never enters the compositor.
 The textures rebuild only when something other than the live stroke changes — layer switch, blend
-change, mask edit, playhead move, undo.
+change, mask edit, playhead move, undo. The mechanism is one rule: the active layer's content version
+is in the invalidation key *only while no stroke is in progress*, which freezes the key for the dab's
+duration and moves it on lift.
+
+Two things are deliberately approximate for the dab's duration, both snapping correct on lift, both
+pinned at their measured deltas by `SandwichLogicTests`: the active layer's own blend mode renders as
+Normal (delta 127), and so do any layers above it (127), because a texture composited onto
+transparency has no backdrop to blend against. An active layer inside a faded group drifts in alpha
+too, not only colour (64). Recovering the layers above exactly needs a `backdrop: CGImage?` on
+`RenderRequest` honoured by both backends, plus a per-pixel unpremultiply against it — composite the
+above stack over the pre-stroke backdrop `B` to get `R`, take coverage `c` from the same stack over
+transparency, emit `αs = c`, `Cs = (R − B(1−c))/c`. Deferred, not unsolved.
+
+**The engage switch is the risk containment.** `[RenderNode].needsCompositorOnCanvas` is false for
+any document with no blend modes and no faded or isolated group, and such a document keeps Core
+Animation's flat-sibling path untouched — it cannot regress. `LayerUITests` pins that.
+
+**Blanking a host is a `CALayer` mask, never `isHidden`.** `UIView.hitTest` returns nil for a hidden,
+`alpha < 0.01`, or interaction-disabled view, so a blanked *active* host would swallow the first
+touch of every stroke with no error to show for it — `UIView.alpha` and `CALayer.opacity` are the
+same property, so neither is an escape. UIKit does not consult masks when hit-testing.
 
 This is one compositor, not two: **`PixelOps.compositeCanvas` is deleted** (phase 3) and the thumbnail
 goes through `Compositor.composite`. The rest of that convergence list turned out to be smaller than
@@ -235,10 +259,12 @@ written, which is worth recording so nobody goes looking for the work:
   compositor would change what the onion skin shows, not merely how it is computed — a product
   decision, still open.
 
-**Live stroke inside a blended group** (§10 decision 5, decided): recomposite **only the active
-node's subtree** per frame — in practice a handful of layers — and fall back to compositing the live
-stroke straight over the cached texture, snapping correct on lift, if that subtree exceeds a frame
-budget. Masks do not need this at all; they have an exact answer (§6.4).
+**Live stroke inside a blended group** (§10 decision 5): phase 5b shipped the *fallback* — the live
+stroke composites straight over the cached texture and snaps correct on lift — and not the
+per-frame subtree recomposite, which nothing has yet needed. `split(atLeaf:)` keeps an enclosing
+group's properties on **both** half-groups, so the middle view must carry the folded
+`effectiveOpacity(ofLayer:)` for the halves to line up; changing one without the other breaks the
+delta-0 identity. Masks do not need any of this; they have an exact answer (§6.4).
 
 ### 5.3 Performance
 
@@ -494,8 +520,8 @@ it is small and none of them fight a moving substrate.
 | ~~**2**~~ | ~~Metal compositor behind a flag; snapshot-driven entry point (§9.1)~~ | **done** — both backends agree byte for byte, delta 0 |
 | ~~**3**~~ | ~~Delete `PixelOps.compositeCanvas`~~ | **done** — thumbnail on one path, `PerfBaselineTests` green |
 | ~~**4**~~ | ~~Group properties: isolated/pass-through, opacity, visibility migration (§4.1–4.2)~~ | **done** — groups composite as parentheses, both backends on one buffer rule |
-| **5a** | ~~Tier 1 blend modes on layers and groups (§7)~~ | **done** — fourteen modes, both backends, picker and row badge |
-| **5b** | §5.2's sandwich, so the live canvas shows a blended layer | a Multiply layer looks multiplied while drawing |
+| ~~**5a**~~ | ~~Tier 1 blend modes on layers and groups (§7)~~ | **done** — fourteen modes, both backends, picker and row badge |
+| ~~**5b**~~ | ~~§5.2's sandwich, so the live canvas shows a blended layer~~ | **done** — exact at rest, snaps on lift |
 | **6** | Alpha masks (§6), incl. `MaskParityLogicTests` | raster and vector mask pixel-identically |
 | **7** | Tier 2 blend modes | |
 | **8** | Compositor nodes: slot-as-folder storage, panel chrome (§4.3) | a 2-input Mix node renders |
@@ -504,29 +530,15 @@ it is small and none of them fight a moving substrate.
 Phases 0–3 are the risky ones; 4 onward are additive. §9.2's background renderer stays deferred
 until the sequencer exists — only §9.1's substrate is in scope here, and it landed inside phase 2.
 
-**Blend modes shipped without the sandwich, so the live canvas does not show them yet.** The
-compositor blends correctly and the thumbnail proves it; `CanvasView.reconcileLayers` still hands
-every layer to Core Animation as a flat sibling, which has no per-view Multiply against arbitrary
-siblings (§1). So an artist can set Multiply, see it in the layer row and in the thumbnail, and see
-no change on canvas. That is phase 5b's whole job and it is the last thing standing between this
-feature and being usable.
-
 **One correction to §5.1 that phase 5 measured.** "The CoreGraphics one is the reference … the
 byte-for-byte definition of correct" holds for the *walk* — order, buffers, alpha — and not for the
 blend functions. `CGBlendMode`'s colorDodge, colorBurn and softLight are the PDF 1.4 originals and
 disagree with W3C Compositing Level 1 by up to 249/255; the app follows the spec, which is what
 Photoshop and CSP do, and hand-rolls those three on the CPU. See `BlendMode.handRolledChannel`.
 
-**The sandwich moved from phase 3 to phase 5 — decided, not drifted.** It rewrites the live canvas,
-which is the most latency-critical code in the app, and nothing consumes it until a layer has a blend
-mode: the compositor cannot drive the live canvas usefully before there is something Core Animation
-cannot already express. Building it in phase 3 would have meant restructuring
-`CanvasView.reconcileLayers` — and with it onion-skin z-order, the Move tool's floating piece, the
-fill preview, and per-layer touch routing — with no feature able to demonstrate the result, which is
-the "moving substrate" §11 opens by warning against.
-
-The measurement is the other half of the case. At 2048² with six layers the `@MainActor` snapshot
-costs 276 ms against an 84 ms CPU composite (`PerfBaselineTests`), so the expensive half is *building*
-the snapshot, not compositing it — and the sandwich caches composites. If live-canvas cost becomes
-the problem before phase 5 arrives, memoizing `PixelOps.rasterize` per cel version is the change that
-addresses the 276 ms, and it helps every consumer rather than only the live path.
+**Deferring the sandwich to phase 5 was right, and the reason generalises.** It rewrites the most
+latency-critical code in the app, and until a layer had a blend mode there was nothing for it to
+show that Core Animation could not already express — so it would have restructured `reconcileLayers`,
+onion-skin z-order, the Move tool's floating piece and per-layer touch routing with no feature able
+to demonstrate the result. Phases 6–9 are all additive for the same reason: build the substrate when
+something consumes it.
