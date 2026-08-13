@@ -59,4 +59,32 @@ final class LayerHostView: UIView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // MARK: - Blanking, for §5.2's sandwich
+
+    /// An empty mask layer. A mask with no contents has alpha 0 everywhere — including outside its
+    /// own (zero) bounds — so the host renders nothing at all while it is installed. Allocated once
+    /// and reused: `CanvasView.updateUIView` runs on every SwiftUI pass, and a `CALayer` per pass
+    /// would be an allocation per render of the whole editor.
+    private lazy var blankingMask = CALayer()
+
+    /// Hides this host's pixels while §5.2's sandwich draws them instead, **without hiding the view
+    /// from hit-testing**.
+    ///
+    /// `isHidden` and `alpha` are both wrong here and they fail silently. `UIView.hitTest` returns
+    /// nil for any view that is hidden, has `alpha < 0.01`, or has interaction disabled, so a blanked
+    /// *active* host would never receive the first touch of a stroke and the artist's stroke would
+    /// simply not happen — no error, no mark. (`UIView.alpha` and `CALayer.opacity` are the same
+    /// backing property, so neither is an escape from that.) A mask is: UIKit's hit-testing does not
+    /// consult `layer.mask` at all, so the host stays fully touchable while rendering nothing.
+    ///
+    /// `LayerUITests.testAStrokeStillLandsWhileTheSandwichIsEngaged` is the regression guard — it is
+    /// what fails if this is ever "simplified" back into `isHidden`.
+    func setBlanked(_ blanked: Bool) {
+        if blanked {
+            if layer.mask !== blankingMask { layer.mask = blankingMask }
+        } else if layer.mask === blankingMask {
+            layer.mask = nil
+        }
+    }
 }

@@ -12,6 +12,9 @@ struct CanvasView: UIViewRepresentable {
         host.clipsToBounds = true
         host.isAccessibilityElement = true
         host.accessibilityIdentifier = "canvas.host"
+        // Which rendering path the canvas is on — see `Coordinator.SandwichPresentation`. Stated here
+        // as well as in the `didSet` because a `didSet` never fires for the initial value.
+        host.accessibilityLabel = "sandwich:off"
         host.canvasManager = canvasManager
 
         let container = UIView()
@@ -39,6 +42,18 @@ struct CanvasView: UIViewRepresentable {
         // Deliberately left on the default bilinear filter — nearest-neighbor made the onion-skin
         // ghost render as a distractingly pixelated overlay instead of a soft reference.
         container.addSubview(onionSkin)
+
+        // §5.2's sandwich: two views, three cached images. At rest the lower one carries
+        // `composite(full)` and the upper one is empty; mid-stroke they carry `below` and `above`
+        // with the active layer's own host between them. Added here so the *disengaged* z-order is
+        // already `onionSkin < below < above < chrome`; `reconcileLayers` is what lifts `above` over
+        // the layer hosts once the sandwich engages. See `updateSandwich`.
+        let sandwichBelow = Coordinator.makeSandwichView()
+        container.addSubview(sandwichBelow)
+        let sandwichAbove = Coordinator.makeSandwichView()
+        container.addSubview(sandwichAbove)
+        context.coordinator.sandwichBelowView = sandwichBelow
+        context.coordinator.sandwichAboveView = sandwichAbove
 
         let transformOverlay = ObjectTransformOverlayView()
         transformOverlay.isHidden = true
@@ -123,6 +138,14 @@ struct CanvasView: UIViewRepresentable {
             onionSkin.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             onionSkin.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             onionSkin.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            sandwichBelow.topAnchor.constraint(equalTo: container.topAnchor),
+            sandwichBelow.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            sandwichBelow.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            sandwichBelow.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            sandwichAbove.topAnchor.constraint(equalTo: container.topAnchor),
+            sandwichAbove.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            sandwichAbove.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            sandwichAbove.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             transformOverlay.topAnchor.constraint(equalTo: container.topAnchor),
             transformOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             transformOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -335,6 +358,10 @@ struct CanvasView: UIViewRepresentable {
         }
         private var lastAppliedTool: [UUID: AppliedTool] = [:]
         private var lastOrderedLayerIDs: [UUID] = []
+        /// Whether the last ordering pass placed the sandwich views. The pass is gated on layer order
+        /// changing, and engaging or disengaging the sandwich is the other thing that moves this
+        /// z-order — see `reconcileLayers`.
+        private var lastOrderedSandwichEngaged = false
 
         init(canvasManager: CanvasManager) {
             self.canvasManager = canvasManager
@@ -358,6 +385,13 @@ struct CanvasView: UIViewRepresentable {
 
         func reconcileLayers() {
             guard let container = containerView else { return }
+
+            // Derived once per pass and threaded through: the ordering pass below has to know whether
+            // the two sandwich views are in the stack, and `updateSandwich` needs the same tree for
+            // its cache key. `renderTree` is O(layers × folders), the same order as the row generation
+            // beside it, and deliberately not on the drawing path (§5.2).
+            let tree = canvasManager.renderTree
+            let sandwichEngaged = isSandwichEngaged(tree)
 
             let currentIDs = Set(canvasManager.layers.map(\.id))
             for (id, host) in layerHosts where !currentIDs.contains(id) {
@@ -391,9 +425,17 @@ struct CanvasView: UIViewRepresentable {
                     // what lets the very touch that created the block also draw into it — a
                     // deferred refresh would drop the first stroke on the floor.
                     self.attachSpawnedCelIfFrameIsEmpty(host: host)
+                    // After the cel spawn, and conditional on there being a tier to stamp into:
+                    // `StrokeCanvasView.handleBegin` returns without ever reaching `onStrokeEnded`
+                    // when both tiers are nil (the eraser on a frame with no block is the reachable
+                    // case, since `attachSpawnedCelIfFrameIsEmpty` excludes it), and a latch set
+                    // before that check would never be cleared — leaving the canvas showing the
+                    // mid-stroke approximation while idle.
+                    self.sandwichStrokeBegan(host: host)
                     if let host { self.startShapeDetection(host: host) }
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
+                    self?.isSandwichStrokeLive = false
                     self?.cancelShapeDetection()
                     self?.canvasManager.refreshUndoRedoState()
                 }
@@ -426,6 +468,10 @@ struct CanvasView: UIViewRepresentable {
                 }
                 host.strokeView.onStrokeEnded = { [weak self, weak host] in
                     guard let self else { return }
+                    // Before the shape-following early return below: every path out of this closure
+                    // is a lift, and a lift is what unfreezes the sandwich's cache key (see
+                    // `makeSandwichKey`) so the canvas snaps back to the exact composite.
+                    self.isSandwichStrokeLive = false
                     self.canvasManager.refreshUndoRedoState()
                     self.cancelShapeDetection()
                     // If the shape was being followed, lift transitions it to adjustable state; no
@@ -454,13 +500,25 @@ struct CanvasView: UIViewRepresentable {
             }
 
             let orderedIDs = canvasManager.layers.map(\.id)
-            if orderedIDs != lastOrderedLayerIDs {
+            // Engagement is in the gate as well as layer order: the sandwich views have to be lifted
+            // into place the pass the compositor takes over, not only when the artist restacks.
+            if orderedIDs != lastOrderedLayerIDs || sandwichEngaged != lastOrderedSandwichEngaged {
+                // `below < hosts < above`, which is §5.2's sandwich in z-order. Everything else the
+                // old pass guaranteed still holds: the onion skin stays under the artwork (it is
+                // never fronted here), and the chrome overlays re-front themselves later in
+                // `updateUIView`, so they end up above `above`. `updateFloatingOverlay`'s Move case
+                // inserts the overlay *below* a specific host, which still lands it between the two
+                // sandwich views — correctly, since the layers above the Move source are inside
+                // `above`.
+                if sandwichEngaged, let sandwichBelowView { container.bringSubviewToFront(sandwichBelowView) }
                 for layer in canvasManager.layers {
                     if let host = layerHosts[layer.id] {
                         container.bringSubviewToFront(host)
                     }
                 }
+                if sandwichEngaged, let sandwichAboveView { container.bringSubviewToFront(sandwichAboveView) }
                 lastOrderedLayerIDs = orderedIDs
+                lastOrderedSandwichEngaged = sandwichEngaged
             }
 
             for (index, layer) in canvasManager.layers.enumerated() {
@@ -531,6 +589,10 @@ struct CanvasView: UIViewRepresentable {
                 }
             }
 
+            // After the per-layer loop, which owns `isHidden`/`alpha`/interaction — the sandwich's
+            // blanking is a `layer.mask` and rides on top of all three (see `LayerHostView.setBlanked`).
+            updateSandwich(tree: tree, engaged: sandwichEngaged)
+
             // Enable the catch-all gesture when no layers exist or the active layer is hidden —
             // by its own switch or by a group's gating it (§4.1), either reads as "hidden" here.
             let needsCatch: Bool
@@ -544,6 +606,309 @@ struct CanvasView: UIViewRepresentable {
             if catchAllTapRecognizer?.isEnabled != needsCatch {
                 catchAllTapRecognizer?.isEnabled = needsCatch
             }
+        }
+
+        // MARK: - §5.2's sandwich
+        //
+        // Core Animation has no per-view Multiply against arbitrary siblings, so a blended layer
+        // cannot be drawn by handing every layer to Core Animation as a flat sibling — which is what
+        // `reconcileLayers` above does and will keep doing for every document that does not need
+        // more. Where it does, the compositor draws instead, in two states over three cached images:
+        //
+        //   at rest      `composite(full)` in the lower view, every host blanked. One image, exact
+        //                for every mode and every nesting, byte-identical to the thumbnail.
+        //   mid-stroke   `composite(below)` | the active layer's live host | `composite(above)`.
+        //
+        // Both halves of the mid-stroke picture are approximations and both are deliberate for this
+        // phase: the active layer's own mode degrades to normal because Core Animation is what draws
+        // that view, and a layer *above* it degrades too because a texture composited onto
+        // transparency has no backdrop left to blend against. `SandwichLogicTests` pins the exact
+        // measured deltas (127, 127, 64) so that a later session cannot come to believe the
+        // mid-stroke path is exact. Lift is what snaps it back to `full`.
+        //
+        // All three images come out of one rebuild and are cached, so switching state is an image
+        // swap — which is what lets the switch happen on a stroke's first touch without a hitch, and
+        // what keeps the compositor off the drawing path entirely (§2, §5.2).
+
+        /// Whether §5.2's sandwich drives the live canvas at all this pass.
+        ///
+        /// **`needsCompositorOnCanvas` is the containment for the whole phase** and the first clause
+        /// is nothing but it: false for every document that could exist before phase 5a, and false is
+        /// what keeps the live canvas on today's exact code path — one host per layer,
+        /// `effectiveOpacity(ofLayer:)` folded in, no compositor and no cached images. A document
+        /// with no blend modes anywhere cannot regress no matter what the rest of this section does.
+        ///
+        /// **The two clauses after it narrow engagement further, and each is a case where the
+        /// compositor's snapshot is not the whole picture.** `RenderRequest`'s sources are
+        /// `PixelOps.rasterize(cel:)` — the model's pixels — and the live canvas draws two things
+        /// that are in no cel:
+        ///
+        /// - A **floating Move piece**: `bakedImageToDisplay` shows `piece.remainderPreview` (the
+        ///   hole) where the cel still holds the un-lifted content, so a composite would show the
+        ///   moved content twice, once at each end of the move.
+        /// - An **interpolated in-between**: its pixels come from `interpolatedImage(forCel:)` via
+        ///   `setInterpolationImage`, and the cel's own canvas is empty (see
+        ///   `StrokeCanvasView.refreshDisplay`), so a composite would drop the in-between entirely.
+        ///
+        /// Both are pre-existing gaps in `makeRenderRequest` rather than in the sandwich — the
+        /// project thumbnail has them too — and both want fixing in the model, not here. Until then
+        /// falling back to Core Animation is the safe direction, exactly as the first clause is: the
+        /// artist loses the blend mode on canvas for as long as a piece is floating or the playhead
+        /// sits on an in-between, rather than losing their artwork.
+        private func isSandwichEngaged(_ tree: [RenderNode]) -> Bool {
+            guard tree.needsCompositorOnCanvas else { return false }
+            guard canvasManager.floatingPiece == nil else { return false }
+            let frame = canvasManager.currentFrame
+            return !canvasManager.layers.indices.contains { index in
+                guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else { return false }
+                return canvasManager.layers[index].cels[celIndex].interpolation != nil
+            }
+        }
+
+        /// Which of the three cached images the canvas is showing right now.
+        ///
+        /// Published on `canvas.host` for the same reason `LayerStackCell` carries its markers: which
+        /// of two rendering paths the canvas is on is not otherwise visible to an XCUITest, and "the
+        /// picture happens to look the same either way" is exactly what the containment test has to
+        /// be able to tell apart. On the *label* rather than the value because `CanvasHostView`
+        /// already computes `accessibilityValue` as the vector gesture trace `VectorEraserUITests`
+        /// reads, and a canvas has no user-facing label to collide with. `canvas.host` is an
+        /// accessibility element in its own right, which hides any descendant from the tree, so a 1×1
+        /// marker view of the kind the layer panel uses could not be found inside it.
+        private enum SandwichPresentation: String {
+            /// Core Animation's flat row of hosts, unblanked — today's code path, unchanged.
+            case disengaged = "off"
+            case rest
+            case midStroke = "stroke"
+        }
+        private var sandwichPresentation: SandwichPresentation = .disengaged {
+            didSet { hostView?.accessibilityLabel = "sandwich:" + sandwichPresentation.rawValue }
+        }
+
+        weak var sandwichBelowView: UIImageView?
+        weak var sandwichAboveView: UIImageView?
+
+        /// The three composites of one rebuild, wrapped as `UIImage` once so assigning them is an
+        /// identity check rather than a fresh wrapper — and therefore a Core Animation no-op — on
+        /// every one of the many SwiftUI passes that change nothing.
+        private var sandwichImages: (full: UIImage, below: UIImage, above: UIImage)?
+        /// The key as of the last pass. What `makeSandwichKey` freezes the active layer against, and
+        /// deliberately *not* the same thing as `sandwichCacheKey`.
+        private var sandwichKey: SandwichKey?
+        /// The key `sandwichImages` was built from. Stale images are still shown — they are at most
+        /// one edit behind — while the rebuild that replaces them runs.
+        private var sandwichCacheKey: SandwichKey?
+        private var isSandwichRebuilding = false
+        /// True from the first touch of a stroke to its lift. The only input to this whole section
+        /// that a *dab* moves, and it moves nothing else: see `makeSandwichKey`.
+        private var isSandwichStrokeLive = false
+
+        static func makeSandwichView() -> UIImageView {
+            let view = UIImageView()
+            // The composite is exactly `canvasSize` and the container's bounds are too, so this is a
+            // 1:1 blit and `.scaleToFill` cannot resample — the same reasoning `LayerHostView` gives
+            // for `fillImageView`. Nearest-neighbor for the same reason it does as well: the whole
+            // stack is magnified by a transform on the container, and bilinear would blur the very
+            // pixels the host views keep crisp.
+            view.contentMode = .scaleToFill
+            view.layer.magnificationFilter = .nearest
+            view.isUserInteractionEnabled = false
+            view.isHidden = true
+            view.translatesAutoresizingMaskIntoConstraints = false
+            return view
+        }
+
+        /// Latches the mid-stroke state. Called from `onStrokeBegan` *after* the cel spawn — see the
+        /// comment there for why the condition is load-bearing rather than defensive.
+        private func sandwichStrokeBegan(host: LayerHostView?) {
+            guard let view = host?.strokeView, view.raster != nil || view.vectorCanvas != nil else { return }
+            isSandwichStrokeLive = true
+        }
+
+        /// Picks the presentation, schedules a rebuild when the key has moved, and applies both.
+        ///
+        /// Called at the end of `reconcileLayers` — so every host exists and has had its own
+        /// `isHidden`/`alpha`/interaction settled — and again from the far end of each rebuild.
+        private func updateSandwich(tree: [RenderNode], engaged: Bool) {
+            guard let belowView = sandwichBelowView, let aboveView = sandwichAboveView else { return }
+
+            guard engaged else {
+                guard sandwichPresentation != .disengaged || sandwichImages != nil else { return }
+                // Everything back to today's path, and the images dropped rather than kept warm: three
+                // canvas-sized images is 50 MB at 2048² and 192 MB at 4000² (§5.3), which is not a
+                // cache to hold against a document that has stopped needing it. Re-engaging pays one
+                // rebuild.
+                belowView.image = nil
+                belowView.isHidden = true
+                aboveView.image = nil
+                aboveView.isHidden = true
+                for host in layerHosts.values { host.setBlanked(false) }
+                sandwichImages = nil
+                sandwichKey = nil
+                sandwichCacheKey = nil
+                sandwichPresentation = .disengaged
+                return
+            }
+
+            let key = makeSandwichKey(tree: tree)
+            sandwichKey = key
+            if key != sandwichCacheKey { startSandwichRebuild(for: key) }
+
+            // **Trap 1: do not blank the hosts until the first composite has landed.** On the very
+            // first engage there is nothing cached, and blanking now would flash an empty canvas for
+            // however long the rebuild takes.
+            guard let images = sandwichImages else { return }
+
+            // **Trap 2: stay mid-stroke until the new `full` lands.** On lift the key unfreezes and
+            // a rebuild starts; flipping to rest right away would show a `full` composited before the
+            // stroke existed, and the artist would watch their just-finished stroke vanish and come
+            // back a beat later. `key != sandwichCacheKey` is exactly "the rebuild lift asked for has
+            // not landed yet".
+            let midStroke = isSandwichStrokeLive
+                || (sandwichPresentation == .midStroke && key != sandwichCacheKey)
+
+            if midStroke {
+                if belowView.image !== images.below { belowView.image = images.below }
+                if aboveView.image !== images.above { aboveView.image = images.above }
+            } else {
+                if belowView.image !== images.full { belowView.image = images.full }
+                // Nothing in the upper view at rest: `full` is the whole tree, so a second image over
+                // it would be everything above the active layer drawn a second time.
+                if aboveView.image != nil { aboveView.image = nil }
+            }
+            if belowView.isHidden { belowView.isHidden = false }
+            let hideAbove = !midStroke
+            if aboveView.isHidden != hideAbove { aboveView.isHidden = hideAbove }
+
+            // The active layer's host is the middle of the sandwich and the only one that draws
+            // itself; everything else is in one of the two composites already. At rest even that one
+            // is blanked, because `full` includes it.
+            let activeID = canvasManager.layers.indices.contains(canvasManager.currentLayerIndex)
+                ? canvasManager.layers[canvasManager.currentLayerIndex].id : nil
+            for (id, host) in layerHosts {
+                host.setBlanked(!(midStroke && id == activeID))
+            }
+            sandwichPresentation = midStroke ? .midStroke : .rest
+        }
+
+        // MARK: The cache key
+
+        /// One layer's pixels at one frame, by identity rather than by content.
+        ///
+        /// Deliberately the same identity `PixelOps.RasterizeKey` is built from, because it is the
+        /// same question — that memo is what makes the snapshot half of a rebuild cheap, and a key
+        /// here that moved when its key did not would rebuild for nothing. The two `UIImage` tiers
+        /// are compared by object identity because that is how they change: a fill or a bake replaces
+        /// them wholesale rather than drawing into them.
+        private struct LayerContentVersion: Equatable {
+            let celID: UUID
+            let raster: ObjectIdentifier
+            let rasterVersion: Int
+            let vector: ObjectIdentifier?
+            let vectorVersion: Int
+            let fillImage: ObjectIdentifier?
+            let bakedImage: ObjectIdentifier?
+
+            init(cel: Cel) {
+                celID = cel.id
+                raster = ObjectIdentifier(cel.raster)
+                rasterVersion = cel.raster.version
+                vector = cel.vector.map(ObjectIdentifier.init)
+                vectorVersion = cel.vector?.version ?? -1
+                fillImage = cel.fillImage.map(ObjectIdentifier.init)
+                bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+            }
+        }
+
+        /// What §5.2's three cached composites depend on — everything *except* the live stroke.
+        ///
+        /// Modelled on `InterpolationPreviewKey` above, and the same rule governs what may be in it:
+        /// every evaluation input, and nothing that moves per dab. The derived tree carries every
+        /// structural and group property already (`[RenderNode]` is `Equatable`), so it is most of
+        /// the key on its own; the frame and the per-layer content versions are what it does not
+        /// carry, and the active index is what decides *where the tree is cut*.
+        ///
+        /// `activeLayerIndex` moving rebuilds `full` as well, which is a picture identical to the one
+        /// already cached — switching layers changes only the cut. Worth the wasted composite rather
+        /// than a second key and a second cache to keep them apart.
+        private struct SandwichKey: Equatable {
+            let tree: [RenderNode]
+            let activeLayerIndex: Int
+            let frame: Int
+            /// Parallel to `layers`; nil where a layer has no cel at this frame.
+            let contents: [LayerContentVersion?]
+        }
+
+        private func makeSandwichKey(tree: [RenderNode]) -> SandwichKey {
+            let frame = canvasManager.currentFrame
+            let active = canvasManager.currentLayerIndex
+            let held = sandwichKey?.contents
+            let contents = canvasManager.layers.indices.map { index -> LayerContentVersion? in
+                // **The active layer's content version is in the key only while no stroke is in
+                // progress, and that one clause is both halves of the contract.** During a dab the
+                // version is held at whatever it was when the dab started, so stamping invalidates
+                // nothing and the compositor stays off the drawing path (§2 forbids it being on it).
+                // On lift it goes live again, the key moves, and the canvas snaps to the exact
+                // composite. Held rather than elided so that *starting* a stroke does not move the
+                // key either — the state switch has to be an image swap, not a rebuild.
+                if isSandwichStrokeLive, index == active, let held, held.indices.contains(index) {
+                    return held[index]
+                }
+                guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
+                return LayerContentVersion(cel: canvasManager.layers[index].cels[celIndex])
+            }
+            return SandwichKey(tree: tree, activeLayerIndex: active, frame: frame, contents: contents)
+        }
+
+        // MARK: Rebuilding
+
+        /// Serialises the composite half of every rebuild off the main thread. `RenderRequest` is a
+        /// pure value — §9.1 point 3 designed it to be exactly this — so the only main-thread work is
+        /// the snapshot `makeSandwichRequests` takes and the assignment on the way back.
+        private static let sandwichQueue = DispatchQueue(label: "com.paintapp.CanvasView.sandwich",
+                                                         qos: .userInitiated)
+
+        /// One rebuild in flight at a time. A key that moves while one is running is not queued: the
+        /// far end of every rebuild re-derives the key from the model, so it picks up whatever has
+        /// happened since rather than compositing an intermediate picture nobody will ever see.
+        private func startSandwichRebuild(for key: SandwichKey) {
+            guard !isSandwichRebuilding else { return }
+            // Nil for a stale or non-leaf `activeLayerIndex`, or a degenerate canvas — it does not
+            // fall back to `full`, deliberately, so that a wrong cut is never composited. The canvas
+            // keeps showing whatever is cached (at most one edit stale), or stays on Core Animation's
+            // path when nothing is cached yet. Both windows are one SwiftUI pass long in practice:
+            // the index is only out of range between a delete and the reselect that follows it, and
+            // the next pass schedules the rebuild this one declined.
+            guard let requests = canvasManager.makeSandwichRequests(atFrame: canvasManager.currentFrame,
+                                                                    activeLayerIndex: canvasManager.currentLayerIndex)
+            else { return }
+
+            isSandwichRebuilding = true
+            Self.sandwichQueue.async { [weak self] in
+                let full = Compositor.composite(requests.full)
+                let below = Compositor.composite(requests.below)
+                let above = Compositor.composite(requests.above)
+                Task { @MainActor in
+                    self?.finishSandwichRebuild(key: key, full: full, below: below, above: above)
+                }
+            }
+        }
+
+        private func finishSandwichRebuild(key: SandwichKey, full: CGImage?, below: CGImage?, above: CGImage?) {
+            isSandwichRebuilding = false
+            // All three or none: a half-updated set would put a `below` from this frame under an
+            // `above` from the last one. `composite` returns nil only for a degenerate canvas.
+            if let full, let below, let above, key == sandwichKey {
+                sandwichImages = (full: UIImage(cgImage: full, scale: 1, orientation: .up),
+                                  below: UIImage(cgImage: below, scale: 1, orientation: .up),
+                                  above: UIImage(cgImage: above, scale: 1, orientation: .up))
+                sandwichCacheKey = key
+            }
+            // The whole reconciliation rather than only the image swap: this result may be the first
+            // one, and the first one is what unblocks blanking the hosts (trap 1 in `updateSandwich`).
+            // It is also what starts the next rebuild when this result was the stale one — the key it
+            // recomputes is the model's current answer, not the one this rebuild was asked for.
+            reconcileLayers()
         }
 
         // MARK: - Vector-layer transform overlay

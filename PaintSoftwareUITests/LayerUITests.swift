@@ -544,4 +544,239 @@ final class LayerUITests: PaintUITestCase {
                        "The picker should reflect the folder's blendMode, not reset when the panel reopens")
     }
 
+    // MARK: - §5.2's sandwich on the live canvas
+
+    /// Where the two crossed strokes below meet — the one pixel every assertion in this section is
+    /// about. Vertically centred, so it is never in the letterbox margin (`visibleCanvasBounds`).
+    private var crossing: CGVector { CGVector(dx: 0.45, dy: 0.5) }
+
+    /// Sets the brush colour through the colour panel and closes it again, so it cannot cover the
+    /// canvas the next probe screenshots.
+    private func setBrushColor(_ app: XCUIApplication, hex: String) {
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
+        colorButton.tap()
+        let hexField = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hexField.waitForExistence(timeout: 5))
+        setHexField(app, hexField, to: hex)
+        colorButton.tap()
+    }
+
+    /// Two overlapping strokes on two layers, in colours whose product is nothing like either of
+    /// them: cyan underneath, magenta on top. At `crossing` a **Normal** top layer reads magenta
+    /// (255, 0, 255) and a **Multiply** one reads blue (0, 0, 255) — the red channel alone is the
+    /// whole discriminator, which is what makes this readable through a screenshot's own rounding.
+    ///
+    /// Both strokes run the same path so the overlap is the width of a stroke rather than the size
+    /// of a crossing, and `crossing` is its midpoint — comfortably inside the solid core of both,
+    /// away from the antialiased edges.
+    private func drawCrossedStrokesOnTwoLayers(_ app: XCUIApplication) -> XCUIElement {
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        setBrushColor(app, hex: "00FFFF")
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
+
+        openLayerPanel(app)
+        app.buttons["layerPanel.addButton"].tap() // layer 1, topmost and active
+        app.buttons["toolbar.layersButton"].tap()
+
+        setBrushColor(app, hex: "FF00FF")
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
+        return canvas
+    }
+
+    /// Sets the active layer's blend mode through the options panel, leaving the panel closed.
+    private func setBlendMode(_ app: XCUIApplication, layerIndex: Int, to mode: String) {
+        openLayerPanel(app)
+        let row = app.staticTexts["layerPanel.row.\(layerIndex)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap() // select
+        row.tap() // open options
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let item = app.buttons["layerOptions.blendMode.\(mode)"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+        app.buttons["layerOptions.close"].tap()
+        app.buttons["toolbar.layersButton"].tap()
+    }
+
+    /// Polls a canvas pixel until `matches` holds. The sandwich composites off the main thread (see
+    /// `CanvasView.Coordinator.startSandwichRebuild`), so every assertion about what the canvas shows
+    /// after a model change is a wait, exactly as `waitUntilFilled` is for the fill.
+    @discardableResult
+    private func waitForPixel(_ canvas: XCUIElement, at point: CGVector, timeout: TimeInterval = 10,
+                              matches: ((r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)?
+        while Date() < deadline {
+            last = rgbaPixel(of: canvas, dx: Double(point.dx), dy: Double(point.dy))
+            if let last, matches(last) { return last }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return last
+    }
+
+    /// "off" / "rest" / "stroke" — which rendering path the live canvas is on, published on
+    /// `canvas.host`'s label by `CanvasView.Coordinator.SandwichPresentation`.
+    private func sandwichState(_ app: XCUIApplication) -> String {
+        let label = app.otherElements["canvas.host"].label
+        return label.hasPrefix("sandwich:") ? String(label.dropFirst("sandwich:".count)) : "?(\(label))"
+    }
+
+    /// **The regression guard for the mask trick, and the reason `LayerHostView.setBlanked` uses a
+    /// mask rather than `isHidden`.**
+    ///
+    /// While the sandwich is engaged every layer host is blanked, including the active one at rest.
+    /// `UIView.hitTest` returns nil for a view that is hidden or below alpha 0.01, so blanking that
+    /// way would mean the first touch of a stroke never reaches the stroke view — the artist draws
+    /// and *nothing happens*, with no error anywhere. The stroke count is the assertion that catches
+    /// it: it can only be non-zero if the touch was delivered.
+    func testAStrokeStillLandsWhileTheSandwichIsEngaged() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        setBlendMode(app, layerIndex: 0, to: "multiply")
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 0)?.strokes, 0, "Setup: nothing drawn yet")
+        XCTAssertEqual(sandwichState(app), "rest",
+                       "A blending leaf is exactly the document Core Animation cannot draw, so the compositor should have taken over")
+
+        setBrushColor(app, hex: "00FFFF")
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
+
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 0)?.strokes, 1,
+                       "The stroke has to reach the blanked host. A zero here means the host was hidden rather than masked and the touch was never delivered")
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing) { !isWhitish($0) },
+                        "And it has to be visible: on lift the canvas goes back to `composite(full)`, which contains the stroke")
+    }
+
+    /// **§11's done-criterion for phase 5b: a Multiply layer looks multiplied on the canvas the
+    /// artist is drawing on.** Before the sandwich, `reconcileLayers` handed every layer to Core
+    /// Animation as a flat sibling, so the mode showed on the layer row and in the project thumbnail
+    /// and changed nothing on canvas.
+    ///
+    /// Doubles as the "a blend change brings the canvas back in sync" case: the mode is picked with
+    /// both strokes already on the canvas, so the pixel has to *move* rather than merely start right.
+    func testAMultiplyLayerLooksMultipliedOnTheLiveCanvas() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = drawCrossedStrokesOnTwoLayers(app)
+
+        XCTAssertEqual(sandwichState(app), "off", "Two Normal layers are still Core Animation's own case")
+        guard let normal = waitForPixel(canvas, at: crossing, matches: { $0.r > 200 && $0.b > 200 }) else {
+            return XCTFail("Setup: the magenta stroke should cover the cyan one at the crossing")
+        }
+        XCTAssertLessThan(normal.g, 80, "Setup: magenta over cyan, source-over, is magenta")
+
+        setBlendMode(app, layerIndex: 1, to: "multiply")
+
+        XCTAssertEqual(sandwichState(app), "rest")
+        guard let multiplied = waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }) else {
+            return XCTFail("The canvas never showed the multiply")
+        }
+        XCTAssertLessThan(multiplied.r, 80,
+                          "Magenta multiplied into cyan has no red left — this is the assertion the whole phase exists for, and \(multiplied) is what an unblended flat sibling still looks like")
+        XCTAssertGreaterThan(multiplied.b, 200, "Blue survives both, so it is what tells a multiply from a layer that simply vanished")
+    }
+
+    /// **The risk containment, stated as a test.** Every document that could exist before phase 5a
+    /// has to keep taking today's exact code path — one host per layer, no compositor, no cached
+    /// images — and `needsCompositorOnCanvas` is what guarantees it. If this ever reads anything but
+    /// "off", every project ever made starts rendering through a path it has never rendered through.
+    func testAnAllNormalDocumentNeverEngagesTheSandwich() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = drawCrossedStrokesOnTwoLayers(app)
+
+        XCTAssertEqual(sandwichState(app), "off", "Two Normal layers on a flat stack")
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1, "Drawing behaves as before")
+
+        // A folder at its defaults is a transparent parenthesis — opacity 1, normal, isolated over
+        // nothing that blends — so nesting must not engage anything either.
+        openLayerPanel(app)
+        addFolderFromAddMenu(app)
+        dragRow(layerCell(app, layerIndex: 1), onto: folderCell(app, named: "Folder 1"), dropDY: 0.5)
+        XCTAssertEqual(rowFolder(app, layerIndex: 1), "Folder 1", "Setup: the top layer should now be inside the folder")
+        app.buttons["toolbar.layersButton"].tap()
+
+        XCTAssertEqual(sandwichState(app), "off", "An untouched folder changes nothing Core Animation cannot express")
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.42), to: CGVector(dx: 0.55, dy: 0.42))
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 2,
+                       "And drawing still lands, on the same path it always did")
+        XCTAssertEqual(sandwichState(app), "off", "Drawing is not what engages it either")
+    }
+
+    /// The invalidation contract from the other side: everything *except* the live stroke has to
+    /// move the cached composites. A layer switch re-cuts the tree, a visibility toggle changes what
+    /// is in it, and undo changes a layer's pixels — each has to reach the canvas, and each would sit
+    /// there showing a stale composite if it were missing from `SandwichKey`.
+    func testTheBlendedCanvasComesBackInSyncAfterLayerSwitchVisibilityToggleAndUndo() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = drawCrossedStrokesOnTwoLayers(app)
+        setBlendMode(app, layerIndex: 1, to: "multiply")
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }), "Setup: multiplied")
+
+        // A layer switch changes only where the tree is cut, so the picture must not change with it.
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.0"].tap()
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }),
+                        "Selecting the layer underneath re-cuts the sandwich; at rest it is still `composite(full)` and still multiplied")
+
+        // Hiding the cyan layer leaves the magenta one multiplying against nothing, which is itself.
+        openLayerPanel(app)
+        app.buttons["layerPanel.row.0.visibility"].tap()
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r > 200 && $0.b > 200 }),
+                        "With nothing underneath to multiply into, the top layer reads as its own colour again")
+
+        // And undo, which is the same change arriving from the history rather than from a tap.
+        // `toggleLayerVisibility` goes through `withStructureUndo`, so the hide above is the newest
+        // step and one tap is deterministic — no counting how many of the steps before it were
+        // undoable.
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        undo.tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }),
+                        "Undoing the hide should bring the multiply back, not leave a composite that still remembers the layer as hidden")
+    }
+
+    /// The playhead is the last of §5.2's invalidation triggers, and the one that changes *which*
+    /// pixels a layer contributes rather than what they are. The top layer's block is shortened so
+    /// that a frame past its end is a frame it does not cover: the canvas has to drop back to the
+    /// cyan layer alone there. A sandwich that never rebuilt on a frame change would still be
+    /// showing the multiplied composite of frame 1.
+    func testMovingThePlayheadRebuildsTheBlendedCanvas() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = drawCrossedStrokesOnTwoLayers(app)
+        setBlendMode(app, layerIndex: 1, to: "multiply")
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }), "Setup: multiplied at frame 1")
+
+        // Shrink the magenta layer's block. Read the result rather than assuming the drag's reach —
+        // XCUITest's synthetic drags undershoot by a timing-dependent amount (see `performDrag`).
+        performDrag(app, identifier: "timeline.cel.1.0.rightHandle", totalDelta: -260)
+        guard let block = readCel(app, layerIndex: 1, celIndex: 0) else {
+            return XCTFail("Could not read the shortened block")
+        }
+        XCTAssertLessThan(block.length, 12, "Setup: the drag should have shortened the block")
+
+        let ruler = app.otherElements["timeline.ruler"]
+        XCTAssertTrue(ruler.waitForExistence(timeout: 5))
+        let start = ruler.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
+        // 30pt per frame, and one frame past the block's end is enough.
+        start.press(forDuration: 0.2,
+                    thenDragTo: start.withOffset(CGVector(dx: CGFloat(block.start + block.length + 1) * 30, dy: 0)),
+                    withVelocity: .slow, thenHoldForDuration: 0.2)
+        guard let (current, _) = readFrameLabel(app) else { return XCTFail("Could not read the frame label") }
+        XCTAssertGreaterThan(current, block.start + block.length,
+                             "Setup: the playhead has to land past the shortened block for this to test anything")
+
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.g > 200 && $0.b > 200 && $0.r < 120 }),
+                        "Past the magenta block there is nothing to multiply, so the canvas is the cyan layer alone — a stale composite would still read blue")
+    }
+
 }
