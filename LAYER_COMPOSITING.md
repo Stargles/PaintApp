@@ -475,6 +475,9 @@ later and rewriting for one.
 ## 10. Still open
 
 1. **Mask threshold constant** (§6.3) — starting at 0.5, tunable once there is something to look at.
+   **"Clip to below" (§7 Tier 1) waits for the same machinery** — §7 lists it as a blend mode while
+   noting it is not one, and building it in phase 5 would have meant building mask resolution early
+   to serve a single mode. It lands in phase 6 as a mask whose source is implied.
 2. **Compositor node ops** — §7 lists the *effects*; the multi-input ops themselves (Mix, and which
    others take 2+ inputs) want a pass once the node UI exists and there is something to try them on.
 3. **Whether the pass-through toggle should ship before phase 5 makes it do anything** (§4.2).
@@ -491,7 +494,8 @@ it is small and none of them fight a moving substrate.
 | ~~**2**~~ | ~~Metal compositor behind a flag; snapshot-driven entry point (§9.1)~~ | **done** — both backends agree byte for byte, delta 0 |
 | ~~**3**~~ | ~~Delete `PixelOps.compositeCanvas`~~ | **done** — thumbnail on one path, `PerfBaselineTests` green |
 | ~~**4**~~ | ~~Group properties: isolated/pass-through, opacity, visibility migration (§4.1–4.2)~~ | **done** — groups composite as parentheses, both backends on one buffer rule |
-| **5** | Tier 1 blend modes on layers and groups (§7), **and §5.2's sandwich with them** | the shader `switch` plus UI; the live canvas shows a blended layer |
+| **5a** | ~~Tier 1 blend modes on layers and groups (§7)~~ | **done** — fourteen modes, both backends, picker and row badge |
+| **5b** | §5.2's sandwich, so the live canvas shows a blended layer | a Multiply layer looks multiplied while drawing |
 | **6** | Alpha masks (§6), incl. `MaskParityLogicTests` | raster and vector mask pixel-identically |
 | **7** | Tier 2 blend modes | |
 | **8** | Compositor nodes: slot-as-folder storage, panel chrome (§4.3) | a 2-input Mix node renders |
@@ -499,6 +503,19 @@ it is small and none of them fight a moving substrate.
 
 Phases 0–3 are the risky ones; 4 onward are additive. §9.2's background renderer stays deferred
 until the sequencer exists — only §9.1's substrate is in scope here, and it landed inside phase 2.
+
+**Blend modes shipped without the sandwich, so the live canvas does not show them yet.** The
+compositor blends correctly and the thumbnail proves it; `CanvasView.reconcileLayers` still hands
+every layer to Core Animation as a flat sibling, which has no per-view Multiply against arbitrary
+siblings (§1). So an artist can set Multiply, see it in the layer row and in the thumbnail, and see
+no change on canvas. That is phase 5b's whole job and it is the last thing standing between this
+feature and being usable.
+
+**One correction to §5.1 that phase 5 measured.** "The CoreGraphics one is the reference … the
+byte-for-byte definition of correct" holds for the *walk* — order, buffers, alpha — and not for the
+blend functions. `CGBlendMode`'s colorDodge, colorBurn and softLight are the PDF 1.4 originals and
+disagree with W3C Compositing Level 1 by up to 249/255; the app follows the spec, which is what
+Photoshop and CSP do, and hand-rolls those three on the CPU. See `BlendMode.handRolledChannel`.
 
 **The sandwich moved from phase 3 to phase 5 — decided, not drifted.** It rewrites the live canvas,
 which is the most latency-critical code in the app, and nothing consumes it until a layer has a blend
