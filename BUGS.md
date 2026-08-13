@@ -3,6 +3,14 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## `duplicateLayer` drops `blendMode`, and now `alphaMask` too (2026-08-13)
+
+`CanvasManager+LayerTree.swift`'s `duplicateLayer(at:)` builds the copy's `Layer` without carrying
+over `source.blendMode` or `source.alphaMask`, so both silently reset to their defaults (`.normal`,
+`nil`). The `blendMode` gap dates from phase 5a; phase 6a left it in place rather than fold a
+phase-5 behaviour change into a phase-6 diff, so `alphaMask` now drops the same way. Wants its own
+commit plus a test.
+
 ## Fill tool: the gap-closing UI test is still skipped (2026-07-21)
 
 `testFillToolBridgesOpenContourGapWhenGapClosingEnabled` is `XCTSkip`'d, and it is the single skip in
