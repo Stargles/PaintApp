@@ -1,133 +1,115 @@
 Read LAYER_COMPOSITING.md first — the agreed design, settled with the product owner. §11 is the build
-order. Phases 0 through 5a are done. **You are finishing phase 5b: §5.2's sandwich, so the live canvas
-actually shows a blended layer.** Half of it has landed and is verified; the other half is a draft
-that has never been built. See "State" below before you touch anything.
+order. **Phases 0 through 5b are done, committed and green.** You are doing **phase 6: alpha masks
+(§6)**, which is now the only thing between this project and "Clip to below" — §7 lists that in Tier
+1 while admitting it is not a blend but the mask machinery with an implicit source, and phase 5a
+deliberately shipped fourteen Tier 1 modes rather than fifteen because of it.
 
 You are the orchestrator. Delegate to worker sessions and pick the model per task, but **at most
-2 sonnet + 1 opus at any one moment**. Sessions keep dying mid-task on usage limits — this one did,
-and the one before it. **A dying worker's uncommitted work is recoverable from its worktree**
-(`git -C <worktree> status`), so check there before redoing anything, and commit a stopped worker's
-tree as an explicitly-unverified WIP rather than leaving it loose.
+2 sonnet + 1 opus at any one moment**. Sessions keep dying mid-task on usage limits — two of the last
+three did. **A dying worker's uncommitted work is recoverable from its worktree** (`git -C <worktree>
+status`); check there before redoing anything, and commit a stopped worker's tree as an explicitly
+unverified WIP rather than leaving it loose. **Branch a worker's worktree from the phase tip, not
+`origin/main`** — every worker up to session 26 had to `merge --ff-only` onto the real tip first, and
+branching correctly deletes that step entirely.
 
 ## State
 
-| | |
-|---|---|
-| `claude/layer-system-redesign-f9afd9` | the phase branch, at `9925d51`. **Fast tier 718/718, verified from `xcresulttool`, not the banner.** |
-| `tmp/5b2-sandwich-wiring` at `966b012` | the CanvasView wiring, ~630 lines. **Never built, never run.** |
+Fast tier **718/718**. Full XCUITest suite run at the 5b boundary — see the session log for the
+number and for anything environmental. `Compositor.backend` is still `.coreGraphics`.
 
-The full XCUITest suite **has not been run since the blend work** — two phases ago now. Run it at the
-phase boundary, after `simctl shutdown all` + `erase` + **boot**.
+## What phase 5b built, so you don't rediscover it
 
-## The scope decision, taken by the product owner on 2026-08-12
+The live canvas finally shows blended layers. The owner's scope decision was **exact at rest, snaps
+on lift**, not mid-stroke fidelity:
 
-§11's done-criterion reads "a Multiply layer looks multiplied while drawing", which is ambiguous
-between "during a drawing session" and "mid-stroke, on the wet dab". **The owner chose: exact at
-rest, snaps on lift.** Do not quietly widen this.
+- At rest the canvas is one `composite(full)` with every host blanked — exact for every mode and
+  every nesting, byte-identical to the thumbnail.
+- While a dab is down, a below/live-host/above trio takes over. The active layer's own blend and any
+  layers above it render as Normal for the dab's duration and snap on lift.
+- `[RenderNode].needsCompositorOnCanvas` is the engage switch, and it is the risk containment: a
+  document with no blend modes and no faded or isolated group keeps Core Animation's old flat-sibling
+  path untouched.
+- `[RenderNode].split(atLeaf:)` prunes the tree either side of the active leaf, keeping an enclosing
+  group's properties on **both** halves. `SandwichLogicTests` (24 cases) pins the identity.
+- Rebuilds run **off-main** on `CanvasView`'s sandwich queue, showing the previous images until the
+  new ones land. Measured: snapshot 0.1 ms, three composites ~55 ms at 2048²/six layers. That async
+  path is load-bearing, not incidental — 55 ms inline is a dropped frame at 60 Hz and several at 120.
 
-- **At rest** (no dab down) the canvas shows one image, `composite(full)` — byte-identical to what
-  the thumbnail renders, every blend mode and every nesting exact, every layer host blanked.
-- **Mid-stroke** the three-view sandwich takes over: `composite(below)` | the active layer's live
-  host | `composite(above)`. The active layer's own blend degrades to Normal for the dab's duration,
-  and so do any layers above it, because a texture composited onto transparency has no backdrop to
-  blend against. Both snap correct on lift.
+## The two things in 5b that phase 6 will collide with
 
-This is what keeps the compositor out of the drawing path, which §2 requires. Blending the wet stroke
-itself needs a per-dab GPU upload scissored to `strokeDirtyRect` and is deliberately a later phase.
+1. **`layer.mask` is already taken on `LayerHostView`.** Blanking a host for the sandwich installs a
+   contentless `CALayer` as `host.layer.mask` (`LayerHostView.setBlanked`), because `isHidden` and
+   `alpha` both make `hitTest` return nil and a blanked *active* host would silently swallow the
+   first touch of every stroke. §6.4 wants the resolved alpha mask carried as a `CALayer.mask` on the
+   **live stroke view** — `host.strokeView`, a different layer, so the two do not fight *as written*.
+   Put phase 6's mask on the host instead and you will break blanking, or blanking will eat your
+   mask, depending on order. Neither fails loudly. Decide this deliberately and comment it.
+2. **The content-version key you need already exists.** §6.2 says the resolved mask texture is cached
+   on the source subtree's `contentVersion`, and §9.1's `contentVersion` was *removed* in phase 2
+   after being measured at a zero hit rate — because it keyed on the rendered `CGImage`, which
+   `PixelOps.rasterize` mints fresh every call. 5b built the version that works: a per-layer key
+   derived from **model** state (cel id, both tiers' object identity *and* version, fill/baked image
+   identity), in `CanvasView`'s sandwich key. Reuse that derivation rather than reintroducing the one
+   that could not hit. Note the trap it already handles: a cel id outlives the buffers under it, so
+   reopening a project rebuilds every `RasterLayerTexture` with its counter back at 0 under the same
+   id — a version-only key serves pre-edit pixels.
 
-**Rejected, so nobody re-proposes it:** `CALayer.compositingFilter` would make the middle view blend
-for free. It is private-ish on iOS *and* it would use Apple's blend maths, which phase 5a measured as
-disagreeing with the spec by up to 249/255 on three modes — so mid-stroke would not match at-rest.
+## What §6 has already settled, so don't reopen it
 
-## What 5b-1 built and verified (commit `9925d51`)
+Read §6 in full, but the load-bearing calls are: masks resolve at **render time and are never baked**,
+for raster as well as vector — non-destructive is *cheaper*, since the mask is cached once per
+distinct mask and shared, while destructive makes undo retain the pixels it destroyed. Sources
+**union** by `max` of alpha. A source that would create a cycle is **ignored, not diagnosed**. The
+test is `sourceAlpha > threshold` (≈0.5) and **not** `> 0`, because `softRound`'s dab falls to alpha
+≈ 0 across its whole radius and `> 0` would make every mask visibly larger than its stroke; a narrow
+smoothstep across the threshold handles the diagonal stair-stepping without reintroducing a gradient.
+A mask **ignores its source's visibility**, deliberately unlike `isFillReference`. Mask edits coalesce
+to one undo step per mask-edit session.
 
-```swift
-extension Array where Element == RenderNode {
-    var needsCompositorOnCanvas: Bool { get }                                    // the engage switch
-    func split(atLeaf layerIndex: Int) -> (below: [RenderNode], above: [RenderNode])?
-}
-struct SandwichRequests { let full: RenderRequest; let below: RenderRequest; let above: RenderRequest }
-extension CanvasManager {
-    @MainActor func makeSandwichRequests(atFrame:activeLayerIndex:quality:) -> SandwichRequests?
-}
-```
-`SandwichLogicTests`, 24 cases, pins all of it. **Measured, actually run:** the exact case is delta 0
-across nine tree shapes; the approximations are 127 (a blending layer above the active one), 127 (the
-active layer's own mode) and 64 (active layer inside a group at 0.5 opacity — sandwich RGBA
-(64,128,0,192) against exact (0,128,0,128), so alpha drifts too, not only colour). Those are asserted
-at their measured values, so they fail if the approximation improves *or* worsens.
+`MaskParityLogicTests` is the phase's gate: a raster layer and a vector layer with identical content
+and identical masks must composite pixel-identically. Insist on it structurally — `selectionClipPath`
+is the cautionary tale already in the tree, clipping raster by reverting pixels at stroke-end and
+vector by dropping samples, and its own comment admits the two disagree.
 
-Two honest caveats from that worker, worth not rediscovering:
+## Gotchas that each cost a cycle
 
-- **Delta 0 holds because the fixtures are opaque.** The `above` half quantizes to 8-bit once more
-  than the direct walk. One semi-transparent layer above costs 0; it takes four stacked fractional
-  draws to reach 1. The `below` half is exact whatever the alphas are, and that is structural — it is
-  a prefix of the same walk drawn into a still-transparent context. If you ever have to trust one
-  texture, trust the lower one.
-- **A faded group *above* the active layer** is not covered by the stated exact-case condition and is
-  not exact either — same double-quantization, measured at 1.
+- **`** TEST SUCCEEDED **` and exit 0 do not mean any test ran.** Build `-only-testing` flags into a
+  shell *array* and pass `"${SUITES[@]}"` — zsh does not word-split an unquoted `$VAR`. Read
+  `totalTestCount` from `xcresulttool`, never the banner. CLAUDE.md has the recipe.
+- **A new test file needs a `project.pbxproj` edit.** `PaintSoftwareUITests` opts out of
+  `PBXFileSystemSynchronizedRootGroup` and hand-lists its sources, so an unregistered file compiles
+  nowhere, runs nothing, and still prints a green banner.
+- **After `simctl erase` you must `boot`** (`xcrun simctl boot <udid>; xcrun simctl bootstatus <udid>
+  -b`) or the runner fails behind a wall of `FBSOpenApplicationServiceErrorDomain` that means only
+  "nothing is booted".
+- **Read CLAUDE.md's XCUITest triage before diagnosing any failure.** Erase, boot, re-run the single
+  test; a clean pass is confirmation it was environmental. Never re-run the 22-minute suite to decide.
+- **Do not add a heavy case to the fast tier.** A phase-4 case allocating ~400 MB pushed
+  `InterpolationRenderLogicTests.testPreviewIsSubstantiallyCheaperThanFull` from 0.073 s to 8.98 s
+  and failed whenever they shared a runner process. Measure, record the number, drop the case.
+- **Verify a worker's numbers, not its summary.** One session recorded a "measured" delta table it
+  had never run; the real figure was 70× larger and was a genuine bug.
 
-## Gotchas the wiring session was handed, which the draft should already reflect — verify it does
-
-- **`host.isHidden = true` breaks drawing, silently.** `UIView.hitTest` returns nil for hidden,
-  `alpha < 0.01`, or interaction-disabled views, so a blanked *active* host never receives a stroke's
-  first touch and the stroke simply does not happen. `UIView.alpha` and `CALayer.opacity` are the same
-  property, so neither is an escape. Blank with `host.layer.mask` — a contentless mask layer is alpha
-  0 everywhere and **UIKit does not consult masks when hit-testing**. Assign it once; do not allocate
-  a `CALayer` per pass, `updateUIView` runs on every SwiftUI render.
-- **Z-order**: in `reconcileLayers`, after the existing ordering pass, front `belowView`, then each
-  host in order, then `aboveView` — giving `onionSkin < belowView < hosts < aboveView < chrome`. That
-  keeps `updateFloatingOverlay`'s Move anchor (`insertSubview(overlay, belowSubview: hostAbove)`,
-  CanvasView.swift:672) landing between the two sandwich views, which is where it belongs. The
-  existing pass is gated on `orderedIDs != lastOrderedLayerIDs` and must also run when engagement
-  changes.
-- **Two async traps.** Do not blank the hosts until the first composite lands, or the first engage
-  flashes an empty canvas. Do not flip to rest on stroke-end until the *new* `full` lands, or the
-  artist watches their finished stroke vanish and reappear.
-- **The active layer's content version belongs in the invalidation key only while no stroke is in
-  progress.** That one rule gives both halves of the contract: frozen during a dab so stamping
-  rebuilds nothing, unfrozen on lift so the canvas snaps.
-- **Risk containment, and it is the point**: engage only when `needsCompositorOnCanvas`. A document
-  with no blend modes and no faded/isolated group must take today's exact path and cannot regress.
-
-## What is left
-
-1. Build the WIP. It has never compiled. Then the fast tier — **718/718 is the bar**.
-2. The XCUITests it was asked for and may not have finished: the mask-trick regression guard (set a
-   blend mode, draw, assert the stroke landed), a Multiply layer looking multiplied at rest (§11's
-   criterion), an all-normal document unaffected, and blend/layer-switch/visibility/undo/playhead
-   each bringing the canvas back in sync.
-3. **The rebuild cost, measured** — 2048², ~6 layers, CoreGraphics backend. The worker was killed
-   immediately before taking this number. Record it; do not add the case to the fast tier, since a
-   phase-4 case allocating ~400 MB pushed an unrelated interpolation test from 0.073 s to 8.98 s.
-   `Compositor.backend` stays `.coreGraphics` — Metal for the sandwich is a follow-up, not this phase.
-4. Full XCUITest suite at the boundary. Read CLAUDE.md's triage before diagnosing any failure: erase,
-   **boot**, re-run the single test, treat a clean pass as environmental and say so.
-
-## Carried forward to a later phase, with the answer already worked out
+## Carried forward, with the answer already worked out
 
 Mid-stroke, layers above the active one render as Normal. Recovering them exactly needs a `backdrop:
 CGImage?` on `RenderRequest` honoured by both backends, plus a per-pixel unpremultiply against it:
 composite the above stack over the pre-stroke backdrop `B` to get `R`, take coverage `c` from the
-same stack over transparency, and emit `αs = c`, `Cs = (R − B(1−c))/c`. Drawn source-over onto `B`
-that reproduces `R` exactly. It was cut from 5b deliberately — it is real parity-test surface for a
-case that degrades gracefully, and whether the mid-stroke flicker actually bothers the owner is worth
-measuring rather than guessing.
+same stack over transparency, emit `αs = c`, `Cs = (R − B(1−c))/c`. Cut from 5b deliberately —
+whether that flicker actually bothers the owner is worth measuring rather than guessing. **Ask
+before building it.**
 
 ## Constraints
 
-Follow CLAUDE.md — multi-session protocol, build/test tiers, graphify. **A worker's worktree should be
-branched from the phase tip, not `origin/main`**; every worker before this session had to `merge
---ff-only` onto the real tip first, and branching correctly deletes that whole step. Run the fast
-`*LogicTests` tier constantly. **`** TEST SUCCEEDED **` and exit 0 do not mean any test ran** — use a
-shell array and `"${SUITES[@]}"`, read `totalTestCount` from `xcresulttool`, never the banner.
-**Verify a worker's numbers rather than its summary**: one session recorded a "measured" table it had
-never run and the real figure was 70× larger and was a genuine bug. Match the surrounding comment
-density — this codebase explains why, not what. Keep docs short: prune what is done rather than
-appending status.
+Follow CLAUDE.md — multi-session protocol, build/test tiers, graphify. Run the fast `*LogicTests`
+tier constantly; run the full suite at the phase boundary, and if you skip it say so plainly rather
+than implying it passed. Match the surrounding comment density and idiom — this codebase explains
+why, not what. Keep the docs short: prune what is done rather than appending status.
 
-At the phase boundary: prune §5.2/§11 to what shipped, append the one-line SESSION_LOG.md entry
-(keeping only the last five), refresh the graphify report, and **write the next session's prompt to
-`nextprompt.md` and commit it** — whatever is genuinely next (phase 6, alpha masks, which "Clip to
-below" is waiting on), including what you learned that would otherwise be rediscovered, and this same
-instruction to write the following session's prompt at the end. Keep it about this long.
+When phase 6 is done and verified: prune §6 and §11 to what shipped, append the one-line
+SESSION_LOG.md entry (keeping only the last five), refresh the graphify report, and **write the next
+session's prompt to `nextprompt.md` and commit it** — whatever is genuinely next (phase 7's Tier 2
+modes are non-separable and need the whole RGB triple, and Apple's versions should be assumed to
+disagree with the spec until measured, exactly as Tier 1's colorDodge/colorBurn/softLight did),
+including what you learned that would otherwise be rediscovered, and this same instruction to write
+the following session's prompt at the end. Keep it about this long.
