@@ -163,6 +163,115 @@ extension Array where Element == RenderNode {
     var leafLayerIndices: [Int] {
         flatMap(\.leafLayerIndices)
     }
+
+    /// **Whether Core Animation's flat row of sibling views can still express this tree**, which is
+    /// the containment for the whole of phase 5b rather than an optimisation.
+    ///
+    /// False for every document that could exist before phase 5a, and false is what keeps the live
+    /// canvas on today's exact code path — one host view per layer, `effectiveOpacity(ofLayer:)`
+    /// folded in, no compositor and no cached textures. So §5.2's sandwich is reachable only from
+    /// documents Core Animation was already drawing wrongly, and a document with no blend modes
+    /// anywhere cannot regress no matter what the sandwich does.
+    ///
+    /// **The blend clause is not a restatement of the buffer clause**, which is the easy mistake:
+    /// `needsOwnBuffer` is deliberately false for a blending *leaf*, because a leaf blends as it is
+    /// drawn rather than as an assembled composite — and a blending leaf is precisely the case the
+    /// sandwich was built for. Asking only about buffers would answer false for a Multiply layer in
+    /// a flat stack and leave the feature showing nothing again.
+    ///
+    /// Visibility is deliberately not consulted. A hidden blending group answers true and buys a
+    /// composite that draws nothing; the alternative is a predicate that flips as the artist toggles
+    /// an eye, swapping the live canvas between two rendering paths mid-session for no visible
+    /// difference.
+    var needsCompositorOnCanvas: Bool {
+        contains { node in
+            if node.needsOwnBuffer || node.blendMode.isBlending { return true }
+            guard case .node(_, let inputs) = node.content else { return false }
+            return inputs.contains { $0.needsCompositorOnCanvas }
+        }
+    }
+
+    /// The tree pruned to everything strictly below, and strictly above, one leaf in evaluation
+    /// order. Nil when `layerIndex` is not a leaf anywhere in this tree.
+    ///
+    /// **§5.2's sandwich is the whole reason this exists.** Core Animation cannot Multiply one view
+    /// against arbitrary siblings, so a blended layer is drawn as three views — the composite of
+    /// everything below, the active layer's own stroke host untouched, the composite of everything
+    /// above — and this is the cut that produces the outer two. Stamping a dab changes neither half,
+    /// which is what keeps the compositor off the drawing path.
+    ///
+    /// A group that *contains* the active leaf becomes two half-groups, one on each side, and **each
+    /// keeps the original's `id`, `opacity`, `isVisible`, `blendMode` and `isIsolated` verbatim.**
+    /// Dropping them would be more wrong rather than less: the layer's own host already has every
+    /// enclosing group's opacity folded into it by `effectiveOpacity(ofLayer:)`, so a half-group that
+    /// forgot the group's properties would disagree with the one view sitting between the two halves.
+    ///
+    /// **Where the group buffers, giving both halves its properties is an approximation, and this is
+    /// exactly §5.2's "live stroke inside a blended group".** A faded group fades twice, once per
+    /// half, instead of once over the composite the halves would have made together; a group blend
+    /// mode runs against the backdrop once per half. §10 decision 5 settles the real answer —
+    /// recomposite the active node's subtree per frame — and until that exists the sandwich is the
+    /// near picture that snaps correct on lift. The delta is measured rather than asserted away —
+    /// 64 on a group at half opacity, in
+    /// `SandwichLogicTests.testTheSandwichIsNotExactWhenTheActiveLayerIsInsideAFadedGroup`.
+    ///
+    /// A half-group pruned to nothing is **dropped entirely**, not emitted as a node with an empty
+    /// slot. The derivation above keeps a genuinely *empty folder* on purpose — its group properties
+    /// need somewhere to hang, and a folder that is empty only at this frame must not blink out of
+    /// the tree between frames — and a half that was pruned to nothing has neither reason.
+    /// `testAnEmptyFolderSurvivesIntoWhicheverHalfItRanksIn` is the fixture for the difference.
+    func split(atLeaf layerIndex: Int) -> (below: [RenderNode], above: [RenderNode])? {
+        for (position, node) in enumerated() {
+            switch node.content {
+            case .leaf(let index):
+                guard index == layerIndex else { continue }
+                return (Array(self[..<position]), Array(self[(position + 1)...]))
+
+            case .node(_, let inputs):
+                // Slots are ordered and each is its own bottom-to-top stack, so the slots before the
+                // one holding the leaf are wholly below it and the ones after are wholly above —
+                // the same reasoning as for siblings, one level in. At arity 1, which is every node
+                // the derivation can currently produce, there are no such slots and this is just the
+                // recursion.
+                var found: (slot: Int, below: [RenderNode], above: [RenderNode])?
+                for (slot, input) in inputs.enumerated() {
+                    guard let inner = input.split(atLeaf: layerIndex) else { continue }
+                    found = (slot, inner.below, inner.above)
+                    break
+                }
+                guard let found else { continue }
+
+                var below = Array(self[..<position])
+                var above = Array(self[(position + 1)...])
+                // Spelled `[[RenderNode]](…)` rather than `Array(…)`: inside an extension of `Array`
+                // the bare name means `Self`, so `Array(inputs[…])` would ask for a stack of leaves
+                // where a list of slots is wanted.
+                if let half = node.half(inputs: [[RenderNode]](inputs[..<found.slot]) + [found.below]) {
+                    below.append(half)
+                }
+                if let half = node.half(inputs: [found.above] + [[RenderNode]](inputs[(found.slot + 1)...])) {
+                    above.insert(half, at: 0)
+                }
+                return (below, above)
+            }
+        }
+        return nil
+    }
+}
+
+extension RenderNode {
+
+    /// This node with its inputs replaced by one side of a split, or nil if that side holds nothing
+    /// at all — see `split(atLeaf:)`, which is the only caller and carries the reasoning.
+    ///
+    /// "Nothing at all" is every slot being empty, not the half being leafless: a half that still
+    /// contains an empty folder contains something the derivation put there deliberately.
+    fileprivate func half(inputs: [[RenderNode]]) -> RenderNode? {
+        guard case .node(let op, _) = content, inputs.contains(where: { !$0.isEmpty }) else { return nil }
+        return RenderNode(id: id, content: .node(op: op, inputs: inputs),
+                          opacity: opacity, isVisible: isVisible,
+                          blendMode: blendMode, isIsolated: isIsolated)
+    }
 }
 
 // MARK: - Derivation

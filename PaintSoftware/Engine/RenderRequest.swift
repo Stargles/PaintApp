@@ -102,6 +102,28 @@ struct RenderRequest {
     let quality: RenderQuality
 }
 
+/// The three requests §5.2's sandwich is assembled from, over one snapshot.
+///
+/// **`full` is not a spare.** The settled scope for phase 5b is that at rest the canvas shows one
+/// image — `composite(full)`, exact for every mode and every nesting, with every layer host hidden —
+/// and that the two halves appear only for the duration of a dab. So `full` is the picture the artist
+/// looks at almost all of the time, and `below`/`above` are the ones that have to be *fast*, not the
+/// ones that have to be right.
+struct SandwichRequests {
+
+    /// The whole tree, exactly as `makeRenderRequest` would have built it.
+    let full: RenderRequest
+
+    /// Everything strictly below the active layer in evaluation order.
+    let below: RenderRequest
+
+    /// Everything strictly above it. Drawn source-over onto the live stroke, which is why a blend
+    /// mode up here degrades to normal mid-stroke: a texture composited onto transparency has no
+    /// backdrop left to blend against. Accepted for this phase, and it snaps correct on lift because
+    /// lift is when the canvas goes back to `full`.
+    let above: RenderRequest
+}
+
 // MARK: - Building one
 
 extension CanvasManager {
@@ -117,7 +139,59 @@ extension CanvasManager {
                            includeBackground: Bool) -> RenderRequest? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
-        let sources: [LayerRenderSource?] = layers.indices.map { index in
+        return RenderRequest(
+            tree: renderTree,
+            sources: renderSources(atFrame: frame, canvasSize: canvasSize, quality: quality),
+            frame: frame,
+            canvasSize: canvasSize,
+            background: includeBackground && isCanvasBackgroundVisible
+                ? RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor))
+                : nil,
+            quality: quality
+        )
+    }
+
+    /// The three requests §5.2's sandwich needs, or nil when there is no canvas to composite into or
+    /// `activeLayerIndex` is not a leaf of the tree (`Array<RenderNode>.split(atLeaf:)`).
+    ///
+    /// **All three share one `sources` array, and that sharing is the reason this is one call rather
+    /// than three.** `sources` is indexed by `layers` index rather than by position in a tree, so the
+    /// same array answers all three walks unchanged, and `PixelOps.rasterize` is memoized on cel
+    /// version — so the snapshot, which §11 measured at 276 ms against an 84 ms composite and is
+    /// therefore the expensive half, is paid once for the three instead of three times.
+    ///
+    /// `background: nil` on all three, for the case `RenderBackground`'s doc comment describes from
+    /// the thumbnail's side: the live canvas paints its own `paperView` behind the whole stack. A
+    /// background drawn into `below` would be a second one, and into `above` an opaque sheet over
+    /// everything beneath it.
+    @MainActor
+    func makeSandwichRequests(atFrame frame: Int,
+                              activeLayerIndex: Int,
+                              quality: RenderQuality = .full) -> SandwichRequests? {
+        guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
+        let tree = renderTree
+        guard let halves = tree.split(atLeaf: activeLayerIndex) else { return nil }
+
+        let sources = renderSources(atFrame: frame, canvasSize: canvasSize, quality: quality)
+        func request(_ tree: [RenderNode]) -> RenderRequest {
+            RenderRequest(tree: tree, sources: sources, frame: frame, canvasSize: canvasSize,
+                          background: nil, quality: quality)
+        }
+        return SandwichRequests(full: request(tree),
+                                below: request(halves.below),
+                                above: request(halves.above))
+    }
+
+    /// One resolved image per `layers` index, or nil where a layer contributes nothing at this frame.
+    ///
+    /// Factored out of `makeRenderRequest` rather than copied into `makeSandwichRequests`, because a
+    /// second copy of the elision rule is a second thing to update when §6.6 decision 9 changes it —
+    /// a mask ignores its source's visibility, so a hidden layer that is somebody's mask source will
+    /// have to be snapshotted after all.
+    @MainActor
+    private func renderSources(atFrame frame: Int, canvasSize: CGSize,
+                               quality: RenderQuality) -> [LayerRenderSource?] {
+        layers.indices.map { index in
             let layer = layers[index]
             // The visibility check is an elision, not the compositing rule — `RenderNode.isVisible`
             // carries the flag and the compositor is what honours it. Skipping the render here only
@@ -130,16 +204,5 @@ extension CanvasManager {
             else { return nil }
             return LayerRenderSource(image: image)
         }
-
-        return RenderRequest(
-            tree: renderTree,
-            sources: sources,
-            frame: frame,
-            canvasSize: canvasSize,
-            background: includeBackground && isCanvasBackgroundVisible
-                ? RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor))
-                : nil,
-            quality: quality
-        )
     }
 }
