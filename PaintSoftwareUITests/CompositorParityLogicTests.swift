@@ -793,7 +793,14 @@ final class CompositorParityLogicTests: XCTestCase {
     /// this assertion exists to catch exactly that.
     private static let blendTolerance = 1
 
-    /// **Every one of the fourteen modes, through both backends, over 4096 (colour, alpha) pairs.**
+    /// **Every mode in the picker, through both backends, over 4096 (colour, alpha) pairs.**
+    ///
+    /// Fifteen entries since phase 6, and the fifteenth is not a blend: `clipToBelow` is resolved in
+    /// the render tree into source-over plus a mask (§7), so it rides this sweep as `.normal` with
+    /// the spectrum layer beneath clipping the one above. It clears the tolerance below for that
+    /// reason rather than for the ones the table gives; its own exact gate — delta 0 on a masked
+    /// leaf, a masked group, an antialiased mask edge and the implicit clip — is in
+    /// `MaskParityLogicTests`.
     ///
     /// This is the phase 5 counterpart to phase 2's delta-0 gate, and the headline is that the gate
     /// does not survive contact with blend modes — which was the expected outcome this time, and is
@@ -855,7 +862,7 @@ final class CompositorParityLogicTests: XCTestCase {
         }
     }
 
-    /// The same fourteen through the *group* path, where each one is applied to an assembled scratch
+    /// The same set through the *group* path, where each one is applied to an assembled scratch
     /// buffer rather than to an uploaded leaf. Worth sweeping separately: it is a different texture
     /// on the GPU and a different image on the CPU, and a mode wired up for leaves only would pass
     /// the sweep above and repaint every grouped document.

@@ -231,7 +231,12 @@ final class LayerStackCell: UITableViewCell {
         // common case) contributes nothing, so no row shifts, and `accessibilityLabel` below stays
         // the bare name — VoiceOver/XCUITest read `blendModeMarker`'s stable rawValue instead of
         // parsing this display string.
-        nameLabel.text = model.blendMode.isBlending ? "\(model.name)  ·  \(model.blendMode.displayName)" : model.name
+        //
+        // `!= .normal` rather than `isBlending`: "Clip to Below" answers false to the second, because
+        // it composites source-over and expresses itself as a mask (§7) — but it is still a pick the
+        // artist made and still needs to show here, which is a question about the picker rather than
+        // about the arithmetic.
+        nameLabel.text = model.blendMode != .normal ? "\(model.name)  ·  \(model.blendMode.displayName)" : model.name
         nameLabel.accessibilityLabel = model.name
 
         visibilityButton.setImage(UIImage(systemName: model.isVisible ? "eye" : "eye.slash"), for: .normal)

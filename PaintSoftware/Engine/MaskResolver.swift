@@ -45,8 +45,12 @@ final class ResolvedMask {
     /// on `host.strokeView` — `LayerHostView.layer.mask` is taken, by phase 5b's blanking.
     ///
     /// White premultiplied by coverage, so it reads correctly whether a consumer looks at alpha or at
-    /// luminance. Built on demand and held, since the only consumer wants it once per mask.
-    private(set) lazy var maskImage: CGImage? = {
+    /// luminance. **A method rather than a cached `lazy var`**: one `ResolvedMask` is shared by every
+    /// layer using it and read from the sandwich's off-main rebuild, so a stored property filled in
+    /// on first access is a data race waiting for the phase that adds the second caller. Building it
+    /// costs one canvas-sized pass, paid once per stroke; a consumer that wants it more often than
+    /// that should hold it itself.
+    func makeMaskImage() -> CGImage? {
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         for pixel in 0..<(width * height) {
             let value = coverage[pixel]
@@ -57,7 +61,7 @@ final class ResolvedMask {
                        bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
-    }()
+    }
 }
 
 extension ResolvedMask: Equatable {
@@ -110,6 +114,12 @@ enum MaskResolver {
         for pixel in 0..<(width * height) {
             let m = Float(mask.coverage[pixel]) / 255
             guard m < 1 else { continue }   // full coverage is the identity, exactly
+            guard m > 0 else {
+                // …and no coverage is transparent, exactly. Worth the branch rather than four
+                // multiplies by zero: outside the mask is most of the canvas in most documents.
+                for channel in 0..<4 { bytes[pixel * 4 + channel] = 0 }
+                continue
+            }
             for channel in 0..<4 {
                 let offset = pixel * 4 + channel
                 let value = Float(bytes[offset]) / 255
