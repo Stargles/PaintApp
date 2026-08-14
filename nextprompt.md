@@ -187,8 +187,8 @@ failure count is not a finding.
 
 | # | work | state |
 |---|---|---|
-| **LIVE** | live stroke invisible mid-gesture | **fixed at `309a573`; regression test never executed** |
-| **8** | the 16-test regression | **fixed** (`c1d23dc`, `83bd747`); last 2 pending an isolated run |
+| **LIVE** | live stroke invisible mid-gesture | **DONE** — fixed `309a573`, confirmed on hardware by the owner **and** by `testEveryStrokeEntersTheMidStrokePresentationNotJustTheFirst` (1/1, 47.6 s, 78.57% idle) |
+| **8** | the 16-test regression | **DONE** — all 16 pass (`c1d23dc`, `83bd747`) |
 | **9a** | effect as a stack layer | **DONE, `tmp/p9-layer`, 222/222 in Release** |
 | **§10.1** | mask constants | **baked 0.1 / 0.01 on `tmp/p8-slotmode`**; §6.3 rewritten |
 | **6.5b** | mask/fill-reference panel rework | in flight on `tmp/mask-ui`, spec below |
@@ -583,6 +583,11 @@ latency-critical path.
   checks. The same worker verified its fix survived intact at the new HEAD and that the three tests it
   ran were byte-identical between its commit and HEAD, which is what licensed its numbers. Do that
   check rather than assuming either way.
+- **Rule that came out of it: re-read HEAD immediately before AND after every measured run, and quote
+  both in the result.** That branch moved three separate times mid-sequence. Beyond voiding one run
+  entirely, `e33f425` changed `CanvasView.swift` between runs, so two tests built without it and two
+  built with it — a difference invisible in any of the four xcresults. A result without its commit is
+  not a measurement.
 - **A new test file needs a `project.pbxproj` edit** — `PaintSoftwareUITests` opts out of
   `PBXFileSystemSynchronizedRootGroup` and hand-lists its sources, so an unregistered file compiles
   nowhere, runs nothing, and prints green. App sources under `PaintSoftware/` are synchronized.
