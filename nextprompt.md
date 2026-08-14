@@ -156,9 +156,26 @@ looks like from their side. Concrete rules that came out of it:
   `waitForExistence`/`waitForPixel` timeouts under load) versus 94.9 s passing; test 2 was 48.3 s
   failing (dying early at its first missing element) versus 357.5 s passing end to end. The direction
   reverses depending on *where* it died. Compare pass/fail at a known idle figure, never wall-clock.
-- **Never `pkill -f` a broad pattern while runs are live.** The orchestrator used one that could have
-  matched the live `simlock` runs; it did not, but only by luck, and killing them would have destroyed
-  ~40 minutes of work and erased a simulator mid-run. Target a PID you have verified holds no lock.
+- **Never `pkill -f` a broad pattern while runs are live**, and **verify every kill took**. Both halves
+  bit on 2026-08-14. The orchestrator used a pattern that could have matched the live `simlock` runs —
+  it did not, but only by luck, and killing them would have destroyed ~40 minutes of work and erased a
+  simulator mid-run. Separately, a worker's `pkill` of its own repro run *silently missed*: it reported
+  the run cancelled, and that run took a device 22 minutes later. Target a PID you have verified holds
+  no lock, then confirm it is gone.
+- **A 0-byte log is not a hung run, and `pgrep -f` lies about it.** A worker piped a long test run
+  through `tail -6`; the pipe buffers until the pipeline ends, so the log sat empty for 12 minutes
+  while the run was perfectly healthy. Its follow-up check, `pgrep -fl "xcodebuild test"`, then matched
+  only the *zsh wrapper's* command-line text rather than the real processes, appearing to confirm
+  "nothing is running". Use **`pgrep -x xcodebuild`**, and judge liveness by whether the in-progress
+  `.xcresult` is **growing** (`du -sk` twice, 25 s apart) — never by log output, which may be buffered
+  by your own pipeline.
+- **A single `top` sample can catch your own commands spiking.** Two workers read 0.0% and 79.5% idle
+  within moments of each other and both were correct. Sample twice (`top -l 2 -n 0 -s 2 | tail -1`)
+  and treat one reading as a hint, not a measurement.
+- **Check a lock's owner immediately before acting on it.** The orchestrator moved to cancel an
+  oversized queued run, checked whether it held a device first, and found it had acquired one in the
+  two seconds between the two checks. The guard is what saved a live run; the check is not optional
+  ceremony.
 
 **Do not dispatch a second worker into a worktree that already has one**, even if the first has gone
 quiet. A worker blocked on a background run reports as finished and is still live — two of them
@@ -417,7 +434,46 @@ empty gutter so checkmarks align in one column across row kinds); the tuning sli
 260pt panel into a 240pt menu at 9–10pt labels; and undo granularity, since after the first mask pick
 everything else in that menu visit coalesces into one step.
 
-## The merge, which is the largest single piece left
+## The merge — THREE OF FOUR DONE on `tmp/converge`, 249 passed / 0 failed / 1 skipped
+
+`tmp/converge` (worktree `/Users/juliapark/Desktop/Kevin.P/PaintApp-converge`) holds
+`tmp/p8-slotmode` (`7ed3011`), `tmp/p9-layer` (`66b0629`), `tmp/p9-multipass` (`2c67519`), a re-merge
+of the trunk (`75e30a4`), and two commits of its own. **`tmp/mask-ui` still merges fourth**, then the
+full suite, then `main` (untouched at `5d39396`).
+
+Per-suite from the xcresult: CompositorParity 48 · EffectLayer **21** · EffectMultiPass 27 (+1
+`PAINT_PERF_HEAVY` skip) · EffectParity 22 · MaskParity 42 · RenderTreeChar 23 · Sandwich 30 ·
+ShapeDetector 36. **EffectLayerLogicTests went 18 → 21**, which is how we know the three new cases ran
+rather than silently matching nothing.
+
+**Two things the merge produced that neither branch had:**
+
+1. **A defect the merge created (`566d01a`).** `EffectPipelines.encode` returned `Void` on `p9-layer`,
+   so the caller ignoring it was correct; `p9-multipass` changed it to `@discardableResult -> Bool`
+   where `false` means "declined — fall back to `EffectReference`". Merged, the only caller discards
+   that signal and `@discardableResult` suppresses the warning, so a decline proceeds to `mix()` with
+   an **unwritten pool texture** — stale pixels presented as a result. Git reported no conflict
+   because the two changes touched different lines. Fixed with
+   `guard effects.encode(…) else { pool.release(scratch); return false }`.
+   **Still unverified by test** — it only fires when the device declines a texture allocation, which a
+   healthy simulator never does. Reasoned-correct and compiling, not covered.
+2. **The first tests putting a multi-pass effect through the compositor** (`78a2706`), which could not
+   have existed on either branch: blur shipped before 9a's wrappers, 9a shipped without blur. Measured
+   GPU-vs-CPU through the wrapper: **blur 0, directionalBlur 0, bloom 0** — tighter than the
+   single-pass sweep in the same file (which shows 1 on brightnessContrast, gradientMap,
+   chromaticAberration, posterize, dither).
+
+**The two independent checks in it are worth copying.** Bloom at **radius 0** collapses the blur
+passes while still dispatching all four and running the ping-pong, so every byte is hand-computable —
+grey 128 → `w = 0.169935`, glow 22, alpha 43, `128+22 = 150` with alpha clamped, derived *before*
+running and cross-validated against `p9-multipass`'s already-verified rows so it was not fitted. And
+the blur test asserts `above == left` **to the byte** with no reference implementation, because a
+wrong ping-pong slot yields a single-pass blur — a plausible picture, wrong in one axis, and **wrong
+identically in both backends**, which is exactly what a parity sweep cannot see. Its transpose
+asymmetry is allowed to be 1, not 0, because the separable intermediate is not transpose-symmetric
+even when its input and output are; demanding 0 would fail for a reason that is not a bug.
+
+## Merge notes for the remaining step
 
 **Nothing since phase 7 is on `main`.** `tmp/p8-integrate` is the trunk — it already contains phase 8,
 `tmp/p9-kernels`, `tmp/release-cfg` and `tmp/mask-tune`. Merge the rest **into it**, in this order,
