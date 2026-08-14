@@ -623,6 +623,169 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertEqual(maxChannelDelta(gpu, cpu), 0, "GPU and CPU differ on the implicit mask")
     }
 
+    // MARK: - Live feedback while drawing (§6.4)
+    //
+    // §6.4's claim is a strong one — the live stroke and the composite "agree by construction" — and
+    // it rests on two things this section pins separately. The mask Core Animation applies has to be
+    // *the same coverage* the compositor multiplies in, not an equal-looking one; and the image
+    // handed to `CALayer.mask` has to carry that coverage in the channel Core Animation reads.
+
+    /// The alpha channel of `makeMaskImage()` is the coverage, byte for byte.
+    ///
+    /// `CALayer.mask` multiplies the masked layer by its mask's **alpha**, and `MaskResolver.apply`
+    /// multiplies by `coverage` — so this equality is the whole of "it is the same alpha multiply the
+    /// compositor does". Anything that quantized, premultiplied differently, or went through a colour
+    /// space on the way out would break the claim here rather than on screen.
+    func testTheLiveMaskImageCarriesTheCoverageInItsAlpha() {
+        let manager = clippedManager()
+        guard let mask = manager.layers[1].alphaMask,
+              let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
+              let resolved = MaskResolver.coverage(for: [mask], of: request),
+              let image = resolved.makeMaskImage(),
+              let bytes = CanvasFixture.rgbaBytes(image) else { return XCTFail("The mask must resolve") }
+
+        XCTAssertEqual(image.width, side)
+        XCTAssertEqual(image.height, side)
+        let alpha = stride(from: 3, to: bytes.count, by: 4).map { bytes[$0] }
+        XCTAssertEqual(alpha, resolved.coverage, "Core Animation reads alpha; that has to be the coverage itself")
+    }
+
+    /// The live mask and the compositor resolve to **the same object**, which is what "by
+    /// construction" means here rather than "we checked and they matched".
+    ///
+    /// Both go through `MaskResolver.coverage`, whose cache is keyed on the masks plus the content
+    /// versions they read — so as long as the live side asks with the same masks over a request built
+    /// from the same document, it cannot get a different answer. Identity is the assertion because an
+    /// equal-but-separate coverage would mean the key had stopped doing its job.
+    func testTheLiveMaskIsTheSameResolutionTheCompositorApplies() {
+        let manager = clippedManager()
+        let tree = manager.renderTree
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
+              let node = RenderNode.find(manager.layers[1].id, in: tree),
+              let live = RenderNode.masksClipping(leafAt: 1, in: tree) else {
+            return XCTFail("The masked leaf must be in the tree")
+        }
+        XCTAssertEqual(live, node.masks, "An unnested leaf's chain is its own list")
+        guard let byCompositor = MaskResolver.coverage(for: node.masks, of: request),
+              let byLiveStroke = MaskResolver.coverage(for: live, of: request) else {
+            return XCTFail("Both sides must resolve")
+        }
+        XCTAssertTrue(byCompositor === byLiveStroke, "Not an equal coverage — the same one")
+    }
+
+    /// An enclosing group's mask is in the live chain, and it has to be.
+    ///
+    /// The compositor applies a group's mask to the group's assembled buffer, which mid-stroke does
+    /// not exist: the active layer is drawn by Core Animation and is in neither sandwich half. So a
+    /// live mask built from the leaf's own list would let ink cross the *group's* boundary and snap
+    /// back on lift — §6.4's glitch, moved one level up rather than fixed.
+    func testAnEnclosingGroupsMaskClipsTheLiveStrokeToo() {
+        let manager = CanvasFixture.manager(layerCount: 3)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(green, rect: CGRect(x: 0, y: 0, width: 64, height: 32)))
+        let leafMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        let groupMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
+        manager.layers[2].alphaMask = leafMask
+        guard let folderIndex = nest(layerIndex: 2, in: manager, mask: groupMask) else {
+            return XCTFail("Fixture needs the group")
+        }
+        XCTAssertEqual(manager.folders[folderIndex].alphaMask, groupMask, "Fixture premise: the group is masked")
+
+        guard let chain = RenderNode.masksClipping(leafAt: 2, in: manager.renderTree) else {
+            return XCTFail("The nested leaf must be in the tree")
+        }
+        XCTAssertEqual(chain, [groupMask, leafMask], "Outermost first, and both of them")
+    }
+
+    func testAnUnmaskedLeafHasAnEmptyChainAndAMissingOneHasNoChain() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        XCTAssertEqual(RenderNode.masksClipping(leafAt: 1, in: manager.renderTree), [],
+                       "In the tree, clipped by nothing")
+        XCTAssertNil(RenderNode.masksClipping(leafAt: 9, in: manager.renderTree),
+                     "Not in the tree at all, which is a different answer from 'clipped by nothing'")
+    }
+
+    /// **Nested clips agree to the byte too, which is more than §6.4 needs and was not obvious.**
+    ///
+    /// This is the one case where the live path and the compositor are not the same arithmetic. The
+    /// compositor clips the leaf, quantizes to 8 bits, draws it into the group buffer, then clips
+    /// that and quantizes again; the live path multiplies the two coverages into one and quantizes
+    /// once. Two roundings against one, so the expectation going in was a ±1 across the antialiased
+    /// band and a bound rather than an equality here.
+    ///
+    /// It is an equality. Written as one deliberately: a bound would pass just as well and would
+    /// stop saying anything the day the paths did drift. If a future change makes this fail by one
+    /// step across a feathered edge, that is tolerable — §6.4 is a live preview and lift replaces it
+    /// with the composite outright — but it should be a decision someone makes, not a slack the test
+    /// left lying around.
+    ///
+    /// The premise assertion is what keeps the equality honest: where either coverage is 0 or 255 the
+    /// two paths coincide trivially, so the fixture has to contain a pixel where *both* are partial
+    /// or it proves nothing.
+    func testNestedClipsAgreeByteForByteDespiteTheDoubleRounding() {
+        let manager = CanvasFixture.manager(layerCount: 3)
+        // Soft-edged sources, so the antialiased band the two paths can disagree across actually
+        // exists — a hard rectangle is 0 or 255 everywhere and would agree trivially.
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, softDisc(at: CGPoint(x: 28, y: 32), radius: 20))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, softDisc(at: CGPoint(x: 38, y: 32), radius: 20))
+        CanvasFixture.setBakedContent(manager, layerIndex: 2,
+                                      CanvasFixture.solidImage(blue, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        let leafMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        let groupMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
+        manager.layers[2].alphaMask = leafMask
+        guard nest(layerIndex: 2, in: manager, mask: groupMask) != nil else {
+            return XCTFail("Fixture needs the group")
+        }
+
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
+              let content = manager.layers[2].cels[0].bakedImage?.cgImage,
+              let leafCoverage = MaskResolver.coverage(for: [leafMask], of: request),
+              let groupCoverage = MaskResolver.coverage(for: [groupMask], of: request),
+              let chained = MaskResolver.coverage(for: [groupMask, leafMask], of: request) else {
+            return XCTFail("Every mask must resolve")
+        }
+        let bothPartial = zip(leafCoverage.coverage, groupCoverage.coverage)
+            .filter { (1...254).contains($0) && (1...254).contains($1) }.count
+        XCTAssertGreaterThan(bothPartial, 0,
+                             "Fixture premise: the two feathered edges have to cross, or double rounding never happens")
+
+        // The compositor's order: clip the leaf, then clip the assembled group.
+        guard let once = MaskResolver.apply(leafCoverage, to: content),
+              let composited = MaskResolver.apply(groupCoverage, to: once),
+              // The live path's: one coverage, one multiply.
+              let live = MaskResolver.apply(chained, to: content),
+              let a = CanvasFixture.rgbaBytes(composited), let b = CanvasFixture.rgbaBytes(live) else {
+            return XCTFail("Both paths must produce pixels")
+        }
+
+        let worst = zip(a, b).map { abs(Int($0) - Int($1)) }.max() ?? 0
+        XCTAssertEqual(worst, 0, "The live product and the compositor's two passes differ by \(worst)")
+    }
+
+    /// Puts one layer alone inside a new masked folder, returning the folder's index in `folders`.
+    /// `addFolder` plus a reparent rather than `groupLayers`, which needs two layers to group.
+    private func nest(layerIndex: Int, in manager: CanvasManager, mask: AlphaMask) -> Int? {
+        let folder = manager.addFolder(name: "Group", parentFolderID: nil)
+        guard let index = manager.folders.firstIndex(where: { $0.id == folder }) else { return nil }
+        manager.layers[layerIndex].parentFolderID = folder
+        manager.folders[index].alphaMask = mask
+        return index
+    }
+
+    /// A radial falloff, which is what the §6.3 threshold's antialiased band needs to exist at all.
+    private func softDisc(at centre: CGPoint, radius: CGFloat) -> UIImage {
+        UIGraphicsImageRenderer(size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+            guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                            colors: [UIColor.black.cgColor,
+                                                     UIColor.black.withAlphaComponent(0).cgColor] as CFArray,
+                                            locations: [0, 1]) else { return }
+            ctx.cgContext.drawRadialGradient(gradient, startCenter: centre, startRadius: 0,
+                                             endCenter: centre, endRadius: radius, options: [])
+        }
+    }
+
     // MARK: - Containment
 
     /// The live canvas has to leave Core Animation's flat-sibling path for a masked document, or the

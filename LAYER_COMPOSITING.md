@@ -358,9 +358,30 @@ Both constants live in `Models/AlphaMask.swift`: `AlphaMask.threshold` (0.5) and
 
 A mask applied only on lift would reproduce the selection clip's glitch — ink visibly crossing the
 boundary and snapping back. It does not have to: **the mask is static for the duration of a stroke**,
-so the live stroke view carries the resolved mask as a `CALayer.mask`. Core Animation applies it in
+so the live host carries the resolved mask as a `CALayer.mask`. Core Animation applies it in
 hardware, free and exact, and it is the same alpha multiply the compositor does — so they agree by
-construction.
+construction. **Shipped**, and the agreement is literal rather than approximate: both sides call
+`MaskResolver.coverage` with the same masks over a request carrying the same `maskStacks` and
+content versions, so they get back *the same `ResolvedMask` object*, and `makeMaskImage()`'s alpha is
+its `coverage` byte for byte.
+
+Three things the build settled that the paragraph above does not imply:
+
+- **The mask goes on the host's content sublayers, never on `LayerHostView.layer`** — §5.2's blanking
+  owns that slot, and a collision there fails silently in whichever direction install order decides.
+  All three content views are masked, not only `strokeView`: mid-stroke the host is in neither
+  sandwich half, so its baked and fill tiers are as unclipped as its live ink.
+- **Every enclosing group's mask is in the live chain** (`RenderNode.masksClipping(leafAt:in:)`).
+  The compositor clips a group's assembled buffer, which mid-stroke does not exist — so the leaf's
+  own list alone would move the glitch one level up rather than remove it.
+- Install and release ride on the same predicate as blanking, not on the touch callbacks: trap 2 in
+  `updateSandwich` keeps the mid-stroke picture up until the rebuild lift asked for lands, and
+  releasing on touch-up would drop the clip while the host is still what is on screen.
+
+**`MaskResolver.apply` is the cost to watch**, measured at 2048² by
+`PerfBaselineTests.testMaskedCompositeCostAtCanvasResolution` (gated behind `PAINT_PERF_HEAVY`; it is
+36 s and a 615 MB peak). ~32 ms per clipped node per composite optimised, and ~62x that at `-Onone`
+— which is what the scheme's Run configuration builds, so it is what the iPad runs today.
 
 ### 6.5 UI
 

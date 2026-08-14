@@ -207,6 +207,35 @@ extension RenderNode {
         }
         return nil
     }
+
+    /// Everything clipping one leaf: its own masks, plus every enclosing group's, outermost first.
+    /// Nil when `layerIndex` is not a leaf anywhere in `nodes`.
+    ///
+    /// **§6.4's live stroke is what needs the whole chain rather than the leaf's own list.** The
+    /// compositor never asks this question — it clips a leaf as it draws it and clips a group's
+    /// assembled buffer separately, so each half is applied where it belongs. Mid-stroke there is no
+    /// group buffer to apply the outer half to: the active layer is drawn by Core Animation and sits
+    /// in neither sandwich half, so a live mask built from the leaf's own list alone would let ink
+    /// cross an enclosing group's mask boundary and snap back on lift — the exact glitch §6.4 exists
+    /// to remove, one level up.
+    ///
+    /// Concatenated rather than combined here, because `MaskResolver.coverage(for:of:)` already
+    /// defines what a list of masks means: a product of coverages, which is the intersection two
+    /// nested clips plainly are. Order is the reader's convenience only — a product does not care.
+    static func masksClipping(leafAt layerIndex: Int, in nodes: [RenderNode]) -> [AlphaMask]? {
+        for node in nodes {
+            switch node.content {
+            case .leaf(let index):
+                if index == layerIndex { return node.masks }
+            case .node(_, let inputs):
+                for input in inputs {
+                    guard let inner = masksClipping(leafAt: layerIndex, in: input) else { continue }
+                    return node.masks + inner
+                }
+            }
+        }
+        return nil
+    }
 }
 
 extension Array where Element == RenderNode {

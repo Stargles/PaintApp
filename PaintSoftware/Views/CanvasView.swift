@@ -432,6 +432,10 @@ struct CanvasView: UIViewRepresentable {
                     // before that check would never be cleared — leaving the canvas showing the
                     // mid-stroke approximation while idle.
                     self.sandwichStrokeBegan(host: host)
+                    // After `sandwichStrokeBegan`, which latches the mid-stroke state this reads,
+                    // and after the cel spawn, which is what decides whether there is a stroke at
+                    // all. §6.4: resolved here, once, and static until lift.
+                    self.liveMaskStrokeBegan(host: host)
                     if let host { self.startShapeDetection(host: host) }
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
@@ -738,6 +742,15 @@ struct CanvasView: UIViewRepresentable {
             guard let belowView = sandwichBelowView, let aboveView = sandwichAboveView else { return }
 
             guard engaged else {
+                // Before the early return below, which is reached on every pass once the canvas has
+                // settled onto Core Animation's path: a live mask installed while the sandwich was
+                // engaged has to come off when it disengages, and a stroke that began while it was
+                // already disengaged has no other place to be cleaned up. Gated on the stroke being
+                // over, so disengaging mid-stroke is not what takes the clip away.
+                if !isSandwichStrokeLive, liveMaskImage != nil {
+                    for host in layerHosts.values { host.setContentMask(nil) }
+                    liveMaskImage = nil
+                }
                 guard sandwichPresentation != .disengaged || sandwichImages != nil else { return }
                 // Everything back to today's path, and the images dropped rather than kept warm: three
                 // canvas-sized images is 50 MB at 2048² and 192 MB at 4000² (§5.3), which is not a
@@ -751,6 +764,9 @@ struct CanvasView: UIViewRepresentable {
                 sandwichImages = nil
                 sandwichKey = nil
                 sandwichCacheKey = nil
+                // The mask image goes with them and for the same reason — it is another canvas-sized
+                // 16 MB, and re-engaging pays one `makeMaskImage` alongside the one rebuild.
+                liveMaskCache = nil
                 sandwichPresentation = .disengaged
                 return
             }
@@ -791,9 +807,80 @@ struct CanvasView: UIViewRepresentable {
             let activeID = canvasManager.layers.indices.contains(canvasManager.currentLayerIndex)
                 ? canvasManager.layers[canvasManager.currentLayerIndex].id : nil
             for (id, host) in layerHosts {
-                host.setBlanked(!(midStroke && id == activeID))
+                let drawsItself = midStroke && id == activeID
+                host.setBlanked(!drawsItself)
+                // §6.4 rides on exactly the same predicate as blanking, which is the point: the one
+                // host drawing its own pixels is the one place a mask can be applied, and every
+                // other host's pixels are inside a composite that has already been clipped. Tying
+                // the two together is also what removes the flash at both ends — the clip arrives
+                // the moment the host starts drawing itself and leaves the moment `full` takes over,
+                // rather than on the touch events, which are a beat early and a beat late.
+                host.setContentMask(drawsItself ? liveMaskImage : nil)
             }
+            // Trap 2 above keeps `midStroke` true until the rebuild lift asked for lands, so this is
+            // the lift, not the touch-up — releasing it any earlier would drop the clip while the
+            // host is still the thing on screen.
+            if !midStroke { liveMaskImage = nil }
             sandwichPresentation = midStroke ? .midStroke : .rest
+        }
+
+        // MARK: §6.4's live mask
+
+        /// The mask clipping the active layer, resolved at the current stroke's first touch and held
+        /// unchanged until it lifts — **§6.4's "the mask is static for the duration of a stroke"**,
+        /// stored rather than recomputed because that is the whole of the guarantee. Nil when nothing
+        /// clips the active layer, which is almost every document.
+        private var liveMaskImage: CGImage?
+
+        /// The last coverage turned into an image, and the coverage it came from.
+        ///
+        /// **The cache is here rather than on `ResolvedMask`, deliberately.** One `ResolvedMask` is
+        /// shared by every layer using it and is read from `sandwichQueue`'s off-main rebuild, so a
+        /// `lazy var` filled in on first access there is a data race — which is why
+        /// `makeMaskImage()` is a method, and it must stay one.
+        ///
+        /// Identity is a sound key *because the entry retains the mask it keys on*: `MaskResolver`'s
+        /// own cache hands back the same object for the same masks over the same content versions and
+        /// a new one for anything else, so `===` answers "the same coverage" — but only while the old
+        /// object cannot be deallocated and a new one land at its address. The same ABA hazard
+        /// `LayerContentVersion` documents, closed the same way.
+        private var liveMaskCache: (mask: ResolvedMask, image: CGImage)?
+
+        /// Resolves the active layer's mask and installs it, from `onStrokeBegan`.
+        ///
+        /// Installed here rather than left to the next `updateSandwich` because there may not be one:
+        /// a dab publishes nothing, so the pass that would install it is the pass this stroke is
+        /// deliberately not causing. `updateSandwich` maintains it from here on.
+        private func liveMaskStrokeBegan(host: LayerHostView?) {
+            guard let host, let layerID = host.strokeView.layerID,
+                  let index = canvasManager.layers.firstIndex(where: { $0.id == layerID }) else { return }
+            liveMaskImage = resolveLiveMask(forLayerAt: index)
+            host.setContentMask(liveMaskImage)
+        }
+
+        /// The coverage clipping one layer, as an image `CALayer.mask` can apply.
+        ///
+        /// **`makeRenderRequest` is what makes this agree with the compositor rather than merely
+        /// resemble it.** `MaskResolver.coverage` keys on the masks plus the content versions of the
+        /// layers they read, and a request built here carries the same `maskStacks` (derived from the
+        /// whole tree, not from a sandwich half) and the same `contentVersions` as the three the
+        /// rebuild composites — so this call and the compositor's hit the same cache entry and get
+        /// back the same object. Not an equal mask: the same one.
+        ///
+        /// It is also cheap despite building a whole request, because `PixelOps.rasterize` is
+        /// memoized on cel identity and the rebuild has just walked the same cels. `includeBackground`
+        /// is false to match what `makeSandwichRequests` passes, though nothing downstream reads it —
+        /// `MaskResolver` composites each source stack onto transparency regardless.
+        private func resolveLiveMask(forLayerAt index: Int) -> CGImage? {
+            guard let masks = RenderNode.masksClipping(leafAt: index, in: canvasManager.renderTree),
+                  !masks.isEmpty,
+                  let request = canvasManager.makeRenderRequest(atFrame: canvasManager.currentFrame,
+                                                                includeBackground: false),
+                  let resolved = MaskResolver.coverage(for: masks, of: request) else { return nil }
+            if let cached = liveMaskCache, cached.mask === resolved { return cached.image }
+            guard let image = resolved.makeMaskImage() else { return nil }
+            liveMaskCache = (mask: resolved, image: image)
+            return image
         }
 
         // MARK: The cache key

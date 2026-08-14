@@ -87,4 +87,75 @@ final class LayerHostView: UIView {
             layer.mask = nil
         }
     }
+
+    // MARK: - The alpha mask, for §6.4's live stroke
+
+    /// The three views that hold this layer's own pixels, and therefore the three that a mask has to
+    /// clip. Ordered as they are stacked, which is only for reading — `contentMasks` pairs with this
+    /// by index and nothing else depends on the order.
+    private var maskedContentViews: [UIView] { [bakedImageView, fillImageView, strokeView] }
+
+    /// One mask layer per content view. **Three, not one shared**: `CALayer.mask` takes ownership the
+    /// way a superlayer does, so assigning a single layer to three masks would move it to the third
+    /// and silently leave the other two unmasked.
+    private lazy var contentMasks: [CALayer] = maskedContentViews.map { _ in
+        let mask = CALayer()
+        // The mask is canvas-sized and so are these views' bounds, so it is a 1:1 blit — and nearest
+        // is what keeps it agreeing with the composite under zoom, since `full` reaches the screen
+        // through image views that magnify the same way (`makeSandwichView`). Bilinear here would
+        // soften the clip edge against a composite that keeps it crisp.
+        mask.magnificationFilter = .nearest
+        return mask
+    }
+
+    /// What is masking this host's content right now — held so the many SwiftUI passes that change
+    /// nothing are an identity check rather than a Core Animation write.
+    private var contentMaskImage: CGImage?
+
+    /// Clips this layer's own pixels to `image`'s alpha for as long as it is installed — §6.4's live
+    /// feedback, and the reason `ResolvedMask.makeMaskImage()` exists.
+    ///
+    /// **Deliberately not `layer.mask`, which `setBlanked` owns.** Installing both there would leave
+    /// whichever ran second holding the slot: blanking would eat the mask, or the mask would unblank
+    /// a host the sandwich is drawing for — and either way silently, since a `CALayer.mask` reports
+    /// nothing about being replaced. Two slots, two owners, no ordering rule to remember.
+    ///
+    /// **All three content views rather than `strokeView` alone.** Mid-stroke this host is the only
+    /// thing drawing the active layer — it is in neither sandwich half — so its baked and fill tiers
+    /// are as unclipped as its live ink until they are masked too. Masking only the ink would fix the
+    /// stroke and leave baked content popping out from under the clip on the same first touch.
+    ///
+    /// Implicit animation is off: this is installed on a stroke's first touch, and Core Animation's
+    /// default would fade the clip in over a quarter second while the artist draws through it.
+    func setContentMask(_ image: CGImage?) {
+        guard contentMaskImage !== image else { return }
+        contentMaskImage = image
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (view, mask) in zip(maskedContentViews, contentMasks) {
+            if let image {
+                mask.contents = image
+                mask.frame = bounds
+                if view.layer.mask !== mask { view.layer.mask = mask }
+            } else {
+                if view.layer.mask === mask { view.layer.mask = nil }
+                mask.contents = nil
+            }
+        }
+        CATransaction.commit()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // The mask layers are not in the view hierarchy, so autolayout does not reach them. Canvas
+        // size is fixed for a document's life and a stroke cannot outlive it, so this is belt and
+        // braces rather than a live resize path — but a mask frozen at the zero frame it was created
+        // with would hide the layer entirely, which is too quiet a failure to leave to reasoning.
+        guard contentMaskImage != nil else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for mask in contentMasks where mask.frame != bounds { mask.frame = bounds }
+        CATransaction.commit()
+    }
 }

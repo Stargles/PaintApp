@@ -99,4 +99,69 @@ this had to be established rather than hoped for.
 
 ## 3. What shipped
 
-To follow in the next commit.
+- `RenderNode.masksClipping(leafAt:in:)` (`Models/RenderTree.swift`) — the leaf's masks plus every
+  enclosing group's, outermost first.
+- `LayerHostView.setContentMask(_:)` (`Views/Canvas/LayerHostView.swift`) — installs the mask on the
+  host's three content sublayers.
+- `CanvasView.Coordinator.liveMaskStrokeBegan(host:)` / `resolveLiveMask(forLayerAt:)`, called from
+  `onStrokeBegan`; maintained and released by `updateSandwich`.
+- Five cases in `MaskParityLogicTests` under a new §6.4 heading (32 → 37 in that suite).
+
+### The decisions, and why
+
+- **The mask goes on the host's three content sublayers, never on `host.layer`.** Blanking owns
+  `host.layer.mask`, and the collision fails silently in whichever direction install order decides.
+- **All three content views, not `strokeView` alone.** Mid-stroke the active host is the only thing
+  drawing the active layer — it is in neither sandwich half — so its `bakedImageView` and
+  `fillImageView` are as unclipped as its live ink. Masking only the ink fixes the stroke and leaves
+  baked content popping out from under the clip on the same first touch. **This is the one place I
+  went past the brief's "the mask goes on `host.strokeView`"** — same constraint (nothing on
+  `host.layer`), two more sublayers. Easy to cut back to one line if you want it narrower.
+- **Three mask layers, not one shared.** `CALayer.mask` takes ownership the way a superlayer does, so
+  one layer assigned to three masks lands on the third and silently leaves two unmasked.
+- **Install/release rides on the same predicate as blanking** (`midStroke && id == activeID`) rather
+  than on the touch callbacks. Trap 2 in `updateSandwich` keeps `midStroke` true until the rebuild
+  lift asked for lands, so clearing on `onStrokeEnded` would drop the clip while the host is still
+  what is on screen — a flash of the very glitch, at the other end of the stroke. `onStrokeBegan`
+  still installs directly, because a dab publishes nothing and the SwiftUI pass that would install it
+  is the pass the stroke is deliberately not causing.
+- **Resolved once at `onStrokeBegan` and held** — §6.4's "static for the duration of a stroke", and
+  the same window `makeSandwichKey` freezes the active layer's content version over.
+- **Cached at the call site on the coordinator, keyed on `ResolvedMask` identity, and the entry
+  retains the mask.** Retaining is what makes `===` sound: without it the old object could be freed
+  and a new one land at the same address — the ABA hazard `LayerContentVersion` documents. Not a
+  `lazy var` on `ResolvedMask`, which is shared across layers and read from the off-main rebuild.
+
+### Does it actually agree with the compositor?
+
+Yes, and more strongly than expected.
+
+- **Same object, not an equal one.** Both sides call `MaskResolver.coverage`, whose cache is keyed on
+  the masks plus the content versions they read; `resolveLiveMask` builds its request with
+  `makeRenderRequest`, which shares `maskStacks` (derived from the whole tree) and `contentVersions`
+  with all three sandwich requests. `testTheLiveMaskIsTheSameResolutionTheCompositorApplies` asserts
+  identity.
+- **`makeMaskImage()`'s alpha is `coverage` byte for byte**, so what Core Animation multiplies by is
+  what `MaskResolver.apply` multiplies by.
+  (`testTheLiveMaskImageCarriesTheCoverageInItsAlpha`.)
+- **Nested clips agree byte for byte too — I expected them not to.** The compositor clips the leaf,
+  quantizes, then clips the assembled group and quantizes again; the live path multiplies the two
+  coverages into one and quantizes once. Two roundings against one should show up as ±1 across a
+  feathered edge. Measured worst-case difference over a fixture whose two soft mask edges genuinely
+  cross (asserted as a premise, or the equality would be trivial): **0**. Pinned as an equality
+  rather than a bound, so a future drift is a decision rather than slack.
+
+### Known gaps, none of them mine to close
+
+- **A `.preview`-quality request would resolve a different coverage.** `resolveLiveMask` asks at
+  `.full`, which matches what the sandwich rebuild uses today. If §9.2's background renderer ever
+  composites the canvas at `.preview`, the live mask and the composite stop sharing a cache entry —
+  `RenderQuality` is in `MaskResolver`'s key.
+- **The disengaged path shows no mask at all**, at rest or mid-stroke. Reachable only via
+  `isSandwichEngaged`'s floating-piece and in-between escape hatches (drawing is blocked outright
+  during the first). Pre-existing, and outside §6.4.
+- **`resolveLiveMask` runs `makeRenderRequest` on the main actor at stroke begin.** Cheap because
+  `PixelOps.rasterize` is memoized on cel identity and the rebuild has just walked the same cels —
+  but it is main-thread work on the first touch, and in a Debug build `makeMaskImage` behind it is
+  the 2.5 s from section 1 the first time a given mask is used. The call-site cache makes it once per
+  distinct mask rather than once per stroke; the rest is section 1's Debug-configuration problem.
