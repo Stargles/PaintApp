@@ -1,0 +1,286 @@
+import UIKit
+
+// MARK: - The CPU reference for Tier 3 effects
+//
+// LAYER_COMPOSITING.md §4.4/§7. The counterpart to `applyEffect` in `Composite.metal`, and the same
+// relationship `CoreGraphicsCompositor` has to `compositeOver`: this is the definition, the shader is
+// measured against it, and a device with no Metal renders through it.
+//
+// **What "reference" can and cannot mean here, stated up front, because this is where the project has
+// been burned.** For the blend modes, eleven of fourteen Tier 1 cases are Apple's own `CGBlendMode`
+// implementations, so a GPU-versus-CPU delta crosses a real framework boundary. **No effect in this
+// file has a CoreGraphics primitive at all.** CoreGraphics composites and draws; it does not grade.
+// So a parity sweep over these seven compares the app's Metal against the app's Swift — two
+// implementations of the same formulas by the same hand — and it is worth exactly what that is worth:
+// it catches transcription slips, layout mismatches between `EffectParams` here and in the shader, and
+// wrong kind codes, and it says nothing whatever about whether the formula itself is right.
+//
+// What says that is the other half of `EffectParityLogicTests`: values computed from the published
+// definitions and asserted against this file directly. Every effect with a spec (§7's list is mostly
+// specless, but Levels, CSS's brightness/contrast, W3C's Lum and the standard Bayer screen are not)
+// gets one. Read the two kinds of test as answering two different questions, and never read a green
+// sweep as evidence about the third.
+//
+// One genuine exception, and it is deliberate: **HSV goes through `ColorMath.rgbToHSB`/`hsbToRGB`**,
+// the conversion the colour picker already ships, written by someone else before effects existed and
+// in `Double` rather than `Float`. That makes HSV's delta the one number in the sweep that compares
+// two independently authored implementations.
+
+enum EffectReference {
+
+    /// One effect over one premultiplied RGBA8 buffer, in the app's byte layout — device RGB,
+    /// premultiplied last, 8 bits per component, row-major, top-left origin.
+    ///
+    /// **Alpha is copied through unchanged for every effect**, and that is the contract rather than an
+    /// implementation detail: a grade that could alter coverage would reshape the artwork it is applied
+    /// to, and neither §4.4 wrapper — a stack layer grading the backdrop, or a node grading its slot —
+    /// has any business doing that. It is also what lets an effect sit anywhere in a tree without
+    /// changing what a mask or a blend beneath it resolves to.
+    ///
+    /// Fully transparent pixels come out fully transparent, with colour zeroed, matching the kernel's
+    /// early-out. Unpremultiplying at `a == 0` has no answer, and the two backends have to give the
+    /// same non-answer.
+    static func apply(_ effect: Effect, to bytes: [UInt8], width: Int, height: Int) -> [UInt8] {
+        guard width > 0, height > 0, bytes.count >= width * height * 4 else { return bytes }
+        let kind = effect.kindCode
+        let params = effect.params
+        let lut = effect.lookupTable
+
+        if kind == kChromaticAberration {
+            return chromaticAberration(bytes, params: params, width: width, height: height)
+        }
+
+        var result = bytes
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixel = (x + y * width) * 4
+                let alpha = Float(bytes[pixel + 3]) / 255
+                guard alpha > 0 else {
+                    for channel in 0..<4 { result[pixel + channel] = 0 }
+                    continue
+                }
+                let source = SIMD3<Float>(Float(bytes[pixel]) / 255,
+                                          Float(bytes[pixel + 1]) / 255,
+                                          Float(bytes[pixel + 2]) / 255)
+                let colour = clamp(source / alpha)
+                let graded = clamp(transform(kind, params, lut, colour, x: x, y: y))
+                for channel in 0..<3 {
+                    result[pixel + channel] = quantize(graded[channel] * alpha)
+                }
+                result[pixel + 3] = bytes[pixel + 3]
+            }
+        }
+        return result
+    }
+
+    /// The `CGImage` convenience, through exactly the conversions both compositor backends use — the
+    /// image is redrawn into the app's byte layout rather than read out of whatever backing store it
+    /// arrived with, for the reason `CoreGraphicsCompositor.premultipliedBytes` gives.
+    static func apply(_ effect: Effect, to image: CGImage) -> CGImage? {
+        let width = image.width, height = image.height
+        guard let bytes = CoreGraphicsCompositor.premultipliedBytes(image, width: width, height: height) else {
+            return nil
+        }
+        return CoreGraphicsCompositor.makeImage(fromPremultiplied: apply(effect, to: bytes, width: width, height: height),
+                                                width: width, height: height)
+    }
+
+    // MARK: - Kind codes
+    //
+    // **These must match the `kEffect…` constants in `Composite.metal` and `Effect.kindCode`, case for
+    // case.** Three literals in three places with nothing but this comment between them, covered the
+    // way the blend-mode codes are: `EffectParityLogicTests` runs every effect through both backends,
+    // where a code that disagreed renders as some *other* real effect rather than failing to compile.
+
+    private static let kLookupTable: UInt32 = 0
+    private static let kBrightnessContrast: UInt32 = 1
+    private static let kHSVShift: UInt32 = 2
+    private static let kGradientMap: UInt32 = 3
+    private static let kChromaticAberration: UInt32 = 4
+    private static let kPosterize: UInt32 = 5
+    private static let kNoise: UInt32 = 6
+
+    // MARK: - The per-pixel transforms
+    //
+    // Unpremultiplied in, unpremultiplied out, `[0, 1]` on both sides — the same contract
+    // `BlendMode.handRolledChannel` has, and for the same reason: it is the only shape in which the
+    // arithmetic can be compared with the shader's line for line.
+
+    private static func transform(_ kind: UInt32, _ params: EffectParams, _ lut: [UInt8],
+                                  _ c: SIMD3<Float>, x: Int, y: Int) -> SIMD3<Float> {
+        switch kind {
+        case kLookupTable:
+            return SIMD3<Float>(entry(lut, index(c.x), 0), entry(lut, index(c.y), 1), entry(lut, index(c.z), 2))
+
+        case kBrightnessContrast:
+            // Contrast then brightness, clamped once at the end — see `Effect.BrightnessContrast`.
+            let contrasted = c * params.contrast + (0.5 - 0.5 * params.contrast)
+            return contrasted * params.brightness
+
+        case kHSVShift:
+            let hsb = ColorMath.rgbToHSB(r: Double(c.x), g: Double(c.y), b: Double(c.z))
+            let saturation = min(max(hsb.s * Double(params.saturation), 0), 1)
+            let value = min(max(hsb.v * Double(params.value), 0), 1)
+            let rgb = ColorMath.hsbToRGB(h: hsb.h + Double(params.hueTurns), s: saturation, v: value)
+            return SIMD3<Float>(Float(rgb.r), Float(rgb.g), Float(rgb.b))
+
+        case kGradientMap:
+            let stop = index(luminance(c))
+            let mapped = SIMD3<Float>(entry(lut, stop, 0), entry(lut, stop, 1), entry(lut, stop, 2))
+            return c + (mapped - c) * params.mix
+
+        case kPosterize:
+            let steps = max(params.levels - 1, 1)
+            let dither = 0.5 + params.screenStrength * (screen(params.screen, x: x, y: y) - 0.5)
+            return SIMD3<Float>((c.x * steps + dither).rounded(.down) / steps,
+                                (c.y * steps + dither).rounded(.down) / steps,
+                                (c.z * steps + dither).rounded(.down) / steps)
+
+        case kNoise:
+            let deviation = params.isMonochrome != 0
+                ? SIMD3<Float>(repeating: (noiseValue(x, y, params.seed, 0) - 0.5) * 2 * params.amount)
+                : SIMD3<Float>((noiseValue(x, y, params.seed, 0) - 0.5) * 2 * params.amount,
+                               (noiseValue(x, y, params.seed, 1) - 0.5) * 2 * params.amount,
+                               (noiseValue(x, y, params.seed, 2) - 0.5) * 2 * params.amount)
+            return c + deviation
+
+        default:
+            return c
+        }
+    }
+
+    /// W3C Compositing and Blending Level 1's `Lum`, which `Compositor.swift` and `Composite.metal`
+    /// both already state — see `Effect.GradientMap` for why the gradient is indexed by this and not by
+    /// some other brightness.
+    private static func luminance(_ c: SIMD3<Float>) -> Float { 0.3 * c.x + 0.59 * c.y + 0.11 * c.z }
+
+    /// The table index for one channel value. `floor(v * 255 + 0.5)` rather than any of Swift's
+    /// rounding rules, because half-up is the one expression that can be written identically in both
+    /// languages — Metal's `round` is half-away-from-zero and Swift's default is half-to-even, and a
+    /// table lookup that disagreed by one index would step by however steep the curve is there rather
+    /// than by a channel step.
+    private static func index(_ value: Float) -> Int {
+        Int(min(max(value, 0), 1) * 255 + 0.5)
+    }
+
+    private static func entry(_ lut: [UInt8], _ index: Int, _ channel: Int) -> Float {
+        Float(lut[min(max(index, 0), 255) * 4 + channel]) / 255
+    }
+
+    /// The screen's value at one pixel, in `[0, 1)` and averaging 0.5 — see `Effect.Posterize` for why
+    /// the mean matters (it is what makes `screenStrength == 0` exactly plain rounding).
+    private static func screen(_ kind: UInt32, x: Int, y: Int) -> Float {
+        let cell = (y & 3) * 4 + (x & 3)
+        switch kind {
+        case 1:  return (Float(bayer4[cell]) + 0.5) / 16
+        case 2:  return (Float(clustered4[cell]) + 0.5) / 16
+        default: return 0.5
+        }
+    }
+
+    /// The standard 4×4 Bayer (recursive dispersed-dot) matrix.
+    private static let bayer4: [Int] = [
+         0,  8,  2, 10,
+        12,  4, 14,  6,
+         3, 11,  1,  9,
+        15,  7, 13,  5,
+    ]
+
+    /// The classic 4×4 clustered-dot screen: the thresholds spiral outward from one cell, so growing
+    /// coverage grows a dot rather than scattering pixels. That clustering is the whole difference
+    /// between a halftone and a dither.
+    private static let clustered4: [Int] = [
+        12,  5,  6, 13,
+         4,  0,  1,  7,
+        11,  3,  2,  8,
+        15, 10,  9, 14,
+    ]
+
+    /// A hash of position and seed, in `[0, 1)`.
+    ///
+    /// **Integer arithmetic, then a 24-bit truncation, and both halves are load-bearing.** Metal's
+    /// `uint` wraps by definition and Swift's `&*`/`&+` are the same operation, so the mix below is
+    /// bit-identical across the two languages where a float-based hash (`fract(sin(dot(…)) * 43758.5)`,
+    /// the usual shader idiom) would depend on `sin`'s last bit and on whether fast math rewrote the
+    /// multiply. Truncating to the top 24 bits before the conversion keeps the result exactly
+    /// representable in `Float`, so neither side has a rounding decision to make either.
+    private static func noiseValue(_ x: Int, _ y: Int, _ seed: UInt32, _ salt: UInt32) -> Float {
+        var h = UInt32(truncatingIfNeeded: x) &* 374_761_393
+        h = h &+ UInt32(truncatingIfNeeded: y) &* 668_265_263
+        h = h &+ seed &* 2_246_822_519 &+ salt &* 3_266_489_917
+        h = (h ^ (h >> 13)) &* 1_274_126_177
+        h ^= h >> 16
+        return Float(h >> 8) / 16_777_216
+    }
+
+    // MARK: - The one gather effect
+
+    /// Red sampled at `+offset`, blue at `-offset`, green where it is, each unpremultiplied by the
+    /// alpha it was sampled with and the triple re-premultiplied by the alpha at the pixel itself.
+    ///
+    /// That last part is what keeps the contract: the shape of the artwork is the green channel's
+    /// alpha, so the fringe appears in colour and never in coverage. Where a displaced sample lands on
+    /// transparency its channel contributes nothing, which is the dark fringe real lateral aberration
+    /// shows at a hard edge.
+    private static func chromaticAberration(_ bytes: [UInt8], params: EffectParams,
+                                            width: Int, height: Int) -> [UInt8] {
+        var result = bytes
+        let offset = SIMD2<Float>(params.offsetX, params.offsetY)
+        for y in 0..<height {
+            for x in 0..<width {
+                let position = SIMD2<Float>(Float(x), Float(y))
+                let centre = sample(bytes, position, width: width, height: height)
+                let alpha = centre.w
+                let pixel = (x + y * width) * 4
+                guard alpha > 0 else {
+                    for channel in 0..<4 { result[pixel + channel] = 0 }
+                    continue
+                }
+                let shiftedRed = sample(bytes, position + offset, width: width, height: height)
+                let shiftedBlue = sample(bytes, position - offset, width: width, height: height)
+                let colour = clamp(SIMD3<Float>(shiftedRed.w > 0 ? shiftedRed.x / shiftedRed.w : 0,
+                                                centre.y / alpha,
+                                                shiftedBlue.w > 0 ? shiftedBlue.z / shiftedBlue.w : 0))
+                for channel in 0..<3 { result[pixel + channel] = quantize(colour[channel] * alpha) }
+                result[pixel + 3] = quantize(alpha)
+            }
+        }
+        return result
+    }
+
+    /// Bilinear, clamp-to-edge, on premultiplied values — see `Effect.ChromaticAberration` for why the
+    /// interpolation is premultiplied and not unpremultiplied.
+    private static func sample(_ bytes: [UInt8], _ position: SIMD2<Float>,
+                               width: Int, height: Int) -> SIMD4<Float> {
+        let base = SIMD2<Float>(position.x.rounded(.down), position.y.rounded(.down))
+        let fraction = position - base
+        let x0 = Int(base.x), y0 = Int(base.y)
+        let c00 = texel(bytes, x0, y0, width: width, height: height)
+        let c10 = texel(bytes, x0 + 1, y0, width: width, height: height)
+        let c01 = texel(bytes, x0, y0 + 1, width: width, height: height)
+        let c11 = texel(bytes, x0 + 1, y0 + 1, width: width, height: height)
+        let top = c00 + (c10 - c00) * fraction.x
+        let bottom = c01 + (c11 - c01) * fraction.x
+        return top + (bottom - top) * fraction.y
+    }
+
+    private static func texel(_ bytes: [UInt8], _ x: Int, _ y: Int, width: Int, height: Int) -> SIMD4<Float> {
+        let cx = min(max(x, 0), width - 1), cy = min(max(y, 0), height - 1)
+        let pixel = (cx + cy * width) * 4
+        return SIMD4<Float>(Float(bytes[pixel]), Float(bytes[pixel + 1]),
+                            Float(bytes[pixel + 2]), Float(bytes[pixel + 3])) / 255
+    }
+
+    // MARK: - Shared arithmetic
+
+    private static func clamp(_ v: SIMD3<Float>) -> SIMD3<Float> {
+        SIMD3<Float>(min(max(v.x, 0), 1), min(max(v.y, 0), 1), min(max(v.z, 0), 1))
+    }
+
+    /// **`.toNearestOrEven` because that is the rule Metal's float→unorm8 write uses**, the same
+    /// reasoning `CoreGraphicsCompositor.drawHandRolled` records: a half-way value rounded the other
+    /// way is a delta of 1 on a channel that should have been exact.
+    private static func quantize(_ value: Float) -> UInt8 {
+        UInt8((min(max(value, 0), 1) * 255).rounded(.toNearestOrEven))
+    }
+}

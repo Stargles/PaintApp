@@ -294,3 +294,263 @@ kernel void compositeMask(texture2d<float, access::read>  layer  [[texture(0)]],
 {
     result.write(layer.read(gid) * mask.read(gid).r, gid);
 }
+
+// MARK: - Tier 3 effects (§4.4, §7)
+//
+// **One kernel with one switch, the shape §5.1 describes for blend modes and for the same reason.**
+// Seven pipelines would be seven registrations in whichever object ends up owning the compositor's
+// pipeline states, and adding the eighth effect would touch that object again; one pipeline means an
+// effect is a case here and a case in `Effect.kindCode`, with nothing to register. The neighbourhood
+// filters §7 defers (blur, bloom, sharpen) will not fit this kernel — they need a ping-pong buffer and
+// more than one pass — and that is fine: they are a different contract, not a bigger version of this
+// one.
+//
+// **Every kernel below is bound to the same three values `EffectReference` reads**: a kind code, a
+// flat parameter block, and a 256-entry table. Neither backend interprets an `Effect`; `Effect.swift`
+// does that once, in Swift, and hands both the result. See that file's header for what this buys and
+// what it costs.
+//
+// Alpha is preserved by construction — the wrapper unpremultiplies, hands the *colour* to the switch,
+// and re-premultiplies with the alpha it read. An effect grades what is there without reshaping it,
+// which is what lets one sit anywhere in a tree without changing what a mask beneath it resolves to.
+
+// **Must match `Effect.kindCode` in Effect.swift and `EffectReference`'s constants, case for case** —
+// three literals in three places, covered by `EffectParityLogicTests` running every effect through
+// both backends rather than by a convention, exactly as the `kBlend…` codes above are.
+constant uint kEffectLookupTable         = 0;
+constant uint kEffectBrightnessContrast  = 1;
+constant uint kEffectHSVShift            = 2;
+constant uint kEffectGradientMap         = 3;
+constant uint kEffectChromaticAberration = 4;
+constant uint kEffectPosterize           = 5;
+constant uint kEffectNoise               = 6;
+
+/// Mirrors `EffectParams` in Effect.swift field for field. **All-scalar, deliberately**: a `float2`
+/// here has an alignment a Swift `SIMD2<Float>` matches only by luck, and a padding disagreement
+/// between the two declarations shifts every field after it — which does not fail to compile, it
+/// renders a different picture.
+struct EffectParams {
+    float brightness;
+    float contrast;
+    float hueTurns;
+    float saturation;
+    float value;
+    float offsetX;
+    float offsetY;
+    float mix;
+    float levels;
+    float screenStrength;
+    float amount;
+    uint  screen;
+    uint  seed;
+    uint  isMonochrome;
+};
+
+/// One entry of the resolved transfer table.
+///
+/// `floor(v * 255 + 0.5)` rather than `round`, because half-up is the one rounding rule that can be
+/// written identically in Metal and Swift — `round` is half-away-from-zero and Swift's default is
+/// half-to-even, and an index that disagreed by one would step by however steep the curve is at that
+/// point rather than by the channel step the blend modes are allowed.
+static inline float3 lutEntry(constant uchar4 *lut, float value) {
+    uint index = min(uint(floor(saturate(value) * 255.0f + 0.5f)), 255u);
+    return float3(lut[index].rgb) / 255.0f;
+}
+
+// The two screens `Posterize` offsets its quantizer with: Bayer's recursive dispersed dot, and the
+// classic clustered dot whose thresholds spiral outward from one cell so that growing coverage grows a
+// dot instead of scattering pixels. That clustering is the whole difference between a halftone and a
+// dither.
+constant uint kBayer4[16]     = {  0,  8,  2, 10, 12,  4, 14,  6,  3, 11,  1,  9, 15,  7, 13,  5 };
+constant uint kClustered4[16] = { 12,  5,  6, 13,  4,  0,  1,  7, 11,  3,  2,  8, 15, 10,  9, 14 };
+
+/// The screen's value at one pixel, in `[0, 1)` and averaging 0.5 — the mean is what makes
+/// `screenStrength == 0` exactly plain rounding, so posterize is the faded case of the same formula
+/// rather than a branch of its own.
+static inline float screenValue(uint kind, uint2 gid) {
+    uint cell = (gid.y & 3u) * 4u + (gid.x & 3u);
+    if (kind == 1u) { return (float(kBayer4[cell]) + 0.5f) / 16.0f; }
+    if (kind == 2u) { return (float(kClustered4[cell]) + 0.5f) / 16.0f; }
+    return 0.5f;
+}
+
+/// A hash of position and seed, in `[0, 1)`.
+///
+/// **Integer arithmetic, then a 24-bit truncation, and both halves are load-bearing.** `uint` wraps by
+/// definition here and Swift's `&*`/`&+` are the same operation, so this is bit-identical across the
+/// two languages — where the usual shader idiom (`fract(sin(dot(…)) * 43758.5)`) would depend on
+/// `sin`'s last bit and on whether fast math rewrote the multiply. Truncating to the top 24 bits before
+/// the conversion keeps the result exactly representable in `float`, so neither side has a rounding
+/// decision to make either.
+static inline float noiseValue(uint2 gid, uint seed, uint salt) {
+    uint h = gid.x * 374761393u;
+    h = h + gid.y * 668265263u;
+    h = h + seed * 2246822519u + salt * 3266489917u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    h ^= h >> 16;
+    return float(h >> 8) / 16777216.0f;
+}
+
+// The app's existing HSV conversion (`ColorMath.rgbToHSB`/`hsbToRGB`), transcribed — including its
+// hue-in-turns convention and its achromatic answer of hue 0. Transcribed rather than replaced because
+// the CPU reference calls the original: that makes HSV the one effect whose measured GPU-versus-CPU
+// delta compares two implementations that were not written together, and the value of that depends on
+// this being the same function rather than a better one.
+
+static inline float3 rgbToHSB(float3 c) {
+    float maxC = max(c.r, max(c.g, c.b));
+    float minC = min(c.r, min(c.g, c.b));
+    float delta = maxC - minC;
+    float v = maxC;
+    float s = maxC == 0.0f ? 0.0f : delta / maxC;
+    if (!(delta > 0.0f)) { return float3(0.0f, s, v); }
+
+    float h;
+    if (maxC == c.r)      { h = fmod((c.g - c.b) / delta, 6.0f); }
+    else if (maxC == c.g) { h = (c.b - c.r) / delta + 2.0f; }
+    else                  { h = (c.r - c.g) / delta + 4.0f; }
+    h /= 6.0f;
+    if (h < 0.0f) { h += 1.0f; }
+    return float3(h, s, v);
+}
+
+static inline float3 hsbToRGB(float3 hsb) {
+    float v = hsb.z, s = hsb.y;
+    if (!(s > 0.0f)) { return float3(v); }
+    float wrapped = fmod(fmod(hsb.x, 1.0f) + 1.0f, 1.0f);
+    float hh = wrapped * 6.0f;
+    int sector = int(hh) % 6;
+    float f = hh - float(int(hh));
+    float p = v * (1.0f - s);
+    float q = v * (1.0f - s * f);
+    float t = v * (1.0f - s * (1.0f - f));
+    switch (sector) {
+        case 0:  return float3(v, t, p);
+        case 1:  return float3(q, v, p);
+        case 2:  return float3(p, v, t);
+        case 3:  return float3(p, q, v);
+        case 4:  return float3(t, p, v);
+        default: return float3(v, p, q);
+    }
+}
+
+/// The per-pixel colour transform, unpremultiplied in and out — the same contract `blendChannels` has,
+/// and the shape `EffectReference.transform` mirrors line for line.
+static inline float3 effectChannels(uint kind, constant EffectParams &params, constant uchar4 *lut,
+                                    float3 c, uint2 gid) {
+    switch (kind) {
+        case kEffectLookupTable:
+            // Each channel indexes the table with its own value, which is what makes per-channel
+            // levels and curves a parameter change in Swift rather than a change here.
+            return float3(lutEntry(lut, c.r).r, lutEntry(lut, c.g).g, lutEntry(lut, c.b).b);
+
+        case kEffectBrightnessContrast:
+            // Contrast then brightness, clamped once by the caller — CSS Filter Effects Level 1's two
+            // linear transfers, in the order the two names are always written.
+            return (c * params.contrast + (0.5f - 0.5f * params.contrast)) * params.brightness;
+
+        case kEffectHSVShift: {
+            float3 hsb = rgbToHSB(c);
+            float s = saturate(hsb.y * params.saturation);
+            float v = saturate(hsb.z * params.value);
+            return hsbToRGB(float3(hsb.x + params.hueTurns, s, v));
+        }
+
+        case kEffectGradientMap: {
+            // W3C Compositing Level 1's `Lum`, which `lum` above already states — one definition of
+            // "how bright is this colour" in this file, not two that nearly agree.
+            float3 mapped = lutEntry(lut, lum(c));
+            return c + (mapped - c) * params.mix;
+        }
+
+        case kEffectPosterize: {
+            float steps = max(params.levels - 1.0f, 1.0f);
+            float dither = 0.5f + params.screenStrength * (screenValue(params.screen, gid) - 0.5f);
+            return floor(c * steps + dither) / steps;
+        }
+
+        case kEffectNoise: {
+            float3 deviation;
+            if (params.isMonochrome != 0u) {
+                deviation = float3((noiseValue(gid, params.seed, 0u) - 0.5f) * 2.0f * params.amount);
+            } else {
+                deviation = float3((noiseValue(gid, params.seed, 0u) - 0.5f) * 2.0f * params.amount,
+                                   (noiseValue(gid, params.seed, 1u) - 0.5f) * 2.0f * params.amount,
+                                   (noiseValue(gid, params.seed, 2u) - 0.5f) * 2.0f * params.amount);
+            }
+            return c + deviation;
+        }
+
+        default:
+            return c;
+    }
+}
+
+static inline float4 texelClamped(texture2d<float, access::read> source, int x, int y) {
+    int width = int(source.get_width()), height = int(source.get_height());
+    return source.read(uint2(uint(clamp(x, 0, width - 1)), uint(clamp(y, 0, height - 1))));
+}
+
+/// Bilinear, clamp-to-edge, on **premultiplied** texels — which is the whole reason premultiplied
+/// storage exists, since interpolating unpremultiplied colour across an alpha edge pulls in the colour
+/// of pixels that are not there.
+static inline float4 sampleBilinear(texture2d<float, access::read> source, float2 position) {
+    float2 base = floor(position);
+    float2 fraction = position - base;
+    int x = int(base.x), y = int(base.y);
+    float4 top = mix(texelClamped(source, x, y), texelClamped(source, x + 1, y), fraction.x);
+    float4 bottom = mix(texelClamped(source, x, y + 1), texelClamped(source, x + 1, y + 1), fraction.x);
+    return mix(top, bottom, fraction.y);
+}
+
+/// The one gather effect in the set: red sampled at `+offset`, blue at `-offset`, green where it is.
+///
+/// Each channel is unpremultiplied by the alpha it was sampled with, and the triple is re-premultiplied
+/// by the alpha at the pixel itself — so the shape of the artwork is the *green* channel's alpha and
+/// the fringe appears in colour, never in coverage. Where a displaced sample lands on transparency its
+/// channel contributes nothing, which is the dark fringe real lateral aberration shows at a hard edge.
+static inline float4 chromaticAberration(texture2d<float, access::read> source,
+                                         constant EffectParams &params, uint2 gid) {
+    float2 position = float2(gid);
+    float2 offset = float2(params.offsetX, params.offsetY);
+    float4 centre = sampleBilinear(source, position);
+    float alpha = centre.a;
+    if (!(alpha > 0.0f)) { return float4(0.0f); }
+
+    float4 shiftedRed = sampleBilinear(source, position + offset);
+    float4 shiftedBlue = sampleBilinear(source, position - offset);
+    float3 colour = saturate(float3(shiftedRed.a > 0.0f ? shiftedRed.r / shiftedRed.a : 0.0f,
+                                    centre.g / alpha,
+                                    shiftedBlue.a > 0.0f ? shiftedBlue.b / shiftedBlue.a : 0.0f));
+    return float4(colour * alpha, alpha);
+}
+
+/// One effect over one texture — the kernel both §4.4 wrappers reach, and the only one they need.
+///
+/// Dispatched with `dispatchThreads` like every kernel above, so out-of-bounds threads are never
+/// launched and there is no bounds check to pay for.
+kernel void applyEffect(texture2d<float, access::read>  source [[texture(0)]],
+                        texture2d<float, access::write> result [[texture(1)]],
+                        constant uint                  &kind   [[buffer(0)]],
+                        constant EffectParams          &params [[buffer(1)]],
+                        constant uchar4                *lut    [[buffer(2)]],
+                        uint2 gid [[thread_position_in_grid]])
+{
+    // The one effect that reads a neighbourhood, and it needs the alpha of three different texels —
+    // so it answers for the whole pixel rather than fitting the unpremultiply/regrade/re-premultiply
+    // wrapper below.
+    if (kind == kEffectChromaticAberration) {
+        result.write(chromaticAberration(source, params, gid), gid);
+        return;
+    }
+
+    float4 src = source.read(gid);
+    float alpha = src.a;
+    // A fully transparent pixel has no colour to unpremultiply, and both backends have to give the
+    // same non-answer.
+    if (!(alpha > 0.0f)) { result.write(float4(0.0f), gid); return; }
+
+    float3 colour = saturate(src.rgb / alpha);
+    float3 graded = saturate(effectChannels(kind, params, lut, colour, gid));
+    result.write(float4(graded * alpha, alpha), gid);
+}
