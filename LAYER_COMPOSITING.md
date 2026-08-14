@@ -468,6 +468,19 @@ entry directly beneath, so it never reaches a backend as a blend mode at all —
 Sequencing: Tier 3 splits into "cheap LUT/per-pixel" (one item covering the first six), then the two
 that need the multi-pass buffer (blur, bloom), with Sobel/Sharpen/Outline alongside them.
 
+**The first six have shipped as kernels** — `Effect` in [Effect.swift](PaintSoftware/Models/Effect.swift),
+`applyEffect` in `Composite.metal`, `EffectReference` as the CPU reference, measured against each other
+by `EffectParityLogicTests`. Curves ship alongside Levels: both resolve to the same 256-entry table in
+Swift, so a third curve shape is a case in `Effect` and no shader change. **Neither §4.4 wrapper exists
+yet** — nothing puts an effect into the tree, so no document can hold one; the wrappers are what add
+`var effect: Effect?` to the manifest, with one `decodeIfPresent` and no migration.
+
+Where an effect had a published definition it follows it, and the choice is recorded next to the code:
+Photoshop/GIMP Levels, **CSS Filter Effects Level 1** for brightness and contrast, W3C Compositing
+Level 1's `Lum` for the gradient map's index (the weighting the non-separable blend modes already use),
+Fritsch–Carlson for the curve so a tone curve cannot overshoot. HSV is a real HSV rotation and
+deliberately **not** CSS `hue-rotate()`'s matrix.
+
 ## 8. Vector as the default layer
 
 The plain **+** ([LayerPanel.swift:91](PaintSoftware/Views/LayerPanel.swift:91)) calls
