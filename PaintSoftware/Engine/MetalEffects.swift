@@ -3,15 +3,14 @@ import Metal
 
 // MARK: - Tier 3 effects on the GPU
 //
-// LAYER_COMPOSITING.md §4.4/§7. The `applyEffect` half of `Composite.metal`, and **deliberately not a
-// change to `MetalCompositor.swift`.**
+// LAYER_COMPOSITING.md §4.4/§7. The `applyEffect` half of `Composite.metal`.
 //
-// §4.4's two wrappers are what put an effect into the tree, and neither exists yet. Registering the
-// effect pipeline inside `CompositorMetalEngine` before there is a walk that dispatches it would be an
-// edit to the file phase 8 is currently rewriting, in exchange for nothing. `EffectPipelines` is
-// instead constructible from any device and library, so when a wrapper lands the compositor owns one
-// as a stored property and calls `encode` inside the encoder it already has — one line in its
-// initialiser and one in its walk, against a type that is already tested.
+// **The prediction this file was written on held exactly, which is worth recording.** Phase 9's
+// kernels shipped before either §4.4 wrapper existed, and `EffectPipelines` was made constructible
+// from any device and library rather than registered inside `CompositorMetalEngine` — so that when a
+// wrapper landed the compositor would own one as a stored property and call `encode` inside the
+// encoder it already had, "one line in its initialiser and one in its walk, against a type that is
+// already tested". Phase 9a is that wrapper and that is what it cost.
 //
 // `MetalEffectEngine` below is the standalone harness that makes that possible: its own device, queue
 // and byte round-trip, so the kernel is exercisable — and measurable against `EffectReference` — with

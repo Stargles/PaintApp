@@ -160,6 +160,13 @@ final class CompositorMetalEngine {
     private let psOver: MTLComputePipelineState
     private let psFill: MTLComputePipelineState
     private let psMask: MTLComputePipelineState
+    private let psEffectMix: MTLComputePipelineState
+
+    /// §4.4's grade, as `MetalEffects` already packaged it — **held optionally on purpose.** A library
+    /// without `applyEffect` should cost the effect layers a CPU frame, not disable compositing for
+    /// every document; `encode` returns false when a tree actually needs one and it is missing, which
+    /// is `Compositor.composite`'s cue to render the whole frame through the reference instead.
+    private let effects: EffectPipelines?
 
     private init?() {
         guard let device = MTLCreateSystemDefaultDevice(),
@@ -184,12 +191,15 @@ final class CompositorMetalEngine {
             return try? device.makeComputePipelineState(function: fn)
         }
         guard let over = pipeline("compositeOver"), let fill = pipeline("compositeFill"),
-              let mask = pipeline("compositeMask") else { return nil }
+              let mask = pipeline("compositeMask"), let effectMix = pipeline("compositeEffectMix")
+        else { return nil }
         self.device = device
         self.queue = queue
         self.psOver = over
         self.psFill = fill
         self.psMask = mask
+        self.psEffectMix = effectMix
+        self.effects = EffectPipelines(device: device, library: library)
     }
 
     /// How many scratch textures the last composite allocated. Reported by `PerfBaselineTests`;
@@ -256,8 +266,23 @@ final class CompositorMetalEngine {
         for node in nodes {
             switch node.content {
             case .leaf(let layerIndex):
-                guard node.isVisible,
-                      request.sources.indices.contains(layerIndex),
+                guard node.isVisible else { continue }
+                // §4.4's stack layer, reached before `sources` for the reason the CPU reference
+                // gives: an effect layer has no pixels to find, only a grade over `front` — which
+                // *is* "the backdrop accumulated so far in this container", since a buffered group
+                // handed this walk its own accumulator.
+                if let effect = node.effect {
+                    guard let effects, let scratch = pool.acquire() else { return false }
+                    effects.encode(effect, source: front, into: scratch, encoder: encoder)
+                    mix(base: front, graded: scratch,
+                        coverage: maskTexture(for: node, of: request, cache: &masks),
+                        opacity: node.opacity, into: back, encoder: encoder,
+                        width: width, height: height)
+                    swap(&front, &back)
+                    pool.release(scratch)
+                    continue
+                }
+                guard request.sources.indices.contains(layerIndex),
                       let source = request.sources[layerIndex] else { continue }
                 guard let texture = Self.upload(source.image, device: device) else { return false }
                 // A masked leaf takes one extra dispatch and one scratch texture: the mask multiply
@@ -379,6 +404,27 @@ final class CompositorMetalEngine {
         encoder.setTexture(mask, index: 1)
         encoder.setTexture(result, index: 2)
         dispatch2D(encoder, psMask, width: width, height: height)
+    }
+
+    /// One `compositeEffectMix` dispatch: the graded backdrop mixed back over the ungraded one.
+    ///
+    /// Mirrors `CoreGraphicsCompositor.grade`'s second half, and the kernel carries the argument for
+    /// why this is a mix rather than a composite. The caller does the swap, as it does after `over`.
+    private func mix(base: MTLTexture, graded: MTLTexture, coverage: MTLTexture?, opacity: Double,
+                     into result: MTLTexture, encoder: MTLComputeCommandEncoder,
+                     width: Int, height: Int) {
+        var opacity = Float(opacity)
+        var hasCoverage: UInt32 = coverage == nil ? 0 : 1
+        encoder.setComputePipelineState(psEffectMix)
+        encoder.setTexture(base, index: 0)
+        encoder.setTexture(graded, index: 1)
+        // A declared texture argument has to be bound whether or not the kernel reads it; `base`
+        // again is a texture already resident, and `hasCoverage` is what keeps it unread.
+        encoder.setTexture(coverage ?? base, index: 2)
+        encoder.setTexture(result, index: 3)
+        encoder.setBytes(&opacity, length: MemoryLayout<Float>.stride, index: 0)
+        encoder.setBytes(&hasCoverage, length: MemoryLayout<UInt32>.stride, index: 1)
+        dispatch2D(encoder, psEffectMix, width: width, height: height)
     }
 
     /// One `compositeOver` dispatch, and the swap that makes the result the new backdrop.
