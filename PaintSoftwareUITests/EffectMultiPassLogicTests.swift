@@ -31,8 +31,13 @@ import UIKit
 ///    the shader as well as the reference against them. Read its header before trusting any number in
 ///    this file as evidence that blur and bloom are *correct* rather than merely consistent.
 ///
-/// Neither §4.4 wrapper exists yet, so nothing here goes through `Compositor` or `RenderRequest`; the
-/// fixtures are byte buffers in the app's layout, for the reason the sibling file gives.
+/// Nothing here goes through `Compositor` or `RenderRequest`: this file pins the pass list and the
+/// arithmetic, so its fixtures are byte buffers in the app's layout, for the reason the sibling file
+/// gives. That scope is deliberate, but it is now a *gap* rather than a fact about the tree — the
+/// §4.4 wrappers exist as of this merge, and a multi-pass effect reaching one has never executed.
+/// Neither suite covers the join: `EffectLayerLogicTests` drives the wrappers with single-pass grades
+/// only, and this file drives multi-pass with no wrapper. A blur and a bloom *as a stack layer*,
+/// graded through the compositor in both backends, is the case that closes it.
 final class EffectMultiPassLogicTests: XCTestCase {
 
     private static let side = 64
