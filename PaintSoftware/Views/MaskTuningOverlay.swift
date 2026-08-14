@@ -2,9 +2,11 @@ import SwiftUI
 
 // MARK: - MASK-TUNE — temporary scaffolding, LAYER_COMPOSITING.md §10 item 1
 //
-// Nobody has looked at `AlphaMask.threshold`/`.antialiasHalfWidth` since §6.3 picked 0.5/0.05, and
-// the judgement has to be made by eye against a soft brush. This overlay is the only writer of those
-// two `static var`s (see the MASK-TUNE comments on them in AlphaMask.swift) and is the whole harness.
+// The product owner used this to judge `AlphaMask.threshold`/`.antialiasHalfWidth` by eye against a
+// soft brush on the iPad, in Release, and picked 0.1/0.01 over §6.3's original 0.5/0.05 guess. This
+// overlay is the only writer of those two `static var`s (see the MASK-TUNE comments on them in
+// AlphaMask.swift) and is the whole harness — kept rather than deleted in case that judgement needs
+// re-checking once the live-stroke bug it currently competes with is fixed.
 //
 // **Cache invalidation is not this file's job, on purpose.** A `ResolvedMask` is cached per distinct
 // mask (§6.1) in `MaskResolver`, keyed on `AlphaMask`'s stored properties plus content versions — this
@@ -26,8 +28,8 @@ struct MaskTuningOverlay: View {
     @State private var threshold: Float = AlphaMask.threshold
     @State private var antialiasHalfWidth: Float = AlphaMask.antialiasHalfWidth
 
-    private static let shippingThreshold: Float = 0.5
-    private static let shippingAntialiasHalfWidth: Float = 0.05
+    private static let shippingThreshold: Float = 0.1
+    private static let shippingAntialiasHalfWidth: Float = 0.01
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {

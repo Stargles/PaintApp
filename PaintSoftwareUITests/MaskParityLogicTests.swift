@@ -142,13 +142,16 @@ final class MaskParityLogicTests: XCTestCase {
 
     /// **Why the test is not `alpha > 0`.** The default brush is `softRound`, whose dab is a radial
     /// gradient falling to alpha ≈ 0 across its whole radius, so a `> 0` mask would keep every pixel
-    /// the dab touched however faintly — substantially more than the stroke looks like it covers.
+    /// the dab touched however faintly.
     ///
-    /// The number below is the measurement rather than a restatement: this asserts the masked area is
-    /// meaningfully smaller than the touched area *and* that the solid middle survives, which is what
-    /// "tracks the visually solid part of a stroke" means. Both halves matter — a threshold pushed to
-    /// 1 would pass the first assertion and fail the second.
-    func testTheThresholdTracksTheSolidPartOfASoftDab() {
+    /// This used to assert the mask kept only the "visually solid part" of the dab, which was true at
+    /// the pre-hardware guess of 0.5. It is not what the shipped threshold does: 0.1, judged by eye on
+    /// the iPad against a soft brush, tracks nearly the *whole* extent of the dab instead. So rather
+    /// than restate a fraction that would just be re-deriving the shipped constant by hand, this pins
+    /// the shift structurally — the shipped threshold has to keep meaningfully more of the dab than the
+    /// old 0.5 guess would, while still not being `alpha > 0` outright. Both halves matter: a threshold
+    /// of 0 would pass the "keeps more" half and fail the "still not everything" half.
+    func testTheThresholdExcludesOnlyTheFaintestSkirtOfASoftDab() {
         let manager = CanvasFixture.manager(layerCount: 2)
         guard let celIndex = manager.activeCelIndex(inLayer: 0, atFrame: 0) else {
             return XCTFail("Fixture needs a cel to stamp into")
@@ -169,11 +172,27 @@ final class MaskParityLogicTests: XCTestCase {
         let touched = coveredPixelCount(dab)
         let kept = coveredPixelCount(masked)
         XCTAssertGreaterThan(touched, 0, "Fixture premise: the dab landed")
-        XCTAssertGreaterThan(kept, 0, "The solid middle of the dab has to survive the threshold")
-        XCTAssertLessThan(kept, touched * 3 / 4,
-                          "The dab touches \(touched) pixels and the mask keeps \(kept). `alpha > 0` would keep all "
-                          + "\(touched) — the whole point of the threshold is that a soft dab's skirt is not coverage.")
+        XCTAssertGreaterThan(kept, 0, "The centre of the dab has to survive the threshold")
+        XCTAssertLessThan(kept, touched,
+                          "The dab touches \(touched) pixels; the mask keeps \(kept). Equal would mean the "
+                          + "threshold kept every pixel `alpha > 0` does — the one thing it exists not to be, "
+                          + "even now that it keeps nearly all of them")
         XCTAssertEqual(pixel(masked, 32, 32), [0, 0, 255, 255], "The dab's centre is solid, so the content shows there")
+
+        let priorThreshold = AlphaMask.threshold
+        let priorHalfWidth = AlphaMask.antialiasHalfWidth
+        AlphaMask.threshold = 0.5      // the pre-hardware guess this test used to assume
+        AlphaMask.antialiasHalfWidth = 0.05
+        defer {
+            AlphaMask.threshold = priorThreshold
+            AlphaMask.antialiasHalfWidth = priorHalfWidth
+        }
+        guard let solidCoreOnly = composite(manager) else { return XCTFail("Fixture must composite") }
+        let keptAtOldGuess = coveredPixelCount(solidCoreOnly)
+        XCTAssertGreaterThan(kept, keptAtOldGuess,
+                             "The shipped threshold keeps \(kept) pixels of the dab against \(keptAtOldGuess) for "
+                             + "the old 0.5 guess — the on-iPad judgement tracks nearly the whole dab, not just "
+                             + "the solid core 0.5 was reasoned to land on")
     }
 
     // MARK: - Parity, which is the point (§6.5)
@@ -546,7 +565,7 @@ final class MaskParityLogicTests: XCTestCase {
             return XCTFail("The mask must resolve")
         }
 
-        AlphaMask.threshold = 0.9   // far from the dab's default-threshold (0.5) coverage
+        AlphaMask.threshold = 0.9   // far from the dab's default-threshold (0.1) coverage
 
         guard let after = manager.makeRenderRequest(atFrame: 0, includeBackground: false)
             .flatMap({ MaskResolver.coverage(for: [mask], of: $0) }) else {

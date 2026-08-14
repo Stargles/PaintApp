@@ -388,15 +388,22 @@ implies in both directions.
 ### 6.3 Binary, with a threshold
 
 The mask is a boolean coverage test on source alpha, not the source's own alpha ramp: `mask =
-sourceAlpha > threshold`. A literal `alpha > 0` would make the mask substantially larger than the
-stroke looks, since the default `softRound` brush's dab is a radial gradient falling to alpha ≈ 0
-across its whole radius — threshold ≈ 0.5 tracks the visually solid part of a stroke instead, and
-reduces to `> 0` for a hard brush. A narrow smoothstep across the threshold antialiases the resulting
+sourceAlpha > threshold`. A literal `alpha > 0` would keep every pixel the default `softRound`
+brush's dab touches however faintly, since its dab is a radial gradient falling to alpha ≈ 0 across
+its whole radius; a threshold instead cuts that faintest skirt away, and reduces to `> 0` for a hard
+brush regardless of where it sits. A narrow smoothstep across the threshold antialiases the resulting
 edge (a hard boolean edge stair-steps on diagonals) without reintroducing the source's own falloff.
 
-Both constants live in `Models/AlphaMask.swift`: `AlphaMask.threshold` (0.5) and
-`AlphaMask.antialiasHalfWidth` (0.05), feeding the one function that defines the mask,
-`coverage(forSourceAlpha:)`.
+Both constants live in `Models/AlphaMask.swift`: `AlphaMask.threshold` (0.1) and
+`AlphaMask.antialiasHalfWidth` (0.01), feeding the one function that defines the mask,
+`coverage(forSourceAlpha:)`. Neither was derived — they were judged by eye on the iPad against a soft
+brush, in a Release build, and they replaced 0.5/0.05, which had been a reasoned guess that threshold
+≈ 0.5 would land on the visually solid part of a stroke. Measurement on hardware disagreed: the
+shipped threshold tracks nearly the whole extent of a soft dab rather than only its solid core, so 0.1
+sits close to the `> 0` this section argues against, not close to 0.5. The antialias half-width moved
+with it to 0.01 — narrower than the 0.05 it replaced — so the resolved edge sits nearer a hard boolean
+than the reasoning above anticipated; the smoothstep still exists only to stop diagonals stair-
+stepping, not to reintroduce softness.
 
 ### 6.4 Live feedback while drawing
 
@@ -605,11 +612,13 @@ later and rewriting for one.
 
 ## 10. Still open
 
-1. **Mask threshold and antialias constants** (§6.3) — `AlphaMask.threshold` (0.5) and
-   `AlphaMask.antialiasHalfWidth` (0.05). **Unblocked, not done**: 6b shipped the UI and the live
-   stroke clip, so there is now something to look at and nobody has looked. Tune against a soft
-   brush on the iPad, where §6.4's `-Onone` cost is also felt. "Clip to below" itself shipped in 6a,
-   as a mask whose source is implied.
+1. **Mask threshold and antialias constants** (§6.3) — judged, not derived. `AlphaMask.threshold`
+   (0.1) and `AlphaMask.antialiasHalfWidth` (0.01) are what the product owner picked by eye on the
+   iPad, against a soft brush, in a Release build — replacing 0.5/0.05, 6b's pre-hardware guess.
+   `MaskTuningOverlay` and the two `static var`s stay rather than being deleted: the owner may want to
+   re-check the judgement once the live-stroke bug currently competing for iPad time is fixed. Delete
+   the harness (see the MASK-TUNE comments) once that re-check happens or is waved off. "Clip to
+   below" itself shipped in 6a, as a mask whose source is implied.
 2. **Compositor node ops** — §7 lists the *effects*; the multi-input ops themselves (Mix, and which
    others take 2+ inputs) want a pass once the node UI exists and there is something to try them on.
 
