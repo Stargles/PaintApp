@@ -165,7 +165,11 @@ final class EffectParityLogicTests: XCTestCase {
             deltas.append((name, maxChannelDelta(gpu, cpu(effect, bytes))))
         }
         let table = deltas.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
-        print("[effects] Metal-kernel-vs-Swift-reference max channel delta by effect: \(table)")
+        // As an activity rather than a `print`: a test's stdout does not reliably reach the build log
+        // from the runner app, and this table is the measurement — it has to be readable from the
+        // `.xcresult` afterwards (`xcresulttool get test-results activities`) rather than only when
+        // someone happens to be watching the console.
+        XCTContext.runActivity(named: "[effects] Metal-vs-Swift max channel delta: \(table)") { _ in }
 
         for (name, delta) in deltas {
             XCTAssertLessThanOrEqual(delta, Self.tolerance,
@@ -173,23 +177,39 @@ final class EffectParityLogicTests: XCTestCase {
         }
     }
 
-    /// The two effects resolved entirely into a lookup table are the two the backends cannot disagree
-    /// about *in the table itself*, because `Effect.lookupTable` builds it once in Swift and both sides
-    /// receive the same 1024 bytes (`Effect.swift`'s header argues for that, and names what it costs).
-    /// What is still measured here is everything around the lookup — the unpremultiply, the index, the
-    /// re-premultiply and the quantization — so the row is a real number about a smaller claim.
-    func testTheLookupTableEffectsAgreeExactly() throws {
+    /// The three table-driven effects cannot disagree about the table *itself*: `Effect.lookupTable`
+    /// builds it once in Swift and both backends receive the same 1024 bytes (`Effect.swift`'s header
+    /// argues for that and names what it costs). What is still measured is everything around the
+    /// lookup — the unpremultiply, the index, the re-premultiply, the quantization — and **the three
+    /// split, which is the finding this case exists to record.**
+    ///
+    /// Levels and Curves hold at **0**. Their index is the channel value itself, and both sides compute
+    /// it as `floor(v * 255 + 0.5)` from a value that came out of the same byte, so they land on the
+    /// same entry every time.
+    ///
+    /// Gradient Map is at **1**, and it is not a worse implementation of the same thing — it indexes by
+    /// `Lum(c)`, a dot product. Metal compiles with fast math on and may contract those three multiplies
+    /// and two adds into fused operations, so the last bit of the index can differ from Swift's; where
+    /// that shifts the index by one entry, the output moves by the gradient's local slope, which for a
+    /// black-to-white ramp is exactly one channel step. **A steeper gradient would move further**, which
+    /// is worth knowing before anyone reads this row as a bound: it is a bound on this gradient, not on
+    /// gradient maps.
+    ///
+    /// Measured on the simulator, this fixture. Asserted per effect rather than as one tolerance so
+    /// that Levels and Curves losing their exactness stays loud instead of hiding inside a number
+    /// written for the dot product.
+    func testTheLookupTableEffectsAgreeExactlyExceptWhereTheIndexIsComputed() throws {
         try skipUnlessGPUAvailable()
         guard let engine = MetalEffectEngine.shared else { return }
         let bytes = spectrumBytes()
+        let expected = ["levels": 0, "curves": 0, "gradientMap": 1]
 
-        for (name, effect) in Self.sweep where name == "levels" || name == "curves" || name == "gradientMap" {
+        for (name, effect) in Self.sweep where expected[name] != nil {
             guard let gpu = engine.apply(effect, to: bytes, width: Self.side, height: Self.side) else {
                 XCTFail("The GPU declined \(name)"); continue
             }
-            let delta = maxChannelDelta(gpu, cpu(effect, bytes))
-            XCTAssertEqual(delta, 0,
-                           "\(name) reads the same table on both sides, so a difference of \(delta) is in the index or the premultiply, not the curve")
+            XCTAssertLessThanOrEqual(maxChannelDelta(gpu, cpu(effect, bytes)), expected[name]!,
+                                     "\(name) is measured at \(expected[name]!) and got \(maxChannelDelta(gpu, cpu(effect, bytes)))")
         }
     }
 
