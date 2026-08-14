@@ -1,5 +1,43 @@
 # You are the Orchestrator for the rest of the layer-compositing project
 
+## HIBERNATED 2026-08-14 ~19:30 — resume here
+
+The session stopped on a usage cap, not on a problem. **Everything is committed; no worktree has
+uncommitted work; no process, lock or simulator was left running.** `main` is untouched at `5d39396`.
+
+**Exactly three things remain**, in order:
+
+1. **Re-run `tmp/mask-ui`'s five `LayerUITests` failures in isolation on a quiet machine.** Its suite
+   was 29 total / 24 passed / **5 failed**, but that run shared the box with another suite, and
+   **three of the five are the known load-sensitive trio that each passed clean in isolation on the
+   trunk** (94.9 s / 357.5 s / 47.6 s). A FAIL under load is inconclusive. The five:
+   `testAMultiplyLayerLooksMultipliedOnTheLiveCanvas`,
+   `testAnAllNormalDocumentNeverEngagesTheSandwich`,
+   `testEveryStrokeEntersTheMidStrokePresentationNotJustTheFirst`,
+   `testMovingThePlayheadRebuildsTheBlendedCanvas`,
+   `testTappingSelectedLayerOpensOptionsAndTogglesFillReference`.
+   The last one's own bug was already found and fixed at `504169e` — a fresh document has one layer
+   that is *already selected*, so its first tap correctly opens the menu; the test now adds a second
+   layer so the two-tap sequence is real. The keyboard-focus failure names `colorPanel.hexField`,
+   which `tmp/mask-ui` does not touch — chase it anyway if it survives, since a focused text field
+   swallowing event synthesis is a real defect, not just a flaky test.
+2. **Merge `tmp/mask-ui` into `tmp/converge` (the fourth merge), then run the full boundary suite.**
+   Expect conflicts in `LAYER_COMPOSITING.md` (§6.5/§6.6 vs §4.3/§6.3) and `DrawingView.swift`
+   (mask-ui deletes the overlay and the `83bd747` guard that converge still carries).
+3. **Fast-forward `main`, then push.** The owner has NOT yet approved the push — ask before
+   `git push origin main`, since it publishes everything since phase 7 in one move.
+
+**If the five do not come clean quickly, `tmp/converge` without `tmp/mask-ui` is still shippable** —
+the first three merges are green at 249/0/1 and self-contained. That defers only the owner's UI
+rework, so **put that choice to them rather than deciding it**.
+
+**Awaiting the owner:** the diagonal mask edge at threshold 0.1 / antialiasHalfWidth 0.01. Measured,
+~0.34 px of ramp and 24 fractional pixels on a radius-20 dab, so the smoothstep is close to vestigial.
+Their answer decides whether §6.3 gets amended or the constant revisited. **Do not delete the
+mask-tune harness until they answer.**
+
+
+
 Not for one phase. **Phase 9's remaining wrappers, §7's last three effects, §10, and the iPad
 judgements are yours**, and you carry the project until they are done or the owner redirects you.
 Read LAYER_COMPOSITING.md — the agreed design, settled with the product owner. §11 is the build order.
