@@ -329,21 +329,28 @@ kernel void compositeEffectMix(texture2d<float, access::read>  base        [[tex
 // MARK: - Tier 3 effects (§4.4, §7)
 //
 // **One kernel with one switch, the shape §5.1 describes for blend modes and for the same reason.**
-// Seven pipelines would be seven registrations in whichever object ends up owning the compositor's
-// pipeline states, and adding the eighth effect would touch that object again; one pipeline means an
-// effect is a case here and a case in `Effect.kindCode`, with nothing to register. The neighbourhood
-// filters §7 defers (blur, bloom, sharpen) will not fit this kernel — they need a ping-pong buffer and
-// more than one pass — and that is fine: they are a different contract, not a bigger version of this
-// one.
+// Ten pipelines would be ten registrations in whichever object ends up owning the compositor's
+// pipeline states, and adding the eleventh effect would touch that object again; one pipeline means an
+// effect is a case here and a case in `Effect.kindCode`, with nothing to register.
 //
-// **Every kernel below is bound to the same three values `EffectReference` reads**: a kind code, a
-// flat parameter block, and a 256-entry table. Neither backend interprets an `Effect`; `Effect.swift`
-// does that once, in Swift, and hands both the result. See that file's header for what this buys and
-// what it costs.
+// **The multi-pass effects did not need a second entry point, and that is the finding worth recording
+// here.** An earlier note in this file said the neighbourhood filters "will not fit this kernel". They
+// fit. A separable blur is two dispatches of *this* kernel differing only in the step vector in
+// `params`, and bloom is four; what changed is not the kernel but the thing driving it —
+// `EffectPipelines` now runs a list of passes rather than one, and `Effect.passes` in Swift decides how
+// long that list is. Nothing here is told which pass it is running, because a pass is fully described
+// by the numbers it carries.
 //
-// Alpha is preserved by construction — the wrapper unpremultiplies, hands the *colour* to the switch,
-// and re-premultiplies with the alpha it read. An effect grades what is there without reshaping it,
-// which is what lets one sit anywhere in a tree without changing what a mask beneath it resolves to.
+// **Every kernel below is bound to the same values `EffectReference` reads**: a kind code, a flat
+// parameter block, a 256-entry table, and a half-kernel of convolution weights. Neither backend
+// interprets an `Effect`; `Effect.swift` does that once, in Swift, and hands both the result. See that
+// file's header for what this buys and what it costs.
+//
+// Alpha is preserved by construction *for the grades* — the wrapper unpremultiplies, hands the
+// *colour* to the switch, and re-premultiplies with the alpha it read, so a grade sits anywhere in a
+// tree without changing what a mask beneath it resolves to. **Blur and bloom sit outside that wrapper
+// and do change coverage**, because a blur that left the silhouette sharp is not a blur; they convolve
+// premultiplied values so colour and coverage move together.
 
 // **Must match `Effect.kindCode` in Effect.swift and `EffectReference`'s constants, case for case** —
 // three literals in three places, covered by `EffectParityLogicTests` running every effect through
@@ -355,6 +362,9 @@ constant uint kEffectGradientMap         = 3;
 constant uint kEffectChromaticAberration = 4;
 constant uint kEffectPosterize           = 5;
 constant uint kEffectNoise               = 6;
+constant uint kEffectBlur1D              = 7;
+constant uint kEffectBloomThreshold      = 8;
+constant uint kEffectBloomCombine        = 9;
 
 /// Mirrors `EffectParams` in Effect.swift field for field. **All-scalar, deliberately**: a `float2`
 /// here has an alignment a Swift `SIMD2<Float>` matches only by luck, and a padding disagreement
@@ -366,15 +376,20 @@ struct EffectParams {
     float hueTurns;
     float saturation;
     float value;
+    // A displacement in pixels, shared by chromatic aberration's per-channel offset and a blur pass's
+    // per-tap step — and the reason a blur pass carries no "which pass am I" flag: the step is it.
     float offsetX;
     float offsetY;
     float mix;
     float levels;
     float screenStrength;
     float amount;
+    float threshold;
+    float intensity;
     uint  screen;
     uint  seed;
     uint  isMonochrome;
+    uint  taps;
 };
 
 /// One entry of the resolved transfer table.
@@ -556,22 +571,108 @@ static inline float4 chromaticAberration(texture2d<float, access::read> source,
     return float4(colour * alpha, alpha);
 }
 
-/// One effect over one texture — the kernel both §4.4 wrappers reach, and the only one they need.
+/// One separable pass: a weighted sum of `2 * taps + 1` samples along `(offsetX, offsetY)`.
+///
+/// **Premultiplied throughout, and never unpremultiplied.** A convolution is a weighted average, and
+/// averaging premultiplied values is the only form of it that is correct across an alpha edge — the
+/// argument `sampleBilinear` above already makes for one tap, applied to every tap here. The weights
+/// are non-negative and sum to 1, so a valid premultiplied input stays valid (`rgb <= a` survives a
+/// convex combination) and there is nothing to re-impose afterwards.
+///
+/// **The step is checked once for whether it lands on the pixel grid.** The Gaussian's two axis-aligned
+/// passes always do; a directional blur's angle generally does not. On-grid taps read one texel,
+/// off-grid taps interpolate four. The branch is uniform across the dispatch — it is a property of the
+/// parameters, not of the pixel — so it costs nothing and saves the common case four reads a tap.
+static inline float4 blur1D(texture2d<float, access::read> source, constant EffectParams &params,
+                            constant float *weights, uint2 gid) {
+    uint taps = params.taps;
+    if (taps == 0u) { return source.read(gid); }
+
+    float2 step = float2(params.offsetX, params.offsetY);
+    bool onGrid = step.x == round(step.x) && step.y == round(step.y);
+    int2 position = int2(gid);
+    float4 sum = source.read(gid) * weights[0];
+    for (uint tap = 1u; tap <= taps; ++tap) {
+        float2 delta = step * float(tap);
+        float4 forward, backward;
+        if (onGrid) {
+            int2 offset = int2(round(delta));
+            forward = texelClamped(source, position.x + offset.x, position.y + offset.y);
+            backward = texelClamped(source, position.x - offset.x, position.y - offset.y);
+        } else {
+            forward = sampleBilinear(source, float2(position) + delta);
+            backward = sampleBilinear(source, float2(position) - delta);
+        }
+        sum += (forward + backward) * weights[tap];
+    }
+    return sum;
+}
+
+/// Bloom's bright pass: the whole premultiplied texel scaled by how far its `Lum` sits above the
+/// threshold.
+///
+/// Scaling the premultiplied vector — rather than the colour — is what puts the brightness into
+/// *coverage*, so the blur that follows spreads a dim pixel less than a bright one without either
+/// kernel knowing that is what it is doing. `Lum` is read from the unpremultiplied colour, because how
+/// bright a pixel is, is a question about its colour and not about how much of it is there.
+static inline float4 bloomThreshold(texture2d<float, access::read> source,
+                                    constant EffectParams &params, uint2 gid) {
+    float4 texel = source.read(gid);
+    if (!(texel.a > 0.0f)) { return float4(0.0f); }
+    float weight = saturate((lum(saturate(texel.rgb / texel.a)) - params.threshold)
+                            / max(1.0f - params.threshold, 1e-4f));
+    return texel * weight;
+}
+
+/// Bloom's combine: the original image plus the blurred bright pass, additively, in premultiplied space.
+///
+/// `rgb` is re-clamped against the summed alpha afterwards. Addition can push a channel above the
+/// coverage carrying it, which is not a representable premultiplied colour and would surface much later
+/// as an unpremultiply above 1 in whatever read the texture next.
+static inline float4 bloomCombine(texture2d<float, access::read> glow,
+                                  texture2d<float, access::read> original,
+                                  constant EffectParams &params, uint2 gid) {
+    float4 base = original.read(gid);
+    float4 light = glow.read(gid);
+    float alpha = saturate(base.a + light.a * params.intensity);
+    return float4(min(saturate(base.rgb + light.rgb * params.intensity), alpha), alpha);
+}
+
+/// One pass of one effect over one texture — the kernel both §4.4 wrappers reach, and the only one they
+/// need whether the effect runs once or four times.
+///
+/// `original` is the effect's own input, unchanged by any earlier pass, and equals `source` on pass 0.
+/// Only `kEffectBloomCombine` reads it, but it is bound for every pass so the binding contract does not
+/// vary by kind — the same rule `lut` follows.
 ///
 /// Dispatched with `dispatchThreads` like every kernel above, so out-of-bounds threads are never
 /// launched and there is no bounds check to pay for.
-kernel void applyEffect(texture2d<float, access::read>  source [[texture(0)]],
-                        texture2d<float, access::write> result [[texture(1)]],
-                        constant uint                  &kind   [[buffer(0)]],
-                        constant EffectParams          &params [[buffer(1)]],
-                        constant uchar4                *lut    [[buffer(2)]],
+kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
+                        texture2d<float, access::write> result   [[texture(1)]],
+                        texture2d<float, access::read>  original [[texture(2)]],
+                        constant uint                  &kind     [[buffer(0)]],
+                        constant EffectParams          &params   [[buffer(1)]],
+                        constant uchar4                *lut      [[buffer(2)]],
+                        constant float                 *weights  [[buffer(3)]],
                         uint2 gid [[thread_position_in_grid]])
 {
-    // The one effect that reads a neighbourhood, and it needs the alpha of three different texels —
-    // so it answers for the whole pixel rather than fitting the unpremultiply/regrade/re-premultiply
-    // wrapper below.
+    // The kernels that read a neighbourhood, or a second texture, need the alpha of texels other than
+    // this one — so they answer for the whole pixel rather than fitting the unpremultiply / regrade /
+    // re-premultiply wrapper below.
     if (kind == kEffectChromaticAberration) {
         result.write(chromaticAberration(source, params, gid), gid);
+        return;
+    }
+    if (kind == kEffectBlur1D) {
+        result.write(blur1D(source, params, weights, gid), gid);
+        return;
+    }
+    if (kind == kEffectBloomThreshold) {
+        result.write(bloomThreshold(source, params, gid), gid);
+        return;
+    }
+    if (kind == kEffectBloomCombine) {
+        result.write(bloomCombine(source, original, params, gid), gid);
         return;
     }
 
