@@ -12,9 +12,11 @@ struct CanvasView: UIViewRepresentable {
         host.clipsToBounds = true
         host.isAccessibilityElement = true
         host.accessibilityIdentifier = "canvas.host"
-        // Which rendering path the canvas is on — see `Coordinator.SandwichPresentation`. Stated here
-        // as well as in the `didSet` because a `didSet` never fires for the initial value.
-        host.accessibilityLabel = "sandwich:off"
+        // Which rendering path the canvas is on, and how many times the mid-stroke one has been
+        // entered — see `Coordinator.SandwichPresentation` and `midStrokeEntryCount`. Stated here as
+        // well as in the `didSet` because a `didSet` never fires for the initial value; the two
+        // formats have to stay identical or the test helpers parse one of them into nothing.
+        host.accessibilityLabel = "sandwich:off entries:0"
         host.canvasManager = canvasManager
 
         let container = UIView()
@@ -700,8 +702,24 @@ struct CanvasView: UIViewRepresentable {
             case midStroke = "stroke"
         }
         private var sandwichPresentation: SandwichPresentation = .disengaged {
-            didSet { hostView?.accessibilityLabel = "sandwich:" + sandwichPresentation.rawValue }
+            didSet {
+                if sandwichPresentation == .midStroke, oldValue != .midStroke { midStrokeEntryCount += 1 }
+                hostView?.accessibilityLabel = "sandwich:\(sandwichPresentation.rawValue) entries:\(midStrokeEntryCount)"
+            }
         }
+
+        /// How many times the canvas has *entered* the mid-stroke presentation, published beside the
+        /// presentation itself.
+        ///
+        /// **The state alone is not observable at the moment that matters.** `sandwichPresentation`
+        /// is only ever read by a test between gestures, and the whole mid-stroke half of §5.2 exists
+        /// only while a touch is down — by the time XCUITest can look, lift has already put the
+        /// canvas back to `.rest` whether or not a single frame of the mid-stroke picture was ever
+        /// shown. Sampling during the gesture is not an option either: XCUITest synthesises events on
+        /// the main thread and refuses to do it from anywhere else, so a test cannot drag and look at
+        /// the same time. A latch is what closes that gap — a stroke that never entered `.midStroke`
+        /// is exactly a stroke the artist watched produce no ink until they lifted.
+        private var midStrokeEntryCount = 0
 
         weak var sandwichBelowView: UIImageView?
         weak var sandwichAboveView: UIImageView?

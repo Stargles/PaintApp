@@ -619,9 +619,24 @@ final class LayerUITests: PaintUITestCase {
 
     /// "off" / "rest" / "stroke" — which rendering path the live canvas is on, published on
     /// `canvas.host`'s label by `CanvasView.Coordinator.SandwichPresentation`.
+    ///
+    /// The label carries a second, space-separated field (`entries:`) that `midStrokeEntries` reads;
+    /// only the first token is the state.
     private func sandwichState(_ app: XCUIApplication) -> String {
         let label = app.otherElements["canvas.host"].label
-        return label.hasPrefix("sandwich:") ? String(label.dropFirst("sandwich:".count)) : "?(\(label))"
+        guard let first = label.split(separator: " ").first, first.hasPrefix("sandwich:") else {
+            return "?(\(label))"
+        }
+        return String(first.dropFirst("sandwich:".count))
+    }
+
+    /// How many times the canvas has entered §5.2's mid-stroke presentation — the latch
+    /// `CanvasView.Coordinator.midStrokeEntryCount` keeps, because the presentation itself only
+    /// exists while a touch is down and XCUITest cannot drag and look at once.
+    private func midStrokeEntries(_ app: XCUIApplication) -> Int? {
+        let label = app.otherElements["canvas.host"].label
+        guard let field = label.split(separator: " ").first(where: { $0.hasPrefix("entries:") }) else { return nil }
+        return Int(field.dropFirst("entries:".count))
     }
 
     /// **The regression guard for the mask trick, and the reason `LayerHostView.setBlanked` uses a
@@ -656,17 +671,25 @@ final class LayerUITests: PaintUITestCase {
     ///
     /// Every other sandwich assertion samples the canvas *after* lift, where `composite(full)`
     /// contains the stroke and the picture is right whether or not a single pixel of ink was on
-    /// screen while the artist was drawing. The mid-stroke half of §5.2 is only observable with the
-    /// touch still down, so that is what this does: the drag runs on a background queue with a hold
-    /// at the far end, and the test thread probes the canvas during the hold.
+    /// screen while the artist was drawing. So a canvas that shows nothing until the pen comes up
+    /// passes all of them.
+    ///
+    /// **Why this reads a latch instead of screenshotting mid-gesture.** The obvious test — drag
+    /// slowly on a background queue, probe the pixel from the test thread — does not work and cannot
+    /// be made to work: XCUITest synthesises events on the main thread and throws
+    /// `"Must be called on the main thread"` from anywhere else, so a test cannot drag and look at
+    /// the same time. `midStrokeEntryCount` (`CanvasView.Coordinator`) is the seam that makes the
+    /// question answerable after the fact: a stroke drawn while the sandwich is engaged has to have
+    /// *entered* the mid-stroke presentation at some point, and a stroke that never did is exactly a
+    /// stroke whose ink the artist could not see until lift.
     ///
     /// **The second stroke, not the first, and that is the whole point.** `updateSandwich` is the
     /// only thing that unblanks the active host, and it runs from a SwiftUI pass. The first stroke on
     /// a frame spawns a cel, which publishes, which causes the pass — so the first stroke draws
     /// visibly and hides the defect. The second stroke publishes nothing (a dab must not, §5.2), so
     /// if nothing applies the mid-stroke presentation at touch-down the host stays blanked for the
-    /// whole stroke and the ink appears only on lift.
-    func testInkIsVisibleWhileTheSecondStrokeIsStillDown() throws {
+    /// whole stroke.
+    func testEveryStrokeEntersTheMidStrokePresentationNotJustTheFirst() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
@@ -674,76 +697,32 @@ final class LayerUITests: PaintUITestCase {
 
         setBlendMode(app, layerIndex: 0, to: "multiply")
         XCTAssertEqual(sandwichState(app), "rest", "Setup: a blending leaf puts the canvas on the compositor")
+        XCTAssertEqual(midStrokeEntries(app), 0, "Setup: nothing drawn, so the mid-stroke picture has never been shown")
         setBrushColor(app, hex: "00FFFF")
 
-        // Stroke one, lifted normally. It spawns the cel, so it is the stroke that gets a free
-        // SwiftUI pass — and it leaves the canvas back at rest with every host blanked again.
+        // Stroke one spawns the cel, and that spawn publishes — so this stroke gets a SwiftUI pass
+        // for free and enters the mid-stroke presentation even with the defect present.
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
         XCTAssertNotNil(waitForPixel(canvas, at: crossing) { !isWhitish($0) }, "Setup: the first stroke landed")
-        XCTAssertEqual(sandwichState(app), "rest", "Setup: back at rest, so the active host is blanked again")
+        XCTAssertEqual(midStrokeEntries(app), 1, "Setup: the first stroke is the one that gets a pass for free")
 
-        // Let the debounced thumbnail regen (400 ms, `CanvasManager`) land and publish before the
-        // stroke under test starts. Otherwise it could arrive mid-stroke, cause the SwiftUI pass this
-        // test is about the absence of, and mask the defect.
+        // Let the 400 ms thumbnail-regen debounce land before the stroke under test, so its publish
+        // cannot supply the SwiftUI pass whose absence is the whole subject.
         Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertEqual(sandwichState(app), "rest", "Setup: settled back to rest, so every host is blanked again")
 
-        // Stroke two, on fresh paper well clear of stroke one, so the only thing that can put ink at
-        // `probe` is the active layer's own host drawing itself.
-        let probe = CGVector(dx: 0.40, dy: 0.65)
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)),
-                      "Setup: nothing has been drawn at the probe yet")
+        // Stroke two, on fresh paper. The cel already exists, so nothing publishes at touch-down.
+        let second = CGVector(dx: 0.45, dy: 0.65)
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: second.dy), to: CGVector(dx: 0.55, dy: second.dy))
 
-        var midStrokePixel: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)?
-        var midStrokeState = "?"
-        whileDrawing(on: canvas, from: CGVector(dx: 0.30, dy: probe.dy), to: CGVector(dx: 0.62, dy: probe.dy)) {
-            // Poll rather than sample once: the touch is synthesised asynchronously, so the first
-            // reads land before the pen has crawled as far as the probe.
-            let deadline = Date().addingTimeInterval(8)
-            while Date() < deadline {
-                let pixel = self.rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)
-                midStrokePixel = pixel
-                midStrokeState = self.sandwichState(app)
-                if !self.isWhitish(pixel) { return }
-                Thread.sleep(forTimeInterval: 0.2)
-            }
+        XCTContext.runActivity(named: "after the second stroke") { activity in
+            activity.add(XCTAttachment(string: "label=\(app.otherElements["canvas.host"].label)"))
         }
+        XCTAssertEqual(midStrokeEntries(app), 2,
+                       "The second stroke has to show the artist their ink too. A count still at 1 means the mid-stroke picture was never put up for it — the active host stayed blanked by §5.2 for the whole gesture and the stroke only appeared on lift")
 
-        XCTContext.runActivity(named: "mid-stroke probe") { activity in
-            activity.add(XCTAttachment(string: "pixel=\(String(describing: midStrokePixel)) state=\(midStrokeState)"))
-        }
-        XCTAssertEqual(midStrokeState, "stroke",
-                       "With a dab down the canvas has to be on the three-view mid-stroke path, not still showing `full`")
-        XCTAssertFalse(isWhitish(midStrokePixel),
-                       "The artist has to see their ink while the touch is still down. White at \(String(describing: midStrokePixel)) is the blanked active host — the stroke is being recorded into a view §5.2 is hiding, and it appears only on lift")
-
-        // And the lift still snaps to the exact composite, so the fix cannot have been "stop blanking".
-        XCTAssertNotNil(waitForPixel(canvas, at: probe) { !isWhitish($0) }, "The stroke survives the lift")
+        XCTAssertNotNil(waitForPixel(canvas, at: second) { !isWhitish($0) }, "The stroke survives the lift")
         XCTAssertEqual(sandwichState(app), "rest", "…and the canvas goes back to `composite(full)`")
-    }
-
-    /// Runs a deliberately slow drag on a background queue and calls `probe` on the test thread while
-    /// the touch is still down, joining before it returns.
-    ///
-    /// XCUITest's gesture APIs are synchronous — `press(forDuration:thenDragTo:…)` returns only once
-    /// the touch has lifted — so there is no other way to look at the screen mid-gesture, and
-    /// mid-gesture is the only place §5.2's mid-stroke state exists.
-    ///
-    /// **A crawling drag rather than `thenHoldForDuration`, and that is not a style choice.** Holding
-    /// the pen still for 0.8 s is the smart-shape gesture (`Coordinator.startShapeDetection`): the
-    /// hold timer fires, a straight drag detects as a line, and `fireShapeDetection` *reverts the
-    /// stroke it was painting*. The probe would then be reading a canvas the app had deliberately
-    /// cleared. A drag that never stops moving resets that timer on every sample instead.
-    private func whileDrawing(on element: XCUIElement, from: CGVector, to: CGVector, probe: () -> Void) {
-        let start = element.coordinate(withNormalizedOffset: from)
-        let end = element.coordinate(withNormalizedOffset: to)
-        let finished = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).async {
-            start.press(forDuration: 0.1, thenDragTo: end,
-                        withVelocity: XCUIGestureVelocity(rawValue: 40), thenHoldForDuration: 0.1)
-            finished.signal()
-        }
-        probe()
-        _ = finished.wait(timeout: .now() + 60)
     }
 
     /// **§11's done-criterion for phase 5b: a Multiply layer looks multiplied on the canvas the
