@@ -896,6 +896,23 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// Sets the mode a Mix node combines its two inputs with (§4.3) — **the whole content of its
+    /// op**, and a different question from `setFolderBlendMode` above, which the same folder also
+    /// answers: that one is how the node's finished composite blends into whatever contains it.
+    ///
+    /// Narrow on purpose. A general `setCompositorOp` would have to refuse any op of a different
+    /// arity — the slots are folders that already exist and hold artwork, so changing arity is a
+    /// structural edit rather than a pick — and phase 8 ships one op, so the guard would be
+    /// unreachable code defending an affordance nothing offers. Reshaping the op is what
+    /// `addCompositorNode` is for.
+    func setMixBlendMode(_ folderID: UUID, to mode: BlendMode) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }),
+              case .mix(let current)? = folders[idx].compositorOp, current != mode else { return }
+        withStructureUndo(name: "Mix Mode") {
+            folders[idx].compositorRole = .node(op: .mix(mode))
+        }
+    }
+
     /// Sets (or clears) a layer's alpha mask — §6.2's model half of the §6.5 panel.
     ///
     /// One undo step per call, like every other discrete pick. §6.6 wants a whole mask-edit *session*

@@ -93,6 +93,16 @@ struct LayerPanel: View {
                     Label("Folder", systemImage: "folder")
                 }
                 .accessibilityIdentifier("layerPanel.addFolderButton")
+                // §4.3: a compositor node arrives from the same menu a folder does, because it *is*
+                // one — a folder whose children are its input slots. One tap creates the node and
+                // both slots (`addCompositorNode`), since a node without its operands is a shape
+                // none of the tree's guards would accept.
+                Button {
+                    canvasManager.addCompositorNode(op: .mix(.normal))
+                } label: {
+                    Label("Mix Node", systemImage: "camera.filters")
+                }
+                .accessibilityIdentifier("layerPanel.addMixNodeButton")
             } label: {
                 Image(systemName: "plus")
                     .font(.title3)
@@ -308,11 +318,17 @@ struct LayerOptionsPanel: View {
 /// `current`'s raw value rides as the button's `accessibilityValue` — stable across a `displayName`
 /// wording change, unlike reading the visible label back — so a UI test can confirm a pick stuck
 /// after the panel closes and reopens, the same way `layerOptions.passThroughToggle` does.
-private func blendModeRow(current: BlendMode, onSelect: @escaping (BlendMode) -> Void) -> some View {
+///
+/// §4.3's Mix node points this same control at its **op** rather than at the folder's own blend into
+/// its parent — hence `title`, `identifier` and `groups`, which are the whole of the difference. A
+/// second picker for a second thing spelled `BlendMode` would be fourteen cases kept in step by hand.
+private func blendModeRow(title: String = "Blend Mode", identifier: String = "blendMode",
+                          groups: [[BlendMode]] = BlendMode.menuGroups,
+                          current: BlendMode, onSelect: @escaping (BlendMode) -> Void) -> some View {
     Menu {
-        ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
+        ForEach(groups.indices, id: \.self) { groupIndex in
             Section {
-                ForEach(BlendMode.menuGroups[groupIndex], id: \.self) { mode in
+                ForEach(groups[groupIndex], id: \.self) { mode in
                     Button {
                         onSelect(mode)
                     } label: {
@@ -322,13 +338,13 @@ private func blendModeRow(current: BlendMode, onSelect: @escaping (BlendMode) ->
                             Text(mode.displayName)
                         }
                     }
-                    .accessibilityIdentifier("layerOptions.blendMode.\(mode.rawValue)")
+                    .accessibilityIdentifier("layerOptions.\(identifier).\(mode.rawValue)")
                 }
             }
         }
     } label: {
         HStack(spacing: 8) {
-            Text("Blend Mode").foregroundColor(.white)
+            Text(title).foregroundColor(.white)
             Spacer()
             Text(current.displayName)
                 .font(.caption)
@@ -341,9 +357,19 @@ private func blendModeRow(current: BlendMode, onSelect: @escaping (BlendMode) ->
         .padding(.vertical, 10)
         .contentShape(Rectangle())
     }
-    .accessibilityIdentifier("layerOptions.blendModeButton")
+    .accessibilityIdentifier("layerOptions.\(identifier)Button")
     .accessibilityValue(current.rawValue)
 }
+
+/// The picker's list with "Clip to Below" dropped, for a compositor op.
+///
+/// That mode is not a blend at all (§7): it is the mask machinery with an *implicit* source, the
+/// entry one step down in the same container. A Mix's operands are two named slots rather than a
+/// stack with something under them, so there is nothing for the implicit source to resolve to — the
+/// pick would silently mean "normal" and read as a mode that quietly does nothing.
+private let compositorOpModeGroups: [[BlendMode]] = BlendMode.menuGroups
+    .map { $0.filter { $0 != .clipToBelow } }
+    .filter { !$0.isEmpty }
 
 /// One row of an options menu's action list — shared by `LayerOptionsPanel` and
 /// `FolderOptionsPanel` so the two menus render identically.
@@ -434,6 +460,11 @@ private func maskSubtitle(_ mask: AlphaMask?) -> String {
 /// again" — a folder row's tap already means expand/collapse, so that gesture was taken. Presented
 /// the same way as `LayerOptionsPanel` (see `DrawingView.layerPanelRail`), and the two are mutually
 /// exclusive since both hang off the one `layerOptionsID`.
+///
+/// **Also the node and slot menu (§4.3)**, because both are folders — `DrawingView.layerPanelRail`
+/// routes on "is this id a folder" and cannot tell them apart. Each section below asks the model
+/// what this particular folder is rather than the panel being forked three ways: a node adds the Mix
+/// picker, and a slot drops the three controls that would promise it is an ordinary folder.
 struct FolderOptionsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     let folderID: UUID
@@ -443,6 +474,7 @@ struct FolderOptionsPanel: View {
     @State private var isRenaming = false
 
     private var folderIndex: Int? { canvasManager.folders.firstIndex { $0.id == folderID } }
+    private var folder: LayerFolder? { canvasManager.folders.first { $0.id == folderID } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -450,26 +482,44 @@ struct FolderOptionsPanel: View {
                 header(for: index)
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-                // §4.2: isolated is the default — children blend only against each other — and
-                // pass-through is the toggle, off by default. The switch reads directly as
-                // `!isIsolated` so its "on" position matches its label rather than the model's.
-                Toggle(isOn: Binding(
-                    get: { canvasManager.folders.indices.contains(index) ? !canvasManager.folders[index].isIsolated : false },
-                    set: { canvasManager.setFolderIsolated(folderID, isIsolated: !$0) }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Pass Through").foregroundColor(.white)
-                        Text("Blend with layers below this group")
-                            .font(.caption2)
-                            .foregroundColor(.gray)
+                // §4.3: for a Mix, the mode *is* the op — the whole of what the node does with its
+                // two inputs — so it is the first thing in the panel and sits above the folder's own
+                // blend mode below, which answers the different question of how the node's finished
+                // composite meets whatever contains it.
+                if case .mix(let mode)? = folder?.compositorOp {
+                    blendModeRow(title: "Mix Mode", identifier: "mixMode",
+                                 groups: compositorOpModeGroups, current: mode) { picked in
+                        canvasManager.setMixBlendMode(folderID, to: picked)
                     }
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
                 }
-                .tint(.blue)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .accessibilityIdentifier("layerOptions.passThroughToggle")
 
-                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                // §4.3: an input slot is always isolated — an input that blended against the backdrop
+                // beneath its own node would not be an input in any sense the op could use — so there
+                // is no toggle to offer. The derivation forces `isIsolated` for a slot regardless;
+                // showing a switch that the render tree overrides is the UX half of the same rule.
+                if folder?.isInputSlot != true {
+                    // §4.2: isolated is the default — children blend only against each other — and
+                    // pass-through is the toggle, off by default. The switch reads directly as
+                    // `!isIsolated` so its "on" position matches its label rather than the model's.
+                    Toggle(isOn: Binding(
+                        get: { canvasManager.folders.indices.contains(index) ? !canvasManager.folders[index].isIsolated : false },
+                        set: { canvasManager.setFolderIsolated(folderID, isIsolated: !$0) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Pass Through").foregroundColor(.white)
+                            Text("Blend with layers below this group")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .tint(.blue)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .accessibilityIdentifier("layerOptions.passThroughToggle")
+
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                }
 
                 // §6.2: a group is as legal a mask *target* as a layer, the same way it's a legal
                 // source — `maskSection` doesn't know or care which kind of node it was handed.
@@ -478,19 +528,33 @@ struct FolderOptionsPanel: View {
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-                blendModeRow(current: canvasManager.folders[index].blendMode) { mode in
-                    canvasManager.setFolderBlendMode(folderID, to: mode)
-                }
+                // A slot's own blend mode would be a second answer to the question its node's op
+                // already answers — §4.3's "Mix(A, B, .multiply) is deliberately the same math as
+                // stacking B over A with blend mode multiply" is precisely the collision — and §4.3
+                // does not say which of the two wins. Not offered where it cannot be honoured
+                // unambiguously; the mode for an operand is the node's, above.
+                if folder?.isInputSlot != true {
+                    blendModeRow(current: canvasManager.folders[index].blendMode) { mode in
+                        canvasManager.setFolderBlendMode(folderID, to: mode)
+                    }
 
-                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                }
 
                 optionsAction("Rename", systemImage: "pencil", identifier: "layerOptions.rename") {
                     draftName = canvasManager.folders[index].name
                     isRenaming = true
                 }
-                optionsAction("Delete", systemImage: "trash", identifier: "layerOptions.deleteFolder", role: .destructive) {
-                    canvasManager.deleteFolder(folderID)
-                    onClose()
+                // §4.3: a slot exists because its node's arity says so, and `deleteFolder` refuses
+                // one. Asked of the manager rather than re-derived here, so the panel and the guard
+                // cannot disagree about which folders have a Delete. A *node* keeps its — the whole
+                // subtree goes as one undo step, which the label says out loud.
+                if canvasManager.canDeleteFolder(folderID) {
+                    optionsAction(folder?.isCompositorNode == true ? "Delete Node and Inputs" : "Delete",
+                                  systemImage: "trash", identifier: "layerOptions.deleteFolder", role: .destructive) {
+                        canvasManager.deleteFolder(folderID)
+                        onClose()
+                    }
                 }
             } else {
                 Text("Folder no longer exists.")

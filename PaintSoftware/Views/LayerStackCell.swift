@@ -1,6 +1,12 @@
 import UIKit
 
-/// One row of the layer stack: a folder header or a layer.
+/// One row of the layer stack: a layer, a group header, a compositor node header, or one of that
+/// node's input slots (§4.3).
+///
+/// The last two are folders in storage and deliberately so — containment, spans and the ordering
+/// rules reuse the group machinery untouched — which means the panel is the only place they can be
+/// told apart at all, and the row is where an artist finds out that "Input A" is not a folder they
+/// can delete or drag.
 ///
 /// Laid out by hand at fixed heights. The SwiftUI version indented children by widening the row's
 /// `HStack` spacing, which applied that gap between *every* control in the row rather than just at
@@ -51,6 +57,9 @@ final class LayerStackCell: UITableViewCell {
     /// Carries `blendMode.rawValue` — stable across localization, unlike `displayName` in the
     /// subtitle/name suffix below, which is what a test should read instead of the visible label.
     private let blendModeMarker = UIView()
+    /// §4.3's row kind, as `"node,<mixMode>"` or `"slot,<index>"`. Which slot a row is is otherwise
+    /// only readable from its position among its siblings, which is exactly the thing worth pinning.
+    private let compositorMarker = UIView()
 
     private var contentLeading: NSLayoutConstraint!
     private var isFolderRow = false
@@ -73,7 +82,8 @@ final class LayerStackCell: UITableViewCell {
     private func buildHierarchy() {
         for view in [guideContainer, disclosureButton, visibilityButton, thumbnailView, folderIconView,
                      nameLabel, subtitleLabel, opacitySlider, currentMarker, folderOptionsButton,
-                     maskSourceMarker, bakedMarker, vectorMarker, folderMarker, blendModeMarker] {
+                     maskSourceMarker, bakedMarker, vectorMarker, folderMarker, blendModeMarker,
+                     compositorMarker] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -92,9 +102,9 @@ final class LayerStackCell: UITableViewCell {
         thumbnailView.layer.borderColor = UIColor.white.withAlphaComponent(0.2).cgColor
         thumbnailView.backgroundColor = .white
 
+        // Image and tint are set per row in `configure` — a node and a slot take this same slot with
+        // their own glyph, which is most of what makes them read as something other than a folder.
         folderIconView.contentMode = .scaleAspectFit
-        folderIconView.image = UIImage(systemName: "folder.fill")
-        folderIconView.tintColor = .systemYellow
 
         nameLabel.font = .systemFont(ofSize: 15)
         nameLabel.textColor = .white
@@ -129,7 +139,7 @@ final class LayerStackCell: UITableViewCell {
         maskSourceMarker.isAccessibilityElement = true
         maskSourceMarker.accessibilityTraits = .image
 
-        for marker in [bakedMarker, vectorMarker, folderMarker, blendModeMarker] {
+        for marker in [bakedMarker, vectorMarker, folderMarker, blendModeMarker, compositorMarker] {
             marker.isAccessibilityElement = true
             marker.isUserInteractionEnabled = false
             marker.backgroundColor = .clear
@@ -208,6 +218,11 @@ final class LayerStackCell: UITableViewCell {
             blendModeMarker.heightAnchor.constraint(equalToConstant: 1),
             blendModeMarker.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
             blendModeMarker.topAnchor.constraint(equalTo: contentView.topAnchor),
+
+            compositorMarker.widthAnchor.constraint(equalToConstant: 1),
+            compositorMarker.heightAnchor.constraint(equalToConstant: 1),
+            compositorMarker.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            compositorMarker.topAnchor.constraint(equalTo: contentView.topAnchor),
         ])
 
         // The name sits after the thumbnail on layer rows and after the folder icon on folder rows,
@@ -241,18 +256,7 @@ final class LayerStackCell: UITableViewCell {
         isFolderRow = model.isFolder
         updateGuides(depth: model.depth)
 
-        // A layer or group set to Multiply reads identically to Normal otherwise — the row is the
-        // only place an artist checks a stack at a glance, so the mode has to show without opening
-        // options (§7). Appended to the name rather than laid out as its own label: `.normal` (the
-        // common case) contributes nothing, so no row shifts, and `accessibilityLabel` below stays
-        // the bare name — VoiceOver/XCUITest read `blendModeMarker`'s stable rawValue instead of
-        // parsing this display string.
-        //
-        // `!= .normal` rather than `isBlending`: "Clip to Below" answers false to the second, because
-        // it composites source-over and expresses itself as a mask (§7) — but it is still a pick the
-        // artist made and still needs to show here, which is a question about the picker rather than
-        // about the arithmetic.
-        nameLabel.text = model.blendMode != .normal ? "\(model.name)  ·  \(model.blendMode.displayName)" : model.name
+        nameLabel.text = title(for: model)
         nameLabel.accessibilityLabel = model.name
 
         visibilityButton.setImage(UIImage(systemName: model.isVisible ? "eye" : "eye.slash"), for: .normal)
@@ -260,84 +264,23 @@ final class LayerStackCell: UITableViewCell {
         visibilityButton.accessibilityIdentifier = model.isFolder
             ? "layerPanel.folder.\(model.name).visibility" : "layerPanel.row.\(model.layerIndex).visibility"
 
-        if model.isFolder {
-            thumbnailView.isHidden = true
-            folderIconView.isHidden = false
-            opacitySlider.isHidden = false
-            currentMarker.isHidden = true
-            folderOptionsButton.isHidden = false
-            subtitleLabel.isHidden = true
-            disclosureButton.isHidden = false
-            disclosureButton.setImage(UIImage(systemName: model.isExpanded ? "chevron.down" : "chevron.right"), for: .normal)
-
-            layerNameLeading.isActive = false
-            layerNameCenterY.isActive = false
-            folderNameLeading.isActive = true
-            folderNameCenterY.isActive = true
-            opacitySliderTrailingToMarker.isActive = false
-            opacitySliderTrailingToOptions.isActive = true
-            if !opacitySlider.isTracking {
-                opacitySlider.value = Float(model.opacity)
-            }
-            opacitySlider.accessibilityIdentifier = "layerPanel.folder.\(model.name).opacity"
-            setCurrentRow(false)
-            nameLabel.textColor = model.isVisible ? .white : .gray
-            nameLabel.accessibilityIdentifier = "layerPanel.folder.\(model.name)"
-            nameLabel.accessibilityValue = "\(model.depth)"
-            folderOptionsButton.accessibilityIdentifier = "layerPanel.folder.\(model.name).options"
-
-            bakedMarker.accessibilityIdentifier = nil
-            vectorMarker.accessibilityIdentifier = nil
-            folderMarker.accessibilityIdentifier = nil
-            subtitleLabel.accessibilityIdentifier = nil
-            currentMarker.accessibilityIdentifier = nil
-            blendModeMarker.accessibilityIdentifier = "layerPanel.folder.\(model.name).blendMode"
-            blendModeMarker.accessibilityValue = model.blendMode.rawValue
-        } else {
-            thumbnailView.isHidden = false
-            folderIconView.isHidden = true
-            opacitySlider.isHidden = false
-            subtitleLabel.isHidden = false
-            disclosureButton.isHidden = true
-            folderOptionsButton.isHidden = true
-
-            folderNameLeading.isActive = false
-            folderNameCenterY.isActive = false
-            layerNameLeading.isActive = true
-            layerNameCenterY.isActive = true
-            opacitySliderTrailingToOptions.isActive = false
-            opacitySliderTrailingToMarker.isActive = true
-            nameLabel.textColor = .white
-
-            thumbnailView.image = model.thumbnail
-            thumbnailView.backgroundColor = model.thumbnail == nil ? .white : .clear
-            thumbnailView.alpha = CGFloat(model.opacity)
-
-            if !opacitySlider.isTracking {
-                opacitySlider.value = Float(model.opacity)
-            }
-            // Overwrites whatever a recycled cell's last row left here — including a folder row's
-            // `.opacity` identifier above, which would otherwise linger on a reused cell.
-            opacitySlider.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).opacity"
-            currentMarker.isHidden = !model.isCurrent
-            currentMarker.isAccessibilityElement = model.isCurrent
-            setCurrentRow(model.isCurrent)
-
-            subtitleLabel.text = model.isFillReference ? "Fill Reference" : "Fill Excluded"
-
-            nameLabel.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex)"
-            nameLabel.accessibilityValue = "\(model.strokeCount)"
-            subtitleLabel.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).fillRef"
-            subtitleLabel.accessibilityValue = model.isFillReference ? "1" : "0"
-            currentMarker.accessibilityIdentifier = model.isCurrent ? "layerPanel.row.\(model.layerIndex).current" : nil
-            bakedMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).hasBaked"
-            bakedMarker.accessibilityValue = model.hasBakedImage ? "1" : "0"
-            vectorMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).vector"
-            vectorMarker.accessibilityValue = "\(model.isVector ? 1 : 0),\(model.vectorStrokeCount),\(model.vectorEraseCount)"
-            folderMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).folder"
-            folderMarker.accessibilityValue = model.folderName ?? ""
-            blendModeMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).blendMode"
-            blendModeMarker.accessibilityValue = model.blendMode.rawValue
+        // Four kinds where this was `if model.isFolder`. The three folder kinds share their whole
+        // geometry — a node and a slot are groups in storage and there is nothing to lay out
+        // differently — so what the switch actually picks is the glyph, its tint, and the marker,
+        // which is the entire visible difference between "a folder" and "an operand of a node".
+        switch model.kind {
+        case .layer:
+            configureLayerRow(model)
+        case .group:
+            configureFolderRow(model, icon: "folder.fill", tint: .systemYellow)
+        case .compositorNode:
+            // Two overlapping circles: the node combines its inputs, which is the one thing about it
+            // a glyph can say.
+            configureFolderRow(model, icon: "camera.filters", tint: .systemTeal)
+        case .inputSlot:
+            // A receptacle rather than a container — a slot is where artwork is *put*, and it cannot
+            // be deleted or dragged the way the folder glyph would promise.
+            configureFolderRow(model, icon: "tray", tint: .systemTeal)
         }
 
         configureMaskEdit(model)
@@ -345,6 +288,132 @@ final class LayerStackCell: UITableViewCell {
         isMergeHighlighted = false
         isDropHighlighted = false
         refreshBackground()
+    }
+
+    /// The row's visible title: its name, plus every pick that would otherwise be invisible without
+    /// opening the options panel.
+    ///
+    /// A layer or group set to Multiply reads identically to Normal otherwise — the row is the only
+    /// place an artist checks a stack at a glance, so the mode has to show here (§7). Appended to the
+    /// name rather than laid out as its own label: the common case contributes nothing, so no row
+    /// shifts, and `accessibilityLabel` stays the bare name — VoiceOver and XCUITest read the
+    /// `blendModeMarker`/`compositorMarker` raw values instead of parsing this display string.
+    ///
+    /// **A Mix node's mode shows even at Normal**, unlike a layer's. It is the whole content of the
+    /// node's op (§4.3), so Normal there is a pick the artist made rather than the absence of one —
+    /// and a Mix node with nothing after its name would look like a node whose op had gone missing.
+    private func title(for model: LayerRowModel) -> String {
+        var parts = [model.name]
+        if let mix = model.mixMode { parts.append(mix.displayName) }
+        // `!= .normal` rather than `isBlending`: "Clip to Below" answers false to the second, because
+        // it composites source-over and expresses itself as a mask (§7) — but it is still a pick the
+        // artist made and still needs to show here, which is a question about the picker rather than
+        // about the arithmetic.
+        if model.blendMode != .normal { parts.append(model.blendMode.displayName) }
+        return parts.joined(separator: "  ·  ")
+    }
+
+    private func configureFolderRow(_ model: LayerRowModel, icon: String, tint: UIColor) {
+        thumbnailView.isHidden = true
+        folderIconView.isHidden = false
+        folderIconView.image = UIImage(systemName: icon)
+        folderIconView.tintColor = tint
+        opacitySlider.isHidden = false
+        currentMarker.isHidden = true
+        folderOptionsButton.isHidden = false
+        subtitleLabel.isHidden = true
+        disclosureButton.isHidden = false
+        disclosureButton.setImage(UIImage(systemName: model.isExpanded ? "chevron.down" : "chevron.right"), for: .normal)
+
+        layerNameLeading.isActive = false
+        layerNameCenterY.isActive = false
+        folderNameLeading.isActive = true
+        folderNameCenterY.isActive = true
+        opacitySliderTrailingToMarker.isActive = false
+        opacitySliderTrailingToOptions.isActive = true
+        if !opacitySlider.isTracking {
+            opacitySlider.value = Float(model.opacity)
+        }
+        opacitySlider.accessibilityIdentifier = "layerPanel.folder.\(model.name).opacity"
+        setCurrentRow(false)
+        nameLabel.textColor = model.isVisible ? .white : .gray
+        nameLabel.accessibilityIdentifier = "layerPanel.folder.\(model.name)"
+        nameLabel.accessibilityValue = "\(model.depth)"
+        folderOptionsButton.accessibilityIdentifier = "layerPanel.folder.\(model.name).options"
+
+        bakedMarker.accessibilityIdentifier = nil
+        vectorMarker.accessibilityIdentifier = nil
+        folderMarker.accessibilityIdentifier = nil
+        subtitleLabel.accessibilityIdentifier = nil
+        currentMarker.accessibilityIdentifier = nil
+        blendModeMarker.accessibilityIdentifier = "layerPanel.folder.\(model.name).blendMode"
+        blendModeMarker.accessibilityValue = model.blendMode.rawValue
+        configureCompositorMarker(model)
+    }
+
+    /// Overwrites whatever a recycled cell's last row left on the probe — an ordinary folder and a
+    /// layer both clear it, so a stale "slot,0" can't linger on a reused cell and make an unrelated
+    /// row answer as an operand.
+    private func configureCompositorMarker(_ model: LayerRowModel) {
+        switch model.kind {
+        case .compositorNode:
+            compositorMarker.accessibilityIdentifier = "layerPanel.folder.\(model.name).compositor"
+            compositorMarker.accessibilityValue = "node,\(model.mixMode?.rawValue ?? "stack")"
+        case .inputSlot:
+            compositorMarker.accessibilityIdentifier = "layerPanel.folder.\(model.name).compositor"
+            compositorMarker.accessibilityValue = "slot,\(model.inputSlotIndex ?? -1)"
+        case .group, .layer:
+            compositorMarker.accessibilityIdentifier = nil
+            compositorMarker.accessibilityValue = nil
+        }
+    }
+
+    private func configureLayerRow(_ model: LayerRowModel) {
+        thumbnailView.isHidden = false
+        folderIconView.isHidden = true
+        opacitySlider.isHidden = false
+        subtitleLabel.isHidden = false
+        disclosureButton.isHidden = true
+        folderOptionsButton.isHidden = true
+
+        folderNameLeading.isActive = false
+        folderNameCenterY.isActive = false
+        layerNameLeading.isActive = true
+        layerNameCenterY.isActive = true
+        opacitySliderTrailingToOptions.isActive = false
+        opacitySliderTrailingToMarker.isActive = true
+        nameLabel.textColor = .white
+
+        thumbnailView.image = model.thumbnail
+        thumbnailView.backgroundColor = model.thumbnail == nil ? .white : .clear
+        thumbnailView.alpha = CGFloat(model.opacity)
+
+        if !opacitySlider.isTracking {
+            opacitySlider.value = Float(model.opacity)
+        }
+        // Overwrites whatever a recycled cell's last row left here — including a folder row's
+        // `.opacity` identifier, which would otherwise linger on a reused cell.
+        opacitySlider.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).opacity"
+        currentMarker.isHidden = !model.isCurrent
+        currentMarker.isAccessibilityElement = model.isCurrent
+        setCurrentRow(model.isCurrent)
+
+        subtitleLabel.text = model.isFillReference ? "Fill Reference" : "Fill Excluded"
+
+        nameLabel.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex)"
+        nameLabel.accessibilityValue = "\(model.strokeCount)"
+        subtitleLabel.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).fillRef"
+        subtitleLabel.accessibilityValue = model.isFillReference ? "1" : "0"
+        currentMarker.accessibilityIdentifier = model.isCurrent ? "layerPanel.row.\(model.layerIndex).current" : nil
+        bakedMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).hasBaked"
+        bakedMarker.accessibilityValue = model.hasBakedImage ? "1" : "0"
+        vectorMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).vector"
+        vectorMarker.accessibilityValue = "\(model.isVector ? 1 : 0),\(model.vectorStrokeCount),\(model.vectorEraseCount)"
+        folderMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).folder"
+        folderMarker.accessibilityValue = model.folderName ?? ""
+        blendModeMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).blendMode"
+        blendModeMarker.accessibilityValue = model.blendMode.rawValue
+        configureCompositorMarker(model)
     }
 
     /// §6.5's picker chrome. Takes over the row's trailing slot from `currentMarker`/

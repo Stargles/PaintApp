@@ -191,6 +191,14 @@ struct LayerStackListView: UIViewRepresentable {
                 let above = reordered[newIndex - 1]
                 parentFolderID = above.isFolder ? above.id : above.parentFolderID
             }
+            // A node's children are exactly its slots (§4.3), so landing directly under a node
+            // header — which only a *collapsed* node offers, since an expanded one has a slot row
+            // there instead — resolves to a container that has no legal resting place in it. Sent
+            // to the node's own container rather than left to `restackLayer`'s refusal: a drop that
+            // silently does nothing reads as a dropped gesture, not as a rule.
+            if let container = parentFolderID, !canvasManager.canDrop(inContainer: container) {
+                parentFolderID = canvasManager.folders.first { $0.id == container }?.parentFolderID
+            }
 
             if moved.isFolder {
                 // Only the header moved in `reordered`; its contents are still at their old spots,
@@ -334,6 +342,9 @@ extension LayerStackListView.Coordinator: UITableViewDelegate {
         guard canvasManager.maskEditTarget == nil else { return nil }
         guard rows.indices.contains(indexPath.row) else { return nil }
         let row = rows[indexPath.row]
+        // An input slot exists because its node's arity says so (§4.3), and Duplicate is layer-only,
+        // so a slot's swipe would hold nothing but a button that refuses itself.
+        guard row.canDelete else { return nil }
 
         let delete = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, done in
             guard let self else { return done(false) }
@@ -389,6 +400,10 @@ extension LayerStackListView.Coordinator {
             guard canvasManager.maskEditTarget == nil,
                   let path = tableView.indexPathForRow(at: point),
                   rows.indices.contains(path.row),
+                  // §4.3: an input slot's position among its siblings *is* its index, so there is
+                  // nothing a drag could mean. `restackFolder` refuses one anyway — lifting the row
+                  // only to snap it back is what would read as a bug.
+                  rows[path.row].canDrag,
                   let cell = tableView.cellForRow(at: path),
                   let snapshot = cell.snapshotView(afterScreenUpdates: true) else { return }
 
@@ -468,11 +483,15 @@ extension LayerStackListView.Coordinator {
         guard let draggedID = dragRowID else { return }
         var resolved = resolveDropTarget(at: point)
 
-        // Dropping a row onto itself, or a folder into its own contents, is meaningless.
+        // Dropping a row onto itself, or a folder into its own contents, is meaningless — and so is
+        // dropping onto a node header, whose children are exactly its slots (§4.3). All three fall
+        // back to "between", so the drag keeps a live destination instead of going inert over a row
+        // it can never land in.
         if case .onto(let rowIndex) = resolved, rows.indices.contains(rowIndex) {
             let target = rows[rowIndex]
             let dragged = rows.first { $0.id == draggedID }
-            if target.id == draggedID || (dragged?.isFolder == true && folderContentIDs(draggedID).contains(target.id)) {
+            if target.id == draggedID || !target.acceptsDrop
+                || (dragged?.isFolder == true && folderContentIDs(draggedID).contains(target.id)) {
                 resolved = .between(insertionIndex: rowIndex)
             }
         }
@@ -581,11 +600,25 @@ extension LayerStackListView.Coordinator: UIGestureRecognizerDelegate {
 /// Everything a row draws, flattened out of `CanvasManager` so cells never index back into a
 /// mutating array and the table can diff rows by value.
 struct LayerRowModel: Equatable {
+
+    /// What the row draws as — four kinds, where this used to be an `isFolder` boolean.
+    ///
+    /// §4.3 stores a compositor node and its input slots as ordinary `LayerFolder`s precisely so
+    /// that containment, restack and row generation need no new arithmetic; the cost is that
+    /// nothing structural distinguishes them, and a boolean branch lays all three out as the same
+    /// yellow folder header with the same affordances. This is where that is paid back.
+    enum Kind: Equatable {
+        case layer
+        case group
+        case compositorNode
+        case inputSlot
+    }
+
     let id: UUID
+    var kind: Kind
     var depth: Int
     var name: String
     var isVisible: Bool
-    var isFolder: Bool
     var isExpanded: Bool
     var parentFolderID: UUID?
     /// Position in `CanvasManager.layers`; -1 for folder rows.
@@ -621,6 +654,32 @@ struct LayerRowModel: Equatable {
     /// reads differently to an artist than "this would create a cycle".
     var isMaskEditTarget: Bool = false
 
+    // MARK: - Compositor nodes (§4.3)
+
+    /// A Mix node's mode — the whole content of its op, so unlike `blendMode` it shows on the row
+    /// even at Normal. Nil on every other kind of row, including a `.stack` node, which has no mode.
+    var mixMode: BlendMode? = nil
+    /// Which input this row is, if it is one. Zero is the backdrop. Carried for the cell's test
+    /// probe, since "which slot is this" is otherwise only readable from the row's position.
+    var inputSlotIndex: Int? = nil
+
+    // The three affordance gates, read from the manager's own `can*` calls so the panel and the
+    // mutation guards cannot come to different answers. Baked into the row rather than asked at
+    // gesture time because the cell needs them too, and one row must not offer a control the
+    // gesture would then refuse.
+
+    /// `CanvasManager.canDeleteFolder` — false for an input slot, which exists because its node's
+    /// arity says so.
+    var canDelete: Bool = true
+    /// `CanvasManager.canRestackFolder` — false for an input slot, whose position among its
+    /// siblings *is* its index.
+    var canDrag: Bool = true
+    /// `CanvasManager.canDrop(inContainer:)` — false for a node header, whose children are exactly
+    /// its slots, so a bare layer dropped on it has no legal resting place.
+    var acceptsDrop: Bool = true
+
+    var isFolder: Bool { kind != .layer }
+
     var folderID: UUID? { isFolder ? id : nil }
     /// This row's own identity as a mask source — what a tap toggles and what `canMask` is asked
     /// about, computed the same way at both call sites so they can't drift apart.
@@ -631,9 +690,18 @@ struct LayerRowModel: Equatable {
         id = row.id
         depth = row.depth
         switch row {
-        case .folder(let folderID, _):
+        case .folder(let folderID, _, let folderKind):
             let folder = manager.folders.first { $0.id == folderID }
-            isFolder = true
+            switch folderKind {
+            case .group:          kind = .group
+            case .compositorNode: kind = .compositorNode
+            case .inputSlot:      kind = .inputSlot
+            }
+            if case .mix(let mode)? = folder?.compositorOp { mixMode = mode }
+            inputSlotIndex = folder?.inputSlotIndex
+            canDelete = manager.canDeleteFolder(folderID)
+            canDrag = manager.canRestackFolder(folderID)
+            acceptsDrop = manager.canDrop(inContainer: folderID)
             isExpanded = folder?.isExpanded ?? true
             name = folder?.name ?? "Folder"
             isVisible = folder?.isVisible ?? true
@@ -653,7 +721,7 @@ struct LayerRowModel: Equatable {
 
         case .layer(_, let index, _):
             let layer = manager.layers.indices.contains(index) ? manager.layers[index] : nil
-            isFolder = false
+            kind = .layer
             isExpanded = true
             name = layer?.name ?? ""
             isVisible = layer?.isVisible ?? true
