@@ -17,6 +17,13 @@ Full-suite baseline to beat is **836: 834 passed, 1 failed, 1 skipped** at `dbba
 skips now — the `FillUITests` one in BUGS.md, plus the `PAINT_PERF_HEAVY`-gated
 `testMaskedCompositeCostAtCanvasResolution` 6b added. Fast tier was 757/765 at the 6b worker tips.
 
+**A suite run was in flight when the last session ended — check it before you spend 22 minutes.**
+`build/DerivedData/Logs/Test/Test-PaintSoftware-2026.08.14_12-14-53--0400.xcresult` in the integrate
+worktree, launched 12:14 on 2026-08-14 against `75C8B97E` after shutdown/erase/boot. If
+`xcresulttool get test-results summary` reads it, the run completed and the answer is already on
+disk for free. If it errors about a missing `Info.plist`, the run was cut off with the session and
+you re-run. That distinction is worth the ten seconds it costs to check.
+
 If `LayerUITests.testTheBlendedCanvasComesBackInSyncAfterLayerSwitchVisibilityToggleAndUndo` fails,
 know that it failed once in a suite before and passed three of three in isolation. It sits inside
 5b/6a/7's blast radius. A second suite failure makes it a real suspect, not a fourth re-run.
@@ -29,10 +36,25 @@ deciding what happens next. Everything else goes to a worker — test runs, docs
 entries, graphify refreshes, conflict resolution. Ask the owner when two readings of a phase would
 produce materially different work; do not ask about what §6–§9 already settle.
 
-Delegation limits: **at most 2 sonnet + 1 opus at any one moment.** Opus for design-bearing work
-(node graph, multi-pass effects, conflict resolution); sonnet for measurement, docs, mechanical
-registration. **Branch a worker's worktree from the phase tip, not `origin/main`** — last session is
-the proof, since `origin/main` sat at `dbbaabc` while all of 6b lived on a branch.
+**Delegation limits were raised for you: 3 opus + 8 sonnet at any one moment** (the owner lifted them
+from 1+2 on 2026-08-14, expecting this session to run `ultracode` and finish the project in one go).
+Fan out accordingly — this is permission to go wide, not merely tolerance for it. Opus for
+design-bearing work (the node graph, multi-pass effects, conflict resolution); sonnet for
+measurement, docs, mechanical registration, and survey reads.
+
+**But width is not test parallelism, and this is the one place the raised cap will bite you.** There
+are exactly **two** dedicated simulators, so at most two agents may run a suite at once no matter how
+many are alive — and `PerfBaselineTests`' timing assertions fail under concurrent CPU load (see
+below; it happened twice in one session). Eleven agents reading, designing and writing is fine.
+Eleven agents building is not. Serialize anything that compiles or measures, and keep the machine
+quiet around a timing-sensitive run.
+
+The other thing a wide fan-out changes: an agent cut off mid-flight returns **nothing**, so scope
+each one small enough to land. Many narrow agents beat a few broad ones — a raised cap raises how
+many can be in flight, not how long any one should be.
+
+**Branch a worker's worktree from the phase tip, not `origin/main`** — last session is the proof,
+since `origin/main` sat at `dbbaabc` while all of 6b lived on a branch.
 
 **Verify numbers, never summaries.** Read `totalTestCount` from `xcresulttool` yourself. Two sessions
 ago a worker recorded a fabricated "measured" table that shipped; the truth was 70× larger and was a
