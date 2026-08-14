@@ -43,20 +43,35 @@ Phases 0–7 are on `main`. Nothing since phase 7 has merged. `origin/main` is a
 | `tmp/mask-tune` | on-device harness for §10.1 | built Release, with the owner |
 | `tmp/release-cfg` | the Release deploy fix | folded into `p8-integrate` |
 
-**The phase-8 regression.** The boundary suite is 901 total: 883 passed, **16 failed**, 2 skipped
-(the 2 skips are the expected `FillUITests` and `PAINT_PERF_HEAVY` ones). Baseline was 846 with 1.
-**16 is real — do not triage it away.**
+**The phase-8 regression: SOLVED, and phase 8 was never the cause.** The boundary suite was 901
+total, 883 passed, **16 failed**, 2 skipped. The cause was the **mask-tuning harness overlay**, which
+came in with the `tmp/mask-tune` merge (`3f8d204`): `MaskTuningOverlay` is declared last in
+`DrawingView`'s ZStack, so it drew *and hit-tested* on top of the trailing chrome, and it was
+default-visible. Its 260pt panel covered the colour panel's SV square and the layer panel's `+`
+button. Nothing was wrong with phase 8's tree arithmetic or its row-kind widening.
 
-**And do not inherit the previous session's diagnosis of it.** It described the 16 as "one cluster in
-the layer panel" and listed 12 of them. The xcresult's own list includes
-`ToolsAndSelectionUITests/testColorPanelControlsChangeBrushColorAndPaintedStroke` (a hue-slider drag)
-and `TimelineAndUndoUITests/testInterpolateModeEndToEndFromGestureToScrub` (a canvas gesture sweep),
-neither of which is in the layer panel. What all 16 share is that **a drag gesture does not land**.
-**Generalise this: a summary of a test run can be filtered to fit its author's hypothesis. Re-read the
-raw `xcresulttool` failure list, never the prose.** The competing hypotheses were (A) phase 8's
-widening of `LayerRowModel.isFolder: Bool` into `kind: Kind` and its three affordance gates, versus
-(B) something global — a gesture-recognizer conflict, a moved shared drag helper, or a composite
-slowdown making timing-sensitive drags miss their window.
+Fixed across `c1d23dc` and `83bd747`; the 3-suite verification went **52 total, 49 passed, 3 failed**,
+i.e. 14 of the original 16 recovered immediately, and the last 2 are addressed by `83bd747`.
+
+**Four lessons from that hunt, each of which cost time:**
+
+1. **The previous session's failure list was filtered to fit its hypothesis** — it named 12 of the 16
+   and called them "one cluster in the layer panel", omitting a colour-panel hue drag and a canvas
+   gesture sweep that are not in the panel at all. Re-read the raw `xcresulttool` failure list, never
+   the prose.
+2. **Read the `file:line` of a failure before believing its name.** Two of the last three failures
+   looked like canvas-rendering failures and were not: `testAMultiplyLayerLooksMultipliedOnTheLiveCanvas`
+   died at `LayerUITests.swift:593`, a `row.waitForExistence` inside `setBlendMode`, and
+   `testAnAllNormalDocumentNeverEngagesTheSandwich` at a `vectorMarkerViaPanel` returning nil. Both
+   were **missing elements**, downstream of one swallowed `layerPanel.addButton` tap. A test's name
+   tells you its intent, not what its failing assertion actually measured.
+3. **The orchestrator twice reasoned from failures measured at 0–14% idle** — once concluding a bug
+   reproduced in Debug when it did not. The rule is easy to state and easy to violate, because a
+   failure list *looks* like data no matter what the machine was doing. Check the idle figure that
+   produced a number before you reason from it.
+4. **`layerPanelRail` renders under `if activePanel == .layers`**, which is mutually exclusive with
+   `.none` — so the original gate did protect the rail, and all 11 rail-touching tests passed at
+   `c1d23dc`. Do not assume "the rail is not a panel"; check what it renders under.
 
 ## Read this first
 
@@ -94,6 +109,27 @@ under load is trustworthy; a FAIL under load is inconclusive.** Load produces fa
 false passes. So re-run a failure when quiet before letting it decide anything, and never wait on
 behalf of a pass.
 
+**Two bugs in `simlock.sh` itself, found under queue pressure on 2026-08-14. Fix the first one.**
+
+1. **It reaps live locks.** The reap condition is `{ owner dead } || { age > 3600 }` — an `||`, so a
+   lock older than an hour is reaped *even when its owner is alive and running*, and the reaper then
+   `simctl erase`s the device out from under it. A three-suite XCUITest run on a loaded machine can
+   exceed an hour easily, and with a queue behind it the next waiter will happily destroy it. The fix
+   is to reap on a dead owner unconditionally, and to apply the age check **only** when the pid is
+   missing or unreadable. Until it is fixed, refresh live locks periodically:
+   `for d in "$TMPDIR"/paintapp-simlock/*; do o=$(cat "$d/pid"); kill -0 "$o" 2>/dev/null && touch "$d"; done`
+2. **It does not bound the queue.** Seven runs were queued against two devices at once, all
+   legitimate. The lock correctly prevented a third simulator from booting, but nothing stops workers
+   from *queuing* faster than devices drain, and a worker that queues three runs (Debug triple,
+   Release triple, single repro) blocks two others for an hour. Prefer one narrow run per worker;
+   compare configurations on a **single test**, never on three whole suites.
+
+**Do not dispatch a second worker into a worktree that already has one**, even if the first has gone
+quiet. A worker blocked on a background run reports as finished and is still live — two of them
+committed into the same index seven seconds apart on 2026-08-14. Earlier handoffs warned about
+*resuming* a stalled worker blind; the sharper rule is that a stalled worker still **owns its
+worktree** until it reports for real. One worktree, one worker.
+
 **Workers run only the suites their own change touches.** The full suite runs **once**, at the
 boundary, on a quiet machine, by a dedicated worker. Telling six workers to run the ~750-case fast
 tier is what saturated the machine; the owner called this out directly.
@@ -113,14 +149,121 @@ failure count is not a finding.
 
 ## What is left
 
-| # | work | done when |
+| # | work | state |
 |---|---|---|
-| **8** | unblock the drag regression, then merge | boundary suite back to ~901 with 0 real failures |
-| **9a** | effect **as a stack layer** (`LayerKind.compositing`, §4.4) | an adjustment layer grades what is below it in its container |
-| **9b** | effect **as a 1-input node** (§4.4) | the same shader grades only what is in its slot |
-| **9c** | Sobel, Sharpen/unsharp, Outline (§7) | wants the multi-pass infrastructure |
-| **§10.1** | bake the mask constants the owner picks | awaiting the owner's two numbers |
-| **§10.2** | which node ops take 2+ inputs beyond Mix | unblocked once phase 8's UI works |
+| **LIVE** | live stroke invisible mid-gesture | **fixed at `309a573`; regression test never executed** |
+| **8** | the 16-test regression | **fixed** (`c1d23dc`, `83bd747`); last 2 pending an isolated run |
+| **9a** | effect as a stack layer | **DONE, `tmp/p9-layer`, 222/222 in Release** |
+| **§10.1** | mask constants | **baked 0.1 / 0.01 on `tmp/p8-slotmode`**; §6.3 rewritten |
+| **6.5b** | mask/fill-reference panel rework | in flight on `tmp/mask-ui`, spec below |
+| **9b** | effect **as a 1-input node** (§4.4) | not started — the seam is described below |
+| **9c** | Sobel, Sharpen/unsharp, Outline (§7) | not started; wants the multi-pass work |
+| **blur/bloom** | `tmp/p9-multipass` | tests rescued and rewritten; counts pending |
+| **§10.2** | which node ops take 2+ inputs beyond Mix | unblocked; a starting position is below |
+| **MERGE** | nothing since phase 7 is on `main` | seven branches to converge — see below |
+
+**9b is small and its seam is already cut.** `RenderNode.effect` is **one field for both §4.4
+wrappers**, because the wrapper is the *position in the tree*, not the data. 9b is therefore:
+`LayerFolder.effect` in storage, one `decodeIfPresent`, and one grade/mix call after `fold` in each
+backend. Nothing else branches on which wrapper produced the input — keep it that way.
+
+**What 9a established that 9b and 9c inherit:**
+- **An effect leaf derives with `blendMode: .normal`** — a grade *replaces* its backdrop, so there are
+  not two things to compose. (That is exactly what the node form gives you instead.)
+- **`compositeEffectMix` is not source-over, deliberately.** An effect preserves alpha, so compositing
+  the graded texture over its own backdrop would inflate coverage to `2a − a²` and thicken every
+  antialiased edge. Opacity and mask coverage go in as one `amount` to a `mix`.
+- **Effect scoping *is* isolation, not a new concept.** `enclosesABlend` counts `effect != nil`;
+  without it, an isolated group of all-normal children plus one effect declines a buffer and the grade
+  escapes to the outer backdrop. Pass-through deliberately lets it out. Both directions are pinned.
+- **`renderSources` elides `.compositing` layers**, so there is no canvas-sized transparent rasterize
+  per frame.
+
+**One open UI decision, currently unreachable so not urgent.** `addEffectLayer` makes the new layer
+active, matching `addLayer`/`addVectorLayer` — but drawing onto an active effect layer would go into a
+cel nothing renders, i.e. ink would silently vanish. There is no UI to create one yet. When phase 9's
+picker ships, decide it then; the sane default is to *select* it (so its properties are editable) while
+making a draw gesture on it either a no-op with feedback or a redirect to the nearest drawable layer.
+Ask the owner rather than guessing — it is a taste call, not an engine one.
+
+## The live-stroke bug — ROOT-CAUSED and fixed at `309a573`, but not yet verified
+
+The owner reported **ink does not appear while drawing** on the iPad. Found by *reading the call
+graph*, not by running tests — the 22-minute suite was never going to point at this.
+
+`updateSandwich(tree:engaged:)` (`CanvasView.swift:741`) is the **only** thing that unblanks the
+active layer's host (`host.setBlanked(!drawsItself)`, :811). Its only callers are `reconcileLayers()`
+(:603) and `finishSandwichRebuild` (:981), and `reconcileLayers()` is called only from `makeUIView`
+(:234) and `updateUIView` (:247). **So the mid-stroke picture can only appear during a SwiftUI pass.**
+`sandwichStrokeBegan` (:732) sets `isSandwichStrokeLive = true` and stops; nothing applies it. And a
+stroke's first touch publishes nothing — `commitInteractiveFill`/`commitInteractiveShape` guard-return,
+`interactionBegan` is guarded, `startShapeDetection` touches no `@Published`.
+
+Net effect: **the first stroke on a frame draws, because the cel spawn publishes and buys a pass.
+Every stroke after that on the same cel does not**, and the host stays blanked for the whole gesture.
+
+The author had already reasoned this out one line away and applied it only to the mask —
+`liveMaskStrokeBegan`'s comment (:851) says the mask is installed at touch-down "because there may not
+be one: a dab publishes nothing, so the pass that would install it is the pass this stroke is
+deliberately not causing." Blanking needed identical treatment and never got it.
+
+**Latent since 5b (`389876b`), made reachable by 6a (`46a8cf6`)** — the `!node.masks.isEmpty` clause in
+`needsCompositorOnCanvas` (`RenderTree.swift:368`) means *any masked document* now engages the
+sandwich, where before only a blend mode or a faded/isolated group did. Release was a coincidence of
+the same deploy, not a cause; it reproduces in Debug.
+
+Both rival hypotheses were closed by construction rather than left dangling: every `.mask` write was
+audited (`blankingMask` is one layer per host; `contentMasks` produces three distinct layers zipped
+1:1 — no sharing, so no ownership collision), and the off-main rebuild's two caches
+(`MaskResolver.MaskCache`, `PixelOps.rasterizeCache`) are `NSLock`-guarded with `ResolvedMask`
+immutable.
+
+**Still to do:** `testInkIsVisibleWhileTheSecondStrokeIsStillDown` (in `LayerUITests.swift`, registered)
+is the regression test and **has never been executed**. It was written by someone who could not run
+it, so a first-run failure is as likely to be the test as the fix. It probes with the touch still
+down, which nothing else in the suite does — every other sandwich assertion samples after lift, where
+`full` contains the stroke and the picture is right either way. Two traps it already dodges:
+`thenHoldForDuration` is unusable because holding still 0.8 s fires `fireShapeDetection`, which
+*reverts the stroke being probed*; and it settles the 400 ms thumbnail-regen debounce first, because
+that publish would otherwise supply the very SwiftUI pass whose absence is the subject.
+
+## §6.5 rework, specified by the owner 2026-08-14 — not yet built
+
+The owner's judgement: the mask features are "all dumped in the edit menu" and the **Mask switch is
+redundant**. Replace it with per-row controls:
+
+- **Opening a layer's edit menu enters the mask-edit session for that layer.** The switch that used
+  to enter it goes away; the edit menu already names the target, which is what made the switch
+  redundant.
+- **Keep the modal session and all of §6.5's protections** — the owner confirmed this explicitly.
+  Illegal sources still filter through the same `canMask` cycle rule derivation uses (never a second
+  copy), structural edits (swipe delete/duplicate, long-press reorder, pinch-merge) are still refused
+  for the duration, and every mask edit still coalesces into **one** undo step via
+  `beginMaskEdit`/`endMaskEdit`. Dropping the session would make each checkmark its own undo step;
+  that is a regression, not a simplification.
+- **Each layer row gains a "mask this layer" checkmark** while the edit menu is open.
+- **A fill-reference button sits immediately beside it**, same treatment. It **defaults to ON**, and
+  **defaults to OFF when the layer is hidden** — but the owner's exact words are that *"the user can
+  change these at any moment"*, so these govern the automatic value only. **An explicit user choice
+  always wins and must never be silently overridden**, including on a hidden layer. Note this is a
+  change from today: §6.6 records that hiding a layer *clears* `isFillReference` outright.
+
+## The mask constants, and the reasoning they overturned
+
+Shipping values are now **`threshold` 0.1** and **`antialiasHalfWidth` 0.01**, chosen by eye on the
+iPad against a soft brush, in Release. They replace 0.5/0.05, which were a reasoned guess.
+
+**§6.3's stated rationale was wrong and has been corrected rather than left standing.** It argued that
+`alpha > 0` "would make the mask substantially larger than the stroke looks" and that ~0.5 "tracks the
+visually solid part of a stroke". 0.1 is close to `> 0`, so on real hardware the owner wanted the mask
+to track nearly the whole soft dab, not its solid core. The structure of the argument survives (a
+threshold rather than the source's own alpha ramp; a narrow smoothstep so a hard boolean edge does not
+stair-step on diagonals); the specific claim about where 0.5 sits did not.
+
+**The harness is still installed** (`MaskTuningOverlay`, the two `var`s, `tuningGeneration`) because
+the owner may re-judge after the live-stroke bug is fixed — their tuning was done on a build where
+they could not see strokes live. Delete it once they confirm; it is a clean revert, and
+`AlphaMask.swift`'s MASK-TUNE comments name every piece.
 
 **§4.4 is the whole of 9a/9b and it is smaller than it looks:** both wrappers are one shader; *only
 the input-resolution rule differs* — "the accumulated backdrop so far in this container" versus "this
@@ -167,6 +310,28 @@ iPad. If they ask: add `backdrop: CGImage?` to `RenderRequest` honoured by both 
 the above stack over the pre-stroke backdrop `B` to get `R`, take coverage `c` from the same stack
 over transparency, emit `αs = c`, `Cs = (R − B(1−c))/c`. Cost is another composite per stroke in the
 latency-critical path.
+
+## Two things carried forward as UNPROVEN — check these before you trust them
+
+- **`912d692` on `tmp/p8-slotmode` is unverified.** It makes a slot's blend-mode inertness the
+  derivation's contract — `blendMode: folder.isInputSlot ? .normal : folder.blendMode.compositedMode`
+  at `RenderTree.swift:546`. For every non-slot folder the false branch is textually identical to what
+  it replaced, and a slot reachable through the UI always stores `.normal`, so both are no-ops. The
+  case that is *not* a no-op: a slot with a genuinely non-normal stored mode (reachable only via a
+  direct `setFolderBlendMode`, an undo of one, or a legacy document) also loses a buffer pass, because
+  `needsOwnBuffer` keys on `blendMode.isBlending` (`RenderTree.swift:211`). Removing a buffer pass can
+  in principle change bytes. The author's argument that it cannot here — the pass is a composite onto
+  pure transparency, the same lossless copy §4.3's Mix correction established — is sound *inference
+  from a pre-fix run*, not an observation. **`testASlotsOwnBlendModeIsInertButItsOpacityStillFades`
+  must be seen green after the fix.** It runs inside the boundary suite, so the proof is free; just do
+  not merge on the pre-fix green.
+- **A green backend-parity test here does not prove both backends ran.** These tests append Metal only
+  `if CompositorMetalEngine.shared != nil`, and `xcresulttool get test-results activities` on the run
+  showed only Start/Set Up/Tear Down — no console log, no activity naming the backend. So a pass is
+  equally consistent with CoreGraphics-only execution. This is the *same hazard* as the parity sweep
+  that compared the wrong two things, wearing a different disguise: the test is honest, but its green
+  under-determines what it exercised. Fix is cheap and should be done once, generally — an
+  `XCTContext.runActivity` recording the exercised backend(s) per iteration.
 
 ## What phases 8 and 9 established — do not re-litigate
 
