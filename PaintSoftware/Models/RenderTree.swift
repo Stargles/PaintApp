@@ -24,14 +24,79 @@ import Foundation
 
 /// How a node combines the inputs beneath it.
 ///
-/// One case so far, and deliberately an enum rather than nothing: LAYER_COMPOSITING.md §4.3 settles
-/// that **a group is a 1-input compositor node** — folders and multi-input nodes are the same
-/// mechanism at different arities, so they get one renderer rather than two, and the arity lives on
-/// the op. `Mix`, `Add`, and the rest arrive in phase 8 without reshaping anything here.
+/// LAYER_COMPOSITING.md §4.3 settles that **a group is a 1-input compositor node** — folders and
+/// multi-input nodes are the same mechanism at different arities, so they get one renderer rather
+/// than two, and the arity lives on the op. Phase 8 is the second case arriving, and the prediction
+/// held: `RenderNode.Content` and every walk over it took the change without reshaping.
 enum CompositorOp: Equatable {
-    /// Composite this op's inputs over each other bottom-to-top. At arity 1 — every node the
-    /// derivation below can currently produce — that is exactly a folder.
+
+    /// Composite this op's inputs over each other bottom-to-top, into one shared accumulator. At
+    /// arity 1 — every node the derivation below can currently produce — that is exactly a folder.
     case stack
+
+    /// Two isolated slots folded into one: slot 1's own composite over slot 0's, in this mode.
+    ///
+    /// **Deliberately the same math as stacking slot 1 over slot 0 with that blend mode** (§4.3), and
+    /// the redundancy is the point rather than something to unify away — the stack is ergonomic for
+    /// painting, the graph is ergonomic for effects with more than one input. What differs is the
+    /// *walk*: each slot is composited on its own, against transparency, before the fold ever runs,
+    /// which is what makes "combine A and B" expressible at all. `.stack` bakes slot 0 into the
+    /// accumulator before slot 1 is drawn, so under it the question cannot even be asked.
+    case mix(BlendMode)
+
+    /// How many input slots an op takes — declared by the op, per §4.3, because the arity is a
+    /// property of what the op *means* and not of the folder the artist happens to have built.
+    enum Arity: Equatable {
+        case fixed(Int)
+        /// Variadic ops get add/remove-slot controls in the panel; `min` is what they may not go below.
+        case variadic(min: Int)
+    }
+
+    var arity: Arity {
+        switch self {
+        // A folder holds one slot and is the only producer today, but nothing about stacking N
+        // composites bottom-to-top is arity-1 — the renderer already loops.
+        case .stack: return .variadic(min: 1)
+        case .mix: return .fixed(2)
+        }
+    }
+
+    /// The slot count when the op declares one, nil when it is variadic — the convenience the
+    /// derivation builds its `inputs` array from, so "how many slot folders does this node have" has
+    /// one answer rather than a `switch` per caller.
+    var slotCount: Int? {
+        switch arity {
+        case .fixed(let count): return count
+        case .variadic: return nil
+        }
+    }
+
+    /// **Whether the fold itself is a blend** — not whether the *node* blends against its backdrop,
+    /// which is `RenderNode.blendMode` and a different question entirely.
+    ///
+    /// A `Mix(A, B, .multiply)` can carry `blendMode == .normal` and still be something Core Animation
+    /// cannot express, because the multiply happens *between its slots*. Reading only the node's own
+    /// mode would answer "nothing here blends" for exactly the document nodes exist for.
+    var isBlending: Bool {
+        switch self {
+        case .stack: return false
+        case .mix(let mode): return mode.isBlending
+        }
+    }
+
+    /// Whether assembling this op's slots requires a buffer of its own regardless of the node's
+    /// properties — see `RenderNode.needsOwnBuffer`, which is where the rest of that decision lives.
+    ///
+    /// Structural for `.mix` rather than conservative: §4.3's "an input slot is always isolated" means
+    /// each slot is composited against transparency and the fold happens between the finished slots,
+    /// so there is nowhere for the result to go but a buffer. `.stack` is the case that can still
+    /// decline one, and declining it is what keeps a folder a transparent parenthesis.
+    var needsOwnBuffer: Bool {
+        switch self {
+        case .stack: return false
+        case .mix: return true
+        }
+    }
 }
 
 /// One node of the derived tree. A leaf names a `layers` index; a node holds ordered input slots,
@@ -126,6 +191,10 @@ extension RenderNode {
     ///   composite — masking each child on its own way in would clip the children instead, which is
     ///   a different picture wherever they overlap, exactly as with opacity. A masked *leaf* still
     ///   needs no buffer: its mask multiplies the one image it draws.
+    /// - **The op says so** (§4.3, phase 8). A `.mix` folds slots that were each composited against
+    ///   transparency, so the fold has nowhere to happen but a buffer — see `CompositorOp.needsOwnBuffer`.
+    ///   `.stack` answers false here, so every folder that has ever existed keeps the direct path and
+    ///   this clause changes not one byte of any document that predates nodes.
     ///
     /// **All three clauses are reachable as of phase 5**, which is the change `BlendMode`'s fourteen
     /// cases made to this predicate without editing a line of it. Phase 4 wrote the rule whole while
@@ -136,10 +205,11 @@ extension RenderNode {
         // A leaf is drawn, never assembled — its opacity is an argument to one draw call, and so is
         // its blend mode. That is the whole difference between a leaf and a group: a leaf blends as
         // it is drawn, a group blends its finished composite once.
-        guard case .node = content else { return false }
+        guard case .node(let op, _) = content else { return false }
         // `!= 1` rather than `< 1`: the identity is the thing being tested, and `setFolderOpacity`
         // clamps to 0...1 so the two are the same test for every value that can reach here.
-        return opacity != 1 || blendMode.isBlending || !masks.isEmpty || (isIsolated && enclosesABlend)
+        return op.needsOwnBuffer || opacity != 1 || blendMode.isBlending || !masks.isEmpty
+            || (isIsolated && enclosesABlend)
     }
 
     /// Whether anything inside this node **blends against the backdrop this node is drawn onto** —
@@ -159,11 +229,28 @@ extension RenderNode {
     /// where a buffer changes nothing costs time, answering false where a blend really does see the
     /// backdrop renders the wrong picture. `testABufferedChildDoesNotForceItsParentToBuffer` and
     /// `testAPassThroughChildDoesForceIt` are the two sides.
+    ///
+    /// **A child's *op* counts as a blend here as well as its `blendMode`, and phase 8 is why.** The
+    /// two are different questions — a `Mix(A, B, .multiply)` blends between its own slots while
+    /// carrying `blendMode == .normal` — and a test that read only the node's own mode would call a
+    /// Mix-multiply subtree "all normal". Stated whole for the same reason phase 4 stated the buffer
+    /// rule whole while two of its clauses were dead: **the clause cannot fire today**, because
+    /// `CompositorOp.needsOwnBuffer` makes every `.mix` buffer and the walk stops at a child that
+    /// buffers. It becomes live the moment an op arrives that folds without one.
     private var enclosesABlend: Bool {
         guard case .node(_, let inputs) = content else { return false }
         return inputs.contains { input in
-            input.contains { $0.blendMode.isBlending || (!$0.needsOwnBuffer && $0.enclosesABlend) }
+            input.contains {
+                $0.blendMode.isBlending || (!$0.needsOwnBuffer && ($0.opIsBlending || $0.enclosesABlend))
+            }
         }
+    }
+
+    /// This node's own fold, asked of a `RenderNode` rather than of a `CompositorOp` — false for a
+    /// leaf, which has no op to ask about.
+    var opIsBlending: Bool {
+        guard case .node(let op, _) = content else { return false }
+        return op.isBlending
     }
 
     /// Every `layers` index under this node, in evaluation order (bottom-to-top, depth-first).
@@ -272,7 +359,13 @@ extension Array where Element == RenderNode {
             // masked document that stayed on that path would show the mask nowhere but the
             // thumbnail. `needsOwnBuffer` answers false for a masked *leaf*, which is the common
             // case, so asking only about buffers would leave the feature invisible on canvas.
-            if node.needsOwnBuffer || node.blendMode.isBlending || !node.masks.isEmpty { return true }
+            //
+            // The op clause is the phase 8 addition and is redundant *today* — `needsOwnBuffer` is
+            // true for every `.mix` — but it is the clause that actually states the reason, and the
+            // reason is not "a mix allocates". Core Animation cannot fold two arbitrary subtrees
+            // with a blend mode at all, whatever the buffer rule for nodes turns out to be next.
+            if node.needsOwnBuffer || node.blendMode.isBlending || node.opIsBlending
+                || !node.masks.isEmpty { return true }
             guard case .node(_, let inputs) = node.content else { return false }
             return inputs.contains { $0.needsCompositorOnCanvas }
         }

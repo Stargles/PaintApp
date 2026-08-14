@@ -278,11 +278,13 @@ final class CompositorMetalEngine {
                      front: &front, back: &back, encoder: encoder, width: width, height: height)
                 if let scratch { pool.release(scratch) }
 
-            case .node(_, let inputs):
+            case .node(let op, let inputs):
                 // A hidden group is a subtree this walk does not enter, so it needs no texture to
                 // gate and costs nothing to skip (§4.1).
                 guard node.isVisible else { continue }
                 guard node.needsOwnBuffer else {
+                    // `needsOwnBuffer` is false only for `.stack`, so nothing is folding here that
+                    // this loop is silently flattening — see `CompositorOp.needsOwnBuffer`.
                     for input in inputs {
                         guard encode(input, of: request, front: &front, back: &back,
                                      encoder: encoder, pool: pool, masks: &masks,
@@ -298,15 +300,13 @@ final class CompositorMetalEngine {
                 }
                 fill(groupFront, with: SIMD4<Float>(repeating: 0), encoder: encoder,
                      width: width, height: height)
-                for input in inputs {
-                    guard encode(input, of: request, front: &groupFront, back: &groupBack,
-                                 encoder: encoder, pool: pool, masks: &masks,
-                                 width: width, height: height) else { return false }
-                }
-                // The group's mask clips the assembled composite, never the children — the same
-                // placement the CPU reference uses and the reason a masked group buffers at all.
-                // `groupBack` is free here (the loop above left the result in `groupFront`), so the
-                // clip costs a dispatch and no allocation.
+                guard fold(op, inputs, of: request, front: &groupFront, back: &groupBack,
+                           encoder: encoder, pool: pool, masks: &masks,
+                           width: width, height: height) else { return false }
+                // The node's mask clips the assembled composite, never the children and never a
+                // slot — the same placement the CPU reference uses and the reason a masked group
+                // buffers at all. `groupBack` is free here (the fold above left the result in
+                // `groupFront`), so the clip costs a dispatch and no allocation.
                 var assembled = groupFront
                 if let mask = maskTexture(for: node, of: request, cache: &masks) {
                     apply(mask: mask, to: groupFront, into: groupBack, encoder: encoder,
@@ -316,6 +316,41 @@ final class CompositorMetalEngine {
                 over(source: assembled, opacity: node.opacity, mode: node.blendMode,
                      front: &front, back: &back, encoder: encoder, width: width, height: height)
             }
+        }
+        return true
+    }
+
+    /// One node's input slots, combined by its op, into `front` — the mirror of
+    /// `CoreGraphicsCompositor.fold`, which carries the reasoning for why slot 0 goes straight into
+    /// the accumulator and every later slot is composited on its own first.
+    ///
+    /// The GPU-side note is the pool: a `.mix` holds one extra texture pair live for the duration of
+    /// each folded slot, on top of the node's own pair. That is still bounded by nesting rather than
+    /// by slot count — the pair is released at the end of each iteration and the next slot reuses it —
+    /// so a 2-input Mix costs four textures at its level, not two per slot.
+    private func fold(_ op: CompositorOp, _ inputs: [[RenderNode]], of request: RenderRequest,
+                      front: inout MTLTexture, back: inout MTLTexture,
+                      encoder: MTLComputeCommandEncoder, pool: ScratchTexturePool,
+                      masks: inout [ObjectIdentifier: MTLTexture],
+                      width: Int, height: Int) -> Bool {
+        for (slot, input) in inputs.enumerated() {
+            guard case .mix(let mode) = op, slot > 0 else {
+                guard encode(input, of: request, front: &front, back: &back, encoder: encoder,
+                             pool: pool, masks: &masks, width: width, height: height) else { return false }
+                continue
+            }
+            guard var slotFront = pool.acquire(), var slotBack = pool.acquire() else { return false }
+            defer {
+                pool.release(slotFront)
+                pool.release(slotBack)
+            }
+            fill(slotFront, with: SIMD4<Float>(repeating: 0), encoder: encoder,
+                 width: width, height: height)
+            guard encode(input, of: request, front: &slotFront, back: &slotBack, encoder: encoder,
+                         pool: pool, masks: &masks, width: width, height: height) else { return false }
+            // Opacity 1: the node's own fade applies once to the finished fold, in `encode`.
+            over(source: slotFront, opacity: 1, mode: mode, front: &front, back: &back,
+                 encoder: encoder, width: width, height: height)
         }
         return true
     }

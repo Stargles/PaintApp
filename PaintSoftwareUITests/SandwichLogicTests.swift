@@ -556,6 +556,225 @@ final class SandwichLogicTests: XCTestCase {
         XCTAssertTrue(manager.renderTree.needsCompositorOnCanvas)
     }
 
+    // MARK: - The split through a compositor node (§4.3, phase 8)
+    //
+    // **`split(atLeaf:)` has looped `inputs.enumerated()` since phase 1 and has never once been run
+    // against a slot fold that is not `.stack`.** It reasons that "the slots before the one holding
+    // the leaf are wholly below it and the ones after are wholly above", which is true of the leaf
+    // *order* for any op — and is a claim about the composite only while the fold is source-over into
+    // one shared accumulator. A `.mix` fold is not that. These cases run it.
+    //
+    // The trees are stated outright, because the derivation cannot build a `.mix` yet (the model
+    // change is separate work) and because `split` operates on `[RenderNode]` rather than on a
+    // manager, so nothing is being faked. Every node is left at opacity 1 and mode `.normal` so that
+    // the half-group approximation `testTheSandwichIsNotExactWhenTheActiveLayerIsInsideAFadedGroup`
+    // already measures cannot confound what the fold itself costs.
+
+    /// Slot 0 is a full-canvas floor with two squares over it; slot 1 is a full-canvas sheet with a
+    /// square over it. Opaque throughout, so `.normal` has no rounding to hide behind, and arranged so
+    /// that the part of a slot *below* the active leaf still shows through where the part above it
+    /// does not cover — which is the only place a fold applied to the wrong operand is visible.
+    private func mixFixture() -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 4)
+        let whole = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, CanvasFixture.solidImage(red, rect: whole))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, CanvasFixture.solidImage(grey, rect: whole))
+        CanvasFixture.setBakedContent(manager, layerIndex: 2,
+                                      CanvasFixture.solidImage(green, rect: CGRect(x: 0, y: 0, width: 30, height: 30)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 3,
+                                      CanvasFixture.solidImage(blue, rect: CGRect(x: 16, y: 16, width: 30, height: 30)))
+        return manager
+    }
+
+    private func leafNode(_ index: Int, of manager: CanvasManager) -> RenderNode {
+        RenderNode(id: manager.layers[index].id, content: .leaf(layerIndex: index),
+                   opacity: 1, isVisible: true, blendMode: .normal, isIsolated: false)
+    }
+
+    private func mixNode(_ slots: [[RenderNode]], _ mode: BlendMode) -> RenderNode {
+        RenderNode(id: UUID(), content: .node(op: .mix(mode), inputs: slots),
+                   opacity: 1, isVisible: true, blendMode: .normal, isIsolated: true)
+    }
+
+    private func request(_ manager: CanvasManager, tree: [RenderNode]) -> RenderRequest? {
+        guard let base = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else { return nil }
+        return RenderRequest(tree: tree, sources: base.sources, contentVersions: base.contentVersions,
+                             maskStacks: base.maskStacks, frame: base.frame, canvasSize: base.canvasSize,
+                             background: nil, quality: base.quality)
+    }
+
+    /// `sandwichComposite`'s three views, over halves cut from a stated tree rather than a derived
+    /// one. Every node is at opacity 1, so the active layer's host draws at alpha 1 — which is what
+    /// `effectiveOpacity(ofLayer:)` would return for this shape anyway.
+    private func mixSandwich(_ manager: CanvasManager, tree: [RenderNode],
+                             active: Int) -> (sandwich: CGImage, exact: CGImage)? {
+        guard let canvasSize = manager.canvasSize,
+              let halves = tree.split(atLeaf: active),
+              let whole = request(manager, tree: tree),
+              let exact = Compositor.composite(whole),
+              let below = request(manager, tree: halves.below).flatMap(Compositor.composite),
+              let above = request(manager, tree: halves.above).flatMap(Compositor.composite) else { return nil }
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        guard let sandwich = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
+            .image(actions: { _ in
+                UIImage(cgImage: below, scale: 1, orientation: .up).draw(in: bounds)
+                if let source = whole.sources[active] {
+                    UIImage(cgImage: source.image, scale: 1, orientation: .up).draw(in: bounds)
+                }
+                UIImage(cgImage: above, scale: 1, orientation: .up).draw(in: bounds)
+            }).cgImage else { return nil }
+        return (sandwich, exact)
+    }
+
+    /// A leaf inside slot 0, and a leaf inside slot 1 — the two cases, both with content on each side
+    /// of the leaf within its own slot.
+    private func mixShapes(_ manager: CanvasManager, _ mode: BlendMode) -> [(name: String, tree: [RenderNode], active: Int)] {
+        func leaf(_ index: Int) -> RenderNode { leafNode(index, of: manager) }
+        return [
+            // Slot 0 holds the lower layers and slot 1 the upper ones, which is the shape §4.3's
+            // contiguous slot spans will actually produce — the cut is not being handed an ordering
+            // the model could never build.
+            (name: "the active leaf in slot 0",
+             tree: [mixNode([[leaf(0), leaf(1), leaf(2)], [leaf(3)]], mode)], active: 1),
+            (name: "the active leaf in slot 1",
+             tree: [mixNode([[leaf(0)], [leaf(1), leaf(2), leaf(3)]], mode)], active: 2),
+        ]
+    }
+
+    /// The structural half of the claim, and it holds: the cut reassembles the leaf order through a
+    /// `.mix` exactly as it does through a `.stack`, in either slot. That much is arity-agnostic —
+    /// `split` reasons about *order*, and slot order is slot order whatever the op does with the
+    /// finished slots.
+    func testTheSplitThroughAMixReassemblesTheStackFromEitherSlot() {
+        let manager = mixFixture()
+        for shape in mixShapes(manager, .multiply) {
+            guard let halves = shape.tree.split(atLeaf: shape.active) else {
+                XCTFail("\(shape.name): the active layer is a leaf of this tree, so the split must succeed")
+                continue
+            }
+            XCTAssertEqual(halves.below.leafLayerIndices + [shape.active] + halves.above.leafLayerIndices,
+                           shape.tree.leafLayerIndices,
+                           "\(shape.name): below \(halves.below.leafLayerIndices) + active \(shape.active) + above \(halves.above.leafLayerIndices) is not the tree's own leaf order \(shape.tree.leafLayerIndices)")
+        }
+    }
+
+    /// **A half of a two-slot Mix is a Mix with one slot, which its own arity says cannot exist.**
+    ///
+    /// `half(inputs:)` carries the op verbatim — correctly, since forgetting it would be worse — so
+    /// cutting a `.fixed(2)` node produces a node whose slot count disagrees with `CompositorOp.arity`
+    /// on one side of the cut. Both backends fold a one-slot Mix to that slot and nothing else
+    /// (`CompositorParityLogicTests.testAMixWithOneSlotIsThatSlotAssembled`), so this is not a hole in
+    /// the render, but it *is* a shape no validator downstream may assume away: a sandwich half is not
+    /// a document, and arity is a rule about documents.
+    func testAHalfOfATwoSlotMixKeepsTheOpAndLosesASlot() {
+        let manager = mixFixture()
+        let tree = [mixNode([[leafNode(0, of: manager), leafNode(2, of: manager)],
+                             [leafNode(1, of: manager), leafNode(3, of: manager)]], .multiply)]
+        guard let halves = tree.split(atLeaf: 2),
+              case .node(let belowOp, let belowSlots)? = halves.below.first?.content,
+              case .node(let aboveOp, let aboveSlots)? = halves.above.first?.content else {
+            return XCTFail("Cutting inside slot 0 must leave a half on each side")
+        }
+        XCTAssertEqual(belowOp, .mix(.multiply), "The op is carried verbatim, the same as every other property")
+        XCTAssertEqual(aboveOp, .mix(.multiply))
+        XCTAssertEqual(belowSlots.count, 1, "Everything below the leaf is the part of slot 0 beneath it, and nothing else")
+        XCTAssertEqual(aboveSlots.count, 2, "…while the upper half keeps the rest of slot 0 and the whole of slot 1")
+        XCTAssertEqual(CompositorOp.mix(.multiply).arity, .fixed(2),
+                       "Which the op's own arity says is not a shape a node may have — a half is not a document")
+    }
+
+    /// **The exact case, and it is exact: a `.mix(.normal)` splits and reassembles byte for byte in
+    /// either slot.** Source-over is associative, so folding an isolated slot 1 onto an isolated slot
+    /// 0 and then drawing the result is the same picture as drawing the pieces in order — which is
+    /// what makes the cut legitimate at all for the op the derivation will produce most.
+    func testTheSandwichThroughANormalMixIsExactInEitherSlot() {
+        let manager = mixFixture()
+        for shape in mixShapes(manager, .normal) {
+            guard let (sandwich, exact) = mixSandwich(manager, tree: shape.tree, active: shape.active) else {
+                XCTFail("\(shape.name): both sides must composite")
+                continue
+            }
+            XCTAssertEqual(maxChannelDelta(sandwich, exact), 0,
+                           "\(shape.name): a normal fold splits cleanly, so the halves and the live layer must add back up exactly")
+        }
+    }
+
+    /// **The finding, pinned rather than papered over: a blending Mix does *not* split cleanly, and
+    /// the arithmetic says why.**
+    ///
+    /// The fold applies its mode once, between two finished slots. A cut inside a slot breaks that
+    /// slot into two pieces on opposite sides of the live layer, and neither half can fold against the
+    /// operand the whole document folds against:
+    ///
+    /// - **Active leaf in slot 0.** Exact is `(b ⊕ leaf ⊕ a) ⊕ᵐᵒᵈᵉ slot1`. The upper half is
+    ///   `Mix(a, slot1, mode)`, so slot 1 blends against `a` alone — `b` and the live layer are below
+    ///   it in the sandwich and cannot participate.
+    /// - **Active leaf in slot 1.** Exact is `slot0 ⊕ᵐᵒᵈᵉ (b ⊕ leaf ⊕ a)`. The lower half folds only
+    ///   `b` onto slot 0; the live layer and `a` then land source-over on top, so the mode never sees
+    ///   them at all.
+    ///
+    /// **This is the same degradation §5.2 already accepts, one level in** — it is
+    /// `testTheSandwichIsNotExactWhenSomethingAboveTheActiveLayerBlends` reached through a slot
+    /// instead of through a sibling, and it snaps correct on lift for the same reason: lift shows
+    /// `full`, which is exact. It is recorded here as a measurement so that a later session cannot
+    /// come to believe a node splits cleanly when only `.normal` does.
+    func testTheSandwichThroughABlendingMixIsNotExactAndTheDeltaIsMeasured() {
+        let manager = mixFixture()
+        for shape in mixShapes(manager, .multiply) {
+            guard let (sandwich, exact) = mixSandwich(manager, tree: shape.tree, active: shape.active) else {
+                XCTFail("\(shape.name): both sides must composite")
+                continue
+            }
+            let delta = maxChannelDelta(sandwich, exact)
+            print("[sandwich] max channel delta through a multiply Mix, \(shape.name): \(delta)")
+            XCTAssertGreaterThan(delta, 0,
+                                 "\(shape.name): if this ever reaches 0 the fold started splitting cleanly and this file's reasoning is stale — update §5.2 rather than deleting the test")
+        }
+    }
+
+    // MARK: - What a node does to the canvas gate
+
+    /// **A Mix engages the compositor on canvas, and it has to engage on the *op* rather than on the
+    /// node's own mode.** A `Mix(A, B, .multiply)` at `blendMode == .normal`, opacity 1, unmasked is
+    /// an all-normal document by every test that predates phase 8 — and Core Animation cannot draw it,
+    /// because the multiply is between two subtrees rather than between a view and its backdrop.
+    ///
+    /// Left un-taught, `LayerUITests.testAnAllNormalDocumentNeverEngagesTheSandwich` would have stayed
+    /// green while a Mix document rendered correctly in the thumbnail and wrongly on the canvas the
+    /// artist is looking at.
+    func testAMixNodeAlwaysBuffersAndAlwaysEngagesTheCompositorOnCanvas() {
+        let manager = mixFixture()
+        let slots = [[leafNode(0, of: manager)], [leafNode(1, of: manager)]]
+
+        for mode in [BlendMode.normal, .multiply] {
+            let node = mixNode(slots, mode)
+            XCTAssertTrue(node.needsOwnBuffer,
+                          "\(mode.displayName): a fold happens between slots composited against transparency, so there is nowhere for it to happen but a buffer")
+            XCTAssertTrue([node].needsCompositorOnCanvas,
+                          "\(mode.displayName): Core Animation has no way to combine two subtrees, whatever the node's own mode says")
+        }
+        XCTAssertTrue(mixNode(slots, .multiply).opIsBlending, "The fold is the blend")
+        XCTAssertFalse(mixNode(slots, .normal).opIsBlending, "A normal fold is source-over and blends nothing")
+    }
+
+    /// The other side of that, and the containment the whole phase rests on: **`.stack` is untouched.**
+    /// A folder is still `.node(op: .stack, …)` and still a transparent parenthesis at its defaults —
+    /// no buffer, no canvas path, not one byte different from before nodes existed.
+    func testAStackNodeIsUnaffectedByTheOpsSecondCase() {
+        let manager = stack(2)
+        let folder = manager.addFolder(name: "Folder")
+        manager.layers[1].parentFolderID = folder
+
+        guard case .node(let op, _)? = manager.renderTree.first(where: { $0.id == folder })?.content else {
+            return XCTFail("The derivation still builds a folder as a node")
+        }
+        XCTAssertEqual(op, .stack, "Phase 8 adds a case to the op; it does not change what a folder derives to")
+        XCTAssertEqual(op.arity, .variadic(min: 1), "Stacking N composites bottom-to-top is not an arity-1 idea")
+        XCTAssertNil(op.slotCount, "A variadic op declares no slot count")
+        XCTAssertFalse(op.needsOwnBuffer, "Which is what keeps an untouched folder on the direct path")
+        XCTAssertFalse(manager.renderTree.needsCompositorOnCanvas)
+    }
+
     // MARK: - The requests
 
     /// **One snapshot, three requests, and the sharing is the point.** `sources` is indexed by

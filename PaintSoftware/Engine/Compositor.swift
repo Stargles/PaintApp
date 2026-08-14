@@ -409,41 +409,72 @@ enum CoreGraphicsCompositor {
                 // considered, so hiding a group is the cheapest thing in this walk rather than a
                 // buffer full of nothing.
                 guard node.isVisible else { continue }
-                switch op {
-                case .stack:
-                    guard node.needsOwnBuffer else {
-                        // The direct path is also the pass-through path: children drawn straight
-                        // onto the backdrop blend against it, which is what "pass-through" means.
-                        // `needsOwnBuffer` guarantees `node.blendMode == .normal` here, so there is
-                        // no group mode being silently dropped — a group that blends always buffers.
-                        for input in inputs { draw(input, of: request, in: bounds, context: context) }
-                        continue
-                    }
-                    // Render the group's own composite, then apply its opacity and its mode once to
-                    // the finished thing — the alternative, applying either per child, is a
-                    // different and wrong picture wherever children overlap.
-                    //
-                    // **The scratch buffer starts transparent whatever `isIsolated` says, and that
-                    // is a decision rather than an omission.** A pass-through group that also
-                    // buffers — because it is faded, or because it has a mode of its own — cannot
-                    // have both: compositing children against the backdrop *and then* compositing
-                    // the result over that same backdrop counts it twice. Photoshop resolves the
-                    // same conflict the same way (choosing any mode other than Pass Through is what
-                    // makes a group isolated there), so a buffered group is an isolated group here,
-                    // and `isIsolated` is what decides the case that is still free to differ:
-                    // opacity 1, mode normal, something inside that blends.
-                    let grouped = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
-                        .image { inner in
-                            for input in inputs { draw(input, of: request, in: bounds, context: inner) }
-                        }
-                    // The group's mask clips the group, so it lands on the assembled composite —
-                    // which is the same rule its opacity and its blend mode follow, and the reason
-                    // `needsOwnBuffer` counts a mask as a reason to allocate.
-                    let clipped = grouped.cgImage.map { masked($0, by: node, of: request) }
-                        .map { UIImage(cgImage: $0, scale: 1, orientation: .up) } ?? grouped
-                    draw(clipped, mode: node.blendMode, opacity: node.opacity, in: bounds, context: context)
+                if !node.needsOwnBuffer {
+                    // The direct path is also the pass-through path: children drawn straight onto
+                    // the backdrop blend against it, which is what "pass-through" means.
+                    // `needsOwnBuffer` guarantees `node.blendMode == .normal` here, so there is no
+                    // group mode being silently dropped — a group that blends always buffers — and
+                    // it guarantees `op == .stack`, so no fold is being dropped either.
+                    for input in inputs { draw(input, of: request, in: bounds, context: context) }
+                    continue
                 }
+                // Render the node's own composite, then apply its opacity and its mode once to the
+                // finished thing — the alternative, applying either per child, is a different and
+                // wrong picture wherever children overlap.
+                //
+                // **The scratch buffer starts transparent whatever `isIsolated` says, and that
+                // is a decision rather than an omission.** A pass-through group that also
+                // buffers — because it is faded, or because it has a mode of its own — cannot
+                // have both: compositing children against the backdrop *and then* compositing
+                // the result over that same backdrop counts it twice. Photoshop resolves the
+                // same conflict the same way (choosing any mode other than Pass Through is what
+                // makes a group isolated there), so a buffered group is an isolated group here,
+                // and `isIsolated` is what decides the case that is still free to differ:
+                // opacity 1, mode normal, something inside that blends.
+                let assembled = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
+                    .image { inner in fold(op, inputs, of: request, in: bounds, context: inner) }
+                // The node's mask clips the node, so it lands on the assembled composite — which is
+                // the same rule its opacity and its blend mode follow, and the reason
+                // `needsOwnBuffer` counts a mask as a reason to allocate. It clips the *result* of
+                // a fold, never the slots that went into it, for exactly the reason it clips a
+                // group rather than its children.
+                let clipped = assembled.cgImage.map { masked($0, by: node, of: request) }
+                    .map { UIImage(cgImage: $0, scale: 1, orientation: .up) } ?? assembled
+                draw(clipped, mode: node.blendMode, opacity: node.opacity, in: bounds, context: context)
             }
+        }
+    }
+
+    /// **One node's input slots, combined by its op, into the buffer the caller has made current.**
+    ///
+    /// This is the whole of phase 8's change to this backend, and it is a change to the *walk* rather
+    /// than to any arithmetic: §4.3's `Mix(A, B, .multiply)` is deliberately the same math as stacking
+    /// B over A with multiply, so the fold reuses `draw(_:mode:opacity:in:context:)` — the same call a
+    /// blending leaf and a blending group already go through — and no new primitive exists on either
+    /// backend.
+    ///
+    /// **Slot 0 is drawn straight into the accumulator and every later slot gets a buffer of its own.**
+    /// §4.3 says an input slot is always isolated, and slot 0 already is: the accumulator was made
+    /// transparent one line above and nothing has touched it, so a separate buffer for it would buy
+    /// nothing but one more 8-bit requantization. The later slots genuinely need one — the fold is
+    /// between two *finished* composites, and drawing slot 1's contents one at a time onto slot 0
+    /// would blend each of them against slot 0 in turn, which is `.stack` wearing a mode.
+    ///
+    /// `.stack` never takes the isolating branch, so it still runs the single-shared-accumulator loop
+    /// it always did, byte for byte — the common case does not start paying a buffer per child.
+    private static func fold(_ op: CompositorOp, _ inputs: [[RenderNode]], of request: RenderRequest,
+                             in bounds: CGRect, context: UIGraphicsImageRendererContext) {
+        for (slot, input) in inputs.enumerated() {
+            guard case .mix(let mode) = op, slot > 0 else {
+                draw(input, of: request, in: bounds, context: context)
+                continue
+            }
+            let isolated = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
+                .image { inner in draw(input, of: request, in: bounds, context: inner) }
+            // Opacity 1: the node's own fade applies once to the finished fold, up in `draw`. Fading
+            // a slot on its way into the fold would be the per-child mistake group opacity already
+            // refuses to make.
+            draw(isolated, mode: mode, opacity: 1, in: bounds, context: context)
         }
     }
 

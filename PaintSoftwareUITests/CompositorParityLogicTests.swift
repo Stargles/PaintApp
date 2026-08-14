@@ -1121,6 +1121,239 @@ final class CompositorParityLogicTests: XCTestCase {
         XCTAssertEqual(maxChannelDelta(gpu, cpu), 0, "Both backends drop the same subtree, neither pays for it")
     }
 
+    // MARK: - Compositor nodes (§4.3)
+    //
+    // Phase 8 gives `CompositorOp` a second case and both backends a fold to go with it. **The
+    // derivation cannot produce one yet** — the model change that lets a folder say "I am a node with
+    // these slots" is a separate piece of work — so every fixture below states the `RenderNode` value
+    // outright and hands it to a request built over an ordinary manager's snapshot. That is what the
+    // tree being a value type buys: the walk is testable before the storage that will feed it exists,
+    // and these tests will keep meaning the same thing once it does.
+    //
+    // `.clipToBelow` is excluded from the sweeps. It is not a blend (§7 says so while listing it among
+    // them) — `compositedMode` resolves it into source-over plus a mask before a mode ever reaches a
+    // backend — so a `.mix(.clipToBelow)` is a value the derivation will never build, and sweeping it
+    // would only measure that both backends map it to Normal.
+
+    /// A request over `manager`'s pixels, walking `tree` instead of the derived one.
+    private func request(_ manager: CanvasManager, tree: [RenderNode],
+                         maskStacks: [MaskSource: [RenderNode]] = [:]) -> RenderRequest? {
+        guard let base = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+            XCTFail("Fixture needs a canvas size")
+            return nil
+        }
+        return RenderRequest(tree: tree, sources: base.sources, contentVersions: base.contentVersions,
+                             maskStacks: maskStacks, frame: base.frame, canvasSize: base.canvasSize,
+                             background: nil, quality: base.quality)
+    }
+
+    private func leafNode(_ index: Int, of manager: CanvasManager, mode: BlendMode = .normal) -> RenderNode {
+        RenderNode(id: manager.layers[index].id, content: .leaf(layerIndex: index),
+                   opacity: 1, isVisible: true, blendMode: mode, isIsolated: false)
+    }
+
+    /// A Mix node at its identity properties, so the only thing the fixtures vary is the fold.
+    private func mixNode(_ slots: [[RenderNode]], _ mode: BlendMode, masks: [AlphaMask] = []) -> RenderNode {
+        RenderNode(id: UUID(), content: .node(op: .mix(mode), inputs: slots),
+                   opacity: 1, isVisible: true, blendMode: .normal, isIsolated: true, masks: masks)
+    }
+
+    /// **§4.3's central claim about nodes, asserted rather than assumed: `Mix(A, B, mode)` is the
+    /// same math as stacking B over A with that mode.**
+    ///
+    /// The doc calls the redundancy the point — the stack is ergonomic for painting, the graph for
+    /// effects with more than one input — and that is only true if the two really do produce the same
+    /// picture. If this ever fails, the fold is not what §4.3 says a node is and the design's own
+    /// justification for having both goes with it.
+    ///
+    /// Swept over the spectrum fixture rather than spot-checked, because the claim is about a domain:
+    /// 4096 (colour, alpha) pairs per mode, including the fully transparent and fully opaque bands
+    /// where several modes change branch. Both backends, because the fold is a separate code path in
+    /// each and one of them could hold while the other did not.
+    func testMixIsTheSameMathAsStackingTheUpperSlotOverTheLowerOne() {
+        var backends: [CompositorBackend] = [.coreGraphics]
+        if CompositorMetalEngine.shared != nil { backends.append(.metal) }
+
+        for backend in backends {
+            Compositor.backend = backend
+            var deltas: [(BlendMode, Int)] = []
+            for mode in BlendMode.allCases where mode != .clipToBelow {
+                let manager = spectrumManager(.normal)
+                guard let mixed = request(manager, tree: [mixNode([[leafNode(0, of: manager)],
+                                                                   [leafNode(1, of: manager)]], mode)]),
+                      let stacked = request(manager, tree: [leafNode(0, of: manager),
+                                                            leafNode(1, of: manager, mode: mode)]),
+                      let mixImage = Compositor.composite(mixed),
+                      let stackImage = Compositor.composite(stacked) else {
+                    XCTFail("\(backend): both trees must composite for \(mode.displayName)")
+                    continue
+                }
+                deltas.append((mode, maxChannelDelta(mixImage, stackImage)))
+            }
+            let table = deltas.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+            print("[compositor] Mix-vs-stack max channel delta, \(backend): \(table)")
+
+            for (mode, delta) in deltas {
+                XCTAssertLessThanOrEqual(delta, Self.foldTolerance,
+                                         "\(backend): Mix(A, B, \(mode.displayName)) differs from stacking B over A by \(delta), which is past the one step an extra 8-bit intermediate can cost. Table: \(table)")
+            }
+        }
+    }
+
+    /// The cost of the one thing a Mix does that a stack does not: **slot 1 is composited on its own
+    /// before it is folded**, so its pixels are quantized to 8-bit premultiplied once more than the
+    /// stack's are. Same tolerance and same reasoning as `testNestedGroupOpacityCompounds`' — one step
+    /// is what an extra intermediate can produce, anything above it is a difference in the walk.
+    private static let foldTolerance = 1
+
+    /// **The whole reason the walk had to change, stated as the picture it buys.** §4.3: "an input
+    /// slot is always isolated". Slot 1 blends against *slot 0*, never against whatever the node is
+    /// drawn onto — which is precisely what the old shared-accumulator loop could not express, since
+    /// it baked slot 0 into the backdrop before slot 1 was drawn.
+    ///
+    /// The fixture makes the two answers different by keeping the slots apart: a multiply that lands
+    /// where slot 0 has no coverage sees transparency and reads as normal (§4.2's rule, and
+    /// `testABlendingLayerOverNothingReadsAsNormal` at the top level). Under `.stack` semantics it
+    /// would have seen the grey floor beneath the node instead, and the two differ by 127.
+    func testAMixsUpperSlotBlendsAgainstTheLowerSlotAndNotAgainstTheBackdrop() {
+        let manager = CanvasFixture.manager(layerCount: 3)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(UIColor(white: 128.0 / 255, alpha: 1),
+                                                               rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 20, height: 20)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 2,
+                                      CanvasFixture.solidImage(green, rect: CGRect(x: 30, y: 30, width: 20, height: 20)))
+
+        let tree = [leafNode(0, of: manager),
+                    mixNode([[leafNode(1, of: manager)], [leafNode(2, of: manager)]], .multiply)]
+        guard let composited = request(manager, tree: tree).flatMap(Compositor.composite) else {
+            return XCTFail("The fixture must composite")
+        }
+        XCTAssertEqual(pixel(composited, 35, 35), [0, 255, 0, 255],
+                       "Slot 1 multiplies against slot 0, which is transparent here — so it reads as normal, not as green into the floor. Got RGBA \(pixel(composited, 35, 35))")
+        XCTAssertEqual(pixel(composited, 10, 10), [255, 0, 0, 255],
+                       "And slot 0 draws over the floor unchanged where slot 1 has no coverage. Got RGBA \(pixel(composited, 10, 10))")
+        XCTAssertEqual(pixel(composited, 55, 55), [128, 128, 128, 255],
+                       "The floor outside the node is nobody's business. Got RGBA \(pixel(composited, 55, 55))")
+    }
+
+    /// The same fixture through the GPU, because slot isolation is a texture the Metal walk has to
+    /// acquire and clear rather than a `UIGraphicsImageRenderer` block — a different mistake is
+    /// available in each backend, and only compositing both catches the one that is made.
+    func testTheGPUIsolatesAMixsSlotsExactlyAsTheCPUDoes() throws {
+        try skipUnlessGPUAvailable()
+        let manager = CanvasFixture.manager(layerCount: 3)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(UIColor(white: 128.0 / 255, alpha: 1),
+                                                               rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 20, height: 20)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 2,
+                                      CanvasFixture.solidImage(green, rect: CGRect(x: 30, y: 30, width: 20, height: 20)))
+
+        let tree = [leafNode(0, of: manager),
+                    mixNode([[leafNode(1, of: manager)], [leafNode(2, of: manager)]], .multiply)]
+        guard let node = request(manager, tree: tree) else { return }
+        Compositor.backend = .coreGraphics
+        guard let cpu = Compositor.composite(node), let gpu = MetalCompositor.composite(node) else {
+            return XCTFail("Both backends must render a Mix")
+        }
+        XCTAssertEqual(maxChannelDelta(gpu, cpu), 0,
+                       "Opaque content through a Mix involves no blend arithmetic where the slots do not meet, so this is a format or an ordering mistake if it fails")
+    }
+
+    /// **Every mode through the fold, both backends** — the counterpart to
+    /// `testEveryBlendModeAgreesBetweenTheBackendsOnAGroup`, and worth sweeping separately for the
+    /// same reason that one is: a mode applied to a folded slot buffer is a different texture on the
+    /// GPU and a different image on the CPU from one applied to an uploaded leaf or an assembled
+    /// group, so a fold wired up for one of them could pass both existing sweeps.
+    ///
+    /// Same tolerance the leaf and group sweeps hold to, because it is the same measurement of the
+    /// same two rounding regimes — `.normal` exact, everything else within a channel step.
+    func testEveryMixModeAgreesBetweenTheBackends() throws {
+        try skipUnlessGPUAvailable()
+
+        var deltas: [(BlendMode, Int)] = []
+        for mode in BlendMode.allCases where mode != .clipToBelow {
+            let manager = spectrumManager(.normal)
+            guard let node = request(manager, tree: [mixNode([[leafNode(0, of: manager)],
+                                                              [leafNode(1, of: manager)]], mode)]) else { return }
+            Compositor.backend = .coreGraphics
+            guard let cpu = Compositor.composite(node), let gpu = MetalCompositor.composite(node) else {
+                XCTFail("Both backends must render a Mix in \(mode.displayName)")
+                continue
+            }
+            deltas.append((mode, maxChannelDelta(gpu, cpu)))
+        }
+        let table = deltas.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+        print("[compositor] GPU-vs-CPU max channel delta by mix mode: \(table)")
+
+        for (mode, delta) in deltas {
+            if mode == .normal {
+                XCTAssertEqual(delta, 0,
+                               "Source-over through a fold is still source-over, and it holds at 0 for leaves and for groups. Table: \(table)")
+            } else {
+                XCTAssertLessThanOrEqual(delta, Self.blendTolerance,
+                                         "Mix \(mode.displayName) differs by \(delta), past the \(Self.blendTolerance) this file's comment derives from measurement. Table: \(table)")
+            }
+        }
+    }
+
+    /// **Phase 6a's `masks` list applies to the assembled node buffer, whatever assembled it.**
+    ///
+    /// The rule is "a node's mask clips the node", so for a Mix it clips the *result* of the fold and
+    /// not the slots that went into it. The fixture is built so that the wrong placement is visible:
+    /// with the mask on slot 0 (or applied before the fold at all), slot 1's multiply would land
+    /// outside the mask against transparency, read as normal, and paint green where the node should
+    /// be showing nothing.
+    func testAMixNodesMaskClipsTheFoldedResultRatherThanItsSlots() throws {
+        let manager = CanvasFixture.manager(layerCount: 3)
+        let whole = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, CanvasFixture.solidImage(red, rect: whole))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, CanvasFixture.solidImage(green, rect: whole))
+        CanvasFixture.setBakedContent(manager, layerIndex: 2,
+                                      CanvasFixture.solidImage(blue, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+
+        // Stated rather than derived, for the same reason the tree is: nothing in the model can yet
+        // hang a mask on a node. The shape is exactly what `maskSourceStacks(of:)` builds for a
+        // `.layer` source — a one-node stack with visibility forced on (§6.6).
+        let shape = MaskSource.layer(manager.layers[2].id)
+        let stacks: [MaskSource: [RenderNode]] = [shape: [leafNode(2, of: manager)]]
+        let node = mixNode([[leafNode(0, of: manager)], [leafNode(1, of: manager)]], .multiply,
+                           masks: [AlphaMask(sources: [shape])])
+
+        var backends: [CompositorBackend] = [.coreGraphics]
+        if CompositorMetalEngine.shared != nil { backends.append(.metal) }
+        for backend in backends {
+            Compositor.backend = backend
+            guard let composited = request(manager, tree: [node], maskStacks: stacks)
+                .flatMap(Compositor.composite) else {
+                XCTFail("\(backend): the fixture must composite")
+                continue
+            }
+            XCTAssertEqual(pixel(composited, 16, 16), [0, 0, 0, 255],
+                           "\(backend): inside the mask, green multiplies red to black. Got RGBA \(pixel(composited, 16, 16))")
+            XCTAssertEqual(pixel(composited, 48, 48), [0, 0, 0, 0],
+                           "\(backend): outside it the whole fold is clipped away — a mask applied to the slots instead would leave slot 1 reading as normal and paint green here. Got RGBA \(pixel(composited, 48, 48))")
+        }
+    }
+
+    /// **A Mix pruned to one slot still renders, and renders as that slot** — which is not a
+    /// hypothetical arity: `Array<RenderNode>.split(atLeaf:)` produces exactly this shape whenever the
+    /// active layer sits in one slot of a two-slot node, and it keeps the op verbatim while doing so.
+    /// See `SandwichLogicTests` for what that costs; here it only has to not be a crash or a hole.
+    func testAMixWithOneSlotIsThatSlotAssembled() {
+        let manager = overlappingManager()
+        let slot = [leafNode(0, of: manager), leafNode(1, of: manager)]
+        guard let folded = request(manager, tree: [mixNode([slot], .multiply)]).flatMap(Compositor.composite),
+              let stacked = request(manager, tree: slot).flatMap(Compositor.composite) else {
+            return XCTFail("Both trees must composite")
+        }
+        assertPixelsIdentical(folded, stacked,
+                              "With no second slot there is nothing to fold, so the mode never runs and the node is its only slot")
+    }
+
     func testAHiddenBackgroundLeavesTheStackOnTransparency() {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.canvasBackgroundColor = .white
