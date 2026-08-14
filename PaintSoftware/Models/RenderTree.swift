@@ -163,6 +163,21 @@ struct RenderNode: Identifiable, Equatable {
     /// `CanvasView.SandwichKey` compares whole trees on every SwiftUI pass. The resolved *coverage*
     /// deliberately does not live in the tree for that reason (see `MaskResolver`).
     var masks: [AlphaMask] = []
+
+    /// The grade this node applies to **whatever it takes as input**, or nil for a node that draws
+    /// or assembles pixels of its own (§4.4, phase 9).
+    ///
+    /// **One field for both of §4.4's wrappers, because the wrapper is the position and not the
+    /// data.** On a `.leaf` this is the stack-layer form and the input is the backdrop accumulated so
+    /// far in this container; on a `.node` it will be the 1-input form (phase 9b) and the input is the
+    /// slot composite the fold just assembled. Both hand that texture to the same kernel with the same
+    /// three derived values, which is the whole of §4.4's "only the input-resolution rule differs" —
+    /// so a second field, or a second `Content` case, would be encoding the difference twice.
+    ///
+    /// Deliberately not `Content.effect(…)`: an effect leaf keeps its `layerIndex`, because it is a
+    /// row in the panel, a member of a container, undoable and maskable like any other layer, and a
+    /// separate case would have to restate every one of those.
+    var effect: Effect? = nil
 }
 
 extension RenderNode {
@@ -237,11 +252,25 @@ extension RenderNode {
     /// rule whole while two of its clauses were dead: **the clause cannot fire today**, because
     /// `CompositorOp.needsOwnBuffer` makes every `.mix` buffer and the walk stops at a child that
     /// buffers. It becomes live the moment an op arrives that folds without one.
+    /// **An effect counts here as much as a blend does, and phase 9a is why.** §4.4's stack-layer
+    /// wrapper grades the accumulated backdrop, so it reads what is beneath it exactly the way a
+    /// `multiply` layer does — which means isolation changes its answer, which is the one question
+    /// this predicate asks. Without this clause an isolated group whose children are all `.normal`
+    /// plus one effect layer would take the direct path, the children would be drawn onto the
+    /// *parent's* accumulator, and the grade would reach outside its own container: §4.4's
+    /// "an effect layer inside a group cannot reach outside it" broken by an optimisation.
+    ///
+    /// Which is also why the scoping needs no rule of its own. It **is** isolation, and isolation is
+    /// every folder's default; a group explicitly switched to pass-through says its children blend
+    /// against what is below the group, and a grade reaching that far is then exactly what was asked
+    /// for. `testAnEffectInsideAPassThroughGroupGradesTheOuterBackdrop` pins that direction so the
+    /// two are not quietly conflated later.
     private var enclosesABlend: Bool {
         guard case .node(_, let inputs) = content else { return false }
         return inputs.contains { input in
             input.contains {
-                $0.blendMode.isBlending || (!$0.needsOwnBuffer && ($0.opIsBlending || $0.enclosesABlend))
+                $0.blendMode.isBlending || $0.effect != nil
+                    || (!$0.needsOwnBuffer && ($0.opIsBlending || $0.enclosesABlend))
             }
         }
     }
@@ -279,7 +308,7 @@ extension RenderNode {
             inner = .node(op: op, inputs: inputs.map { $0.map(\.ignoringVisibility) })
         }
         return RenderNode(id: id, content: inner, opacity: opacity, isVisible: true,
-                          blendMode: blendMode, isIsolated: isIsolated, masks: masks)
+                          blendMode: blendMode, isIsolated: isIsolated, masks: masks, effect: effect)
     }
 
     /// The node with this `Layer.id` or `LayerFolder.id`, anywhere in `nodes`. Nil when the id names
@@ -364,8 +393,14 @@ extension Array where Element == RenderNode {
             // true for every `.mix` — but it is the clause that actually states the reason, and the
             // reason is not "a mix allocates". Core Animation cannot fold two arbitrary subtrees
             // with a blend mode at all, whatever the buffer rule for nodes turns out to be next.
+            //
+            // The effect clause is phase 9a's, and it is the blend clause's argument again rather
+            // than a new one: Core Animation draws a flat row of hosts and has no way to grade one
+            // sibling by what is under it, so an effect layer left on that path would show up in the
+            // thumbnail and nowhere else. `needsOwnBuffer` is false for an effect *leaf* — it grades
+            // in place — so asking only about buffers would answer false for the whole feature.
             if node.needsOwnBuffer || node.blendMode.isBlending || node.opIsBlending
-                || !node.masks.isEmpty { return true }
+                || !node.masks.isEmpty || node.effect != nil { return true }
             guard case .node(_, let inputs) = node.content else { return false }
             return inputs.contains { $0.needsCompositorOnCanvas }
         }
@@ -451,7 +486,7 @@ extension RenderNode {
         guard case .node(let op, _) = content, inputs.contains(where: { !$0.isEmpty }) else { return nil }
         return RenderNode(id: id, content: .node(op: op, inputs: inputs),
                           opacity: opacity, isVisible: isVisible,
-                          blendMode: blendMode, isIsolated: isIsolated, masks: masks)
+                          blendMode: blendMode, isIsolated: isIsolated, masks: masks, effect: effect)
     }
 }
 
@@ -487,6 +522,7 @@ extension CanvasManager {
             switch entry {
             case .layer(let index):
                 let layer = layers[index]
+                let effect = layer.compositingEffect
                 return RenderNode(id: layer.id, content: .leaf(layerIndex: index),
                                   opacity: layer.opacity, isVisible: layer.isVisible,
                                   // **`.clipToBelow` never reaches the compositor as a mode.** It is
@@ -494,9 +530,23 @@ extension CanvasManager {
                                   // machinery with an implicit source, so it is resolved here into a
                                   // mask and a plain `.normal`. That is the whole of the feature —
                                   // no shader case, no backend clause, nothing to keep in step.
-                                  blendMode: layer.blendMode.compositedMode, isIsolated: false,
+                                  //
+                                  // **An effect layer is pinned to `.normal` whatever it stores**,
+                                  // and that is a decision rather than a field going unread. §4.4's
+                                  // stack layer *replaces* the backdrop it grades — the graded pixels
+                                  // are the same pixels, regraded, so there are not two things to
+                                  // compose. A mode here would composite the grade a second time on
+                                  // top of what it graded, which is a different feature and is
+                                  // exactly what the 1-input node form (9b) gives: an effect whose
+                                  // output is a *source* with its own mode. Clip-to-below survives
+                                  // this untouched, because it was never a mode by the time it got
+                                  // here — it is the mask on the next line, and on an adjustment
+                                  // layer it means what Photoshop means by clipping one.
+                                  blendMode: effect == nil ? layer.blendMode.compositedMode : .normal,
+                                  isIsolated: false,
                                   masks: masks(ofNode: layer.id, declared: layer.alphaMask,
-                                               clippingTo: layer.blendMode == .clipToBelow ? below : nil))
+                                               clippingTo: layer.blendMode == .clipToBelow ? below : nil),
+                                  effect: effect)
             case .folder(let folder):
                 // Unconditional descent: `isExpanded` is a panel affordance and must not reach
                 // rendering. A collapsed folder still draws everything inside it.

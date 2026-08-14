@@ -156,6 +156,9 @@ enum ProjectStore {
             let parentFolderID: UUID?
             let blendMode: BlendMode
             let alphaMask: AlphaMask?
+            /// A `.compositing` layer's grade (§4.4). A value type, so unlike `vector` it needs no
+            /// defensive copy to be safe to encode off main.
+            let effect: Effect?
             let cels: [CelContent]
         }
 
@@ -222,7 +225,7 @@ enum ProjectStore {
                 LayerContent(id: layer.id, name: layer.name, opacity: layer.opacity,
                              isVisible: layer.isVisible, kind: layer.kind,
                              parentFolderID: layer.parentFolderID, blendMode: layer.blendMode,
-                             alphaMask: layer.alphaMask,
+                             alphaMask: layer.alphaMask, effect: layer.effect,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                rasterImage: cel.raster.renderToUIImage(),
@@ -417,6 +420,7 @@ enum ProjectStore {
                 parentFolderID: layer.parentFolderID?.uuidString,
                 blendMode: layer.blendMode,
                 alphaMask: layer.alphaMask,
+                effect: layer.effect,
                 cels: celManifests
             ))
         }
@@ -567,6 +571,7 @@ enum ProjectStore {
                 opacity: layerManifest.opacity,
                 isVisible: layerManifest.isVisible,
                 kind: layerManifest.kind,
+                effect: layerManifest.effect,
                 blendMode: layerManifest.blendMode,
                 alphaMask: layerManifest.alphaMask,
                 parentFolderID: parentID,

@@ -273,7 +273,15 @@ extension CanvasManager {
             // carries the flag and the compositor is what honours it. Skipping the render here only
             // avoids rasterizing pixels that would then be multiplied by zero, which is precisely
             // not true of a hidden mask source: its alpha is read even though it never draws.
-            guard layer.isVisible || maskSourceLayers.contains(index),
+            //
+            // **A `.compositing` layer is elided outright (§4.4, phase 9a)**, and unlike the
+            // visibility case there is nothing conditional about it: an effect layer holds no pixels
+            // at all, so rasterizing its blank cel would mint a canvas-sized transparent image per
+            // frame for a leaf the compositor reaches by its `effect` and never by its source. Nor is
+            // it an exception to the mask rule above — an effect layer named as a mask source
+            // contributes no alpha either way, because it has none to contribute.
+            guard layer.kind != .compositing,
+                  layer.isVisible || maskSourceLayers.contains(index),
                   let celIndex = activeCelIndex(inLayer: index, atFrame: frame),
                   let image = PixelOps.rasterize(cel: layer.cels[celIndex],
                                                  canvasSize: canvasSize,
