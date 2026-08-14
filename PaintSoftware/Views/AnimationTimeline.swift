@@ -541,16 +541,18 @@ struct AnimationTimeline: View {
     @ViewBuilder
     private func nameRow(_ row: LayerStackRow) -> some View {
         switch row {
-        case .folder(let folderID, let depth):
+        case .folder(let folderID, let depth, let kind):
             if let folder = canvasManager.folders.first(where: { $0.id == folderID }) {
                 HStack(spacing: 3) {
                     Image(systemName: folder.isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9))
                         .foregroundColor(.gray)
                         .onTapGesture { canvasManager.toggleFolderExpanded(folderID) }
-                    Image(systemName: "folder.fill")
+                    // Same three glyphs the layer panel's rows use (`LayerStackCell.configure`), so
+                    // a node reads as a node in both columns rather than as a folder in one of them.
+                    Image(systemName: folderIcon(kind))
                         .font(.system(size: 9))
-                        .foregroundColor(.yellow)
+                        .foregroundColor(kind == .group ? .yellow : .teal)
                     Text(folder.name)
                         .font(.caption)
                         .foregroundColor(folder.isVisible ? .white : .gray)
@@ -573,11 +575,23 @@ struct AnimationTimeline: View {
         }
     }
 
+    private func folderIcon(_ kind: LayerStackRow.FolderKind) -> String {
+        switch kind {
+        case .group:          return "folder.fill"
+        case .compositorNode: return "camera.filters"
+        case .inputSlot:      return "tray"
+        }
+    }
+
     /// Press and hold for half a second, then drag: the same reorder gesture the layer panel uses,
     /// resolved here by counting how many fixed-height rows the finger travelled.
     private func reorderGesture(for row: LayerStackRow) -> some Gesture {
         LongPressGesture(minimumDuration: 0.5)
             .onEnded { _ in
+                // §4.3: an input slot's position among its siblings *is* its index, so no drag of
+                // one has a meaning. `restackFolder` refuses it either way — the lift is what has to
+                // not happen, here as in the layer panel, or the row picks up and snaps back.
+                guard row.folderID.map(canvasManager.canRestackFolder) ?? true else { return }
                 draggingRowID = row.id
                 dragTranslation = 0
                 dragOffsetRows = 0

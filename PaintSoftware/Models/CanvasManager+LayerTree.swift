@@ -30,7 +30,7 @@ extension CanvasManager {
         for entry in containerEntries(inContainer: container) {
             switch entry {
             case .folder(let folder):
-                result.append(.folder(id: folder.id, depth: depth))
+                result.append(.folder(id: folder.id, depth: depth, kind: .init(folder)))
                 // Collapsing hides rows and nothing else — it is a panel affordance, which is why
                 // the render tree (`RenderTree.swift`) descends unconditionally where this doesn't.
                 if folder.isExpanded {
