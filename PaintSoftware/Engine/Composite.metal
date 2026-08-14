@@ -295,6 +295,37 @@ kernel void compositeMask(texture2d<float, access::read>  layer  [[texture(0)]],
     result.write(layer.read(gid) * mask.read(gid).r, gid);
 }
 
+/// **A graded backdrop rejoining the stack it was graded from** — §4.4's stack-layer wrapper, phase 9a.
+///
+/// Not `compositeOver`, and the difference is the whole of what an adjustment layer is. An effect
+/// preserves alpha exactly (`applyEffect`), so the graded texture has the backdrop's own coverage —
+/// and compositing a texture source-over a backdrop of the same alpha would inflate it to
+/// `2a - a²`, thickening every antialiased edge in the document a grade passed over. The graded
+/// pixels are not a new source to lay on top; they are the same pixels, regraded, so they *replace*
+/// what they came from and `mix` is the only operator that says that.
+///
+/// That is also what makes `opacity` and the mask read as an *amount* here rather than as coverage:
+/// half opacity is half-way between the ungraded and graded backdrop, which is what an artist means
+/// by a 50% adjustment layer, and outside the mask the amount is 0 and the backdrop comes through
+/// byte for byte. `CoreGraphicsCompositor.grade` computes `b + (g - b) * amount` in that order for
+/// the same reason `MaskResolver.apply` mirrors `compositeMask` term for term.
+///
+/// `coverage` is bound even when the node has no mask, because a declared texture argument has to be;
+/// `hasCoverage` is what keeps it unread, and the caller binds `base` again rather than allocating
+/// something to ignore.
+kernel void compositeEffectMix(texture2d<float, access::read>  base        [[texture(0)]],
+                               texture2d<float, access::read>  graded      [[texture(1)]],
+                               texture2d<float, access::read>  coverage    [[texture(2)]],
+                               texture2d<float, access::write> result      [[texture(3)]],
+                               constant float                 &opacity     [[buffer(0)]],
+                               constant uint                  &hasCoverage [[buffer(1)]],
+                               uint2 gid [[thread_position_in_grid]])
+{
+    float amount = opacity * (hasCoverage != 0u ? coverage.read(gid).r : 1.0f);
+    float4 b = base.read(gid);
+    result.write(mix(b, graded.read(gid), amount), gid);
+}
+
 // MARK: - Tier 3 effects (§4.4, §7)
 //
 // **One kernel with one switch, the shape §5.1 describes for blend modes and for the same reason.**

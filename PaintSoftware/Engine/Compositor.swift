@@ -381,8 +381,17 @@ enum CoreGraphicsCompositor {
                 // A leaf's flag gates the leaf; a group's gates its whole subtree (see the `.node`
                 // case). The deleted flat walk's `where layer.isVisible` is exactly this test, and
                 // `CompositorParityLogicTests.flatWalkComposite` still holds it to that.
-                guard node.isVisible,
-                      request.sources.indices.contains(layerIndex),
+                guard node.isVisible else { continue }
+                // **§4.4's stack layer, and it is reached before `sources` rather than after.** An
+                // effect layer holds no pixels — the snapshot elides it — so it has no source to
+                // find, and the guard below would drop it as an empty leaf. What it has is a grade
+                // over the backdrop this walk has accumulated so far, which is the input-resolution
+                // rule the whole wrapper consists of.
+                if let effect = node.effect {
+                    grade(effect, by: node, of: request, in: bounds, context: context)
+                    continue
+                }
+                guard request.sources.indices.contains(layerIndex),
                       let source = request.sources[layerIndex] else { continue }
                 // **A leaf blends as it is drawn** (`RenderNode.blendMode`): its mode is an argument
                 // to this one draw, against whatever the walk has accumulated underneath. That is
@@ -476,6 +485,58 @@ enum CoreGraphicsCompositor {
             // refuses to make.
             draw(isolated, mode: mode, opacity: 1, in: bounds, context: context)
         }
+    }
+
+    /// **§4.4's stack layer: one effect over the backdrop accumulated so far in this container.**
+    ///
+    /// *This container* is not a rule stated here — it is `context`. A buffered group runs this walk
+    /// inside its own `UIGraphicsImageRenderer`, so `currentImage` is the group's own accumulator and
+    /// the grade cannot see past it; at the root it is the canvas, background included, which is what
+    /// an adjustment layer at the top of a stack grades in Photoshop. `RenderNode.enclosesABlend` is
+    /// what guarantees an isolated group has that buffer, and carries the argument.
+    ///
+    /// The graded pixels **replace** the backdrop rather than compositing over it, mixed back by
+    /// opacity and coverage — see `compositeEffectMix` in `Composite.metal`, which is the same three
+    /// lines and carries the reasoning for why source-over would be wrong here.
+    ///
+    /// Slow, and for `drawHandRolled`'s reason rather than by oversight: it snapshots the canvas,
+    /// reads it back, grades every pixel in Swift and writes a third buffer. This backend is the
+    /// oracle the shader is measured against and the fallback on a device with no Metal, so it may be
+    /// slow and may not be approximate. §5.1 is the argument for where this runs at interactive rates.
+    private static func grade(_ effect: Effect, by node: RenderNode, of request: RenderRequest,
+                              in bounds: CGRect, context: UIGraphicsImageRendererContext) {
+        let width = Int(bounds.width.rounded()), height = Int(bounds.height.rounded())
+        guard width > 0, height > 0,
+              let backdropImage = context.currentImage.cgImage,
+              let backdrop = premultipliedBytes(backdropImage, width: width, height: height)
+        else { return }
+
+        // The one call both §4.4 wrappers make, given the one texture their input-resolution rules
+        // differ about. Nothing here looks inside the `Effect`; `Effect.swift` resolved it once.
+        let graded = EffectReference.apply(effect, to: backdrop, width: width, height: height)
+        // Same resolution the GPU path uploads, for `MaskResolver`'s reason — the threshold is a step
+        // function and the two backends cannot be allowed to land on opposite sides of it.
+        let coverage = node.masks.isEmpty ? nil : MaskResolver.coverage(for: node.masks, of: request)
+        let opacity = Float(node.opacity)
+
+        var result = backdrop
+        for pixel in 0..<(width * height) {
+            let amount = opacity * (coverage.map { Float($0.coverage[pixel]) / 255 } ?? 1)
+            // No amount is the backdrop, exactly — worth the branch rather than four multiplies by
+            // zero, since outside the mask is most of the canvas in most documents.
+            guard amount > 0 else { continue }
+            for channel in 0..<4 {
+                let offset = pixel * 4 + channel
+                let base = Float(backdrop[offset]) / 255
+                let value = base + (Float(graded[offset]) / 255 - base) * amount
+                result[offset] = UInt8((min(max(value, 0), 1) * 255).rounded(.toNearestOrEven))
+            }
+        }
+
+        guard let image = makeImage(fromPremultiplied: result, width: width, height: height) else { return }
+        // `.copy`, as `drawHandRolled` ends: this image *is* the accumulated backdrop, regraded, so it
+        // replaces the context rather than being composited onto what it was computed from.
+        UIImage(cgImage: image, scale: 1, orientation: .up).draw(in: bounds, blendMode: .copy, alpha: 1)
     }
 
     /// `image` with this node's masks applied, or `image` unchanged when it has none.

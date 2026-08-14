@@ -546,6 +546,35 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// Adds a `.compositing` layer: it holds no pixels and grades everything beneath it *within its
+    /// own container* (§4.4), which is Photoshop's adjustment layer.
+    ///
+    /// It still gets an empty cel, for `addVectorLayer`'s reason — every cel-lifecycle path in the
+    /// app assumes a layer has one, and a blank cel is free (§8.1). Nothing ever draws into it: the
+    /// snapshot elides a compositing layer's pixels entirely (`renderSources`), and the compositor
+    /// reaches this leaf's effect before it would look for a source.
+    func addEffectLayer(_ effect: Effect, name: String? = nil) {
+        withStructureUndo(name: "Add Effect Layer") {
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1),
+                          raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
+            let layer = Layer(id: UUID(), name: name ?? effect.displayName, opacity: 1.0,
+                              isVisible: true, kind: .compositing, effect: effect, cels: [cel])
+            layers.append(layer)
+            currentLayerIndex = layers.count - 1
+        }
+    }
+
+    /// Replaces the grade on an effect layer, leaving every other property alone. Nothing happens on a
+    /// layer that is not `.compositing` — the kind is what makes an effect live (`compositingEffect`),
+    /// so writing one onto a raster layer would store a value that never renders.
+    func setLayerEffect(layerIndex: Int, to effect: Effect) {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .compositing,
+              layers[layerIndex].effect != effect else { return }
+        withStructureUndo(name: "Effect") {
+            layers[layerIndex].effect = effect
+        }
+    }
+
     func deleteLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
         withStructureUndo(name: "Delete Layer") {
