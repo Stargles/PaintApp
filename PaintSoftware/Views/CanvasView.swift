@@ -436,10 +436,19 @@ struct CanvasView: UIViewRepresentable {
                     // and after the cel spawn, which is what decides whether there is a stroke at
                     // all. §6.4: resolved here, once, and static until lift.
                     self.liveMaskStrokeBegan(host: host)
+                    // Last, so it sees both the latch and the resolved mask. Without it the latch
+                    // above is a variable nothing reads until some unrelated SwiftUI pass happens
+                    // to come along — see `applySandwichPresentationNow`.
+                    self.applySandwichPresentationNow()
                     if let host { self.startShapeDetection(host: host) }
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
                     self?.isSandwichStrokeLive = false
+                    // The clear needs applying for the same reason the latch does, and a cancel is
+                    // the case with no publish to rely on at all: it restores the pre-touch content,
+                    // so nothing about the model has moved for SwiftUI to notice. The key is back
+                    // where the cached images were built, so this snaps straight to `full`.
+                    self?.applySandwichPresentationNow()
                     self?.cancelShapeDetection()
                     self?.canvasManager.refreshUndoRedoState()
                 }
@@ -732,6 +741,32 @@ struct CanvasView: UIViewRepresentable {
         private func sandwichStrokeBegan(host: LayerHostView?) {
             guard let view = host?.strokeView, view.raster != nil || view.vectorCanvas != nil else { return }
             isSandwichStrokeLive = true
+        }
+
+        /// Puts §5.2's presentation on screen right now, for the touch callbacks that move
+        /// `isSandwichStrokeLive` outside a SwiftUI pass.
+        ///
+        /// **The latch is not the state change — `updateSandwich` is, and it runs only from
+        /// `reconcileLayers`, which runs only from a SwiftUI pass.** A dab publishes nothing, on
+        /// purpose and load-bearingly (§5.2), so touching down does not cause a pass either. The
+        /// *first* stroke on a frame gets one for free because the cel spawn beside it publishes;
+        /// every stroke after that gets none, and the active layer's host stays blanked for the
+        /// whole gesture. The artist then draws into a view the sandwich is deliberately hiding and
+        /// sees no ink at all until they lift, which is the bug this closes — and every existing
+        /// assertion about the canvas is taken after lift, where `full` has the stroke and
+        /// everything looks right.
+        ///
+        /// This is the same reasoning `liveMaskStrokeBegan` already gives for resolving the mask at
+        /// touch-down rather than leaving it to the next pass. Blanking needed it too.
+        ///
+        /// Deriving the tree is off `reconcileLayers`'s per-pass budget, but this is once per
+        /// *stroke*, never per dab, and `liveMaskStrokeBegan` on the same touch already builds a
+        /// whole `RenderRequest`. It schedules no composite: `makeSandwichKey` freezes the active
+        /// layer's content version for the dab's duration, so the key has not moved and the
+        /// compositor stays off the drawing path.
+        private func applySandwichPresentationNow() {
+            let tree = canvasManager.renderTree
+            updateSandwich(tree: tree, engaged: isSandwichEngaged(tree))
         }
 
         /// Picks the presentation, schedules a rebuild when the key has moved, and applies both.
