@@ -3,13 +3,34 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
-## `duplicateLayer` drops `blendMode`, and now `alphaMask` too (2026-08-13)
+## Duplicating a cel or a layer drops the in-between's `interpolation` recipe (2026-08-14)
 
-`CanvasManager+LayerTree.swift`'s `duplicateLayer(at:)` builds the copy's `Layer` without carrying
-over `source.blendMode` or `source.alphaMask`, so both silently reset to their defaults (`.normal`,
-`nil`). The `blendMode` gap dates from phase 5a; phase 6a left it in place rather than fold a
-phase-5 behaviour change into a phase-6 diff, so `alphaMask` now drops the same way. Wants its own
-commit plus a test.
+Both per-cel copy sites build `Cel(...)` without passing `interpolation`:
+`CanvasManager+LayerTree.swift`'s `duplicateLayer(at:)` (the `source.cels.map`, ~line 384) and
+`CanvasManager+Timeline.swift:106`'s `duplicateCel`. A duplicated in-between therefore keeps its
+pixels and silently loses its recipe link — it stops being derived and becomes an ordinary drawing,
+with no feedback.
+
+**Deliberately not fixed here, because the obvious fix may be worse than the bug.**
+`InterpolationRecipe.references` holds `CelRef(layerID:celID:)` — **UUIDs, not indices within the
+layer** — and both duplicate paths mint fresh UUIDs for the copy (and, in `duplicateLayer`, for the
+layer too). So copying the recipe across verbatim does not give the duplicate its own keyframes: it
+gives it pointers back at the *original's*, and the copy's in-betweens would regenerate from the
+source layer, tracking edits to a layer the artist thinks they have left behind. The three candidate
+answers — remap each `CelRef` through the old→new id mapping the duplication already builds, drop
+the recipe as it does today but say so in the UI, or copy verbatim and accept the shared reference
+as intentional — are a vector-interpolation product call, not a layer-compositing one. See
+[VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md).
+
+## The test target does not compile under `-configuration Release` (2026-08-14)
+
+`xcodebuild -configuration Release` fails at `PaintSoftwareUITests/ShapeDetectorLogicTests.swift:54`
+with "the compiler is unable to type-check this expression in reasonable time" — the `largestGap`
+`map`/`hypot` chain, which wants splitting into annotated intermediate lets. Pre-existing and
+unrelated to layer compositing, but it has a cost worth recording: it is why phase 6b's Release
+performance figures (§6.4's ~32 ms per clipped node) had to be produced by extracting the loops into
+a standalone `swiftc` harness rather than by running the perf case in Release. Any future
+optimised-build measurement pays the same tax until this is fixed.
 
 ## Fill tool: the gap-closing UI test is still skipped (2026-07-21)
 

@@ -356,16 +356,19 @@ Both constants live in `Models/AlphaMask.swift`: `AlphaMask.threshold` (0.5) and
 
 ### 6.4 Live feedback while drawing
 
-A mask applied only on lift would reproduce the selection clip's glitch — ink visibly crossing the
+A mask applied only on lift reproduces the selection clip's glitch — ink visibly crossing the
 boundary and snapping back. It does not have to: **the mask is static for the duration of a stroke**,
-so the live host carries the resolved mask as a `CALayer.mask`. Core Animation applies it in
-hardware, free and exact, and it is the same alpha multiply the compositor does — so they agree by
-construction. **Shipped**, and the agreement is literal rather than approximate: both sides call
-`MaskResolver.coverage` with the same masks over a request carrying the same `maskStacks` and
-content versions, so they get back *the same `ResolvedMask` object*, and `makeMaskImage()`'s alpha is
-its `coverage` byte for byte.
+so the live host carries the resolved mask as a `CALayer.mask`, resolved once at the stroke's first
+touch. Core Animation applies it in hardware, and the agreement with the compositor is literal
+rather than approximate: both sides call `MaskResolver.coverage` with the same masks over a request
+carrying the same `maskStacks` and content versions, so they get back *the same `ResolvedMask`
+object*, and `makeMaskImage()`'s alpha is its `coverage` byte for byte. Nested clips agree byte for
+byte too, against the expectation that they would not: the compositor clips the leaf, quantizes,
+then clips the assembled group and quantizes again, where the live path multiplies the two coverages
+and quantizes once. Measured difference across two genuinely crossing feathered edges is 0, and it
+is pinned as an equality so a future drift is a decision rather than slack.
 
-Three things the build settled that the paragraph above does not imply:
+Four things the build settled that the paragraph above does not imply:
 
 - **The mask goes on the host's content sublayers, never on `LayerHostView.layer`** — §5.2's blanking
   owns that slot, and a collision there fails silently in whichever direction install order decides.
@@ -377,22 +380,49 @@ Three things the build settled that the paragraph above does not imply:
 - Install and release ride on the same predicate as blanking, not on the touch callbacks: trap 2 in
   `updateSandwich` keeps the mid-stroke picture up until the rebuild lift asked for lands, and
   releasing on touch-up would drop the clip while the host is still what is on screen.
+- **The mask image is canvas-space and needs no zoom compensation**, which was checked rather than
+  hoped for: `containerView.bounds` is the canvas size outright and every content view is pinned
+  edge-to-edge to it, and zoom/pan is a transform on `containerView` — an *ancestor*, which scales a
+  layer and its mask together. Blanking has never needed a zoom clause for the same reason. A vector
+  layer's own transform is baked into the rendered pixels rather than applied to the view, so it
+  does not reach this question either.
 
 **`MaskResolver.apply` is the cost to watch**, measured at 2048² by
 `PerfBaselineTests.testMaskedCompositeCostAtCanvasResolution` (gated behind `PAINT_PERF_HEAVY`; it is
 36 s and a 615 MB peak). ~32 ms per clipped node per composite optimised, and ~62x that at `-Onone`
 — which is what the scheme's Run configuration builds, so it is what the iPad runs today.
 
+Two limits a later phase inherits:
+
+- **A `.preview`-quality composite would stop sharing the resolution.** `RenderQuality` is in
+  `MaskResolver`'s cache key and the live path asks at `.full`, which is what the sandwich rebuild
+  uses today; if §9.2's background renderer ever composites at `.preview` the two resolve separate
+  coverages and the byte-for-byte agreement above is no longer structural.
+- **The disengaged path carries no mask at all**, at rest or mid-stroke. Reachable only through
+  `isSandwichEngaged`'s floating-piece and in-between escape hatches — drawing is blocked outright
+  during the first — and pre-existing rather than introduced by §6.4.
+
 ### 6.5 UI
 
-- Toggle in `LayerOptionsPanel` ([LayerPanel.swift:138](PaintSoftware/Views/LayerPanel.swift:138)),
-  beside Fill Reference. Turning it on enters **mask-edit mode**: layer rows become
-  include/exclude targets, with an explicit exit. Mask-edit mode is modal state on `CanvasManager`,
-  so the canvas can dim non-source layers while it is on.
+**Mask-edit mode is modal state on `CanvasManager`** (`maskEditTarget`), not view `@State`, so the
+layer rows can double as the source picker and the live canvas can dim everything that is not a
+legal source while a session is open. A Mask toggle sits beside Fill Reference in `LayerOptionsPanel`
+and beside Pass Through in `FolderOptionsPanel` — §6.2 masks groups too, so both menus carry it.
+Turning it on enters the session; the panel header becomes a "Mask Sources — *name*" bar with a
+**Done** exit, since the options popover that opened the session is long closed by then.
+
+- **The picker filters through the same `canMask` cycle rule derivation uses**, not a second copy of
+  it, so it cannot offer a source the engine would then ignore (§6.2).
+- **Structural edits are refused for the duration** — swipe delete/duplicate, long-press reorder,
+  pinch-merge. Allowing one would nest it inside the session's open `beginStructureGesture` bracket
+  rather than reject it, which is a stranger outcome than not starting.
+- **Picking any row force-enables the mask.** So re-opening the picker on a mask paused from the
+  panel and touching a row silently un-pauses it. Simpler than threading a stay-paused mode through,
+  and the one place the session semantics could reasonably want a different answer.
 - Fill's flood need not be bounded by the mask — spill outside is invisible anyway, so it is a
   nicety, deferrable.
 - **`MaskParityLogicTests`**: a raster layer and a vector layer with identical content and identical
-  masks must composite to pixel-identical output. Precedent: `RasterVectorParityLogicTests`.
+  masks composite to pixel-identical output. Precedent: `RasterVectorParityLogicTests`.
 
 ### 6.6 Lifecycle
 
@@ -401,8 +431,9 @@ Three things the build settled that the paragraph above does not imply:
   `isFillReference`, which hiding a layer does clear.
 - **A deleted source drops out of `sources`**; an emptied list disables the mask rather than clipping
   everything. Undo restores both together (`withStructureUndo`).
-- **Mask edits coalesce into one undo step per mask-edit session**, the same `withStructureUndo`
-  nesting used elsewhere.
+- **Mask edits coalesce into one undo step per mask-edit session** — `beginMaskEdit`/`endMaskEdit`
+  bracket with `beginStructureGesture`/`commitStructureGesture` and every edit between them nests
+  through `withStructureUndo`'s depth guard, the same mechanism the opacity slider uses.
 
 ## 7. Blend modes and effects — the build list
 
@@ -518,8 +549,10 @@ later and rewriting for one.
 ## 10. Still open
 
 1. **Mask threshold and antialias constants** (§6.3) — `AlphaMask.threshold` (0.5) and
-   `AlphaMask.antialiasHalfWidth` (0.05), tunable once 6b's UI gives something to look at. "Clip to
-   below" itself shipped in 6a, as a mask whose source is implied.
+   `AlphaMask.antialiasHalfWidth` (0.05). **Unblocked, not done**: 6b shipped the UI and the live
+   stroke clip, so there is now something to look at and nobody has looked. Tune against a soft
+   brush on the iPad, where §6.4's `-Onone` cost is also felt. "Clip to below" itself shipped in 6a,
+   as a mask whose source is implied.
 2. **Compositor node ops** — §7 lists the *effects*; the multi-input ops themselves (Mix, and which
    others take 2+ inputs) want a pass once the node UI exists and there is something to try them on.
 
@@ -537,7 +570,7 @@ it is small and none of them fight a moving substrate.
 | ~~**4**~~ | ~~Group properties: isolated/pass-through, opacity, visibility migration (§4.1–4.2)~~ | **done** — groups composite as parentheses, both backends on one buffer rule |
 | ~~**5a**~~ | ~~Tier 1 blend modes on layers and groups (§7)~~ | **done** — fourteen modes, both backends, picker and row badge |
 | ~~**5b**~~ | ~~§5.2's sandwich, so the live canvas shows a blended layer~~ | **done** — exact at rest, snaps on lift |
-| **6** | Alpha masks (§6), incl. `MaskParityLogicTests` | **6a done** — engine resolves masks in both backends, raster and vector pixel-identically. **6b not built** — §6.5's UI and §6.4's live stroke feedback remain |
+| ~~**6**~~ | ~~Alpha masks (§6), incl. `MaskParityLogicTests`~~ | **done** — engine resolves masks in both backends at delta 0, raster and vector pixel-identically; the mask-edit UI picks sources through the same cycle rule; the live stroke is clipped by the same `ResolvedMask` object the compositor applies |
 | ~~**7**~~ | ~~Tier 2 blend modes~~ | **done** — eleven modes, both backends, measured against the spec |
 | **8** | Compositor nodes: slot-as-folder storage, panel chrome (§4.3) | a 2-input Mix node renders |
 | **9** | Tier 3 effects, as layer *and* node (§4.4, §7) | cheap per-pixel set first, then the multi-pass ones |
