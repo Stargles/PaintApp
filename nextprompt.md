@@ -4,11 +4,21 @@ Not for one phase. **Phases 8 and 9, what is left of §10, and the iPad Release-
 and you carry the project until they are done or the owner redirects you. Read LAYER_COMPOSITING.md —
 the agreed design, settled with the product owner. §11 is the build order.
 
-## State
+## State — your first action is one command
 
-**Phase 6 is closed and merged. `main` has it, and you start at phase 8.** Phases 0–7 are done,
-committed, green and on `origin/main`; §11's build-order table has one unticked row before 8, which
-is nothing — row 6 flipped this session.
+**Phase 6b is finished and verified but NOT yet on `main`.** It sits on `tmp/integrate-6b` (worktree
+`/Users/juliapark/Desktop/Kevin.P/PaintApp-integrate`), 8 commits ahead of `origin/main` and **0
+behind — a clean fast-forward**. The last session's push was refused by a permission gate, not by
+anything wrong with the branch, and it deliberately did not route around it. So:
+
+```
+git -C /Users/juliapark/Desktop/Kevin.P/PaintApp-integrate push origin tmp/integrate-6b:main
+```
+
+Re-check `git rev-list --left-right --count origin/main...HEAD` first in case `main` moved. **Push
+from the worktree, not through `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`** — that checkout is
+stale and holds ~48 files of another session's dead index. Then start phase 8; everything else at
+this boundary (suite, docs prune, SESSION_LOG, graphify) is done and committed.
 
 Full XCUITest suite at the 6b merge: **846: 843 passed, 1 failed, 2 skipped.** Both skips are
 expected — the `FillUITests` one in BUGS.md and the `PAINT_PERF_HEAVY` gate on
