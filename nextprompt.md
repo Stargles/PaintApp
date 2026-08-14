@@ -4,29 +4,24 @@ Not for one phase. **Phases 8 and 9, what is left of §10, and the iPad Release-
 and you carry the project until they are done or the owner redirects you. Read LAYER_COMPOSITING.md —
 the agreed design, settled with the product owner. §11 is the build order.
 
-## Start here, because the tree may not be where you would guess
+## State
 
-**Check `origin/main` first, and check `tmp/integrate-6b` (worktree
-`/Users/juliapark/Desktop/Kevin.P/PaintApp-integrate`) second.** Phase 6b — the mask UI, the live
-stroke clip, the `duplicateLayer` fix, the docs prune — is complete and committed on that branch. It
-merges to `main` once the full suite is green; if `origin/main` already has it, that landed and this
-paragraph is history. If it does not, **finishing 6b's boundary is your first job, not phase 8**:
-full suite, SESSION_LOG line, graphify refresh, merge.
+**Phase 6 is closed and merged. `main` has it, and you start at phase 8.** Phases 0–7 are done,
+committed, green and on `origin/main`; §11's build-order table has one unticked row before 8, which
+is nothing — row 6 flipped this session.
 
-Full-suite baseline to beat is **836: 834 passed, 1 failed, 1 skipped** at `dbbaabc`. Expect **two**
-skips now — the `FillUITests` one in BUGS.md, plus the `PAINT_PERF_HEAVY`-gated
-`testMaskedCompositeCostAtCanvasResolution` 6b added. Fast tier was 757/765 at the 6b worker tips.
+Full XCUITest suite at the 6b merge: **846: 843 passed, 1 failed, 2 skipped.** Both skips are
+expected — the `FillUITests` one in BUGS.md and the `PAINT_PERF_HEAVY` gate on
+`testMaskedCompositeCostAtCanvasResolution`. The failure,
+`LayerUITests.testAnAllNormalDocumentNeverEngagesTheSandwich`, passed clean in isolation on an
+erased-and-booted simulator and is environmental per CLAUDE.md's triage — it read `nil` rather than a
+wrong value, meaning a panel row simply did not appear inside its 5 s window as test 826 of 846.
+Fast tier was 757/765 at the 6b worker tips. **Use 846 as your baseline**, not the 836 older
+documents quote.
 
-**A suite run was in flight when the last session ended — check it before you spend 22 minutes.**
-`build/DerivedData/Logs/Test/Test-PaintSoftware-2026.08.14_12-14-53--0400.xcresult` in the integrate
-worktree, launched 12:14 on 2026-08-14 against `75C8B97E` after shutdown/erase/boot. If
-`xcresulttool get test-results summary` reads it, the run completed and the answer is already on
-disk for free. If it errors about a missing `Info.plist`, the run was cut off with the session and
-you re-run. That distinction is worth the ten seconds it costs to check.
-
-If `LayerUITests.testTheBlendedCanvasComesBackInSyncAfterLayerSwitchVisibilityToggleAndUndo` fails,
-know that it failed once in a suite before and passed three of three in isolation. It sits inside
-5b/6a/7's blast radius. A second suite failure makes it a real suspect, not a fourth re-run.
+`LayerUITests.testTheBlendedCanvasComesBackInSyncAfterLayerSwitchVisibilityToggleAndUndo` was the one
+the previous handoff said to suspect on a second sighting. It **passed** this session, so the counter
+resets — but it sits inside 5b/6a/7's blast radius, so if it fails twice in a row it is real.
 
 ## Read this first
 
