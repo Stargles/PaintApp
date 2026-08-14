@@ -513,6 +513,52 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertNotEqual(before.coverage, after.coverage, "…and the new coverage really is the new shape")
     }
 
+    // MARK: - MASK-TUNE's cache invalidation (temporary; delete this test alongside the harness)
+
+    /// **The harness's one way to fail.** `AlphaMask.threshold`/`.antialiasHalfWidth` are `static
+    /// var`s the on-iPad tuning harness (`MaskTuningOverlay`) writes — they are not stored properties
+    /// of the `AlphaMask` values `CacheKey` hashes, so a slider write is invisible to the key on its
+    /// own. Without `tuningGeneration` folded into that key (see `AlphaMask.swift`,
+    /// `MaskResolver.CacheKey`), this would keep handing back the `ResolvedMask` computed under the
+    /// old value — the exact "slider changes the number, canvas shows stale pixels" failure §10 item 1
+    /// warns against. This pins the fix rather than assuming it holds.
+    func testMutatingTheTuningThresholdInvalidatesTheMaskCache() {
+        let originalThreshold = AlphaMask.threshold
+        defer { AlphaMask.threshold = originalThreshold }
+
+        let manager = CanvasFixture.manager(layerCount: 2)
+        guard let celIndex = manager.activeCelIndex(inLayer: 0, atFrame: 0) else {
+            return XCTFail("Fixture needs a cel to stamp into")
+        }
+        // A soft dab, not a flat rectangle: the threshold only has something to say about a source
+        // whose alpha actually ramps (§6.3) — a hard-edged shape would resolve the same either side
+        // of any threshold in range and the test would pass by accident.
+        BrushStamper.stampDab(into: manager.layers[0].cels[celIndex].raster,
+                              at: CGPoint(x: 32, y: 32), pressure: 1,
+                              brush: BrushLibrary.softRound, color: .black,
+                              brushSize: 40, brushOpacity: 1, isEraser: false)
+        manager.layers[0].isVisible = false
+        let mask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        manager.layers[1].alphaMask = mask
+
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
+              let before = MaskResolver.coverage(for: [mask], of: request) else {
+            return XCTFail("The mask must resolve")
+        }
+
+        AlphaMask.threshold = 0.9   // far from the dab's default-threshold (0.5) coverage
+
+        guard let after = manager.makeRenderRequest(atFrame: 0, includeBackground: false)
+            .flatMap({ MaskResolver.coverage(for: [mask], of: $0) }) else {
+            return XCTFail("The mask must resolve again")
+        }
+
+        XCTAssertFalse(before === after, "A new threshold is a new key, so the stale coverage cannot be served")
+        XCTAssertNotEqual(before.coverage, after.coverage,
+                          "Raising the threshold to 0.9 must shrink the solid area a soft dab covers — equal "
+                          + "coverage here means the cache served pixels resolved under the old value.")
+    }
+
     // MARK: - Persistence (§6.2)
 
     func testAMaskSurvivesAManifestRoundTrip() throws {

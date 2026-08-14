@@ -87,7 +87,8 @@ enum MaskResolver {
         guard width > 0, height > 0 else { return nil }
 
         let key = CacheKey(masks: masks, width: width, height: height, quality: request.quality,
-                           versions: contentVersions(readBy: masks, of: request))
+                           versions: contentVersions(readBy: masks, of: request),
+                           tuningGeneration: AlphaMask.tuningGeneration)
         if let hit = cache.value(for: key) { return hit }
         guard let resolved = resolveUncached(masks, of: request, width: width, height: height) else { return nil }
         cache.store(resolved, for: key)
@@ -227,6 +228,12 @@ enum MaskResolver {
         let height: Int
         let quality: RenderQuality
         let versions: [LayerContentVersion?]
+        // MASK-TUNE (temporary): `AlphaMask.threshold`/`.antialiasHalfWidth` are statics, not stored
+        // properties, so `masks` above cannot see a change to either — without this field the cache
+        // would keep serving a `ResolvedMask` computed under the old value. See
+        // `AlphaMask.tuningGeneration`'s doc comment. Delete this field when the tuning harness goes;
+        // it costs nothing in production, where the generation never moves off 0.
+        let tuningGeneration: Int
     }
 
     /// Small on purpose: a coverage buffer is 4.2 MB at 2048² and 16 MB at 4000², and a document with

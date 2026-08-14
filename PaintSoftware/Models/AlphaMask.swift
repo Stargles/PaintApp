@@ -56,7 +56,13 @@ struct AlphaMask: Hashable {
     /// than the stroke looks. 0.5 tracks the visually solid part of a stroke and reduces to `> 0` for
     /// a hard brush. `MaskParityLogicTests.testTheThresholdTracksTheSolidPartOfASoftDab` is the
     /// measurement behind that sentence rather than a restatement of it.
-    static let threshold: Float = 0.5
+    ///
+    /// MASK-TUNE (temporary, see `MaskTuningOverlay.swift`): `var` rather than `let` only so the
+    /// on-iPad tuning harness can scrub it live. The shipping default is still 0.5; nothing but that
+    /// overlay ever writes here. `didSet` bumps `tuningGeneration` — see its doc comment for why that
+    /// is load-bearing rather than decoration. Revert to `let` (and delete `tuningGeneration`) when
+    /// the harness is deleted.
+    static var threshold: Float = 0.5 { didSet { tuningGeneration += 1 } }
 
     /// Half-width of the smoothstep across `threshold`, in alpha units — **antialiasing only**.
     ///
@@ -65,7 +71,21 @@ struct AlphaMask: Hashable {
     /// threshold. At 0.05 a `softRound` dab of radius 20 feathers over roughly two pixels while its
     /// own gradient spans twenty, so the mask is still binary to the eye. Widen this and the mask
     /// starts inheriting the brush's ramp, which is the failure §6.3 names.
-    static let antialiasHalfWidth: Float = 0.05
+    ///
+    /// MASK-TUNE (temporary): same story as `threshold` above — `var` only for the harness, shipping
+    /// default still 0.05, `didSet` bumps `tuningGeneration`.
+    static var antialiasHalfWidth: Float = 0.05 { didSet { tuningGeneration += 1 } }
+
+    /// MASK-TUNE (temporary): **this is what makes the harness's cache invalidation real rather than
+    /// assumed.** `MaskResolver.CacheKey` keys on `AlphaMask`'s *stored* properties (`sources`,
+    /// `isEnabled`, `invert`) plus content versions — `threshold`/`antialiasHalfWidth` are statics,
+    /// not stored properties, so mutating them changes nothing the cache key can see on its own. This
+    /// counter is folded into that key (see `MaskResolver.swift`) so a slider write invalidates every
+    /// cached resolution instead of a `clearCache()` call the UI has to remember to make.
+    /// `MaskParityLogicTests.testMutatingTheTuningThresholdInvalidatesTheMaskCache` is the regression
+    /// this closes. Costs the shipping path nothing — it never moves off 0 there. Delete alongside
+    /// the two tunables above.
+    private(set) static var tuningGeneration: Int = 0
 
     /// The resolved coverage for one source alpha: the threshold test, softened only across the
     /// narrow band above, then inverted if asked.
