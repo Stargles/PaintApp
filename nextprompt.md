@@ -124,6 +124,22 @@ behalf of a pass.
    Release triple, single repro) blocks two others for an hour. Prefer one narrow run per worker;
    compare configurations on a **single test**, never on three whole suites.
 
+**Manage the machine as a resource, because nobody else will.** This session drove it to 0.37% idle
+and the owner noticed before the orchestrator did — "Simulator quit unexpectedly" is what saturation
+looks like from their side. Concrete rules that came out of it:
+
+- **The task count is not the signal; idle CPU is.** A 58-minute task is normal here (a three-suite
+  XCUITest run legitimately takes 30+ minutes). Before suspecting a hang, check whether the run is
+  *progressing*: `du -sk` its in-progress `.xcresult` twice, 25 s apart. Growing means working.
+- **Simulators reading `Shutdown` while a run holds their lock is normal**, not a wedge — `xcodebuild`
+  runs tests on *clones*, so the base device shows shutdown throughout.
+- **The proof that load matters, measured:** `testAMultiplyLayerLooksMultipliedOnTheLiveCanvas` took
+  **169.8 s and failed at ~0% idle**, then **94.9 s and passed at 63.97% idle**. Same commit. That is
+  the whole argument for the quiet-machine gate in one line.
+- **Never `pkill -f` a broad pattern while runs are live.** The orchestrator used one that could have
+  matched the live `simlock` runs; it did not, but only by luck, and killing them would have destroyed
+  ~40 minutes of work and erased a simulator mid-run. Target a PID you have verified holds no lock.
+
 **Do not dispatch a second worker into a worktree that already has one**, even if the first has gone
 quiet. A worker blocked on a background run reports as finished and is still live — two of them
 committed into the same index seven seconds apart on 2026-08-14. Earlier handoffs warned about
@@ -218,14 +234,28 @@ audited (`blankingMask` is one layer per host; `contentMasks` produces three dis
 (`MaskResolver.MaskCache`, `PixelOps.rasterizeCache`) are `NSLock`-guarded with `ResolvedMask`
 immutable.
 
-**Still to do:** `testInkIsVisibleWhileTheSecondStrokeIsStillDown` (in `LayerUITests.swift`, registered)
-is the regression test and **has never been executed**. It was written by someone who could not run
-it, so a first-run failure is as likely to be the test as the fix. It probes with the touch still
-down, which nothing else in the suite does — every other sandwich assertion samples after lift, where
-`full` contains the stroke and the picture is right either way. Two traps it already dodges:
-`thenHoldForDuration` is unusable because holding still 0.8 s fires `fireShapeDetection`, which
-*reverts the stroke being probed*; and it settles the 400 ms thumbnail-regen debounce first, because
-that publish would otherwise supply the very SwiftUI pass whose absence is the subject.
+**CONFIRMED FIXED ON HARDWARE.** The owner drew three consecutive strokes on the same frame in a
+Release build of `83bd747` and all three appeared. That is the validation that counts; the simulator
+test below is belt-and-braces.
+
+**The regression test, and a dead end worth not repeating.** The first attempt
+(`testInkIsVisibleWhileTheSecondStrokeIsStillDown`) tried to drag on a background queue and probe the
+canvas from the test thread. It fails with *"Must be called on the main thread"* —
+**XCUITest synthesises events on the main thread and refuses from anywhere else**, so
+`press(forDuration:thenDragTo:)` blew up before any assertion ran. Conclusion: **you cannot drag and
+screenshot simultaneously from XCUITest, so "sample the canvas mid-stroke" is unreachable by that
+route.** Do not try again.
+
+The replacement, `testEveryStrokeEntersTheMidStrokePresentationNotJustTheFirst` (`e33f425`), inverts
+it: the *app* publishes the fact. `sandwichPresentation`'s `didSet` counts entries into `.midStroke`
+and appends `entries:N` to `canvas.host`'s label. Draw stroke one (spawns the cel, publishes, gets a
+pass free → `entries:1`), settle the 400 ms thumbnail debounce, draw stroke two on the same cel
+(publishes nothing) → must reach `entries:2`. With the defect it stays at 1. Both gestures are plain
+`drawLine` on the test thread, so the main-thread constraint is gone. **It is still unrun.**
+
+Other traps that cost time here: holding still for 0.8 s fires `fireShapeDetection`, which *reverts
+the stroke being probed*; and the 400 ms thumbnail-regen debounce must be settled first, or its
+publish supplies the very SwiftUI pass whose absence is the subject.
 
 ## §6.5 rework, specified by the owner 2026-08-14 — not yet built
 
@@ -242,6 +272,14 @@ redundant**. Replace it with per-row controls:
   `beginMaskEdit`/`endMaskEdit`. Dropping the session would make each checkmark its own undo step;
   that is a regression, not a simplification.
 - **Each layer row gains a "mask this layer" checkmark** while the edit menu is open.
+- **The mask-tuning sliders move into the edit menu too**, added by the owner on seeing a build:
+  *"That tuning panel should be removed. Move it to the edit menu."* Delete the floating
+  `MaskTuningOverlay`, its `wand.and.rays` corner toggle, **and** the
+  `.opacity`/`.allowsHitTesting`/`.accessibilityHidden` gating in `DrawingView.swift` (`83bd747`) that
+  exists only to stop that overlay eating taps — with the overlay gone it guards nothing. Keep
+  `AlphaMask.tuningGeneration`: it is folded into `MaskResolver.CacheKey` and is load-bearing, because
+  the two tunables are statics rather than stored properties and nothing else would invalidate the
+  cache. All of this is temporary and dies with the harness when the constants finalise.
 - **A fill-reference button sits immediately beside it**, same treatment. It **defaults to ON**, and
   **defaults to OFF when the layer is hidden** — but the owner's exact words are that *"the user can
   change these at any moment"*, so these govern the automatic value only. **An explicit user choice
@@ -277,6 +315,62 @@ be that almost nothing new is needed: what is genuinely missing is (a) variadic 
 a variadic Add over N slots is a chain of `Mix(.add)` and buys only the absence of nesting — and (b) a
 true matte/key op that consumes B as *coverage* rather than as colour, which no blend mode expresses.
 Try it against the real node UI before committing to it.
+
+## The merge, which is the largest single piece left
+
+**Nothing since phase 7 is on `main`.** `tmp/p8-integrate` is the trunk — it already contains phase 8,
+`tmp/p9-kernels`, `tmp/release-cfg` and `tmp/mask-tune`. Merge the rest **into it**, in this order,
+then run the full suite on a quiet machine, then fast-forward `main`:
+
+| order | branch | brings | base |
+|---|---|---|---|
+| 1 | `tmp/p8-slotmode` | §4.3 corrections, §6.3 rewrite, mask constants, slot inertness | `cbb46fa` |
+| 2 | `tmp/p9-layer` | phase 9a, 222/222 | `f195b90` |
+| 3 | `tmp/p9-multipass` | blur, bloom, the multi-pass contract, 49/50 | `235cd6e` |
+| 4 | `tmp/mask-ui` | the §6.5 panel rework | `309a573` |
+
+`tmp/mask-tune` is **not** merged again — it is already in, and its extra commit is only the
+cherry-picked overlay gate. It exists to build the tuning harness for the iPad; delete the harness
+when §10.1 closes.
+
+**Known conflict surface, from the actual file lists:**
+- `LAYER_COMPOSITING.md` — slotmode rewrote §4.3 and §6.3, mask-ui rewrites §6.5/§6.6. Semantic, not
+  textual; resolve by reading, never by taking one side wholesale.
+- `PaintSoftware.xcodeproj/project.pbxproj` — p9-layer and p9-multipass each register a new test file.
+  **Both entries must survive.** A dropped entry does not fail the build; the file just compiles
+  nowhere, runs nothing and prints green.
+- `RenderTree.swift` — slotmode's `isInputSlot ? .normal : …` derivation change and p9-layer's
+  `RenderNode.effect` both land in the derivation.
+- `Composite.metal`, `MetalEffects.swift` — p9-layer and p9-multipass both extend the effect path.
+- `ShapeDetectorLogicTests.swift` — p9-multipass already took `tmp/release-cfg`'s fix byte for byte,
+  so this should resolve as identical content, not a real conflict.
+
+**After merging 2 and 3, run the effect-layer tests against blur and bloom.** Until now nothing put a
+multi-pass effect through `Compositor`/`RenderRequest`, because §4.4's wrappers did not exist; 9a
+creates them. That combination has never executed and is the first thing the merge makes reachable.
+
+## Blur and bloom: what is proven, and the one real gap
+
+`tmp/p9-multipass`, **50 total, 49 passed, 0 failed, 1 skipped** (the `PAINT_PERF_HEAVY` blur-cost
+case). Four checks now escape the abstraction's blind spot, each matched by a host `swiftc` harness
+before the run: an **impulse response** against a 2D Gaussian computed in the test (delta 0–1),
+**separable vs. direct O(n²) 2D** convolution in `Double` (delta 1), **bloom's threshold at radius 0**
+where the blur passes collapse and every byte is hand-computable, and a **whole-bloom independent
+transcription** in three stages rather than four (delta 1–2, the 2 at intensity 1.6).
+
+**Still unproven, in priority order:**
+1. **The directional/off-grid blur path has no independent check.** Both new blur tests are
+   axis-aligned and take the on-grid `texelClamped` branch; the bilinear-tap branch that
+   `directionalAtAnAngle` exercises is covered only by the self-comparing sweep. This is the gap.
+2. `σ = radius/3` is a convention (the three-sigma rule: 99.73% inside ±3σ, so truncation discards
+   under one part in 255), not a derivation. No test can appeal to a spec here.
+3. `maxBlurTaps = 128` is asserted on the weight array, never on an image rendered at the cap.
+4. The geometric cases (one-axis, angle-from-+x, coverage spread, no-overshoot) are **CPU-only**.
+
+**Correction to earlier handoffs, including mine:** "the test target now compiles under
+`-configuration Release`" is true only where `tmp/release-cfg`'s scheme change is present.
+`tmp/p9-multipass` still has `TestAction buildConfiguration = "Debug"`, so a perf number taken there is
+a Debug number. Check the scheme before trusting the claim on any branch.
 
 ## The iPad judgements
 
