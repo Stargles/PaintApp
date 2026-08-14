@@ -652,8 +652,20 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertEqual(maxChannelDelta(gpu, cpu), 0, "GPU and CPU differ on a masked leaf")
     }
 
+    /// **Pins its own feather, and checks it landed rather than assuming the comment above is still
+    /// true.** At the shipped `antialiasHalfWidth` (0.01) this ellipse's antialiased rim produces
+    /// zero fractional *mask* coverage bytes — CoreGraphics' rim alpha only takes a handful of
+    /// discrete levels (measured: 0%, 3%, 5%, 14%, 25%, 33%, 40%, ~47–53%, 65%, 70%, 78%, 80%, 90–98%),
+    /// none of which fall inside the ~2%-wide band 0.1±0.01 spans, so the delta-0 assertion below
+    /// would have passed having tested nothing — the same silent failure
+    /// `testNestedClipsAgreeByteForByteDespiteTheDoubleRounding` had. 0.05 (the pre-bake default)
+    /// lands on real levels (measured: ~6% and ~14%); restored after regardless of outcome.
     func testAMaskWithAFractionalEdgeAgreesBetweenTheBackends() throws {
         try skipUnlessGPUAvailable()
+        let originalHalfWidth = AlphaMask.antialiasHalfWidth
+        AlphaMask.antialiasHalfWidth = 0.05
+        defer { AlphaMask.antialiasHalfWidth = originalHalfWidth }
+
         // An ellipse's antialiased rim is where the coverage bytes are fractional, which is the only
         // place the two multiplies could round apart.
         let manager = clippedManager()
@@ -662,6 +674,16 @@ final class MaskParityLogicTests: XCTestCase {
                 red.setFill()
                 ctx.cgContext.fillEllipse(in: CGRect(x: 6, y: 6, width: 51, height: 51))
             })
+
+        guard let mask = manager.layers[1].alphaMask,
+              let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
+              let resolved = MaskResolver.coverage(for: [mask], of: request) else {
+            return XCTFail("The mask must resolve")
+        }
+        XCTAssertTrue(resolved.coverage.contains { $0 > 0 && $0 < 255 },
+                     "Fixture premise: the ellipse's rim has to leave at least one pixel with fractional "
+                     + "mask coverage, or there is no rounding difference for the two backends to agree on")
+
         guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
         XCTAssertEqual(maxChannelDelta(gpu, cpu), 0, "GPU and CPU differ on a mask's antialiased edge")
     }
@@ -789,7 +811,19 @@ final class MaskParityLogicTests: XCTestCase {
     /// The premise assertion is what keeps the equality honest: where either coverage is 0 or 255 the
     /// two paths coincide trivially, so the fixture has to contain a pixel where *both* are partial
     /// or it proves nothing.
+    ///
+    /// **Pins its own feather rather than trusting the shipping tunable.** At the shipped
+    /// `antialiasHalfWidth` (0.01) the smoothstep spans about 0.02 of alpha — for this fixture's two
+    /// radius-20 discs that band is narrower than a pixel of the annulus it falls on, so *no* pixel
+    /// lands partial for both masks and the premise below is false before double rounding ever enters
+    /// it. The test is about surviving double rounding across a feathered edge, not about whichever
+    /// half-width happens to be live, so it sets one wide enough to guarantee that edge exists — 0.05,
+    /// the pre-bake default this fixture was written against — and restores it whatever happens next.
     func testNestedClipsAgreeByteForByteDespiteTheDoubleRounding() {
+        let originalHalfWidth = AlphaMask.antialiasHalfWidth
+        AlphaMask.antialiasHalfWidth = 0.05
+        defer { AlphaMask.antialiasHalfWidth = originalHalfWidth }
+
         let manager = CanvasFixture.manager(layerCount: 3)
         // Soft-edged sources, so the antialiased band the two paths can disagree across actually
         // exists — a hard rectangle is 0 or 255 everywhere and would agree trivially.
