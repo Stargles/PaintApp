@@ -10,6 +10,9 @@ struct DrawingView: View {
     // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
     // discreet corner button. Lives entirely in its own view; this is just the overlay + state.
     @State private var isPerfHUDVisible: Bool = false
+    // MASK-TUNE (temporary, LAYER_COMPOSITING.md §10 item 1): default ON so the product owner finds
+    // it without hunting — see MaskTuningOverlay.swift, the harness's only other file.
+    @State private var isMaskTuningVisible: Bool = true
 
     var body: some View {
         HStack(spacing: 0) {
@@ -86,6 +89,13 @@ struct DrawingView: View {
                 PerfHUDOverlay(canvasManager: canvasManager, isVisible: $isPerfHUDVisible)
                     .padding(.top, 64)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                // MASK-TUNE (temporary, see MaskTuningOverlay.swift): opposite corner from the perf
+                // HUD, clear of the top toolbar, so it doesn't fight either for space.
+                MaskTuningOverlay(isVisible: $isMaskTuningVisible)
+                    .padding(.top, 64)
+                    .padding(.trailing, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
         }
         .background(Color.black)
