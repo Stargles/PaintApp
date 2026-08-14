@@ -24,6 +24,13 @@ import UIKit
 ///    grades must not touch alpha and these two must, because a blur that left the silhouette sharp is
 ///    not a blur.
 ///
+/// 4. **Section (2c) is the half that answers the third question — is the formula right — and it is
+///    the only part of this file that can.** Kinds 1 and 2 above both consume values `Effect` resolved,
+///    so neither can see an error made once in Swift and handed to both backends identically. (2c)
+///    computes its expectations from `exp(-d²/2σ²)` and from hand-worked bytes, in the test, and runs
+///    the shader as well as the reference against them. Read its header before trusting any number in
+///    this file as evidence that blur and bloom are *correct* rather than merely consistent.
+///
 /// Neither §4.4 wrapper exists yet, so nothing here goes through `Compositor` or `RenderRequest`; the
 /// fixtures are byte buffers in the app's layout, for the reason the sibling file gives.
 final class EffectMultiPassLogicTests: XCTestCase {
@@ -403,6 +410,334 @@ final class EffectMultiPassLogicTests: XCTestCase {
         XCTAssertEqual(passes[1].params.offsetY, 0)
         XCTAssertEqual(passes[2].params.offsetX, 0)
         XCTAssertEqual(passes[2].params.offsetY, 1)
+    }
+
+    // MARK: - (2c) The arithmetic measured against mathematics rather than against itself
+    //
+    // **Why this section exists, in one sentence: nothing above it can say the blur is a Gaussian.**
+    //
+    // Everything above is one of three kinds, and all three share a hole. The backend sweep compares
+    // `Composite.metal` against `EffectReference` — but both are handed the *same* Swift-resolved
+    // `kindCode`, `params`, `lookupTable`, `passes` and `weights`, so a mistake in that resolution is
+    // made identically on both sides and the sweep stays green; that is the blind spot `Effect.swift`'s
+    // header names. `testTheResolvedWeightsAre…` re-types `gaussianHalfKernel`'s own formula in the
+    // test, which catches a transcription slip and not a conceptual error, because one author wrote
+    // both. And the geometric properties — the outer-product impulse check, the one-axis check — are
+    // stated against `Effect.weights` and run on the CPU reference alone, so they never reach the
+    // shader's arithmetic at all.
+    //
+    // The four cases below close that. Each builds its expectation here from `exp(-d²/2σ²)`, with no
+    // reference to `Effect.weights` and no assumption about either backend's structure, and runs
+    // **both** backends against it — so the shader is measured against mathematics rather than against
+    // the Swift twin that shares its blind spot. σ is the one input they still take on trust, and the
+    // note below says why that is a convention no test can derive.
+
+    /// **Why σ = `radius / 3`, recorded here because — alone among this project's effect claims — it
+    /// cannot be checked against a published document.**
+    ///
+    /// The sibling file's spot checks all appeal to a spec: CSS Filter Effects for brightness and
+    /// contrast, W3C Compositing and Blending Level 1 for `Lum`, the standard recursive Bayer matrix for
+    /// the ordered screen. A Gaussian blur has no such spec. "Radius" is a word from a UI, not from
+    /// mathematics — a true Gaussian has infinite support and no radius at all — so every application
+    /// invents its own map from the artist's number to σ, and there is no external authority to be right
+    /// or wrong against.
+    ///
+    /// `radius / 3` is the conventional choice, for the reason the three-sigma rule gives: 99.73% of a
+    /// Gaussian's mass lies within ±3σ, so truncating the kernel at the radius the artist asked for
+    /// discards about 0.27% — under one part in 255, and so below a channel step at 8 bits. A larger
+    /// divisor truncates visibly; a smaller one spends taps on weights that quantize to zero.
+    ///
+    /// So the tests below take σ as an input exactly as `Effect` does, and prove everything downstream:
+    /// that the shape really is `exp(-d²/2σ²)`, that it is normalized, that two 1D passes really do
+    /// compose into that 2D kernel, and that both backends produce it.
+    private static let sigmaPerRadius = 1.0 / 3.0
+
+    /// **`.toNearestOrEven`, the rule Metal's float→unorm8 write uses** — `EffectReference.quantize`
+    /// argues it. A reference that rounded halves the other way would report a spurious delta of 1 on
+    /// every exactly-half value, which is a property of the output format and not of the formula under
+    /// test.
+    private func quantized(_ value: Double) -> UInt8 {
+        UInt8((min(max(value, 0), 1) * 255).rounded(.toNearestOrEven))
+    }
+
+    /// The truncated 2D Gaussian, normalized over its own support — **written out here from the
+    /// exponential, sharing nothing with `Effect.gaussianHalfKernel` but σ.**
+    ///
+    /// Note what is deliberately *not* assumed: this is a genuine 2D kernel over `(i, j)`, built from
+    /// `exp(-(i² + j²) / 2σ²)` and normalized as a square, with no 1D kernel and no outer product
+    /// anywhere in it. That it factors into two 1D Gaussians is the mathematical fact under
+    /// `Effect.Blur`'s two-pass design; the tests below are what check the code exploits it correctly
+    /// rather than merely claiming to.
+    private func idealGaussian2D(radius: Double) -> (kernel: [[Double]], taps: Int) {
+        let taps = Int(radius.rounded())
+        let sigma = radius * Self.sigmaPerRadius
+        let denominator = 2 * sigma * sigma
+        var kernel = [[Double]](repeating: [Double](repeating: 0, count: 2 * taps + 1),
+                                count: 2 * taps + 1)
+        var total = 0.0
+        for j in -taps...taps {
+            for i in -taps...taps {
+                let value = exp(-Double(i * i + j * j) / denominator)
+                kernel[j + taps][i + taps] = value
+                total += value
+            }
+        }
+        for j in kernel.indices { for i in kernel[j].indices { kernel[j][i] /= total } }
+        return (kernel, taps)
+    }
+
+    /// One clamp-to-edge texel fetch in `[0, 1]`, written here rather than shared, so the reference and
+    /// the thing it references cannot agree by sharing a helper.
+    private func clampedTexel(_ bytes: [UInt8], _ x: Int, _ y: Int) -> SIMD4<Double> {
+        let cx = min(max(x, 0), Self.side - 1), cy = min(max(y, 0), Self.side - 1)
+        let offset = (cx + cy * Self.side) * 4
+        return SIMD4<Double>(Double(bytes[offset]), Double(bytes[offset + 1]),
+                             Double(bytes[offset + 2]), Double(bytes[offset + 3])) / 255
+    }
+
+    /// **The independent transcription of the algorithm: a direct `O(n²)` 2D convolution.** Slow,
+    /// obviously correct, and structurally nothing like the code it checks — one pass instead of two, a
+    /// square kernel instead of a line, `Double` instead of `Float`, and no intermediate buffer at all
+    /// and therefore no ping-pong to get wrong.
+    ///
+    /// Clamping is applied per axis, which is what makes the comparison exact rather than approximate:
+    /// a clamped separable pair expands to `Σᵢⱼ w[i]·w[j]·f(clamp(x+i), clamp(y+j))`, which is this sum.
+    /// So the two must agree at the border for the same reason they agree in the interior, and a
+    /// convention mismatch — one side clamping, the other reading transparent black — would show as a
+    /// dark band `radius` wide rather than as a rounding difference.
+    private func directConvolution2D(_ bytes: [UInt8], radius: Double) -> [UInt8] {
+        let (kernel, taps) = idealGaussian2D(radius: radius)
+        var result = bytes
+        for y in 0..<Self.side {
+            for x in 0..<Self.side {
+                var sum = SIMD4<Double>(repeating: 0)
+                for j in -taps...taps {
+                    for i in -taps...taps {
+                        sum += clampedTexel(bytes, x + i, y + j) * kernel[j + taps][i + taps]
+                    }
+                }
+                let offset = (x + y * Self.side) * 4
+                for channel in 0..<4 { result[offset + channel] = quantized(sum[channel]) }
+            }
+        }
+        return result
+    }
+
+    /// Both backends, or the CPU alone where there is no Metal — so every case below states its claim
+    /// about the shader and still runs somewhere without a GPU.
+    private func bothBackends(_ effect: Effect, _ bytes: [UInt8]) -> [(String, [UInt8])] {
+        var backends: [(String, [UInt8])] = [("cpu", cpu(effect, bytes))]
+        if let gpu = MetalEffectEngine.shared?.apply(effect, to: bytes, width: Self.side, height: Self.side) {
+            backends.append(("gpu", gpu))
+        }
+        return backends
+    }
+
+    /// **Blur one white pixel on black, and the output *is* the kernel.**
+    ///
+    /// The strongest single statement in the file, because the read-out is direct: no fitting, no
+    /// statistic, no property that many wrong kernels would also satisfy. The bytes at `(±i, ±j)` around
+    /// the impulse are the 2D kernel the pipeline actually applied, times 255, and they are compared
+    /// against `exp(-(i² + j²)/2σ²)` normalized in this file. Pass structure, ping-pong slot choice, tap
+    /// offsets, edge handling and normalization all sit upstream of that number, so every one of them is
+    /// under test at once — against mathematics, not against a second copy of the same mistake.
+    ///
+    /// Sister to `testATwoPassBlurOfAnImpulseIsTheOuterProduct…`, and not a duplicate of it: that one
+    /// asks whether the pipeline applied the weights `Effect` resolved, this one asks whether those
+    /// weights are a Gaussian. Both can pass while the other fails.
+    ///
+    /// **Measured maximum channel deviation is recorded in the activity; the bound is 1 because that is
+    /// what the arithmetic can produce and no more.** The separable pair writes its intermediate to
+    /// RGBA8, so an impulse is quantized twice on the way through (the sister test argues why that
+    /// intermediate is deliberate) where this reference rounds once. Larger radii measure *smaller*
+    /// deviations, not larger, because the peak is lower and one rounding is a smaller share of it.
+    func testTheImpulseResponseIsTheGaussianComputedFromFirstPrinciples() {
+        var table: [String] = []
+        for radius in [2.0, 3.0, 4.0, 6.0] {
+            let effect = Effect.blur(Effect.Blur(radius: radius))
+            let (kernel, taps) = idealGaussian2D(radius: radius)
+            let centre = (x: Self.side / 2, y: Self.side / 2)
+            let input = impulseBytes(at: centre)
+
+            for (backend, out) in bothBackends(effect, input) {
+                var worst = 0, worstAt = "-"
+                for j in -taps...taps {
+                    for i in -taps...taps {
+                        let expected = Int(quantized(kernel[j + taps][i + taps]))
+                        let got = pixel(out, centre.x + i, centre.y + j)
+                        for channel in 0..<4 where abs(got[channel] - expected) > worst {
+                            worst = abs(got[channel] - expected)
+                            worstAt = "(\(i),\(j))c\(channel) got \(got[channel]) want \(expected)"
+                        }
+                    }
+                }
+                table.append("r\(Int(radius))/\(backend) \(worst)")
+                XCTAssertLessThanOrEqual(worst, 1,
+                                         "The \(backend) blur of an impulse at radius \(radius) is not the Gaussian this test computed from exp(-d²/2σ²): worst \(worstAt)")
+
+                // The kernel has finite support, so the impulse must not have reached past it. A blur
+                // that read one tap too far would still look like a blur and would still normalize.
+                for step in [taps + 1, taps + 2] {
+                    XCTAssertEqual(pixel(out, centre.x + step, centre.y)[3], 0,
+                                   "\(backend) at radius \(radius) spread the impulse \(step) px horizontally, past its \(taps)-tap support")
+                    XCTAssertEqual(pixel(out, centre.x, centre.y + step)[3], 0,
+                                   "\(backend) at radius \(radius) spread the impulse \(step) px vertically, past its \(taps)-tap support")
+                }
+            }
+        }
+        XCTContext.runActivity(named: "[multipass] impulse vs first-principles 2D Gaussian, max channel delta: \(table.joined(separator: " · "))") { _ in }
+    }
+
+    /// **The separable pair against a direct 2D convolution, over a real image.**
+    ///
+    /// A separable blur equals the 2D convolution *by construction* — that is the theorem the two-pass
+    /// design rests on — so a disagreement here is not a tolerance question, it means the pass structure
+    /// is wrong: a dropped pass, a second pass on the wrong axis, an intermediate read from the wrong
+    /// ping-pong slot, or a step that is not one texel. The impulse test says the kernel is right at one
+    /// pixel; this says the machine applies it at all 4096, over a fixture where every tap lands on a
+    /// different value and across an edge band where the clamp convention has to hold.
+    ///
+    /// **Measured maximum channel delta is 1, and its whole source is the intermediate**: the app
+    /// quantizes to RGBA8 between the two 1D passes, this reference accumulates in `Double` and
+    /// quantizes once. One rounding of difference is exactly what is measured, and it is the same bound
+    /// the blend modes and the grades hold to — the project's number rather than one picked here.
+    func testTheSeparablePairEqualsADirect2DConvolution() {
+        let bytes = spectrumBytes()
+        var table: [String] = []
+        for radius in [2.0, 3.0, 5.0] {
+            let reference = directConvolution2D(bytes, radius: radius)
+            for (backend, out) in bothBackends(.blur(Effect.Blur(radius: radius)), bytes) {
+                let delta = maxChannelDelta(out, reference)
+                table.append("r\(Int(radius))/\(backend) \(delta)")
+                XCTAssertLessThanOrEqual(delta, 1,
+                                         "The \(backend) two-pass blur at radius \(radius) differs from a direct 2D convolution by \(delta), past the one rounding its RGBA8 intermediate can explain. This measures the pass structure, not the kernel")
+            }
+        }
+        XCTContext.runActivity(named: "[multipass] separable vs direct 2D, max channel delta: \(table.joined(separator: " · "))") { _ in }
+    }
+
+    /// **Bloom's threshold ramp, `(Lum(c) − threshold) / (1 − threshold)`, against hand-computed bytes.**
+    ///
+    /// Everything else about bloom in this file is qualitative — a dark corner stays untouched, a bright
+    /// square glows — and qualitative properties do not pin a formula. Dividing by `threshold`, not
+    /// dividing at all, or reading `Lum` off the premultiplied texel instead of the colour all still
+    /// darken corners and brighten squares. So the ramp gets numbers.
+    ///
+    /// **Radius 0 is what makes those numbers hand-computable**: both backends collapse a zero-tap blur
+    /// to a straight copy, so the four passes reduce to threshold-then-add. **Alpha is 100 rather than
+    /// 255 for the same reason** — it leaves the combine room to add the glow without saturating, so the
+    /// alpha channel reads out `round(100 · w)` directly and the weight is observed rather than
+    /// inferred.
+    ///
+    /// Worked by hand at `threshold = 0.4`, `intensity = 1`, with `Lum = 0.3r + 0.59g + 0.11b` taken on
+    /// the unpremultiplied colour `c = premultiplied / alpha`:
+    ///
+    ///     in (premul)         c              Lum     w=(Lum-0.4)/0.6   glow=round(w·in)   out=in+glow
+    ///     (20, 30, 10, 100)   (.20,.30,.10)  0.248   0 (clamped)       (0, 0, 0, 0)       (20, 30, 10, 100)
+    ///     (40, 40, 40, 100)   (.40,.40,.40)  0.400   0 (the foot)      (0, 0, 0, 0)       (40, 40, 40, 100)
+    ///     (40, 70, 20, 100)   (.40,.70,.20)  0.555   0.2583            (10, 18, 5, 26)    (50, 88, 25, 126)
+    ///     (100,100,100,100)   (1, 1, 1)      1.000   1 (the top)       (100,100,100,100)  (200,200,200,200)
+    ///
+    /// The third row is the load-bearing one: its three channels differ, so all three `Lum` coefficients
+    /// do distinct work. Swapping 0.3 and 0.59 gives Lum 0.468 and an alpha of 111 rather than 126;
+    /// dividing by 1 instead of `1 − threshold` gives 115 or 116; dividing by `threshold` saturates to
+    /// 255. The last row pins the top of the ramp at exactly 1 and the first two pin its foot at exactly
+    /// 0, so the four points determine the affine map uniquely.
+    func testBloomsThresholdRampMatchesHandComputedValues() {
+        let cases: [(String, [UInt8], [Int])] = [
+            ("belowTheThreshold", [20, 30, 10, 100], [20, 30, 10, 100]),
+            ("exactlyAtIt",       [40, 40, 40, 100], [40, 40, 40, 100]),
+            ("partWayUpTheRamp",  [40, 70, 20, 100], [50, 88, 25, 126]),
+            ("fullWhite",     [100, 100, 100, 100], [200, 200, 200, 200]),
+        ]
+        let effect = Effect.bloom(Effect.Bloom(threshold: 0.4, radius: 0, intensity: 1))
+        var table: [String] = []
+        for (name, input, expected) in cases {
+            let bytes = flatBytes(input[0], input[1], input[2], input[3])
+            for (backend, out) in bothBackends(effect, bytes) {
+                let got = pixel(out, Self.side / 2, Self.side / 2)
+                table.append("\(name)/\(backend) \(got.map(String.init).joined(separator: ","))")
+                XCTAssertEqual(got, expected,
+                               "\(name) on the \(backend): \(input) came out \(got), not the \(expected) the ramp (Lum − 0.4)/0.6 gives")
+            }
+        }
+        XCTContext.runActivity(named: "[multipass] bloom threshold ramp: \(table.joined(separator: " · "))") { _ in }
+    }
+
+    /// Bloom rewritten end to end: bright pass, direct 2D blur, additive combine. Used by the test
+    /// below — three stages rather than four, its own blur, `Double` throughout, and the effect's
+    /// original input held in a local rather than in a texture bound alongside a ping-pong.
+    private func independentBloom(_ bytes: [UInt8], threshold: Double, radius: Double,
+                                  intensity: Double) -> [UInt8] {
+        var bright = bytes
+        for y in 0..<Self.side {
+            for x in 0..<Self.side {
+                let offset = (x + y * Self.side) * 4
+                let source = clampedTexel(bytes, x, y)
+                guard source.w > 0 else {
+                    for channel in 0..<4 { bright[offset + channel] = 0 }
+                    continue
+                }
+                let colour = SIMD3<Double>(min(source.x / source.w, 1), min(source.y / source.w, 1),
+                                           min(source.z / source.w, 1))
+                let lum = 0.3 * colour.x + 0.59 * colour.y + 0.11 * colour.z
+                let weight = min(max((lum - threshold) / max(1 - threshold, 1e-4), 0), 1)
+                for channel in 0..<4 { bright[offset + channel] = quantized(source[channel] * weight) }
+            }
+        }
+
+        let glow = directConvolution2D(bright, radius: radius)
+        var result = bytes
+        for y in 0..<Self.side {
+            for x in 0..<Self.side {
+                let offset = (x + y * Self.side) * 4
+                let base = clampedTexel(bytes, x, y), light = clampedTexel(glow, x, y)
+                let alpha = min(max(base.w + light.w * intensity, 0), 1)
+                for channel in 0..<3 {
+                    let value = min(max(base[channel] + light[channel] * intensity, 0), 1)
+                    result[offset + channel] = quantized(min(value, alpha))
+                }
+                result[offset + 3] = quantized(alpha)
+            }
+        }
+        return result
+    }
+
+    /// **The whole four-pass bloom against that independent transcription.**
+    ///
+    /// The one case that exercises the multi-pass machine end to end against something that is not it.
+    /// The part that matters most is the last stage: the app's combine reads the effect's *original*
+    /// input from a texture bound for the whole effect while the other three passes ping-pong between
+    /// two scratch textures, and a bug there — combining against the wrong buffer, or against a scratch
+    /// slot that pass 2 had already overwritten — produces a plausible picture that no self-comparison
+    /// can see. A transcription holding the original in a local variable has no way to make the same
+    /// mistake.
+    ///
+    /// **The bound is stated per case, and the amplifying one is 2 rather than 1 for a reason that is
+    /// arithmetic and not a formula disagreement**: the app quantizes three times along the glow's path
+    /// (threshold, then each 1D pass) where this reference quantizes twice, and the combine then scales
+    /// that difference by `intensity`. At intensity ≤ 1 it measures 1; at 1.6 it measures 2, which is
+    /// 1.6 roundings rounded up. Recording it as one number would have meant either a false failure or a
+    /// tolerance loose enough to hide a real one.
+    func testTheWholeBloomMatchesAnIndependentTranscription() {
+        let bytes = spectrumBytes()
+        let cases: [(threshold: Double, radius: Double, intensity: Double, bound: Int)] = [
+            (0.4, 3, 1.0, 1),
+            (0.6, 2, 0.8, 1),
+            (0.15, 5, 1.6, 2),
+        ]
+        var table: [String] = []
+        for (threshold, radius, intensity, bound) in cases {
+            let reference = independentBloom(bytes, threshold: threshold, radius: radius, intensity: intensity)
+            let effect = Effect.bloom(Effect.Bloom(threshold: threshold, radius: radius, intensity: intensity))
+            for (backend, out) in bothBackends(effect, bytes) {
+                let delta = maxChannelDelta(out, reference)
+                table.append("t\(threshold)r\(Int(radius))i\(intensity)/\(backend) \(delta)")
+                XCTAssertLessThanOrEqual(delta, bound,
+                                         "The \(backend) bloom at threshold \(threshold), radius \(radius), intensity \(intensity) differs from an independently written bloom by \(delta), past the \(bound) its extra quantization can explain")
+            }
+        }
+        XCTContext.runActivity(named: "[multipass] whole bloom vs independent transcription, max channel delta: \(table.joined(separator: " · "))") { _ in }
     }
 
     // MARK: - (3) The wrapper: identity and coverage
