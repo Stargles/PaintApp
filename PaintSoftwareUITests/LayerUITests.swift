@@ -319,19 +319,19 @@ final class LayerUITests: PaintUITestCase {
 
         let top = app.staticTexts["layerPanel.row.1"]
         top.tap()   // already selected after the add; this opens its options
-        XCTAssertTrue(app.otherElements["layerOptions.maskSummary"].waitForExistence(timeout: 5),
-                      "The layer menu should be open")
+        let summary = app.staticTexts["layerOptions.maskSummary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5), "The layer menu should be open")
 
         let sourceCheck = app.buttons["layerPanel.row.0.maskSource"]
         XCTAssertTrue(sourceCheck.waitForExistence(timeout: 5), "Every other row is a candidate source")
         XCTAssertEqual(sourceCheck.value as? String, "0")
-        XCTAssertFalse(app.buttons["layerPanel.row.1.maskSource"].isEnabled,
-                       "The row under edit is the one row that can never be its own source")
+        let ownCheck = app.buttons["layerPanel.row.1.maskSource"]
+        XCTAssertTrue(ownCheck.exists, "The row under edit carries the control…")
+        XCTAssertFalse(ownCheck.isEnabled, "…inert, because it is the one row that can never be its own source")
 
         sourceCheck.tap()
         XCTAssertEqual(sourceCheck.value as? String, "1", "The checkmark is the pick")
-        XCTAssertEqual(app.otherElements["layerOptions.maskSummary"].value as? String, "1",
-                       "…and the menu it belongs to reports it")
+        XCTAssertEqual(summary.value as? String, "1", "…and the menu it belongs to reports it")
 
         let fillRefButton = app.buttons["layerPanel.row.0.fillRefButton"]
         XCTAssertTrue(fillRefButton.exists, "The fill-reference button sits beside the checkmark, same rows")

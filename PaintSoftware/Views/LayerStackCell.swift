@@ -490,6 +490,12 @@ final class LayerStackCell: UITableViewCell {
             ? "layerPanel.folder.\(model.name).maskSource" : "layerPanel.row.\(model.layerIndex).maskSource"
         maskSourceButton.accessibilityValue = model.isMaskSourceSelected ? "1" : "0"
 
+        guard model.showsFillReferenceControl else {
+            // A folder row keeps the gutter — the pair stays in one column across kinds — but must
+            // not keep a recycled layer row's identifier on a button it is not showing.
+            fillReferenceButton.accessibilityIdentifier = nil
+            return
+        }
         // A drop, because what this bounds is the fill tool's flood. Filled and orange when the layer
         // walls the fill in, hollow when it does not — and the glyph says nothing about *why*, since
         // §6.6 makes "defaulted off because hidden" and "switched off by hand" the same picture on

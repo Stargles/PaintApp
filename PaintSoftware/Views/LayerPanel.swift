@@ -388,16 +388,19 @@ private func maskSection(canvasManager: CanvasManager, target: MaskSource, mask:
             Image(systemName: "circle.lefthalf.filled").foregroundColor(.white)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Mask").foregroundColor(.white)
+                // The identifier rides the `Text` rather than the row, so it surfaces as one
+                // `staticTexts` element — a bare `HStack` with an identifier on it does not reliably
+                // become an element at all, and a test querying it would pass by never running.
                 Text(maskSubtitle(mask))
                     .font(.caption2)
                     .foregroundColor(.gray)
+                    .accessibilityIdentifier("layerOptions.maskSummary")
+                    .accessibilityValue("\(mask?.sources.count ?? 0)")
             }
             Spacer()
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .accessibilityIdentifier("layerOptions.maskSummary")
-        .accessibilityValue("\(mask?.sources.count ?? 0)")
 
         if let mask, !mask.sources.isEmpty {
             Toggle(isOn: Binding(
