@@ -152,6 +152,33 @@ final class EffectParityLogicTests: XCTestCase {
     /// the right gate, and exceeding it means the two transcriptions have diverged.
     private static let tolerance = 1
 
+    /// **Every effect through both backends, over 4096 (colour, alpha) pairs.**
+    ///
+    /// Measured maximum channel delta — simulator, this fixture, **`applyEffect` in `Composite.metal`
+    /// against `EffectReference` in Swift**, which is two implementations written by one hand in one
+    /// sitting except where noted:
+    ///
+    ///     levels 0 · curves 0 · brightnessContrast 1 · hsvShift 0 · gradientMap 1
+    ///     chromaticAberration 1 · posterize 1 · dither 1 · halftone 1 · grain 0 · colourNoise 0
+    ///
+    /// **`hsvShift` at 0 is the row worth the most, and for a reason the other zeros do not share.**
+    /// `EffectReference` grades HSV through `ColorMath.rgbToHSB`/`hsbToRGB` — the colour picker's
+    /// conversion, in `Double`, written long before effects existed — so this row compares a float32
+    /// shader against an independently authored `Double` implementation and they agree to the byte over
+    /// every pair in the fixture. `grain` and `colourNoise` reach 0 by construction rather than by
+    /// luck: the hash is integer arithmetic truncated to 24 bits, so there is no float rounding in it
+    /// to disagree about, which is exactly why it is written that way.
+    ///
+    /// The ones at 1 are the ones with float arithmetic between the unpremultiply and the quantize:
+    /// `brightnessContrast` multiplies and adds, `gradientMap` takes a dot product to find its index
+    /// (see `testTheLookupTableEffectsAgreeExactlyExceptWhereTheIndexIsComputed` for why that one is
+    /// different in kind), `posterize` divides by its step count, and `chromaticAberration` interpolates
+    /// four texels. Metal compiles with fast math on and may contract or reassociate any of those; one
+    /// step is what that costs, and is the same bound the blend modes hold to.
+    ///
+    /// **A green row here is not evidence that a formula is right** — both sides are this app's code and
+    /// no effect in the set has a CoreGraphics primitive to check against. The `MatchHandComputedValues`
+    /// tests are where that claim lives.
     func testEveryEffectAgreesBetweenTheBackends() throws {
         try skipUnlessGPUAvailable()
         guard let engine = MetalEffectEngine.shared else { return }
