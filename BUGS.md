@@ -22,16 +22,6 @@ the recipe as it does today but say so in the UI, or copy verbatim and accept th
 as intentional — are a vector-interpolation product call, not a layer-compositing one. See
 [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md).
 
-## The test target does not compile under `-configuration Release` (2026-08-14)
-
-`xcodebuild -configuration Release` fails at `PaintSoftwareUITests/ShapeDetectorLogicTests.swift:54`
-with "the compiler is unable to type-check this expression in reasonable time" — the `largestGap`
-`map`/`hypot` chain, which wants splitting into annotated intermediate lets. Pre-existing and
-unrelated to layer compositing, but it has a cost worth recording: it is why phase 6b's Release
-performance figures (§6.4's ~32 ms per clipped node) had to be produced by extracting the loops into
-a standalone `swiftc` harness rather than by running the perf case in Release. Any future
-optimised-build measurement pays the same tax until this is fixed.
-
 ## Fill tool: the gap-closing UI test is still skipped (2026-07-21)
 
 `testFillToolBridgesOpenContourGapWhenGapClosingEnabled` is `XCTSkip`'d, and it is the single skip in

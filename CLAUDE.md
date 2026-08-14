@@ -83,14 +83,16 @@ top -l 2 -n 0 -s 2 | grep "CPU usage" | tail -1
 ```bash
 source ~/.config/paintapp/.env      # KEYCHAIN_PASSWORD, SIGNING_IDENTITY, PROJECT_DIR, PROJECT_FILE, SCHEME
 security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
-xcodebuild build -project PaintSoftware.xcodeproj -scheme PaintSoftware \
+xcodebuild build -project PaintSoftware.xcodeproj -scheme PaintSoftware -configuration Release \
   -destination "generic/platform=iOS" -allowProvisioningUpdates -derivedDataPath build/DerivedData
 xcrun devicectl device install app --device E3B83820-DF74-5042-B52B-0D5BA17E4877 <path>.app
 ```
-`~/PaintApp/deploy/deploy.sh` does this but **pulls `main` first**, so it never ships branch work —
-run the steps above from the worktree instead. The first `install` often fails with `NWError 54`;
-just re-run it. Never pass the device by name (`devicectl`'s columns shift on the space in
-"Kevin's iPad") — use the UUID above.
+The scheme's LaunchAction stays Debug (Xcode's Run button is for development); `-configuration
+Release` above is what makes the shipped build the one that's actually optimised — Debug measured
+62x slower than Release on the alpha-mask render path. `~/PaintApp/deploy/deploy.sh` does this but
+**pulls `main` first**, so it never ships branch work — run the steps above from the worktree
+instead. The first `install` often fails with `NWError 54`; just re-run it. Never pass the device by
+name (`devicectl`'s columns shift on the space in "Kevin's iPad") — use the UUID above.
 
 Auto-resign for the 7-day free-account cert: `/Library/LaunchDaemons/com.paintapp.resign.plist`
 (daily 3:05 AM as root, resigns every 5 days). Log: `~/.config/paintapp/resign.log`.
