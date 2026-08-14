@@ -57,9 +57,9 @@ struct AlphaMask: Hashable {
     /// a hard brush. `MaskParityLogicTests.testTheThresholdTracksTheSolidPartOfASoftDab` is the
     /// measurement behind that sentence rather than a restatement of it.
     ///
-    /// MASK-TUNE (temporary, see `MaskTuningOverlay.swift`): `var` rather than `let` only so the
+    /// MASK-TUNE (temporary, see `MaskTuningSection.swift`): `var` rather than `let` only so the
     /// on-iPad tuning harness can scrub it live. The shipping default is still 0.5; nothing but that
-    /// overlay ever writes here. `didSet` bumps `tuningGeneration` — see its doc comment for why that
+    /// section ever writes here. `didSet` bumps `tuningGeneration` — see its doc comment for why that
     /// is load-bearing rather than decoration. Revert to `let` (and delete `tuningGeneration`) when
     /// the harness is deleted.
     static var threshold: Float = 0.5 { didSet { tuningGeneration += 1 } }

@@ -10,11 +10,6 @@ struct DrawingView: View {
     // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
     // discreet corner button. Lives entirely in its own view; this is just the overlay + state.
     @State private var isPerfHUDVisible: Bool = false
-    // MASK-TUNE (temporary, LAYER_COMPOSITING.md §10 item 1): opt-in, via its own toggle. It was
-    // default-on so the product owner would find it without hunting, and the cost of that was a
-    // debug harness sitting on the trailing edge of every session that never asked for it — see
-    // the placement note below. One tap is cheaper than a panel nobody opted into.
-    @State private var isMaskTuningVisible: Bool = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -91,29 +86,6 @@ struct DrawingView: View {
                 PerfHUDOverlay(canvasManager: canvasManager, isVisible: $isPerfHUDVisible)
                     .padding(.top, 64)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                // MASK-TUNE (temporary, see MaskTuningOverlay.swift): opposite corner from the perf
-                // HUD, clear of the top toolbar, so it doesn't fight either for space.
-                //
-                // Inert whenever anything else owns the trailing edge, and that condition is
-                // load-bearing rather than tidy. "The opposite corner from the perf HUD" is also
-                // where the layer rail and every trailing dropdown live, and this is declared last,
-                // so it draws and hit-tests above both. Left unguarded it covered the top ~190pt of
-                // that edge — the rail's first rows and the colour panel's whole SV square — and
-                // swallowed every drag, drop, swipe and slider that landed there.
-                //
-                // Hit-testing is what gets gated, rather than the view simply removed, because the
-                // two do not stop at the same moment: this whole body animates on `activePanel`, so
-                // a removal keeps drawing *and* answering touches for the fifth of a second it
-                // spends fading, and the toggle is a 26x26 circle sitting close enough to
-                // `layerPanel.addButton` to take the tap meant for it. Opacity may lag; reach may not.
-                MaskTuningOverlay(isVisible: $isMaskTuningVisible)
-                    .padding(.top, 64)
-                    .padding(.trailing, 8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .opacity(activePanel == .none ? 1 : 0)
-                    .allowsHitTesting(activePanel == .none)
-                    .accessibilityHidden(activePanel != .none)
             }
         }
         .background(Color.black)

@@ -3,12 +3,18 @@ import SwiftUI
 // MARK: - MASK-TUNE — temporary scaffolding, LAYER_COMPOSITING.md §10 item 1
 //
 // Nobody has looked at `AlphaMask.threshold`/`.antialiasHalfWidth` since §6.3 picked 0.5/0.05, and
-// the judgement has to be made by eye against a soft brush. This overlay is the only writer of those
+// the judgement has to be made by eye against a soft brush. This section is the only writer of those
 // two `static var`s (see the MASK-TUNE comments on them in AlphaMask.swift) and is the whole harness.
+//
+// **It sits in the layer options menu, beside the mask controls, and not over the canvas.** As a
+// floating corner panel it was declared last in `DrawingView`'s ZStack, so it drew and hit-tested
+// above the layer rail and every trailing dropdown, and it swallowed the taps that landed in the top
+// ~190pt of that edge — sixteen tests' worth. A menu that is only on screen while the artist opened
+// it cannot do that, and it needs no opacity/hit-testing guard to make it safe.
 //
 // **Cache invalidation is not this file's job, on purpose.** A `ResolvedMask` is cached per distinct
 // mask (§6.1) in `MaskResolver`, keyed on `AlphaMask`'s stored properties plus content versions — this
-// overlay writes two statics that aren't stored properties, so the cache can't see the write on its
+// harness writes two statics that aren't stored properties, so the cache can't see the write on its
 // own. Rather than have every writer (this file today, anything else tomorrow) remember to call
 // `MaskResolver.clearCache()`, `AlphaMask.threshold`/`.antialiasHalfWidth` bump a `tuningGeneration`
 // counter on `didSet` that's folded straight into `MaskResolver.CacheKey` — so simply assigning below
@@ -19,10 +25,9 @@ import SwiftUI
 // these statics deliberately don't touch, so the way to see a change is the same way §6.4 already
 // works: drum a new soft-brush stroke over the masked area after moving a slider.
 //
-// DELETE TO REVERT: this file, the two-line call site in `DrawingView.swift`, and put
+// DELETE TO REVERT: this file, the one-line call site in `LayerPanel.maskSection`, and put
 // `AlphaMask.threshold`/`.antialiasHalfWidth` back to `let` in `AlphaMask.swift`.
-struct MaskTuningOverlay: View {
-    @Binding var isVisible: Bool
+struct MaskTuningSection: View {
     @State private var threshold: Float = AlphaMask.threshold
     @State private var antialiasHalfWidth: Float = AlphaMask.antialiasHalfWidth
 
@@ -30,34 +35,9 @@ struct MaskTuningOverlay: View {
     private static let shippingAntialiasHalfWidth: Float = 0.05
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 6) {
-            HStack {
-                Spacer()
-                toggleButton
-            }
-            if isVisible {
-                panel
-            }
-        }
-    }
-
-    private var toggleButton: some View {
-        Button(action: { isVisible.toggle() }) {
-            Image(systemName: "wand.and.rays")
-                .font(.footnote)
-                .foregroundColor(isVisible ? .orange : .white.opacity(0.5))
-                .frame(width: 26, height: 26)
-                .background(Color.black.opacity(0.5))
-                .clipShape(Circle())
-        }
-        .accessibilityIdentifier("maskTuning.toggle")
-        .accessibilityLabel(isVisible ? "Mask tuning: on" : "Mask tuning: off")
-    }
-
-    private var panel: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("MASK TUNE — TEMPORARY, DELETE BEFORE SHIP")
-                .font(.system(.caption2, design: .monospaced).bold())
+                .font(.system(size: 9, design: .monospaced).bold())
                 .foregroundColor(.orange)
             Text("Draw a soft-brush stroke into a masked layer, then scrub.")
                 .font(.system(size: 9, design: .monospaced))
@@ -80,15 +60,12 @@ struct MaskTuningOverlay: View {
                 AlphaMask.threshold = Self.shippingThreshold
                 AlphaMask.antialiasHalfWidth = Self.shippingAntialiasHalfWidth
             }
-            .font(.system(.caption2, design: .monospaced))
+            .font(.system(size: 10, design: .monospaced))
             .foregroundColor(.orange)
             .accessibilityIdentifier("maskTuning.reset")
         }
-        .padding(10)
-        .background(Color.black.opacity(0.8))
-        .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.6), lineWidth: 1))
-        .frame(width: 260)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .accessibilityIdentifier("maskTuning.panel")
     }
 
@@ -98,11 +75,11 @@ struct MaskTuningOverlay: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(label)
-                    .font(.system(.caption2, design: .monospaced))
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.white.opacity(0.8))
                 Spacer()
                 Text(String(format: "%.3f", value.wrappedValue))
-                    .font(.system(.caption2, design: .monospaced).bold())
+                    .font(.system(size: 10, design: .monospaced).bold())
                     .foregroundColor(.white)
             }
             Slider(value: Binding(get: { value.wrappedValue }, set: { newValue in

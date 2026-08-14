@@ -516,7 +516,7 @@ final class MaskParityLogicTests: XCTestCase {
     // MARK: - MASK-TUNE's cache invalidation (temporary; delete this test alongside the harness)
 
     /// **The harness's one way to fail.** `AlphaMask.threshold`/`.antialiasHalfWidth` are `static
-    /// var`s the on-iPad tuning harness (`MaskTuningOverlay`) writes — they are not stored properties
+    /// var`s the on-iPad tuning harness (`MaskTuningSection`) writes — they are not stored properties
     /// of the `AlphaMask` values `CacheKey` hashes, so a slider write is invisible to the key on its
     /// own. Without `tuningGeneration` folded into that key (see `AlphaMask.swift`,
     /// `MaskResolver.CacheKey`), this would keep handing back the `ResolvedMask` computed under the

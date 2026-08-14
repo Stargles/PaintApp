@@ -411,6 +411,12 @@ private func maskSection(canvasManager: CanvasManager, target: MaskSource, mask:
             .padding(.vertical, 8)
             .accessibilityIdentifier("layerOptions.maskInvertToggle")
         }
+
+        // MASK-TUNE (temporary, see MaskTuningSection.swift): the two constants §10 item 1 is waiting
+        // on, beside the mask controls they govern rather than floating over the canvas — which is
+        // where they could reach the trailing chrome and eat its taps. Deleted whole with the harness.
+        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+        MaskTuningSection()
     }
 }
 
