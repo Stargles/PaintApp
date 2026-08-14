@@ -332,7 +332,6 @@ final class ProjectSaveLogicTests: XCTestCase {
         for index in manager.folders.indices { manager.folders[index].isVisible = false }
         for index in manager.layers.indices where index < 2 {
             manager.layers[index].isVisible = false
-            manager.layers[index].isFillReference = false
         }
 
         let url = projectURL()
@@ -347,7 +346,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertTrue(reloaded.layers[0].isVisible && reloaded.layers[1].isVisible,
                       "Un-hiding the group must bring its contents back, at any depth")
         XCTAssertTrue(reloaded.layers[0].isFillReference,
-                      "isFillReference moves with visibility, the pairing toggleLayerVisibility keeps")
+                      "Fill reference comes back with visibility, since nothing ever answered for this layer by hand (§6.6)")
     }
 
     /// The other half, and the reason the signal is the absence of a key rather than a version number:
@@ -387,7 +386,6 @@ final class ProjectSaveLogicTests: XCTestCase {
         manager.toggleFolderVisibility(group)
         for index in manager.layers.indices where index < 2 {
             manager.layers[index].isVisible = false
-            manager.layers[index].isFillReference = false
         }
         manager.addViewPreset()
 

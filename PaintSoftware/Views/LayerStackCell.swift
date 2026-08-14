@@ -32,6 +32,12 @@ final class LayerStackCell: UITableViewCell {
     /// toggle, Rename) hangs off this button instead of "tap the already-selected row again", which
     /// is how a layer row opens the same menu.
     var onOpenFolderOptions: (() -> Void)?
+    /// §6.5's source pick: whether this row clips the node whose options menu is open.
+    var onToggleMaskSource: (() -> Void)?
+    /// §6.6's fill boundary for this row's own layer — a per-layer property rather than anything to
+    /// do with the open session, shown alongside the checkmark because the two are the same question
+    /// asked of the same rows.
+    var onToggleFillReference: (() -> Void)?
 
     private let guideContainer = UIView()
     private var guideLines: [UIView] = []
@@ -45,10 +51,11 @@ final class LayerStackCell: UITableViewCell {
     private let opacitySlider = UISlider()
     private let currentMarker = UIImageView()
     private let folderOptionsButton = UIButton(type: .system)
-    /// §6.5's picker accessory — takes the trailing slot `currentMarker`/`folderOptionsButton` use
-    /// the rest of the time, rather than competing with them for space, since the two modes are
-    /// never both relevant to the same row.
-    private let maskSourceMarker = UIImageView()
+    /// §6.5's picker, as two trailing buttons that appear only while an options menu is open. They
+    /// take space from the opacity slider rather than from any existing control: the session is now
+    /// an ordinary state to be in, so a row has to stay a row while it is a picker.
+    private let maskSourceButton = UIButton(type: .system)
+    private let fillReferenceButton = UIButton(type: .system)
 
     // Invisible probes so UI tests can read per-row state that isn't rendered as text.
     private let bakedMarker = UIView()
@@ -82,8 +89,8 @@ final class LayerStackCell: UITableViewCell {
     private func buildHierarchy() {
         for view in [guideContainer, disclosureButton, visibilityButton, thumbnailView, folderIconView,
                      nameLabel, subtitleLabel, opacitySlider, currentMarker, folderOptionsButton,
-                     maskSourceMarker, bakedMarker, vectorMarker, folderMarker, blendModeMarker,
-                     compositorMarker] {
+                     maskSourceButton, fillReferenceButton, bakedMarker, vectorMarker, folderMarker,
+                     blendModeMarker, compositorMarker] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -134,10 +141,11 @@ final class LayerStackCell: UITableViewCell {
         folderOptionsButton.tintColor = .white
         folderOptionsButton.addTarget(self, action: #selector(openFolderOptions), for: .touchUpInside)
 
-        maskSourceMarker.contentMode = .scaleAspectFit
-        maskSourceMarker.isHidden = true
-        maskSourceMarker.isAccessibilityElement = true
-        maskSourceMarker.accessibilityTraits = .image
+        maskSourceButton.isHidden = true
+        maskSourceButton.addTarget(self, action: #selector(toggleMaskSource), for: .touchUpInside)
+
+        fillReferenceButton.isHidden = true
+        fillReferenceButton.addTarget(self, action: #selector(toggleFillReference), for: .touchUpInside)
 
         for marker in [bakedMarker, vectorMarker, folderMarker, blendModeMarker, compositorMarker] {
             marker.isAccessibilityElement = true
@@ -187,12 +195,17 @@ final class LayerStackCell: UITableViewCell {
             folderOptionsButton.widthAnchor.constraint(equalToConstant: 30),
             folderOptionsButton.heightAnchor.constraint(equalToConstant: 30),
 
-            // Same trailing slot as `currentMarker` — the two are never shown at once (see
-            // `configure`), so there's nothing to arbitrate between them.
-            maskSourceMarker.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            maskSourceMarker.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            maskSourceMarker.widthAnchor.constraint(equalToConstant: 22),
-            maskSourceMarker.heightAnchor.constraint(equalToConstant: 22),
+            maskSourceButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            maskSourceButton.widthAnchor.constraint(equalToConstant: 30),
+            maskSourceButton.heightAnchor.constraint(equalToConstant: 34),
+
+            // Fixed to the mask button rather than to the row, so the pair reads as one control
+            // group and stays in the same column whether or not a folder row's options button is
+            // pushing them inward.
+            fillReferenceButton.trailingAnchor.constraint(equalTo: maskSourceButton.leadingAnchor, constant: -2),
+            fillReferenceButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            fillReferenceButton.widthAnchor.constraint(equalToConstant: 30),
+            fillReferenceButton.heightAnchor.constraint(equalToConstant: 34),
 
             subtitleLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
             subtitleLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
@@ -236,10 +249,15 @@ final class LayerStackCell: UITableViewCell {
 
         // The opacity slider ends before whichever trailing control the row has — the invisible
         // `currentMarker` probe on a layer row, `folderOptionsButton` on a folder row (§4.1's group
-        // opacity gets the same slider the layer rows already have).
+        // opacity gets the same slider the layer rows already have), and the picker pair while an
+        // options menu is open, which is what the session costs the row: a shorter slider.
         opacitySliderTrailingToMarker = opacitySlider.trailingAnchor.constraint(equalTo: currentMarker.leadingAnchor, constant: -8)
         opacitySliderTrailingToOptions = opacitySlider.trailingAnchor.constraint(equalTo: folderOptionsButton.leadingAnchor, constant: -8)
+        opacitySliderTrailingToPicker = opacitySlider.trailingAnchor.constraint(equalTo: fillReferenceButton.leadingAnchor, constant: -6)
         opacitySliderTrailingToMarker.isActive = true
+
+        maskTrailingToEdge = maskSourceButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8)
+        maskTrailingToOptions = maskSourceButton.trailingAnchor.constraint(equalTo: folderOptionsButton.leadingAnchor, constant: -2)
     }
 
     private var guideWidth: NSLayoutConstraint!
@@ -249,6 +267,9 @@ final class LayerStackCell: UITableViewCell {
     private var folderNameCenterY: NSLayoutConstraint!
     private var opacitySliderTrailingToMarker: NSLayoutConstraint!
     private var opacitySliderTrailingToOptions: NSLayoutConstraint!
+    private var opacitySliderTrailingToPicker: NSLayoutConstraint!
+    private var maskTrailingToEdge: NSLayoutConstraint!
+    private var maskTrailingToOptions: NSLayoutConstraint!
 
     // MARK: - Configuration
 
@@ -416,49 +437,67 @@ final class LayerStackCell: UITableViewCell {
         configureCompositorMarker(model)
     }
 
-    /// §6.5's picker chrome. Takes over the row's trailing slot from `currentMarker`/
-    /// `folderOptionsButton` and the row's own alpha from `refreshBackground`'s tints, rather than
-    /// adding a fourth competing indicator — mask-edit mode is the only thing the row is for while
-    /// it's on.
+    /// §6.5's picker chrome: the mask checkmark and the fill-reference button, added to the row for
+    /// as long as some node's options menu is open.
+    ///
+    /// **Added, not substituted.** The old flow could take the row over entirely — it was reached by
+    /// a deliberate switch and the panel had a Mask Sources header to say so. The session is now the
+    /// ordinary state of having a menu open, so the eye, the thumbnail, the opacity slider and the
+    /// options button all stay live; the two buttons take their space out of the slider. The dim that
+    /// marks an illegal source moved onto the checkmark alone for the same reason: fading the whole
+    /// row would fade a fill-reference button that has nothing to do with cycles.
     private func configureMaskEdit(_ model: LayerRowModel) {
-        guard model.isMaskEditActive else {
-            maskSourceMarker.isHidden = true
-            contentView.alpha = 1
-            return
-        }
+        maskSourceButton.isHidden = !model.showsMaskControl
+        fillReferenceButton.isHidden = !model.showsFillReferenceControl
 
-        opacitySlider.isHidden = true
-        currentMarker.isHidden = true
-        folderOptionsButton.isHidden = true
-        maskSourceMarker.isHidden = false
+        // Deactivate before activating, always: two live trailing constraints on the same view are
+        // an unsatisfiable pair, and Auto Layout resolves that by dropping one of its choosing.
+        opacitySliderTrailingToPicker.isActive = false
+        maskTrailingToEdge.isActive = false
+        maskTrailingToOptions.isActive = false
+        guard model.showsMaskControl || model.showsFillReferenceControl else { return }
+
+        opacitySliderTrailingToMarker.isActive = false
+        opacitySliderTrailingToOptions.isActive = false
+        opacitySliderTrailingToPicker.isActive = true
+        // A folder row keeps its options button, so the pair sits inboard of it; a layer row has
+        // nothing there but the invisible `currentMarker` probe, so they go to the edge.
+        if model.isFolder {
+            maskTrailingToOptions.isActive = true
+        } else {
+            maskTrailingToEdge.isActive = true
+        }
 
         if model.isMaskEditTarget {
             // Fails `canMask` the same way any self-mask does, but "this is what you're editing"
             // reads differently than "this would cycle" — a distinct glyph says which one it is.
-            maskSourceMarker.image = UIImage(systemName: "pencil.circle.fill")
-            maskSourceMarker.tintColor = .white
+            maskSourceButton.setImage(UIImage(systemName: "pencil.circle.fill"), for: .normal)
+            maskSourceButton.tintColor = .white
         } else if model.isMaskSourceSelected {
-            maskSourceMarker.image = UIImage(systemName: "checkmark.circle.fill")
-            maskSourceMarker.tintColor = .systemBlue
+            maskSourceButton.setImage(UIImage(systemName: "checkmark.circle.fill"), for: .normal)
+            maskSourceButton.tintColor = .systemBlue
         } else {
-            maskSourceMarker.image = UIImage(systemName: "circle")
-            maskSourceMarker.tintColor = UIColor.white.withAlphaComponent(0.4)
+            maskSourceButton.setImage(UIImage(systemName: "circle"), for: .normal)
+            maskSourceButton.tintColor = UIColor.white.withAlphaComponent(0.4)
         }
-        maskSourceMarker.accessibilityIdentifier = model.isFolder
+        // A cyclic pick is never offered (§6.2) — dimmed and inert rather than hidden, so the stack's
+        // shape stays legible while a pick is in progress. The node under edit reads the same way for
+        // the same underlying reason (it fails `canMask` too) but at a lighter dim, so the two don't
+        // look identical.
+        maskSourceButton.isEnabled = model.isMaskEligible
+        maskSourceButton.alpha = model.isMaskEligible ? 1 : (model.isMaskEditTarget ? 0.55 : 0.3)
+        maskSourceButton.accessibilityIdentifier = model.isFolder
             ? "layerPanel.folder.\(model.name).maskSource" : "layerPanel.row.\(model.layerIndex).maskSource"
-        maskSourceMarker.accessibilityValue = model.isMaskSourceSelected ? "1" : "0"
+        maskSourceButton.accessibilityValue = model.isMaskSourceSelected ? "1" : "0"
 
-        // A cyclic pick is never offered (§6.2) — dimmed and inert rather than hidden, so the
-        // stack's shape stays legible while a pick is in progress. The node under edit reads the
-        // same way for the same underlying reason (it fails `canMask` too) but at a lighter dim, so
-        // the two don't look identical.
-        if model.isMaskEditTarget {
-            contentView.alpha = 0.55
-        } else if model.isMaskEligible {
-            contentView.alpha = 1
-        } else {
-            contentView.alpha = 0.3
-        }
+        // A drop, because what this bounds is the fill tool's flood. Filled and orange when the layer
+        // walls the fill in, hollow when it does not — and the glyph says nothing about *why*, since
+        // §6.6 makes "defaulted off because hidden" and "switched off by hand" the same picture on
+        // purpose: what the fill will do is the artist's question, not which of the two produced it.
+        fillReferenceButton.setImage(UIImage(systemName: model.isFillReference ? "drop.fill" : "drop"), for: .normal)
+        fillReferenceButton.tintColor = model.isFillReference ? .systemOrange : UIColor.white.withAlphaComponent(0.4)
+        fillReferenceButton.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).fillRefButton"
+        fillReferenceButton.accessibilityValue = model.isFillReference ? "1" : "0"
     }
 
     /// Vertical guide lines, one per enclosing folder, so nesting depth reads at a glance.
@@ -538,4 +577,6 @@ final class LayerStackCell: UITableViewCell {
     @objc private func opacityDragBegan() { onOpacityChangeBegan?() }
     @objc private func opacityDragEnded() { onOpacityChangeEnded?() }
     @objc private func openFolderOptions() { onOpenFolderOptions?() }
+    @objc private func toggleMaskSource() { onToggleMaskSource?() }
+    @objc private func toggleFillReference() { onToggleFillReference?() }
 }

@@ -11,14 +11,10 @@ struct LayerPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // §6.5: mask-edit mode replaces the ordinary header with an explicit-exit bar rather
-            // than layering a banner on top of it — the picker is the whole panel's rows, so "Add"
-            // and the view selector have nothing to do while it's open.
-            if let target = canvasManager.maskEditTarget {
-                maskEditBar(for: target)
-            } else {
-                header
-            }
+            // The header stays put through a mask-edit session. The session is now just "an options
+            // menu is open" (§6.5), which is far too ordinary a state to take the panel's own chrome
+            // away for — the rows gain two controls and lose nothing.
+            header
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
             LayerStackListView(canvasManager: canvasManager) { layerID in
                 optionsLayerID = layerID
@@ -76,19 +72,19 @@ struct LayerPanel: View {
 
             Menu {
                 Button {
-                    canvasManager.addLayer()
+                    closingOptions { canvasManager.addLayer() }
                 } label: {
                     Label("Raster Layer", systemImage: "square.on.square")
                 }
                 .accessibilityIdentifier("layerPanel.addRasterButton")
                 Button {
-                    canvasManager.addVectorLayer()
+                    closingOptions { canvasManager.addVectorLayer() }
                 } label: {
                     Label("Vector Layer", systemImage: "scribble.variable")
                 }
                 .accessibilityIdentifier("layerPanel.addVectorButton")
                 Button {
-                    canvasManager.addFolder()
+                    closingOptions { canvasManager.addFolder() }
                 } label: {
                     Label("Folder", systemImage: "folder")
                 }
@@ -98,7 +94,7 @@ struct LayerPanel: View {
                 // both slots (`addCompositorNode`), since a node without its operands is a shape
                 // none of the tree's guards would accept.
                 Button {
-                    canvasManager.addCompositorNode(op: .mix(.normal))
+                    closingOptions { canvasManager.addCompositorNode(op: .mix(.normal)) }
                 } label: {
                     Label("Mix Node", systemImage: "camera.filters")
                 }
@@ -111,7 +107,7 @@ struct LayerPanel: View {
             } primaryAction: {
                 // Vector is the default kind — a tap on `+` gives one, and the menu above is where
                 // raster is asked for by name.
-                canvasManager.addVectorLayer()
+                closingOptions { canvasManager.addVectorLayer() }
             }
             .accessibilityIdentifier("layerPanel.addButton")
         }
@@ -119,36 +115,14 @@ struct LayerPanel: View {
         .padding(.vertical, 12)
     }
 
-    // MARK: - Mask-edit bar (§6.5)
-
-    /// Replaces `header` while a mask-edit session is open: names what's being edited and gives the
-    /// explicit exit §6.5 asks for instead of "tap away", which the small options popover this
-    /// session was opened from can't offer once it has already closed.
-    private func maskEditBar(for target: MaskSource) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "circle.lefthalf.filled")
-                .foregroundColor(.white)
-            Text("Mask Sources — \(maskEditTargetName(target))")
-                .font(.subheadline)
-                .foregroundColor(.white)
-                .lineLimit(1)
-            Spacer()
-            Button("Done") {
-                canvasManager.endMaskEdit()
-            }
-            .foregroundColor(.blue)
-            .accessibilityIdentifier("layerPanel.maskEdit.done")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .accessibilityIdentifier("layerPanel.maskEdit.bar")
-    }
-
-    private func maskEditTargetName(_ target: MaskSource) -> String {
-        switch target {
-        case .layer(let id): return canvasManager.layers.first { $0.id == id }?.name ?? "Layer"
-        case .folder(let id): return canvasManager.folders.first { $0.id == id }?.name ?? "Folder"
-        }
+    /// Closes the open options menu — and with it §6.5's session — *before* a structural edit runs,
+    /// so the edit records its own undo step instead of nesting into the session's open bracket. Both
+    /// writes are synchronous, so the menu and the session never disagree about being open; the
+    /// `onChange` that normally ends the session then finds nothing to do.
+    private func closingOptions(_ perform: () -> Void) {
+        canvasManager.endMaskEdit()
+        optionsLayerID = nil
+        perform()
     }
 
     // MARK: - Background Row
@@ -231,7 +205,7 @@ struct LayerOptionsPanel: View {
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
                 maskSection(canvasManager: canvasManager, target: .layer(canvasManager.layers[index].id),
-                           mask: canvasManager.layers[index].alphaMask, onClose: onClose)
+                           mask: canvasManager.layers[index].alphaMask)
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
@@ -246,24 +220,22 @@ struct LayerOptionsPanel: View {
                     isRenaming = true
                 }
                 optionsAction("Duplicate", systemImage: "plus.square.on.square", identifier: "layerOptions.duplicate") {
-                    canvasManager.duplicateLayer(at: index)
-                    onClose()
+                    leavingMaskEdit { canvasManager.duplicateLayer(at: index) }
                 }
                 if let target = mergeTargetIndex {
                     optionsAction("Merge Down", systemImage: "arrow.triangle.merge", identifier: "layerOptions.mergeDown") {
-                        canvasManager.mergeLayers(canvasManager.layers[index].id, canvasManager.layers[target].id)
-                        onClose()
+                        leavingMaskEdit {
+                            canvasManager.mergeLayers(canvasManager.layers[index].id, canvasManager.layers[target].id)
+                        }
                     }
                 }
                 if canvasManager.layers[index].kind == .vector {
                     optionsAction("Rasterize", systemImage: "square.on.square", identifier: "layerOptions.rasterize") {
-                        canvasManager.rasterizeLayer(layerIndex: index)
-                        onClose()
+                        leavingMaskEdit { canvasManager.rasterizeLayer(layerIndex: index) }
                     }
                 }
                 optionsAction("Delete", systemImage: "trash", identifier: "layerOptions.delete", role: .destructive) {
-                    canvasManager.deleteLayer(at: index)
-                    onClose()
+                    leavingMaskEdit { canvasManager.deleteLayer(at: index) }
                 }
             } else {
                 Text("Layer no longer exists.")
@@ -286,6 +258,16 @@ struct LayerOptionsPanel: View {
                 if !trimmed.isEmpty { canvasManager.layers[index].name = trimmed }
             }
         }
+    }
+
+    /// §6.5 refuses a structural edit while the session is open, because it would nest inside the
+    /// session's bracket rather than record its own step. These four are the ones the menu itself
+    /// offers, so they close the session first instead of being refused — the artist asked for a
+    /// delete, not for a picker.
+    private func leavingMaskEdit(_ perform: () -> Void) {
+        canvasManager.endMaskEdit()
+        perform()
+        onClose()
     }
 
     private func header(for index: Int) -> some View {
@@ -391,42 +373,33 @@ private func optionsAction(_ title: String, systemImage: String, identifier: Str
     .accessibilityIdentifier(identifier)
 }
 
-/// §6.5's Mask toggle plus, once a mask exists, `invert` and a way back into the picker — shared by
-/// `LayerOptionsPanel` and `FolderOptionsPanel` since §6.2 puts `alphaMask` on both `Layer` and
-/// `LayerFolder` and neither options menu needs to know that here.
+/// What is left of §6.5's mask controls in the options menu, shared by `LayerOptionsPanel` and
+/// `FolderOptionsPanel` since §6.2 puts `alphaMask` on both `Layer` and `LayerFolder`.
 ///
-/// The switch is bound straight to `isEnabled`, which is "what the model already has and means what
-/// it says" rather than a reinterpreted on/off of its own. Turning it on always opens mask-edit mode
-/// (§6.5), even for a mask that already has sources — reopening the picker to review a pick already
-/// made costs nothing and needing a second, different affordance for "edit again" would.
-private func maskSection(canvasManager: CanvasManager, target: MaskSource, mask: AlphaMask?,
-                         onClose: @escaping () -> Void) -> some View {
+/// **Sources are not picked here.** Having this menu open *is* the mask-edit session for the node it
+/// names (`syncMaskEditSession`), and the picker is the panel's own rows — which is the whole of the
+/// redundancy the owner named: a switch that said "mask this one" sat inside a menu that already
+/// said which one. What remains is the count, so the menu still reports what the checkmarks did, and
+/// `invert`, which belongs to the mask rather than to any one source and so has nowhere in a row to
+/// live.
+private func maskSection(canvasManager: CanvasManager, target: MaskSource, mask: AlphaMask?) -> some View {
     Group {
-        Toggle(isOn: Binding(
-            get: { mask?.isEnabled ?? false },
-            set: { on in
-                if on {
-                    canvasManager.beginMaskEdit(for: target)
-                    onClose()
-                } else {
-                    canvasManager.setMaskEnabled(false, for: target)
-                    if canvasManager.maskEditTarget == target { canvasManager.endMaskEdit() }
-                }
-            }
-        )) {
+        HStack(spacing: 8) {
+            Image(systemName: "circle.lefthalf.filled").foregroundColor(.white)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Mask").foregroundColor(.white)
                 Text(maskSubtitle(mask))
                     .font(.caption2)
                     .foregroundColor(.gray)
             }
+            Spacer()
         }
-        .tint(.blue)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .accessibilityIdentifier("layerOptions.maskToggle")
+        .accessibilityIdentifier("layerOptions.maskSummary")
+        .accessibilityValue("\(mask?.sources.count ?? 0)")
 
-        if let mask {
+        if let mask, !mask.sources.isEmpty {
             Toggle(isOn: Binding(
                 get: { mask.invert },
                 set: { canvasManager.setMaskInvert($0, for: target) }
@@ -437,20 +410,13 @@ private func maskSection(canvasManager: CanvasManager, target: MaskSource, mask:
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .accessibilityIdentifier("layerOptions.maskInvertToggle")
-
-            optionsAction(mask.sources.isEmpty ? "Choose Sources" : "Edit Sources",
-                         systemImage: "checklist", identifier: "layerOptions.maskEditSources") {
-                canvasManager.beginMaskEdit(for: target)
-                onClose()
-            }
         }
     }
 }
 
 private func maskSubtitle(_ mask: AlphaMask?) -> String {
-    guard let mask else { return "Clips to other layers" }
-    if mask.sources.isEmpty { return "No sources yet" }
-    return "\(mask.sources.count) source\(mask.sources.count == 1 ? "" : "s")" + (mask.isEnabled ? "" : " (off)")
+    guard let mask, !mask.sources.isEmpty else { return "Check rows to clip this to them" }
+    return "\(mask.sources.count) source\(mask.sources.count == 1 ? "" : "s")"
 }
 
 // MARK: - Folder Options
@@ -523,10 +489,15 @@ struct FolderOptionsPanel: View {
 
                 // §6.2: a group is as legal a mask *target* as a layer, the same way it's a legal
                 // source — `maskSection` doesn't know or care which kind of node it was handed.
-                maskSection(canvasManager: canvasManager, target: .folder(canvasManager.folders[index].id),
-                           mask: canvasManager.folders[index].alphaMask, onClose: onClose)
+                // §4.3's node and slot are folders in storage but not content anyone clips, so they
+                // open no session (`syncMaskEditSession`) and their rows carry no checkmark — a mask
+                // summary here would name a picker that isn't running.
+                if folder?.isCompositorNode != true && folder?.isInputSlot != true {
+                    maskSection(canvasManager: canvasManager, target: .folder(canvasManager.folders[index].id),
+                               mask: canvasManager.folders[index].alphaMask)
 
-                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                }
 
                 // A slot's own blend mode would be a second answer to the question its node's op
                 // already answers — §4.3's "Mix(A, B, .multiply) is deliberately the same math as
@@ -552,6 +523,9 @@ struct FolderOptionsPanel: View {
                 if canvasManager.canDeleteFolder(folderID) {
                     optionsAction(folder?.isCompositorNode == true ? "Delete Node and Inputs" : "Delete",
                                   systemImage: "trash", identifier: "layerOptions.deleteFolder", role: .destructive) {
+                        // Same rule as the layer menu's: end the session before a structural edit so
+                        // it lands as its own undo step rather than inside the session's bracket.
+                        canvasManager.endMaskEdit()
                         canvasManager.deleteFolder(folderID)
                         onClose()
                     }

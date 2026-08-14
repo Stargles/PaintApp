@@ -156,6 +156,7 @@ enum ProjectStore {
             let parentFolderID: UUID?
             let blendMode: BlendMode
             let alphaMask: AlphaMask?
+            let fillReferenceOverride: Bool?
             let cels: [CelContent]
         }
 
@@ -223,6 +224,7 @@ enum ProjectStore {
                              isVisible: layer.isVisible, kind: layer.kind,
                              parentFolderID: layer.parentFolderID, blendMode: layer.blendMode,
                              alphaMask: layer.alphaMask,
+                             fillReferenceOverride: layer.fillReferenceOverride,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                rasterImage: cel.raster.renderToUIImage(),
@@ -417,6 +419,7 @@ enum ProjectStore {
                 parentFolderID: layer.parentFolderID?.uuidString,
                 blendMode: layer.blendMode,
                 alphaMask: layer.alphaMask,
+                fillReferenceOverride: layer.fillReferenceOverride,
                 cels: celManifests
             ))
         }
@@ -566,6 +569,7 @@ enum ProjectStore {
                 name: layerManifest.name,
                 opacity: layerManifest.opacity,
                 isVisible: layerManifest.isVisible,
+                fillReferenceOverride: layerManifest.fillReferenceOverride,
                 kind: layerManifest.kind,
                 blendMode: layerManifest.blendMode,
                 alphaMask: layerManifest.alphaMask,
@@ -595,9 +599,10 @@ enum ProjectStore {
     /// **Nothing is lost that the old behaviour had not already lost**: the write-through clobbered
     /// per-child visibility at the moment the folder was hidden, reaching subfolders as well, so
     /// "everything under a hidden group is visible" is exactly the state the old code would itself
-    /// have restored on re-show. `isFillReference` moves with it, the same pairing
-    /// `toggleLayerVisibility` keeps. The hidden folder itself stays hidden — that flag is the one
-    /// piece of the old state that was the artist's own decision rather than a side effect.
+    /// have restored on re-show. Fill reference comes back with it for free, since a layer with no
+    /// explicit answer derives it from visibility (§6.6). The hidden folder itself stays hidden —
+    /// that flag is the one piece of the old state that was the artist's own decision rather than a
+    /// side effect.
     ///
     /// It cannot fire twice and cannot fire on anything this build wrote: the signal is the absence
     /// of `opacity` from the folder's JSON, and every save from here on writes it (see
@@ -618,7 +623,6 @@ enum ProjectStore {
 
             for index in manager.layers.indices where descendantLayerIDs.contains(manager.layers[index].id) {
                 manager.layers[index].isVisible = true
-                manager.layers[index].isFillReference = true
             }
             for index in manager.folders.indices where descendantFolders.contains(manager.folders[index].id) {
                 manager.folders[index].isVisible = true

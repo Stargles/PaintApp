@@ -128,6 +128,14 @@ struct DrawingView: View {
         .onChange(of: activePanel) { _, panel in
             if panel != .layers { layerOptionsID = nil }
         }
+        // §6.5's mask-edit session *is* the open options menu, so it is driven from the one piece of
+        // state that says which menu that is. Every way the menu can close — its own X, a structural
+        // action, selecting another layer, leaving the panel — writes this binding, so hanging the
+        // session off it means there is no fifth path to forget. The mode itself stays on
+        // `CanvasManager`, where the rows and the canvas dim both read it.
+        .onChange(of: layerOptionsID) { _, id in
+            canvasManager.syncMaskEditSession(toOptionsTarget: id)
+        }
         // Alert shown when the user tries to draw but there are no layers.
         .alert("No Layers", isPresented: Binding(
             get: { canvasManager.needsLayerAlert },
