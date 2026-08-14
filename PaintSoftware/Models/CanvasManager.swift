@@ -1055,10 +1055,101 @@ final class CanvasManager: ObservableObject {
         return folder.id
     }
 
+    // MARK: - Compositor nodes (§4.3)
+
+    /// Creates a compositor node — a folder whose children are exactly its input slots — together
+    /// with the slots `op`'s arity requires. Returns the node folder's id.
+    ///
+    /// One `withStructureUndo` rather than the `beginStructureGesture`/`commitStructureGesture`
+    /// bracket the opacity slider uses: that pair exists for a mutation spread across a drag's
+    /// events, and this is a single call. Nested scopes coalesce (see `withStructureUndo`'s depth
+    /// guard), so node and slots land as one step — which is the property that matters here, since a
+    /// node caught half-created is a shape none of the guards below would accept.
+    ///
+    /// The slots are appended lowest index first, so **slot 0 — the backdrop — presents at the
+    /// bottom**; `containerEntries` ranks unfilled slots by index to keep that true before the
+    /// artist has put anything in them.
+    @discardableResult
+    func addCompositorNode(op: CompositorOp, name: String? = nil, parentFolderID: UUID? = nil) -> UUID {
+        let node = LayerFolder(id: UUID(), name: name ?? defaultNodeName(for: op),
+                               parentFolderID: parentFolderID, compositorRole: .node(op: op))
+        withStructureUndo(name: "Add Node") {
+            folders.append(node)
+            for index in 0..<slotCount(for: op.arity) {
+                folders.append(LayerFolder(id: UUID(), name: CanvasManager.inputSlotName(index),
+                                           parentFolderID: node.id,
+                                           compositorRole: .slot(node: node.id, index: index)))
+            }
+        }
+        return node.id
+    }
+
+    private func defaultNodeName(for op: CompositorOp) -> String {
+        let ordinal = folders.filter(\.isCompositorNode).count + 1
+        switch op {
+        case .stack: return "Group \(ordinal)"
+        case .mix: return "Mix \(ordinal)"
+        }
+    }
+
+    /// A node starts with the fewest slots its op will accept — for a variadic op that is its
+    /// minimum, since an add-slot control can only be offered once there is a node to hang it on.
+    private func slotCount(for arity: CompositorOp.Arity) -> Int {
+        switch arity {
+        case .fixed(let count): return count
+        case .variadic(let minimum): return minimum
+        }
+    }
+
+    /// §4.3's own naming for the slot rows. Past Z it numbers rather than wrapping, so two slots of
+    /// one node can never present under the same label.
+    private static func inputSlotName(_ index: Int) -> String {
+        guard index < 26, let letter = Unicode.Scalar(UnicodeScalar("A").value + UInt32(index)) else {
+            return "Input \(index + 1)"
+        }
+        return "Input \(Character(letter))"
+    }
+
+    /// Whether `deleteFolder` will do anything. An input slot exists because its node's arity says
+    /// so, so it refuses — and the panel asks this rather than offering an affordance that silently
+    /// does nothing.
+    func canDeleteFolder(_ folderID: UUID) -> Bool {
+        folders.first(where: { $0.id == folderID })?.isInputSlot != true
+    }
+
+    /// Deletes a node, its input slots, and everything inside them, as one undo step.
+    ///
+    /// **Deliberately not a promote**, which is what every other folder deletion here does: promoting
+    /// a node's children would lift its slot folders into the grandparent still tagged as inputs to a
+    /// node that no longer exists, and nothing about a stranded slot says which node it lost, so no
+    /// later guard could repair it. One undo step is what makes deleting the artwork inside
+    /// recoverable rather than the reason to invent a third behaviour.
+    func deleteCompositorNode(_ nodeID: UUID) {
+        guard folders.first(where: { $0.id == nodeID })?.isCompositorNode == true else { return }
+        withStructureUndo(name: "Delete Node") {
+            let subtree = folderSubtree(nodeID)
+            for index in layers.indices.reversed()
+            where layers[index].parentFolderID.map(subtree.contains) == true {
+                deleteLayer(at: index)
+            }
+            for folderID in subtree {
+                guard let index = folders.firstIndex(where: { $0.id == folderID }) else { continue }
+                folders.remove(at: index)
+                for vi in viewPresets.indices {
+                    viewPresets[vi].folderVisibility.removeValue(forKey: folderID)
+                }
+                dropMaskSource(.folder(folderID))
+            }
+        }
+    }
+
     /// Removes a folder, keeping everything that was inside it. Its layers and subfolders move up
     /// into whatever contained the folder, in the same stacking positions.
     func deleteFolder(_ folderID: UUID) {
-        guard folders.contains(where: { $0.id == folderID }) else { return }
+        guard let folder = folders.first(where: { $0.id == folderID }) else { return }
+        guard canDeleteFolder(folderID) else { return }
+        // A node is the one folder whose contents must not be promoted — see `deleteCompositorNode`.
+        guard !folder.isCompositorNode else { return deleteCompositorNode(folderID) }
         withStructureUndo(name: "Delete Folder") {
             guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
             // Children move up into whatever contained this folder, not to the root, so deleting a

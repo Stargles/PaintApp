@@ -29,9 +29,11 @@ import Foundation
 /// mechanism at different arities, so they get one renderer rather than two, and the arity lives on
 /// the op. `Mix`, `Add`, and the rest arrive in phase 8 without reshaping anything here.
 enum CompositorOp: Equatable {
-    /// Composite this op's inputs over each other bottom-to-top. At arity 1 — every node the
-    /// derivation below can currently produce — that is exactly a folder.
-    case stack
+    case stack              // a folder: children stacked into one slot
+    case mix(BlendMode)     // two slots: slot 1 composited over slot 0 with this mode
+
+    enum Arity: Equatable { case fixed(Int); case variadic(min: Int) }
+    var arity: Arity { switch self { case .stack: .variadic(min: 1); case .mix: .fixed(2) } }
 }
 
 /// One node of the derived tree. A leaf names a `layers` index; a node holds ordered input slots,
@@ -411,15 +413,29 @@ extension CanvasManager {
                 // An empty folder becomes a node with one empty slot rather than being dropped, so
                 // the group properties below have somewhere to hang even with nothing inside — and
                 // so a group that is empty only at this frame doesn't blink out of the tree.
+                let children = renderNodes(inContainer: folder.id)
+                // **A compositor node's children are exactly its slots (§4.3)**, so each becomes an
+                // input of its own; an ordinary folder is the same thing at arity 1, one slot
+                // holding all of them. Splitting the same child list either way is what keeps the
+                // leaf order identical to `layers` however a folder happens to be tagged.
+                //
+                // `containerEntries` ranks top-to-bottom and `stack` above reversed it, so
+                // `children` is bottom-to-top and **input 0 is the lowest row** — the backdrop that
+                // "slot 1 composites over slot 0" names, which is the direction a plain stack
+                // already reads.
                 return RenderNode(id: folder.id,
-                                  content: .node(op: .stack, inputs: [renderNodes(inContainer: folder.id)]),
+                                  content: .node(op: folder.compositorOp ?? .stack,
+                                                 inputs: folder.isCompositorNode ? children.map { [$0] } : [children]),
                                   // The folder's real group properties (§4.1), not the identities
                                   // phase 1 stood in with. They each still *default* to the
                                   // identity, so an untouched folder remains a no-op in the tree —
                                   // that is `LayerFolder`'s doing now rather than this line's.
                                   opacity: folder.opacity, isVisible: folder.isVisible,
                                   blendMode: folder.blendMode.compositedMode,
-                                  isIsolated: folder.isIsolated,
+                                  // An input slot is isolated whatever it stores (§4.3): an input
+                                  // that blended against the backdrop under its own node would not
+                                  // be an input to it in any sense the op could use.
+                                  isIsolated: folder.isInputSlot ? true : folder.isIsolated,
                                   masks: masks(ofNode: folder.id, declared: folder.alphaMask,
                                                clippingTo: folder.blendMode == .clipToBelow ? below : nil))
             }

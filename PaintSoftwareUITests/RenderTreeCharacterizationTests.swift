@@ -431,4 +431,77 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.undo()
         assertRenderTreeMatchesFlatOrder(manager, "after undoing back through a structural edit")
     }
+
+    // MARK: - Compositor nodes (§4.3)
+
+    /// A node with two populated slots is the first tree in the app with more than one input, and
+    /// this pins all three things §4.3 says about it: the op reaches the tree, each slot is an input
+    /// of its own rather than another entry in a shared one, and **slot 0 is the lower row** — the
+    /// backdrop that "slot 1 composites over slot 0" names.
+    ///
+    /// Slot order is read off the presented order rather than off the stored index, so a test that
+    /// only checked the index would pass while the panel drew the operands the other way round.
+    func testAMixNodeDerivesToOneInputPerSlotWithSlotZeroAsTheBackdrop() {
+        let manager = namedManager(["A", "B"])
+        let ids = manager.layers.map(\.id)
+        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        let slots = manager.inputSlots(ofNode: node)
+        XCTAssertEqual(slots.map(\.name), ["Input A", "Input B"], "Setup: `.fixed(2)` should bring two named slots, slot 0 first")
+
+        manager.restackLayer(ids[1], above: .folder(slots[1].id), parentFolderID: slots[1].id)
+        manager.restackLayer(ids[0], above: .folder(slots[0].id), parentFolderID: slots[0].id)
+
+        assertRenderTreeMatchesFlatOrder(manager, "after filling both slots")
+        assertFolderSpansAreContiguous(manager, "after filling both slots")
+        XCTAssertEqual(renderRows(manager), ["0:Mix", "1:Input A", "2:A", "1:Input B", "2:B"],
+                       "Bottom-to-top, the backdrop slot comes first and each slot encloses its own contents")
+
+        guard case .node(let op, let inputs) = manager.renderTree.first?.content else {
+            return XCTFail("The node folder should derive to a `.node`")
+        }
+        XCTAssertEqual(op, .mix(.multiply), "The folder's op is what the compositor switches on")
+        XCTAssertEqual(inputs.count, 2, "Two slots are two inputs, not two entries in one")
+        XCTAssertEqual(inputs.map { $0.map(\.id) }, [[slots[0].id], [slots[1].id]],
+                       "Input 0 is the lower slot — §4.3's backdrop, and the direction a plain stack already reads")
+        XCTAssertTrue(inputs.flatMap { $0 }.allSatisfy(\.isIsolated),
+                      "§4.3: an input slot is always isolated, or \"input\" means nothing")
+    }
+
+    /// Isolation on a slot is not read off the folder, it is asserted by the derivation — so a slot
+    /// someone has switched to pass-through, by an older build or a hand-edited document, still
+    /// derives isolated rather than blending against whatever sits under the node.
+    func testASlotDerivesIsolatedEvenWhenTheFolderSaysPassThrough() {
+        let manager = namedManager(["A"])
+        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        let slots = manager.inputSlots(ofNode: node)
+        manager.restackLayer(manager.layers[0].id, above: .folder(slots[0].id), parentFolderID: slots[0].id)
+
+        guard let index = manager.folders.firstIndex(where: { $0.id == slots[0].id }) else {
+            return XCTFail("Setup: the slot folder should exist")
+        }
+        manager.folders[index].isIsolated = false
+
+        guard case .node(_, let inputs) = manager.renderTree.first?.content else {
+            return XCTFail("The node folder should derive to a `.node`")
+        }
+        XCTAssertEqual(inputs.first?.first?.isIsolated, true)
+    }
+
+    /// An ordinary folder is unchanged by any of this — it is still one slot holding all its
+    /// children, which is the arity-1 case §4.3 says a group is.
+    func testAnOrdinaryFolderStillDerivesToASingleStackedSlot() {
+        let manager = namedManager(["A", "B"])
+        let folder = manager.addFolder(name: "Group")
+        for id in manager.layers.map(\.id) {
+            manager.restackLayer(id, above: .folder(folder), parentFolderID: folder)
+        }
+
+        guard case .node(let op, let inputs) = manager.renderTree.first?.content else {
+            return XCTFail("A folder should still derive to a `.node`")
+        }
+        XCTAssertEqual(op, .stack)
+        XCTAssertEqual(inputs.count, 1, "No role means one slot, however many children are in it")
+        XCTAssertEqual(inputs.first?.count, 2)
+        assertRenderTreeMatchesFlatOrder(manager)
+    }
 }

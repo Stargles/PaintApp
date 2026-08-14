@@ -37,4 +37,109 @@ struct LayerFolder: Identifiable {
     /// group, which is a different picture wherever they overlap. A group can be masked *and* be a
     /// mask source.
     var alphaMask: AlphaMask? = nil
+
+    /// What this folder is in a compositor graph (§4.3), or nil for an ordinary group — which is
+    /// every folder in every project saved before phase 8, and the whole of why that needs no
+    /// migration. Follows `alphaMask`'s recipe exactly: optional, absent means "not one".
+    var compositorRole: CompositorRole? = nil
+}
+
+// MARK: - Compositor nodes (§4.3)
+
+/// What a folder is inside a compositor graph.
+///
+/// §4.3's storage decision, stated as a field: **a node is a folder whose children are exactly its
+/// slot folders, and a slot is an ordinary folder that is auto-created, undeletable, and tagged with
+/// its owning node and slot index.** Containment, spans, the restack arithmetic and the panel's rows
+/// all go on reading a plain `LayerFolder` and need no case of their own.
+///
+/// What the tag buys is the two behaviours that have no precedent anywhere in the tree: a folder that
+/// refuses to be deleted, and a set of siblings that must stay adjacent. Both are enforced *before*
+/// the shape breaks (`CanvasManager.deleteFolder`, and the drop guards in `CanvasManager+LayerTree`)
+/// rather than repaired after, because a stranded slot carries nothing that says which node it lost.
+enum CompositorRole: Equatable {
+
+    /// This folder is a compositor node: its children are its input slots, and `op` combines them.
+    case node(op: CompositorOp)
+
+    /// This folder is input slot `index` of the node folder `node`.
+    ///
+    /// **Index 0 is the backdrop.** §4.3 defines a Mix as "slot 1 composited over slot 0", which is
+    /// the direction a plain stack already reads — lower row underneath — so a two-input node and a
+    /// two-layer stack agree about which one is on top. `containerEntries` is what keeps this index
+    /// and the order the slots present in from drifting apart.
+    case slot(node: UUID, index: Int)
+}
+
+extension CompositorRole: Codable {
+
+    // The op is written as its own string rather than as `CompositorOp`'s layout: that enum belongs
+    // to the compositor and gains a case whenever an op is added, and a document already on disk must
+    // not change meaning when it does.
+    private enum CodingKeys: String, CodingKey { case kind, op, mixMode, node, index }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(String.self, forKey: .kind) {
+        case "node":
+            switch try container.decodeIfPresent(String.self, forKey: .op) {
+            case "mix":
+                self = .node(op: .mix(try container.decodeIfPresent(BlendMode.self, forKey: .mixMode) ?? .normal))
+            default:
+                self = .node(op: .stack)
+            }
+        case "slot":
+            self = .slot(node: try container.decode(UUID.self, forKey: .node),
+                         index: try container.decode(Int.self, forKey: .index))
+        case let kind:
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container,
+                                                   debugDescription: "Unknown compositor role \"\(kind)\"")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .node(let op):
+            try container.encode("node", forKey: .kind)
+            switch op {
+            case .stack:
+                try container.encode("stack", forKey: .op)
+            case .mix(let mode):
+                try container.encode("mix", forKey: .op)
+                try container.encode(mode, forKey: .mixMode)
+            }
+        case .slot(let node, let index):
+            try container.encode("slot", forKey: .kind)
+            try container.encode(node, forKey: .node)
+            try container.encode(index, forKey: .index)
+        }
+    }
+}
+
+extension LayerFolder {
+
+    /// True when this folder is a node, whose children are its input slots.
+    var isCompositorNode: Bool { compositorOp != nil }
+
+    /// How this node combines its inputs, or nil when the folder is not a node. An ordinary folder
+    /// is the arity-1 case and the derivation reads `.stack` for it without needing it stored.
+    var compositorOp: CompositorOp? {
+        if case .node(let op)? = compositorRole { return op }
+        return nil
+    }
+
+    var isInputSlot: Bool { inputSlotIndex != nil }
+
+    /// Which input this folder is, if it is one. Zero is the backdrop.
+    var inputSlotIndex: Int? {
+        if case .slot(_, let index)? = compositorRole { return index }
+        return nil
+    }
+
+    /// The node this folder is an input to, if it is one.
+    var owningNodeID: UUID? {
+        if case .slot(let node, _)? = compositorRole { return node }
+        return nil
+    }
 }

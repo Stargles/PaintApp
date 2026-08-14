@@ -150,6 +150,12 @@ struct FolderManifest: Codable {
     /// §10.3 migration reads its *absence* as a signal.
     var alphaMask: AlphaMask? = nil
 
+    /// The folder's compositor role (§4.3) — node, input slot, or absent for an ordinary group.
+    /// Absent is what every project saved before phase 8 carries and what every folder nobody has
+    /// built a node out of carries, which is one meaning rather than two: see `alphaMask` above for
+    /// the same argument, and `opacity` below for the one field that cannot be written this way.
+    var compositorRole: CompositorRole? = nil
+
     /// **Not persisted, and derived at decode time.** True when this folder arrived without the
     /// group-property keys — which is to say it was written while `toggleFolderVisibility` still
     /// wrote through to every descendant. `ProjectStore.load` is the only reader; see the §10.3
@@ -158,7 +164,7 @@ struct FolderManifest: Codable {
 
     init(id: UUID, name: String, isExpanded: Bool, isVisible: Bool, parentFolderID: UUID? = nil,
          opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true,
-         alphaMask: AlphaMask? = nil) {
+         alphaMask: AlphaMask? = nil, compositorRole: CompositorRole? = nil) {
         self.id = id
         self.name = name
         self.isExpanded = isExpanded
@@ -168,6 +174,7 @@ struct FolderManifest: Codable {
         self.blendMode = blendMode
         self.isIsolated = isIsolated
         self.alphaMask = alphaMask
+        self.compositorRole = compositorRole
     }
 
     // Custom decoding for the same reason `LayerManifest` has one: a synthesized decoder demands
@@ -183,6 +190,11 @@ struct FolderManifest: Codable {
         blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
         isIsolated = try container.decodeIfPresent(Bool.self, forKey: .isIsolated) ?? true
         alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
+        // Swallowed rather than propagated: a role this build cannot read — a future op, a truncated
+        // slot tag — degrades the folder to an ordinary one, which is exactly what §4.3's storage
+        // decision makes it anyway. Throwing here would cost the artist the whole document to save
+        // a graph edge, and a document that renders is the standing preference (see `canMask`).
+        compositorRole = (try? container.decodeIfPresent(CompositorRole.self, forKey: .compositorRole)) ?? nil
         // `opacity` stands in for the whole group-property set, so **it must keep being written
         // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`
         // plays with the interpolation registries — would make every untouched folder in every
@@ -192,6 +204,7 @@ struct FolderManifest: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, isExpanded, isVisible, parentFolderID, opacity, blendMode, isIsolated, alphaMask
+        case compositorRole
     }
 }
 

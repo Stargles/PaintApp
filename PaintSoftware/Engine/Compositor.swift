@@ -410,7 +410,10 @@ enum CoreGraphicsCompositor {
                 // buffer full of nothing.
                 guard node.isVisible else { continue }
                 switch op {
-                case .stack:
+                // `.mix` rides the stack path until phase 8's compositor half lands: §4.3 defines
+                // Mix as "the same math as stacking B over A", so the difference is only that each
+                // slot wants a buffer of its own first — a walk change, made where the walk lives.
+                case .stack, .mix:
                     guard node.needsOwnBuffer else {
                         // The direct path is also the pass-through path: children drawn straight
                         // onto the backdrop blend against it, which is what "pass-through" means.

@@ -63,8 +63,17 @@ extension CanvasManager {
         }
         for (order, folder) in folders.enumerated() where resolvedContainer(ofFolder: folder.id) == container {
             // An empty folder has no span, so it sorts above everything else in its container.
-            let top = descendantLayerIndices(ofFolder: folder.id).max() ?? Int.max
-            ranked.append((top: top, tieBreak: order, entry: .folder(folder)))
+            var top = descendantLayerIndices(ofFolder: folder.id).max() ?? Int.max
+            // **An unfilled input slot is the one empty folder that must not float to the top.** A
+            // node's operand order is fixed by §4.3 — slot 1 composites over slot 0 — and cannot be
+            // allowed to depend on which slots the artist has filled so far, or filling only Input B
+            // would silently promote Input A to the thing drawn over it. Ranking the empty slot just
+            // above whatever the slots below it hold puts it where its index says it belongs, and a
+            // folder holding no layers contributes no leaves, so this cannot reorder anything.
+            if top == Int.max, let slot = folder.inputSlotIndex, let owner = folder.owningNodeID {
+                top = highestLayerIndex(inSlotsBelow: slot, ofNode: owner) ?? -1
+            }
+            ranked.append((top: top, tieBreak: folder.inputSlotIndex ?? order, entry: .folder(folder)))
         }
         ranked.sort { ($0.top, $0.tieBreak) > ($1.top, $1.tieBreak) }
         return ranked.map(\.entry)
@@ -100,6 +109,55 @@ extension CanvasManager {
 
     func isFolder(_ folderID: UUID, descendantOf ancestorID: UUID) -> Bool {
         folderID != ancestorID && folderSubtree(ancestorID).contains(folderID)
+    }
+
+    // MARK: - Compositor nodes (§4.3)
+
+    /// A node's input slots, **slot 0 first** — bottom-to-top, the direction the stack composites in,
+    /// so `inputSlots(ofNode:)[1]` is the one composited over `[0]`. Read from `containerEntries` so
+    /// it cannot disagree with the order the panel presents or the derivation walks.
+    func inputSlots(ofNode nodeID: UUID) -> [LayerFolder] {
+        containerEntries(inContainer: nodeID).reversed().compactMap { entry -> LayerFolder? in
+            guard case .folder(let folder) = entry, folder.isInputSlot else { return nil }
+            return folder
+        }
+    }
+
+    /// The top of everything held by the slots below `slotIndex` — where an empty slot ranks, and
+    /// where the first layer dropped into one belongs.
+    private func highestLayerIndex(inSlotsBelow slotIndex: Int, ofNode nodeID: UUID) -> Int? {
+        folders.filter { $0.owningNodeID == nodeID && ($0.inputSlotIndex ?? 0) < slotIndex }
+            .compactMap { descendantSpan(ofFolder: $0.id)?.upperBound }
+            .max()
+    }
+
+    private func lowestLayerIndex(inSlotsAbove slotIndex: Int, ofNode nodeID: UUID) -> Int? {
+        folders.filter { $0.owningNodeID == nodeID && ($0.inputSlotIndex ?? 0) > slotIndex }
+            .compactMap { descendantSpan(ofFolder: $0.id)?.lowerBound }
+            .min()
+    }
+
+    /// Whether a drop may come to rest **directly** inside `container`.
+    ///
+    /// A node's children are exactly its slot folders (§4.3), so a bare layer or an unrelated folder
+    /// dropped onto a node header has no legal resting place there. Refused rather than redirected
+    /// into a slot: which input the artist meant is not recoverable from the gesture, and silently
+    /// picking one is a worse answer than declining. The panel reads this to decline the drag before
+    /// it lands; `restackLayer`/`restackFolder` enforce it regardless, since a stale row still on
+    /// screen from before a structural edit goes through the same call.
+    func canDrop(inContainer container: UUID?) -> Bool {
+        guard let container, let folder = folders.first(where: { $0.id == container }) else { return true }
+        return !folder.isCompositorNode
+    }
+
+    /// Whether a folder may be restacked at all.
+    ///
+    /// A slot may not: its position among its siblings **is** its index (§4.3's "slot 1 composites
+    /// over slot 0"), and letting a drag move it would leave the stored index and the presented
+    /// order as two answers to one question — the stored one still naming the row "Input A" while it
+    /// sat on top. The artist reorders a node's operands by moving what is inside the slots.
+    func canRestackFolder(_ folderID: UUID) -> Bool {
+        folders.first(where: { $0.id == folderID })?.isInputSlot != true
     }
 
     /// `layers` indices held by a folder at any depth, ascending. Contiguous by the invariant above.
@@ -208,6 +266,15 @@ extension CanvasManager {
     /// Where a new child of an empty folder belongs: the top of the nearest ancestor that does have
     /// a span, since that's where the empty folder itself renders.
     private func emptyFolderInsertionIndex(_ folderID: UUID) -> Int {
+        // An unfilled input slot sits between its sibling slots rather than above everything (see
+        // `containerEntries`), so the first thing dropped into it has to land there too. The generic
+        // walk below would send it to the top of the whole node, which is how filling Input A after
+        // Input B would put A's layers over B's and quietly invert the node.
+        if let folder = folders.first(where: { $0.id == folderID }),
+           let slot = folder.inputSlotIndex, let owner = folder.owningNodeID {
+            if let below = highestLayerIndex(inSlotsBelow: slot, ofNode: owner) { return below + 1 }
+            if let above = lowestLayerIndex(inSlotsAbove: slot, ofNode: owner) { return above }
+        }
         var current = folders.first(where: { $0.id == folderID })?.parentFolderID
         var guardCount = 0
         while let parent = current, guardCount < folders.count + 1 {
@@ -244,12 +311,36 @@ extension CanvasManager {
             return min(max(index, 0), layers.count)
         }
         guard let span = descendantSpan(ofFolder: container) else { return emptyFolderInsertionIndex(container) }
-        return min(max(index, span.lowerBound), span.upperBound + 1)
+        return pushedOutOfNodes(min(max(index, span.lowerBound), span.upperBound + 1), container: container)
+    }
+
+    /// Pulls an insertion point out of any node it would land strictly inside without being dropped
+    /// into one of that node's slots — §4.3's "the node's span is the union of its adjacent slots'
+    /// spans", which is contiguity one level further in than the clamp above enforces.
+    ///
+    /// The clamp only knows about the folder being dropped *into*, and that is exactly the gap:
+    /// dropping into the folder that merely *holds* a node is a legal drop, and left alone it is free
+    /// to come to rest between Input A and Input B and separate them. A top-level drop needs no such
+    /// pass — a top-level node is caught by the top-level clause above, and a nested one is inside
+    /// some top-level folder that clause already pushes clear of.
+    private func pushedOutOfNodes(_ index: Int, container: UUID) -> Int {
+        // Widest violated span first: clearing the outermost node also clears every node nested
+        // inside it, because the boundary it lands on is outside those too.
+        let violated = folders
+            .filter { $0.isCompositorNode && !folderSubtree($0.id).contains(container) }
+            .compactMap { node -> ClosedRange<Int>? in
+                guard let span = descendantSpan(ofFolder: node.id),
+                      index > span.lowerBound, index <= span.upperBound else { return nil }
+                return span
+            }
+            .max { $0.count < $1.count }
+        guard let span = violated else { return index }
+        return (index - span.lowerBound) <= (span.upperBound + 1 - index) ? span.lowerBound : span.upperBound + 1
     }
 
     /// Re-stacks `layerID` so it sits directly above `anchor`, inside `parentFolderID`.
     func restackLayer(_ layerID: UUID, above anchor: StackAnchor, parentFolderID: UUID?) {
-        guard let from = layers.firstIndex(where: { $0.id == layerID }) else { return }
+        guard let from = layers.firstIndex(where: { $0.id == layerID }), canDrop(inContainer: parentFolderID) else { return }
         withStructureUndo(name: "Reorder Layer") {
             withPreservedActiveLayer {
                 var moved = layers.remove(at: from)
@@ -263,7 +354,8 @@ extension CanvasManager {
     /// Moves a whole folder — its subfolders and every layer inside them, relative order intact —
     /// so the group comes to rest directly above `anchor`, inside `parentFolderID`.
     func restackFolder(_ folderID: UUID, above anchor: StackAnchor, parentFolderID: UUID?) {
-        guard let folderIndex = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        guard let folderIndex = folders.firstIndex(where: { $0.id == folderID }),
+              canRestackFolder(folderID), canDrop(inContainer: parentFolderID) else { return }
         // A folder can't be dropped into itself or into anything it contains.
         let subtree = folderSubtree(folderID)
         if let parentFolderID, subtree.contains(parentFolderID) { return }
