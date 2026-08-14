@@ -1211,6 +1211,79 @@ final class CompositorParityLogicTests: XCTestCase {
         }
     }
 
+    /// **The collision `FolderOptionsPanel` refuses to offer a control for.** A slot is stored as an
+    /// ordinary `LayerFolder` (§4.3), so it structurally carries its own `blendMode` — but the panel
+    /// never shows it a blend-mode row, because "a slot's own mode would be a second answer to the
+    /// question its node's op already answers" (`LayerPanel.swift`'s comment on that omission) and
+    /// §4.3 never says which of the two wins. That leaves the field reachable only through
+    /// `CanvasManager.setFolderBlendMode` directly, through undo, or through a hand-edited document —
+    /// paths the panel does not gate.
+    ///
+    /// **Measured here rather than assumed: a slot's own mode never reaches a backdrop to blend
+    /// against, so it is not ignored *by policy*, it is inert *by geometry*, for every mode on either
+    /// slot, on both backends.** `CoreGraphicsCompositor.fold` and `CompositorMetalEngine.fold` both
+    /// zero-fill the buffer a slot draws into before drawing it — slot 0 straight into the node's own
+    /// fresh buffer, every other slot into a fresh buffer of its own — so a slot's mode always blends
+    /// against transparency and reads as Normal by the same rule §4.2 already settled for a layer at
+    /// the bottom of an isolated group. A slot is *always* in that position, never only incidentally,
+    /// so the value is silently dropped in every document that could exist rather than in an edge
+    /// case of one.
+    ///
+    /// **Opacity is the contrast that tells "ignored" apart from "nothing on this folder does
+    /// anything".** It scales what a slot draws regardless of the (always-transparent) backdrop
+    /// underneath, so it survives into the fold — the second half of this test is what confirms that
+    /// is still true, so a future change cannot silently swallow opacity the same way geometry already
+    /// swallows blend mode.
+    func testASlotsOwnBlendModeIsInertButItsOpacityStillFades() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 48, height: 48)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(green, rect: CGRect(x: 16, y: 16, width: 48, height: 48)))
+        let ids = manager.layers.map(\.id)
+        // The op itself stays `.normal` so the only thing this fixture can possibly be measuring is
+        // the slot's own field, never confused with the Mix mode `testMixIsTheSameMathAs…` above
+        // already covers.
+        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        let slots = manager.inputSlots(ofNode: node)
+        manager.restackLayer(ids[1], above: .folder(slots[1].id), parentFolderID: slots[1].id)
+        manager.restackLayer(ids[0], above: .folder(slots[0].id), parentFolderID: slots[0].id)
+
+        var backends: [CompositorBackend] = [.coreGraphics]
+        if CompositorMetalEngine.shared != nil { backends.append(.metal) }
+
+        for backend in backends {
+            Compositor.backend = backend
+            guard let baseline = composite(manager) else {
+                XCTFail("\(backend): the filled Mix must composite")
+                continue
+            }
+
+            for slotIndex in [0, 1] {
+                for mode in BlendMode.allCases where mode != .clipToBelow && mode != .normal {
+                    manager.setFolderBlendMode(slots[slotIndex].id, to: mode)
+                    guard let changed = composite(manager) else {
+                        XCTFail("\(backend): must still composite with slot \(slotIndex) at \(mode.displayName)")
+                        manager.setFolderBlendMode(slots[slotIndex].id, to: .normal)
+                        continue
+                    }
+                    XCTAssertEqual(maxChannelDelta(baseline, changed), 0,
+                                   "\(backend): slot \(slotIndex)'s own blend mode (\(mode.displayName)) moved a pixel — it should be exactly as unobservable as any content at the bottom of an isolated container (§4.2)")
+                    manager.setFolderBlendMode(slots[slotIndex].id, to: .normal)
+                }
+            }
+
+            manager.setFolderOpacity(slots[1].id, to: 0.4)
+            guard let faded = composite(manager) else {
+                XCTFail("\(backend): must composite with slot 1 faded")
+                continue
+            }
+            XCTAssertGreaterThan(maxChannelDelta(baseline, faded), 0,
+                                 "\(backend): a slot's own opacity should still fade its content into the fold — unlike blend mode, it is not swallowed by the always-transparent backdrop a slot draws into")
+            manager.setFolderOpacity(slots[1].id, to: 1)
+        }
+    }
+
     /// **The whole reason the walk had to change, stated as the picture it buys.** §4.3: "an input
     /// slot is always isolated". Slot 1 blends against *slot 0*, never against whatever the node is
     /// drawn onto — which is precisely what the old shared-accumulator loop could not express, since

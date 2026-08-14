@@ -48,33 +48,38 @@ struct AlphaMask: Hashable {
 
     // MARK: - The tunables (§6.3, §10 item 1)
 
-    /// **The coverage test, and the one knob the owner asked to tune once there is something to look
-    /// at.** `mask = sourceAlpha > threshold`.
+    /// **The coverage test, tuned once there was something to look at.** `mask = sourceAlpha >
+    /// threshold`.
     ///
     /// It cannot be `alpha > 0`: the default brush is `softRound`, whose dab is a radial gradient
-    /// falling to alpha ≈ 0 across its whole radius, so `> 0` makes the mask substantially larger
-    /// than the stroke looks. 0.5 tracks the visually solid part of a stroke and reduces to `> 0` for
-    /// a hard brush. `MaskParityLogicTests.testTheThresholdTracksTheSolidPartOfASoftDab` is the
-    /// measurement behind that sentence rather than a restatement of it.
+    /// falling to alpha ≈ 0 across its whole radius, so `> 0` would keep every pixel the dab touched
+    /// however faintly. A threshold still excludes that faintest skirt — but 0.1 is not a derived
+    /// number, it is what the product owner judged by eye on the iPad, against a soft brush, in a
+    /// Release build. It replaced 0.5, the pre-hardware reasoned guess that this comment used to
+    /// defend as "the visually solid part of a stroke"; measurement on a screen disagreed; the number
+    /// is now the one the owner picked, not the one the reasoning predicted. `MaskParityLogicTests.
+    /// testTheThresholdExcludesOnlyTheFaintestSkirtOfASoftDab` is the measurement behind that
+    /// sentence rather than a restatement of it. Still reduces to `> 0` for a hard brush either way.
     ///
     /// MASK-TUNE (temporary, see `MaskTuningOverlay.swift`): `var` rather than `let` only so the
-    /// on-iPad tuning harness can scrub it live. The shipping default is still 0.5; nothing but that
+    /// on-iPad tuning harness can scrub it live. The shipping default is now 0.1; nothing but that
     /// overlay ever writes here. `didSet` bumps `tuningGeneration` — see its doc comment for why that
     /// is load-bearing rather than decoration. Revert to `let` (and delete `tuningGeneration`) when
     /// the harness is deleted.
-    static var threshold: Float = 0.5 { didSet { tuningGeneration += 1 } }
+    static var threshold: Float = 0.1 { didSet { tuningGeneration += 1 } }
 
     /// Half-width of the smoothstep across `threshold`, in alpha units — **antialiasing only**.
     ///
     /// A hard boolean edge stair-steps on diagonals; a ramp wide enough to fix that must still be
     /// narrow enough not to reintroduce the source's own falloff, which is the whole point of the
-    /// threshold. At 0.05 a `softRound` dab of radius 20 feathers over roughly two pixels while its
-    /// own gradient spans twenty, so the mask is still binary to the eye. Widen this and the mask
-    /// starts inheriting the brush's ramp, which is the failure §6.3 names.
+    /// threshold. 0.01 is narrower than the 0.05 this replaced — the same on-iPad judgement that moved
+    /// `threshold` down to 0.1 also pulled this in, so the resolved edge sits nearer a hard boolean
+    /// than the original reasoning here anticipated. Widen this and the mask starts inheriting the
+    /// brush's own ramp, which is the failure §6.3 names.
     ///
     /// MASK-TUNE (temporary): same story as `threshold` above — `var` only for the harness, shipping
-    /// default still 0.05, `didSet` bumps `tuningGeneration`.
-    static var antialiasHalfWidth: Float = 0.05 { didSet { tuningGeneration += 1 } }
+    /// default now 0.01, `didSet` bumps `tuningGeneration`.
+    static var antialiasHalfWidth: Float = 0.01 { didSet { tuningGeneration += 1 } }
 
     /// MASK-TUNE (temporary): **this is what makes the harness's cache invalidation real rather than
     /// assumed.** `MaskResolver.CacheKey` keys on `AlphaMask`'s *stored* properties (`sources`,

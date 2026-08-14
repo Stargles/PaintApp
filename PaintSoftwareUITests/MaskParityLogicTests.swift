@@ -142,13 +142,16 @@ final class MaskParityLogicTests: XCTestCase {
 
     /// **Why the test is not `alpha > 0`.** The default brush is `softRound`, whose dab is a radial
     /// gradient falling to alpha ≈ 0 across its whole radius, so a `> 0` mask would keep every pixel
-    /// the dab touched however faintly — substantially more than the stroke looks like it covers.
+    /// the dab touched however faintly.
     ///
-    /// The number below is the measurement rather than a restatement: this asserts the masked area is
-    /// meaningfully smaller than the touched area *and* that the solid middle survives, which is what
-    /// "tracks the visually solid part of a stroke" means. Both halves matter — a threshold pushed to
-    /// 1 would pass the first assertion and fail the second.
-    func testTheThresholdTracksTheSolidPartOfASoftDab() {
+    /// This used to assert the mask kept only the "visually solid part" of the dab, which was true at
+    /// the pre-hardware guess of 0.5. It is not what the shipped threshold does: 0.1, judged by eye on
+    /// the iPad against a soft brush, tracks nearly the *whole* extent of the dab instead. So rather
+    /// than restate a fraction that would just be re-deriving the shipped constant by hand, this pins
+    /// the shift structurally — the shipped threshold has to keep meaningfully more of the dab than the
+    /// old 0.5 guess would, while still not being `alpha > 0` outright. Both halves matter: a threshold
+    /// of 0 would pass the "keeps more" half and fail the "still not everything" half.
+    func testTheThresholdExcludesOnlyTheFaintestSkirtOfASoftDab() {
         let manager = CanvasFixture.manager(layerCount: 2)
         guard let celIndex = manager.activeCelIndex(inLayer: 0, atFrame: 0) else {
             return XCTFail("Fixture needs a cel to stamp into")
@@ -169,11 +172,27 @@ final class MaskParityLogicTests: XCTestCase {
         let touched = coveredPixelCount(dab)
         let kept = coveredPixelCount(masked)
         XCTAssertGreaterThan(touched, 0, "Fixture premise: the dab landed")
-        XCTAssertGreaterThan(kept, 0, "The solid middle of the dab has to survive the threshold")
-        XCTAssertLessThan(kept, touched * 3 / 4,
-                          "The dab touches \(touched) pixels and the mask keeps \(kept). `alpha > 0` would keep all "
-                          + "\(touched) — the whole point of the threshold is that a soft dab's skirt is not coverage.")
+        XCTAssertGreaterThan(kept, 0, "The centre of the dab has to survive the threshold")
+        XCTAssertLessThan(kept, touched,
+                          "The dab touches \(touched) pixels; the mask keeps \(kept). Equal would mean the "
+                          + "threshold kept every pixel `alpha > 0` does — the one thing it exists not to be, "
+                          + "even now that it keeps nearly all of them")
         XCTAssertEqual(pixel(masked, 32, 32), [0, 0, 255, 255], "The dab's centre is solid, so the content shows there")
+
+        let priorThreshold = AlphaMask.threshold
+        let priorHalfWidth = AlphaMask.antialiasHalfWidth
+        AlphaMask.threshold = 0.5      // the pre-hardware guess this test used to assume
+        AlphaMask.antialiasHalfWidth = 0.05
+        defer {
+            AlphaMask.threshold = priorThreshold
+            AlphaMask.antialiasHalfWidth = priorHalfWidth
+        }
+        guard let solidCoreOnly = composite(manager) else { return XCTFail("Fixture must composite") }
+        let keptAtOldGuess = coveredPixelCount(solidCoreOnly)
+        XCTAssertGreaterThan(kept, keptAtOldGuess,
+                             "The shipped threshold keeps \(kept) pixels of the dab against \(keptAtOldGuess) for "
+                             + "the old 0.5 guess — the on-iPad judgement tracks nearly the whole dab, not just "
+                             + "the solid core 0.5 was reasoned to land on")
     }
 
     // MARK: - Parity, which is the point (§6.5)
@@ -546,7 +565,7 @@ final class MaskParityLogicTests: XCTestCase {
             return XCTFail("The mask must resolve")
         }
 
-        AlphaMask.threshold = 0.9   // far from the dab's default-threshold (0.5) coverage
+        AlphaMask.threshold = 0.9   // far from the dab's default-threshold (0.1) coverage
 
         guard let after = manager.makeRenderRequest(atFrame: 0, includeBackground: false)
             .flatMap({ MaskResolver.coverage(for: [mask], of: $0) }) else {
@@ -633,8 +652,20 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertEqual(maxChannelDelta(gpu, cpu), 0, "GPU and CPU differ on a masked leaf")
     }
 
+    /// **Pins its own feather, and checks it landed rather than assuming the comment above is still
+    /// true.** At the shipped `antialiasHalfWidth` (0.01) this ellipse's antialiased rim produces
+    /// zero fractional *mask* coverage bytes — CoreGraphics' rim alpha only takes a handful of
+    /// discrete levels (measured: 0%, 3%, 5%, 14%, 25%, 33%, 40%, ~47–53%, 65%, 70%, 78%, 80%, 90–98%),
+    /// none of which fall inside the ~2%-wide band 0.1±0.01 spans, so the delta-0 assertion below
+    /// would have passed having tested nothing — the same silent failure
+    /// `testNestedClipsAgreeByteForByteDespiteTheDoubleRounding` had. 0.05 (the pre-bake default)
+    /// lands on real levels (measured: ~6% and ~14%); restored after regardless of outcome.
     func testAMaskWithAFractionalEdgeAgreesBetweenTheBackends() throws {
         try skipUnlessGPUAvailable()
+        let originalHalfWidth = AlphaMask.antialiasHalfWidth
+        AlphaMask.antialiasHalfWidth = 0.05
+        defer { AlphaMask.antialiasHalfWidth = originalHalfWidth }
+
         // An ellipse's antialiased rim is where the coverage bytes are fractional, which is the only
         // place the two multiplies could round apart.
         let manager = clippedManager()
@@ -643,6 +674,16 @@ final class MaskParityLogicTests: XCTestCase {
                 red.setFill()
                 ctx.cgContext.fillEllipse(in: CGRect(x: 6, y: 6, width: 51, height: 51))
             })
+
+        guard let mask = manager.layers[1].alphaMask,
+              let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
+              let resolved = MaskResolver.coverage(for: [mask], of: request) else {
+            return XCTFail("The mask must resolve")
+        }
+        XCTAssertTrue(resolved.coverage.contains { $0 > 0 && $0 < 255 },
+                     "Fixture premise: the ellipse's rim has to leave at least one pixel with fractional "
+                     + "mask coverage, or there is no rounding difference for the two backends to agree on")
+
         guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
         XCTAssertEqual(maxChannelDelta(gpu, cpu), 0, "GPU and CPU differ on a mask's antialiased edge")
     }
@@ -770,7 +811,19 @@ final class MaskParityLogicTests: XCTestCase {
     /// The premise assertion is what keeps the equality honest: where either coverage is 0 or 255 the
     /// two paths coincide trivially, so the fixture has to contain a pixel where *both* are partial
     /// or it proves nothing.
+    ///
+    /// **Pins its own feather rather than trusting the shipping tunable.** At the shipped
+    /// `antialiasHalfWidth` (0.01) the smoothstep spans about 0.02 of alpha — for this fixture's two
+    /// radius-20 discs that band is narrower than a pixel of the annulus it falls on, so *no* pixel
+    /// lands partial for both masks and the premise below is false before double rounding ever enters
+    /// it. The test is about surviving double rounding across a feathered edge, not about whichever
+    /// half-width happens to be live, so it sets one wide enough to guarantee that edge exists — 0.05,
+    /// the pre-bake default this fixture was written against — and restores it whatever happens next.
     func testNestedClipsAgreeByteForByteDespiteTheDoubleRounding() {
+        let originalHalfWidth = AlphaMask.antialiasHalfWidth
+        AlphaMask.antialiasHalfWidth = 0.05
+        defer { AlphaMask.antialiasHalfWidth = originalHalfWidth }
+
         let manager = CanvasFixture.manager(layerCount: 3)
         // Soft-edged sources, so the antialiased band the two paths can disagree across actually
         // exists — a hard rectangle is 0 or 255 everywhere and would agree trivially.

@@ -137,26 +137,70 @@ or more inputs below it**, each input holding layers or further nodes.
 **A group is this same thing with one input slot.** One renderer covers both; a "folder" is
 `.node(op: .stack, inputs: [children])`.
 
-**Storage — no new tree arithmetic.** A node's input slot is stored as an ordinary `LayerFolder`
-that is auto-created, undeletable, and tagged with its owning node and slot index. The node itself
-is a folder whose children are exactly its slot folders. So containment, restack, contiguity,
-visibility, and the panel's row generation all reuse the existing machinery unchanged — only
-*rendering* and *panel chrome* differ. The contiguity invariant generalises cleanly: each slot is a
+**Each input slot derives as its own `RenderNode`**, rather than being folded into a shared
+accumulator the way an ordinary folder's children are — which is what makes "always isolated"
+expressible at all, and is why a slot reads its own opacity, blend mode and mask off the folder the
+same way any folder does. **Slot 0 is the backdrop, and it is the lowest row**: a Mix is "slot 1
+composited over slot 0", the direction a plain stack already reads, so `inputSlots(ofNode:)` always
+returns slot 0 first and the panel presents Input B above Input A for the same reason it presents any
+higher layer above a lower one. (A slot's own *blend mode* is the one field this does not make live —
+every slot draws into a backdrop the fold has just zero-filled, so it always reads as Normal by §4.2's
+already-settled rule for the bottom of an isolated container, structural here rather than incidental;
+the panel does not offer it a control for exactly that reason.)
+
+**Storage — no new tree arithmetic, guarded in three places rather than the one this section used to
+admit.** A node's input slot is stored as an ordinary `LayerFolder`, auto-created and tagged with its
+owning node and slot index, and:
+
+- **undeletable** — `CanvasManager.canDeleteFolder`/`deleteFolder` refuse it
+  (`testDeletingAnInputSlotIsRefused`), because a slot exists because its op's arity says so, and
+  deleting one would leave the node an operand short with nothing left to say why;
+- **fixed in the panel** — `canRestackFolder` refuses to let a slot be dragged out of its node or
+  reordered among its siblings (`testDraggingAnInputSlotOutOfItsNodeIsRefused`), because a slot's
+  position among its siblings *is* its index; letting a drag move it would leave the stored index and
+  the presented order as two answers to one question. An operand is reordered by moving what is
+  *inside* its slot, never the slot itself;
+- and **ranked by index while empty**, which is the one this section did not admit. An empty folder
+  ordinarily floats to the top of its container — correct for an ordinary folder, wrong for a slot:
+  filling Input B before Input A would otherwise float the still-empty Input A above it and silently
+  invert which one is the backdrop. `containerEntries` ranks an unfilled slot by its index instead,
+  fixed by `testFillingTheUpperSlotFirstStillLeavesInputAAsTheBackdrop` — do not undo it.
+
+So containment, restack and the panel's row generation still reuse the existing machinery, but not
+*unchanged*: the three guards above are new logic standing in front of it, not new arithmetic inside
+it. The contiguity invariant itself does generalise cleanly, exactly as claimed — each slot is a
 contiguous span, and the node's span is the union of its adjacent slots' spans.
 
 ```
 ▼ [Node] Mix                    ← CompositorNode row
-   ▼ Input A                    ← slot folder (undeletable)
+   ▼ Input B                    ← slot folder (undeletable) — higher slot, presents on top
+       Layer 1
+   ▼ Input A                    ← slot 0, the backdrop — presents at the bottom
        Layer 3
        Layer 2
-   ▼ Input B
-       Layer 1
 ```
 
 **Arity** is declared by the op: `.fixed(2)` for Mix, `.variadic(min: 2)` for Add/Max. Variadic nodes
 get add/remove-slot controls. An input slot is **always isolated** — otherwise "input" is meaningless.
 
-`Mix(A, B, .multiply)` is deliberately the same math as stacking B over A with blend mode multiply.
+**Arity is a property of a whole document, not of every shape a node can take mid-gesture.** §5.2's
+sandwich cuts the tree at the active leaf, and cutting a `.fixed(2)` Mix produces a one-slot Mix on
+one side of the cut — a shape its own arity says cannot exist
+(`SandwichLogicTests.testAHalfOfATwoSlotMixKeepsTheOpAndLosesASlot`). Both backends fold it correctly
+regardless (`CompositorParityLogicTests.testAMixWithOneSlotIsThatSlotAssembled`), which is what makes
+the sandwich legal — but no validator downstream may assume a node's slot count still matches its
+op's arity. A sandwich half is not a document.
+
+`Mix(A, B, .multiply)` is the same math as stacking B over A with blend mode multiply — **measured
+now, not asserted**: 0 on every channel, for all 25 modes, on both backends
+(`CompositorParityLogicTests.testMixIsTheSameMathAsStackingTheUpperSlotOverTheLowerOne`). A channel
+step was the expected answer, the same reason `testNestedGroupOpacityCompounds` needs a tolerance: a
+Mix runs slot 1 through a buffer of its own before folding it, one more 8-bit premultiplied
+requantization than the stack pays. It comes out exact because that extra step is a *copy* — slot 1
+composited onto transparency is lossless in premultiplied 8-bit, so the fold receives the identical
+bytes the stack hands its blend. No kernel closes that gap, because there was never one open; none
+should be added.
+
 That redundancy is the point (it is why Blender has both): the stack is ergonomic for painting, the
 graph is ergonomic for effects with more than one input. Do not try to unify them away.
 
@@ -344,15 +388,22 @@ implies in both directions.
 ### 6.3 Binary, with a threshold
 
 The mask is a boolean coverage test on source alpha, not the source's own alpha ramp: `mask =
-sourceAlpha > threshold`. A literal `alpha > 0` would make the mask substantially larger than the
-stroke looks, since the default `softRound` brush's dab is a radial gradient falling to alpha ≈ 0
-across its whole radius — threshold ≈ 0.5 tracks the visually solid part of a stroke instead, and
-reduces to `> 0` for a hard brush. A narrow smoothstep across the threshold antialiases the resulting
+sourceAlpha > threshold`. A literal `alpha > 0` would keep every pixel the default `softRound`
+brush's dab touches however faintly, since its dab is a radial gradient falling to alpha ≈ 0 across
+its whole radius; a threshold instead cuts that faintest skirt away, and reduces to `> 0` for a hard
+brush regardless of where it sits. A narrow smoothstep across the threshold antialiases the resulting
 edge (a hard boolean edge stair-steps on diagonals) without reintroducing the source's own falloff.
 
-Both constants live in `Models/AlphaMask.swift`: `AlphaMask.threshold` (0.5) and
-`AlphaMask.antialiasHalfWidth` (0.05), feeding the one function that defines the mask,
-`coverage(forSourceAlpha:)`.
+Both constants live in `Models/AlphaMask.swift`: `AlphaMask.threshold` (0.1) and
+`AlphaMask.antialiasHalfWidth` (0.01), feeding the one function that defines the mask,
+`coverage(forSourceAlpha:)`. Neither was derived — they were judged by eye on the iPad against a soft
+brush, in a Release build, and they replaced 0.5/0.05, which had been a reasoned guess that threshold
+≈ 0.5 would land on the visually solid part of a stroke. Measurement on hardware disagreed: the
+shipped threshold tracks nearly the whole extent of a soft dab rather than only its solid core, so 0.1
+sits close to the `> 0` this section argues against, not close to 0.5. The antialias half-width moved
+with it to 0.01 — narrower than the 0.05 it replaced — so the resolved edge sits nearer a hard boolean
+than the reasoning above anticipated; the smoothstep still exists only to stop diagonals stair-
+stepping, not to reintroduce softness.
 
 ### 6.4 Live feedback while drawing
 
@@ -561,11 +612,13 @@ later and rewriting for one.
 
 ## 10. Still open
 
-1. **Mask threshold and antialias constants** (§6.3) — `AlphaMask.threshold` (0.5) and
-   `AlphaMask.antialiasHalfWidth` (0.05). **Unblocked, not done**: 6b shipped the UI and the live
-   stroke clip, so there is now something to look at and nobody has looked. Tune against a soft
-   brush on the iPad, where §6.4's `-Onone` cost is also felt. "Clip to below" itself shipped in 6a,
-   as a mask whose source is implied.
+1. **Mask threshold and antialias constants** (§6.3) — judged, not derived. `AlphaMask.threshold`
+   (0.1) and `AlphaMask.antialiasHalfWidth` (0.01) are what the product owner picked by eye on the
+   iPad, against a soft brush, in a Release build — replacing 0.5/0.05, 6b's pre-hardware guess.
+   `MaskTuningOverlay` and the two `static var`s stay rather than being deleted: the owner may want to
+   re-check the judgement once the live-stroke bug currently competing for iPad time is fixed. Delete
+   the harness (see the MASK-TUNE comments) once that re-check happens or is waved off. "Clip to
+   below" itself shipped in 6a, as a mask whose source is implied.
 2. **Compositor node ops** — §7 lists the *effects*; the multi-input ops themselves (Mix, and which
    others take 2+ inputs) want a pass once the node UI exists and there is something to try them on.
 

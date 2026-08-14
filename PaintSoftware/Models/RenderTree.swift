@@ -522,7 +522,28 @@ extension CanvasManager {
                                   // identity, so an untouched folder remains a no-op in the tree —
                                   // that is `LayerFolder`'s doing now rather than this line's.
                                   opacity: folder.opacity, isVisible: folder.isVisible,
-                                  blendMode: folder.blendMode.compositedMode,
+                                  // A slot's own mode is forced to `.normal` regardless of what the
+                                  // folder stores (§4.3) — the panel already refuses it a blend-mode
+                                  // control for the same reason: the node's op is the one answer to
+                                  // "how do these inputs combine", and a slot blending under that as
+                                  // well would be a second, unresolved answer to the same question
+                                  // (`FolderOptionsPanel`'s comment on that omission — §4.3 never says
+                                  // which wins).
+                                  //
+                                  // This is not a behaviour change. Every slot draws into a buffer
+                                  // `fold` has just zero-filled — slot 0 straight into the node's own,
+                                  // every other slot into one of its own — so a slot's mode was always
+                                  // blending against transparency and reading as Normal regardless,
+                                  // the same rule §4.2 already settled for a layer at the bottom of an
+                                  // isolated group, just guaranteed for a slot rather than incidental.
+                                  // Stating it here turns that guarantee into the derivation's own
+                                  // contract instead of a side effect of how `fold` happens to zero
+                                  // its buffers, so a future change there cannot make a slot's stored
+                                  // mode start leaking into the picture unannounced. Opacity and masks
+                                  // are untouched: both scale what a slot draws regardless of the
+                                  // backdrop, so both stay real — measured together in
+                                  // `testASlotsOwnBlendModeIsInertButItsOpacityStillFades`.
+                                  blendMode: folder.isInputSlot ? .normal : folder.blendMode.compositedMode,
                                   // An input slot is isolated whatever it stores (§4.3): an input
                                   // that blended against the backdrop under its own node would not
                                   // be an input to it in any sense the op could use.
