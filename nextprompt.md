@@ -133,9 +133,14 @@ looks like from their side. Concrete rules that came out of it:
   *progressing*: `du -sk` its in-progress `.xcresult` twice, 25 s apart. Growing means working.
 - **Simulators reading `Shutdown` while a run holds their lock is normal**, not a wedge — `xcodebuild`
   runs tests on *clones*, so the base device shows shutdown throughout.
-- **The proof that load matters, measured:** `testAMultiplyLayerLooksMultipliedOnTheLiveCanvas` took
-  **169.8 s and failed at ~0% idle**, then **94.9 s and passed at 63.97% idle**. Same commit. That is
-  the whole argument for the quiet-machine gate in one line.
+- **The proof that load matters, measured:** `testAMultiplyLayerLooksMultipliedOnTheLiveCanvas`
+  **failed at ~0% idle and passed at 63.97% idle on the same commit**; `testAnAllNormalDocument…` the
+  same. That is the argument for the quiet-machine gate.
+  **But do not read durations as a load signal** — a failing XCUITest short-circuits, so its runtime
+  is not comparable to a passing one. Test 1 was 169.8 s failing (burning full 5 s/10 s
+  `waitForExistence`/`waitForPixel` timeouts under load) versus 94.9 s passing; test 2 was 48.3 s
+  failing (dying early at its first missing element) versus 357.5 s passing end to end. The direction
+  reverses depending on *where* it died. Compare pass/fail at a known idle figure, never wall-clock.
 - **Never `pkill -f` a broad pattern while runs are live.** The orchestrator used one that could have
   matched the live `simlock` runs; it did not, but only by luck, and killing them would have destroyed
   ~40 minutes of work and erased a simulator mid-run. Target a PID you have verified holds no lock.
@@ -286,6 +291,49 @@ redundant**. Replace it with per-row controls:
   always wins and must never be silently overridden**, including on a hidden layer. Note this is a
   change from today: §6.6 records that hiding a layer *clears* `isFillReference` outright.
 
+## §10.1 is CLOSED, and it left a finding worth more than the constants
+
+`MaskParityLogicTests` **42/42**; `CompositorParityLogicTests` + `PerfBaselineTests` **67/68** (the one
+skip pre-existing). Constants baked at `ac3049a`, fixtures repaired at `de99dd9`.
+
+**Changing one constant silently emptied two tests, and only one of them noticed.** This is the most
+transferable thing this session found:
+
+- `testNestedClipsAgreeByteForByteDespiteTheDoubleRounding` **failed loudly** — because its author had
+  written an explicit fixture-premise assertion (`XCTAssertGreaterThan(bothPartial, 0, …)`). At 0.01
+  the fractional annulus around each of its two radius-20 discs narrowed from ~2px to ~0.34px and the
+  two annuli stopped overlapping anywhere on the pixel grid.
+- `testAMaskWithAFractionalEdgeAgreesBetweenTheBackends` **stayed green while testing nothing** —
+  because it had no such assertion. Its ellipse rim produces alpha only at discrete levels (3, 5, 14,
+  25, 33, 40, ~47–53, 65, 70, 78, 80, 90–98%), none of which fall in the [0.09, 0.11] band, so every
+  pixel resolved to exactly 0 or 255 and "the backends agree to delta 0" compared two things that
+  could not disagree.
+
+Same cause, opposite visibility, and the only difference was one line asserting the fixture is what
+the test thinks it is. **Write the premise assertion.** Both are fixed by scoping
+`antialiasHalfWidth = 0.05` to those tests with a `defer` restore, since neither test is about the
+shipping value — both are about surviving rounding across an edge that has to exist to be tested.
+
+The audit of the other 40 was **reasoned reading, not instrumentation** — ~37 use pixel-aligned
+`solidImage` fixtures where no half-width can matter, 3 touch real gradients and were judged
+structurally safe by reading. Nobody logged fractional-pixel counts across all 42. If you want that
+guarantee mechanically, it has not been done.
+
+## The antialias question the owner has not yet ruled on
+
+At `threshold 0.1` / `antialiasHalfWidth 0.01` the smoothstep spans alpha **[0.09, 0.11]**. Measured
+against a real `softRound` dab of radius 20 (hardness 0.15) using the engine's own profile: the band
+is an annulus **18.1–18.5px from centre, ~0.34px wide, containing 24 fractional pixels** out of ~1264
+the dab touches. At the old 0.5/0.05 the same dab had **108** in a ~2px annulus.
+
+**So the antialiasing is under a pixel wide and behaves as an effectively hard boolean on most edges.**
+Not literally zero, but whether a given curved edge catches one is sub-pixel luck — and two genuinely
+soft fixtures caught *none*. §6.3's stated purpose for that constant (stopping diagonals stair-
+stepping) is only marginally realised at the shipping value. The owner has the numbers and a build;
+if they keep 0.01, say in §6.3 that the smoothstep is vestigial at the shipping value rather than
+leaving it claiming a purpose it no longer serves. If they want it back, that is a §6.3
+binary-with-threshold design question, not a tuning one.
+
 ## The mask constants, and the reasoning they overturned
 
 Shipping values are now **`threshold` 0.1** and **`antialiasHalfWidth` 0.01**, chosen by eye on the
@@ -315,6 +363,44 @@ be that almost nothing new is needed: what is genuinely missing is (a) variadic 
 a variadic Add over N slots is a chain of `Mix(.add)` and buys only the absence of nesting — and (b) a
 true matte/key op that consumes B as *coverage* rather than as colour, which no blend mode expresses.
 Try it against the real node UI before committing to it.
+
+## §6.5 rework — BUILT on `tmp/mask-ui`, compiles clean, logic tiers running, `LayerUITests` unrun
+
+What shipped, and the parts that are load-bearing rather than cosmetic:
+
+- **The open edit menu *is* the session.** `syncMaskEditSession(toOptionsTarget:)` is driven from
+  `DrawingView`'s `layerOptionsID` — the single piece of state saying which menu is open — so every
+  close path ends the session and there is no second path to forget. `maskEditTarget` stays modal
+  state on `CanvasManager` per §6.5. The Mask switch and the "Mask Sources / Done" header are gone.
+- **`beginStructureGesture` now nests** via `structureGestureDepth`. Required because rows are live
+  under an open menu, so a row's opacity drag opens a bracket inside the session's; without depth the
+  inner `begin` overwrote the session's baseline and the inner `commit` consumed it. **This is core
+  undo machinery used far beyond masks, and a depth bug surfaces as a lost or merged undo step
+  somewhere unrelated, not as a crash.**
+- **The session's bracket opens on the first mask write, not on entry** — otherwise merely opening a
+  menu pushes an empty undo step, and the empty `AlphaMask()` that used to fill it would hang a mask
+  off every node ever inspected.
+- **`isFillReference` is now computed: `fillReferenceOverride ?? isVisible`.** `nil` means "never
+  asked" and is the *only* value ever recomputed, which is what makes the owner's "the user can change
+  these at any moment" real. The four sites that wrote the effective value through on a visibility
+  change are deleted. `setFillReference` guards on the *decision*, not the value, so setting a visible
+  layer to "yes" — a visual no-op today — is what keeps it a reference once hidden. Persisted only
+  when non-nil, so absence *is* "follow the default" and old projects decode unchanged.
+- **`isEnabled` now means exactly "has sources"** — the Mask switch was the only way to pause a mask
+  while keeping its sources, so there is no paused state left. `setMaskEnabled`/`removeMask` deleted.
+  **If the owner ever wants "pause this mask", it needs a new affordance and this decision must be
+  revisited with it.**
+- The tuning sliders moved into the options menu (`MaskTuningSection.swift`); the floating overlay,
+  its toggle, and `83bd747`'s hit-testing guard are deleted.
+
+**Open with the owner:** whether the labelled "Fill Reference" switch stays in the options menu. It is
+now strictly redundant with the per-row drop button — the same complaint that killed the Mask switch —
+but it is the only control that explains what fill reference *does*. One-line deletion either way.
+
+**Not yet judged on hardware:** the two 30pt row buttons at real width (a group row shows a deliberate
+empty gutter so checkmarks align in one column across row kinds); the tuning sliders squeezed from a
+260pt panel into a 240pt menu at 9–10pt labels; and undo granularity, since after the first mask pick
+everything else in that menu visit coalesces into one step.
 
 ## The merge, which is the largest single piece left
 
