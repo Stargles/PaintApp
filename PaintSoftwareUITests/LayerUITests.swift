@@ -285,18 +285,27 @@ final class LayerUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
 
+        // A second layer first, so row 0 is *not* the active one. The sequence this pins only exists
+        // for a row that isn't already selected: a fresh document has one layer, `currentLayerIndex`
+        // is already pointing at it, and so its very first tap opens the menu — correctly. An earlier
+        // draft asserted the opposite here and failed on its own false premise rather than on a bug.
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5),
+                      "The added layer becomes row 1 and takes the selection with it")
+
         let row = app.staticTexts["layerPanel.row.0"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["layerOptions.maskSummary"].exists,
-                       "The options menu should not be showing before the second tap")
+        let summary = app.staticTexts["layerOptions.maskSummary"]
+        XCTAssertFalse(summary.exists, "The options menu should not be showing before any tap")
 
         row.tap() // select
-        XCTAssertFalse(app.staticTexts["layerOptions.maskSummary"].exists,
-                       "…nor after the first, which only selects")
+        XCTAssertFalse(summary.exists, "…nor after the first tap on an unselected row, which only selects")
         row.tap() // open options
 
-        XCTAssertTrue(app.staticTexts["layerOptions.maskSummary"].waitForExistence(timeout: 5),
-                      "A second tap on the selected layer should open its options")
+        XCTAssertTrue(summary.waitForExistence(timeout: 5),
+                      "A second tap on the now-selected layer should open its options")
 
         let fillRef = app.staticTexts["layerPanel.row.0.fillRef"]
         XCTAssertEqual(fillRef.value as? String, "1", "Layers start as fill references")
