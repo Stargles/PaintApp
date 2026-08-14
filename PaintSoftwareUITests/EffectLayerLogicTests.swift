@@ -565,4 +565,173 @@ final class EffectLayerLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(delta, Self.tolerance,
                                  "An effect inside a buffered group differs by \(delta) between the backends")
     }
+
+    // MARK: - (4) Multi-pass effects through the wrapper
+
+    /// **The join each half of phase 9 left to the other.** The wrappers above were built when every
+    /// effect was one dispatch, and blur and bloom were built with no wrapper to run through: the sweep
+    /// in (1) grades only single-pass effects, and `EffectMultiPassLogicTests` drives multi-pass with a
+    /// byte buffer and never touches `Compositor`. A multi-pass effect reaching a §4.4 stack layer was
+    /// therefore unexecuted by construction rather than by oversight, and these three tests are the
+    /// first thing to run it.
+    ///
+    /// What is new is the pair of facts nothing else binds together: `EffectPipelines.encode`
+    /// ping-pongs through scratch textures it allocates itself, and the wrapper hands it `front` — the
+    /// accumulator the walk is already writing into — rather than a texture uploaded from a layer. The
+    /// source of a multi-pass grade is now a surface the walk also owns, which is exactly the aliasing
+    /// `encode`'s "source and result must be different textures" rule exists to prevent.
+    private static let multiPassSweep: [(String, Effect)] = [
+        ("blur", .blur(Effect.Blur(radius: 3.5))),
+        ("directionalBlur", .blur(Effect.Blur(radius: 3.5, angleDegrees: 30, isDirectional: true))),
+        ("bloom", .bloom(Effect.Bloom(threshold: 0.35, radius: 4, intensity: 1.2))),
+    ]
+
+    /// Both walks over one request, with the GPU **optional** — unlike `gpuAndCPU`, which the sweeps
+    /// use and which requires one. The hand-computed test below is the only non-self-comparing evidence
+    /// in this section, so it has to keep making its claim on a machine with no Metal device instead of
+    /// skipping and reporting green.
+    private func bothWalks(_ manager: CanvasManager) -> [(backend: String, image: CGImage)] {
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+            XCTFail("Fixture needs a canvas size")
+            return []
+        }
+        var walks: [(backend: String, image: CGImage)] = []
+        if let cpu = CoreGraphicsCompositor.composite(request) { walks.append(("CPU", cpu)) }
+        else { XCTFail("The CPU reference must always render") }
+        if CompositorMetalEngine.shared != nil {
+            if let gpu = MetalCompositor.composite(request) { walks.append(("GPU", gpu)) }
+            else { XCTFail("The GPU backend declined a request it should have handled") }
+        }
+        return walks
+    }
+
+    /// The sweep, extended to the effects that take more than one dispatch. Same fixture and same
+    /// tolerance as (1), so a delta here that (1) does not show is the multi-pass path and not the
+    /// grade.
+    ///
+    /// **On its own this proves less than it appears to**, for the reason this file's header gives:
+    /// both walks read the same Swift-resolved `passes` and `weights`, so a wrong pass list is a
+    /// mistake they make identically and agree about. It is evidence that the ping-pong and the mix
+    /// agree between backends. The test below is what makes it evidence that they are *right*.
+    func testTheBackendsAgreeOnAMultiPassEffectLayer() throws {
+        try skipUnlessGPUAvailable()
+
+        var deltas: [(String, Int)] = []
+        for (name, effect) in Self.multiPassSweep {
+            guard let (gpu, cpu) = gpuAndCPU(spectrumUnderAnEffect(effect)) else { return }
+            deltas.append((name, maxChannelDelta(gpu, cpu)))
+        }
+        let table = deltas.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+        XCTContext.runActivity(named: "[multipass layer] GPU-vs-CPU max channel delta: \(table)") { _ in }
+
+        for (name, delta) in deltas {
+            XCTAssertLessThanOrEqual(delta, Self.tolerance,
+                                     "\(name) as a stack layer differs by \(delta) between the backends. Table: \(table)")
+        }
+    }
+
+    /// **The independent check, and the only one in this section that a resolution bug cannot pass.**
+    ///
+    /// Bloom at `radius 0` is the trick `EffectMultiPassLogicTests` already established: the two blur
+    /// passes collapse to a single centre tap (`weights == [1]`), so all four passes still dispatch and
+    /// the ping-pong still runs, but every byte becomes hand-computable. Nothing here is read from
+    /// `EffectReference`; the expectation comes from the ramp §7 publishes, worked out in the comment.
+    ///
+    /// Opaque grey 128 under `threshold 0.4, intensity 1`, with `Lum = 0.3r + 0.59g + 0.11b` on the
+    /// unpremultiplied colour:
+    ///
+    ///     c    = 128/255                = 0.501961
+    ///     Lum  = c                       (the three coefficients sum to 1, so a grey is its own Lum)
+    ///     w    = (0.501961 − 0.4) / 0.6 = 0.169935
+    ///     glow = round(w · 128) = 22     and on alpha, round(w · 255) = 43
+    ///     out  = 128 + 22 = 150          alpha min(255 + 43, 255) = 255
+    ///
+    /// The alpha clamp is doing real work — the glow's own coverage would push it past 1 — so this pins
+    /// the combine pass's clamp as well as its sum. At opacity 1 with no mask the wrapper's `amount` is
+    /// 1, and `compositeEffectMix` is then the identity on the graded value, so the byte the wrapper
+    /// emits must be the byte the effect computed: **150**. That is what makes a hand-computed grade a
+    /// legitimate assertion about the *wrapper* and not just about the kernel.
+    func testABloomEffectLayerAtZeroRadiusMatchesTheHandComputedRamp() {
+        let manager = greyUnderAnEffect(.bloom(Effect.Bloom(threshold: 0.4, radius: 0, intensity: 1)))
+        let expected = [150, 150, 150, 255]
+
+        let walks = bothWalks(manager)
+        XCTAssertFalse(walks.isEmpty, "At least the CPU walk must have rendered")
+        var table: [String] = []
+        for (backend, image) in walks {
+            let got = pixel(image, 32, 32)
+            table.append("\(backend) \(got.map(String.init).joined(separator: ","))")
+            XCTAssertEqual(got, expected,
+                           "A bloom stack layer on the \(backend) came out \(got), not the \(expected) the "
+                           + "published ramp (Lum − 0.4)/0.6 gives for grey 128. This is the assertion the "
+                           + "parity sweep cannot make, because both walks resolve the same passes.")
+        }
+        XCTContext.runActivity(named: "[multipass layer] bloom radius 0 through the wrapper: \(table.joined(separator: " · "))") { _ in }
+    }
+
+    /// **A blur through the wrapper must spread in both axes**, which is the one failure a green sweep
+    /// would wave through: an intermediate written or read from the wrong ping-pong slot does not crash
+    /// and does not produce noise, it produces a single-pass blur — a plausible picture that is wrong in
+    /// one axis. Both backends read the same pass list, so both would be wrong the same way.
+    ///
+    /// Asserted without a reference implementation. A centred bright square on a dark floor is symmetric
+    /// under transpose, so a blur with equal reach on both axes must leave it that way; the probes are
+    /// the direct form of the same claim, one pixel outside the square in each axis, and a blur that ran
+    /// in x only leaves `above` at the untouched floor value while `left` lights up.
+    ///
+    /// The symmetry is measured rather than required to be exact, and the reason is the separable
+    /// implementation: the intermediate between the two passes is quantized to bytes, and that
+    /// intermediate is *not* transpose-symmetric even though its input and output are. One channel step
+    /// is what that can cost. A dropped pass is not a one-step effect, so the tolerance does not blunt
+    /// the claim.
+    func testABlurEffectLayerSpreadsInBothAxesThroughTheWrapper() {
+        let floor = 40
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(UIColor(white: CGFloat(floor) / 255, alpha: 1)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(UIColor(white: 1, alpha: 1),
+                                                               rect: CGRect(x: 24, y: 24, width: 16, height: 16)))
+        manager.addEffectLayer(.blur(Effect.Blur(radius: 5)))
+
+        let walks = bothWalks(manager)
+        XCTAssertFalse(walks.isEmpty, "At least the CPU walk must have rendered")
+        var table: [String] = []
+        for (backend, image) in walks {
+            // Two pixels outside the square, one in each axis. Radius 5 gives 5 taps a side, so a
+            // probe 2px out is well inside the kernel's reach on the axis that ran.
+            let above = pixel(image, 32, 22)[0]
+            let left = pixel(image, 22, 32)[0]
+            let corner = pixel(image, 2, 2)[0]
+
+            XCTAssertGreaterThan(above, floor,
+                                 "On the \(backend) the blur did not reach 2px above the square (\(above) vs floor \(floor)) "
+                                 + "— the vertical pass did not run or its output was not read")
+            XCTAssertGreaterThan(left, floor,
+                                 "On the \(backend) the blur did not reach 2px left of the square (\(left) vs floor \(floor)) "
+                                 + "— the horizontal pass did not run or its output was not read")
+            XCTAssertEqual(corner, floor,
+                           "On the \(backend) a corner far from anything bright must still be the floor, got \(corner)")
+
+            guard let bytes = CanvasFixture.rgbaBytes(image) else {
+                XCTFail("The \(backend) result must be readable")
+                continue
+            }
+            var asymmetry = 0
+            for y in 0..<side {
+                for x in 0..<side {
+                    for channel in 0..<4 {
+                        let here = Int(bytes[(x + y * side) * 4 + channel])
+                        let there = Int(bytes[(y + x * side) * 4 + channel])
+                        asymmetry = max(asymmetry, abs(here - there))
+                    }
+                }
+            }
+            table.append("\(backend) above=\(above) left=\(left) transposeAsymmetry=\(asymmetry)")
+            XCTAssertLessThanOrEqual(asymmetry, 1,
+                                     "On the \(backend) a symmetric fixture blurred by \(asymmetry) channel steps out of "
+                                     + "transpose symmetry, which is more than the separable intermediate's quantization "
+                                     + "can account for — one axis is being blurred differently from the other")
+        }
+        XCTContext.runActivity(named: "[multipass layer] blur two-axis spread: \(table.joined(separator: " · "))") { _ in }
+    }
 }
