@@ -49,11 +49,19 @@ final class ShapeDetectorLogicTests: XCTestCase {
 
     /// Largest gap between consecutive collapsed samples — the metric that catches a seam or a
     /// chord cutting across the shape.
+    /// Spelled as a loop rather than `map { hypot(…) }.max() ?? 0`: `hypot`'s four overloads inside
+    /// a closure whose result type the `??` still has to pin down is one of the expressions Swift
+    /// 6.3's solver gives up on outright ("unable to type-check in reasonable time"), which fails the
+    /// whole test target's build. Same arithmetic, no inference to do.
     private func largestGap(_ samples: [VectorSample]) -> CGFloat {
         guard samples.count >= 2 else { return 0 }
-        return (1..<samples.count).map {
-            hypot(samples[$0].x - samples[$0 - 1].x, samples[$0].y - samples[$0 - 1].y)
-        }.max() ?? 0
+        var largest: CGFloat = 0
+        for index in 1..<samples.count {
+            let dx: CGFloat = samples[index].x - samples[index - 1].x
+            let dy: CGFloat = samples[index].y - samples[index - 1].y
+            largest = max(largest, hypot(dx, dy))
+        }
+        return largest
     }
 
     // MARK: - Detection

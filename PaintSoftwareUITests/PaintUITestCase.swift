@@ -403,6 +403,17 @@ class PaintUITestCase: XCTestCase {
         folderItem.tap()
     }
 
+    /// Same menu, one item further down: §4.3's compositor node arrives from the "+" the way a
+    /// folder does, because it *is* one — a folder whose children are its input slots.
+    func addMixNodeFromAddMenu(_ app: XCUIApplication) {
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.0)
+        let nodeItem = app.buttons["layerPanel.addMixNodeButton"]
+        XCTAssertTrue(nodeItem.waitForExistence(timeout: 5))
+        nodeItem.tap()
+    }
+
     /// Returns to the gallery (saving the project) and waits for its tile to appear.
     @discardableResult
     func saveEditorAndReturnToGallery(_ app: XCUIApplication) -> XCUIElement {

@@ -37,7 +37,7 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     private func presentedRows(_ manager: CanvasManager) -> [String] {
         manager.layerStackRows.map { row in
             switch row {
-            case .folder(let id, let depth):
+            case .folder(let id, let depth, _):
                 return "\(depth):\(manager.folders.first { $0.id == id }?.name ?? "?")"
             case .layer(_, let index, let depth):
                 return "\(depth):\(manager.layers[index].name)"
@@ -477,5 +477,96 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         XCTAssertEqual(manager.inputSlots(ofNode: node).map(\.name), ["Input A", "Input B"])
         XCTAssertEqual(stackOrder(manager), ["A", "B"])
         assertFolderSpansAreContiguous(manager)
+    }
+
+    // MARK: The rows the panel is built from (§4.3)
+    //
+    // A node and a slot are stored as ordinary `LayerFolder`s so that containment, spans and the
+    // restack arithmetic need no new cases — which leaves `layerStackRows` the first place in the
+    // whole pipeline where the three can be told apart at all. These pin that the row list actually
+    // says which is which, since a row that decodes as a plain folder is a node the panel would draw
+    // with a folder's delete button and a folder's drag handle.
+
+    /// The presented stack as `"depth:name:kind"`, where kind is `layer` for a layer row.
+    private func presentedKinds(_ manager: CanvasManager) -> [String] {
+        manager.layerStackRows.map { row in
+            switch row {
+            case .folder(let id, let depth, let kind):
+                let name = manager.folders.first { $0.id == id }?.name ?? "?"
+                switch kind {
+                case .group:          return "\(depth):\(name):group"
+                case .compositorNode: return "\(depth):\(name):node"
+                case .inputSlot:      return "\(depth):\(name):slot"
+                }
+            case .layer(_, let index, let depth):
+                return "\(depth):\(manager.layers[index].name):layer"
+            }
+        }
+    }
+
+    func testTheRowListNamesANodeAndItsSlotsApartFromAnOrdinaryFolder() {
+        let (manager, _, _) = mixFixture(["A", "B", "C"])
+        let group = manager.addFolder(name: "Group")
+        guard let loose = manager.layers.first(where: { $0.name == "C" })?.id else {
+            return XCTFail("Setup: C should still be a loose top-level layer")
+        }
+        manager.restackLayer(loose, above: .folder(group), parentFolderID: group)
+
+        XCTAssertEqual(presentedKinds(manager),
+                       ["0:Group:group", "1:C:layer",
+                        "0:Mix:node", "1:Input B:slot", "2:B:layer", "1:Input A:slot", "2:A:layer"],
+                       "All three folder kinds are LayerFolders; only the row says which is which")
+    }
+
+    /// The one thing an ordinary folder never has to answer: whether it is the backdrop. The panel
+    /// draws slot order from row position, so this is the row list agreeing with `inputSlots`.
+    func testInputSlotRowsPresentBackdropLowest() {
+        let (manager, node, _) = mixFixture(["A", "B"])
+
+        let slotRows = manager.layerStackRows.compactMap { row -> String? in
+            guard case .folder(let id, _, .inputSlot) = row else { return nil }
+            return manager.folders.first { $0.id == id }?.name
+        }
+
+        XCTAssertEqual(slotRows, ["Input B", "Input A"], "Rows run top-to-bottom, so the backdrop is last")
+        XCTAssertEqual(manager.inputSlots(ofNode: node).map(\.name), ["Input A", "Input B"],
+                       "`inputSlots` runs the other way — slot 0 first — and the two must be exact reverses")
+    }
+
+    // MARK: The Mix mode (§4.3)
+
+    /// For a Mix the mode *is* the op, so editing it is editing the node's content — a different
+    /// question from `setFolderBlendMode`, which the same folder also answers about how its finished
+    /// composite meets whatever contains it. Both must land, independently.
+    func testSettingTheMixModeLeavesTheNodesOwnBlendModeAloneAndUndoesAsOneStep() {
+        let (manager, node, _) = mixFixture(["A", "B"])
+        manager.setFolderBlendMode(node, to: .screen)
+
+        manager.setMixBlendMode(node, to: .multiply)
+
+        XCTAssertEqual(manager.folders.first { $0.id == node }?.compositorOp, .mix(.multiply))
+        XCTAssertEqual(manager.folders.first { $0.id == node }?.blendMode, .screen,
+                       "The node's own blend into its parent is a separate pick and must not be overwritten")
+
+        manager.undo()
+
+        XCTAssertEqual(manager.folders.first { $0.id == node }?.compositorOp, .mix(.normal),
+                       "One undo step per pick, like every other discrete pick")
+        XCTAssertEqual(manager.inputSlots(ofNode: node).map(\.name), ["Input A", "Input B"],
+                       "Rewriting `compositorRole` must not disturb the slots hanging off the node's id")
+    }
+
+    func testSettingAMixModeOnSomethingThatIsNotAMixNodeDoesNothing() {
+        let (manager, node, slots) = mixFixture(["A", "B"])
+        let group = manager.addFolder(name: "Group")
+
+        manager.setMixBlendMode(group, to: .multiply)
+        manager.setMixBlendMode(slots[0].id, to: .multiply)
+
+        XCTAssertNil(manager.folders.first { $0.id == group }?.compositorRole,
+                     "An ordinary folder must not acquire an op — that would silently make it a node with no slots")
+        XCTAssertEqual(manager.folders.first { $0.id == slots[0].id }?.inputSlotIndex, 0,
+                       "And a slot must not be turned into a node, which would strand it from its own node")
+        XCTAssertEqual(manager.inputSlots(ofNode: node).count, 2)
     }
 }
