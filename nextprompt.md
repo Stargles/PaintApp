@@ -4,21 +4,17 @@ Not for one phase. **Phases 8 and 9, what is left of §10, and the iPad Release-
 and you carry the project until they are done or the owner redirects you. Read LAYER_COMPOSITING.md —
 the agreed design, settled with the product owner. §11 is the build order.
 
-## State — your first action is one command
+## State
 
-**Phase 6b is finished and verified but NOT yet on `main`.** It sits on `tmp/integrate-6b` (worktree
-`/Users/juliapark/Desktop/Kevin.P/PaintApp-integrate`), 8 commits ahead of `origin/main` and **0
-behind — a clean fast-forward**. The last session's push was refused by a permission gate, not by
-anything wrong with the branch, and it deliberately did not route around it. So:
+**Phase 6 is closed and merged — `origin/main` is at `97d2d05` and you start at phase 8.** Phases 0
+through 7 are done, committed, green and on `main`. The whole 6b boundary (suite, docs prune,
+SESSION_LOG, graphify refresh) is finished; there is nothing to tidy before starting.
 
-```
-git -C /Users/juliapark/Desktop/Kevin.P/PaintApp-integrate push origin tmp/integrate-6b:main
-```
-
-Re-check `git rev-list --left-right --count origin/main...HEAD` first in case `main` moved. **Push
-from the worktree, not through `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`** — that checkout is
-stale and holds ~48 files of another session's dead index. Then start phase 8; everything else at
-this boundary (suite, docs prune, SESSION_LOG, graphify) is done and committed.
+Two standing facts about this repo's git that cost previous sessions real time: **push from a
+worktree, never through `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`** — that checkout is stale
+and holds ~48 files of another session's dead index, and clearing it needs the owner's say-so — and
+**read `origin/main`, never the local `main` ref**, which is what made an earlier handoff report the
+branch 27 commits behind when it was a clean fast-forward.
 
 Full XCUITest suite at the 6b merge: **846: 843 passed, 1 failed, 2 skipped.** Both skips are
 expected — the `FillUITests` one in BUGS.md and the `PAINT_PERF_HEAVY` gate on
