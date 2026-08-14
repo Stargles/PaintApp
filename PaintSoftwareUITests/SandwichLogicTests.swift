@@ -718,7 +718,15 @@ final class SandwichLogicTests: XCTestCase {
     /// instead of through a sibling, and it snaps correct on lift for the same reason: lift shows
     /// `full`, which is exact. It is recorded here as a measurement so that a later session cannot
     /// come to believe a node splits cleanly when only `.normal` does.
+    ///
+    /// **Measured max channel delta: 127 with the leaf in slot 0, 255 with it in slot 1.** Both are
+    /// stated exactly rather than as "greater than zero", so the test also fails if the approximation
+    /// gets *worse* — the same discipline the three existing `testTheSandwichIsNotExactWhen…` cases
+    /// use. 127 is the grey floor at half brightness against the blue square it should have been
+    /// multiplied into; 255 is the green square arriving at full strength where the exact composite
+    /// multiplies it to black.
     func testTheSandwichThroughABlendingMixIsNotExactAndTheDeltaIsMeasured() {
+        let expected = ["the active leaf in slot 0": 127, "the active leaf in slot 1": 255]
         let manager = mixFixture()
         for shape in mixShapes(manager, .multiply) {
             guard let (sandwich, exact) = mixSandwich(manager, tree: shape.tree, active: shape.active) else {
@@ -729,6 +737,8 @@ final class SandwichLogicTests: XCTestCase {
             print("[sandwich] max channel delta through a multiply Mix, \(shape.name): \(delta)")
             XCTAssertGreaterThan(delta, 0,
                                  "\(shape.name): if this ever reaches 0 the fold started splitting cleanly and this file's reasoning is stale — update §5.2 rather than deleting the test")
+            XCTAssertEqual(delta, expected[shape.name],
+                           "\(shape.name): measured, and stated so it also fails if the approximation gets worse")
         }
     }
 

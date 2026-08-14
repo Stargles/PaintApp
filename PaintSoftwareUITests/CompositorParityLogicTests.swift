@@ -1170,6 +1170,17 @@ final class CompositorParityLogicTests: XCTestCase {
     /// 4096 (colour, alpha) pairs per mode, including the fully transparent and fully opaque bands
     /// where several modes change branch. Both backends, because the fold is a separate code path in
     /// each and one of them could hold while the other did not.
+    ///
+    /// **Measured: 0 on every channel of every pixel, for all 25 modes, on both backends** — and that
+    /// is a stronger result than the walk had any right to promise, worth recording as measured rather
+    /// than as design. A Mix runs slot 1 through a buffer of its own before folding it, so its pixels
+    /// are quantized to 8-bit premultiplied once more than the stack's are, and a channel step was the
+    /// anticipated answer here for the same reason `testNestedGroupOpacityCompounds` needs a tolerance.
+    /// It comes out exact because that extra step is a *copy* — slot 1 composited onto transparency,
+    /// which for premultiplied 8-bit is lossless — so the fold receives the identical bytes the stack
+    /// hands its blend. The exact assertion is therefore not optimism: it is the measurement, and if a
+    /// future change to the fold introduces a real intermediate this fails loudly instead of hiding
+    /// inside a tolerance written in advance.
     func testMixIsTheSameMathAsStackingTheUpperSlotOverTheLowerOne() {
         var backends: [CompositorBackend] = [.coreGraphics]
         if CompositorMetalEngine.shared != nil { backends.append(.metal) }
@@ -1194,17 +1205,11 @@ final class CompositorParityLogicTests: XCTestCase {
             print("[compositor] Mix-vs-stack max channel delta, \(backend): \(table)")
 
             for (mode, delta) in deltas {
-                XCTAssertLessThanOrEqual(delta, Self.foldTolerance,
-                                         "\(backend): Mix(A, B, \(mode.displayName)) differs from stacking B over A by \(delta), which is past the one step an extra 8-bit intermediate can cost. Table: \(table)")
+                XCTAssertEqual(delta, 0,
+                               "\(backend): Mix(A, B, \(mode.displayName)) differs from stacking B over A by \(delta). §4.3's claim that the two are the same math is what makes having both worth it — if this is now false, the fold is not what the design says a node is. Table: \(table)")
             }
         }
     }
-
-    /// The cost of the one thing a Mix does that a stack does not: **slot 1 is composited on its own
-    /// before it is folded**, so its pixels are quantized to 8-bit premultiplied once more than the
-    /// stack's are. Same tolerance and same reasoning as `testNestedGroupOpacityCompounds`' — one step
-    /// is what an extra intermediate can produce, anything above it is a difference in the walk.
-    private static let foldTolerance = 1
 
     /// **The whole reason the walk had to change, stated as the picture it buys.** §4.3: "an input
     /// slot is always isolated". Slot 1 blends against *slot 0*, never against whatever the node is
@@ -1271,6 +1276,18 @@ final class CompositorParityLogicTests: XCTestCase {
     ///
     /// Same tolerance the leaf and group sweeps hold to, because it is the same measurement of the
     /// same two rounding regimes — `.normal` exact, everything else within a channel step.
+    ///
+    /// Measured maximum channel delta, simulator, this fixture — and the headline is that it is the
+    /// **same table, mode for mode**, that the leaf sweep and the group sweep report:
+    ///
+    ///     normal 0 · multiply 1 · screen 0 · overlay 0 · add 0 · subtract 0 · darken 0 · lighten 0
+    ///     colorDodge 1 · colorBurn 1 · softLight 0 · hardLight 1 · linearLight 0 · difference 0
+    ///     vividLight 1 · pinLight 0 · linearBurn 0 · hue 1 · saturation 0 · color 1 · luminosity 1
+    ///     divide 0 · exclusion 0 · lighterColor 0 · darkerColor 0
+    ///
+    /// Three identical tables from three different call sites is the evidence that the fold really did
+    /// reuse the existing primitive rather than acquire arithmetic of its own — a mode whose fold path
+    /// had drifted would show up here as a delta the other two sweeps do not have.
     func testEveryMixModeAgreesBetweenTheBackends() throws {
         try skipUnlessGPUAvailable()
 
