@@ -206,7 +206,8 @@ enum ProjectStore {
                 FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded,
                                isVisible: folder.isVisible, parentFolderID: folder.parentFolderID,
                                opacity: folder.opacity, blendMode: folder.blendMode,
-                               isIsolated: folder.isIsolated, alphaMask: folder.alphaMask)
+                               isIsolated: folder.isIsolated, alphaMask: folder.alphaMask,
+                               compositorRole: folder.compositorRole)
             }
             viewPresets = canvasManager.viewPresets.map { preset in
                 var vis: [String: Bool] = [:]
@@ -489,7 +490,8 @@ enum ProjectStore {
         manager.folders = manifest.folders.map { f in
             LayerFolder(id: f.id, name: f.name, isExpanded: f.isExpanded, isVisible: f.isVisible,
                         parentFolderID: f.parentFolderID, opacity: f.opacity,
-                        blendMode: f.blendMode, isIsolated: f.isIsolated, alphaMask: f.alphaMask)
+                        blendMode: f.blendMode, isIsolated: f.isIsolated, alphaMask: f.alphaMask,
+                        compositorRole: f.compositorRole)
         }
 
         // Restore view presets.

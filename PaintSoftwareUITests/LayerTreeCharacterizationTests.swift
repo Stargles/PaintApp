@@ -352,4 +352,130 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
         XCTAssertEqual(manager.layers.count, 4, "No layer was lost along the way")
     }
+
+    // MARK: - Compositor nodes (§4.3)
+    //
+    // Two invariants with no precedent anywhere above: a folder that refuses to be deleted, and a
+    // set of siblings that must stay adjacent. §4.3 phrases the storage decision as "no new tree
+    // arithmetic", which is true of containment and of the restack arithmetic itself — but these two
+    // are new guard logic in front of it, and these are the tests for the guards rather than for the
+    // arithmetic they defend.
+
+    /// A node at the top level with both slots filled: "Input A" is the backdrop and holds the lower
+    /// span, whichever order the artist happened to fill them in.
+    private func mixFixture(_ names: [String]) -> (manager: CanvasManager, node: UUID, slots: [LayerFolder]) {
+        let manager = namedManager(names)
+        let ids = manager.layers.map(\.id)
+        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        let slots = manager.inputSlots(ofNode: node)
+        // Deliberately the higher slot first: the empty-slot ranking is what has to put the layer
+        // dropped into "Input A" afterwards *below* it, rather than at the top of the whole node.
+        manager.restackLayer(ids[1], above: .folder(slots[1].id), parentFolderID: slots[1].id)
+        manager.restackLayer(ids[0], above: .folder(slots[0].id), parentFolderID: slots[0].id)
+        return (manager, node, slots)
+    }
+
+    func testFillingTheUpperSlotFirstStillLeavesInputAAsTheBackdrop() {
+        let (manager, node, slots) = mixFixture(["A", "B"])
+
+        XCTAssertEqual(stackOrder(manager), ["A", "B"], "A went into Input A, so it must end up below B")
+        XCTAssertEqual(manager.inputSlots(ofNode: node).map(\.name), ["Input A", "Input B"],
+                       "Slot 0 presents at the bottom — an unfilled slot ranking above everything would have swapped the operands")
+        XCTAssertEqual(presentedRows(manager), ["0:Mix", "1:Input B", "2:B", "1:Input A", "2:A"])
+        XCTAssertEqual(manager.descendantSpan(ofFolder: slots[0].id), 0...0)
+        assertFolderSpansAreContiguous(manager)
+    }
+
+    // MARK: Undeletable slots
+
+    func testDeletingAnInputSlotIsRefused() {
+        let (manager, node, slots) = mixFixture(["A", "B"])
+
+        XCTAssertFalse(manager.canDeleteFolder(slots[0].id), "The panel asks this before offering the affordance")
+        manager.deleteFolder(slots[0].id)
+
+        XCTAssertEqual(manager.inputSlots(ofNode: node).count, 2,
+                       "A slot exists because its op's arity says so — deleting it would leave the node an operand short with nothing to say so")
+        XCTAssertEqual(stackOrder(manager), ["A", "B"], "And nothing inside it was promoted anywhere")
+        assertFolderSpansAreContiguous(manager)
+    }
+
+    /// Deleting a *node* is the one folder deletion that is not a promote: promoting would lift the
+    /// slot folders into the grandparent still tagged as inputs to a node that no longer exists, and
+    /// nothing on a stranded slot says which node it lost. One undo step is what makes taking the
+    /// contents with it recoverable.
+    func testDeletingANodeTakesItsSlotsAndContentsAndUndoesAsOneStep() {
+        let (manager, node, _) = mixFixture(["A", "B", "C"])
+        XCTAssertEqual(manager.folders.count, 3, "Setup: the node and its two slots")
+
+        manager.deleteFolder(node)
+
+        XCTAssertTrue(manager.folders.isEmpty, "The node and both slots go together")
+        XCTAssertEqual(stackOrder(manager), ["C"], "The layers inside the slots go with them, rather than being stranded at the root")
+
+        manager.undo()
+
+        XCTAssertEqual(manager.folders.count, 3, "One undo step, so one undo brings the whole node back")
+        XCTAssertEqual(stackOrder(manager), ["C", "A", "B"], "C stayed loose below the node, where filling the slots left it")
+        XCTAssertEqual(manager.inputSlots(ofNode: node).map(\.name), ["Input A", "Input B"])
+        assertFolderSpansAreContiguous(manager)
+    }
+
+    // MARK: Slot contiguity
+
+    /// §4.3's "the node's span is the union of its adjacent slots' spans", as the drop that would
+    /// break it. The layer is dropped into the folder that *holds* the node — a legal container —
+    /// with an anchor that puts it squarely between Input A and Input B.
+    func testADropBetweenTwoSlotsIsPushedOutOfTheNode() {
+        let manager = namedManager(["L", "A", "B"])
+        let ids = manager.layers.map(\.id)
+        let outer = manager.addFolder(name: "Outer")
+        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix", parentFolderID: outer)
+        let slots = manager.inputSlots(ofNode: node)
+        manager.restackLayer(ids[2], above: .folder(slots[1].id), parentFolderID: slots[1].id)
+        manager.restackLayer(ids[1], above: .folder(slots[0].id), parentFolderID: slots[0].id)
+        manager.restackLayer(ids[0], above: .folder(outer), parentFolderID: outer)
+        XCTAssertEqual(stackOrder(manager), ["A", "B", "L"], "Setup: the node's span is A..B, with L loose in Outer above it")
+
+        manager.restackLayer(ids[0], above: .layer(ids[1]), parentFolderID: outer)
+
+        XCTAssertEqual(manager.descendantSpan(ofFolder: node), 1...2,
+                       "The node's span stayed the union of its slots' — the drop was pushed to the nearer edge instead of splitting it")
+        XCTAssertEqual(stackOrder(manager), ["L", "A", "B"])
+        XCTAssertEqual(CanvasFixture.layer(ids[0], in: manager)?.parentFolderID, outer, "L is still where it was dropped, just not inside the node")
+        assertFolderSpansAreContiguous(manager)
+    }
+
+    /// A node's children are exactly its slots, so a bare layer dropped onto the node header has no
+    /// legal resting place. Refused rather than redirected into a slot: which input the artist meant
+    /// is not recoverable from the gesture.
+    func testDroppingABareLayerDirectlyIntoANodeIsRefused() {
+        let (manager, node, _) = mixFixture(["A", "B", "C"])
+        guard let loose = manager.layers.first(where: { $0.name == "C" })?.id else {
+            return XCTFail("Setup: C should still be a loose top-level layer")
+        }
+
+        XCTAssertFalse(manager.canDrop(inContainer: node), "The panel asks this to decline the drag before it lands")
+        manager.restackLayer(loose, above: .folder(node), parentFolderID: node)
+
+        XCTAssertNil(CanvasFixture.layer(loose, in: manager)?.parentFolderID, "C stayed at the top level")
+        XCTAssertEqual(stackOrder(manager), ["C", "A", "B"])
+        assertFolderSpansAreContiguous(manager)
+    }
+
+    /// The mirror of the refused delete: a slot cannot be dragged out of its node either. Its
+    /// position among its siblings *is* its index, so a drag that moved it would leave the stored
+    /// index and the presented order as two answers to one question.
+    func testDraggingAnInputSlotOutOfItsNodeIsRefused() {
+        let (manager, node, slots) = mixFixture(["A", "B"])
+
+        XCTAssertFalse(manager.canRestackFolder(slots[0].id))
+        manager.restackFolder(slots[0].id, above: .bottom, parentFolderID: nil)
+
+        XCTAssertEqual(manager.folders.first { $0.id == slots[0].id }?.parentFolderID, node,
+                       "The slot is still a child of its node")
+        XCTAssertEqual(manager.inputSlots(ofNode: node).map(\.name), ["Input A", "Input B"])
+        XCTAssertEqual(stackOrder(manager), ["A", "B"])
+        assertFolderSpansAreContiguous(manager)
+    }
 }

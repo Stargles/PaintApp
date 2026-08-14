@@ -421,4 +421,74 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertTrue(reloaded.layers[0].isVisible)
         XCTAssertFalse(reloaded.layers[1].isVisible, "The migration only fires under a hidden group")
     }
+
+    // MARK: - Compositor nodes (§4.3)
+
+    /// A document containing a Mix node saves and loads as the same graph: the node's op, and each
+    /// slot still tagged with the node it belongs to and which input it is. Everything else about a
+    /// slot is an ordinary folder and is covered by the group-property round trip above — which is
+    /// §4.3's storage decision holding, not a gap in this test.
+    func testAMixNodeRoundTripsThroughSaveAndLoad() {
+        let manager = makeManager()
+        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        let slots = manager.inputSlots(ofNode: node)
+        XCTAssertEqual(slots.count, 2, "Setup: a `.fixed(2)` op should bring two slots with it")
+
+        let backdropLayerID = manager.layers[0].id
+        manager.restackLayer(backdropLayerID, above: .folder(slots[0].id), parentFolderID: slots[0].id)
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        guard let reloaded = ProjectStore.load(from: url) else {
+            return XCTFail("The saved package should load")
+        }
+
+        XCTAssertEqual(reloaded.folders.first { $0.id == node }?.compositorRole, .node(op: .mix(.multiply)),
+                       "The op is the graph — a node that came back roleless would be silently demoted to a plain group")
+        XCTAssertEqual(reloaded.inputSlots(ofNode: node).map(\.compositorRole),
+                       [.slot(node: node, index: 0), .slot(node: node, index: 1)],
+                       "Both slots should come back tagged with their owner and index, and in the same order")
+        XCTAssertEqual(reloaded.inputSlots(ofNode: node).map(\.name), ["Input A", "Input B"])
+        XCTAssertEqual(reloaded.layers.first { $0.id == backdropLayerID }?.parentFolderID, slots[0].id,
+                       "A layer inside a slot is held by the slot folder like any other child — containment is unchanged by §4.3")
+    }
+
+    /// **The no-migration claim, stated as the only thing that could disprove it.** A folder written
+    /// before phase 8 carries no role key at all, and has to decode as an ordinary folder — including
+    /// not decoding as a *failure*, which would cost the artist the whole document over a field that
+    /// did not exist when they saved it.
+    func testAFolderSavedBeforePhase8DecodesAsAnOrdinaryFolder() throws {
+        let json = """
+        {"id":"\(UUID().uuidString)","name":"Group","isExpanded":true,"isVisible":true,
+         "opacity":0.5,"blendMode":"multiply","isIsolated":false}
+        """
+        let decoded = try JSONDecoder().decode(FolderManifest.self, from: Data(json.utf8))
+
+        XCTAssertNil(decoded.compositorRole, "No role key means an ordinary folder, which is what every pre-phase-8 folder is")
+        XCTAssertFalse(decoded.wasSavedBeforeGroupProperties,
+                       "`opacity` was present, so the §10.3 migration must stay disarmed — the new field must not disturb that signal")
+        XCTAssertEqual(decoded.opacity, 0.5)
+        XCTAssertEqual(decoded.blendMode, .multiply)
+        XCTAssertFalse(decoded.isIsolated)
+    }
+
+    /// The other half of the same claim: an untagged folder's manifest is byte-for-byte what it was,
+    /// because the key is written only when there is a role to write. Were it written unconditionally,
+    /// its absence would stop meaning "pre-phase-8" and there would be a migration to run after all.
+    func testAnOrdinaryFolderWritesNoCompositorRoleKey() throws {
+        let ordinary = FolderManifest(id: UUID(), name: "Group", isExpanded: true, isVisible: true)
+        let node = FolderManifest(id: UUID(), name: "Mix", isExpanded: true, isVisible: true,
+                                  compositorRole: .node(op: .mix(.screen)))
+
+        XCTAssertFalse(try encodedKeys(of: ordinary).contains("compositorRole"))
+        XCTAssertTrue(try encodedKeys(of: ordinary).contains("opacity"),
+                      "`opacity` still goes out unconditionally — the §10.3 migration reads its absence, so it cannot follow `alphaMask`'s pattern")
+        XCTAssertTrue(try encodedKeys(of: node).contains("compositorRole"))
+    }
+
+    private func encodedKeys(of folder: FolderManifest) throws -> Set<String> {
+        let object = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(folder))
+        guard let dictionary = object as? [String: Any] else { return [] }
+        return Set(dictionary.keys)
+    }
 }
