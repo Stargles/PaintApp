@@ -13,13 +13,23 @@ import Foundation
 // reserved `LayerKind.compositing` case can hold one: the layer supplies the texture, this supplies
 // the transform.
 //
-// **Both backends consume the same three derived values, and neither switches on the enum.**
-// `kindCode`, `params` and `lookupTable` are what `applyEffect` in `Composite.metal` is bound to and
-// what `EffectReference.apply` reads. An effect's *interpretation* — which knob means what, how a
-// curve becomes a table — happens exactly once, here, in Swift. The alternative (each backend
-// destructuring the associated values itself) is two places to get a parameter's meaning wrong, and
-// the way it fails is a picture that differs between GPU and CPU for reasons nothing to do with the
-// arithmetic under test.
+// **Both backends consume the same derived values, and neither switches on the enum.** `passes`,
+// `lookupTable` and `weights` are what `applyEffect` in `Composite.metal` is bound to and what
+// `EffectReference.apply` reads. An effect's *interpretation* — which knob means what, how a curve
+// becomes a table, how a radius becomes a set of convolution weights — happens exactly once, here, in
+// Swift. The alternative (each backend destructuring the associated values itself) is two places to
+// get a parameter's meaning wrong, and the way it fails is a picture that differs between GPU and CPU
+// for reasons nothing to do with the arithmetic under test.
+//
+// **A multi-pass effect declares itself by returning more than one `EffectPass`, and nothing else
+// about it is special.** `passes` is a list of (kind, parameter block) pairs, and both backends run
+// the list in order, feeding each pass the previous one's output. A per-pixel effect returns one
+// element and its encode path is the single dispatch it always was — no intermediate is allocated, no
+// branch is taken, nothing is paid. A separable blur returns two elements differing only in their step
+// vector; bloom returns four. The kernel is never told "which pass is this": a pass is fully described
+// by the parameters it carries, so pass identity is data rather than a branch, and the same code that
+// runs one dispatch runs four. See `Effect.passes` for why that is stated as a step vector rather than
+// a pass index.
 //
 // That is `MaskResolver`'s pattern rather than a new one: §6.3's threshold is resolved once on the
 // CPU and both backends receive the finished coverage, for the same reason. It buys exactness on the
@@ -28,8 +38,18 @@ import Foundation
 // that is a spot check against a value computed from the published formula, which is why
 // `EffectParityLogicTests` has both shapes of test and not just the sweep.
 //
-// **Alpha is never changed by an effect** (see `EffectReference.apply`), which is what makes an
-// effect composable as an adjustment: it regrades what is there without reshaping it.
+// **A *grade* never changes alpha** (see `EffectReference.apply`), which is what makes one composable
+// as an adjustment: it regrades what is there without reshaping it. **Blur and bloom do change alpha,
+// and that is not an exception being tolerated — it is what those two effects are.** A Gaussian blur
+// that left coverage alone would soften the colour inside a shape and leave its silhouette razor
+// sharp, which is not a blur; a glow that could not spread past the artwork's own coverage would not
+// be visible at all, since a glow is by definition the light outside the thing emitting it. So the
+// contract is per effect and `Effect.reshapesCoverage` states it in code rather than in prose:
+// everything that answers false is pinned byte-for-byte on alpha by `testNoEffectChangesAlpha`, and
+// the two that answer true are pinned instead on the property that actually matters for them, which is
+// that they convolve *premultiplied* values so colour and coverage stay in step (a blur of
+// unpremultiplied colour pulls in the colour of pixels that are not there — the same argument
+// `ChromaticAberration` already makes about its bilinear tap).
 
 /// One Tier 3 effect and the parameters it runs with.
 ///
@@ -51,6 +71,12 @@ enum Effect: Equatable {
     /// Posterize, ordered dither and halftone: one quantizer, three screens (§7 lists them as one item).
     case posterize(Posterize)
     case noise(Noise)
+    /// Gaussian and directional, which are the same 1D convolution run twice and once (§7's "separable,
+    /// two passes" item — the first effect in this file that is not one dispatch).
+    case blur(Blur)
+    /// Threshold, blur, add — §7's "nearly free once blur exists", and it is: two small kernel cases
+    /// and a four-element pass list, with no new plumbing anywhere.
+    case bloom(Bloom)
 
     /// The label an effect picker shows, written out for the reason `BlendMode.displayName` is.
     var displayName: String {
@@ -63,6 +89,22 @@ enum Effect: Equatable {
         case .chromaticAberration: return "Chromatic Aberration"
         case .posterize:           return "Posterize"
         case .noise:               return "Noise"
+        case .blur(let blur):      return blur.isDirectional ? "Directional Blur" : "Gaussian Blur"
+        case .bloom:               return "Bloom"
+        }
+    }
+
+    /// Whether this effect may change alpha. **False for every grade and true for exactly blur and
+    /// bloom**, for the reason the file header gives — a blur that left the silhouette sharp is not a
+    /// blur, and a glow confined to its own coverage is not visible.
+    ///
+    /// Stated as a property rather than a comment because it is the precondition of a test: everything
+    /// answering false is swept for byte-exact alpha, and a ninth grade that quietly started reshaping
+    /// coverage would have to come here and say so first.
+    var reshapesCoverage: Bool {
+        switch self {
+        case .blur, .bloom: return true
+        default:            return false
         }
     }
 }
@@ -203,6 +245,57 @@ extension Effect {
         var seed: UInt32 = 1
     }
 
+    /// Gaussian and directional blur — **one 1D convolution, run on two axes or on one**.
+    ///
+    /// A Gaussian is separable: convolving with a 2D Gaussian is convolving with a 1D Gaussian
+    /// horizontally and then vertically, which turns `O(r²)` taps per pixel into `O(r)` and is the
+    /// entire reason §7 calls this the item that needs the ping-pong buffer. A directional (motion)
+    /// blur is the *same* 1D convolution run once, along an arbitrary angle rather than along an axis.
+    /// So the two are one kernel and one weight table, differing only in the pass list `passes` builds:
+    /// two passes stepping `(1, 0)` and `(0, 1)`, or one stepping `(cos θ, sin θ)`.
+    ///
+    /// **`radius` is the support, and `sigma` is derived as `radius / 3`.** Truncating a Gaussian at 3σ
+    /// is the standard rule (it discards ~0.3% of the mass, below a channel step), and stating the knob
+    /// as the radius rather than as σ is what every blur UI does — so the artist's number is the one
+    /// that says how far the blur actually reaches, and the tap count follows from it rather than
+    /// being a second thing to get wrong.
+    ///
+    /// **Capped at `Effect.maxBlurTaps`.** A blur is the first effect in this file whose cost is not
+    /// bounded by the pixel count alone — it is `2 · (2r + 1)` samples per pixel — so the cap is a real
+    /// limit rather than a defensive one, and it is here rather than in a UI because both backends have
+    /// to agree on what an out-of-range radius means.
+    struct Blur: Equatable {
+        /// Pixels. 0 is the identity, and exactly so — the pass list collapses to a single centre tap.
+        var radius: Double = 0
+        /// Only read when `isDirectional`. 0° steps along +x, 90° along +y.
+        var angleDegrees: Double = 0
+        /// One angled pass instead of two axis-aligned ones. See the type's note: this is not a
+        /// different kernel, it is a different pass list over the same one.
+        var isDirectional: Bool = false
+    }
+
+    /// Threshold, blur, add — the three passes §7 names, plus the blur's own second pass, so four.
+    ///
+    /// **The bright pass carries its brightness in *coverage*, not in colour.** The threshold pass
+    /// scales the whole premultiplied texel by how far the pixel's `Lum` sits above the threshold, so a
+    /// pixel just over the line contributes a faint, mostly-transparent glow and one at full white
+    /// contributes all of itself. That is what makes the blur that follows spread the glow correctly:
+    /// convolving premultiplied values weights each contribution by its own coverage, which is exactly
+    /// the "how much light is here" the combine pass then adds.
+    ///
+    /// Additive rather than screen or lighten, because a glow is light arriving on top of the image and
+    /// addition is what light does. The combine pass clamps and then re-imposes `rgb <= a`, since an
+    /// additive result can otherwise leave the premultiplied invariant and make a later unpremultiply
+    /// produce a colour above 1.
+    struct Bloom: Equatable {
+        /// `Lum` above which a pixel starts to glow. 1 means nothing glows; 0 means everything does.
+        var threshold: Double = 0.75
+        /// The glow's reach, in pixels — the same radius `Blur` takes, resolved the same way.
+        var radius: Double = 8
+        /// How much of the blurred bright pass is added back. 0 is the identity.
+        var intensity: Double = 1
+    }
+
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
     enum Screen: String, Codable, Equatable, CaseIterable {
@@ -258,15 +351,47 @@ struct EffectParams: Equatable {
     var hueTurns: Float = 0
     var saturation: Float = 1
     var value: Float = 1
+    /// **A displacement in pixels, shared by the two effects that need one** — chromatic aberration's
+    /// per-channel offset and a blur pass's per-tap step. One field rather than two that would mean the
+    /// same thing, and the reason a blur pass needs no "which pass am I" flag at all: the step vector
+    /// *is* the pass's identity.
     var offsetX: Float = 0
     var offsetY: Float = 0
     var mix: Float = 1
     var levels: Float = 2
     var screenStrength: Float = 0
     var amount: Float = 0
+    /// The `Lum` above which a bloom's threshold pass starts letting light through.
+    var threshold: Float = 0
+    /// How much of the blurred bright pass a bloom's combine pass adds back.
+    var intensity: Float = 0
     var screen: UInt32 = 0
     var seed: UInt32 = 0
     var isMonochrome: UInt32 = 0
+    /// Half-kernel size for a blur pass: `taps` weights on each side of the centre, so `2 * taps + 1`
+    /// samples. 0 is a single centre tap, which is the identity.
+    var taps: UInt32 = 0
+}
+
+/// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
+/// means here.**
+///
+/// A pass is a kernel branch and the parameters it runs with, and nothing else: no texture, no index,
+/// no reference to the effect that produced it. That is deliberate and is what keeps the encode path
+/// uniform — the backend, not the pass, decides which texture a pass reads and writes, by the fixed
+/// rule that pass *n* reads pass *n−1*'s output. A pass that needs the effect's *original* input as
+/// well (bloom's combine) gets it from a binding that is constant for the whole effect, so even that
+/// case adds no field here.
+///
+/// **There is no pass index in this struct, on purpose.** The obvious design gives each pass an
+/// ordinal and has the kernel switch on it; the two blur passes then differ by a branch rather than by
+/// data, and every later multi-pass effect has to invent its own meaning for the same integer. Stating
+/// the difference as the step vector the pass convolves along means the kernel has one blur case, the
+/// horizontal and vertical passes are the same code with different numbers, and a directional blur —
+/// which is neither of them — needs nothing new.
+struct EffectPass: Equatable {
+    var kind: UInt32
+    var params: EffectParams
 }
 
 extension Effect {
@@ -279,6 +404,11 @@ extension Effect {
     /// **Levels and Curves share a code.** Both resolve to the same per-channel table and the kernel
     /// has no way to tell them apart, which is the point of resolving them here: a third curve shape
     /// later is a new case in this file and no shader change at all.
+    ///
+    /// **For a multi-pass effect this is pass 0's kind**, not a summary of the whole thing —
+    /// `passes[0] == EffectPass(kind: kindCode, params: params)` is an invariant, asserted by
+    /// `EffectMultiPassLogicTests`. A one-pass effect is therefore still fully described by this and
+    /// `params`, which is why neither had to change meaning when multi-pass arrived.
     var kindCode: UInt32 {
         switch self {
         case .levels, .curves:     return 0
@@ -288,11 +418,15 @@ extension Effect {
         case .chromaticAberration: return 4
         case .posterize:           return 5
         case .noise:               return 6
+        case .blur:                return 7
+        // Pass 0 of a bloom is its threshold; the blur and combine codes are reached through `passes`.
+        case .bloom:               return 8
         }
     }
 
-    /// This effect's parameters, flattened. Effects fully resolved into `lookupTable` contribute
-    /// nothing here beyond what the kernel needs after the lookup.
+    /// This effect's parameters, flattened — pass 0's, for an effect with more than one. Effects fully
+    /// resolved into `lookupTable` contribute nothing here beyond what the kernel needs after the
+    /// lookup.
     var params: EffectParams {
         var p = EffectParams()
         switch self {
@@ -320,9 +454,107 @@ extension Effect {
             p.amount = Float(noise.amount)
             p.seed = noise.seed
             p.isMonochrome = noise.isMonochrome ? 1 : 0
+        case .blur(let blur):
+            p.taps = UInt32(Self.tapCount(forRadius: blur.radius))
+            let step = blur.isDirectional
+                ? SIMD2<Double>(cos(blur.angleDegrees * .pi / 180), sin(blur.angleDegrees * .pi / 180))
+                : SIMD2<Double>(1, 0)
+            p.offsetX = Float(step.x)
+            p.offsetY = Float(step.y)
+        case .bloom(let bloom):
+            p.threshold = Float(min(max(bloom.threshold, 0), 1))
+            p.intensity = Float(max(bloom.intensity, 0))
+            p.taps = UInt32(Self.tapCount(forRadius: bloom.radius))
         }
         return p
     }
+
+    /// **The pass list — one entry per dispatch, run in order, each fed the previous one's output.**
+    ///
+    /// Every per-pixel effect returns exactly one entry, and that is what keeps a single-pass effect
+    /// from paying for this: one pass means no intermediate texture is allocated and the encode path is
+    /// the single dispatch it was before multi-pass existed.
+    ///
+    /// A Gaussian blur is two entries whose only difference is the step vector — `(1, 0)` then
+    /// `(0, 1)`. A directional blur is one entry stepping along its angle. Bloom is four: threshold,
+    /// the two blur passes, then a combine that reads the effect's *original* input alongside the
+    /// blurred bright pass. The combine is the one pass that needs a second texture, and it is bound
+    /// for every pass rather than declared per pass, so nothing here has to describe it.
+    var passes: [EffectPass] {
+        let first = EffectPass(kind: kindCode, params: params)
+        switch self {
+        case .blur(let blur):
+            // A directional blur is genuinely one convolution along one line; only the Gaussian is
+            // separable into two, and the second pass differs from the first by two floats.
+            guard !blur.isDirectional else { return [first] }
+            var vertical = first
+            vertical.params.offsetX = 0
+            vertical.params.offsetY = 1
+            return [first, vertical]
+
+        case .bloom:
+            var horizontal = first
+            horizontal.kind = Self.kBlur1D
+            horizontal.params.offsetX = 1
+            horizontal.params.offsetY = 0
+            var vertical = horizontal
+            vertical.params.offsetX = 0
+            vertical.params.offsetY = 1
+            var combine = first
+            combine.kind = Self.kBloomCombine
+            return [first, horizontal, vertical, combine]
+
+        default:
+            return [first]
+        }
+    }
+
+    /// The half-kernel weights a blur pass convolves with — `weights[0]` at the centre and
+    /// `weights[i]` at `±i` steps, **normalized in `Double` so the full kernel sums to 1** before it is
+    /// narrowed to `Float`.
+    ///
+    /// Resolved here for exactly the reason `lookupTable` is: the alternative is `exp` in both kernels,
+    /// and a transcendental evaluated once by Metal with fast math on and once by libm is the kind of
+    /// disagreement a parity sweep would then report as a blur bug. Neither backend computes a weight;
+    /// both are handed the same floats and do a weighted sum. **Bound unconditionally**, one element
+    /// long for the effects that do not convolve, so the binding contract does not vary by kind — the
+    /// same rule `lookupTable` follows.
+    var weights: [Float] {
+        switch self {
+        case .blur(let blur): return Self.gaussianHalfKernel(radius: blur.radius)
+        case .bloom(let bloom): return Self.gaussianHalfKernel(radius: bloom.radius)
+        default: return [1]
+        }
+    }
+
+    /// `2 · maxBlurTaps + 1` samples per pass is the ceiling a blur's cost is measured against; see
+    /// `Blur` for why the cap is a real limit rather than a defensive one.
+    static let maxBlurTaps = 128
+
+    private static func tapCount(forRadius radius: Double) -> Int {
+        guard radius.isFinite, radius > 0 else { return 0 }
+        return min(Int(radius.rounded()), maxBlurTaps)
+    }
+
+    /// `w[i] = exp(-i² / 2σ²)`, σ = radius/3, normalized so `w[0] + 2 Σ w[i] == 1`.
+    ///
+    /// A zero radius returns `[1]`, which makes the blur exactly the identity rather than nearly one —
+    /// the single centre tap reproduces the texel it read, and the identity test can assert bytes.
+    private static func gaussianHalfKernel(radius: Double) -> [Float] {
+        let taps = tapCount(forRadius: radius)
+        guard taps > 0 else { return [1] }
+        let sigma = max(radius / 3, 1e-4)
+        let denominator = 2 * sigma * sigma
+        let unnormalized = (0...taps).map { exp(-Double($0 * $0) / denominator) }
+        let total = unnormalized[0] + 2 * unnormalized.dropFirst().reduce(0, +)
+        return unnormalized.map { Float($0 / total) }
+    }
+
+    /// **Must match the `kEffect…` constants in `Composite.metal` and `EffectReference`**, the same
+    /// contract `kindCode` carries — named here because `passes` reaches two branches no `kindCode`
+    /// ever returns.
+    private static let kBlur1D: UInt32 = 7
+    private static let kBloomCombine: UInt32 = 9
 
     /// 256 RGBA entries, 1024 bytes — the resolved transfer table, and **the only form a curve reaches
     /// either backend in**.
@@ -506,7 +738,7 @@ extension Effect: Codable {
 
     private enum Kind: String, Codable {
         case levels, curves, brightnessContrast, hsvShift, gradientMap, chromaticAberration,
-             posterize, noise
+             posterize, noise, blur, bloom
     }
 
     private var kind: Kind {
@@ -519,6 +751,8 @@ extension Effect: Codable {
         case .chromaticAberration: return .chromaticAberration
         case .posterize:           return .posterize
         case .noise:               return .noise
+        case .blur:                return .blur
+        case .bloom:               return .bloom
         }
     }
 
@@ -541,6 +775,8 @@ extension Effect: Codable {
         case .chromaticAberration: self = .chromaticAberration(try params(ChromaticAberration.self, ChromaticAberration()))
         case .posterize:           self = .posterize(try params(Posterize.self, Posterize()))
         case .noise:               self = .noise(try params(Noise.self, Noise()))
+        case .blur:                self = .blur(try params(Blur.self, Blur()))
+        case .bloom:               self = .bloom(try params(Bloom.self, Bloom()))
         }
     }
 
@@ -556,6 +792,8 @@ extension Effect: Codable {
         case .chromaticAberration(let p): try container.encode(p, forKey: .params)
         case .posterize(let p):           try container.encode(p, forKey: .params)
         case .noise(let p):               try container.encode(p, forKey: .params)
+        case .blur(let p):                try container.encode(p, forKey: .params)
+        case .bloom(let p):               try container.encode(p, forKey: .params)
         }
     }
 }
@@ -648,5 +886,27 @@ extension Effect.Noise: Codable {
         amount = try c.decodeIfPresent(Double.self, forKey: .amount) ?? 0
         isMonochrome = try c.decodeIfPresent(Bool.self, forKey: .isMonochrome) ?? true
         seed = try c.decodeIfPresent(UInt32.self, forKey: .seed) ?? 1
+    }
+}
+
+extension Effect.Blur: Codable {
+    private enum CodingKeys: String, CodingKey { case radius, angleDegrees, isDirectional }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        radius = try c.decodeIfPresent(Double.self, forKey: .radius) ?? 0
+        angleDegrees = try c.decodeIfPresent(Double.self, forKey: .angleDegrees) ?? 0
+        isDirectional = try c.decodeIfPresent(Bool.self, forKey: .isDirectional) ?? false
+    }
+}
+
+extension Effect.Bloom: Codable {
+    private enum CodingKeys: String, CodingKey { case threshold, radius, intensity }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 0.75
+        radius = try c.decodeIfPresent(Double.self, forKey: .radius) ?? 8
+        intensity = try c.decodeIfPresent(Double.self, forKey: .intensity) ?? 1
     }
 }

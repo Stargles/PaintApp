@@ -18,53 +18,132 @@ import Metal
 // no compositor involved at all. It is **not** the render path and must not become one; a real frame
 // uploads once and keeps the texture, where this uploads and reads back per call.
 
-/// The compositor-side handle: one pipeline, and the encoding of one effect into an existing encoder.
+/// The compositor-side handle: one pipeline, the scratch textures a multi-pass effect ping-pongs
+/// through, and the encoding of one effect into an existing encoder.
 ///
-/// Separate from the engine below because this is the part a wrapper needs. It holds no device, no
-/// queue and no textures, so whoever owns the walk owns those and this stays a description of how an
-/// `Effect` becomes a dispatch.
+/// Separate from the engine below because this is the part a wrapper needs. It holds no queue and no
+/// canvas textures, so whoever owns the walk owns those.
+///
+/// **It does hold a device and up to two intermediates, and that is the one thing that changed when
+/// multi-pass arrived.** §5.3 is explicit that a canvas texture is 16.8 MB at 2048² and 64 MB at 4000²
+/// and that the answer is a pool reused across frames rather than an allocation per use — so the
+/// intermediates live here, at the lifetime of whatever owns the pipeline, and are reallocated only
+/// when the canvas size changes. Allocating them inside `encode` would put a 64 MB `makeTexture` on the
+/// path of every blurred frame, which is the shape of the number phase 4 measured at 1071 ms.
+///
+/// Not thread-safe, deliberately: the scratch is mutable state and an encoder is a single-threaded
+/// object, so the owner that serializes one serializes the other for free.
 final class EffectPipelines {
 
+    private let device: MTLDevice
     private let state: MTLComputePipelineState
+
+    /// **At most two, whatever the pass count.** Pass *n* reads pass *n−1*'s output, the first pass
+    /// reads the caller's `source` and the last writes the caller's `result`, so the intermediate
+    /// outputs alternate between exactly two textures however long the list is — four passes need the
+    /// same two as three.
+    private var scratch: [MTLTexture] = []
+    private var scratchSize = (width: 0, height: 0)
 
     /// Nil when the library has no `applyEffect` — the same failable contract `CompositorMetalEngine`
     /// uses, and for the same reason: the caller has `EffectReference` to fall back on.
     init?(device: MTLDevice, library: MTLLibrary) {
         guard let function = library.makeFunction(name: "applyEffect"),
               let state = try? device.makeComputePipelineState(function: function) else { return nil }
+        self.device = device
         self.state = state
     }
 
-    /// One `applyEffect` dispatch: `source` graded into `result`.
+    /// One effect, `source` graded into `result` — **one dispatch or four, and the caller cannot tell
+    /// which.** That is the point of the signature not having changed: a §4.4 wrapper asks for an
+    /// effect and gets however many passes that effect declares.
     ///
-    /// **The three bindings are exactly the three values `EffectReference` reads** — kind, parameter
-    /// block, table — which is what "one value reaches both backends" means concretely. Nothing here
-    /// looks inside the `Effect`.
+    /// **The bindings are exactly the values `EffectReference` reads** — kind, parameter block, table,
+    /// weights — which is what "one value reaches both backends" means concretely. Nothing here looks
+    /// inside the `Effect`; it reads `passes` and runs them.
     ///
-    /// `source` and `result` must be different textures: the kernel reads a neighbourhood for
-    /// chromatic aberration, so writing into the texture being read would sample pixels that had
-    /// already been graded.
+    /// `source` and `result` must be different textures: the kernel reads a neighbourhood, so writing
+    /// into the texture being read would sample pixels that had already been graded. `source` is also
+    /// bound as `original` for the whole effect, which is what bloom's combine pass reads — so it must
+    /// stay readable for the duration and is never written.
+    ///
+    /// **The encoder must be serial-dispatch**, which `makeComputeCommandEncoder()` gives by default:
+    /// consecutive dispatches then observe each other's writes without an explicit barrier. A
+    /// concurrent-dispatch encoder would need `memoryBarrier(scope: .textures)` between passes, and
+    /// nothing in this project makes one.
+    ///
+    /// Returns false when it declined — an intermediate this device would not allocate — so the caller
+    /// can fall back to `EffectReference` the way `Compositor.composite` falls back to
+    /// `CoreGraphicsCompositor`, rather than being handed a half-run effect.
+    @discardableResult
     func encode(_ effect: Effect, source: MTLTexture, into result: MTLTexture,
-                encoder: MTLComputeCommandEncoder) {
-        var kind = effect.kindCode
-        var params = effect.params
-        let lut = effect.lookupTable
+                encoder: MTLComputeCommandEncoder) -> Bool {
+        let passes = effect.passes
+        guard let last = passes.indices.last else { return false }
+        guard intermediates(passes.count - 1, width: source.width, height: source.height) else { return false }
 
+        let lut = effect.lookupTable
+        let weights = effect.weights
+
+        // Constant for the whole effect, so bound once: bindings persist across dispatches within an
+        // encoder, and only the two that vary per pass are re-set inside the loop.
         encoder.setComputePipelineState(state)
-        encoder.setTexture(source, index: 0)
-        encoder.setTexture(result, index: 1)
-        encoder.setBytes(&kind, length: MemoryLayout<UInt32>.stride, index: 0)
-        encoder.setBytes(&params, length: MemoryLayout<EffectParams>.stride, index: 1)
+        encoder.setTexture(source, index: 2)
         lut.withUnsafeBytes { raw in
             guard let base = raw.baseAddress else { return }
             encoder.setBytes(base, length: raw.count, index: 2)
         }
+        weights.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            encoder.setBytes(base, length: raw.count, index: 3)
+        }
 
-        let width = source.width, height = source.height
         let tw = min(16, state.maxTotalThreadsPerThreadgroup)
         let th = min(16, max(1, state.maxTotalThreadsPerThreadgroup / tw))
-        encoder.dispatchThreads(MTLSize(width: width, height: height, depth: 1),
-                                threadsPerThreadgroup: MTLSize(width: tw, height: th, depth: 1))
+
+        for (index, pass) in passes.enumerated() {
+            // Parity of the index picks the scratch slot, which is what keeps two textures enough:
+            // an output can never be its own input because consecutive indices differ in parity.
+            let input = index == 0 ? source : scratch[(index - 1) % 2]
+            let output = index == last ? result : scratch[index % 2]
+            var kind = pass.kind
+            var params = pass.params
+            encoder.setTexture(input, index: 0)
+            encoder.setTexture(output, index: 1)
+            encoder.setBytes(&kind, length: MemoryLayout<UInt32>.stride, index: 0)
+            encoder.setBytes(&params, length: MemoryLayout<EffectParams>.stride, index: 1)
+            encoder.dispatchThreads(MTLSize(width: source.width, height: source.height, depth: 1),
+                                    threadsPerThreadgroup: MTLSize(width: tw, height: th, depth: 1))
+        }
+        return true
+    }
+
+    /// Makes sure `count` intermediates exist at this size, allocating only what is missing.
+    ///
+    /// **A single-pass effect asks for zero and this returns immediately** — no allocation, no
+    /// bookkeeping, nothing held. That is how the eight per-pixel effects go on costing exactly what
+    /// they cost before multi-pass existed.
+    ///
+    /// A size change discards the pool rather than keeping both sizes: a canvas has one size at a time,
+    /// and holding a stale 64 MB pair against the chance the artist resizes back is the memory §5.3
+    /// says not to spend.
+    private func intermediates(_ count: Int, width: Int, height: Int) -> Bool {
+        guard count > 0 else { return true }
+        if scratchSize != (width, height) {
+            scratch.removeAll(keepingCapacity: true)
+            scratchSize = (width, height)
+        }
+        while scratch.count < min(count, 2) {
+            // `.private`: an intermediate is written and read by the GPU and never by the CPU, so it
+            // has no business in shared storage the way the engine's own byte round-trip does.
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
+            descriptor.usage = [.shaderRead, .shaderWrite]
+            descriptor.storageMode = .private
+            guard let texture = device.makeTexture(descriptor: descriptor) else { return false }
+            scratch.append(texture)
+        }
+        return true
     }
 }
 
@@ -114,7 +193,10 @@ final class MetalEffectEngine {
             source.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0,
                            withBytes: base, bytesPerRow: width * 4)
         }
-        pipelines.encode(effect, source: source, into: result, encoder: encoder)
+        guard pipelines.encode(effect, source: source, into: result, encoder: encoder) else {
+            encoder.endEncoding()
+            return nil
+        }
         encoder.endEncoding()
         commands.commit()
         commands.waitUntilCompleted()

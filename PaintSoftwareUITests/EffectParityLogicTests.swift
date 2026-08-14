@@ -430,13 +430,17 @@ final class EffectParityLogicTests: XCTestCase {
                        "Levels and Curves are one kernel by design — both resolve to the same table")
     }
 
-    /// **The Swift half of the layout contract with `Composite.metal`.** Fourteen 4-byte scalars, no
+    /// **The Swift half of the layout contract with `Composite.metal`.** Seventeen 4-byte scalars, no
     /// padding: if a future parameter is added as a `SIMD2` or a `Bool` this fails here, before it
     /// fails as a shifted field and a wrong picture. The Metal half is pinned by the parity sweep,
     /// which is what a mismatch would show up as.
-    func testTheParameterBlockIsFourteenPackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 56)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 56)
+    ///
+    /// The number is fourteen plus the three phase 9's multi-pass half added (`threshold`, `intensity`,
+    /// `taps`) — a count worth updating rather than relaxing, since "did anyone add a field to one
+    /// declaration and not the other" is the whole question it answers.
+    func testTheParameterBlockIsSeventeenPackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 68)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 68)
     }
 
     /// The table is 256 RGBA entries, and an unused one is the identity — so an effect that does not

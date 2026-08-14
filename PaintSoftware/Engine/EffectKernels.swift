@@ -31,23 +31,55 @@ enum EffectReference {
     /// One effect over one premultiplied RGBA8 buffer, in the app's byte layout — device RGB,
     /// premultiplied last, 8 bits per component, row-major, top-left origin.
     ///
-    /// **Alpha is copied through unchanged for every effect**, and that is the contract rather than an
-    /// implementation detail: a grade that could alter coverage would reshape the artwork it is applied
-    /// to, and neither §4.4 wrapper — a stack layer grading the backdrop, or a node grading its slot —
-    /// has any business doing that. It is also what lets an effect sit anywhere in a tree without
-    /// changing what a mask or a blend beneath it resolves to.
+    /// **Every pass in `effect.passes`, in order, each fed the previous one's output** — the same rule
+    /// `EffectPipelines.encode` follows on the GPU, and the reason the two can be compared at all. An
+    /// effect with one pass runs this loop once and allocates nothing extra, which is the whole of what
+    /// "a single-pass effect does not pay for multi-pass" means on this side.
+    ///
+    /// **A grade copies alpha through unchanged**, and that is the contract rather than an
+    /// implementation detail: one that could alter coverage would reshape the artwork it is applied to,
+    /// and neither §4.4 wrapper — a stack layer grading the backdrop, or a node grading its slot — has
+    /// any business doing that. Blur and bloom are the two effects that *do* reshape coverage, because
+    /// that is what they are (`Effect.reshapesCoverage` names them, and `Effect.swift`'s header argues
+    /// it); they convolve premultiplied values, so colour and coverage move together.
     ///
     /// Fully transparent pixels come out fully transparent, with colour zeroed, matching the kernel's
     /// early-out. Unpremultiplying at `a == 0` has no answer, and the two backends have to give the
     /// same non-answer.
     static func apply(_ effect: Effect, to bytes: [UInt8], width: Int, height: Int) -> [UInt8] {
         guard width > 0, height > 0, bytes.count >= width * height * 4 else { return bytes }
-        let kind = effect.kindCode
-        let params = effect.params
         let lut = effect.lookupTable
+        let weights = effect.weights
 
-        if kind == kChromaticAberration {
+        var current = bytes
+        for pass in effect.passes {
+            current = apply(pass, to: current, original: bytes, lut: lut, weights: weights,
+                            width: width, height: height)
+        }
+        return current
+    }
+
+    /// One pass over one buffer. `original` is the effect's own input, unchanged by any earlier pass —
+    /// bloom's combine is the one kernel that reads it, and it is passed to every pass rather than
+    /// declared per pass so that `EffectPass` stays a kind and a parameter block.
+    private static func apply(_ pass: EffectPass, to bytes: [UInt8], original: [UInt8],
+                              lut: [UInt8], weights: [Float], width: Int, height: Int) -> [UInt8] {
+        let kind = pass.kind, params = pass.params
+
+        // The gather and multi-pass kernels answer for the whole premultiplied pixel — they need the
+        // alpha of texels other than this one — so they sit outside the unpremultiply wrapper below
+        // rather than inside it.
+        switch kind {
+        case kChromaticAberration:
             return chromaticAberration(bytes, params: params, width: width, height: height)
+        case kBlur1D:
+            return blur1D(bytes, params: params, weights: weights, width: width, height: height)
+        case kBloomThreshold:
+            return bloomThreshold(bytes, params: params, width: width, height: height)
+        case kBloomCombine:
+            return bloomCombine(bytes, original: original, params: params, width: width, height: height)
+        default:
+            break
         }
 
         var result = bytes
@@ -99,6 +131,9 @@ enum EffectReference {
     private static let kChromaticAberration: UInt32 = 4
     private static let kPosterize: UInt32 = 5
     private static let kNoise: UInt32 = 6
+    private static let kBlur1D: UInt32 = 7
+    private static let kBloomThreshold: UInt32 = 8
+    private static let kBloomCombine: UInt32 = 9
 
     // MARK: - The per-pixel transforms
     //
@@ -269,6 +304,106 @@ enum EffectReference {
         let pixel = (cx + cy * width) * 4
         return SIMD4<Float>(Float(bytes[pixel]), Float(bytes[pixel + 1]),
                             Float(bytes[pixel + 2]), Float(bytes[pixel + 3])) / 255
+    }
+
+    // MARK: - The multi-pass kernels
+
+    /// One separable pass: a weighted sum of `2 * taps + 1` samples along `(offsetX, offsetY)`.
+    ///
+    /// **Premultiplied throughout, and never unpremultiplied.** Convolution is a weighted average, and
+    /// averaging premultiplied values is the only form of it that is correct across an alpha edge — the
+    /// same argument `chromaticAberration` makes about its bilinear tap, applied to every tap here.
+    /// Because the weights are non-negative and sum to 1, the result of a valid premultiplied input is
+    /// still valid (`rgb <= a` survives a convex combination), so there is nothing to re-impose
+    /// afterwards.
+    ///
+    /// **The step is checked once for whether it lands on the pixel grid**, which the Gaussian's two
+    /// axis-aligned passes always do and a directional blur's angle generally does not. On-grid taps
+    /// read one texel; off-grid taps interpolate four. The check is uniform across the buffer — it is a
+    /// property of the parameters, not of the pixel — so it costs nothing and saves the common case
+    /// four reads a tap.
+    private static func blur1D(_ bytes: [UInt8], params: EffectParams, weights: [Float],
+                               width: Int, height: Int) -> [UInt8] {
+        let taps = min(Int(params.taps), weights.count - 1)
+        guard taps > 0 else { return bytes }
+
+        let step = SIMD2<Float>(params.offsetX, params.offsetY)
+        let onGrid = step.x == step.x.rounded() && step.y == step.y.rounded()
+        var result = bytes
+        for y in 0..<height {
+            for x in 0..<width {
+                let position = SIMD2<Float>(Float(x), Float(y))
+                var sum = texel(bytes, x, y, width: width, height: height) * weights[0]
+                for tap in 1...taps {
+                    let delta = step * Float(tap)
+                    let forward: SIMD4<Float>, backward: SIMD4<Float>
+                    if onGrid {
+                        let dx = Int(delta.x.rounded()), dy = Int(delta.y.rounded())
+                        forward = texel(bytes, x + dx, y + dy, width: width, height: height)
+                        backward = texel(bytes, x - dx, y - dy, width: width, height: height)
+                    } else {
+                        forward = sample(bytes, position + delta, width: width, height: height)
+                        backward = sample(bytes, position - delta, width: width, height: height)
+                    }
+                    sum += (forward + backward) * weights[tap]
+                }
+                let pixel = (x + y * width) * 4
+                for channel in 0..<4 { result[pixel + channel] = quantize(sum[channel]) }
+            }
+        }
+        return result
+    }
+
+    /// Bloom's bright pass: the whole premultiplied texel scaled by how far its `Lum` sits above the
+    /// threshold.
+    ///
+    /// Scaling the premultiplied vector — rather than the colour — is what puts the brightness into
+    /// *coverage*, so the blur that follows spreads a dim pixel less than a bright one without either
+    /// kernel knowing that is what it is doing. `Lum` is read from the unpremultiplied colour, because
+    /// "how bright is this pixel" is a question about its colour and not about how much of it is there.
+    private static func bloomThreshold(_ bytes: [UInt8], params: EffectParams,
+                                       width: Int, height: Int) -> [UInt8] {
+        let span = max(1 - params.threshold, 1e-4)
+        var result = bytes
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixel = (x + y * width) * 4
+                let source = texel(bytes, x, y, width: width, height: height)
+                guard source.w > 0 else {
+                    for channel in 0..<4 { result[pixel + channel] = 0 }
+                    continue
+                }
+                let colour = clamp(SIMD3<Float>(source.x, source.y, source.z) / source.w)
+                let weight = min(max((luminance(colour) - params.threshold) / span, 0), 1)
+                for channel in 0..<4 { result[pixel + channel] = quantize(source[channel] * weight) }
+            }
+        }
+        return result
+    }
+
+    /// Bloom's combine: the original image plus the blurred bright pass, additively, in premultiplied
+    /// space.
+    ///
+    /// `rgb` is re-clamped against the summed alpha afterwards. Addition can push a channel above the
+    /// coverage that carries it, which is not a representable premultiplied colour and would surface
+    /// much later as an unpremultiply above 1 in whatever read the texture next.
+    private static func bloomCombine(_ bytes: [UInt8], original: [UInt8], params: EffectParams,
+                                     width: Int, height: Int) -> [UInt8] {
+        var result = bytes
+        for y in 0..<height {
+            for x in 0..<width {
+                let base = texel(original, x, y, width: width, height: height)
+                let glow = texel(bytes, x, y, width: width, height: height)
+                let alpha = min(max(base.w + glow.w * params.intensity, 0), 1)
+                let pixel = (x + y * width) * 4
+                for channel in 0..<3 {
+                    let value = min(max(base[channel] + glow[channel] * params.intensity, 0), 1)
+                    result[pixel + channel] = quantize(min(value, alpha))
+                }
+                result[pixel + 3] = quantize(alpha)
+            }
+        }
+        return result
     }
 
     // MARK: - Shared arithmetic
