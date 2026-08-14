@@ -252,6 +252,7 @@ extension RenderNode {
     /// rule whole while two of its clauses were dead: **the clause cannot fire today**, because
     /// `CompositorOp.needsOwnBuffer` makes every `.mix` buffer and the walk stops at a child that
     /// buffers. It becomes live the moment an op arrives that folds without one.
+    ///
     /// **An effect counts here as much as a blend does, and phase 9a is why.** §4.4's stack-layer
     /// wrapper grades the accumulated backdrop, so it reads what is beneath it exactly the way a
     /// `multiply` layer does — which means isolation changes its answer, which is the one question
