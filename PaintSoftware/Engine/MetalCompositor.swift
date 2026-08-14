@@ -273,7 +273,20 @@ final class CompositorMetalEngine {
                 // handed this walk its own accumulator.
                 if let effect = node.effect {
                     guard let effects, let scratch = pool.acquire() else { return false }
-                    effects.encode(effect, source: front, into: scratch, encoder: encoder)
+                    // **A declined encode has to fail the whole walk, not fall through to `mix`.**
+                    // `encode` returns false when it could not allocate the intermediates a
+                    // multi-pass effect ping-pongs through, and in that case it has written nothing
+                    // — `scratch` still holds whatever the pool last left there. Mixing that in
+                    // would put a previous frame's pixels on screen as though they were this
+                    // effect's output: a wrong picture with no error anywhere, which is strictly
+                    // worse than the black frame a hard failure gives. Returning false instead is
+                    // the contract the rest of this file already runs on — the caller falls back to
+                    // `CoreGraphicsCompositor`, which has no allocation to decline and computes the
+                    // grade correctly, just slower.
+                    guard effects.encode(effect, source: front, into: scratch, encoder: encoder) else {
+                        pool.release(scratch)
+                        return false
+                    }
                     mix(base: front, graded: scratch,
                         coverage: maskTexture(for: node, of: request, cache: &masks),
                         opacity: node.opacity, into: back, encoder: encoder,
