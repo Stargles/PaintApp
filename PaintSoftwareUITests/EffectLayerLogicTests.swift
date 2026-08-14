@@ -290,15 +290,20 @@ final class EffectLayerLogicTests: XCTestCase {
     /// a tautology.
     ///
     /// The second assertion is the one worth the test. If the graded pixels were composited *over*
-    /// the backdrop they came from instead of replacing it, alpha would inflate to `2a - a²` — 191
+    /// the backdrop they came from instead of replacing it, alpha would inflate to `2a - a²` — 192
     /// where it should be 128 — and every antialiased edge a grade passed over would thicken. That
     /// failure looks like nothing at all in a flat interior, which is why it is checked by number.
     func testAnEffectLayerLeavesEveryAlphaByteExactlyAsItFoundIt() {
         let manager = CanvasFixture.manager(layerCount: 1)
-        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(UIColor(white: 1, alpha: 0.5)))
+        // Mid-grey rather than white: `brighten` clamps white to white, and a fixture whose colour
+        // cannot move would make the alpha claim below vacuous.
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(UIColor(white: 128.0 / 255, alpha: 0.5)))
         guard let ungraded = composite(manager) else { return XCTFail("Fixture must composite") }
+        // Measured rather than asserted at 128: what matters is that coverage is fractional, and
+        // pinning the exact byte would make this test about `UIColor`'s rounding instead.
         let backdropAlpha = pixel(ungraded, 32, 32)[3]
-        XCTAssertEqual(backdropAlpha, 128, "Fixture premise: a half-covered backdrop")
+        XCTAssertTrue((1..<255).contains(backdropAlpha),
+                      "Fixture premise: a partly covered backdrop, so alpha is a real claim. Got \(backdropAlpha)")
 
         manager.addEffectLayer(Self.brighten)
         guard let graded = composite(manager) else { return XCTFail("Fixture must composite") }
@@ -310,10 +315,13 @@ final class EffectLayerLogicTests: XCTestCase {
             .reduce(0) { max($0, abs(Int(before[$1]) - Int(after[$1]))) }
         XCTAssertEqual(alphaDelta, 0, "A grade may regrade what is there; it may not reshape it")
 
-        let inflated = Int((((128.0 / 255) * 2 - pow(128.0 / 255, 2)) * 255).rounded())
-        XCTAssertEqual(inflated, 191, "What source-over onto its own backdrop would produce, stated for legibility")
+        let a = Double(backdropAlpha) / 255
+        let inflated = Int(((2 * a - a * a) * 255).rounded())
+        XCTAssertGreaterThan(inflated, backdropAlpha,
+                             "Premise: source-over onto its own backdrop would visibly thicken this coverage")
         XCTAssertNotEqual(pixel(graded, 32, 32)[3], inflated,
-                          "The graded pixels replace the backdrop; compositing them over it would double its coverage")
+                          "The graded pixels replace the backdrop; compositing them over it would inflate coverage "
+                          + "from \(backdropAlpha) to \(inflated)")
         XCTAssertNotEqual(pixel(graded, 32, 32)[0], pixel(ungraded, 32, 32)[0],
                           "Fixture premise: the colour did change, so the alpha result above is not vacuous")
     }
