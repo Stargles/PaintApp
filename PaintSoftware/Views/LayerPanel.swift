@@ -11,7 +11,14 @@ struct LayerPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            // §6.5: mask-edit mode replaces the ordinary header with an explicit-exit bar rather
+            // than layering a banner on top of it — the picker is the whole panel's rows, so "Add"
+            // and the view selector have nothing to do while it's open.
+            if let target = canvasManager.maskEditTarget {
+                maskEditBar(for: target)
+            } else {
+                header
+            }
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
             LayerStackListView(canvasManager: canvasManager) { layerID in
                 optionsLayerID = layerID
@@ -102,6 +109,38 @@ struct LayerPanel: View {
         .padding(.vertical, 12)
     }
 
+    // MARK: - Mask-edit bar (§6.5)
+
+    /// Replaces `header` while a mask-edit session is open: names what's being edited and gives the
+    /// explicit exit §6.5 asks for instead of "tap away", which the small options popover this
+    /// session was opened from can't offer once it has already closed.
+    private func maskEditBar(for target: MaskSource) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "circle.lefthalf.filled")
+                .foregroundColor(.white)
+            Text("Mask Sources — \(maskEditTargetName(target))")
+                .font(.subheadline)
+                .foregroundColor(.white)
+                .lineLimit(1)
+            Spacer()
+            Button("Done") {
+                canvasManager.endMaskEdit()
+            }
+            .foregroundColor(.blue)
+            .accessibilityIdentifier("layerPanel.maskEdit.done")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .accessibilityIdentifier("layerPanel.maskEdit.bar")
+    }
+
+    private func maskEditTargetName(_ target: MaskSource) -> String {
+        switch target {
+        case .layer(let id): return canvasManager.layers.first { $0.id == id }?.name ?? "Layer"
+        case .folder(let id): return canvasManager.folders.first { $0.id == id }?.name ?? "Folder"
+        }
+    }
+
     // MARK: - Background Row
 
     private var backgroundRow: some View {
@@ -178,6 +217,11 @@ struct LayerOptionsPanel: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .accessibilityIdentifier("layerOptions.fillReferenceToggle")
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
+                maskSection(canvasManager: canvasManager, target: .layer(canvasManager.layers[index].id),
+                           mask: canvasManager.layers[index].alphaMask, onClose: onClose)
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
@@ -321,6 +365,68 @@ private func optionsAction(_ title: String, systemImage: String, identifier: Str
     .accessibilityIdentifier(identifier)
 }
 
+/// §6.5's Mask toggle plus, once a mask exists, `invert` and a way back into the picker — shared by
+/// `LayerOptionsPanel` and `FolderOptionsPanel` since §6.2 puts `alphaMask` on both `Layer` and
+/// `LayerFolder` and neither options menu needs to know that here.
+///
+/// The switch is bound straight to `isEnabled`, which is "what the model already has and means what
+/// it says" rather than a reinterpreted on/off of its own. Turning it on always opens mask-edit mode
+/// (§6.5), even for a mask that already has sources — reopening the picker to review a pick already
+/// made costs nothing and needing a second, different affordance for "edit again" would.
+private func maskSection(canvasManager: CanvasManager, target: MaskSource, mask: AlphaMask?,
+                         onClose: @escaping () -> Void) -> some View {
+    Group {
+        Toggle(isOn: Binding(
+            get: { mask?.isEnabled ?? false },
+            set: { on in
+                if on {
+                    canvasManager.beginMaskEdit(for: target)
+                    onClose()
+                } else {
+                    canvasManager.setMaskEnabled(false, for: target)
+                    if canvasManager.maskEditTarget == target { canvasManager.endMaskEdit() }
+                }
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Mask").foregroundColor(.white)
+                Text(maskSubtitle(mask))
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+            }
+        }
+        .tint(.blue)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .accessibilityIdentifier("layerOptions.maskToggle")
+
+        if let mask {
+            Toggle(isOn: Binding(
+                get: { mask.invert },
+                set: { canvasManager.setMaskInvert($0, for: target) }
+            )) {
+                Text("Invert Mask").foregroundColor(.white).font(.subheadline)
+            }
+            .tint(.blue)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .accessibilityIdentifier("layerOptions.maskInvertToggle")
+
+            optionsAction(mask.sources.isEmpty ? "Choose Sources" : "Edit Sources",
+                         systemImage: "checklist", identifier: "layerOptions.maskEditSources") {
+                canvasManager.beginMaskEdit(for: target)
+                onClose()
+            }
+        }
+    }
+}
+
+private func maskSubtitle(_ mask: AlphaMask?) -> String {
+    guard let mask else { return "Clips to other layers" }
+    if mask.sources.isEmpty { return "No sources yet" }
+    return "\(mask.sources.count) source\(mask.sources.count == 1 ? "" : "s")" + (mask.isEnabled ? "" : " (off)")
+}
+
 // MARK: - Folder Options
 
 /// The per-group menu (§4.2): the pass-through toggle and Rename, opened from the folder row's own
@@ -362,6 +468,13 @@ struct FolderOptionsPanel: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .accessibilityIdentifier("layerOptions.passThroughToggle")
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
+                // §6.2: a group is as legal a mask *target* as a layer, the same way it's a legal
+                // source — `maskSection` doesn't know or care which kind of node it was handed.
+                maskSection(canvasManager: canvasManager, target: .folder(canvasManager.folders[index].id),
+                           mask: canvasManager.folders[index].alphaMask, onClose: onClose)
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 

@@ -634,4 +634,75 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertTrue(clippedManager().renderTree.needsCompositorOnCanvas,
                       "A masked leaf is exactly what Core Animation's flat row cannot express")
     }
+
+    // MARK: - Mask-edit mode (§6.5, §6.6, phase 6b)
+    //
+    // The engine side above is 6a's; these pin the panel's session — `beginMaskEdit`/
+    // `toggleMaskSource`/`endMaskEdit` on `CanvasManager` — which is what `LayerStackListView`'s rows
+    // and `LayerPanel`'s mask-edit bar actually call.
+
+    /// **§6.6's headline claim, at the API the panel drives instead of at the render tree.** Four
+    /// picks and an invert between `beginMaskEdit` and `endMaskEdit` land as one step, not five —
+    /// the same `withStructureUndo` depth guard the opacity slider already relies on, exercised here
+    /// through the mask session's own bracket.
+    func testMaskEditSessionCoalescesEveryPickIntoOneUndoStep() {
+        let manager = CanvasFixture.manager(layerCount: 3)
+        let targetID = manager.layers[2].id
+        let sourceA = manager.layers[0].id
+        let sourceB = manager.layers[1].id
+        let stepsBefore = manager.history.undoStack.count
+
+        manager.beginMaskEdit(for: .layer(targetID))
+        manager.toggleMaskSource(.layer(sourceA))
+        manager.toggleMaskSource(.layer(sourceB))
+        manager.setMaskInvert(true, for: .layer(targetID))
+        manager.toggleMaskSource(.layer(sourceA))   // picked, then un-picked, still mid-session
+        manager.endMaskEdit()
+
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore + 1,
+                      "Every write between begin and end is one undo step, not one per call")
+        XCTAssertEqual(manager.layers[2].alphaMask?.sources, [.layer(sourceB)],
+                       "The net effect of the session survives — only A's second tap, which cancelled the first, does not")
+        XCTAssertEqual(manager.layers[2].alphaMask?.invert, true)
+
+        manager.undo()
+        XCTAssertNil(manager.layers[2].alphaMask, "One undo reverts the whole session, back to no mask at all")
+    }
+
+    /// **The picker must filter with `canMask`, and refuse the same way if asked anyway.** A row
+    /// `maskEditAllows` says no to should never reach `toggleMaskSource` in the first place — this
+    /// pins the refusal at the call the picker itself makes, so a stale row (drawn just before a
+    /// structural edit changed what would cycle) can't smuggle a cyclic source through by tapping it
+    /// before the panel redraws.
+    func testMaskEditRefusesASelfMaskAndAMutualCycleEvenIfTapped() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        let a = manager.layers[0].id
+        let b = manager.layers[1].id
+        manager.layers[0].alphaMask = AlphaMask(sources: [.layer(b)])   // A is already masked by B
+
+        manager.beginMaskEdit(for: .layer(b))
+        XCTAssertFalse(manager.maskEditAllows(.layer(a)), "B masking A while A masks B is the mutual cycle §6.2 breaks")
+        XCTAssertFalse(manager.maskEditAllows(.layer(b)), "A layer cannot mask itself")
+
+        manager.toggleMaskSource(.layer(a))   // as if the row had been tapped anyway
+        manager.toggleMaskSource(.layer(b))
+        XCTAssertEqual(manager.layers[1].alphaMask?.sources, [],
+                       "Both refused picks leave the mask exactly as `beginMaskEdit` left it — empty, not cyclic")
+    }
+
+    /// **§6.6's other headline, at the panel's own action rather than a direct model mutation.**
+    /// `toggleLayerVisibility` is what the eye icon actually calls; this is the regression guard for
+    /// it silently growing an `isFillReference`-style write to `alphaMask` the way it already has one
+    /// for fill reference.
+    func testTogglingVisibilityDoesNotClearTheMaskUnlikeFillReference() {
+        let manager = clippedManager(hideSource: false)
+        let sourceIndex = 0
+        XCTAssertTrue(manager.layers[sourceIndex].isFillReference, "Fixture premise: a shown layer is a fill reference")
+
+        manager.toggleLayerVisibility(layerIndex: sourceIndex)
+
+        XCTAssertFalse(manager.layers[sourceIndex].isFillReference, "Hiding clears fill-reference, same as ever")
+        XCTAssertEqual(manager.layers[1].alphaMask?.sources, [.layer(manager.layers[sourceIndex].id)],
+                       "But the mask naming this layer as a source is untouched — hiding a source never silently repaints")
+    }
 }

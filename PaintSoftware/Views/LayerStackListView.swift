@@ -249,7 +249,7 @@ struct LayerStackListView: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 pinchPair = nil
-                guard gesture.numberOfTouches == 2 else { return }
+                guard canvasManager.maskEditTarget == nil, gesture.numberOfTouches == 2 else { return }
                 let first = gesture.location(ofTouch: 0, in: tableView)
                 let second = gesture.location(ofTouch: 1, in: tableView)
                 guard let firstPath = tableView.indexPathForRow(at: first),
@@ -304,6 +304,17 @@ extension LayerStackListView.Coordinator: UITableViewDelegate {
         guard rows.indices.contains(indexPath.row) else { return }
         let row = rows[indexPath.row]
 
+        // §6.5: mid-session, a tap means "toggle this as a source" instead of whatever it would
+        // otherwise mean (select, expand). `maskEditAllows` is the same `canMask` call the row's own
+        // dimming already used to decide whether to offer itself, so a stale row from just before a
+        // structural edit lands here as a no-op rather than a silently-accepted cyclic pick.
+        if canvasManager.maskEditTarget != nil {
+            if canvasManager.maskEditAllows(row.maskSource) {
+                canvasManager.toggleMaskSource(row.maskSource)
+            }
+            return
+        }
+
         if let folderID = row.folderID {
             canvasManager.toggleFolderExpanded(folderID)
             return
@@ -317,6 +328,10 @@ extension LayerStackListView.Coordinator: UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        // A structural edit mid-session would nest inside the open `beginStructureGesture` bracket
+        // rather than recording on its own (`withStructureUndo`'s depth guard), which is confusing
+        // even where it's safe — simpler to hold off entirely while the picker is the point.
+        guard canvasManager.maskEditTarget == nil else { return nil }
         guard rows.indices.contains(indexPath.row) else { return nil }
         let row = rows[indexPath.row]
 
@@ -368,7 +383,11 @@ extension LayerStackListView.Coordinator {
 
         switch gesture.state {
         case .began:
-            guard let path = tableView.indexPathForRow(at: point),
+            // Same reasoning as the swipe actions above: a restack mid-session would nest into the
+            // open bracket rather than being refused outright, which is a stranger outcome than just
+            // not starting the drag.
+            guard canvasManager.maskEditTarget == nil,
+                  let path = tableView.indexPathForRow(at: point),
                   rows.indices.contains(path.row),
                   let cell = tableView.cellForRow(at: path),
                   let snapshot = cell.snapshotView(afterScreenUpdates: true) else { return }
@@ -589,7 +608,23 @@ struct LayerRowModel: Equatable {
     var folderName: String?
     var thumbnail: UIImage?
 
+    /// §6.5: whether `CanvasManager.maskEditTarget` is set at all, baked into every row so the cell
+    /// can tell "not editing" apart from "editing, and this one happens to read false" below.
+    var isMaskEditActive: Bool = false
+    /// This row is one of the edited node's current `sources` — a picker row's checkmark.
+    var isMaskSourceSelected: Bool = false
+    /// This row would close a cycle if picked (§6.2) — dimmed and inert rather than removed, so the
+    /// stack's shape stays legible mid-edit instead of rows disappearing out from under a drag.
+    var isMaskEligible: Bool = true
+    /// This row *is* the node under edit. Marked distinctly from an ordinary ineligible row: it
+    /// fails `canMask` for the same reason every self-mask does, but "this is what you're editing"
+    /// reads differently to an artist than "this would create a cycle".
+    var isMaskEditTarget: Bool = false
+
     var folderID: UUID? { isFolder ? id : nil }
+    /// This row's own identity as a mask source — what a tap toggles and what `canMask` is asked
+    /// about, computed the same way at both call sites so they can't drift apart.
+    var maskSource: MaskSource { isFolder ? .folder(id) : .layer(id) }
 
     @MainActor
     init(row: LayerStackRow, manager: CanvasManager) {
@@ -639,6 +674,13 @@ struct LayerRowModel: Equatable {
             let vectorStrokes = cel?.vector?.strokes ?? []
             vectorStrokeCount = vectorStrokes.filter { $0.composite == .paint }.count
             vectorEraseCount = vectorStrokes.count - vectorStrokeCount
+        }
+
+        if let target = manager.maskEditTarget {
+            isMaskEditActive = true
+            isMaskSourceSelected = manager.isMaskSource(maskSource)
+            isMaskEligible = manager.maskEditAllows(maskSource)
+            isMaskEditTarget = target == maskSource
         }
     }
 }

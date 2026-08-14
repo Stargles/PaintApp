@@ -39,6 +39,10 @@ final class LayerStackCell: UITableViewCell {
     private let opacitySlider = UISlider()
     private let currentMarker = UIImageView()
     private let folderOptionsButton = UIButton(type: .system)
+    /// §6.5's picker accessory — takes the trailing slot `currentMarker`/`folderOptionsButton` use
+    /// the rest of the time, rather than competing with them for space, since the two modes are
+    /// never both relevant to the same row.
+    private let maskSourceMarker = UIImageView()
 
     // Invisible probes so UI tests can read per-row state that isn't rendered as text.
     private let bakedMarker = UIView()
@@ -69,7 +73,7 @@ final class LayerStackCell: UITableViewCell {
     private func buildHierarchy() {
         for view in [guideContainer, disclosureButton, visibilityButton, thumbnailView, folderIconView,
                      nameLabel, subtitleLabel, opacitySlider, currentMarker, folderOptionsButton,
-                     bakedMarker, vectorMarker, folderMarker, blendModeMarker] {
+                     maskSourceMarker, bakedMarker, vectorMarker, folderMarker, blendModeMarker] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -120,6 +124,11 @@ final class LayerStackCell: UITableViewCell {
         folderOptionsButton.tintColor = .white
         folderOptionsButton.addTarget(self, action: #selector(openFolderOptions), for: .touchUpInside)
 
+        maskSourceMarker.contentMode = .scaleAspectFit
+        maskSourceMarker.isHidden = true
+        maskSourceMarker.isAccessibilityElement = true
+        maskSourceMarker.accessibilityTraits = .image
+
         for marker in [bakedMarker, vectorMarker, folderMarker, blendModeMarker] {
             marker.isAccessibilityElement = true
             marker.isUserInteractionEnabled = false
@@ -167,6 +176,13 @@ final class LayerStackCell: UITableViewCell {
             folderOptionsButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             folderOptionsButton.widthAnchor.constraint(equalToConstant: 30),
             folderOptionsButton.heightAnchor.constraint(equalToConstant: 30),
+
+            // Same trailing slot as `currentMarker` — the two are never shown at once (see
+            // `configure`), so there's nothing to arbitrate between them.
+            maskSourceMarker.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            maskSourceMarker.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            maskSourceMarker.widthAnchor.constraint(equalToConstant: 22),
+            maskSourceMarker.heightAnchor.constraint(equalToConstant: 22),
 
             subtitleLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
             subtitleLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
@@ -324,9 +340,56 @@ final class LayerStackCell: UITableViewCell {
             blendModeMarker.accessibilityValue = model.blendMode.rawValue
         }
 
+        configureMaskEdit(model)
+
         isMergeHighlighted = false
         isDropHighlighted = false
         refreshBackground()
+    }
+
+    /// §6.5's picker chrome. Takes over the row's trailing slot from `currentMarker`/
+    /// `folderOptionsButton` and the row's own alpha from `refreshBackground`'s tints, rather than
+    /// adding a fourth competing indicator — mask-edit mode is the only thing the row is for while
+    /// it's on.
+    private func configureMaskEdit(_ model: LayerRowModel) {
+        guard model.isMaskEditActive else {
+            maskSourceMarker.isHidden = true
+            contentView.alpha = 1
+            return
+        }
+
+        opacitySlider.isHidden = true
+        currentMarker.isHidden = true
+        folderOptionsButton.isHidden = true
+        maskSourceMarker.isHidden = false
+
+        if model.isMaskEditTarget {
+            // Fails `canMask` the same way any self-mask does, but "this is what you're editing"
+            // reads differently than "this would cycle" — a distinct glyph says which one it is.
+            maskSourceMarker.image = UIImage(systemName: "pencil.circle.fill")
+            maskSourceMarker.tintColor = .white
+        } else if model.isMaskSourceSelected {
+            maskSourceMarker.image = UIImage(systemName: "checkmark.circle.fill")
+            maskSourceMarker.tintColor = .systemBlue
+        } else {
+            maskSourceMarker.image = UIImage(systemName: "circle")
+            maskSourceMarker.tintColor = UIColor.white.withAlphaComponent(0.4)
+        }
+        maskSourceMarker.accessibilityIdentifier = model.isFolder
+            ? "layerPanel.folder.\(model.name).maskSource" : "layerPanel.row.\(model.layerIndex).maskSource"
+        maskSourceMarker.accessibilityValue = model.isMaskSourceSelected ? "1" : "0"
+
+        // A cyclic pick is never offered (§6.2) — dimmed and inert rather than hidden, so the
+        // stack's shape stays legible while a pick is in progress. The node under edit reads the
+        // same way for the same underlying reason (it fails `canMask` too) but at a lighter dim, so
+        // the two don't look identical.
+        if model.isMaskEditTarget {
+            contentView.alpha = 0.55
+        } else if model.isMaskEligible {
+            contentView.alpha = 1
+        } else {
+            contentView.alpha = 0.3
+        }
     }
 
     /// Vertical guide lines, one per enclosing folder, so nesting depth reads at a glance.

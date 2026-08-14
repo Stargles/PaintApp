@@ -533,7 +533,12 @@ struct CanvasView: UIViewRepresentable {
                 // comments — the latter is a documented approximation, not exact group opacity.
                 let effectivelyVisible = canvasManager.isLayerEffectivelyVisible(index)
                 if host.isHidden != !effectivelyVisible { host.isHidden = !effectivelyVisible }
+                // §6.5: while a mask-edit session is open, everything that isn't a legal source for
+                // it dims — folded in here rather than as a separate overlay, since this is already
+                // where every other per-layer canvas approximation (group opacity, visibility) gets
+                // combined into the one number Core Animation takes.
                 let targetAlpha = CGFloat(canvasManager.effectiveOpacity(ofLayer: index))
+                    * canvasManager.maskEditCanvasDim(forLayerAt: index)
                 if host.alpha != targetAlpha { host.alpha = targetAlpha }
 
                 let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame)

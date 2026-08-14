@@ -164,6 +164,18 @@ final class CanvasManager: ObservableObject {
     /// when the active layer is a vector layer.
     @Published var isVectorTransforming: Bool = false
 
+    /// The node whose mask is being edited (§6.5), or nil outside mask-edit mode.
+    ///
+    /// **Modal state on the manager rather than view `@State`**, specifically so `CanvasView` can
+    /// read it too and dim every layer that isn't a legal source while it's on — a view-local flag
+    /// on `LayerPanel` would be invisible from there. A `MaskSource` names both the target and its
+    /// kind uniformly with the rest of §6.2, so nothing that reads this needs a separate "is it a
+    /// folder" flag.
+    ///
+    /// Same precedent as `isDrawingGuide`/`armedMotionGroupID`: a mode the layer panel enters and
+    /// leaves explicitly (§6.5 wants an explicit exit, not "tap away"), not a `Tool` case.
+    @Published var maskEditTarget: MaskSource?
+
     /// Whether the active layer is a vector layer with a live vector canvas on the current frame.
     var activeLayerIsVector: Bool {
         guard layers.indices.contains(currentLayerIndex),
@@ -903,6 +915,127 @@ final class CanvasManager: ObservableObject {
         withStructureUndo(name: "Mask") {
             folders[idx].alphaMask = mask
         }
+    }
+
+    // MARK: - Mask-edit mode (§6.5, §6.6)
+    //
+    // The layer panel's rows are the picker: `beginMaskEdit` opens the session, a tap routes to
+    // `toggleMaskSource`, and `endMaskEdit` is the explicit exit §6.5 asks for. Every mutation in
+    // between goes through the by-index/by-id `setAlphaMask` overloads above, so it is still true
+    // that those two calls are the only place `alphaMask` is ever written.
+
+    /// Reads whichever of `Layer.alphaMask`/`LayerFolder.alphaMask` `target` names.
+    func alphaMask(for target: MaskSource) -> AlphaMask? {
+        switch target {
+        case .layer(let id): return layers.first { $0.id == id }?.alphaMask
+        case .folder(let id): return folders.first { $0.id == id }?.alphaMask
+        }
+    }
+
+    /// Routes to the by-index/by-id overload `target` names — kept here rather than duplicated,
+    /// since a `MaskSource` already carries which one applies.
+    private func setAlphaMask(_ mask: AlphaMask?, for target: MaskSource) {
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
+            setAlphaMask(mask, forLayer: index)
+        case .folder(let id):
+            setAlphaMask(mask, forFolder: id)
+        }
+    }
+
+    /// Enters mask-edit mode for `target`, creating an empty enabled mask first if it has none so
+    /// the picker always has something to toggle sources into.
+    ///
+    /// **One undo step per session (§6.6), not one per row tapped.** `beginStructureGesture` opens
+    /// the bracket before anything is written, so the "create a mask" write above and every
+    /// `toggleMaskSource` before `endMaskEdit()` land inside `withStructureUndo`'s depth guard as
+    /// nested no-ops rather than as steps of their own — the same coalescing the opacity slider
+    /// already relies on.
+    func beginMaskEdit(for target: MaskSource) {
+        guard maskEditTarget == nil else { return } // one session at a time
+        beginStructureGesture()
+        if alphaMask(for: target) == nil {
+            setAlphaMask(AlphaMask(), for: target)
+        }
+        maskEditTarget = target
+    }
+
+    /// The explicit exit §6.5 asks for, as opposed to "tap away" — closes the session and records
+    /// whatever changed as the one step. Safe to call with nothing pending.
+    func endMaskEdit() {
+        guard maskEditTarget != nil else { return }
+        maskEditTarget = nil
+        commitStructureGesture(name: "Mask")
+    }
+
+    /// Flips whether `source` clips the mask under edit — the picker row's tap.
+    ///
+    /// Refuses a cyclic `source` via `canMask` even though the picker is expected to already filter
+    /// with the same call before offering the row (§6.2: "the picker must filter with this call, do
+    /// not write a second rule") — this is the one path both a correctly filtered row and a stale
+    /// one still on screen from before a structural edit both go through, so it is where the rule is
+    /// enforced rather than only trusted.
+    func toggleMaskSource(_ source: MaskSource) {
+        guard let target = maskEditTarget, canMask(target.id, with: source) else { return }
+        var mask = alphaMask(for: target) ?? AlphaMask()
+        if mask.sources.contains(source) {
+            // `dropping(_:)` is also §6.6's deletion rule — reused rather than re-stated, so
+            // "the list emptied" disables the mask exactly once, however it emptied.
+            mask = mask.dropping(source)
+        } else {
+            mask.sources.append(source)
+            mask.isEnabled = true
+        }
+        setAlphaMask(mask, for: target)
+    }
+
+    /// Whether `source` currently clips the node under edit — a picker row's checkmark.
+    func isMaskSource(_ source: MaskSource) -> Bool {
+        guard let target = maskEditTarget else { return false }
+        return alphaMask(for: target)?.sources.contains(source) == true
+    }
+
+    /// Whether `source` is legal to offer for the node under edit right now — `canMask` guards a
+    /// cycle; there is nothing to offer at all outside a session.
+    func maskEditAllows(_ source: MaskSource) -> Bool {
+        guard let target = maskEditTarget else { return false }
+        return canMask(target.id, with: source)
+    }
+
+    /// §6.5's on-canvas half of mask-edit mode: how much a layer should dim while a session is open,
+    /// read by `CanvasView.reconcileLayers` alongside the opacity/visibility folding it already
+    /// does. Two states rather than the picker row's three — the node under edit reads as "not a
+    /// legal pick" here too (`maskEditAllows` already says so, via the same self-mask case `canMask`
+    /// gives every layer), since a canvas dim has no good way to distinguish "this is what you're
+    /// editing" from "this would cycle" the way a row's glyph can.
+    func maskEditCanvasDim(forLayerAt index: Int) -> CGFloat {
+        guard layers.indices.contains(index), maskEditTarget != nil else { return 1 }
+        return maskEditAllows(.layer(layers[index].id)) ? 1 : 0.25
+    }
+
+    /// Turns a node's mask on or off without discarding its source list — the options panel's own
+    /// switch, distinct from a session's picker. Kept separate from `dropping(_:)` disabling one
+    /// that's been emptied by *deletion* (§6.6): this is the artist choosing to pause a mask they
+    /// mean to come back to, not the model reacting to a source disappearing.
+    func setMaskEnabled(_ enabled: Bool, for target: MaskSource) {
+        guard var mask = alphaMask(for: target), mask.isEnabled != enabled else { return }
+        mask.isEnabled = enabled
+        setAlphaMask(mask, for: target)
+    }
+
+    /// Sets `invert` on a node's mask (§6.5) — works whether or not a session is currently open,
+    /// nesting into one via the same `withStructureUndo` depth guard as everything else here.
+    func setMaskInvert(_ invert: Bool, for target: MaskSource) {
+        guard var mask = alphaMask(for: target), mask.invert != invert else { return }
+        mask.invert = invert
+        setAlphaMask(mask, for: target)
+    }
+
+    /// Removes a node's mask entirely — the options panel toggle's off position when there is no
+    /// mask-edit session open to end instead.
+    func removeMask(for target: MaskSource) {
+        setAlphaMask(nil, for: target)
     }
 
     /// Toggles whether a folder's child layers are shown in the layer panel.
