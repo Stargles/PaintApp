@@ -384,6 +384,26 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[1].alphaMask?.isEnabled, false)
     }
 
+    // MARK: - Duplication
+
+    /// `duplicateLayer` hand-copies each field of `Layer` onto the new node, and used to miss
+    /// `blendMode` and `alphaMask` — a duplicate of a Multiply layer came back Normal, and a duplicate
+    /// of a masked layer came back unmasked. Sharing the source list across is correct here: the
+    /// duplicate is a new node clipped the same way the original was, not a source anything else's
+    /// mask now points at.
+    func testDuplicatingALayerPreservesItsBlendModeAndMask() {
+        let manager = clippedManager(hideSource: false)
+        manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
+
+        manager.duplicateLayer(at: 1)
+        let duplicate = manager.layers[2]
+
+        XCTAssertEqual(duplicate.blendMode, .multiply, "The duplicate must combine with the backdrop the same way the original did")
+        XCTAssertEqual(duplicate.alphaMask?.sources, [.layer(manager.layers[0].id)],
+                       "The duplicate is masked the same way the original was")
+        XCTAssertEqual(duplicate.alphaMask?.isEnabled, true)
+    }
+
     // MARK: - Clip to below (§7 Tier 1, §10 item 1)
 
     func testClipToBelowIsResolvedIntoAMaskRatherThanAMode() {

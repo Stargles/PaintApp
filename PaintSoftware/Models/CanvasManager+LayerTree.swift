@@ -388,7 +388,8 @@ extension CanvasManager {
         }
         var copy = Layer(id: UUID(), name: source.name + " copy", opacity: source.opacity,
                          isVisible: source.isVisible, isFillReference: source.isFillReference,
-                         kind: source.kind, parentFolderID: source.parentFolderID, cels: cels)
+                         kind: source.kind, blendMode: source.blendMode, alphaMask: source.alphaMask,
+                         parentFolderID: source.parentFolderID, cels: cels)
         copy.thumbnail = source.thumbnail
         withStructureUndo(name: "Duplicate Layer") {
             layers.insert(copy, at: index + 1)
