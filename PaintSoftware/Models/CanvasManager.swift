@@ -815,8 +815,8 @@ final class CanvasManager: ObservableObject {
     var fillGestureCelID: UUID?
     var fillGestureBaseBaked: UIImage?  // layer's baked pixels before this gesture (undo/composite base)
 
-    /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — the row's
-    /// fill-reference button and the layer options' switch.
+    /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — written by the
+    /// row's drop button, which is the only control that sets it.
     ///
     /// **Writes the override even when the effective value doesn't move.** Setting a visible layer to
     /// "yes" looks like a no-op today and is the difference between it staying a reference when it is

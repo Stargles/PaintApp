@@ -410,7 +410,14 @@ Two limits a later phase inherits:
 enter one: the menu already says which layer or group is being edited, so a control inside it saying
 "…and mask this one" was a second answer to a question already answered. Every layer and group row
 grows two trailing controls for as long as a menu is open — a **mask checkmark**, which is how
-sources are picked, and a **fill-reference button** (§6.6) beside it.
+sources are picked, and a **fill-reference drop** (§6.6) beside it.
+
+**Both settings live on the rows and nowhere else.** The menu is where a node's own properties are —
+blend mode, invert, rename, the structural actions — and the rows are where per-layer answers to the
+menu's question are given. A control that appeared in both places would be two ways to say one thing,
+which is what the Mask switch was and what the labelled Fill Reference switch beside it became the
+moment the rows could answer. `FillSettingsPanel` carries the sentence explaining what the drop does,
+since a glyph cannot.
 
 **Mask-edit mode is modal state on `CanvasManager`** (`maskEditTarget`), not view `@State`, so the
 rows can double as the picker and the live canvas can dim everything that is not a legal source.

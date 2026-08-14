@@ -274,8 +274,12 @@ final class LayerUITests: PaintUITestCase {
         XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Vector 1 copy")
     }
 
-    /// Tapping a layer selects it; tapping the selected one again opens its options menu, which is
-    /// where Fill Reference lives now that the Edit sheet is gone.
+    /// Tapping a layer selects it; tapping the selected one again opens its options menu.
+    ///
+    /// Fill reference used to be a labelled switch inside that menu and is now the row's own drop
+    /// button (§6.6), so the toggling half moved here — the claim this keeps that no other test makes
+    /// is the **two-tap sequence**: the first tap only selects, and the menu is what the second one
+    /// is for.
     func testTappingSelectedLayerOpensOptionsAndTogglesFillReference() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -283,20 +287,24 @@ final class LayerUITests: PaintUITestCase {
 
         let row = app.staticTexts["layerPanel.row.0"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.otherElements["layerOptions.fillReferenceToggle"].exists,
+        XCTAssertFalse(app.staticTexts["layerOptions.maskSummary"].exists,
                        "The options menu should not be showing before the second tap")
 
         row.tap() // select
+        XCTAssertFalse(app.staticTexts["layerOptions.maskSummary"].exists,
+                       "…nor after the first, which only selects")
         row.tap() // open options
 
-        let toggle = app.switches["layerOptions.fillReferenceToggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "A second tap on the selected layer should open its options")
+        XCTAssertTrue(app.staticTexts["layerOptions.maskSummary"].waitForExistence(timeout: 5),
+                      "A second tap on the selected layer should open its options")
 
         let fillRef = app.staticTexts["layerPanel.row.0.fillRef"]
         XCTAssertEqual(fillRef.value as? String, "1", "Layers start as fill references")
-        // Hit the switch itself — tapping a SwiftUI Toggle's label doesn't flip it.
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-        XCTAssertEqual(fillRef.value as? String, "0", "Toggling in the options menu should update the row")
+        let fillRefButton = app.buttons["layerPanel.row.0.fillRefButton"]
+        XCTAssertTrue(fillRefButton.waitForExistence(timeout: 5),
+                      "The drop button appears on the row for as long as the menu is open")
+        fillRefButton.tap()
+        XCTAssertEqual(fillRef.value as? String, "0", "Tapping the row's drop should update the row")
     }
 
     /// **§6.5's picker, at the panel rather than at `CanvasManager`.** Opening a layer's options menu

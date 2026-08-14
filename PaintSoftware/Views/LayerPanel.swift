@@ -186,24 +186,6 @@ struct LayerOptionsPanel: View {
                 header(for: index)
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-                Toggle(isOn: Binding(
-                    get: { canvasManager.layers.indices.contains(index) ? canvasManager.layers[index].isFillReference : false },
-                    set: { canvasManager.setFillReference(layerIndex: index, isReference: $0) }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Fill Reference").foregroundColor(.white)
-                        Text("Bounds the fill tool")
-                            .font(.caption2)
-                            .foregroundColor(.gray)
-                    }
-                }
-                .tint(.blue)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .accessibilityIdentifier("layerOptions.fillReferenceToggle")
-
-                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-
                 maskSection(canvasManager: canvasManager, target: .layer(canvasManager.layers[index].id),
                            mask: canvasManager.layers[index].alphaMask)
 
