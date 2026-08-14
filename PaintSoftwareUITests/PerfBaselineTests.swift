@@ -1276,4 +1276,133 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertLessThan(nestedCost.seconds, max(flatCost.seconds * 6, 10.0),
                           "Six levels of transparent nesting should cost about what a flat stack costs")
     }
+
+    // MARK: - Alpha masks (LAYER_COMPOSITING.md §6)
+
+    /// The 6-layer stack above, with layer 0 turned into a mask *shape* — the left half of the canvas
+    /// — and every layer above it clipped to it.
+    ///
+    /// A half-canvas shape rather than the full-canvas rect `compositorManager` would otherwise give
+    /// layer 0, because the two halves exercise the two branches `MaskResolver.apply` short-circuits
+    /// on: covered pixels take the identity path, clear ones take the zeroing path, and only the
+    /// antialiased band across the edge (§6.3) reaches the four multiplies. A mask that covered
+    /// everything would measure the cheapest of the three and read as a verdict on all of them.
+    ///
+    /// One `AlphaMask` value shared by every masked layer, which is not a shortcut — §6.1 caches the
+    /// coverage per *distinct mask*, so this is the shape a real document takes when several layers
+    /// clip to one shape, and it is what makes "resolve once, apply per node" the thing being timed.
+    @MainActor
+    private func maskedCompositorManager(layerCount: Int, masked: Bool) -> CanvasManager {
+        let manager = compositorManager(layerCount: layerCount)
+        manager.layers[0].cels[0].bakedImage = UIGraphicsImageRenderer(
+            size: Self.canvasSize, format: PixelOps.transparentFormat()
+        ).image { ctx in
+            UIColor.black.setFill()
+            ctx.cgContext.fill(CGRect(x: 0, y: 0, width: Self.canvasSize.width / 2, height: Self.canvasSize.height))
+        }
+        guard masked else { return manager }
+        let mask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        for index in 1..<layerCount { manager.layers[index].alphaMask = mask }
+        return manager
+    }
+
+    /// **What a mask costs a composite at the app's real canvas size** — the number nobody had, since
+    /// `MaskResolver` shipped measured only against the 64² fixtures (`MaskParityLogicTests`).
+    ///
+    /// `MaskResolver.apply` is a per-pixel CPU pass over 4.2M pixels and it runs **once per masked
+    /// node per composite**, uncached, while the resolution above it is cached and shared. So the two
+    /// halves scale differently and the report separates them: `resolveCold` is paid once when a mask
+    /// source's content version moves, `applyOnce` is paid by every clipped node on every frame. A
+    /// composite is measured masked and unmasked over the same stack so the delta is attributable to
+    /// the mask rather than to the stack.
+    ///
+    /// Warm and cold are both reported because §5.2's sandwich makes them different frames rather
+    /// than different runs: drawing on a layer that is *clipped* leaves the source untouched and the
+    /// coverage cached, while drawing on the layer that *is* the mask source invalidates it every
+    /// dab.
+    ///
+    /// **Measured, five masked nodes at 2048², Debug on the simulator:** unmasked composite 49.9 ms,
+    /// masked 10173.7 ms warm and 19249.1 ms cold; `resolveCold` 1143.7 ms, `applyOnce` 1532.4 ms,
+    /// `makeMaskImage` 2458.1 ms; peak 295.5 MB unmasked against 614.9 MB masked. **A mask is 200x
+    /// the cost of the whole composite it clips**, and the multiply — not the resolution — is where
+    /// it goes.
+    ///
+    /// **Almost all of that is `-Onone`, and the scheme's Run configuration is Debug**, so it is what
+    /// the iPad build does today rather than a test-only artifact. The two loops, extracted verbatim
+    /// and compiled standalone at 2048² on this Mac: `apply` 1969.5 ms → 31.9 ms and `makeMaskImage`
+    /// 3166.9 ms → 7.2 ms across `-Onone`/`-O`, a 62x and a 440x. The `-Onone` figures land within
+    /// 30% of what this case reports, which is what says the extraction measures the same work. So
+    /// the optimised cost of a mask is ~32 ms per clipped node per composite — real, worth knowing
+    /// before §5.2 rebuilds a sandwich per dab, and nothing like a 200x.
+    ///
+    /// **Not in the fast tier**, and the gate rather than the deletion `testNestingLayersInFolders…`
+    /// chose because this number wants re-measuring whenever `apply` is touched. 36 s and a 615 MB
+    /// peak is the same profile that made a ~400 MB neighbour fail
+    /// `InterpolationRenderLogicTests.testPreviewIsSubstantiallyCheaperThanFull` whenever the two
+    /// shared a runner process. Run it deliberately:
+    ///
+    /// ```
+    /// xcodebuild test … -only-testing:PaintSoftwareUITests/PerfBaselineTests/testMaskedCompositeCostAtCanvasResolution \
+    ///   PAINT_PERF_HEAVY=1
+    /// ```
+    ///
+    /// Ceilings only, in this file's house style — read the reported numbers, do not tighten these.
+    @MainActor
+    func testMaskedCompositeCostAtCanvasResolution() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINT_PERF_HEAVY"] != nil,
+                          "Heavy: ~36 s and a 615 MB peak, which destabilises whatever shares the runner process")
+        Compositor.backend = .coreGraphics
+        let maskedCount = 5
+
+        let plain = maskedCompositorManager(layerCount: maskedCount + 1, masked: false)
+        guard let plainRequest = plain.makeRenderRequest(atFrame: 0, includeBackground: true) else {
+            return XCTFail("The perf manager must produce a request")
+        }
+        let unmasked = measuringPeakMemory { autoreleasepool { _ = Compositor.composite(plainRequest) } }
+
+        let clipped = maskedCompositorManager(layerCount: maskedCount + 1, masked: true)
+        guard let maskedRequest = clipped.makeRenderRequest(atFrame: 0, includeBackground: true),
+              let node = maskedRequest.tree.first(where: { !$0.masks.isEmpty }) else {
+            return XCTFail("The fixture must produce a request carrying a mask")
+        }
+
+        // Cold first: an empty cache is the state a source edit leaves behind, and measuring it after
+        // the warm case would measure a hit instead.
+        MaskResolver.clearCache()
+        let cold = measuringPeakMemory { autoreleasepool { _ = Compositor.composite(maskedRequest) } }
+        let warm = measuringPeakMemory { autoreleasepool { _ = Compositor.composite(maskedRequest) } }
+
+        MaskResolver.clearCache()
+        var resolved: ResolvedMask?
+        let resolve = measuringPeakMemory {
+            autoreleasepool { resolved = MaskResolver.coverage(for: node.masks, of: maskedRequest) }
+        }
+        guard let resolved, let leaf = clipped.layers[1].cels[0].bakedImage?.cgImage else {
+            return XCTFail("The fixture must resolve a coverage and carry canvas-sized leaf pixels")
+        }
+        let apply = measuringPeakMemory { autoreleasepool { _ = MaskResolver.apply(resolved, to: leaf) } }
+        let maskImage = measuringPeakMemory { autoreleasepool { _ = resolved.makeMaskImage() } }
+
+        report("masks, \(maskedCount) masked nodes at 2048x2048", [
+            ("compositeUnmasked", milliseconds(unmasked.seconds)),
+            ("compositeMaskedCold", milliseconds(cold.seconds)),
+            ("compositeMaskedWarm", milliseconds(warm.seconds)),
+            ("deltaCold", milliseconds(cold.seconds - unmasked.seconds)),
+            ("deltaWarm", milliseconds(warm.seconds - unmasked.seconds)),
+            ("resolveCold", milliseconds(resolve.seconds)),
+            ("applyOnce", milliseconds(apply.seconds)),
+            ("makeMaskImage", milliseconds(maskImage.seconds)),
+            ("peakUnmasked", megabytes(unmasked.peakBytes)),
+            ("peakMaskedCold", megabytes(cold.peakBytes)),
+            ("peakApply", megabytes(apply.peakBytes)),
+        ])
+
+        // Sized around the measured Debug figures above, an order of magnitude clear of them: at
+        // -Onone this multiply legitimately costs seconds, so an assertion tight enough to call that
+        // a regression would fail on the number the doc comment records.
+        XCTAssertLessThan(apply.seconds, 10.0,
+                          "One canvas-sized mask multiply past 10 s is a structural regression, not -Onone")
+        XCTAssertLessThan(warm.seconds, 30.0,
+                          "A cached mask should cost a per-node multiply on top of the composite, not a new order of magnitude")
+    }
 }
