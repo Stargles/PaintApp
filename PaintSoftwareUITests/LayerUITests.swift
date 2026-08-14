@@ -299,6 +299,53 @@ final class LayerUITests: PaintUITestCase {
         XCTAssertEqual(fillRef.value as? String, "0", "Toggling in the options menu should update the row")
     }
 
+    /// **§6.5's picker, at the panel rather than at `CanvasManager`.** Opening a layer's options menu
+    /// *is* the mask-edit session, so every other row grows a checkmark and a fill-reference button
+    /// while it is open, and both go away when it closes. What this pins that the logic tests cannot
+    /// is the wiring: that the two controls appear on rows, target the row they sit on, and are gated
+    /// on the menu rather than on a switch inside it — the switch this replaced.
+    func testOpeningALayerMenuPutsMaskAndFillControlsOnTheRows() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
+
+        XCTAssertFalse(app.buttons["layerPanel.row.0.maskSource"].exists,
+                       "No menu open, no picker — the rows carry nothing until one is")
+
+        let top = app.staticTexts["layerPanel.row.1"]
+        top.tap()   // already selected after the add; this opens its options
+        XCTAssertTrue(app.otherElements["layerOptions.maskSummary"].waitForExistence(timeout: 5),
+                      "The layer menu should be open")
+
+        let sourceCheck = app.buttons["layerPanel.row.0.maskSource"]
+        XCTAssertTrue(sourceCheck.waitForExistence(timeout: 5), "Every other row is a candidate source")
+        XCTAssertEqual(sourceCheck.value as? String, "0")
+        XCTAssertFalse(app.buttons["layerPanel.row.1.maskSource"].isEnabled,
+                       "The row under edit is the one row that can never be its own source")
+
+        sourceCheck.tap()
+        XCTAssertEqual(sourceCheck.value as? String, "1", "The checkmark is the pick")
+        XCTAssertEqual(app.otherElements["layerOptions.maskSummary"].value as? String, "1",
+                       "…and the menu it belongs to reports it")
+
+        let fillRefButton = app.buttons["layerPanel.row.0.fillRefButton"]
+        XCTAssertTrue(fillRefButton.exists, "The fill-reference button sits beside the checkmark, same rows")
+        XCTAssertEqual(fillRefButton.value as? String, "1", "Layers default to bounding the fill")
+        fillRefButton.tap()
+        XCTAssertEqual(fillRefButton.value as? String, "0")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0.fillRef"].value as? String, "0",
+                       "The row's own subtitle agrees, so the button drove the model and not just itself")
+
+        app.buttons["layerOptions.close"].tap()
+        XCTAssertFalse(app.buttons["layerPanel.row.0.maskSource"].waitForExistence(timeout: 2),
+                       "Closing the menu closes the session, and the rows go back to being rows")
+    }
+
     /// Merge Down flattens a layer into the one below it, leaving a single layer behind. Same model
     /// call the two-finger pinch gesture makes.
     func testMergeDownFlattensTwoLayersIntoOne() throws {

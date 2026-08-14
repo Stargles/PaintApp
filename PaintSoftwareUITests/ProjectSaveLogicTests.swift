@@ -420,6 +420,32 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertFalse(reloaded.layers[1].isVisible, "The migration only fires under a hidden group")
     }
 
+    /// **§6.6's fill-reference decision has to survive the round trip or it is not a decision.** The
+    /// effective value never was persisted — it was recomputed from visibility at load — so writing
+    /// only the override is what makes "explicit wins" true tomorrow as well as this session, and
+    /// leaving the key out for an unanswered layer is what keeps every older project decoding to the
+    /// behaviour it already had.
+    func testAnExplicitFillReferenceSurvivesASaveAndLoadButADefaultedOneIsRederived() throws {
+        let manager = makeManager()
+        manager.setFillReference(layerIndex: 0, isReference: true)
+        manager.toggleLayerVisibility(layerIndex: 0)   // hidden, and still a reference by decision
+        manager.toggleLayerVisibility(layerIndex: 1)   // hidden, and not by default
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+
+        let data = try Data(contentsOf: url.appendingPathComponent("manifest.json"))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let layerJSON = try XCTUnwrap(json["layers"] as? [[String: Any]])
+        XCTAssertEqual(layerJSON[0]["fillReferenceOverride"] as? Bool, true)
+        XCTAssertNil(layerJSON[1]["fillReferenceOverride"],
+                     "A layer nobody answered for writes no key — absence is what \"follow the default\" is")
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        XCTAssertTrue(reloaded.layers[0].isFillReference, "The decision came back with the document")
+        XCTAssertFalse(reloaded.layers[1].isFillReference, "And the default was re-derived from the visibility that did")
+    }
+
     // MARK: - Compositor nodes (§4.3)
 
     /// A document containing a Mix node saves and loads as the same graph: the node's op, and each
