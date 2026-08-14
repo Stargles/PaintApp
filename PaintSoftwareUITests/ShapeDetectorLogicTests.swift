@@ -51,9 +51,12 @@ final class ShapeDetectorLogicTests: XCTestCase {
     /// chord cutting across the shape.
     private func largestGap(_ samples: [VectorSample]) -> CGFloat {
         guard samples.count >= 2 else { return 0 }
-        return (1..<samples.count).map {
-            hypot(samples[$0].x - samples[$0 - 1].x, samples[$0].y - samples[$0 - 1].y)
-        }.max() ?? 0
+        let gaps: [CGFloat] = (1..<samples.count).map { i -> CGFloat in
+            let dx: CGFloat = samples[i].x - samples[i - 1].x
+            let dy: CGFloat = samples[i].y - samples[i - 1].y
+            return hypot(dx, dy)
+        }
+        return gaps.max() ?? 0
     }
 
     // MARK: - Detection
