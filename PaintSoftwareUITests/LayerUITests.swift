@@ -652,6 +652,94 @@ final class LayerUITests: PaintUITestCase {
                         "And it has to be visible: on lift the canvas goes back to `composite(full)`, which contains the stroke")
     }
 
+    /// **"I cannot see my paint strokes live" — the one thing no other case in this file looks at.**
+    ///
+    /// Every other sandwich assertion samples the canvas *after* lift, where `composite(full)`
+    /// contains the stroke and the picture is right whether or not a single pixel of ink was on
+    /// screen while the artist was drawing. The mid-stroke half of §5.2 is only observable with the
+    /// touch still down, so that is what this does: the drag runs on a background queue with a hold
+    /// at the far end, and the test thread probes the canvas during the hold.
+    ///
+    /// **The second stroke, not the first, and that is the whole point.** `updateSandwich` is the
+    /// only thing that unblanks the active host, and it runs from a SwiftUI pass. The first stroke on
+    /// a frame spawns a cel, which publishes, which causes the pass — so the first stroke draws
+    /// visibly and hides the defect. The second stroke publishes nothing (a dab must not, §5.2), so
+    /// if nothing applies the mid-stroke presentation at touch-down the host stays blanked for the
+    /// whole stroke and the ink appears only on lift.
+    func testInkIsVisibleWhileTheSecondStrokeIsStillDown() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        setBlendMode(app, layerIndex: 0, to: "multiply")
+        XCTAssertEqual(sandwichState(app), "rest", "Setup: a blending leaf puts the canvas on the compositor")
+        setBrushColor(app, hex: "00FFFF")
+
+        // Stroke one, lifted normally. It spawns the cel, so it is the stroke that gets a free
+        // SwiftUI pass — and it leaves the canvas back at rest with every host blanked again.
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing) { !isWhitish($0) }, "Setup: the first stroke landed")
+        XCTAssertEqual(sandwichState(app), "rest", "Setup: back at rest, so the active host is blanked again")
+
+        // Stroke two, held down. Fresh paper well clear of stroke one, so the only thing that can
+        // put ink at `probe` is the active layer's own host drawing itself.
+        let probe = CGVector(dx: 0.45, dy: 0.65)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)),
+                      "Setup: nothing has been drawn at the probe yet")
+
+        var midStrokePixel: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)?
+        var midStrokeState = "?"
+        holdingADrag(on: canvas, from: CGVector(dx: 0.35, dy: probe.dy), to: CGVector(dx: 0.55, dy: probe.dy),
+                     holdFor: 6) {
+            // Poll rather than sample once: the touch is synthesised asynchronously, so the first
+            // read can land before the drag has covered the probe.
+            let deadline = Date().addingTimeInterval(4)
+            while Date() < deadline {
+                let pixel = self.rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)
+                if !self.isWhitish(pixel) {
+                    midStrokePixel = pixel
+                    midStrokeState = self.sandwichState(app)
+                    return
+                }
+                Thread.sleep(forTimeInterval: 0.25)
+            }
+            midStrokePixel = self.rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)
+            midStrokeState = self.sandwichState(app)
+        }
+
+        XCTContext.runActivity(named: "mid-stroke probe") { activity in
+            activity.add(XCTAttachment(string: "pixel=\(String(describing: midStrokePixel)) state=\(midStrokeState)"))
+        }
+        XCTAssertEqual(midStrokeState, "stroke",
+                       "With a dab down the canvas has to be on the three-view mid-stroke path, not still showing `full`")
+        XCTAssertFalse(isWhitish(midStrokePixel),
+                       "The artist has to see their ink while the touch is still down. White at \(String(describing: midStrokePixel)) is the blanked active host — the stroke is being recorded into a view §5.2 is hiding, and it will only appear on lift")
+
+        // And the lift still snaps to the exact composite, so the fix cannot have been "stop blanking".
+        XCTAssertNotNil(waitForPixel(canvas, at: probe) { !isWhitish($0) }, "The stroke survives the lift")
+        XCTAssertEqual(sandwichState(app), "rest", "…and the canvas goes back to `composite(full)`")
+    }
+
+    /// Runs a press-drag-hold on a background queue and calls `probe` on the test thread while the
+    /// touch is still down, joining before it returns.
+    ///
+    /// XCUITest's gesture APIs are synchronous — `press(forDuration:thenDragTo:…)` returns only once
+    /// the touch has lifted — so there is no other way to look at the screen mid-gesture, and
+    /// mid-gesture is the only place §5.2's mid-stroke state exists.
+    private func holdingADrag(on element: XCUIElement, from: CGVector, to: CGVector,
+                              holdFor hold: TimeInterval, probe: () -> Void) {
+        let start = element.coordinate(withNormalizedOffset: from)
+        let end = element.coordinate(withNormalizedOffset: to)
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: hold)
+            finished.signal()
+        }
+        probe()
+        _ = finished.wait(timeout: .now() + hold + 30)
+    }
+
     /// **§11's done-criterion for phase 5b: a Multiply layer looks multiplied on the canvas the
     /// artist is drawing on.** Before the sandwich, `reconcileLayers` handed every layer to Core
     /// Animation as a flat sibling, so the mode showed on the layer row and in the project thumbnail
