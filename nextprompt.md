@@ -50,8 +50,23 @@ came in with the `tmp/mask-tune` merge (`3f8d204`): `MaskTuningOverlay` is decla
 default-visible. Its 260pt panel covered the colour panel's SV square and the layer panel's `+`
 button. Nothing was wrong with phase 8's tree arithmetic or its row-kind widening.
 
-Fixed across `c1d23dc` and `83bd747`; the 3-suite verification went **52 total, 49 passed, 3 failed**,
-i.e. 14 of the original 16 recovered immediately, and the last 2 are addressed by `83bd747`.
+Fixed across `c1d23dc` and `83bd747`. The 3-suite verification went **52 total, 49 passed, 3 failed**,
+and **all three stragglers then passed clean in isolation on a quiet machine** — 1/1 each:
+
+| test | duration | idle |
+|---|---|---|
+| `testAMultiplyLayerLooksMultipliedOnTheLiveCanvas` | 94.9 s | 63.97% |
+| `testAnAllNormalDocumentNeverEngagesTheSandwich` | 357.5 s | 55.67% |
+| `testHidingFolderHidesContentsOnCanvasAndReshowingRestoresThem` | 31.5 s | 60.90% |
+
+**Attribution between "load artifact" and "fixed by `83bd747`'s hit-test gate" is confounded** — the
+quiet machine and the gate arrived together, and nobody ran the gate-less build on a quiet box. What
+*is* settled: they are not a second defect and not the mid-stroke bug. Do not let a later summary
+harden this into a cleaner story than the evidence supports.
+
+`testAnAllNormalDocumentNeverEngagesTheSandwich` at **357 s** is worth someone's attention on its own
+— not wrong, just slow; it opens and closes the panel repeatedly through `sandwichState` and
+`vectorMarkerViaPanel`, each with waits.
 
 **Four lessons from that hunt, each of which cost time:**
 
@@ -172,8 +187,8 @@ failure count is not a finding.
 
 | # | work | state |
 |---|---|---|
-| **LIVE** | live stroke invisible mid-gesture | **fixed at `309a573`; regression test never executed** |
-| **8** | the 16-test regression | **fixed** (`c1d23dc`, `83bd747`); last 2 pending an isolated run |
+| **LIVE** | live stroke invisible mid-gesture | **DONE** — fixed `309a573`, confirmed on hardware by the owner **and** by `testEveryStrokeEntersTheMidStrokePresentationNotJustTheFirst` (1/1, 47.6 s, 78.57% idle) |
+| **8** | the 16-test regression | **DONE** — all 16 pass (`c1d23dc`, `83bd747`) |
 | **9a** | effect as a stack layer | **DONE, `tmp/p9-layer`, 222/222 in Release** |
 | **§10.1** | mask constants | **baked 0.1 / 0.01 on `tmp/p8-slotmode`**; §6.3 rewritten |
 | **6.5b** | mask/fill-reference panel rework | in flight on `tmp/mask-ui`, spec below |
@@ -556,6 +571,23 @@ latency-critical path.
 - **`** TEST SUCCEEDED **` and exit 0 do not mean any test ran.** Read `totalTestCount`, never the
   banner. Build `-only-testing` flags into a shell **array** and pass `"${SUITES[@]}"` — zsh does not
   word-split an unquoted `$VAR`, and one long bogus argument is ignored while reporting success.
+- **A concurrent worker's *rename* silently voids your queued `-only-testing`.** This happened for
+  real on 2026-08-14: one worker queued
+  `-only-testing:…/testInkIsVisibleWhileTheSecondStrokeIsStillDown`, another renamed that test to
+  `testEveryStrokeEntersTheMidStrokePresentationNotJustTheFirst` in `e33f425` while the first was
+  gated on idle, and the run matched nothing — `totalTestCount: 0`, `result: "unknown"`, exit 0,
+  `** TEST SUCCEEDED **`. Both the worker and the orchestrator nearly recorded it as a pass. **On a
+  branch with more than one worker, re-check that the test name still exists immediately before
+  reporting a result**, not just before launching.
+- **A worker's measurements can still be valid after the branch moves under it** — but only if it
+  checks. The same worker verified its fix survived intact at the new HEAD and that the three tests it
+  ran were byte-identical between its commit and HEAD, which is what licensed its numbers. Do that
+  check rather than assuming either way.
+- **Rule that came out of it: re-read HEAD immediately before AND after every measured run, and quote
+  both in the result.** That branch moved three separate times mid-sequence. Beyond voiding one run
+  entirely, `e33f425` changed `CanvasView.swift` between runs, so two tests built without it and two
+  built with it — a difference invisible in any of the four xcresults. A result without its commit is
+  not a measurement.
 - **A new test file needs a `project.pbxproj` edit** — `PaintSoftwareUITests` opts out of
   `PBXFileSystemSynchronizedRootGroup` and hand-lists its sources, so an unregistered file compiles
   nowhere, runs nothing, and prints green. App sources under `PaintSoftware/` are synchronized.
