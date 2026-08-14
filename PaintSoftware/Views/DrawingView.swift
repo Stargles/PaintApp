@@ -92,10 +92,20 @@ struct DrawingView: View {
 
                 // MASK-TUNE (temporary, see MaskTuningOverlay.swift): opposite corner from the perf
                 // HUD, clear of the top toolbar, so it doesn't fight either for space.
-                MaskTuningOverlay(isVisible: $isMaskTuningVisible)
-                    .padding(.top, 64)
-                    .padding(.trailing, 8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                //
+                // Only while no panel is open, and that condition is load-bearing rather than tidy.
+                // "The opposite corner from the perf HUD" is also where the layer rail and every
+                // trailing dropdown live, and this sits *below* neither of them in the ZStack — it is
+                // declared last, so it draws and hit-tests on top. Default-on, it covered the top
+                // ~190pt of the trailing edge: the layer panel's first rows and the colour panel's
+                // whole SV square, which is what swallowed every drag, drop, swipe and slider that
+                // landed there.
+                if activePanel == .none {
+                    MaskTuningOverlay(isVisible: $isMaskTuningVisible)
+                        .padding(.top, 64)
+                        .padding(.trailing, 8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
             }
         }
         .background(Color.black)
