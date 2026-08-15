@@ -43,6 +43,7 @@
 		DEC0DE000000000000000012 /* PaintSoftware/Engine/StrokeInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */; };
 		DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */; };
 		DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */; };
+		DEC0DECA0000000000000002 /* PaintSoftware/Models/CanvasNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DECA0000000000000001 /* PaintSoftware/Models/CanvasNotice.swift */; };
 		DEC0DE00000000000000005D /* PaintSoftware/Models/CanvasManager+Fill.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000005C /* PaintSoftware/Models/CanvasManager+Fill.swift */; };
 		DEC0DE00000000000000005B /* PaintSoftware/Models/CanvasManager+Shape.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000005A /* PaintSoftware/Models/CanvasManager+Shape.swift */; };
 		DEC0DE000000000000000059 /* PaintSoftware/Models/CanvasManager+Undo.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000058 /* PaintSoftware/Models/CanvasManager+Undo.swift */; };
@@ -165,6 +166,7 @@
 		DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeInput.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VectorLayer.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasManager.swift; sourceTree = "<group>"; };
+		DEC0DECA0000000000000001 /* PaintSoftware/Models/CanvasNotice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasNotice.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000005C /* PaintSoftware/Models/CanvasManager+Fill.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Fill.swift"; sourceTree = "<group>"; };
 		DEC0DE00000000000000005A /* PaintSoftware/Models/CanvasManager+Shape.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Shape.swift"; sourceTree = "<group>"; };
 		DEC0DE000000000000000058 /* PaintSoftware/Models/CanvasManager+Undo.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Undo.swift"; sourceTree = "<group>"; };
@@ -366,6 +368,7 @@
 				DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */,
 				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
 				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
+				DEC0DECA0000000000000001 /* PaintSoftware/Models/CanvasNotice.swift */,
 				DEC0DE00000000000000005C /* PaintSoftware/Models/CanvasManager+Fill.swift */,
 				DEC0DE00000000000000005A /* PaintSoftware/Models/CanvasManager+Shape.swift */,
 				DEC0DE000000000000000058 /* PaintSoftware/Models/CanvasManager+Undo.swift */,
@@ -562,6 +565,7 @@
 				DEC0DE000000000000000012 /* PaintSoftware/Engine/StrokeInput.swift in Sources */,
 				DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */,
 				DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */,
+				DEC0DECA0000000000000002 /* PaintSoftware/Models/CanvasNotice.swift in Sources */,
 				DEC0DE00000000000000005D /* PaintSoftware/Models/CanvasManager+Fill.swift in Sources */,
 				DEC0DE00000000000000005B /* PaintSoftware/Models/CanvasManager+Shape.swift in Sources */,
 				DEC0DE000000000000000059 /* PaintSoftware/Models/CanvasManager+Undo.swift in Sources */,

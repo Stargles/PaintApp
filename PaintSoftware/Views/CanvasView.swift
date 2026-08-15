@@ -287,10 +287,10 @@ struct CanvasView: UIViewRepresentable {
         weak var panRecognizer: UIPanGestureRecognizer?
         weak var pinchRecognizer: UIPinchGestureRecognizer?
         weak var rotationRecognizer: UIRotationGestureRecognizer?
-        weak var fillTapRecognizer: UILongPressGestureRecognizer?
+        weak var fillTapRecognizer: TouchTypePressRecognizer?
         /// Enabled when there are no layers or the active layer is hidden, so a drawing-tool touch
-        /// triggers a user-facing alert instead of being silently swallowed.
-        weak var catchAllTapRecognizer: UILongPressGestureRecognizer?
+        /// raises a user-facing notice instead of being silently swallowed.
+        weak var catchAllTapRecognizer: TouchTypePressRecognizer?
         /// Counts live canvas touches — engages the shape constraint snap whenever a second is down.
         weak var touchCountRecognizer: TouchCountRecognizer?
 
@@ -1637,6 +1637,32 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: - Gestures
 
+        /// **Which of these reject a finger while pencil-only drawing is on, and which must not.**
+        /// The preference is `CanvasManager.pencilOnlyDrawing`, and the question is not "is this a
+        /// touch?" but "would this input have drawn?" — pencil-only means *drawing* is the pen's job,
+        /// never that the canvas stops listening to hands.
+        ///
+        ///  * `pan` / `pinch` / `rotation` — **never gated.** They are the two-finger navigation
+        ///    transform and are the reason a hand is on the glass at all in pencil-only mode. Gating
+        ///    them would leave an artist holding a pen unable to pan their own canvas.
+        ///  * `twoFingerTap` (undo) / `threeFingerTap` (redo) — **never gated,** and deliberately so
+        ///    rather than incidentally: these are multi-finger by design, have no pen spelling, and
+        ///    the pen cannot supply a second contact. Gating them removes undo from the app.
+        ///  * `touchCounter` — **never gated.** It exists to notice the finger that joins a sequence
+        ///    the *pen* started ("keep the pen down, then drop a finger to snap the shape"), so a
+        ///    finger is not merely allowed here, it is the entire signal.
+        ///  * `fillPress` — **gated,** in `handleFillPress`. A fill is a drawing edit: it replaces
+        ///    pixels, pushes an undo entry, and `minimumPressDuration = 0` makes a stray palm tap a
+        ///    completed flood. This was the second hole in pencil-only mode, reported by the owner.
+        ///  * `catchAll` — **half gated,** in `handleCatchAllTap`: the notice it raises is gated, the
+        ///    menu dismissal is not. See that handler for why those two split.
+        ///
+        /// The per-layer stroke recognizer is not created here — `StrokeCanvasView` owns it and
+        /// `reconcileLayers` mirrors the preference down to it. That was the *only* consumer of
+        /// `pencilOnlyDrawing` before this pass, which is how the two holes above went unnoticed:
+        /// every recognizer on this view was a stock UIKit type whose `@objc` action never sees a
+        /// `UITouch`, so none of them *could* have asked. See `TouchTypePressRecognizer`.
+        ///
         func setUpGestures(on view: UIView) {
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.minimumNumberOfTouches = 2
@@ -1685,7 +1711,11 @@ struct CanvasView: UIViewRepresentable {
             // One-finger press-drag driving the fill tool: press applies the fill, dragging adjusts
             // settings live. `minimumPressDuration = 0` makes a plain tap a one-shot fill. Disabled
             // except while the fill tool is selected, so it never competes with stroke capture.
-            let fillPress = UILongPressGestureRecognizer(target: self, action: #selector(handleFillPress(_:)))
+            //
+            // A `TouchTypePressRecognizer` for the same reason the catch-all below is one, and the
+            // zero press duration is what makes it urgent here: a fill is applied on touch-down, so
+            // there is no dwell in which a mistaken contact could be lifted before it did anything.
+            let fillPress = TouchTypePressRecognizer(target: self, action: #selector(handleFillPress(_:)))
             fillPress.minimumPressDuration = 0
             fillPress.numberOfTouchesRequired = 1
             fillPress.delegate = self
@@ -1694,10 +1724,16 @@ struct CanvasView: UIViewRepresentable {
             view.addGestureRecognizer(fillPress)
             fillTapRecognizer = fillPress
 
-            // Catch-all for when no layers or the active layer is hidden: fires on any single-finger
-            // touch to surface an alert instead of silently swallowing it. Disabled by default —
-            // enabled in reconcileLayers only when the canvas can't accept drawing input.
-            let catchAll = UILongPressGestureRecognizer(target: self, action: #selector(handleCatchAllTap(_:)))
+            // Catch-all for when no layers or the active layer is hidden: fires on any single touch
+            // to surface a notice instead of silently swallowing it. Disabled by default — enabled in
+            // reconcileLayers only when the canvas can't accept drawing input.
+            //
+            // A `TouchTypePressRecognizer` rather than a stock `UILongPressGestureRecognizer`: the
+            // handler has to know whether the touch was a finger or the pencil, and a plain
+            // recognizer's `@objc` action receives only the recognizer — `UIGestureRecognizer`
+            // publishes `numberOfTouches` and `location(ofTouch:in:)` and nothing that reaches a
+            // `UITouch`. See the subclass for why the delegate route was rejected.
+            let catchAll = TouchTypePressRecognizer(target: self, action: #selector(handleCatchAllTap(_:)))
             catchAll.minimumPressDuration = 0
             catchAll.numberOfTouchesRequired = 1
             catchAll.delegate = self
@@ -1897,26 +1933,81 @@ struct CanvasView: UIViewRepresentable {
             canvasManager.redo()
         }
 
-        @objc func handleCatchAllTap(_ recognizer: UILongPressGestureRecognizer) {
+        /// The touch the canvas cannot act on: no layers, the active layer hidden, or the active layer
+        /// holding no pixels. Two separate jobs, and they are deliberately gated differently.
+        ///
+        /// **Dismissing the open menu is unconditional.** Touching the canvas at all closes whatever
+        /// top-bar dropdown is open — that is what `StrokeGestureRecognizer.onAnyTouchBegan` does on
+        /// every layer that *can* be drawn on, fired before its own pencil-only gate for exactly this
+        /// reason. On this path it did not happen at all: the notice states are precisely the states in
+        /// which `reconcileLayers` turns the active host's interaction off, so that host's recognizer
+        /// never sees the touch and `onAnyTouchBegan` never runs, and nothing here sent the signal
+        /// either. The result was that with the layer panel open, tapping the canvas to close it did
+        /// nothing except produce a modal alert — the owner's report. The `send()` below is new
+        /// behaviour, not a gate on existing behaviour.
+        ///
+        /// **Raising the notice is gated on the touch being one that could have drawn.** With
+        /// pencil-only drawing on, a finger is not an input the canvas would have accepted anywhere,
+        /// so telling the artist why their finger did not draw is answering a question they did not
+        /// ask; `StrokeGestureRecognizer` fails such a touch silently on every ordinary layer and this
+        /// path now matches it. The pencil is a drawing touch in both modes, so a pen tap on a value
+        /// layer does both things: closes the menu *and* explains itself.
+        @objc func handleCatchAllTap(_ recognizer: TouchTypePressRecognizer) {
             guard recognizer.state == .began else { return }
+            // Before every other guard, including the tool check: any touch, any tool, any touch type.
+            canvasManager.interactionBegan.send()
             guard canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil || canvasManager.selectedTool == .eraser else { return }
+            // The same test `StrokeGestureRecognizer.touchesBegan` applies, read straight off the
+            // source flag that `reconcileLayers` mirrors down to `StrokeCanvasView.pencilOnlyDrawing`
+            // — not off a third copy of the preference, so the two paths cannot drift apart.
+            guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             if canvasManager.layers.isEmpty {
-                canvasManager.needsLayerAlert = true
+                canvasManager.raise(.noLayers)
             } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
                       !canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex) {
-                canvasManager.needsVisibilityAlert = true
+                canvasManager.raise(.hiddenLayer)
             } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
                       canvasManager.layers[canvasManager.currentLayerIndex].hasNoDrawingSurface {
-                canvasManager.needsNoDrawingSurfaceAlert = true
+                canvasManager.raise(.noDrawingSurface)
             }
         }
 
-        @objc func handleFillPress(_ recognizer: UILongPressGestureRecognizer) {
+        /// The fill tool's press-drag, and pencil-only drawing's second hole (owner-reported): with
+        /// the preference on, a finger tap flooded the artwork.
+        ///
+        /// **A fill is a drawing edit, so it answers to the drawing preference.** It replaces pixels
+        /// and pushes an undo entry, which is what `StrokeGestureRecognizer.requiresPencilOnly` exists
+        /// to keep a hand from doing; that the edit arrives through a press rather than a stroke is an
+        /// implementation detail of the tool, not a difference the artist agreed to. And
+        /// `minimumPressDuration = 0` makes it the worse of the two holes: the flood is applied on
+        /// touch-down, so unlike a stroke there is no travel in which a mistaken contact does
+        /// something small before it is noticed.
+        ///
+        /// **The gate is here and not in the recognizer**, which is the same split
+        /// `handleCatchAllTap` makes and for the same reason — see `TouchTypePressRecognizer`. It sits
+        /// *after* `interactionBegan.send()` deliberately: a rejected finger still closes whatever
+        /// top-bar dropdown is open, because closing a menu by tapping away from it is not drawing and
+        /// every other canvas touch already does it. Beyond that the touch does nothing at all — no
+        /// notice, no fill — matching what a finger does on an ordinary layer with the preference on.
+        ///
+        /// **Rejecting at `.began` has to bind the whole sequence, not just this callback.** UIKit
+        /// goes on delivering `.changed` and `.ended` for a press this handler declined, and `.ended`
+        /// used to call `endInteractiveFill()` unconditionally — which would have *committed the
+        /// previous* adjustable fill, so a stray palm would have baked an edit the artist was still
+        /// tuning. `fillDragStartHost` is the token that says "this sequence was accepted": it was
+        /// already the guard on `.changed`, it is set only on an accepted `.began`, and the terminal
+        /// cases now read it too. That is a no-op for every accepted press — a zero-duration long
+        /// press always begins before it ends — and it is what makes the rejection total.
+        @objc func handleFillPress(_ recognizer: TouchTypePressRecognizer) {
             guard let container = containerView, let host = hostView else { return }
             switch recognizer.state {
             case .began:
                 // Continuing to fill dismisses whatever top-bar dropdown is open.
                 canvasManager.interactionBegan.send()
+                // The same test `StrokeGestureRecognizer.touchesBegan` applies, read straight off the
+                // source flag rather than off a third copy of the preference, so the fill path and the
+                // stroke path cannot drift apart.
+                guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
                 // container's bounds equal canvasSize, so location(in:) there is canvas-pixel space.
                 // The drag delta is measured in fixed screen (host) space so feel is zoom-independent.
                 fillDragStartHost = recognizer.location(in: host)
@@ -1950,9 +2041,14 @@ struct CanvasView: UIViewRepresentable {
                     canvasManager.updateInteractiveFill(gapClosing: fillDragStartGap, threshold: fillDragStartThreshold, edgeOverlap: edge)
                 }
             case .ended:
+                // See the doc comment: `fillDragStartHost` is "this sequence was accepted", and a
+                // declined press must not reach `endInteractiveFill` — which would commit whatever
+                // fill was already adjustable.
+                guard fillDragStartHost != nil else { return }
                 canvasManager.endInteractiveFill()
                 fillDragStartHost = nil
             case .cancelled, .failed:
+                guard fillDragStartHost != nil else { return }
                 canvasManager.cancelInteractiveFillDrag()
                 fillDragStartHost = nil
             default:
@@ -1960,5 +2056,58 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
+    }
+}
+
+/// A press recognizer that remembers what kind of touch started it.
+///
+/// It exists for one reason: `UIGestureRecognizer` gives an `@objc` action the recognizer and nothing
+/// else, and its public surface (`numberOfTouches`, `location(ofTouch:in:)`, `state`) never reaches a
+/// `UITouch`. So a plain `UILongPressGestureRecognizer` cannot tell a finger from the pencil, and
+/// both of the canvas's press handlers have to: `handleCatchAllTap`, or pencil-only drawing goes on
+/// announcing "this layer has no drawing surface" at every finger tap — including the taps whose only
+/// purpose was to close the layer panel — and `handleFillPress`, or the fill tool floods the artwork
+/// from a palm the artist did not know was touching down.
+///
+/// **Both press recognizers are this type, and the policy is deliberately not in here.** The first
+/// version of this class was `CatchAllTapRecognizer`, named after its one caller, and the shape of the
+/// generalisation is worth stating because the obvious one is wrong: this could take a
+/// `shouldAccept: (UITouch) -> Bool` and fail the sequence itself, which would make the fill case a
+/// one-liner — and would break the catch-all, whose whole contract is that a rejected finger tap
+/// *still* recognizes far enough to dismiss the open menu (see `handleCatchAllTap`). The two consumers
+/// want the same fact and opposite answers to "and then what", so the fact is what is shared. Recording
+/// the touch type is a mechanism; refusing the touch is a policy, and it lives with the handler that
+/// has the rest of the context — the selected tool, the layer state, the menu.
+///
+/// **`UIGestureRecognizerDelegate.gestureRecognizer(_:shouldReceive:)` was the alternative**, and it
+/// does receive the `UITouch`. It was rejected because the `Coordinator` is the shared delegate of
+/// pan, pinch, rotation, the touch counter and both presses, so the stash would be written by every
+/// recognizer's touches and read by two — the readers would have to filter by identity, and would
+/// still be leaning on an ordering between a delegate callback and an action dispatch that UIKit
+/// does not document. A subclass owns its own field and cannot be written by anything else, and the
+/// codebase already reaches for exactly this shape twice (`StrokeGestureRecognizer` for the same
+/// pencil test, `TouchCountRecognizer` for a live touch count).
+final class TouchTypePressRecognizer: UILongPressGestureRecognizer {
+    /// The touch type of the most recent touch to land on this recognizer.
+    ///
+    /// Written before `super.touchesBegan`, which is what can drive the recognizer to `.began` and
+    /// dispatch the action, so the handler always reads this sequence's own value and never the
+    /// previous one. Not cleared in `reset()` for the same reason from the other side: `reset()` runs
+    /// at the end of a sequence, after the action, and clearing there would only create a window in
+    /// which the value could read as unset. It is overwritten on every touch-down instead.
+    ///
+    /// `.direct` is the initial value — the conservative one. Read before any touch has arrived, which
+    /// cannot actually happen, it would suppress a notice rather than raise a spurious one, and a
+    /// spurious notice is the bug this type was added to fix.
+    private(set) var lastTouchType: UITouch.TouchType = .direct
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        // A pencil among the touches wins. `numberOfTouchesRequired` is 1, but UIKit still delivers
+        // extra touches here, and "the artist has the pen down" is the fact the handler wants — not
+        // "the arbitrary first member of a Set was a finger".
+        if let touch = touches.first(where: { $0.type == .pencil }) ?? touches.first {
+            lastTouchType = touch.type
+        }
+        super.touchesBegan(touches, with: event)
     }
 }

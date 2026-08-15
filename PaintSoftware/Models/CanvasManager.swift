@@ -485,23 +485,38 @@ final class CanvasManager: ObservableObject {
         commitFloatingPieceIfNeeded()
     }
 
-    /// Set to true by the canvas coordinator when the user touches the canvas with a drawing tool
-    /// selected but no layers exist. `DrawingView` observes this and presents an alert asking the
-    /// user to create a layer. Reset to false once the alert is dismissed.
-    @Published var needsLayerAlert: Bool = false
-    /// Set to true when the user touches the canvas with a drawing tool but the active layer is
-    /// hidden. `DrawingView` presents an alert offering to show the layer. Reset on dismissal.
-    @Published var needsVisibilityAlert: Bool = false
-    /// Set to true when the user touches the canvas with a drawing tool but the active layer has no
-    /// drawing surface — a `.compositing` effect layer (`addEffectLayer`'s doc) or a `.value` layer
-    /// (`addValueLayer`'s), neither of which holds pixels, so a stroke there has nowhere to go.
+    /// The banner currently across the top of the canvas, or nil for none — the owner's replacement
+    /// for the three modal alerts that used to interrupt drawing (`CanvasNotice` carries why).
     ///
-    /// **One flag for both kinds rather than one per kind**, because it is one presentation of one
-    /// idea: the owner's call on the effect layer in phase 9b was to keep the layer selected so its
-    /// settings stay editable and make the draw gesture a no-op *that says so*, rather than silently
-    /// losing the ink into a cel nothing renders — and a value layer is the same requirement with the
-    /// same answer. `DrawingView` presents one alert. Reset on dismissal.
-    @Published var needsNoDrawingSurfaceAlert: Bool = false
+    /// **One optional in place of three `Bool`s, and the collapse is the point rather than a
+    /// tidying.** The three flags were mutually exclusive in fact and independent in the type: the one
+    /// call site that raised them (`CanvasView.handleCatchAllTap`) set exactly one, but nothing said
+    /// so, so every reader had to check all three and any two of them could be true at once and stack
+    /// two alerts. An optional says "at most one message, and here is which" in the type, which is
+    /// also what a banner *is* — there is one strip of screen and it shows one sentence.
+    ///
+    /// Nil rather than a `Bool` beside a payload for the same reason `LayerFolder.effect` is optional:
+    /// presence is the state, so there is no second field to fall out of step with.
+    ///
+    /// Written only through `raise(_:)` below, and cleared by whoever is presenting it — the view owns
+    /// the timer, because how long a banner stays up is a presentation decision and the model has no
+    /// business scheduling one. `CanvasNotice.duration` is the model's advice, not its behaviour.
+    @Published var notice: CanvasNotice?
+
+    /// Shows a banner, **minting a fresh one every time**.
+    ///
+    /// A new `id` per raise is the whole of this method. Assigning an equal value to an `@Published`
+    /// property still publishes, but the two `CanvasNotice`s would be `==`, so a presenter driving its
+    /// transition and its dismissal timer off `.onChange(of: notice)` sees nothing and the second tap
+    /// on a layer that cannot be drawn on produces no banner at all — the artist taps, gets told,
+    /// taps again a moment later and is told nothing. `CanvasNotice`'s own doc calls this out; this is
+    /// where it is honoured.
+    ///
+    /// Re-raising while one is already up is therefore a restart rather than a no-op, which is the
+    /// behaviour that matches what the artist did: they asked again.
+    func raise(_ kind: CanvasNotice.Kind) {
+        notice = CanvasNotice(kind)
+    }
 
     /// Ticks the debounce. The *what* travels in `pendingThumbnailRegens` rather than in the value,
     /// because `.debounce` keeps only the last element it saw — carrying `(layerIndex, celIndex)`
