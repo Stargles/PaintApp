@@ -32,6 +32,7 @@
 		DEC0DE0000000000000000FC /* ToolsAndSelectionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */; };
 		DEC0DE0000000000000000FA /* FillUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F9 /* FillUITests.swift */; };
 		DEC0DE0000000000000000F8 /* LayerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F7 /* LayerUITests.swift */; };
+		DEC0DEFE0000000000000002 /* CanvasTransformFreezeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEFE0000000000000001 /* CanvasTransformFreezeUITests.swift */; };
 		DEC0DE0000000000000000F6 /* TimelineAndUndoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F5 /* TimelineAndUndoUITests.swift */; };
 		DEC0DE0000000000000000F4 /* PaintUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F3 /* PaintUITestCase.swift */; };
 		DEC0DE000000000000000006 /* LayerTreeCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */; };
@@ -157,6 +158,7 @@
 		DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolsAndSelectionUITests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000F9 /* FillUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FillUITests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000F7 /* LayerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LayerUITests.swift; sourceTree = "<group>"; };
+		DEC0DEFE0000000000000001 /* CanvasTransformFreezeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasTransformFreezeUITests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000F5 /* TimelineAndUndoUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineAndUndoUITests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000F3 /* PaintUITestCase.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintUITestCase.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LayerTreeCharacterizationTests.swift; sourceTree = "<group>"; };
@@ -335,6 +337,7 @@
 				DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */,
 				DEC0DE0000000000000000F9 /* FillUITests.swift */,
 				DEC0DE0000000000000000F7 /* LayerUITests.swift */,
+				DEC0DEFE0000000000000001 /* CanvasTransformFreezeUITests.swift */,
 				DEC0DE0000000000000000F5 /* TimelineAndUndoUITests.swift */,
 				DEC0DE0000000000000000F3 /* PaintUITestCase.swift */,
 				DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */,
@@ -559,6 +562,7 @@
 				DEC0DE0000000000000000FC /* ToolsAndSelectionUITests.swift in Sources */,
 				DEC0DE0000000000000000FA /* FillUITests.swift in Sources */,
 				DEC0DE0000000000000000F8 /* LayerUITests.swift in Sources */,
+				DEC0DEFE0000000000000002 /* CanvasTransformFreezeUITests.swift in Sources */,
 				DEC0DE0000000000000000F6 /* TimelineAndUndoUITests.swift in Sources */,
 				DEC0DE0000000000000000F4 /* PaintUITestCase.swift in Sources */,
 				DEC0DE000000000000000006 /* LayerTreeCharacterizationTests.swift in Sources */,

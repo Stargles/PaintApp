@@ -151,6 +151,28 @@ struct AnimationTimeline: View {
         } message: {
             Text("Moving a vector block onto a raster layer flattens its strokes to pixels. They can still be erased and painted over, but they can no longer be reshaped as vectors. This can be undone.")
         }
+        // Touching the canvas closes whatever timeline menu is open, *before* the touch becomes a
+        // stroke — the same contract `DrawingView` already applies to the top-bar dropdowns, and for
+        // a sharper reason than tidiness.
+        //
+        // These three are `.popover`s, and a popover left to its own dismissal is dismissed *by* the
+        // touch that lands outside it. When that touch is the start of a stroke, the presentation is
+        // torn down in the middle of the touch sequence, and UIKit then never sends
+        // `StrokeGestureRecognizer` its `reset()`: the recognizer is stranded in a terminal-but-not-
+        // `.failed` state, and
+        // `CanvasView.Coordinator.gestureRecognizer(_:shouldRequireFailureOf:)` has all three
+        // canvas-transform recognizers waiting on exactly that recognizer failing. Two-finger
+        // pan/pinch/rotate then stay dead for the life of the drawing view — the reported freeze,
+        // and the reason returning to the gallery and reopening clears it without an app quit.
+        //
+        // `interactionBegan` fires from `StrokeGestureRecognizer.touchesBegan` before any of that,
+        // so the popover is on its way out before the sequence it would otherwise break is underway.
+        // Pinned by `CanvasTransformFreezeUITests`.
+        .onReceive(canvasManager.interactionBegan) {
+            if showGapMenu { showGapMenu = false }
+            if showBlockMenu { showBlockMenu = false }
+            if showLoopMenu { showLoopMenu = false }
+        }
         .onDisappear { stopPlayback() }
     }
 

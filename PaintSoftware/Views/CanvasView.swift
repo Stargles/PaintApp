@@ -760,8 +760,28 @@ struct CanvasView: UIViewRepresentable {
         private var sandwichPresentation: SandwichPresentation = .disengaged {
             didSet {
                 if sandwichPresentation == .midStroke, oldValue != .midStroke { midStrokeEntryCount += 1 }
-                hostView?.accessibilityLabel = "sandwich:\(sandwichPresentation.rawValue) entries:\(midStrokeEntryCount)"
+                publishCanvasState()
             }
+        }
+
+        /// Publishes the Coordinator's own state on `canvas.host`'s accessibility label, for the same
+        /// reason `SandwichPresentation` documents above: none of it is otherwise visible to an
+        /// XCUITest. Three space-separated fields —
+        ///
+        ///     sandwich:<off|rest|stroke> entries:<n> xform:<scale>,<rotation>,<dx>,<dy>
+        ///
+        /// — read by `LayerUITests` (the first two) and `CanvasTransformFreezeUITests` (the third).
+        /// `xform` carries the *effective* transform, committed plus whatever a gesture is
+        /// contributing live, so "a two-finger gesture moved the canvas" is a value comparison
+        /// across the gesture rather than something only `container.transform` knows.
+        private func publishCanvasState() {
+            let scale = fitScale * committedScale * liveScale
+            let rotation = committedRotation + liveRotation
+            let dx = committedOffset.width + liveOffset.width
+            let dy = committedOffset.height + liveOffset.height
+            hostView?.accessibilityLabel = "sandwich:\(sandwichPresentation.rawValue)"
+                + " entries:\(midStrokeEntryCount)"
+                + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
         }
 
         /// How many times the canvas has *entered* the mid-stroke presentation, published beside the
@@ -1622,6 +1642,10 @@ struct CanvasView: UIViewRepresentable {
         }
 
         private func applyTransform() {
+            // Before the guards below, and before the no-op early return: the label has to track the
+            // transform even on the passes that change nothing in Core Animation, or a test reads a
+            // stale value. See `publishCanvasState`.
+            publishCanvasState()
             guard let container = containerView, let baseCenter else { return }
             let scale = fitScale * committedScale * liveScale
             let rotation = effectiveRotation()
@@ -1788,12 +1812,50 @@ struct CanvasView: UIViewRepresentable {
         /// layer's drawing recognizer. A static `require(toFail:)` against every layer, including
         /// inactive ones that never reach `.failed`, would deadlock two-finger pan/zoom/rotate as
         /// soon as a second layer exists.
+        ///
+        /// The liveness guard below is the same argument one step further in. The comment above
+        /// closed the *static* version of the deadlock — a named recognizer belonging to a layer that
+        /// is not the active one. It did not close the case where the recognizer named is the active
+        /// layer's and that layer is nonetheless not accepting touches: `reconcileLayers` turns
+        /// `isUserInteractionEnabled` off on the active host for the fill tool, the Select panel, a
+        /// floating Move piece, a vector layer mid-transform, and a layer with no drawing surface (see
+        /// `shouldInteract`). In every one of those the recognizer sits in `.possible` receiving
+        /// nothing, and stating a dependency on it is stating a dependency on something that has no
+        /// reason to resolve. Returning false means "no dependency", which is the safe direction to
+        /// err: the worst case is a stroke racing a transform on a host that is declining strokes
+        /// anyway, and the best case is that two-finger pan keeps working in five states where it had
+        /// no business being at risk.
+        ///
+        /// Kept deliberately narrow: it does not try to inspect `otherGestureRecognizer.state`. A
+        /// recognizer legitimately sitting in `.began` mid-stroke is *exactly* what the dependency
+        /// exists to wait for, so "is it in a terminal state?" is not a question that can be asked
+        /// here without breaking the feature. Making the terminal transition reachable at all is
+        /// `StrokeGestureRecognizer.failTrackedStroke`'s job. (The reported canvas freeze was *not*
+        /// that path — it was popover teardown stranding the recognizer, fixed in `AnimationTimeline`
+        /// and pinned by `CanvasTransformFreezeUITests`; see `failTrackedStroke`'s own doc.)
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            let answer = shouldRequireFailure(gestureRecognizer, of: otherGestureRecognizer)
+            // Recorded on **every** call, not only when the answer changes: a `true` here is the edge
+            // that can wedge pan/pinch/rotate behind a stroke recognizer, so the value of the line is
+            // in pairing it with the `recognizer` lines around it — a `true` naming a recognizer that
+            // the file then shows never reaching a terminal state *is* the bug, stated.
+            ActionRecorder.ifRecording {
+                $0.failureRequirement(asker: $0.nameFor(gestureRecognizer),
+                                      other: $0.nameFor(otherGestureRecognizer),
+                                      answer: answer)
+            }
+            return answer
+        }
+
+        private func shouldRequireFailure(_ gestureRecognizer: UIGestureRecognizer, of otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
             guard transformRecognizers.contains(where: { $0 === gestureRecognizer }) else { return false }
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return false }
             let activeLayer = canvasManager.layers[canvasManager.currentLayerIndex]
             guard let activeHost = layerHosts[activeLayer.id] else { return false }
+            guard activeHost.isUserInteractionEnabled,
+                  activeHost.strokeView.isUserInteractionEnabled,
+                  activeHost.strokeView.strokeRecognizer.isEnabled else { return false }
             return otherGestureRecognizer === activeHost.strokeView.strokeRecognizer
         }
 

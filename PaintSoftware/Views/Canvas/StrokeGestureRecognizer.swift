@@ -107,9 +107,57 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     /// into the layer with no undo step behind it (the recognizer stops receiving touches the moment
     /// it fails, so `onEnd` never came), which is how a two-finger pan started mid-stroke used to
     /// leave a permanent, un-undoable mark.
+    ///
+    /// **What the readback on the next line defends against, and what it does not.** This is reached
+    /// only from `touchesBegan`, and only when a touch is already tracked — so the recognizer is in
+    /// `.began` or `.changed`, never `.possible`. `.failed` is documented as a transition *out of
+    /// `.possible`*, so this assignment is, on paper, not a legal move. If UIKit were to drop it, the
+    /// recognizer would sit in `.began` with `trackedTouch` already nil: `touchesEnded` and
+    /// `touchesCancelled` would both bail at their `guard let trackedTouch`, no terminal state would
+    /// ever be reached, `reset()` would never run, and the recognizer would never return to
+    /// `.possible`. That recognizer is exactly the one
+    /// `Coordinator.gestureRecognizer(_:shouldRequireFailureOf:)` points canvas pan/pinch/rotate at,
+    /// so two-finger canvas movement would be dead for the life of the view while drawing kept
+    /// working. Re-reading `state` and falling back to `.cancelled` — legal from `.began` and
+    /// `.changed` both — closes that off.
+    ///
+    /// **Whether any of that can actually happen is unverified, in both directions.** Nothing in this
+    /// repo reaches this function: measured, every two-finger gesture the test suite synthesises
+    /// arrives as a single `touchesBegan` carrying `touches.count == 2`, which is caught by the
+    /// `touches.count == 1` guard above and takes the ordinary, legal `.possible → .failed` path.
+    /// `failTrackedStroke` is only reachable when a second touch lands in a *later* event than the
+    /// first, which is what a real hand does and what no test here produces. So we have never
+    /// observed UIKit honouring `.began → .failed`, and we have never observed it dropping one
+    /// either. Treat the paragraph above as the hazard this line is priced against, not as something
+    /// that was seen.
+    ///
+    /// **It is emphatically not the "canvas freezes until you quit and re-enter" bug.** An earlier
+    /// version of this comment claimed it was; that attribution was wrong. The real trigger is a
+    /// stroke that begins while one of the timeline's popovers ("Add Drawing" / "Paste" / loop) is
+    /// still up: the popover is dismissed *by* the touch that starts the stroke, and its teardown
+    /// mid-sequence is what strands this recognizer without a `reset()`. The fix is in
+    /// `AnimationTimeline` — `.onReceive(canvasManager.interactionBegan)` closes the three popovers
+    /// before the touch becomes a stroke — and the pair of tests in `CanvasTransformFreezeUITests`
+    /// (the failing case plus the dismiss-first control) is what pins it there. Nothing in this file
+    /// was load-bearing for that bug.
+    ///
+    /// Two alternatives were considered. Assigning `.cancelled` unconditionally is one line shorter
+    /// and always legal, but `.cancelled` means "I recognized, then was cancelled", a *weaker*
+    /// release of a failure requirement than `.failed`'s "I never recognized" — so it would change
+    /// the release semantics of every ordinary pan-begun-mid-stroke, on every build, to guard against
+    /// something never observed. Deleting the readback instead was the other: it is the honest
+    /// response to "no test covers this", but the line costs one comparison, provably cannot change
+    /// behaviour on any build where `.failed` is honoured, and is the cheaper side of a bet whose odds
+    /// nobody here knows. It stays as defence-in-depth. If it ever needs settling, the thing to write
+    /// is a test that delivers the second touch in its own event.
     private func failTrackedStroke() {
         trackedTouch = nil
-        state = .failed
+        transition(to: .failed)
+        // Routed through `transition` as well, so a recording shows *which* of the two branches ran.
+        // That is the only evidence anyone will ever get about the open question above: this file
+        // has no test reaching it, but a recorder file that shows a `.cancelled` here would settle
+        // it on the spot.
+        if state != .failed { transition(to: .cancelled) }
         onCancel?()
     }
 }
