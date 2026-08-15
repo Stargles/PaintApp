@@ -444,9 +444,17 @@ brush, in a Release build, and they replaced 0.5/0.05, which had been a reasoned
 ≈ 0.5 would land on the visually solid part of a stroke. Measurement on hardware disagreed: the
 shipped threshold tracks nearly the whole extent of a soft dab rather than only its solid core, so 0.1
 sits close to the `> 0` this section argues against, not close to 0.5. The antialias half-width moved
-with it to 0.01 — narrower than the 0.05 it replaced — so the resolved edge sits nearer a hard boolean
-than the reasoning above anticipated; the smoothstep still exists only to stop diagonals stair-
-stepping, not to reintroduce softness.
+with it to 0.01 — about a third of a pixel of ramp across a soft dab's falloff, so **the smoothstep is
+vestigial at the shipped value** rather than serving the anti-stair-stepping purpose the paragraph
+above describes for it. The number stays where the owner put it; what moved is the claim made for it.
+
+The two are one setting with an invariant between them, enforced in `AlphaMask.setTuning`: the
+half-width is kept strictly below the threshold. At or past it the ramp's low end reaches zero and
+every pixel on the canvas picks up partial coverage — a transparent pixel stops being fully masked
+out, which is a mask that hides nothing. The sliders reach that easily (half-width to 0.25 against a
+threshold floor of 0.1), so the guard lives on the model rather than on the widget, and
+`MaskGuardLogicTests` pins the property (`coverage(forSourceAlpha: 0) == 0` everywhere reachable)
+rather than the clamp.
 
 ### 6.4 Live feedback while drawing
 
@@ -714,16 +722,12 @@ later and rewriting for one.
 
 ## 10. Still open
 
-1. **Mask threshold and antialias constants** (§6.3) — judged, not derived. `AlphaMask.threshold`
-   (0.1) and `AlphaMask.antialiasHalfWidth` (0.01) are what the product owner picked by eye on the
-   iPad, against a soft brush, in a Release build — replacing 0.5/0.05, 6b's pre-hardware guess.
-   `MaskTuningSection` and the two `static var`s stay rather than being deleted: the owner may want
-   to re-check the judgement once the live-stroke bug currently competing for iPad time is fixed.
-   Delete the harness (see the MASK-TUNE comments) once that re-check happens or is waved off. The
-   sliders live in the layer options menu; they were a floating panel in the canvas's top-trailing
-   corner until it turned out that corner belongs to the layer rail and every trailing dropdown, and
-   a view declared last in that `ZStack` hit-tests above them. "Clip to below" itself shipped in 6a,
-   as a mask whose source is implied.
+1. ~~Mask threshold and antialias constants~~ — **closed, and the harness became the feature.** The
+   owner asked for the Mask row to open "a mask tune menu in place of the edit menu … also include a
+   back button", so `MaskTuningSection` ships behind `LayerPanel.maskRow`/`maskMenu` rather than
+   being deleted. The values stay where the owner judged them on the iPad (0.1 / 0.01); §6.3 records
+   the guard that now keeps the pair legal. The numbering below is left alone because code comments
+   cite these items by number.
 2. **Compositor node ops** — §7 lists the *effects*; which ops take 2+ inputs beyond Mix is still
    open, but phase 8 narrowed it sharply. Because `Mix(A,B,mode)` is measured equal to stacking B
    over A with that mode, **every blend mode is already a 2-input op**, and per-input opacity, blend

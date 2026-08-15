@@ -320,6 +320,169 @@ final class LayerPanelUITests: PaintUITestCase {
         fillRefButton.tap()
         XCTAssertEqual(fillRef.value as? String, "0", "Tapping the row's drop should update the row")
     }
+
+    /// The owner's request: "if you click Mask, it brings up a mask tune menu in place of the edit
+    /// menu … also include a back button which exits this menu and goes back to the edit menu."
+    ///
+    /// The two halves worth pinning are that the mask menu **replaces** the edit rows rather than
+    /// growing the panel — the tuning sliders used to sit inline under every options menu, which is
+    /// the length this change buys back — and that Back restores them, `layerOptions.maskSummary`
+    /// included, since that identifier is what several other tests read the menu's state through.
+    func testTappingMaskOpensTheTuningMenuAndBackReturnsToTheEditMenu() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        // A fresh document has one layer and it is already selected, so its first tap opens options.
+        let row = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertTrue(app.buttons["layerOptions.rename"].waitForExistence(timeout: 5),
+                      "Sanity: the edit menu opened")
+        XCTAssertFalse(app.sliders["maskTuning.threshold"].exists,
+                       "The tuning sliders no longer sit inline in the edit menu")
+
+        app.buttons["layerOptions.maskButton"].tap()
+
+        XCTAssertTrue(app.sliders["maskTuning.threshold"].waitForExistence(timeout: 5),
+                      "Tapping Mask should bring up the tuning menu")
+        XCTAssertTrue(app.sliders["maskTuning.antialiasHalfWidth"].exists)
+        XCTAssertTrue(app.buttons["maskTuning.reset"].exists)
+        XCTAssertFalse(app.buttons["layerOptions.rename"].exists,
+                       "…in place of the edit menu, not stacked under it")
+        XCTAssertFalse(app.staticTexts["layerOptions.maskSummary"].exists)
+
+        app.buttons["layerOptions.maskBack"].tap()
+
+        XCTAssertTrue(app.buttons["layerOptions.rename"].waitForExistence(timeout: 5),
+                      "Back should return to the edit menu")
+        XCTAssertTrue(app.staticTexts["layerOptions.maskSummary"].exists,
+                      "…with the summary still where every other test reads it")
+        XCTAssertFalse(app.sliders["maskTuning.threshold"].exists)
+    }
+
+    /// §6.2 puts `alphaMask` on `LayerFolder` as well as `Layer`, and both panels call the one
+    /// `maskRow`/`maskMenu` pair — so the menu has to open from a folder's options too, not only a
+    /// layer's. The failure this catches is the obvious one: forking the section into two near-copies
+    /// and wiring the button up in only one of them.
+    func testTheMaskMenuOpensFromAFoldersOptionsToo() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addFolderFromAddMenu(app)
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
+
+        app.buttons["layerPanel.folder.Folder 1.options"].tap()
+        XCTAssertTrue(app.switches["layerOptions.passThroughToggle"].waitForExistence(timeout: 5),
+                      "Sanity: the folder's edit menu opened")
+
+        app.buttons["layerOptions.maskButton"].tap()
+        XCTAssertTrue(app.sliders["maskTuning.threshold"].waitForExistence(timeout: 5),
+                      "A folder's Mask row opens the same menu a layer's does")
+        XCTAssertFalse(app.switches["layerOptions.passThroughToggle"].exists,
+                       "…replacing the folder's edit rows, same as on a layer")
+
+        app.buttons["layerOptions.maskBack"].tap()
+        XCTAssertTrue(app.switches["layerOptions.passThroughToggle"].waitForExistence(timeout: 5),
+                      "Back returns to the folder's edit menu")
+    }
+
+    /// The sub-menu belongs to the node whose row was tapped. Both halves matter and they fail
+    /// differently: closing the panel and reopening another row tears the view down, while tapping a
+    /// second **folder's** options button hands the *same* panel a new id — SwiftUI reuses the view,
+    /// so nothing resets on its own and the state has to be cleared explicitly.
+    func testTheMaskMenuDoesNotFollowThePanelToAnotherRow() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
+
+        app.staticTexts["layerPanel.row.1"].tap()   // already selected after the add: opens options
+        XCTAssertTrue(app.buttons["layerOptions.maskButton"].waitForExistence(timeout: 5))
+        app.buttons["layerOptions.maskButton"].tap()
+        XCTAssertTrue(app.sliders["maskTuning.threshold"].waitForExistence(timeout: 5))
+        app.buttons["layerOptions.close"].tap()
+
+        app.staticTexts["layerPanel.row.0"].tap()   // select
+        app.staticTexts["layerPanel.row.0"].tap()   // open options
+        XCTAssertTrue(app.buttons["layerOptions.rename"].waitForExistence(timeout: 5),
+                      "Another layer's options open on its edit menu, not on the mask menu")
+        XCTAssertFalse(app.sliders["maskTuning.threshold"].exists)
+
+        // The same claim where the panel is reused rather than rebuilt.
+        addFolderFromAddMenu(app)
+        addFolderFromAddMenu(app)
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 2"].waitForExistence(timeout: 5))
+
+        app.buttons["layerPanel.folder.Folder 1.options"].tap()
+        XCTAssertTrue(app.buttons["layerOptions.maskButton"].waitForExistence(timeout: 5))
+        app.buttons["layerOptions.maskButton"].tap()
+        XCTAssertTrue(app.sliders["maskTuning.threshold"].waitForExistence(timeout: 5))
+
+        app.buttons["layerPanel.folder.Folder 2.options"].tap()
+        XCTAssertTrue(app.switches["layerOptions.passThroughToggle"].waitForExistence(timeout: 5),
+                      "Swapping the open panel to another folder lands on its edit menu")
+        XCTAssertFalse(app.sliders["maskTuning.threshold"].exists)
+    }
+
+    /// §4.4's effect layer, reachable at last: it shipped engine-complete with no way to create one.
+    ///
+    /// The row's label is the only thing the panel says about it, so the kind is confirmed the way an
+    /// artist would notice it — a stroke has nowhere to land, and `Layer.hasNoDrawingSurface` answers
+    /// with the alert phase 9b already built rather than swallowing the touch.
+    func testTheAddMenuCreatesAnEffectLayerAStrokeCannotLandOn() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The add menu should create a second layer")
+        XCTAssertEqual(row.label, "Brightness / Contrast",
+                       "An effect layer is named for its grade, and arrives as the identity one")
+
+        openLayerPanel(app)   // close the panel so the canvas is clear
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let point = safeOutsideCornerPoint(canvas)
+        drawLine(on: canvas, from: point, to: CGVector(dx: point.dx + 0.12, dy: point.dy))
+
+        XCTAssertTrue(app.alerts["No Drawing Surface"].waitForExistence(timeout: 5),
+                      "The new layer holds no pixels, so the stroke is refused with the existing alert")
+        app.alerts["No Drawing Surface"].buttons["OK"].tap()
+    }
+
+    /// §4.5's value layer, same story — plus the one control it needs to be worth creating: the
+    /// colour it *is*. The swatch carries the hex as its accessibility value (`blendModeRow`'s
+    /// convention) so a test can tell a real fill from a control that renders a default.
+    func testTheAddMenuCreatesAValueLayerWithAColorControl() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertEqual(row.label, "Value 2")
+
+        row.tap()   // already selected after the add: opens its options
+        let swatch = app.buttons["layerOptions.valueColorButton"]
+        XCTAssertTrue(swatch.waitForExistence(timeout: 5),
+                      "A value layer's options should offer the colour it is")
+        XCTAssertEqual(swatch.value as? String, "808080",
+                       "It arrives mid-grey at full alpha (ValueFill.defaultColor)")
+
+        app.buttons["layerOptions.close"].tap()
+        app.staticTexts["layerPanel.row.0"].tap()   // select
+        app.staticTexts["layerPanel.row.0"].tap()   // open options
+        XCTAssertTrue(app.buttons["layerOptions.rename"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["layerOptions.valueColorButton"].exists,
+                       "…and only a value layer's: setLayerFill refuses every other kind anyway")
+    }
 }
 
 final class BlendModesAndCompositorUITests: PaintUITestCase {

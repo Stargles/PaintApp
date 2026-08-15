@@ -414,6 +414,27 @@ class PaintUITestCase: XCTestCase {
         nodeItem.tap()
     }
 
+    /// Same menu again, for §4.4's effect layer — a `.compositing` leaf that grades the backdrop
+    /// beneath it and holds no pixels of its own.
+    func addEffectLayerFromAddMenu(_ app: XCUIApplication) {
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.0)
+        let item = app.buttons["layerPanel.addEffectButton"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+    }
+
+    /// Same menu again, for §4.5's value layer — one flat colour across the canvas.
+    func addValueLayerFromAddMenu(_ app: XCUIApplication) {
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.press(forDuration: 1.0)
+        let item = app.buttons["layerPanel.addValueButton"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+    }
+
     /// Returns to the gallery (saving the project) and waits for its tile to appear.
     @discardableResult
     func saveEditorAndReturnToGallery(_ app: XCUIApplication) -> XCUIElement {

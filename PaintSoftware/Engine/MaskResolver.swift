@@ -228,11 +228,10 @@ enum MaskResolver {
         let height: Int
         let quality: RenderQuality
         let versions: [LayerContentVersion?]
-        // MASK-TUNE (temporary): `AlphaMask.threshold`/`.antialiasHalfWidth` are statics, not stored
-        // properties, so `masks` above cannot see a change to either — without this field the cache
-        // would keep serving a `ResolvedMask` computed under the old value. See
-        // `AlphaMask.tuningGeneration`'s doc comment. Delete this field when the tuning harness goes;
-        // it costs nothing in production, where the generation never moves off 0.
+        // MASK-TUNE: `AlphaMask.threshold`/`.antialiasHalfWidth` are statics, not stored properties,
+        // so `masks` above cannot see a change to either — without this field the cache would keep
+        // serving a `ResolvedMask` computed under the old value. See `AlphaMask.tuningGeneration`'s
+        // doc comment. Costs nothing in a document nobody has tuned, where the generation stays 0.
         let tuningGeneration: Int
     }
 
