@@ -25,26 +25,6 @@ and this would be rewritten. When it is rewritten, reuse `resolveLiveMask(forLay
 §6.4's warning that a `CALayer.mask` slot collision fails silently in whichever direction install
 order decides.
 
-## `testMovingThePlayheadRebuildsTheBlendedCanvas` is order-dependent (2026-08-15)
-
-Not load, and not a product regression — **state left in the simulator by whatever test ran before
-it**. Measured three ways on an erased simulator, quiet machine:
-
-| run | result |
-|---|---|
-| full boundary suite (961 tests) | **failed** |
-| with one other `LayerUITests` case, erased first | **failed** |
-| genuinely alone (`totalTestCount: 1`), erased first | **passed** |
-
-It dies at `LayerUITests.swift:657`, which is `row.waitForExistence` inside the `setBlendMode`
-helper — a **missing layer row**, nothing to do with the playhead or the composite its name
-describes. Two other tests call that same helper with the same `layerIndex: 1` after the same
-`drawCrossedStrokesOnTwoLayers` setup and both pass, so the row identifier is not broken.
-
-The likely mechanism is that `launchIntoEditor` does not guarantee a fresh document, so a prior
-test's project is restored and the panel does not hold the two layers this test assumes. The fix
-belongs in the test's setup, not in the app. **Do not "fix" it by re-running until green.**
-
 ## The multi-pass effect decline path is reasoned-correct and uncovered (2026-08-15)
 
 `EffectPipelines.encode` returns `false` for "declined — fall back to `EffectReference`", and its

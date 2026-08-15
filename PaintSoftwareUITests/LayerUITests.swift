@@ -888,6 +888,12 @@ final class LayerUITests: PaintUITestCase {
     /// showing the multiplied composite of frame 1.
     func testMovingThePlayheadRebuildsTheBlendedCanvas() throws {
         let app = XCUIApplication()
+        // Order-dependent otherwise: without this, a prior test's on-disk gallery/project state
+        // (Projects/Backups/Trash, ProjectBackupManager.swift) can survive into this launch, and
+        // this test — unlike its two passing siblings — has been observed to then fail at
+        // setBlendMode's row.waitForExistence (BUGS.md). -resetGallery is the same isolation
+        // VectorShapeAndRecoveryUITests already uses for its two disk-state-sensitive tests.
+        app.launchArguments = ["-resetGallery"]
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = drawCrossedStrokesOnTwoLayers(app)
         setBlendMode(app, layerIndex: 1, to: "multiply")
