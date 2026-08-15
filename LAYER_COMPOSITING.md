@@ -594,6 +594,17 @@ Swift, so a third curve shape is a case in `Effect` and no shader change. **Neit
 yet** — nothing puts an effect into the tree, so no document can hold one; the wrappers are what add
 `var effect: Effect?` to the manifest, with one `decodeIfPresent` and no migration.
 
+**Sobel, Sharpen/unsharp and Outline (phase 9c) have also shipped as kernels**, on the same multi-pass
+contract blur and bloom established — no new abstraction. Sobel is one direct 3×3 gather (kind 10);
+sharpen is blur's own two passes (sharing its kind, precedented by Levels/Curves) plus a combine pass
+shaped exactly like bloom's (kind 11); outline is one direct disc gather, exact Euclidean distance,
+outside mode only (kind 12). Each carries the correctness defence the multi-pass blind spot demands —
+an impulse response against the published Gx/Gy stencils, the identity at amount 0 plus the exact
+relationship `sharpen(r, −1) ≡ blur(r)`, and a hand-counted width-1 spot check (4 painted pixels, not
+8) — in `EffectMultiPassLogicTests`, not a parity sweep alone. Outline's colour is EffectParams' first
+appended field (`colorR/G/B`, end-of-struct, both declarations); its cost is quadratic, so it is capped
+by `Effect.maxOutlineRadius` rather than `maxBlurTaps`.
+
 Where an effect had a published definition it follows it, and the choice is recorded next to the code:
 Photoshop/GIMP Levels, **CSS Filter Effects Level 1** for brightness and contrast, W3C Compositing
 Level 1's `Lum` for the gradient map's index (the weighting the non-separable blend modes already use),

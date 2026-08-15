@@ -144,6 +144,11 @@ final class EffectMultiPassLogicTests: XCTestCase {
         ("directionalBlur", .blur(Effect.Blur(radius: 0, angleDegrees: 45, isDirectional: true))),
         ("bloomAtZeroIntensity", .bloom(Effect.Bloom(threshold: 0.4, radius: 6, intensity: 0))),
         ("bloomAtAThresholdNothingReaches", .bloom(Effect.Bloom(threshold: 1, radius: 6, intensity: 1))),
+        // out = in + 0·(in − blur(in)) = in, for any radius, because the difference is multiplied by
+        // zero even though both blur passes really ran and quantized twice.
+        ("sharpenAtZeroAmount", .sharpen(Effect.Sharpen(radius: 5, amount: 0))),
+        // taps == 0 makes blur1D a pass-through, so in − blur(in) = 0 for ANY amount.
+        ("sharpenAtZeroRadius", .sharpen(Effect.Sharpen(radius: 0, amount: 2))),
     ]
 
     // MARK: - (1) The two backends
@@ -805,6 +810,257 @@ final class EffectMultiPassLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - (4) Sobel — LAYER_COMPOSITING.md §7's "3×3 gradient in x and y, then magnitude"
+    //
+    // **Defence (a): an impulse response checked against mathematics.** Sobel is a fixed published
+    // 3×3 stencil with a closed-form response, so this is genuinely independent of the implementation
+    // rather than a same-author re-derivation: the expected bytes below are computed from the published
+    // Gx/Gy matrices and the divisor Effect.swift's `params` comment derives, not from reading
+    // `EffectKernels.sobel` or `Composite.metal`'s `sobel`. (b) is unavailable (no separable form in
+    // this contract); (c) is meaningless (no radius); (d) would be a 9-tap transcription by the same
+    // hand that wrote the 9 constants under test, which is weak in exactly the way (a) is not.
+
+    /// **The premise, stated before the arithmetic**: the impulse fixture really is one bright pixel
+    /// among zero, not an image that happens to be uniform. A test that skipped this and still passed
+    /// would be evidence of nothing — the failure this project has already shipped once.
+    func testSobelImpulsePremiseIsGenuinelyAnImpulse() {
+        let centre = (x: Self.side / 2, y: Self.side / 2)
+        let input = impulseBytes(at: centre)
+        XCTAssertEqual(pixel(input, centre.x, centre.y), [255, 255, 255, 255], "Fixture check: the centre must be opaque white")
+        XCTAssertEqual(pixel(input, centre.x + 1, centre.y), [0, 0, 0, 0], "Fixture check: its neighbour must be fully transparent, or every position below is trivially the same value")
+    }
+
+    /// **The hand-worked table**, computed from the published stencils and stated as literals so a
+    /// uniformly-wrong implementation cannot pass by agreeing with itself:
+    ///
+    ///     Gx = [[-1,0,1],[-2,0,2],[-1,0,1]]   Gy = [[-1,-2,-1],[0,0,0],[1,2,1]]   (y downward)
+    ///
+    /// For a unit impulse at the origin, `magnitude = sqrt(Gx² + Gy²)` at offset `(dx, dy)` is EXACTLY:
+    ///     (0,0) = 0 ; (±1,0) = 2 ; (0,±1) = 2 ; (±1,±1) = √2 ≈ 1.41421356 ; |dx|>1 or |dy|>1 = 0.
+    ///
+    /// **The divisor is `D = sqrt(20) ≈ 4.47213595`** — the true maximum of `sqrt(Gx² + Gy²)` over all
+    /// binary 3×3 patterns (attained at Gx=2, Gy=4, a diagonal step; `Effect.params`'s comment records
+    /// the enumeration this came from), chosen because it never clips, unlike D=4. Divided through and
+    /// quantized `.toNearestOrEven`:
+    ///     centre:        0 / 4.47213595 = 0            → byte 0
+    ///     edge-centres:  2 / 4.47213595 = 0.4472136     → 0.4472136 × 255 = 114.0046 → byte 114
+    ///     corners:  1.41421356 / 4.47213595 = 0.3162278 → 0.3162278 × 255 = 80.6381  → byte 81
+    ///
+    /// What this table discriminates from a wrong stencil: Prewitt gives edge-centres 1 and corners
+    /// √2 (corners LARGER, the opposite ordering); Scharr gives 10 and √18; a Gy accidentally equal to
+    /// Gx gives 2.83/0/1.41. The edge:corner ratio (√2 for Sobel, 0.707 for Prewitt, 2.357 for Scharr)
+    /// identifies the operator on its own. What it cannot discriminate — a full Gx↔Gy transpose or any
+    /// sign flip — is genuinely unobservable in a magnitude-only Sobel, so it needs no test.
+    func testSobelImpulseMatchesTheKnownGradientKernels() {
+        let centre = (x: Self.side / 2, y: Self.side / 2)
+        let input = impulseBytes(at: centre)
+        let expected: [(dx: Int, dy: Int, byte: Int)] = [
+            (0, 0, 0),
+            (1, 0, 114), (-1, 0, 114), (0, 1, 114), (0, -1, 114),
+            (1, 1, 81), (1, -1, 81), (-1, 1, 81), (-1, -1, 81),
+        ]
+        var table: [String] = []
+        for (backend, out) in bothBackends(.sobel(Effect.Sobel()), input) {
+            var worst = 0
+            for (dx, dy, want) in expected {
+                let got = pixel(out, centre.x + dx, centre.y + dy)
+                for channel in 0..<4 {
+                    worst = max(worst, abs(got[channel] - want))
+                    XCTAssertLessThanOrEqual(abs(got[channel] - want), 1,
+                                             "\(backend) Sobel at (\(dx),\(dy)) channel \(channel): got \(got[channel]), the Gx/Gy stencils give \(want)")
+                }
+            }
+            // Finite support: the stencil is 3×3, so nothing past radius 1 may have moved.
+            for step in [2, 3] {
+                XCTAssertEqual(pixel(out, centre.x + step, centre.y), [0, 0, 0, 0],
+                               "\(backend) Sobel reached \(step)px horizontally, past its 3×3 support")
+                XCTAssertEqual(pixel(out, centre.x, centre.y + step), [0, 0, 0, 0],
+                               "\(backend) Sobel reached \(step)px vertically, past its 3×3 support")
+            }
+            table.append("\(backend) \(worst)")
+        }
+        XCTContext.runActivity(named: "[sobel] impulse vs Gx/Gy first principles, max channel delta: \(table.joined(separator: " · "))") { _ in }
+    }
+
+    /// A constant field has zero gradient everywhere a differencing stencil can reach it, including the
+    /// border — clamp-to-edge repeats the same value, so the difference stays zero there too. The
+    /// analogue of `testABlurOfAFlatColourIsThatColourIncludingAtTheBorder`, but Sobel's identity output
+    /// is transparent black rather than the input colour, since the effect replaces the image with an
+    /// edge map.
+    func testSobelOfAFlatColourIsZeroEverywhereIncludingAtTheBorder() {
+        let bytes = flatBytes(90, 160, 40)
+        XCTAssertEqual(cpu(.sobel(Effect.Sobel()), bytes), [UInt8](repeating: 0, count: bytes.count),
+                       "A flat field has zero gradient everywhere, including the clamped border")
+    }
+
+    // MARK: - (5) Sharpen / unsharp — `x + amount·(x − blur_r(x))`
+    //
+    // **Defence (d): an independent transcription in a different number of stages**, mirroring
+    // `independentBloom` below it. The blur half is already proven by (a)/(b) in the impulse and
+    // separable-vs-direct tests above; everything NEW here is the combine, and a self-comparison is
+    // exactly blind to a combine bug (both backends read the same `original` binding and would combine
+    // the same wrong buffer identically). So `independentSharpen` holds the original in a local, runs
+    // one direct 2D convolution rather than the app's two 1D passes, and does the algebra once in
+    // `Double` — structurally nothing like the three-pass pipeline it checks.
+
+    /// Bloom's independent transcription, restated for sharpen: bright pass replaced by a direct blur,
+    /// the additive combine replaced by `original + amount·(original − blurred)`. One convolution stage
+    /// against the app's three passes.
+    private func independentSharpen(_ bytes: [UInt8], radius: Double, amount: Double) -> [UInt8] {
+        let blurred = directConvolution2D(bytes, radius: radius)
+        var result = bytes
+        for y in 0..<Self.side {
+            for x in 0..<Self.side {
+                let base = clampedTexel(bytes, x, y)
+                let blur = clampedTexel(blurred, x, y)
+                let out = base + (base - blur) * amount
+                let alpha = min(max(out.w, 0), 1)
+                let offset = (x + y * Self.side) * 4
+                for channel in 0..<3 {
+                    let value = min(max(out[channel], 0), 1)
+                    result[offset + channel] = quantized(min(value, alpha))
+                }
+                result[offset + 3] = quantized(alpha)
+            }
+        }
+        return result
+    }
+
+    func testTheWholeSharpenMatchesAnIndependentTranscription() {
+        let bytes = spectrumBytes()
+        // The premise: a fixture that happened to be flat would make the combine's difference zero
+        // everywhere and this test would pass no matter what the combine did.
+        XCTAssertGreaterThan(Set(stride(from: 0, to: bytes.count, by: 4).map { bytes[$0] }).count, 1,
+                             "Fixture check: spectrumBytes must vary, or a broken combine cannot be seen")
+
+        let cases: [(radius: Double, amount: Double, bound: Int)] = [
+            (2, 0.5, 1),
+            (3, 1.0, 1),
+            (2, 2.0, 3),
+        ]
+        var table: [String] = []
+        for (radius, amount, bound) in cases {
+            let reference = independentSharpen(bytes, radius: radius, amount: amount)
+            let effect = Effect.sharpen(Effect.Sharpen(radius: radius, amount: amount))
+            for (backend, out) in bothBackends(effect, bytes) {
+                let delta = maxChannelDelta(out, reference)
+                table.append("r\(Int(radius))a\(amount)/\(backend) \(delta)")
+                XCTAssertLessThanOrEqual(delta, bound,
+                                         "\(backend) sharpen at radius \(radius), amount \(amount) differs from an independently written sharpen by \(delta), past the \(bound) its extra quantization can explain")
+            }
+        }
+        XCTContext.runActivity(named: "[sharpen] whole sharpen vs independent transcription, max channel delta: \(table.joined(separator: " · "))") { _ in }
+    }
+
+    /// **The load-bearing relationship to the existing blur, stated as code rather than as a claim in
+    /// a comment.** `Sharpen.weights` must be the exact same call `Effect.blur` makes at the same
+    /// radius — not a re-typed formula that happens to agree — which is what would break if the two
+    /// derivations were ever allowed to drift apart.
+    func testSharpenSharesItsBlurKernelWithBlurAtTheSameRadius() {
+        for radius in [0.0, 2.0, 9.0] {
+            XCTAssertEqual(Effect.sharpen(Effect.Sharpen(radius: radius, amount: 1.5)).weights,
+                           Effect.blur(Effect.Blur(radius: radius)).weights,
+                           "sharpen's weights at radius \(radius) must be Effect.blur's own weights, not a re-derivation")
+        }
+    }
+
+    /// **`amount: −1` reproduces the plain blur byte for byte.** `x + (−1)(x − blur(x)) = blur(x)`
+    /// exactly, in float, from two byte-valued operands, and `quantize(blur) = blur` — so this ties the
+    /// brand-new combine to the kernel the impulse-response and separable-vs-direct tests above already
+    /// proved, and it fails on a swapped operand, a sign flip, a different σ, or a different tap count.
+    func testSharpenAtAmountNegativeOneEqualsThePlainBlurByteForByte() {
+        let bytes = spectrumBytes()
+        for radius in [0.0, 2.0, 6.0] {
+            let sharpened = cpu(.sharpen(Effect.Sharpen(radius: radius, amount: -1)), bytes)
+            let blurred = cpu(.blur(Effect.Blur(radius: radius)), bytes)
+            XCTAssertLessThanOrEqual(maxChannelDelta(sharpened, blurred), 1,
+                                     "sharpen(radius: \(radius), amount: -1) must equal blur(radius: \(radius)): x + (-1)(x - blur) = blur algebraically")
+        }
+    }
+
+    // MARK: - (6) Outline — LAYER_COMPOSITING.md §7's "distance field around alpha"
+    //
+    // **Defence (c): a hand-computed spot check at the degenerate radius.** At width 1 the painted set
+    // is exactly the pixels at Euclidean distance ≤ 1 from the shape and not in it, which is a set to
+    // enumerate rather than compute: the four 4-neighbours are painted (d = 1), the four diagonals are
+    // not (d = √2 > 1). That is the single input that separates the Euclidean distance this effect
+    // implements from the L∞ (Chebyshev) distance a pair of separable max passes would give instead —
+    // 4 painted pixels against 8. (a) does not apply (a threshold-then-min-distance is nonlinear, so
+    // there is no impulse response); (b) is the question rather than the check (the implementation
+    // being separable would BE the L∞ answer, not something to compare against it); (d) — a brute-force
+    // scan at a real width like 4–6 — is a good second test but is same-author and cannot identify the
+    // metric the way counting 4 against 8 by hand can.
+
+    /// The premise: the fixture is one opaque pixel among transparency, so the ring at distance 1 is a
+    /// real boundary a broken outline could get wrong in either direction (painting nothing, or
+    /// painting everything within reach).
+    func testOutlinePremiseIsGenuinelyAnImpulse() {
+        let centre = (x: Self.side / 2, y: Self.side / 2)
+        let input = impulseBytes(at: centre)
+        XCTAssertEqual(pixel(input, centre.x, centre.y)[3], 255, "Fixture check: the centre must be opaque")
+        XCTAssertEqual(pixel(input, centre.x + 1, centre.y)[3], 0, "Fixture check: its neighbour must be transparent")
+    }
+
+    /// **The width-1 spot check.** A cross of exactly 4 painted pixels, not a ring of 8 — the signature
+    /// a pair of separable max passes cannot produce. Also pins four more Swift-resolution decisions no
+    /// backend-parity sweep can see: the centre is unchanged byte-for-byte (the containment rule), a
+    /// painted pixel is `round(C·255)` with alpha 255 (catches an unpremultiplied write into a
+    /// premultiplied texture), the ring at distance 2 is untouched (finite support), and — separately,
+    /// below — an alpha exactly at the threshold resolves the same way on both backends.
+    func testOutlineAtWidthOneIsAFourPixelCrossNotAnEightPixelRing() {
+        let centre = (x: Self.side / 2, y: Self.side / 2)
+        let input = impulseBytes(at: centre)
+        let colour = CodableColor(red: 1, green: 0, blue: 0, alpha: 1) // pure red, so a wrong channel is obvious
+        let effect = Effect.outline(Effect.Outline(width: 1, color: colour, threshold: 0.5))
+
+        for (backend, out) in bothBackends(effect, input) {
+            XCTAssertEqual(pixel(out, centre.x, centre.y), [255, 255, 255, 255],
+                           "\(backend): the shape's own pixel must be unchanged — the containment rule")
+
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                XCTAssertEqual(pixel(out, centre.x + dx, centre.y + dy), [255, 0, 0, 255],
+                               "\(backend) at (\(dx),\(dy)), distance 1: must be painted red, round(C·255) with alpha 255")
+            }
+            for (dx, dy) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
+                XCTAssertEqual(pixel(out, centre.x + dx, centre.y + dy), [0, 0, 0, 0],
+                               "\(backend) at (\(dx),\(dy)), distance √2 > 1: must be untouched — an 8-pixel ring here would mean L∞, not Euclidean")
+            }
+            for (dx, dy) in [(2, 0), (0, 2), (2, 2)] {
+                XCTAssertEqual(pixel(out, centre.x + dx, centre.y + dy), [0, 0, 0, 0],
+                               "\(backend) at (\(dx),\(dy)): a width-1 outline must have finite support")
+            }
+        }
+    }
+
+    /// The binary-with-a-threshold argument LAYER_COMPOSITING.md §6.3 makes for `MaskResolver`: an
+    /// alpha sitting exactly on the containment line must resolve the same way everywhere. 128/255 ≈
+    /// 0.502 sits just above threshold 0.5, so this pixel is "in the shape" on both backends or the
+    /// outline painted around it disagrees about where its own edge is.
+    ///
+    /// **Observed through a side effect rather than self-reference on purpose.** Asking "is the centre
+    /// pixel unchanged" cannot distinguish the two outcomes here: this canvas has no other in-shape
+    /// pixel anywhere, so a centre classified "outside" ALSO finds nothing to paint within reach and
+    /// is left unchanged too — the same observable result as being classified "inside". Instead this
+    /// reads a transparent *neighbour* one pixel away, which is painted if and only if the centre
+    /// really did clear the threshold.
+    func testOutlineResolvesAnAlphaAtTheThresholdTheSameWayOnBothBackends() {
+        var bytes = [UInt8](repeating: 0, count: Self.side * Self.side * 4)
+        let centre = Self.side / 2
+        let offset = (centre + centre * Self.side) * 4
+        for channel in 0..<3 { bytes[offset + channel] = 128 }
+        bytes[offset + 3] = 128
+        let effect = Effect.outline(Effect.Outline(width: 1, color: CodableColor(red: 0, green: 1, blue: 0, alpha: 1), threshold: 0.5))
+
+        var painted: [String: Bool] = [:]
+        for (backend, out) in bothBackends(effect, bytes) {
+            painted[backend] = pixel(out, centre + 1, centre) != [0, 0, 0, 0]
+        }
+        let values = Set(painted.values)
+        XCTAssertEqual(values.count, 1, "The backends disagree about whether alpha 128/255 clears threshold 0.5: \(painted)")
+        XCTAssertEqual(painted.values.first ?? false, true,
+                       "128/255 ≈ 0.50196 is > threshold 0.5 and must count as in the shape — otherwise both backends could quietly agree on the wrong side")
+    }
+
     // MARK: - The abstraction itself
 
     /// **`passes[0]` is `kindCode` and `params`, for every effect in the file.** That invariant is what
@@ -818,6 +1074,8 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .posterize(Effect.Posterize()), .noise(Effect.Noise()),
             .blur(Effect.Blur(radius: 5)), .blur(Effect.Blur(radius: 5, isDirectional: true)),
             .bloom(Effect.Bloom()),
+            .sobel(Effect.Sobel()), .sharpen(Effect.Sharpen(radius: 3, amount: 1)),
+            .outline(Effect.Outline()),
         ]
         for effect in everything {
             XCTAssertEqual(effect.passes.first, EffectPass(kind: effect.kindCode, params: effect.params),
@@ -835,6 +1093,9 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .brightnessContrast(Effect.BrightnessContrast()), .hsvShift(Effect.HSVShift()),
             .gradientMap(Effect.GradientMap()), .chromaticAberration(Effect.ChromaticAberration()),
             .posterize(Effect.Posterize()), .noise(Effect.Noise()),
+            // Sobel and outline are gathers, not grades, but they are still one dispatch each: neither
+            // convolves with `weights`, so both bind the same [1] stub every non-convolving effect does.
+            .sobel(Effect.Sobel()), .outline(Effect.Outline()),
         ]
         for effect in cheap {
             XCTAssertEqual(effect.passes.count, 1, "\(effect.displayName) must still be a single dispatch")
@@ -842,16 +1103,23 @@ final class EffectMultiPassLogicTests: XCTestCase {
         }
     }
 
-    /// Ten kernel branches and every one reachable — the assertion that catches a new case copying an
-    /// existing case's code, which a parity sweep shows only as one effect quietly rendering as another.
+    /// Thirteen kernel branches and every one reachable — the assertion that catches a new case copying
+    /// an existing case's code, which a parity sweep shows only as one effect quietly rendering as
+    /// another. Phase 9c's addition of Sobel, sharpen's combine and outline raised the ceiling from 9
+    /// to 12; each of the three is also a gather kind, so a missing entry in either backend's early-out
+    /// list (Composite.metal, EffectKernels.swift) renders as the identity rather than failing here —
+    /// this test only proves the kind is *reachable*, and the effect-specific tests above are what
+    /// would notice a silent identity.
     func testEveryKernelBranchIsReachedThroughSomePassList() {
         let everything: [Effect] = [
             .levels(Effect.Levels()), .brightnessContrast(Effect.BrightnessContrast()),
             .hsvShift(Effect.HSVShift()), .gradientMap(Effect.GradientMap()),
             .chromaticAberration(Effect.ChromaticAberration()), .posterize(Effect.Posterize()),
             .noise(Effect.Noise()), .blur(Effect.Blur(radius: 1)), .bloom(Effect.Bloom()),
+            .sobel(Effect.Sobel()), .sharpen(Effect.Sharpen(radius: 1, amount: 1)),
+            .outline(Effect.Outline()),
         ]
-        XCTAssertEqual(Set(everything.flatMap { $0.passes.map(\.kind) }), Set(0...9),
+        XCTAssertEqual(Set(everything.flatMap { $0.passes.map(\.kind) }), Set(0...12),
                        "Every branch of applyEffect must be reachable from some effect's pass list")
     }
 

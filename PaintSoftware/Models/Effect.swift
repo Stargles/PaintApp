@@ -78,6 +78,23 @@ enum Effect: Equatable {
     /// and a four-element pass list, with no new plumbing anywhere.
     case bloom(Bloom)
 
+    /// **The 3×3 Sobel gradient magnitude of `Lum`, one direct pass.** §7 pairs it with Outline: "it
+    /// can derive line art from a painting". It reads a 3×3 neighbourhood of the *premultiplied* texel
+    /// directly — never unpremultiplied, the same convention `blur1D` follows — so a transparency edge
+    /// and a colour edge are the same kind of gradient and the impulse fixture (opaque on transparent)
+    /// exercises exactly what a painted line-art edge needs. The output is `(m, m, m, m)`, where `m` is
+    /// the normalized magnitude: trivially a valid premultiplied colour (`rgb == a` always), and the
+    /// reason this replaces the image rather than being mixed over it — see `reshapesCoverage`.
+    case sobel(Sobel)
+    /// **Sharpen / unsharp mask: `x + amount·(x − blur_r(x))`.** Fits the multi-pass contract with zero
+    /// new plumbing — see `Sharpen`'s doc for the three-pass shape, which is bloom's combine shape
+    /// exactly, and for what "amount" operates on.
+    case sharpen(Sharpen)
+    /// **Outline / stroke around alpha — one direct disc gather.** Exact Euclidean distance, not the
+    /// L∞ a pair of separable max passes would give (which paints a square ring around a round shape).
+    /// See `Outline` and `Effect.maxOutlineRadius` for the cost that choice buys.
+    case outline(Outline)
+
     /// The label an effect picker shows, written out for the reason `BlendMode.displayName` is.
     var displayName: String {
         switch self {
@@ -91,20 +108,25 @@ enum Effect: Equatable {
         case .noise:               return "Noise"
         case .blur(let blur):      return blur.isDirectional ? "Directional Blur" : "Gaussian Blur"
         case .bloom:               return "Bloom"
+        case .sobel:               return "Sobel"
+        case .sharpen:             return "Sharpen"
+        case .outline:             return "Outline"
         }
     }
 
-    /// Whether this effect may change alpha. **False for every grade and true for exactly blur and
-    /// bloom**, for the reason the file header gives — a blur that left the silhouette sharp is not a
-    /// blur, and a glow confined to its own coverage is not visible.
+    /// Whether this effect may change alpha. **False for every grade, true for blur, bloom, Sobel,
+    /// sharpen and outline** — the file header's argument for blur and bloom (a blur that left the
+    /// silhouette sharp is not a blur) applies to all three of the newer effects for their own reasons:
+    /// Sobel's output *is* a magnitude, sharpen's combine operates on the full premultiplied vector
+    /// exactly as bloom's does, and an outline by definition paints coverage where the shape had none.
     ///
     /// Stated as a property rather than a comment because it is the precondition of a test: everything
-    /// answering false is swept for byte-exact alpha, and a ninth grade that quietly started reshaping
+    /// answering false is swept for byte-exact alpha, and a grade that quietly started reshaping
     /// coverage would have to come here and say so first.
     var reshapesCoverage: Bool {
         switch self {
-        case .blur, .bloom: return true
-        default:            return false
+        case .blur, .bloom, .sobel, .sharpen, .outline: return true
+        default:                                        return false
         }
     }
 }
@@ -296,6 +318,52 @@ extension Effect {
         var intensity: Double = 1
     }
 
+    /// No knobs today — the divisor that keeps the magnitude from clipping is a resolved constant
+    /// (`Effect.params`), not an artist-facing number. Kept as a struct anyway, for the same reason
+    /// every other case is a struct rather than a bare case: a later knob (a mix, a threshold) is then
+    /// a field here and a parameter change, not a new case.
+    struct Sobel: Equatable {}
+
+    /// The blur half is **exactly** `Effect.blur(Blur(radius: radius))` — same `gaussianHalfKernel`,
+    /// same σ = radius/3, same 128-tap cap — which is the load-bearing fact `weights` states in code
+    /// and two tests in `EffectMultiPassLogicTests` pin: that the kernel is shared rather than re-typed,
+    /// and that `amount: −1` reproduces the plain blur byte for byte (`x + (−1)(x − blur) ≡ blur`).
+    ///
+    /// **The combine sharpens the whole premultiplied vector, alpha included** — the same shape
+    /// `bloomCombine` already has (its two operands are this effect's blurred pass and its own
+    /// `original`, clamped and re-imposed the same way) rather than a colour-only combine that would
+    /// need the gather kernel to unpremultiply itself. That crisps the silhouette along with the
+    /// colour, which is why this is one of the effects `reshapesCoverage` names; an artist who wants
+    /// colour-only sharpening with the alpha left soft is a mode this effect does not yet offer.
+    struct Sharpen: Equatable {
+        /// Pixels — same meaning as `Blur.radius`. 0 makes the blur pass-through, so `amount` cannot
+        /// do anything either: see `taps == 0` in `blur1D`.
+        var radius: Double = 0
+        /// How much of `original − blur` is added back. 0 is the identity for any radius. Negative is
+        /// reachable here even before a UI admits it, because `amount: −1` is the strongest cheap test
+        /// this effect has — it ties a brand-new combine to the blur kernel already proven by
+        /// `EffectMultiPassLogicTests`' impulse-response and separable-vs-direct checks.
+        var amount: Double = 0
+    }
+
+    /// A stroke painted where alpha is absent within `width` of alpha that is present — §7's "distance
+    /// field around alpha". **Outside mode only**: a pixel already part of the shape (`alpha >
+    /// threshold`) is left byte-for-byte unchanged, and a pixel outside it within `width` becomes fully
+    /// opaque `color`, replacing whatever partial coverage was there.
+    ///
+    /// `threshold` is the same binary-with-a-threshold shape §6.3's `MaskResolver` uses: one comparison
+    /// resolved the same way by both backends rather than a soft ramp, so an alpha sitting exactly on
+    /// the line reads as the same side everywhere.
+    struct Outline: Equatable {
+        /// Pixels, Euclidean. **Capped by `Effect.maxOutlineRadius`, not `Effect.maxBlurTaps`** — a
+        /// disc gather is `O((2r+1)²)`, not `O(r)`, so a blur's cap would be a hang waiting to happen.
+        var width: Double = 1
+        var color: CodableColor = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
+        /// The alpha above which a pixel counts as "in the shape". 0.5 is the usual choice for content
+        /// that already anti-aliases its own edge.
+        var threshold: Double = 0.5
+    }
+
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
     enum Screen: String, Codable, Equatable, CaseIterable {
@@ -371,6 +439,13 @@ struct EffectParams: Equatable {
     /// Half-kernel size for a blur pass: `taps` weights on each side of the centre, so `2 * taps + 1`
     /// samples. 0 is a single centre tap, which is the identity.
     var taps: UInt32 = 0
+    /// **Appended at the end, deliberately** — Outline's stroke colour. The all-scalar layout rule
+    /// (this struct's own doc) makes the end of the block the one position where adding fields cannot
+    /// shift any existing one; anywhere else would silently corrupt every field after it, for every
+    /// effect shipping today. No effect before this one has needed a colour of its own.
+    var colorR: Float = 0
+    var colorG: Float = 0
+    var colorB: Float = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -421,6 +496,12 @@ extension Effect {
         case .blur:                return 7
         // Pass 0 of a bloom is its threshold; the blur and combine codes are reached through `passes`.
         case .bloom:               return 8
+        case .sobel:               return 10
+        // Pass 0 of a sharpen is a blur pass — sharing blur's code precedented by Levels/Curves
+        // sharing 0, and what makes `passes[0] == EffectPass(kind: kindCode, params: params)` (the
+        // invariant this property exists to serve) hold without a wasted copy pass.
+        case .sharpen:             return 7
+        case .outline:             return 12
         }
     }
 
@@ -465,6 +546,31 @@ extension Effect {
             p.threshold = Float(min(max(bloom.threshold, 0), 1))
             p.intensity = Float(max(bloom.intensity, 0))
             p.taps = UInt32(Self.tapCount(forRadius: bloom.radius))
+        case .sobel:
+            // The divisor that peak-normalizes the magnitude without ever clipping it. Max |Gx| = 4
+            // for input in [0, 1], but the true maximum of sqrt(Gx² + Gy²) over all binary 3×3
+            // patterns is sqrt(20) ≈ 4.4721 (attained at Gx = 2, Gy = 4, a diagonal step — enumerated
+            // over all 512 patterns rather than assumed). Dividing by 4 instead would clip a diagonal
+            // edge by up to 12%; dividing by 8 never clips but reads a straight edge at 0.5, dimmer
+            // than it needs to be. This is exactly the kind of constant a backend parity sweep cannot
+            // see — both backends receive whatever `amount` Swift resolved — so it is recorded here
+            // rather than as a shader literal, and `testTheSobelImpulseMatchesTheKnownGradientKernels`
+            // states the expected bytes this produces.
+            p.amount = Float(1.0 / 20.0.squareRoot())
+        case .sharpen(let sharpen):
+            p.taps = UInt32(Self.tapCount(forRadius: sharpen.radius))
+            p.offsetX = 1
+            p.offsetY = 0
+            p.amount = Float(sharpen.amount)
+        case .outline(let outline):
+            // `amount` carries the (fractional) search radius rather than `taps`, which is a uint and
+            // would truncate a non-integer width — the Euclidean comparison inside the kernel needs
+            // the exact value, not its ceiling.
+            p.amount = Float(min(max(outline.width, 0), Self.maxOutlineRadius))
+            p.threshold = Float(min(max(outline.threshold, 0), 1))
+            p.colorR = Float(min(max(outline.color.red, 0), 1))
+            p.colorG = Float(min(max(outline.color.green, 0), 1))
+            p.colorB = Float(min(max(outline.color.blue, 0), 1))
         }
         return p
     }
@@ -504,6 +610,17 @@ extension Effect {
             combine.kind = Self.kBloomCombine
             return [first, horizontal, vertical, combine]
 
+        case .sharpen:
+            // `first` already IS the horizontal blur pass — its kind is 7 (shared with blur) and its
+            // params already carry the step (1, 0), unlike bloom's pass 0, which is a threshold and so
+            // has to be rebuilt into a blur pass from scratch.
+            var vertical = first
+            vertical.params.offsetX = 0
+            vertical.params.offsetY = 1
+            var combine = first
+            combine.kind = Self.kSharpenCombine
+            return [first, vertical, combine]
+
         default:
             return [first]
         }
@@ -523,6 +640,10 @@ extension Effect {
         switch self {
         case .blur(let blur): return Self.gaussianHalfKernel(radius: blur.radius)
         case .bloom(let bloom): return Self.gaussianHalfKernel(radius: bloom.radius)
+        // The exact same call `Effect.blur` makes at the same radius — not a re-derivation. Pinned by
+        // `testSharpenSharesItsBlurKernelWithBlurAtTheSameRadius`, which is what would catch a copy
+        // that quietly stopped being the same call.
+        case .sharpen(let sharpen): return Self.gaussianHalfKernel(radius: sharpen.radius)
         default: return [1]
         }
     }
@@ -530,6 +651,12 @@ extension Effect {
     /// `2 · maxBlurTaps + 1` samples per pass is the ceiling a blur's cost is measured against; see
     /// `Blur` for why the cap is a real limit rather than a defensive one.
     static let maxBlurTaps = 128
+
+    /// The ceiling on `Outline.width`. **Bounds a quadratic-cost kernel, not a linear one** — a direct
+    /// disc gather is `O((2r + 1)²)` reads per pixel, so `maxBlurTaps`'s 128 would be 66,049 reads per
+    /// pixel here rather than 257. Chosen far more conservatively for that reason: at the ceiling this
+    /// is still ~2,401 reads/pixel, already two orders of magnitude past a same-radius blur.
+    static let maxOutlineRadius = 24.0
 
     private static func tapCount(forRadius radius: Double) -> Int {
         guard radius.isFinite, radius > 0 else { return 0 }
@@ -555,6 +682,7 @@ extension Effect {
     /// ever returns.
     private static let kBlur1D: UInt32 = 7
     private static let kBloomCombine: UInt32 = 9
+    private static let kSharpenCombine: UInt32 = 11
 
     /// 256 RGBA entries, 1024 bytes — the resolved transfer table, and **the only form a curve reaches
     /// either backend in**.
@@ -738,7 +866,7 @@ extension Effect: Codable {
 
     private enum Kind: String, Codable {
         case levels, curves, brightnessContrast, hsvShift, gradientMap, chromaticAberration,
-             posterize, noise, blur, bloom
+             posterize, noise, blur, bloom, sobel, sharpen, outline
     }
 
     private var kind: Kind {
@@ -753,6 +881,9 @@ extension Effect: Codable {
         case .noise:               return .noise
         case .blur:                return .blur
         case .bloom:               return .bloom
+        case .sobel:               return .sobel
+        case .sharpen:             return .sharpen
+        case .outline:             return .outline
         }
     }
 
@@ -777,6 +908,9 @@ extension Effect: Codable {
         case .noise:               self = .noise(try params(Noise.self, Noise()))
         case .blur:                self = .blur(try params(Blur.self, Blur()))
         case .bloom:               self = .bloom(try params(Bloom.self, Bloom()))
+        case .sobel:               self = .sobel(try params(Sobel.self, Sobel()))
+        case .sharpen:             self = .sharpen(try params(Sharpen.self, Sharpen()))
+        case .outline:             self = .outline(try params(Outline.self, Outline()))
         }
     }
 
@@ -794,6 +928,9 @@ extension Effect: Codable {
         case .noise(let p):               try container.encode(p, forKey: .params)
         case .blur(let p):                try container.encode(p, forKey: .params)
         case .bloom(let p):               try container.encode(p, forKey: .params)
+        case .sobel(let p):               try container.encode(p, forKey: .params)
+        case .sharpen(let p):             try container.encode(p, forKey: .params)
+        case .outline(let p):             try container.encode(p, forKey: .params)
         }
     }
 }
@@ -908,5 +1045,33 @@ extension Effect.Bloom: Codable {
         threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 0.75
         radius = try c.decodeIfPresent(Double.self, forKey: .radius) ?? 8
         intensity = try c.decodeIfPresent(Double.self, forKey: .intensity) ?? 1
+    }
+}
+
+extension Effect.Sobel: Codable {
+    // No fields yet — a synthesized `Decodable` on an empty struct still needs an explicit
+    // `init(from:)` that does not require a keyed container, so a bare `{"kind":"sobel"}` decodes.
+    init(from decoder: Decoder) throws {}
+}
+
+extension Effect.Sharpen: Codable {
+    private enum CodingKeys: String, CodingKey { case radius, amount }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        radius = try c.decodeIfPresent(Double.self, forKey: .radius) ?? 0
+        amount = try c.decodeIfPresent(Double.self, forKey: .amount) ?? 0
+    }
+}
+
+extension Effect.Outline: Codable {
+    private enum CodingKeys: String, CodingKey { case width, color, threshold }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        width = try c.decodeIfPresent(Double.self, forKey: .width) ?? 1
+        color = try c.decodeIfPresent(CodableColor.self, forKey: .color)
+            ?? CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
+        threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 0.5
     }
 }

@@ -365,6 +365,9 @@ constant uint kEffectNoise               = 6;
 constant uint kEffectBlur1D              = 7;
 constant uint kEffectBloomThreshold      = 8;
 constant uint kEffectBloomCombine        = 9;
+constant uint kEffectSobel               = 10;
+constant uint kEffectSharpenCombine      = 11;
+constant uint kEffectOutline             = 12;
 
 /// Mirrors `EffectParams` in Effect.swift field for field. **All-scalar, deliberately**: a `float2`
 /// here has an alignment a Swift `SIMD2<Float>` matches only by luck, and a padding disagreement
@@ -390,6 +393,11 @@ struct EffectParams {
     uint  seed;
     uint  isMonochrome;
     uint  taps;
+    // Appended at the end, deliberately — see the Swift declaration this mirrors for why that
+    // position is the only one a mismatch cannot silently corrupt.
+    float colorR;
+    float colorG;
+    float colorB;
 };
 
 /// One entry of the resolved transfer table.
@@ -638,6 +646,76 @@ static inline float4 bloomCombine(texture2d<float, access::read> glow,
     return float4(min(saturate(base.rgb + light.rgb * params.intensity), alpha), alpha);
 }
 
+/// The 3×3 Sobel gradient magnitude of `Lum`, read on the **premultiplied** texel — never
+/// unpremultiplied, the same convention `blur1D` follows — so a coverage edge and a colour edge are the
+/// same kind of gradient to this kernel. Clamp-to-edge at the border, matching every other gather here.
+///
+/// Output is `(m, m, m, m)`: trivially a valid premultiplied colour (`rgb == a`), which is why Sobel is
+/// one of the effects `Effect.reshapesCoverage` names rather than a grade.
+static inline float4 sobel(texture2d<float, access::read> source, constant EffectParams &params, uint2 gid) {
+    int x = int(gid.x), y = int(gid.y);
+    float tl = lum(texelClamped(source, x - 1, y - 1).rgb);
+    float tc = lum(texelClamped(source, x,     y - 1).rgb);
+    float tr = lum(texelClamped(source, x + 1, y - 1).rgb);
+    float ml = lum(texelClamped(source, x - 1, y    ).rgb);
+    float mr = lum(texelClamped(source, x + 1, y    ).rgb);
+    float bl = lum(texelClamped(source, x - 1, y + 1).rgb);
+    float bc = lum(texelClamped(source, x,     y + 1).rgb);
+    float br = lum(texelClamped(source, x + 1, y + 1).rgb);
+    // Gx = [[-1,0,1],[-2,0,2],[-1,0,1]], Gy = [[-1,-2,-1],[0,0,0],[1,2,1]] (y downward).
+    float gx = (tr - tl) + 2.0f * (mr - ml) + (br - bl);
+    float gy = (bl + 2.0f * bc + br) - (tl + 2.0f * tc + tr);
+    float magnitude = sqrt(gx * gx + gy * gy);
+    float m = saturate(magnitude * params.amount);
+    return float4(m, m, m, m);
+}
+
+/// Sharpen's combine: `original + amount · (original − blur)`, on the full premultiplied vector —
+/// **exactly `bloomCombine`'s shape**, with the blurred pass standing in for the glow and `amount` for
+/// the intensity. The difference can be negative as well as positive, so — like an additive bloom — the
+/// sum can overshoot `[0, 1]` in either direction (the halo), and is clamped and re-imposed the same way.
+static inline float4 sharpenCombine(texture2d<float, access::read> blurred,
+                                    texture2d<float, access::read> original,
+                                    constant EffectParams &params, uint2 gid) {
+    float4 base = original.read(gid);
+    float4 blur = blurred.read(gid);
+    float4 diff = base - blur;
+    float4 out = base + diff * params.amount;
+    float alpha = saturate(out.a);
+    return float4(min(saturate(out.rgb), alpha), alpha);
+}
+
+/// Outline, outside mode: a pixel already in the shape (`alpha > threshold`) is returned unchanged —
+/// the containment rule. A pixel outside it becomes fully opaque `(colorR, colorG, colorB, 1)` if some
+/// in-shape pixel lies within `amount` (the resolved fractional width — carried here rather than in
+/// `taps`, which is a uint and would truncate it) Euclidean pixels away, and is returned unchanged
+/// otherwise.
+///
+/// A direct `O((2r+1)²)` search, not a distance transform — see `Effect.maxOutlineRadius` for why its
+/// cost is capped separately from a blur's.
+static inline float4 outline(texture2d<float, access::read> source, constant EffectParams &params, uint2 gid) {
+    float4 src = source.read(gid);
+    if (src.a > params.threshold) { return src; }
+
+    int width = int(source.get_width()), height = int(source.get_height());
+    int x = int(gid.x), y = int(gid.y);
+    float radius = params.amount;
+    float radiusSquared = radius * radius;
+    int searchRadius = int(ceil(radius));
+
+    bool found = false;
+    for (int dy = -searchRadius; dy <= searchRadius && !found; ++dy) {
+        for (int dx = -searchRadius; dx <= searchRadius; ++dx) {
+            if (float(dx * dx + dy * dy) > radiusSquared) { continue; }
+            int nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) { continue; }
+            if (source.read(uint2(uint(nx), uint(ny))).a > params.threshold) { found = true; break; }
+        }
+    }
+    if (!found) { return src; }
+    return float4(params.colorR, params.colorG, params.colorB, 1.0f);
+}
+
 /// One pass of one effect over one texture — the kernel both §4.4 wrappers reach, and the only one they
 /// need whether the effect runs once or four times.
 ///
@@ -673,6 +751,18 @@ kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
     }
     if (kind == kEffectBloomCombine) {
         result.write(bloomCombine(source, original, params, gid), gid);
+        return;
+    }
+    if (kind == kEffectSobel) {
+        result.write(sobel(source, params, gid), gid);
+        return;
+    }
+    if (kind == kEffectSharpenCombine) {
+        result.write(sharpenCombine(source, original, params, gid), gid);
+        return;
+    }
+    if (kind == kEffectOutline) {
+        result.write(outline(source, params, gid), gid);
         return;
     }
 

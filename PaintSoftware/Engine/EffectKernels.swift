@@ -78,6 +78,12 @@ enum EffectReference {
             return bloomThreshold(bytes, params: params, width: width, height: height)
         case kBloomCombine:
             return bloomCombine(bytes, original: original, params: params, width: width, height: height)
+        case kSobel:
+            return sobel(bytes, params: params, width: width, height: height)
+        case kSharpenCombine:
+            return sharpenCombine(bytes, original: original, params: params, width: width, height: height)
+        case kOutline:
+            return outline(bytes, params: params, width: width, height: height)
         default:
             break
         }
@@ -134,6 +140,9 @@ enum EffectReference {
     private static let kBlur1D: UInt32 = 7
     private static let kBloomThreshold: UInt32 = 8
     private static let kBloomCombine: UInt32 = 9
+    private static let kSobel: UInt32 = 10
+    private static let kSharpenCombine: UInt32 = 11
+    private static let kOutline: UInt32 = 12
 
     // MARK: - The per-pixel transforms
     //
@@ -401,6 +410,104 @@ enum EffectReference {
                     result[pixel + channel] = quantize(min(value, alpha))
                 }
                 result[pixel + 3] = quantize(alpha)
+            }
+        }
+        return result
+    }
+
+    /// The 3×3 Sobel gradient magnitude of `Lum`, read on the **premultiplied** texel — never
+    /// unpremultiplied, matching `blur1D`'s convention — so a coverage edge and a colour edge are the
+    /// same kind of gradient to this kernel. Clamp-to-edge at the border, the same convention every
+    /// other gather kernel in this file uses.
+    ///
+    /// Output is `(m, m, m, m)`: a valid premultiplied colour by construction (`rgb == a`), which is
+    /// why `Effect.reshapesCoverage` names Sobel rather than treating it as a grade.
+    private static func sobel(_ bytes: [UInt8], params: EffectParams, width: Int, height: Int) -> [UInt8] {
+        func lum(_ x: Int, _ y: Int) -> Float {
+            let t = texel(bytes, x, y, width: width, height: height)
+            return 0.3 * t.x + 0.59 * t.y + 0.11 * t.z
+        }
+        var result = bytes
+        for y in 0..<height {
+            for x in 0..<width {
+                let tl = lum(x - 1, y - 1), tc = lum(x, y - 1), tr = lum(x + 1, y - 1)
+                let ml = lum(x - 1, y),                         mr = lum(x + 1, y)
+                let bl = lum(x - 1, y + 1), bc = lum(x, y + 1), br = lum(x + 1, y + 1)
+                // Gx = [[-1,0,1],[-2,0,2],[-1,0,1]], Gy = [[-1,-2,-1],[0,0,0],[1,2,1]] (y downward).
+                let gx = (tr - tl) + 2 * (mr - ml) + (br - bl)
+                let gy = (bl + 2 * bc + br) - (tl + 2 * tc + tr)
+                let magnitude = (gx * gx + gy * gy).squareRoot()
+                let m = min(max(magnitude * params.amount, 0), 1)
+                let byte = quantize(m)
+                let pixel = (x + y * width) * 4
+                for channel in 0..<4 { result[pixel + channel] = byte }
+            }
+        }
+        return result
+    }
+
+    /// Sharpen's combine: `original + amount · (original − blur)`, on the full premultiplied vector —
+    /// **exactly `bloomCombine`'s shape**, with the blurred pass standing in for bloom's glow and
+    /// `amount` for its intensity. Clamped and re-imposed the same way, for the same reason: the
+    /// difference can be negative as well as positive, so the sum can overshoot `[0, 1]` in either
+    /// direction — the halo — and a violation would otherwise surface much later as an unpremultiply
+    /// above 1.
+    private static func sharpenCombine(_ bytes: [UInt8], original: [UInt8], params: EffectParams,
+                                       width: Int, height: Int) -> [UInt8] {
+        var result = bytes
+        for y in 0..<height {
+            for x in 0..<width {
+                let base = texel(original, x, y, width: width, height: height)
+                let blurred = texel(bytes, x, y, width: width, height: height)
+                let alpha = min(max(base.w + (base.w - blurred.w) * params.amount, 0), 1)
+                let pixel = (x + y * width) * 4
+                for channel in 0..<3 {
+                    let value = min(max(base[channel] + (base[channel] - blurred[channel]) * params.amount, 0), 1)
+                    result[pixel + channel] = quantize(min(value, alpha))
+                }
+                result[pixel + 3] = quantize(alpha)
+            }
+        }
+        return result
+    }
+
+    /// Outline, outside mode: a pixel already part of the shape (`alpha > threshold`) is left
+    /// byte-for-byte unchanged — the containment rule. A pixel outside it becomes fully opaque
+    /// `(colorR, colorG, colorB, 1)` if some in-shape pixel lies within `amount` (the resolved,
+    /// fractional width, carried here rather than in `taps` so the Euclidean comparison keeps its
+    /// precision) Euclidean pixels away, and is left unchanged otherwise.
+    ///
+    /// A direct `O((2r+1)²)` search rather than a distance transform — see `Effect.maxOutlineRadius`
+    /// for why that cost is bounded separately from a blur's.
+    private static func outline(_ bytes: [UInt8], params: EffectParams, width: Int, height: Int) -> [UInt8] {
+        let radius = Double(params.amount)
+        let radiusSquared = radius * radius
+        let searchRadius = Int(radius.rounded(.up))
+        let threshold = params.threshold
+        let strokeColor: [UInt8] = [quantize(params.colorR), quantize(params.colorG), quantize(params.colorB)]
+
+        var result = bytes
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixel = (x + y * width) * 4
+                let alpha = Float(bytes[pixel + 3]) / 255
+                guard alpha <= threshold else { continue } // in the shape already: unchanged.
+
+                var found = false
+                searchLoop: for dy in -searchRadius...searchRadius {
+                    for dx in -searchRadius...searchRadius {
+                        guard Double(dx * dx + dy * dy) <= radiusSquared else { continue }
+                        let nx = x + dx, ny = y + dy
+                        guard nx >= 0, nx < width, ny >= 0, ny < height else { continue }
+                        let neighbourAlpha = Float(bytes[(nx + ny * width) * 4 + 3]) / 255
+                        if neighbourAlpha > threshold { found = true; break searchLoop }
+                    }
+                }
+                guard found else { continue } // outside the stroke's reach: unchanged.
+                result[pixel] = strokeColor[0]
+                result[pixel + 1] = strokeColor[1]
+                result[pixel + 2] = strokeColor[2]
+                result[pixel + 3] = 255
             }
         }
         return result
