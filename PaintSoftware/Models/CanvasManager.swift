@@ -556,62 +556,130 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Adds a `.compositing` layer: it holds no pixels and grades everything beneath it *within its
-    /// own container* (§4.4), which is Photoshop's adjustment layer.
+    /// Adds a `.value` layer — the kind that draws nothing of its own (§4.5) — in whichever of its two
+    /// modes `effect` selects.
     ///
-    /// It still gets an empty cel, for `addVectorLayer`'s reason — every cel-lifecycle path in the
-    /// app assumes a layer has one, and a blank cel is free (§8.1). Nothing ever draws into it: the
-    /// snapshot elides a compositing layer's pixels entirely (`renderSources`), and the compositor
-    /// reaches this leaf's effect before it would look for a source.
-    func addEffectLayer(_ effect: Effect, name: String? = nil) {
-        withStructureUndo(name: "Add Effect Layer") {
+    /// With `effect` nil it *is* one flat colour across the whole canvas, which is Photoshop's Solid
+    /// Colour layer: an operand for a Mix node, and a flat background or tint that blends with what is
+    /// under it like any other leaf. With `effect` set it is §4.4's stack-layer wrapper instead,
+    /// grading everything beneath it *within its own container* — Photoshop's adjustment layer.
+    ///
+    /// **One constructor for both modes, replacing the separate `addEffectLayer`.** The two used to be
+    /// separate kinds and so needed separate constructors; they are now one kind whose mode is a field,
+    /// and a second constructor would be a second place that has to know which fields make which mode.
+    ///
+    /// **A fill is stamped in *both* modes**, and that is the creation half of `Layer.valueFill`'s
+    /// asymmetry: a layer added as an effect and later flipped to flat colour has to arrive somewhere,
+    /// and mid-grey is the somewhere. Defaulting to mid-grey at full alpha is deliberate in its own
+    /// right — a flat-colour layer added at the top of the stack turns the canvas one flat colour,
+    /// which is correct and is what Photoshop does, so the first thing the artist sees has to read as a
+    /// deliberate colour rather than as a crash, and mid-grey is also the constant the Mix-node case
+    /// wants.
+    ///
+    /// It gets an empty cel, for `addVectorLayer`'s reason — every cel-lifecycle path in the app
+    /// assumes a layer has one, and a blank cel is free (§8.1). Nothing ever draws into it: in
+    /// flat-colour mode the fill is resolved into the snapshot's source at `renderSources`, and in
+    /// effect mode the snapshot elides the layer's pixels entirely and the compositor reaches the leaf
+    /// by its grade before it would look for a source.
+    func addValueLayer(color: PaletteColor = ValueFill.defaultColor, effect: Effect? = nil,
+                       name: String? = nil) {
+        withStructureUndo(name: effect == nil ? "Add Value Layer" : "Add Effect Layer") {
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1),
                           raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-            let layer = Layer(id: UUID(), name: name ?? effect.displayName, opacity: 1.0,
-                              isVisible: true, kind: .compositing, effect: effect, cels: [cel])
-            layers.append(layer)
-            currentLayerIndex = layers.count - 1
+            insertNewLayer { parent in
+                Layer(id: UUID(),
+                      name: name ?? Self.defaultValueLayerName(effect: effect, ordinal: layers.count + 1),
+                      // A caller that supplied a name chose it, so the mode picker must not take it
+                      // back — see `Layer.hasCustomName`. Every in-app route leaves this nil.
+                      hasCustomName: name != nil,
+                      opacity: 1.0, isVisible: true, kind: .value, effect: effect,
+                      fill: ValueFill(color: color), parentFolderID: parent, cels: [cel])
+            }
         }
     }
 
-    /// Replaces the grade on an effect layer, leaving every other property alone. Nothing happens on a
-    /// layer that is not `.compositing` — the kind is what makes an effect live (`compositingEffect`),
-    /// so writing one onto a raster layer would store a value that never renders.
-    func setLayerEffect(layerIndex: Int, to effect: Effect) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .compositing,
+    /// **The one generator for a value layer's automatic name**, so the name it is born with and the
+    /// name `setLayerEffect` renames it to cannot drift apart. Both call it; nothing else spells these
+    /// strings.
+    ///
+    /// The grade's own `displayName` in effect mode — "Gaussian Blur", "Brightness / Contrast" — and
+    /// the numbered default in flat-colour mode.
+    ///
+    /// `ordinal` is **the stack's layer count including this layer**, which is what the creation site
+    /// has always used (`layers.count + 1`, taken before the insert) and what the rename site passes
+    /// (`layers.count`, taken after). It is decoration, not identity: nothing preserves the number a
+    /// layer was born with — a restack or a deletion changes what any positional scheme would say — so
+    /// a layer that leaves effect mode in a taller stack than it entered it comes back with a larger
+    /// number. Worth stating because it looks like a bug and is not; the alternative, storing the
+    /// birth ordinal to reproduce it, is a second field carrying nothing an artist can act on.
+    static func defaultValueLayerName(effect: Effect?, ordinal: Int) -> String {
+        effect?.displayName ?? "Value \(ordinal)"
+    }
+
+    /// Sets or clears the grade on a `.value` layer — **the mode picker's whole model half.** Passing
+    /// an `Effect` puts the layer in effect mode; passing nil returns it to flat colour.
+    ///
+    /// Nothing happens on a layer that is not `.value`: the kind is what makes an effect live
+    /// (`Layer.layerEffect`), so writing one onto a raster layer would store a value that never
+    /// renders. That guard used to read `.compositing` and is the one line of this method the
+    /// kind-retirement changed.
+    ///
+    /// **Clearing drops the effect and keeps the fill, and that asymmetry is deliberate** — see
+    /// `Layer.valueFill`, which argues it. In short: `effect`'s presence *is* the mode, so it has to go
+    /// for the layer to leave effect mode, while `fill` is inert storage in effect mode and keeping it
+    /// is what makes flipping back restore the artist's colour instead of resetting it to grey. A mode
+    /// picker that silently destroys the other mode's setting is not a mode picker.
+    ///
+    /// **The layer renames itself to follow the mode**, unless the artist has named it (owner's call,
+    /// asked and answered directly: "yea rename it"). Enter Gaussian Blur and the row reads "Gaussian
+    /// Blur"; switch to Levels and it follows; go back to a flat colour and it is "Value n" again. The
+    /// row is where an artist reads their stack, and a row reading "Value 3" for something that is
+    /// actually a blur is the state `LayerStackCell.title(for:)` exists to prevent — the rename in the
+    /// *other* direction matters just as much, since leaving "Gaussian Blur" on a layer that is now a
+    /// flat colour is the identical lie told backwards.
+    ///
+    /// `Layer.hasCustomName` is what makes that safe; see it for why a flag and not a guess.
+    ///
+    /// **Inside the same `withStructureUndo` as the effect write, not after it.** An artist who picks a
+    /// grade and presses undo once expects the grade *and* the name back — two steps would leave the
+    /// name of an effect on a layer that no longer has one, which is the exact inconsistency the rename
+    /// exists to prevent, reachable by pressing undo.
+    ///
+    /// One undo step per call, like every other discrete pick.
+    func setLayerEffect(layerIndex: Int, to effect: Effect?) {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .value,
               layers[layerIndex].effect != effect else { return }
-        withStructureUndo(name: "Effect") {
+        withStructureUndo(name: effect == nil ? "Value" : "Effect") {
             layers[layerIndex].effect = effect
+            if !layers[layerIndex].hasCustomName {
+                layers[layerIndex].name = Self.defaultValueLayerName(effect: effect, ordinal: layers.count)
+            }
         }
     }
 
-    /// Adds a `.value` layer: it draws nothing of its own and *is* one flat colour across the whole
-    /// canvas (§4.5), which is Photoshop's Solid Colour layer. It plugs into a Mix node as an operand,
-    /// and blends with what is under it like any other leaf.
+    /// Renames a layer — **the Rename action's model half, and the one place `hasCustomName` is set.**
     ///
-    /// It still gets an empty cel, for `addEffectLayer`'s reason — every cel-lifecycle path in the app
-    /// assumes a layer has one, and a blank cel is free (§8.1). Nothing ever draws into it: the fill is
-    /// resolved into the snapshot's source at `renderSources`, and the cel's own (blank) pixels are
-    /// never rasterized.
-    ///
-    /// Defaulting to mid-grey at full alpha is deliberate. A value layer added at the top of the stack
-    /// turns the canvas one flat colour, which is correct and is what Photoshop does — so the first
-    /// thing the artist sees has to read as a deliberate colour rather than as a crash, and mid-grey is
-    /// also the constant the Mix-node case wants.
-    func addValueLayer(color: PaletteColor = ValueFill.defaultColor, name: String? = nil) {
-        withStructureUndo(name: "Add Value Layer") {
-            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1),
-                          raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-            let layer = Layer(id: UUID(), name: name ?? "Value \(layers.count + 1)", opacity: 1.0,
-                              isVisible: true, kind: .value, fill: ValueFill(color: color), cels: [cel])
-            layers.append(layer)
-            currentLayerIndex = layers.count - 1
+    /// It used to be a bare `canvasManager.layers[index].name = trimmed` in the panel, which is how the
+    /// flag could have gone missing: a write nobody routes through cannot record that it happened. This
+    /// mirrors `renameFolder`, including the undo step it always should have had.
+    func renameLayer(at index: Int, to name: String) {
+        guard layers.indices.contains(index) else { return }
+        withStructureUndo(name: "Rename Layer") {
+            layers[index].name = name
+            layers[index].hasCustomName = true
         }
     }
 
     /// Replaces the colour on a value layer, leaving every other property alone. Nothing happens on a
-    /// layer that is not `.value` — the kind is what makes a fill live (`valueFill`), so writing one
-    /// onto a raster layer would store a value that never renders. `setLayerEffect`'s rule, verbatim.
+    /// layer that is not `.value` — the kind is what makes a fill live (`Layer.valueFill`), so writing
+    /// one onto a raster layer would store a value that never renders. `setLayerEffect`'s rule.
+    ///
+    /// **Deliberately *not* also refused in effect mode**, which was the tempting symmetry. `fill` is
+    /// the layer's stored colour in both modes and live in one; refusing to write it while an effect is
+    /// on would mean the colour a flip-back restores could never be chosen in advance, and would make
+    /// this setter and `Layer.valueFill` disagree about what the field is — one treating it as "the
+    /// colour", the other as "the colour, when it counts". The panel hides the swatch in effect mode,
+    /// which is where "you cannot pick this right now" belongs.
     func setLayerFill(layerIndex: Int, to fill: ValueFill) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .value,
               layers[layerIndex].fill != fill else { return }
@@ -974,20 +1042,67 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Sets the mode a Mix node combines its two inputs with (§4.3) — **the whole content of its
-    /// op**, and a different question from `setFolderBlendMode` above, which the same folder also
-    /// answers: that one is how the node's finished composite blends into whatever contains it.
+    /// Sets a node's operation to a **blend of two inputs** in `mode` (§4.3) — a different question
+    /// from `setFolderBlendMode` above, which the same folder also answers: that one is how the node's
+    /// finished composite blends into whatever contains it.
     ///
-    /// Narrow on purpose. A general `setCompositorOp` would have to refuse any op of a different
-    /// arity — the slots are folders that already exist and hold artwork, so changing arity is a
-    /// structural edit rather than a pick — and phase 8 ships one op, so the guard would be
-    /// unreachable code defending an affordance nothing offers. Reshaping the op is what
-    /// `addCompositorNode` is for.
+    /// Still narrow: it refuses anything that is not already a node, because an ordinary folder the
+    /// artist made is not a node and must not acquire an op by being asked about one. What widened is
+    /// *which* node — it used to require the node already be a `.mix`, which made the picker one-way
+    /// the moment an effect node could exist, with no route back to a blend.
+    ///
+    /// **Picking a blend clears the grade**, which is the other half of `setNodeEffect`'s rule and the
+    /// reason both live next to each other. A node cannot both fold two inputs and grade one: the op
+    /// and the effect would be two unrelated answers to "what does this node do", with nothing to say
+    /// which runs first. Two writes, one undo step — the state where both are set never exists, not
+    /// even transiently on the undo stack.
     func setMixBlendMode(_ folderID: UUID, to mode: BlendMode) {
-        guard let idx = folders.firstIndex(where: { $0.id == folderID }),
-              case .mix(let current)? = folders[idx].compositorOp, current != mode else { return }
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].isCompositorNode,
+              folders[idx].compositorOp != .mix(mode) || folders[idx].effect != nil else { return }
         withStructureUndo(name: "Mix Mode") {
             folders[idx].compositorRole = .node(op: .mix(mode))
+            folders[idx].effect = nil
+            // A node that was named for the grade it no longer has must stop claiming it — the same
+            // rule `setLayerEffect` applies to a value layer, in the same undo step. See
+            // `renameFolderToFollowItsRole`.
+            renameFolderToFollowItsRole(idx)
+        }
+    }
+
+    /// Sets or clears the grade a folder applies to its own finished composite (§4.4's 1-input node
+    /// form) — **the node panel's Effects section, and `setLayerEffect`'s folder twin.**
+    ///
+    /// Accepts any folder, not only a node: `LayerFolder.effect` has always been legal on an ordinary
+    /// group, which is what "a group is a 1-input compositor node" means, and refusing it here would
+    /// make the derivation's unconditional `effect: folder.effect` reachable only through load.
+    ///
+    /// **On a node, setting an effect forces the op to `.stack`** — the 1-input form — which is the
+    /// converse of `setMixBlendMode` clearing the effect. `.stack` rather than a new
+    /// `CompositorOp.effect(Effect)` case: `LayerFolder.effect`'s doc carries that argument, and
+    /// `maxInputCount` is where the resulting arity-1 cap is stated. An ordinary folder keeps its nil
+    /// `compositorRole` and does not become a node by acquiring a grade.
+    ///
+    /// **A node that already holds two children keeps them both.** The alternatives were to refuse the
+    /// switch, which dead-ends the artist in a picker that will not pick until they go and drag a child
+    /// out first, or to promote the extra child into the parent, which is a structural edit performed
+    /// silently by a dropdown. Keeping them costs nothing and renders correctly with no special case:
+    /// the op is `.stack`, so both backends' `fold` draws the children bottom-to-top into the node's
+    /// own buffer exactly as an ordinary folder's, and the grade then runs on that assembled
+    /// composite — which is precisely what §4.4's "input" means here, *this container's own
+    /// composite*, however many children went into it. `maxInputCount` reads 1 against a real child
+    /// count of 2 until the artist drags one out; `canDrop`'s `<` gets that right without help, so no
+    /// third child can land and reordering the two that are there stays legal.
+    ///
+    /// One undo step per call, like every other discrete pick.
+    func setNodeEffect(_ folderID: UUID, to effect: Effect?) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        let opNeedsReshaping = effect != nil && folders[idx].isCompositorNode
+            && folders[idx].compositorOp != .stack
+        guard folders[idx].effect != effect || opNeedsReshaping else { return }
+        withStructureUndo(name: effect == nil ? "Clear Effect" : "Effect") {
+            folders[idx].effect = effect
+            if opNeedsReshaping { folders[idx].compositorRole = .node(op: .stack) }
+            renameFolderToFollowItsRole(idx)
         }
     }
 
@@ -1170,7 +1285,12 @@ final class CanvasManager: ObservableObject {
     /// until layers are dragged into it.
     @discardableResult
     func addFolder(name: String? = nil, parentFolderID: UUID? = nil) -> UUID {
-        let folder = LayerFolder(id: UUID(), name: name ?? "Folder \(folders.count + 1)", parentFolderID: parentFolderID)
+        let folder = LayerFolder(id: UUID(),
+                                 name: name ?? Self.defaultFolderName(effect: nil, op: nil,
+                                                                      ordinal: folders.count + 1),
+                                 // `addValueLayer`'s rule: a supplied name is a chosen name.
+                                 hasCustomName: name != nil,
+                                 parentFolderID: parentFolderID)
         withStructureUndo(name: "Add Folder") {
             folders.append(folder)
         }
@@ -1185,9 +1305,14 @@ final class CanvasManager: ObservableObject {
     /// folder per input; §4.3's redesign deleted slots, so a node is now created exactly the way a
     /// folder is and is filled the same way — by dragging layers and folders into it. Input index is
     /// position: the bottom child is input 0, the backdrop.
+    ///
+    /// The op reshapes after creation too — `setMixBlendMode` picks a blend, `setNodeEffect` picks a
+    /// grade, and each clears the other — so this is the starting op rather than the only one it can
+    /// ever have.
     @discardableResult
     func addCompositorNode(op: CompositorOp, name: String? = nil, parentFolderID: UUID? = nil) -> UUID {
         let node = LayerFolder(id: UUID(), name: name ?? defaultNodeName(for: op),
+                               hasCustomName: name != nil,
                                parentFolderID: parentFolderID, compositorRole: .node(op: op))
         withStructureUndo(name: "Add Node") {
             folders.append(node)
@@ -1196,11 +1321,48 @@ final class CanvasManager: ObservableObject {
     }
 
     private func defaultNodeName(for op: CompositorOp) -> String {
-        let ordinal = folders.filter(\.isCompositorNode).count + 1
+        Self.defaultFolderName(effect: nil, op: op, ordinal: folders.filter(\.isCompositorNode).count + 1)
+    }
+
+    /// **The one generator for a folder's automatic name** — `defaultValueLayerName`'s twin, and there
+    /// for its reason: `addFolder`, `addCompositorNode`, `setNodeEffect` and `setMixBlendMode` all
+    /// produce names, and four spellings of "Mix \(n)" is how a node comes to be born with one name and
+    /// renamed to a different one for the same state.
+    ///
+    /// **The grade wins over the op**, because a node with a grade *is* an effect node whatever op it
+    /// stores — `LayerFolder.effect` is the discriminant and `.stack` is only the shape that carries it.
+    /// A node named "Group 2" for a Gaussian Blur would be naming the implementation.
+    ///
+    /// `ordinal` is the caller's, because the two families count differently and always have: an
+    /// ordinary folder is numbered among all folders, a node among nodes. `defaultValueLayerName`'s
+    /// note on what an ordinal is and is not applies here unchanged.
+    static func defaultFolderName(effect: Effect?, op: CompositorOp?, ordinal: Int) -> String {
+        if let effect { return effect.displayName }
         switch op {
-        case .stack: return "Group \(ordinal)"
-        case .mix: return "Mix \(ordinal)"
+        case .none:    return "Folder \(ordinal)"
+        case .stack?:  return "Group \(ordinal)"
+        case .mix?:    return "Mix \(ordinal)"
         }
+    }
+
+    /// Re-derives `folders[idx]`'s automatic name after its op or grade changed, and leaves a
+    /// hand-named folder alone (`LayerFolder.hasCustomName`).
+    ///
+    /// **Reads the folder's state after the write rather than taking the new op as an argument**, so it
+    /// cannot disagree with what was actually stored — `setNodeEffect` reshapes the op as a side effect
+    /// of setting a grade, and a caller passing what it *meant* to set would name the node for a state
+    /// one line of code away from the one it is in.
+    ///
+    /// Must be called from inside the caller's `withStructureUndo`, for `setLayerEffect`'s reason: the
+    /// rename and the reshape are one edit and undo has to treat them as one.
+    private func renameFolderToFollowItsRole(_ idx: Int) {
+        guard folders.indices.contains(idx), !folders[idx].hasCustomName else { return }
+        let ordinal = folders[idx].isCompositorNode
+            ? folders.filter(\.isCompositorNode).count
+            : folders.count
+        folders[idx].name = Self.defaultFolderName(effect: folders[idx].effect,
+                                                   op: folders[idx].compositorOp,
+                                                   ordinal: ordinal)
     }
 
     /// Removes a folder, keeping everything that was inside it. Its layers and subfolders move up
@@ -1251,11 +1413,13 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Renames a folder. Used by the layer options popover.
+    /// Renames a folder. Used by the layer options popover, and the one place a folder's
+    /// `hasCustomName` is set — `renameLayer`'s twin.
     func renameFolder(_ folderID: UUID, to name: String) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
         withStructureUndo(name: "Rename Folder") {
             folders[idx].name = name
+            folders[idx].hasCustomName = true
         }
     }
 

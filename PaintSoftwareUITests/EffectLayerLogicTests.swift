@@ -4,8 +4,11 @@ import UIKit
 /// **An effect as a stack layer** — LAYER_COMPOSITING.md §4.4, phase 9a.
 ///
 /// `EffectParityLogicTests` covers the kernels: one effect over one buffer, on both backends. This
-/// file covers the *wrapper* — a `LayerKind.compositing` layer sitting in the tree, grading the
-/// backdrop accumulated so far **within its own container**, which is Photoshop's adjustment layer.
+/// file covers the *wrapper* — a `LayerKind.value` layer **in effect mode** sitting in the tree,
+/// grading the backdrop accumulated so far **within its own container**, which is Photoshop's
+/// adjustment layer. (It had a kind of its own, `.compositing`, until §4.5's value layer absorbed it:
+/// one kind, two modes, told apart by whether `Layer.effect` is present. `addValueLayer(effect:)` is
+/// what used to be `addEffectLayer`, and `Layer.layerEffect` what used to be `compositingEffect`.)
 /// Nothing here re-measures a formula the kernels already own; what it measures is where the input
 /// comes from, what the graded result replaces, and how opacity and a mask restrict it.
 ///
@@ -83,7 +86,7 @@ final class EffectLayerLogicTests: XCTestCase {
     private func greyUnderAnEffect(_ effect: Effect = brighten) -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
-        manager.addEffectLayer(effect)
+        manager.addValueLayer(effect: effect)
         return manager
     }
 
@@ -155,7 +158,7 @@ final class EffectLayerLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(grey, rect: CGRect(x: 0, y: 0, width: 64, height: 32)))
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                       CanvasFixture.solidImage(grey, rect: CGRect(x: 0, y: 32, width: 64, height: 32)))
-        manager.addEffectLayer(Self.brighten)
+        manager.addValueLayer(effect: Self.brighten)
         manager.addLayer()
         CanvasFixture.setBakedContent(manager, layerIndex: 3,
                                       CanvasFixture.solidImage(grey, rect: CGRect(x: 48, y: 0, width: 16, height: 16)))
@@ -216,7 +219,7 @@ final class EffectLayerLogicTests: XCTestCase {
         manager.addLayer()
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                       CanvasFixture.solidImage(grey, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
-        manager.addEffectLayer(Self.brighten)
+        manager.addValueLayer(effect: Self.brighten)
 
         let folder = manager.addFolder(name: "Group")
         manager.layers[1].parentFolderID = folder
@@ -251,7 +254,7 @@ final class EffectLayerLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
         manager.layers[0].isVisible = false
         CanvasFixture.setBakedContent(manager, layerIndex: 1, fullCanvas(grey))
-        manager.addEffectLayer(Self.brighten)
+        manager.addValueLayer(effect: Self.brighten)
         manager.layers[2].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
 
         guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
@@ -269,12 +272,23 @@ final class EffectLayerLogicTests: XCTestCase {
         XCTAssertEqual(pixel(image, 32, 32), opaqueGrey(128), "Got RGBA \(pixel(image, 32, 32))")
     }
 
-    /// A `.compositing` layer the artist has just added and not configured. It must read as a no-op
-    /// rather than as a missing grade — and, because `compositingEffect` is nil, must not drag the
+    /// A `.value` layer carrying **neither** of its two modes — no grade and no fill. It must read as
+    /// a no-op rather than as a missing grade, and, because `layerEffect` is nil, must not drag the
     /// document onto the compositor path either.
-    func testACompositingLayerWithNoEffectYetIsANoOp() {
+    ///
+    /// **`fill` is cleared as well as `effect`, and that is the whole point of this version of the
+    /// test.** Under the retired `.compositing` kind, "unconfigured" was just `effect == nil`. It is
+    /// not any more: `Layer.valueFill` reads `kind == .value && effect == nil`, so dropping the grade
+    /// alone flips the layer into flat-colour mode, and `ValueFill.defaultColor` is `808080` — byte
+    /// 128, the exact grey this fixture's floor is painted. A test that cleared only `effect` would
+    /// therefore assert `opaqueGrey(128)` against a full-canvas flat fill that had *replaced* the
+    /// floor, and pass green while measuring the opposite of what it claims. Clearing both is the
+    /// state that is genuinely neither mode, and it is reachable: `Layer.fill` is optional and a
+    /// document written before value layers existed decodes with it absent.
+    func testAValueLayerInNeitherModeIsANoOp() {
         let manager = greyUnderAnEffect()
         manager.layers[1].effect = nil
+        manager.layers[1].fill = nil
 
         guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
         XCTAssertEqual(pixel(image, 32, 32), opaqueGrey(128), "Got RGBA \(pixel(image, 32, 32))")
@@ -305,7 +319,7 @@ final class EffectLayerLogicTests: XCTestCase {
         XCTAssertTrue((1..<255).contains(backdropAlpha),
                       "Fixture premise: a partly covered backdrop, so alpha is a real claim. Got \(backdropAlpha)")
 
-        manager.addEffectLayer(Self.brighten)
+        manager.addValueLayer(effect: Self.brighten)
         guard let graded = composite(manager) else { return XCTFail("Fixture must composite") }
 
         guard let before = CanvasFixture.rgbaBytes(ungraded), let after = CanvasFixture.rgbaBytes(graded) else {
@@ -328,7 +342,7 @@ final class EffectLayerLogicTests: XCTestCase {
 
     // MARK: - Derivation and storage (§4.4, phase 9a's first commit)
 
-    func testACompositingLayerDerivesIntoALeafCarryingItsEffect() {
+    func testAValueLayerInEffectModeDerivesIntoALeafCarryingItsEffect() {
         let manager = greyUnderAnEffect()
         let tree = manager.renderTree
 
@@ -340,11 +354,11 @@ final class EffectLayerLogicTests: XCTestCase {
 
     /// The kind is what makes an effect live, and this is the rule stated as a test: an `effect` left
     /// on a layer whose kind is raster must not start grading the stack.
-    func testAnEffectOnANonCompositingLayerNeverReachesTheTree() {
+    func testAnEffectOnANonValueLayerNeverReachesTheTree() {
         let manager = greyUnderAnEffect()
         manager.layers[1].kind = .raster
 
-        XCTAssertNil(manager.renderTree[1].effect, "`compositingEffect` is both halves or neither")
+        XCTAssertNil(manager.renderTree[1].effect, "`layerEffect` is both halves or neither")
         guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
         XCTAssertEqual(pixel(image, 32, 32), opaqueGrey(128), "Got RGBA \(pixel(image, 32, 32))")
     }
@@ -384,12 +398,12 @@ final class EffectLayerLogicTests: XCTestCase {
     func testAnEffectSurvivesAManifestRoundTripAndItsAbsenceNeedsNoMigration() throws {
         let cel = CelManifest(id: UUID(), startFrame: 0, frameCount: 12, rasterFileName: "r.png")
         let manifest = LayerManifest(id: UUID(), name: "Levels", opacity: 1, isVisible: true,
-                                     kind: .compositing, effect: Self.brighten, cels: [cel])
+                                     kind: .value, effect: Self.brighten, cels: [cel])
 
         let data = try JSONEncoder().encode(manifest)
         let decoded = try JSONDecoder().decode(LayerManifest.self, from: data)
         XCTAssertEqual(decoded.effect, Self.brighten, "The grade round-trips through the document format")
-        XCTAssertEqual(decoded.kind, .compositing)
+        XCTAssertEqual(decoded.kind, .value, "An effect layer is a `.value` layer in effect mode now")
 
         // What every project saved before phase 9 looks like: the key is simply absent.
         let plain = LayerManifest(id: UUID(), name: "Layer 1", opacity: 1, isVisible: true, cels: [cel])
@@ -397,6 +411,64 @@ final class EffectLayerLogicTests: XCTestCase {
         XCTAssertFalse(String(data: plainData, encoding: .utf8)?.contains("effect") ?? true,
                        "A layer with no effect writes no key, so its manifest is byte-for-byte what it was")
         XCTAssertNil(try JSONDecoder().decode(LayerManifest.self, from: plainData).effect)
+    }
+
+    /// **The kind retirement's migration, and the reason it is not optional.** Every project the
+    /// artist has already saved with an effect layer holds the literal string `"compositing"` in that
+    /// layer's `kind` field, and `LayerKind` no longer has a case for it.
+    ///
+    /// The failure this guards is not a lost layer, which is why it is worth a test of its own.
+    /// `LayerKind` is a bare `String, Codable` enum, so an unparseable-but-present `kind` throws
+    /// `DecodingError.dataCorrupted` rather than falling back; that throw unwinds all the way out of
+    /// `JSONDecoder.decode(ProjectManifest.self, …)` into `ProjectStore.loadManifest`'s `try?`, which
+    /// turns the whole document into nil. The artist's project would simply refuse to open, with
+    /// nothing anywhere saying why.
+    ///
+    /// Asserted from **raw JSON rather than from a re-encoded manifest**, because there is no longer
+    /// any way to *write* the old string — the case is gone — so a fixture built through
+    /// `LayerManifest`'s own encoder could not express the document being migrated. The string is
+    /// quoted from `LayerKind.retiredEffectLayerRawValue` so this test and the migration cannot drift
+    /// apart on what the old spelling was.
+    func testALayerSavedAsTheRetiredEffectKindReopensAsAValueLayerInEffectMode() throws {
+        let effectJSON = String(data: try JSONEncoder().encode(Self.brighten), encoding: .utf8)!
+        let legacy = """
+        {"id":"\(UUID().uuidString)","name":"Levels","opacity":1,"isVisible":true,
+         "kind":"\(LayerKind.retiredEffectLayerRawValue)","effect":\(effectJSON),
+         "cels":[{"id":"\(UUID().uuidString)","startFrame":0,"frameCount":12,"rasterFileName":"r.png"}]}
+        """
+
+        let decoded = try JSONDecoder().decode(LayerManifest.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.kind, .value, "The retired kind reads as the kind that absorbed it")
+        XCTAssertEqual(decoded.effect, Self.brighten,
+                       "The grade was already in the manifest's own `effect` key and needed no moving")
+        XCTAssertNil(decoded.fill,
+                     "The old kind had no fill to carry, and a `.value` layer with an effect and no "
+                     + "fill is exactly effect mode — `Layer.valueFill` reads `effect == nil`")
+
+        // The layer the manifest describes, not just the manifest: the round trip only counts if what
+        // comes out the far end still grades.
+        let layer = Layer(id: decoded.id, name: decoded.name, opacity: decoded.opacity,
+                          isVisible: decoded.isVisible, kind: decoded.kind, effect: decoded.effect,
+                          fill: decoded.fill, cels: [])
+        XCTAssertEqual(layer.layerEffect, Self.brighten, "It reopens grading, not as an inert layer")
+        XCTAssertNil(layer.valueFill, "…and not as a flat colour, which would paint over the document")
+        XCTAssertTrue(layer.hasNoDrawingSurface, "The predicate answered true for the old kind too")
+    }
+
+    /// The deliberate other half of the migration: an unrecognised kind still throws.
+    ///
+    /// A silent fallback to `.raster` was the tempting shape and is worse than the throw. A kind
+    /// written by a newer build, or a genuinely corrupt file, would come back as a raster layer whose
+    /// only content is an empty cel — which reads to the artist as "my layer's content was deleted"
+    /// rather than as "this file could not be read", and is unrecoverable because the save that
+    /// follows writes the emptied layer back over the original.
+    func testAnUnknownLayerKindStillThrowsRatherThanQuietlyBecomingRaster() {
+        let legacy = """
+        {"id":"\(UUID().uuidString)","name":"From the future","opacity":1,"isVisible":true,
+         "kind":"holographic","cels":[]}
+        """
+        XCTAssertThrowsError(try JSONDecoder().decode(LayerManifest.self, from: Data(legacy.utf8)),
+                             "Only the one retired spelling is migrated; everything else is a read error")
     }
 
     // MARK: - (1) The two backends
@@ -475,7 +547,7 @@ final class EffectLayerLogicTests: XCTestCase {
     private func spectrumUnderAnEffect(_ effect: Effect) -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, spectrumImage())
-        manager.addEffectLayer(effect)
+        manager.addValueLayer(effect: effect)
         return manager
     }
 
@@ -535,7 +607,7 @@ final class EffectLayerLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 40, height: 64)))
         manager.layers[1].isVisible = false
-        manager.addEffectLayer(Self.brighten)
+        manager.addValueLayer(effect: Self.brighten)
         manager.layers[2].opacity = 0.6
         manager.layers[2].alphaMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
 
@@ -554,7 +626,7 @@ final class EffectLayerLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 2)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, spectrumImage())
         CanvasFixture.setBakedContent(manager, layerIndex: 1, fullCanvas(grey))
-        manager.addEffectLayer(Self.brighten)
+        manager.addValueLayer(effect: Self.brighten)
         let folder = manager.addFolder(name: "Group")
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
@@ -691,7 +763,7 @@ final class EffectLayerLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                       CanvasFixture.solidImage(UIColor(white: 1, alpha: 1),
                                                                rect: CGRect(x: 24, y: 24, width: 16, height: 16)))
-        manager.addEffectLayer(.blur(Effect.Blur(radius: 5)))
+        manager.addValueLayer(effect: .blur(Effect.Blur(radius: 5)))
 
         let walks = bothWalks(manager)
         XCTAssertFalse(walks.isEmpty, "At least the CPU walk must have rendered")
@@ -1028,8 +1100,14 @@ final class EffectLayerLogicTests: XCTestCase {
     }
 
     /// **Duplicating an effect layer must carry its grade**, and before this test it did not:
-    /// `duplicateLayer` copied `kind` but not `effect`, so the copy stayed a `.compositing` layer
-    /// whose `compositingEffect` was nil — an adjustment layer that silently stopped adjusting.
+    /// `duplicateLayer` copied `kind` but not `effect`, so the copy stayed a `.value` layer whose
+    /// `layerEffect` was nil — an adjustment layer that silently stopped adjusting.
+    ///
+    /// The kind retirement raised the stakes on exactly this line rather than lowering them. `effect`
+    /// is now the *discriminant* between the value layer's two modes, so a copy that drops it does not
+    /// merely produce an inert layer any more: it produces a **flat-colour** layer, which paints its
+    /// fill across the whole canvas over everything the original was grading. The regression that used
+    /// to be invisible is now destructive, which is why the assertions below check both halves.
     ///
     /// The cel copy above it in `duplicateLayer` is the same idea for raster and vector: a layer's
     /// content has to come with it. An effect layer's content simply is not in a cel, so nothing in
@@ -1040,19 +1118,247 @@ final class EffectLayerLogicTests: XCTestCase {
     /// source had no effect would let a copy that drops every effect pass green.
     func testDuplicatingAnEffectLayerCarriesItsGrade() {
         let manager = CanvasFixture.manager(layerCount: 1)
-        manager.layers[0].kind = .compositing
+        manager.layers[0].kind = .value
         manager.layers[0].effect = Self.brighten
 
-        XCTAssertEqual(manager.layers[0].compositingEffect, Self.brighten,
+        XCTAssertEqual(manager.layers[0].layerEffect, Self.brighten,
                        "Premise: the layer being duplicated is an effect layer with a grade on it")
 
         manager.duplicateLayer(at: 0)
 
         XCTAssertEqual(manager.layers.count, 2, "Premise: the duplicate landed")
-        XCTAssertEqual(manager.layers[1].kind, .compositing,
+        XCTAssertEqual(manager.layers[1].kind, .value,
                        "The copy keeps its kind — that half was never broken")
-        XCTAssertEqual(manager.layers[1].compositingEffect, Self.brighten,
+        XCTAssertEqual(manager.layers[1].layerEffect, Self.brighten,
                        "The copy grades exactly as the original does. Without `effect:` on the copy it "
                        + "reads as an unconfigured effect layer: right kind, no grade, no visible reason")
+        XCTAssertNil(manager.layers[1].valueFill,
+                     "And it is still in effect mode, not flat colour — the two modes are told apart by "
+                     + "`effect`'s presence, so a dropped grade would have turned the copy into a "
+                     + "colour painted over the whole canvas rather than into a layer doing nothing")
+    }
+
+    // MARK: - Invalidation: what has to move when only the grade moves
+
+    /// **A grade is content, so editing one has to move the layer's content version.**
+    ///
+    /// The failure this guards is the one an artist reports as "the sliders do nothing": a cache keyed
+    /// on something that did not move goes on serving the picture from before the edit. `valueFill`
+    /// was added to `LayerContentVersion` for exactly this reason when §4.5's flat colour arrived, and
+    /// §4.4's grade is the same argument with a different payload — the layer's content is not in its
+    /// cel either way.
+    ///
+    /// **It failed before the fix for a second reason worth naming**, because a reader looking only at
+    /// the struct would miss it: `renderSources` *elides* a grading layer, and it used to elide the
+    /// version along with the pixels — one guard answering "does this draw?" for both. So the version
+    /// was not merely missing the grade, it was nil. Hence the two `XCTFail`s below rather than a bare
+    /// `XCTAssertNotEqual`: "there is no version at all" and "the version did not move" are different
+    /// regressions and the test should say which happened.
+    ///
+    /// The consumer is `MaskResolver`'s cache, which is keyed on these versions and carries no tree.
+    /// The live canvas is *not* the consumer, and `testChangingOnlyTheGradeMovesTheDerivedTree` below
+    /// is where that is stated.
+    func testChangingOnlyTheGradeMovesTheLayersContentVersion() {
+        let manager = greyUnderAnEffect()
+        guard let before = request(manager)?.contentVersions[1] else {
+            return XCTFail("A grading layer must carry a content version even though it renders no pixels")
+        }
+
+        manager.setLayerEffect(layerIndex: 1, to: .levels(Effect.Levels(inputBlack: 0.1, inputWhite: 0.9,
+                                                                        gamma: 1.5, outputBlack: 0,
+                                                                        outputWhite: 1)))
+        guard let after = request(manager)?.contentVersions[1] else {
+            return XCTFail("…and still carry one after the edit")
+        }
+
+        XCTAssertNotEqual(before, after,
+                          "A regrade must invalidate every cache keyed on this layer's content")
+    }
+
+    /// The same edit seen from the live canvas, and the half that was **already right** — recorded so
+    /// that the belt-and-braces `effect` in `makeSandwichKey` is not mistaken for the mechanism.
+    ///
+    /// `CanvasView.SandwichKey` holds the whole derived `[RenderNode]`, `RenderNode` is `Equatable`,
+    /// and `RenderNode.effect` carries the grade verbatim for both of §4.4's wrappers. So the sandwich
+    /// key moves on a regrade through its *tree*, not through a content version, and it does so for a
+    /// folder's grade too — which nothing indexed by layer could ever cover.
+    ///
+    /// Asserted on `renderTree` rather than on the key, because the key is private to the coordinator
+    /// and the tree is the part of it that carries this claim. If this ever fails, the canvas has
+    /// stopped repainting on an effect edit and no amount of content-version work will fix it.
+    func testChangingOnlyTheGradeMovesTheDerivedTree() {
+        let manager = greyUnderAnEffect()
+        let before = manager.renderTree
+        manager.setLayerEffect(layerIndex: 1, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.9)))
+        XCTAssertNotEqual(before, manager.renderTree,
+                          "The tree is what the live canvas's cache key compares — a grade that did not "
+                          + "move it would leave the canvas showing the pre-edit composite")
+
+        // The folder form of the same wrapper (§4.4's 1-input node, phase 9b). A grade on a *folder* is
+        // reachable from nothing indexed by layer — `contentVersions` is per layer and a folder is not
+        // a leaf — so the tree is the only thing that can carry it, which is why this half is here.
+        let (grouped, folder) = greyFloorUnderAGroupHoldingAnEffect()
+        let beforeNode = grouped.renderTree
+        grouped.setNodeEffect(folder, to: Self.brighten)
+        XCTAssertNotEqual(beforeNode, grouped.renderTree,
+                          "A folder's grade moves the tree too, and only the tree can carry that")
+    }
+
+    /// §4.5's live-canvas fast path, stated from the model side: `CanvasView` paints a value layer as a
+    /// host background colour taken straight from `valueFill`, which is only ever legitimate when the
+    /// layer really is one flat colour.
+    ///
+    /// In effect mode there is no colour to paint — the layer grades what is beneath it, which one
+    /// Core Animation sibling cannot do to another — so the two claims below are what keep that path
+    /// off. `valueFill` nil is what makes `CanvasView`'s `.map` yield nil and *clear* the host's
+    /// background rather than leave the colour from before the flip standing over the grade;
+    /// `needsCompositorOnCanvas` true is what puts the compositor on so the grade is drawn at all.
+    /// Both have to hold at once: either alone leaves the canvas wrong in a way that is invisible in a
+    /// unit test of the other.
+    func testAValueLayerInEffectModeOffersNoFlatColourAndDemandsTheCompositor() {
+        let manager = greyUnderAnEffect()
+        // Premise: the layer carries a fill underneath, so "nil" below is the mode answering rather
+        // than an absence. `addValueLayer` stamps one in both modes for exactly this reason.
+        XCTAssertNotNil(manager.layers[1].fill,
+                        "Premise: there is a stored colour, so the nil below is the mode and not an empty field")
+        XCTAssertNil(manager.layers[1].valueFill,
+                     "A grading layer has no flat colour for the live canvas to paint into its host")
+        XCTAssertTrue(manager.renderTree.needsCompositorOnCanvas,
+                      "…so the grade has to come from the compositor, or it is drawn nowhere at all")
+
+        // And back: the same layer in flat-colour mode is the fast path's own case again.
+        manager.setLayerEffect(layerIndex: 1, to: nil)
+        XCTAssertNotNil(manager.layers[1].valueFill,
+                        "Flipping back restores the colour the artist mixed — `fill` is kept, not cleared")
+        XCTAssertFalse(manager.renderTree.needsCompositorOnCanvas,
+                       "A flat opaque leaf is what Core Animation is good at; the compositor stands down")
+    }
+
+    // MARK: - The row has to say what the layer is (owner: "yea rename it")
+
+    /// **Entering effect mode renames the layer, switching grades renames it again, and going back to
+    /// a flat colour restores a default.** The owner asked for this directly.
+    ///
+    /// The layer panel row is the only place an artist reads their stack at a glance, so a row saying
+    /// "Value 3" for something that is actually a Gaussian Blur is the state `LayerStackCell.title(for:)`
+    /// exists to prevent. The third leg is the one that is easy to leave out and is not optional:
+    /// leaving "Gaussian Blur" on a layer that has gone back to being a flat colour is the identical
+    /// lie told backwards.
+    func testAValueLayerRenamesItselfToFollowItsMode() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer()
+        XCTAssertEqual(manager.layers[1].name, "Value 2", "Premise: it starts under the flat-colour default")
+
+        manager.setLayerEffect(layerIndex: 1, to: .blur(Effect.Blur(radius: 4)))
+        XCTAssertEqual(manager.layers[1].name, "Gaussian Blur",
+                       "Entering effect mode names the layer for the grade it now applies")
+
+        manager.setLayerEffect(layerIndex: 1, to: Self.brighten)
+        XCTAssertEqual(manager.layers[1].name, "Brightness / Contrast",
+                       "…and switching to another grade follows, rather than sticking on the first one")
+
+        manager.setLayerEffect(layerIndex: 1, to: nil)
+        XCTAssertEqual(manager.layers[1].name, "Value 2",
+                       "Returning to flat colour returns the default name — a layer that is a colour "
+                       + "must not go on advertising a grade it no longer has")
+    }
+
+    /// **The artist's own name is never overwritten**, which is the whole reason
+    /// `Layer.hasCustomName` exists rather than the rename firing unconditionally.
+    ///
+    /// Auto-renaming over a deliberate name is real data loss performed silently by a dropdown, and
+    /// `fillReferenceOverride` is the in-repo precedent for the distinction it needs: a value nobody
+    /// chose has to be tellable from a value somebody did.
+    func testAHandRenamedValueLayerKeepsItsNameThroughEveryModeChange() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer()
+        manager.renameLayer(at: 1, to: "Sky tint")
+        XCTAssertTrue(manager.layers[1].hasCustomName, "Renaming is what records the decision")
+
+        manager.setLayerEffect(layerIndex: 1, to: .blur(Effect.Blur(radius: 4)))
+        XCTAssertEqual(manager.layers[1].name, "Sky tint", "A grade must not take the artist's name back")
+        manager.setLayerEffect(layerIndex: 1, to: Self.brighten)
+        XCTAssertEqual(manager.layers[1].name, "Sky tint", "…nor a second grade")
+        manager.setLayerEffect(layerIndex: 1, to: nil)
+        XCTAssertEqual(manager.layers[1].name, "Sky tint", "…nor going back to a flat colour")
+    }
+
+    /// **The rename and the grade are one undo step.** They are one edit as far as the artist is
+    /// concerned, and two steps would let a single undo strand the name of an effect on a layer that no
+    /// longer has one — the exact inconsistency the rename was added to prevent, reachable by pressing
+    /// undo once.
+    func testTheRenameAndTheGradeAreASingleUndoStep() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer()
+        manager.setLayerEffect(layerIndex: 1, to: .blur(Effect.Blur(radius: 4)))
+        XCTAssertEqual(manager.layers[1].name, "Gaussian Blur")
+
+        manager.undo()
+
+        XCTAssertNil(manager.layers[1].layerEffect, "One undo takes the grade back")
+        XCTAssertEqual(manager.layers[1].name, "Value 2",
+                       "…and the name with it, in the same step — not one undo for the grade and "
+                       + "another for the label")
+    }
+
+    /// The flag has to persist, and that is most of why it is a stored field rather than something
+    /// inferred: a name the artist chose that survived a save and then started being auto-clobbered
+    /// after the reload would be a loss arriving later, detached from anything they did.
+    ///
+    /// The second half is the migration, and it is the same one every optional field in this manifest
+    /// gets: absence means "never named by hand", so every project saved before the key decodes to
+    /// exactly the behaviour it had.
+    func testTheHandRenamedFlagSurvivesAManifestRoundTrip() throws {
+        let cel = CelManifest(id: UUID(), startFrame: 0, frameCount: 12, rasterFileName: "r.png")
+        let named = LayerManifest(id: UUID(), name: "Sky tint", hasCustomName: true, opacity: 1,
+                                  isVisible: true, kind: .value, cels: [cel])
+        let decoded = try JSONDecoder().decode(LayerManifest.self, from: try JSONEncoder().encode(named))
+        XCTAssertTrue(decoded.hasCustomName, "An artist's name survives the document format")
+        XCTAssertEqual(decoded.name, "Sky tint")
+
+        let legacy = """
+        {"id":"\(UUID().uuidString)","name":"Value 2","opacity":1,"isVisible":true,"kind":"value",
+         "cels":[{"id":"\(UUID().uuidString)","startFrame":0,"frameCount":12,"rasterFileName":"r.png"}]}
+        """
+        let old = try JSONDecoder().decode(LayerManifest.self, from: Data(legacy.utf8))
+        XCTAssertFalse(old.hasCustomName,
+                       "A project saved before the key reads as never-named-by-hand, which is what it was")
+
+        // The folder half of the same field, since a node needs it for the same reason.
+        let folder = FolderManifest(id: UUID(), name: "Contrast pass", hasCustomName: true,
+                                    isExpanded: true, isVisible: true)
+        let folderBack = try JSONDecoder().decode(FolderManifest.self,
+                                                  from: try JSONEncoder().encode(folder))
+        XCTAssertTrue(folderBack.hasCustomName, "…and a folder's name is the artist's the same way")
+    }
+
+    /// **The node half of the rename (§4.4's 1-input form).** The owner's answer was about the value
+    /// layer; a node has the identical problem — "Mix 1" on something the artist has since set to a
+    /// Gaussian Blur names an operation the node no longer performs — and leaving the two inconsistent
+    /// would be an arbitrary split rather than a decision.
+    ///
+    /// Both directions again, because `setMixBlendMode` and `setNodeEffect` each clear what the other
+    /// sets: a node that goes back to being a Mix must stop advertising the grade.
+    func testACompositorNodeRenamesItselfToFollowItsOpAndItsGrade() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let node = manager.addCompositorNode(op: .mix(.multiply))
+        XCTAssertEqual(manager.folders[0].name, "Mix 1", "Premise: it starts named for its op")
+
+        manager.setNodeEffect(node, to: .blur(Effect.Blur(radius: 4)))
+        XCTAssertEqual(manager.folders[0].name, "Gaussian Blur",
+                       "A node with a grade is an effect node whatever op it stores, and is named for it")
+
+        manager.setMixBlendMode(node, to: .screen)
+        XCTAssertEqual(manager.folders[0].name, "Mix 1",
+                       "Back to a Mix, so back to the Mix's name — the grade is gone and the label with it")
+
+        manager.renameFolder(node, to: "Grade pass")
+        manager.setNodeEffect(node, to: Self.brighten)
+        XCTAssertEqual(manager.folders[0].name, "Grade pass",
+                       "And a node the artist has named keeps that name, exactly as a layer does")
+    }
+
+    private func request(_ manager: CanvasManager, atFrame frame: Int = 0) -> RenderRequest? {
+        manager.makeRenderRequest(atFrame: frame, includeBackground: false)
     }
 }

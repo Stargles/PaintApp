@@ -121,12 +121,32 @@ extension LayerRenderSource {
 /// until `MaskResolver` needed exactly the same answer. Two spellings of it would be two things to
 /// keep right.
 ///
-/// **`valueFill` is the one component that does not come from a cel, and §4.5 is why.** A value
-/// layer's pixels are not in its cel — the colour *is* its content — so a document whose only change
-/// is that colour would leave every component above unmoved, and the two caches keyed on this would
-/// go on serving the old picture: §5.2's sandwich would keep showing the previous colour on canvas,
-/// and a mask reading that layer as a source would resolve to a stale coverage. Nil for every other
-/// kind, so no existing key moved when this field arrived.
+/// **`valueFill` and `effect` are the two components that do not come from a cel, and §4.5/§4.4 are
+/// why.** A value layer's pixels are not in its cel — in flat-colour mode the *colour* is its content
+/// and in effect mode the *grade* is — so a document whose only change is one of those would leave
+/// every component above unmoved, and the caches keyed on this would go on serving the old picture: a
+/// mask reading that layer as a source would resolve to a stale coverage. Nil for every other kind, so
+/// no existing key moved when either field arrived.
+///
+/// **`effect` is here even though it is elided from `sources`, and that pairing is the whole point.**
+/// `renderSources` renders no pixels for a grading layer (it has none) but still records a version for
+/// it, because "what does this leaf contribute" and "what does this leaf draw" stopped being the same
+/// question when §4.4's wrapper became a mode of an ordinary layer. See that function.
+///
+/// **This does not make it the live canvas's invalidation mechanism, and it was never needed as one.**
+/// The tempting reading of the phase-9 gap is that an effect slider would fail to repaint the canvas
+/// because the grade is not in a cache key — but `CanvasView.SandwichKey` carries the whole derived
+/// `[RenderNode]`, `RenderNode` is `Equatable`, and `RenderNode.effect` holds the grade verbatim for
+/// both of §4.4's wrappers. So the sandwich already moves on a grade change, from the tree half of its
+/// key, and it moves for a *folder's* grade too — which nothing indexed by layer could ever cover.
+/// This field is for the cache that has no tree in its key: `MaskResolver`'s.
+///
+/// **Hashed by hand, and only to skip `effect`.** `Effect` is `Equatable` but not `Hashable`, and
+/// making it so means conforming it plus its thirteen payload structs, `CurvePoint`, `GradientStop`
+/// and `CodableColor` — seventeen declarations in a file this change has no other business in — to buy
+/// nothing but bucket spread. Hashing is allowed to collide; **equality** is what decides a cache hit,
+/// and equality is synthesized and does include `effect`. Two versions differing only in their grade
+/// therefore land in one bucket and are then told apart correctly, which is the contract.
 struct LayerContentVersion: Hashable {
     let celID: UUID
     let raster: ObjectIdentifier
@@ -136,10 +156,12 @@ struct LayerContentVersion: Hashable {
     let fillImage: ObjectIdentifier?
     let bakedImage: ObjectIdentifier?
     let valueFill: ValueFill?
+    let effect: Effect?
 
-    init(cel: Cel, valueFill: ValueFill? = nil) {
+    init(cel: Cel, valueFill: ValueFill? = nil, effect: Effect? = nil) {
         celID = cel.id
         self.valueFill = valueFill
+        self.effect = effect
         raster = ObjectIdentifier(cel.raster)
         rasterVersion = cel.raster.version
         vector = cel.vector.map(ObjectIdentifier.init)
@@ -147,6 +169,17 @@ struct LayerContentVersion: Hashable {
         vectorVersion = cel.vector?.version ?? -1
         fillImage = cel.fillImage.map(ObjectIdentifier.init)
         bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(celID)
+        hasher.combine(raster)
+        hasher.combine(rasterVersion)
+        hasher.combine(vector)
+        hasher.combine(vectorVersion)
+        hasher.combine(fillImage)
+        hasher.combine(bakedImage)
+        hasher.combine(valueFill)
     }
 }
 
@@ -183,9 +216,13 @@ struct RenderRequest {
     /// means "contributes nothing at this frame".
     let sources: [LayerRenderSource?]
 
-    /// Parallel to `sources`: what each leaf's pixels *are*, by model identity, for the caches
-    /// downstream of this request that key on content rather than on the image object. Nil where
-    /// `sources` is nil, and for the same reason.
+    /// Parallel to `sources`: what each leaf *is*, by model identity, for the caches downstream of
+    /// this request that key on content rather than on the image object.
+    ///
+    /// Nil where the leaf contributes nothing at this frame — no block covering it, or hidden and not
+    /// read for its alpha. **Not** nil merely because `sources` is, which is what this used to say:
+    /// a grading leaf (§4.4) holds no pixels and still has content, so it carries a version while its
+    /// source stays nil. See `renderSources`, which argues the split.
     let contentVersions: [LayerContentVersion?]
 
     /// The stack each mask source resolves to (§6.2), keyed by source.
@@ -323,24 +360,53 @@ extension CanvasManager {
             // avoids rasterizing pixels that would then be multiplied by zero, which is precisely
             // not true of a hidden mask source: its alpha is read even though it never draws.
             //
-            // **A `.compositing` layer is elided outright (§4.4, phase 9a)**, and unlike the
-            // visibility case there is nothing conditional about it: an effect layer holds no pixels
-            // at all, so rasterizing its blank cel would mint a canvas-sized transparent image per
-            // frame for a leaf the compositor reaches by its `effect` and never by its source. Nor is
-            // it an exception to the mask rule above — an effect layer named as a mask source
-            // contributes no alpha either way, because it has none to contribute.
-            guard layer.kind != .compositing,
-                  layer.isVisible || maskSourceLayers.contains(index),
-                  let celIndex = activeCelIndex(inLayer: index, atFrame: frame),
-                  let image = sourceImage(for: layer, celIndex: celIndex, atFrame: frame,
-                                          canvasSize: canvasSize, quality: quality)
+            // **A layer that is grading is elided outright (§4.4, phase 9a)**, and unlike the
+            // visibility case there is nothing conditional about it: it holds no pixels at all, so
+            // rasterizing its blank cel would mint a canvas-sized transparent image per frame for a
+            // leaf the compositor reaches by its `effect` and never by its source. Nor is it an
+            // exception to the mask rule above — a grading layer named as a mask source contributes
+            // no alpha either way, because it has none to contribute.
+            //
+            // **Asked as `layerEffect == nil`, not as a kind test, and the kind test is what this
+            // replaced.** §4.4's wrapper stopped being `LayerKind.compositing` and became the
+            // effect *mode* of a `.value` layer, so "does this layer hold pixels" is no longer a
+            // question the kind can answer on its own: the other mode of the same kind resolves to a
+            // solid below and must not be elided. Reading the same accessor the tree's leaf
+            // derivation reads (`RenderTree.renderNodes`) is what keeps the two in step — the leaf is
+            // elided here exactly when the compositor is going to reach it by its grade instead.
+            //
+            // **The two guards below used to be one, and splitting them is phase 9's correction.**
+            // `versions` was documented as "nil wherever `sources` is nil, and for the same reason",
+            // which held for as long as a leaf's contribution *was* its pixels. It stopped holding
+            // the moment a grading layer became an ordinary leaf: such a leaf contributes a real
+            // thing to the composite — its grade — while contributing no pixels at all, so the one
+            // guard was answering "does this draw?" for a field that asks "what is this?". Left
+            // coupled, a grading leaf carried no version, and `MaskResolver`'s cache — whose key is
+            // these versions and, unlike `CanvasView.SandwichKey`, contains no tree — would go on
+            // serving the coverage it resolved before the grade changed. That is visible wherever the
+            // grade reshapes alpha (outline, blur, bloom, Sobel, sharpen: `reshapesCoverage`) inside a
+            // folder somebody is using as a mask source.
+            //
+            // What stays shared is the pair above it: no block at this frame, or hidden and not
+            // wanted for its alpha, means the leaf contributes nothing of *either* sort, and nil for
+            // both is exactly right.
+            guard layer.isVisible || maskSourceLayers.contains(index),
+                  let celIndex = activeCelIndex(inLayer: index, atFrame: frame)
             else {
                 sources.append(nil)
                 versions.append(nil)
                 continue
             }
+            versions.append(LayerContentVersion(cel: layer.cels[celIndex], valueFill: layer.valueFill,
+                                                effect: layer.layerEffect))
+            guard layer.layerEffect == nil,
+                  let image = sourceImage(for: layer, celIndex: celIndex, atFrame: frame,
+                                          canvasSize: canvasSize, quality: quality)
+            else {
+                sources.append(nil)
+                continue
+            }
             sources.append(LayerRenderSource(image: image))
-            versions.append(LayerContentVersion(cel: layer.cels[celIndex], valueFill: layer.valueFill))
         }
         return (sources, versions)
     }

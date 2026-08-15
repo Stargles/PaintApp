@@ -572,6 +572,26 @@ struct CanvasView: UIViewRepresentable {
                 // the sandwich takes over with the resolved solid source. A clause here would have
                 // pushed every document containing a flat colour onto the compositor for nothing.
                 //
+                // **This whole path is the *flat-colour* mode's, and `valueFill` is what confines it
+                // there** — not a `kind` test, which is what it would have been if the accessor had
+                // not been narrowed. A value layer in effect mode has no colour to paint: it grades
+                // the backdrop beneath it, which is a thing one sibling view cannot do to another, so
+                // it must be compositor-driven. `Layer.valueFill` answers nil the moment `effect` is
+                // set (that is the mode discriminant), the `.map` below therefore yields nil, and the
+                // line after it *assigns* that nil — which is the half worth stating, because the
+                // failure this would otherwise be is silent: an `if let` here, or a "only write when
+                // there is a colour" shortcut, would leave the flat colour the artist picked before
+                // the flip painted over the grade for the rest of the session, and it would look like
+                // the effect simply not working. The write is unconditional-when-different, so the
+                // flip clears it on the same pass the mode changes.
+                //
+                // Nothing else is needed to make the grade appear: `needsCompositorOnCanvas`'s
+                // *effect* clause (phase 9a) fires on the leaf, the sandwich engages, and `full` is
+                // the graded composite. That clause reads `RenderNode.effect`, which the derivation
+                // sets from the same `layerEffect` accessor, so the two answers cannot disagree —
+                // "this host paints no colour" and "the compositor is on" are one condition read
+                // twice, and `EffectLayerLogicTests` pins both halves.
+                //
                 // Resolved at `currentFrame` for `renderSources`' reason: the frame is the argument a
                 // later keyframe phase needs, and reading it here too keeps the live canvas and the
                 // composite asking the same question. Gated on `celIdx` for the same reason the
@@ -1010,12 +1030,20 @@ struct CanvasView: UIViewRepresentable {
                     return held[index]
                 }
                 guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
-                // `valueFill` alongside the cel, exactly as `renderSources` builds it: a value
-                // layer's content is its colour rather than its (blank) cel, so a key built from the
-                // cel alone would not move when the artist recolours one and the canvas would keep
-                // showing the cached composite. See `LayerContentVersion`.
+                // `valueFill` and `effect` alongside the cel, exactly as `renderSources` builds it: a
+                // value layer's content is its colour or its grade rather than its (blank) cel, so a
+                // key built from the cel alone would not move when the artist recolours or regrades
+                // one. See `LayerContentVersion`.
+                //
+                // The grade is **belt and braces here**, unlike the colour: `tree` above already
+                // carries it (`RenderNode.effect`, compared by `[RenderNode]`'s synthesized `==`), so
+                // this key moved on a grade change before the field existed. Included anyway because
+                // the two builders are documented as mirrors of each other and a reader checking that
+                // should not find one of them quietly short a field — and because "the tree happens
+                // to carry it" is a property of the derivation, not a promise this key makes.
                 return LayerContentVersion(cel: canvasManager.layers[index].cels[celIndex],
-                                           valueFill: canvasManager.layers[index].valueFill)
+                                           valueFill: canvasManager.layers[index].valueFill,
+                                           effect: canvasManager.layers[index].layerEffect)
             }
             return SandwichKey(tree: tree, activeLayerIndex: active, frame: frame, contents: contents)
         }

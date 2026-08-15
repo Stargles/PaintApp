@@ -542,7 +542,7 @@ extension CanvasManager {
             switch entry {
             case .layer(let index):
                 let layer = layers[index]
-                let effect = layer.compositingEffect
+                let effect = layer.layerEffect
                 return RenderNode(id: layer.id, content: .leaf(layerIndex: index),
                                   opacity: layer.opacity, isVisible: layer.isVisible,
                                   // **`.clipToBelow` never reaches the compositor as a mode.** It is
@@ -551,17 +551,28 @@ extension CanvasManager {
                                   // mask and a plain `.normal`. That is the whole of the feature —
                                   // no shader case, no backend clause, nothing to keep in step.
                                   //
-                                  // **An effect layer is pinned to `.normal` whatever it stores**,
-                                  // and that is a decision rather than a field going unread. §4.4's
-                                  // stack layer *replaces* the backdrop it grades — the graded pixels
-                                  // are the same pixels, regraded, so there are not two things to
-                                  // compose. A mode here would composite the grade a second time on
-                                  // top of what it graded, which is a different feature and is
-                                  // exactly what the 1-input node form (9b) gives: an effect whose
-                                  // output is a *source* with its own mode. Clip-to-below survives
-                                  // this untouched, because it was never a mode by the time it got
-                                  // here — it is the mask on the next line, and on an adjustment
-                                  // layer it means what Photoshop means by clipping one.
+                                  // **A layer in effect mode is pinned to `.normal` whatever it
+                                  // stores**, and that is a decision rather than a field going
+                                  // unread. §4.4's stack layer *replaces* the backdrop it grades —
+                                  // the graded pixels are the same pixels, regraded, so there are not
+                                  // two things to compose. A mode here would composite the grade a
+                                  // second time on top of what it graded, which is a different
+                                  // feature and is exactly what the 1-input node form (9b) gives: an
+                                  // effect whose output is a *source* with its own mode.
+                                  // Clip-to-below survives this untouched, because it was never a
+                                  // mode by the time it got here — it is the mask on the next line,
+                                  // and on an adjustment layer it means what Photoshop means by
+                                  // clipping one.
+                                  //
+                                  // **This is what answers "why would you multiply and change
+                                  // brightness at the same time".** You cannot: the clause fires off
+                                  // `effect != nil`, and now that §4.4's wrapper is a *mode* of the
+                                  // value layer rather than a kind of its own, a value layer that is
+                                  // grading reaches this line by the same route the old effect layer
+                                  // did — `layerEffect` above is non-nil — and its stored blend mode
+                                  // goes unread for exactly as long as the effect is there. Flip the
+                                  // same layer back to flat colour and the mode is live again,
+                                  // because a flat colour genuinely is a second thing to compose.
                                   //
                                   // **A layer dropped straight into a node is an operand**, and an
                                   // operand's own mode is the node's op asked a second time — so it

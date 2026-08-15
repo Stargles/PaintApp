@@ -3,6 +3,32 @@ import UIKit
 struct Layer: Identifiable {
     let id: UUID
     var name: String
+    /// Whether `name` above is the artist's own answer, or one the model wrote for them.
+    ///
+    /// **`fillReferenceOverride` below is the precedent, and this is the same problem in a second
+    /// place**: a value nobody has chosen must be distinguishable from a value somebody *has*, or the
+    /// recompute clobbers the choice. §4.4's value layer renames itself as its mode changes — pick
+    /// Gaussian Blur and the row reads "Gaussian Blur", go back to a flat colour and it reads "Value
+    /// n" again — because the row is the only place an artist reads their stack at a glance and a row
+    /// labelled "Value 3" on something that is actually a blur is the state `LayerStackCell.title(for:)`
+    /// exists to prevent. But a layer the artist has *named*, deliberately, from the Rename action, is
+    /// not the model's to overwrite: that is real data loss, performed silently by a dropdown, and it
+    /// is exactly the failure `fillReferenceOverride` was introduced to stop happening to a Bool.
+    ///
+    /// **A flag rather than `fillReferenceOverride`'s optional**, because the two shapes answer
+    /// different-shaped questions. There is no "no name" state to model — every layer has one and
+    /// always has — so the thing that needs recording is not the value but its *provenance*, and
+    /// `String?` would have meant "unnamed", which is not a state the panel can render.
+    ///
+    /// False by default, so every existing `Layer(...)` call site is unchanged and every project saved
+    /// before this field decodes to "never named by hand". That last part is a real, bounded
+    /// concession: a value layer an artist hand-named in an earlier build reloads as auto-nameable and
+    /// will be renamed the first time they change its mode. Bounded because that is the only edit that
+    /// renames anything, and because the flag is set the moment they rename it again. The alternative —
+    /// inferring provenance by testing the stored name against what the generator would have produced —
+    /// is the recompute-over-a-decision trap wearing a different hat: it guesses, and it guesses wrong
+    /// for the artist who deliberately types "Value 2".
+    var hasCustomName: Bool = false
     var opacity: Double
     var isVisible: Bool
     /// The artist's own answer to "is this layer a fill boundary", or nil for "never asked" (§6.6).
@@ -30,14 +56,29 @@ struct Layer: Identifiable {
     /// answer.
     var isFillReference: Bool { fillReferenceOverride ?? (kind == .value ? false : isVisible) }
     var kind: LayerKind = .raster
-    /// The grade a `.compositing` layer applies (§4.4), or nil on a layer that draws pixels instead.
+    /// The grade a `.value` layer in **effect mode** applies (§4.4), or nil on a layer that draws
+    /// pixels — and, on a `.value` layer, **the field whose presence decides the mode**.
+    ///
+    /// A value layer is one of two things and never both: an effect that grades the backdrop beneath
+    /// it, or one flat colour. The discriminant is this field being non-nil, which is exactly the
+    /// recipe `LayerFolder.effect` already uses for the folder form and `alphaMask`/`compositorRole`
+    /// use for theirs — optional, absent means "not one". A third `mode` enum beside these two
+    /// payloads was the alternative and was rejected: it is a second answer to a question the payloads
+    /// already answer, so every write has to keep two fields in step and every read has to decide
+    /// which one wins when they disagree. A document cannot say "effect mode, no effect".
     ///
     /// Stored on `Layer` rather than in `LayerKind`'s payload so that flipping a layer's kind cannot
     /// lose it, and so the field decodes with the one `decodeIfPresent` `Effect`'s persistence note
-    /// prescribes. `compositingEffect` below is what rendering reads — the kind is what decides
-    /// whether this is live, and that decision has one home.
+    /// prescribes. `layerEffect` below is what rendering reads — the kind is what decides whether this
+    /// is live, and that decision has one home.
     var effect: Effect? = nil
-    /// The flat colour a `.value` layer is (§4.5), or nil on a layer that draws pixels instead.
+    /// The flat colour a `.value` layer is in **flat-colour mode** (§4.5), or nil on a layer that
+    /// draws pixels instead.
+    ///
+    /// Not a discriminant, unlike `effect` above: it is read only once `effect` has already said the
+    /// layer is in flat-colour mode, so a fill sitting on a layer that is currently grading is inert
+    /// storage rather than a contradiction. That asymmetry is the whole of the mode flip — see
+    /// `layerEffect` for what it buys.
     ///
     /// Stored on `Layer` beside `effect` and for its reasons, which are the same two: flipping a
     /// layer's kind cannot lose it, and it decodes with the one `decodeIfPresent` recipe the
@@ -63,41 +104,62 @@ struct Layer: Identifiable {
 
 extension Layer {
 
-    /// The grade this layer applies to the backdrop beneath it, or nil if it draws pixels instead —
-    /// §4.4's stack-layer wrapper, and the *only* place "is this an effect layer" is decided.
+    /// The grade this layer applies to the backdrop beneath it, or nil if it draws pixels or is a flat
+    /// colour instead — §4.4's stack-layer wrapper, and the *only* place "is this layer an effect" is
+    /// decided.
     ///
-    /// Both halves are required. A `.compositing` layer with no effect yet is one the artist has just
-    /// added and not configured, and it must read as a no-op rather than as a missing grade; an
-    /// `effect` left on a layer whose kind has since changed back must not silently start grading the
-    /// stack. Rendering asks this, never `kind` or `effect` on their own.
-    var compositingEffect: Effect? { kind == .compositing ? effect : nil }
+    /// **`layerEffect` rather than the old `compositingEffect`**, because there is no longer a
+    /// `.compositing` kind for the name to refer to: §4.4's wrapper is now one of the two modes of a
+    /// `.value` layer, chosen by whether `effect` is there. The old name outlived the thing it named,
+    /// which is how an accessor comes to be read as a kind test by people who never look at it.
+    ///
+    /// Both halves are still required, and for the reasons they always were. A `.raster` layer that
+    /// once carried a grade and has since been changed back must not silently start grading the stack;
+    /// and a `.value` layer with no effect is not "an effect that does nothing", it is the *other*
+    /// mode, which `valueFill` answers. Rendering asks this, never `kind` or `effect` on their own.
+    var layerEffect: Effect? { kind == .value ? effect : nil }
 
-    /// The flat colour this layer *is*, or nil if it draws pixels instead (§4.5) — and the **only**
-    /// place "is this a value layer" is decided, exactly as `compositingEffect` is for effects.
+    /// The flat colour this layer *is*, or nil if it draws pixels or is grading instead (§4.5) — and
+    /// the **only** place "is this layer a flat colour" is decided, exactly as `layerEffect` is for
+    /// effects. The two are mutually exclusive by construction: both read the same `effect` field, one
+    /// for its presence and one for its absence, so no document and no in-memory state can make both
+    /// answer non-nil.
     ///
-    /// Both halves are required, for both of that accessor's reasons. A `.value` layer carrying no
-    /// fill at all is one nothing has configured — only reachable from a hand-written manifest, since
-    /// `addValueLayer` always stamps one — and it must read as a **no-op**, exactly as a `.compositing`
-    /// layer with no grade does, rather than as a colour guessed on its behalf. (The default colour is
-    /// applied one level down instead, by `ValueFill`'s own decoder and by `addValueLayer`, so a fill
-    /// that exists but omits its colour key is mid-grey while a fill that does not exist is nothing.)
-    /// And a `fill` left on a layer whose kind has since changed back must not silently start painting
-    /// over the stack. Rendering asks this, never `kind` or `fill` on their own.
-    var valueFill: ValueFill? { kind == .value ? fill : nil }
+    /// All three halves are required. `kind == .value` for `layerEffect`'s reason — a `fill` left on a
+    /// layer whose kind has since changed back must not start painting over the stack. `effect == nil`
+    /// because that is what flat-colour mode *is*. And a non-nil `fill`, because a `.value` layer
+    /// carrying none is one nothing has configured — only reachable from a hand-written manifest,
+    /// since `addValueLayer` always stamps one — and it must read as a **no-op** rather than as a
+    /// colour guessed on its behalf. (The default colour is applied one level down instead, by
+    /// `ValueFill`'s own decoder and by `addValueLayer`, so a fill that exists but omits its colour key
+    /// is mid-grey while a fill that does not exist is nothing.)
+    ///
+    /// **The mode flip is deliberately asymmetric, and this accessor is why.** Going *to* flat colour
+    /// clears `effect`, because `effect`'s presence is the discriminant and leaving it set would leave
+    /// the layer in effect mode however the panel labelled it. Going *to* an effect keeps `fill`,
+    /// because `fill` is not a discriminant — nothing reads it while `effect` is set — so keeping it
+    /// costs one inert field and buys the round trip: flip to an effect, flip back, and the colour the
+    /// artist mixed is still there. Clearing it instead would be a silent destructive edit performed by
+    /// a mode picker, which is the one thing a mode picker must not do.
+    var valueFill: ValueFill? { kind == .value && effect == nil ? fill : nil }
 
     /// Whether a brush stroke has anywhere to land on this layer.
     ///
-    /// **Asked of the `kind`, not of the configuration**, and deliberately: a `.compositing` layer
-    /// with no grade yet and a `.value` layer with no fill yet are both still layers a stroke would
-    /// disappear into, so this must not flicker as the artist configures one. `compositingEffect` and
-    /// `valueFill` answer the *rendering* question and are right to ask both halves; this one is about
-    /// the drawing surface, and there is none either way.
+    /// **Asked of the `kind`, not of the configuration**, and deliberately: a `.value` layer with no
+    /// grade and no fill yet is still a layer a stroke would disappear into, so this must not flicker
+    /// as the artist configures one — nor as they flip between the two modes, since neither holds
+    /// pixels. `layerEffect` and `valueFill` answer the *rendering* question and are right to ask more
+    /// than the kind; this one is about the drawing surface, and there is none in any configuration.
+    ///
+    /// One kind rather than the two this used to name: §4.4's effect layer stopped being a kind of its
+    /// own and became a mode of this one, so the clause it contributed went with it rather than being
+    /// preserved as a test that can no longer be true.
     ///
     /// One property rather than a clause repeated at each of `CanvasView`'s three sites (host
     /// interaction, the catch-all gesture's gate, the catch-all's handler) — those three have to agree
     /// or the touch is either swallowed with no feedback or fed to a host that cannot use it, and
     /// three spellings of the same list is how they come to disagree.
-    var hasNoDrawingSurface: Bool { kind == .compositing || kind == .value }
+    var hasNoDrawingSurface: Bool { kind == .value }
 }
 
 // MARK: - §4.5's value layer

@@ -83,21 +83,17 @@ struct LayerPanel: View {
                     Label("Vector Layer", systemImage: "scribble.variable")
                 }
                 .accessibilityIdentifier("layerPanel.addVectorButton")
-                // §4.4's effect layer and §4.5's value layer arrive from the same menu the two
-                // drawable kinds do — they are leaves in the stack like any other, and the only
-                // thing that separates them is that a stroke has nowhere to land (`Layer.
-                // hasNoDrawingSurface`, which `CanvasView` already answers with an alert).
+                // §4.5's value layer arrives from the same menu the two drawable kinds do — it is a
+                // leaf in the stack like any other, and the only thing that separates it is that a
+                // stroke has nowhere to land (`Layer.hasNoDrawingSurface`, which `CanvasView`
+                // already answers with a notice).
                 //
-                // An effect layer arrives as an **identity** Brightness / Contrast: `Layer.
-                // compositingEffect`'s doc asks for a layer the artist has just added to read as a
-                // no-op rather than as a grade nobody chose, the way a folder arrives empty and a
-                // Mix arrives `.normal`.
-                Button {
-                    closingOptions { canvasManager.addEffectLayer(.brightnessContrast(Effect.BrightnessContrast())) }
-                } label: {
-                    Label("Effect Layer", systemImage: "slider.horizontal.below.rectangle")
-                }
-                .accessibilityIdentifier("layerPanel.addEffectButton")
+                // **There is no "Effect Layer" entry any more, and nothing was lost.** §4.4's
+                // wrapper stopped being a kind of its own and became a *mode* of this one, chosen by
+                // the value layer's own Mode row (`LayerOptionsPanel.valueModeRow`). A second entry
+                // here would be a second way to create the same kind, differing only in which mode
+                // it arrived in — and the artist who wanted the other mode would have to delete the
+                // layer and add it again rather than flipping the picker that is already there.
                 Button {
                     closingOptions { canvasManager.addValueLayer() }
                 } label: {

@@ -306,24 +306,37 @@ final class ValueLayerLogicTests: XCTestCase {
     // MARK: - No drawing surface
 
     /// The predicate all three of `CanvasView`'s sites read — host interaction, the catch-all
-    /// gesture's gate, and the handler that raises the alert. They have to agree or a touch is either
+    /// gesture's gate, and the handler that raises the notice. They have to agree or a touch is either
     /// swallowed with no feedback or handed to a host that cannot use it, so it is one property and
     /// this is the test of it.
     ///
     /// Phase 9b settled the presentation for the effect layer and the value layer is the same
     /// requirement: the layer stays selectable (so its colour stays editable) and a draw gesture is a
-    /// no-op that *says so*, through the one "No Drawing Surface" alert rather than a second one.
+    /// no-op that *says so* — through the one `.noDrawingSurface` notice rather than a second one.
+    ///
+    /// **Both modes, and that is now the sharper half of the claim.** The two used to be separate
+    /// kinds, so "they agree" was a statement about two `case`s in one `switch`. They are one kind
+    /// now, and `hasNoDrawingSurface` is `kind == .value` with no clause about `effect` at all — so
+    /// what this pins is that flipping the mode picker can never hand a value layer a drawing surface
+    /// it should not have.
     func testAValueLayerDeclaresItHasNoDrawingSurface() {
         let manager = redUnderAValueLayer()
         XCTAssertTrue(manager.layers[1].hasNoDrawingSurface,
                       "A value layer holds no pixels, so a stroke has nowhere to land")
         XCTAssertFalse(manager.layers[0].hasNoDrawingSurface, "A raster layer does")
 
-        manager.addEffectLayer(.brightnessContrast(Effect.BrightnessContrast()))
+        manager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast()))
         XCTAssertTrue(manager.layers[2].hasNoDrawingSurface,
                       "…and it is the same predicate 9b's effect layer answers, not a parallel one")
 
-        XCTAssertFalse(manager.needsNoDrawingSurfaceAlert, "Nothing has been drawn yet")
+        manager.setLayerEffect(layerIndex: 2, to: nil)
+        XCTAssertTrue(manager.layers[2].hasNoDrawingSurface,
+                      "Flipping that same layer back to flat colour cannot give it a surface either")
+
+        // The notice is raised by the gesture path, which a logic test has none of; what it can pin is
+        // that nothing has raised one merely by building this document. `notice` replaced the three
+        // `needs*Alert` flags — a modal alert per blocker became one transient banner (`CanvasNotice`).
+        XCTAssertNil(manager.notice, "Nothing has been drawn yet, so nothing has been announced")
     }
 
     /// The *pixels* half of "a draw gesture is a no-op": ink that reaches a value layer's cel — which

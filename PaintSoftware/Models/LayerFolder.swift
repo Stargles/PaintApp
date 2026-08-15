@@ -3,6 +3,14 @@ import Foundation
 struct LayerFolder: Identifiable {
     let id: UUID
     var name: String
+    /// Whether `name` above is the artist's own answer — `Layer.hasCustomName`'s twin, argued there.
+    ///
+    /// A folder needs it for the same reason a layer does and one more: a node's name is a claim about
+    /// what the node *does*, and a node does exactly one thing (`effect` below says why). So "Mix 1"
+    /// on a node the artist has since set to Gaussian Blur is not merely stale, it names the operation
+    /// the node no longer performs. `setNodeEffect` and `setMixBlendMode` therefore rename as they
+    /// reshape — and stop the moment this is true.
+    var hasCustomName: Bool = false
     var isExpanded: Bool = true
     var isVisible: Bool = true
     /// Set when this folder is nested inside another. Ordering among siblings is derived from the
@@ -48,9 +56,20 @@ struct LayerFolder: Identifiable {
 
     /// §4.4's second wrapper (phase 9b): a grade applied once to this folder's finished composite —
     /// the 1-input node form, where "input" is *this container's own slot composite* rather than the
-    /// accumulated backdrop a `.compositing` layer grades. No `CompositorRole` case is needed for
-    /// it: presence alone makes an ordinary `.stack`-arity-1 folder an effect node, the same recipe
+    /// accumulated backdrop a `.value` layer in effect mode grades. No `CompositorRole` case is
+    /// needed for it: presence alone makes a `.stack`-op folder an effect node, the same recipe
     /// `alphaMask` and `compositorRole` above already use — optional, absent means "not one".
+    ///
+    /// **This is also how a Mix node becomes an effect node**, and no `CompositorOp.effect` case was
+    /// added for it. A `.mix` folded two isolated slots; an effect folds one — but "fold one input"
+    /// is precisely what `.stack` already does, and `RenderNode.effect` is already carried off this
+    /// field for *any* op by the folder derivation and applied after the fold by both backends. So
+    /// the op-and-effect pair is `op == .stack, effect != nil`, and switching a node between the two
+    /// forms is two field writes with no new enum case, no `Compositor`/`MetalCompositor` branch and
+    /// no Metal kernel. `CanvasManager.setNodeEffect` and `setMixBlendMode` are the two writers, and
+    /// each clears what the other set — the pair must never both be live on one node, because an op
+    /// that both blends two inputs and grades one is two unrelated answers to "what does this node
+    /// do" and there is nothing to say which runs first.
     var effect: Effect? = nil
 }
 
@@ -144,7 +163,27 @@ extension LayerFolder {
     /// How many direct children this folder will accept, or nil for "as many as the artist likes" —
     /// every ordinary folder, and every variadic node. The one number the drop guards enforce, in
     /// `canDrop(inContainer:moving:)` and again in the restacks it fronts for.
+    ///
+    /// **An effect node is the arity-1 case, and it is stated here rather than in `CompositorOp`.**
+    /// The op it stores is `.stack`, which is variadic because stacking N composites bottom-to-top
+    /// genuinely is — what caps this node at one input is not the op but the grade hanging beside it
+    /// (see `effect` above): §4.4's 1-input node form takes *this container's composite* and returns
+    /// it regraded, so a second operand is a thing the form has no place for. Teaching `.stack`'s
+    /// arity about `effect` was not an option — `CompositorOp` is a value the folder holds and cannot
+    /// see the folder holding it — and a whole `CompositorOp.effect(Effect)` case to carry a number
+    /// this one line already carries would have duplicated the grade's storage, forced a branch into
+    /// both backends' `fold` and both `Codable` halves of `CompositorRole`, and left two places a
+    /// grade could live that have to agree.
+    ///
+    /// So one clause, in the one property the drop guards read. `canDrop` and both restacks pick it
+    /// up unchanged.
+    ///
+    /// A node that already holds two children when the artist picks an effect keeps them, and this
+    /// then reads 1 against a real child count of 2 — see `CanvasManager.setNodeEffect`, which is
+    /// where that choice is argued. The `<` in `canDrop` handles the over-count exactly right: no
+    /// third child may land, and reordering the two that are there stays legal.
     var maxInputCount: Int? {
+        if isCompositorNode, effect != nil { return 1 }
         guard case .fixed(let count)? = compositorOp?.arity else { return nil }
         return count
     }

@@ -131,6 +131,8 @@ struct CodableColor: Codable, Equatable {
 struct FolderManifest: Codable {
     var id: UUID
     var name: String
+    /// `LayerFolder.hasCustomName` — `LayerManifest.hasCustomName`'s twin, argued there.
+    var hasCustomName: Bool = false
     var isExpanded: Bool
     var isVisible: Bool
     /// Set when this folder is nested inside another. Optional so projects saved before folders
@@ -169,11 +171,13 @@ struct FolderManifest: Codable {
     /// migration there for what it does with it.
     var wasSavedBeforeGroupProperties = false
 
-    init(id: UUID, name: String, isExpanded: Bool, isVisible: Bool, parentFolderID: UUID? = nil,
+    init(id: UUID, name: String, hasCustomName: Bool = false, isExpanded: Bool, isVisible: Bool,
+         parentFolderID: UUID? = nil,
          opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true,
          alphaMask: AlphaMask? = nil, compositorRole: CompositorRole? = nil, effect: Effect? = nil) {
         self.id = id
         self.name = name
+        self.hasCustomName = hasCustomName
         self.isExpanded = isExpanded
         self.isVisible = isVisible
         self.parentFolderID = parentFolderID
@@ -191,6 +195,7 @@ struct FolderManifest: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
+        hasCustomName = try container.decodeIfPresent(Bool.self, forKey: .hasCustomName) ?? false
         isExpanded = try container.decode(Bool.self, forKey: .isExpanded)
         isVisible = try container.decode(Bool.self, forKey: .isVisible)
         parentFolderID = try container.decodeIfPresent(UUID.self, forKey: .parentFolderID)
@@ -219,8 +224,8 @@ struct FolderManifest: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, isExpanded, isVisible, parentFolderID, opacity, blendMode, isIsolated, alphaMask
-        case compositorRole, effect
+        case id, name, hasCustomName, isExpanded, isVisible, parentFolderID, opacity, blendMode
+        case isIsolated, alphaMask, compositorRole, effect
     }
 }
 
@@ -237,12 +242,22 @@ struct ViewPresetManifest: Codable {
 struct LayerManifest: Codable {
     var id: UUID
     var name: String
+    /// `Layer.hasCustomName` — **persisted, and that is the whole reason the field is worth having.**
+    /// A name the artist chose that survived a save and then started being auto-clobbered after the
+    /// reload would be worse than never renaming at all: the loss would arrive later, detached from
+    /// anything they did. Absent decodes to false, which is what every project saved before this key
+    /// says and what a layer nobody has renamed says — one meaning, `alphaMask`'s argument.
+    var hasCustomName: Bool = false
     var opacity: Double
     var isVisible: Bool
-    /// Mirrors `Layer.kind` (raster/vector/compositing/value). Persisted now (defaulting missing
-    /// values to `.raster`) so future layer kinds need no migration of already-saved projects — which
-    /// is exactly what `.value` needed on arrival, since no document written before it contains the
-    /// string and every one of them still decodes to the raster layer it was.
+    /// Mirrors `Layer.kind` (raster/vector/value). Persisted (defaulting missing values to `.raster`)
+    /// so *added* layer kinds need no migration of already-saved projects — which is exactly what
+    /// `.value` needed on arrival, since no document written before it contains the string and every
+    /// one of them still decodes to the raster layer it was.
+    ///
+    /// A **removed** kind is the other half of that bargain and does need one: documents already
+    /// contain the retired `"compositing"` string. `LayerKind.decodeMigratingEffectLayers`, used
+    /// below, is the whole of it.
     var kind: LayerKind
     /// The folder this layer belongs to, if any. Stored as a UUID string for forward compat.
     var parentFolderID: String? = nil
@@ -251,9 +266,14 @@ struct LayerManifest: Codable {
     /// The layer's alpha mask (§6.2), written only when there is one — see `FolderManifest.alphaMask`
     /// for why absence is the whole migration this field needs.
     var alphaMask: AlphaMask? = nil
-    /// A `.compositing` layer's grade (§4.4), written only when there is one — `Effect`'s persistence
-    /// note settles the recipe, and it is `alphaMask`'s: nil is what every project saved before
-    /// effects existed says, so absence is the whole migration this field needs.
+    /// A `.value` layer's grade — §4.4's effect mode — written only when there is one. `Effect`'s
+    /// persistence note settles the recipe, and it is `alphaMask`'s: nil is what every project saved
+    /// before effects existed says, so absence is the whole migration this field needs.
+    ///
+    /// **Unchanged by the retirement of the `.compositing` kind, and that is what makes that
+    /// migration one line.** An effect layer's grade was always written here, decoded here
+    /// unconditionally by `init(from:)` below regardless of `kind`, and non-nil on a `.value` layer
+    /// now *means* effect mode — so remapping the kind string is the only thing left to do.
     var effect: Effect? = nil
     /// A `.value` layer's flat colour (§4.5), written only when there is one — `ValueFill`'s
     /// persistence note settles the recipe, and it is `effect`'s and `alphaMask`'s: nil is what every
@@ -267,12 +287,14 @@ struct LayerManifest: Codable {
     var fillReferenceOverride: Bool? = nil
     var cels: [CelManifest]
 
-    init(id: UUID, name: String, opacity: Double, isVisible: Bool, kind: LayerKind = .raster,
+    init(id: UUID, name: String, hasCustomName: Bool = false, opacity: Double, isVisible: Bool,
+         kind: LayerKind = .raster,
          parentFolderID: String? = nil, blendMode: BlendMode = .normal,
          alphaMask: AlphaMask? = nil, effect: Effect? = nil, fill: ValueFill? = nil,
          fillReferenceOverride: Bool? = nil, cels: [CelManifest]) {
         self.id = id
         self.name = name
+        self.hasCustomName = hasCustomName
         self.opacity = opacity
         self.isVisible = isVisible
         self.kind = kind
@@ -291,9 +313,13 @@ struct LayerManifest: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
+        hasCustomName = try container.decodeIfPresent(Bool.self, forKey: .hasCustomName) ?? false
         opacity = try container.decode(Double.self, forKey: .opacity)
         isVisible = try container.decode(Bool.self, forKey: .isVisible)
-        kind = try container.decodeIfPresent(LayerKind.self, forKey: .kind) ?? .raster
+        // Not `decodeIfPresent(LayerKind.self, …)`: that substitutes `.raster` only for an *absent*
+        // key and throws on the retired `"compositing"` one, taking the whole project down with it.
+        // See `LayerKind.decodeMigratingEffectLayers`, which carries the argument.
+        kind = try LayerKind.decodeMigratingEffectLayers(from: container, forKey: .kind) ?? .raster
         cels = try container.decode([CelManifest].self, forKey: .cels)
         parentFolderID = try container.decodeIfPresent(String.self, forKey: .parentFolderID)
         blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
@@ -304,8 +330,8 @@ struct LayerManifest: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask, effect, fill
-        case fillReferenceOverride, cels
+        case id, name, hasCustomName, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask
+        case effect, fill, fillReferenceOverride, cels
     }
 }
 

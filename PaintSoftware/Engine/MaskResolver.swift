@@ -222,6 +222,17 @@ enum MaskResolver {
     /// The masks themselves are in the key rather than the masked node's id, which is the difference
     /// between "cached per distinct mask" and "cached per masked layer" — ten layers clipped to the
     /// same shape resolve it once.
+    ///
+    /// **KNOWN GAP — a *folder's* grade is not in this key.** §4.4's 1-input node form (phase 9b) puts
+    /// an `Effect` on a `LayerFolder`, and a mask source naming that folder resolves its whole node,
+    /// so a grade that reshapes alpha (`reshapesCoverage`: outline, blur, bloom, Sobel, sharpen)
+    /// changes the coverage this cache holds. Nothing here can see it: `versions` is indexed by
+    /// *layer*, gathered from `stack.leafLayerIndices`, and a folder is not a leaf. A grading **layer**
+    /// inside such a stack is covered — that is what `LayerContentVersion.effect` is for — but the
+    /// folder form is not, and closing it means putting the stacks' node grades in this key rather
+    /// than extending a per-layer version, which is a change of its own and is deliberately not this
+    /// pass's. The live canvas is unaffected either way: `CanvasView.SandwichKey` compares whole
+    /// `[RenderNode]` trees and so sees both forms.
     private struct CacheKey: Hashable {
         let masks: [AlphaMask]
         let width: Int

@@ -469,7 +469,13 @@ extension CanvasManager {
         // showed. Two fields, one argument list, and only the newer one had a test —
         // `testDuplicatingAnEffectLayerCarriesItsGrade` is the older half's, and it fails without
         // this line.
-        var copy = Layer(id: UUID(), name: source.name + " copy", opacity: source.opacity,
+        // `hasCustomName` is carried for `fillReferenceOverride`'s reason rather than `fill`'s: it is a
+        // record of a decision the artist made, and a copy that dropped it would quietly become
+        // auto-nameable — so a duplicate of a layer they had named would lose that name the next time
+        // its mode changed, while the original kept it. What the copy is *called* is derived either
+        // way ("… copy"); what is being carried is who gets to decide.
+        var copy = Layer(id: UUID(), name: source.name + " copy", hasCustomName: source.hasCustomName,
+                         opacity: source.opacity,
                          isVisible: source.isVisible, fillReferenceOverride: source.fillReferenceOverride,
                          kind: source.kind, effect: source.effect, fill: source.fill,
                          blendMode: source.blendMode, alphaMask: source.alphaMask,

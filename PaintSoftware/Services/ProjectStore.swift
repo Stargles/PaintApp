@@ -150,16 +150,22 @@ enum ProjectStore {
         struct LayerContent {
             let id: UUID
             let name: String
+            /// Whether `name` is the artist's own (`Layer.hasCustomName`). Snapshotted so the save can
+            /// write it: a name that survives a reload but comes back auto-nameable is the failure the
+            /// flag exists to prevent, arriving one launch late.
+            let hasCustomName: Bool
             let opacity: Double
             let isVisible: Bool
             let kind: LayerKind
             let parentFolderID: UUID?
             let blendMode: BlendMode
             let alphaMask: AlphaMask?
-            /// A `.compositing` layer's grade (§4.4). A value type, so unlike `vector` it needs no
-            /// defensive copy to be safe to encode off main.
+            /// A `.value` layer's grade — §4.4's effect mode. A value type, so unlike `vector` it
+            /// needs no defensive copy to be safe to encode off main.
             let effect: Effect?
-            /// A `.value` layer's flat colour (§4.5). A value type, for `effect`'s reason.
+            /// A `.value` layer's flat colour — §4.5's other mode. A value type, for `effect`'s
+            /// reason. Both are snapshotted unconditionally: the mode is which one is *live*, and a
+            /// layer in effect mode still carries the colour it will go back to (`Layer.valueFill`).
             let fill: ValueFill?
             let fillReferenceOverride: Bool?
             let cels: [CelContent]
@@ -209,7 +215,8 @@ enum ProjectStore {
             customBrushes = canvasManager.customBrushes
             vectorEraserMode = canvasManager.vectorEraserMode
             folders = canvasManager.folders.map { folder in
-                FolderManifest(id: folder.id, name: folder.name, isExpanded: folder.isExpanded,
+                FolderManifest(id: folder.id, name: folder.name, hasCustomName: folder.hasCustomName,
+                               isExpanded: folder.isExpanded,
                                isVisible: folder.isVisible, parentFolderID: folder.parentFolderID,
                                opacity: folder.opacity, blendMode: folder.blendMode,
                                isIsolated: folder.isIsolated, alphaMask: folder.alphaMask,
@@ -225,7 +232,8 @@ enum ProjectStore {
             motionGroups = canvasManager.motionGroups
             guideStrokes = canvasManager.guideStrokes
             layers = canvasManager.layers.map { layer in
-                LayerContent(id: layer.id, name: layer.name, opacity: layer.opacity,
+                LayerContent(id: layer.id, name: layer.name, hasCustomName: layer.hasCustomName,
+                             opacity: layer.opacity,
                              isVisible: layer.isVisible, kind: layer.kind,
                              parentFolderID: layer.parentFolderID, blendMode: layer.blendMode,
                              alphaMask: layer.alphaMask, effect: layer.effect, fill: layer.fill,
@@ -418,6 +426,7 @@ enum ProjectStore {
             layerManifests.append(LayerManifest(
                 id: layer.id,
                 name: layer.name,
+                hasCustomName: layer.hasCustomName,
                 opacity: layer.opacity,
                 isVisible: layer.isVisible,
                 kind: layer.kind,
@@ -498,7 +507,8 @@ enum ProjectStore {
 
         // Restore folders.
         manager.folders = manifest.folders.map { f in
-            LayerFolder(id: f.id, name: f.name, isExpanded: f.isExpanded, isVisible: f.isVisible,
+            LayerFolder(id: f.id, name: f.name, hasCustomName: f.hasCustomName,
+                        isExpanded: f.isExpanded, isVisible: f.isVisible,
                         parentFolderID: f.parentFolderID, opacity: f.opacity,
                         blendMode: f.blendMode, isIsolated: f.isIsolated, alphaMask: f.alphaMask,
                         compositorRole: f.compositorRole, effect: f.effect)
@@ -574,6 +584,7 @@ enum ProjectStore {
             layers.append(Layer(
                 id: layerManifest.id,
                 name: layerManifest.name,
+                hasCustomName: layerManifest.hasCustomName,
                 opacity: layerManifest.opacity,
                 isVisible: layerManifest.isVisible,
                 fillReferenceOverride: layerManifest.fillReferenceOverride,
