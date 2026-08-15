@@ -431,10 +431,20 @@ final class LayerPanelUITests: PaintUITestCase {
 
     /// §4.4's effect layer, reachable at last: it shipped engine-complete with no way to create one.
     ///
-    /// The row's label is the only thing the panel says about it, so the kind is confirmed the way an
-    /// artist would notice it — a stroke has nowhere to land, and `Layer.hasNoDrawingSurface` answers
-    /// with the alert phase 9b already built rather than swallowing the touch.
-    func testTheAddMenuCreatesAnEffectLayerAStrokeCannotLandOn() throws {
+    /// It is reached through the value layer's Mode row now rather than through an add-menu entry of
+    /// its own (see `addEffectLayerFromAddMenu`), so this test covers the *whole* route: pick the
+    /// kind, pick the mode, and confirm the layer that results is the one §4.4 describes.
+    ///
+    /// The kind is confirmed the way an artist would notice it — a stroke has nowhere to land, and
+    /// `Layer.hasNoDrawingSurface` answers rather than swallowing the touch.
+    ///
+    /// **The answer is a banner now, not an alert.** The three modal `.alert()`s were replaced by one
+    /// transient `CanvasNotice`, so this asserts `canvasNotice` exists rather than
+    /// `app.alerts["No Drawing Surface"]`, and it does not dismiss anything afterwards: there is
+    /// nothing to dismiss, which is the entire change. Its *value* is the `CanvasNotice.Kind` raw
+    /// value rather than the sentence, because the banner deliberately puts the case code there so a
+    /// rewording of the message cannot break a test — `CanvasNoticeBanner` says so at the identifier.
+    func testTheModePickerCreatesAnEffectLayerAStrokeCannotLandOn() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
@@ -442,18 +452,35 @@ final class LayerPanelUITests: PaintUITestCase {
 
         let row = app.staticTexts["layerPanel.row.1"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), "The add menu should create a second layer")
-        XCTAssertEqual(row.label, "Brightness / Contrast",
-                       "An effect layer is named for its grade, and arrives as the identity one")
 
+        // **The row names the grade.** A value layer that has entered effect mode renames itself to the
+        // effect's `displayName` unless the artist has named it by hand (`Layer.hasCustomName`), so the
+        // row that read "Value 2" a moment ago now reads this. Asserted here rather than only in the
+        // logic tier because the row is the artist's actual view of the change, and this assertion was
+        // dropped once already — while the name did *not* follow the effect — which is exactly the
+        // window in which the panel could go on lying about a layer with nothing catching it.
+        XCTAssertEqual(row.label, "Brightness / Contrast",
+                       "The row must say what the layer is, not the flat-colour name it was created with")
+
+        // The Mode row is the panel's own report of which mode the layer is in, and it is the
+        // assertion that the pick actually landed rather than merely being tapped.
+        XCTAssertEqual(app.buttons["layerOptions.valueModeButton"].value as? String, "brightnesscontrast",
+                       "Picking a grade from Mode is what puts a value layer into effect mode")
+        XCTAssertFalse(app.buttons["layerOptions.valueColorButton"].exists,
+                       "…and the flat colour's swatch goes away with it — the fill is inert in this mode")
+
+        app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)   // close the panel so the canvas is clear
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let point = safeOutsideCornerPoint(canvas)
         drawLine(on: canvas, from: point, to: CGVector(dx: point.dx + 0.12, dy: point.dy))
 
-        XCTAssertTrue(app.alerts["No Drawing Surface"].waitForExistence(timeout: 5),
-                      "The new layer holds no pixels, so the stroke is refused with the existing alert")
-        app.alerts["No Drawing Surface"].buttons["OK"].tap()
+        let notice = app.staticTexts["canvasNotice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5),
+                      "The new layer holds no pixels, so the stroke is refused with a transient banner")
+        XCTAssertEqual(notice.value as? String, "noDrawingSurface",
+                       "The banner names the blocker by `CanvasNotice.Kind`, not by its wording")
     }
 
     /// §4.5's value layer, same story — plus the one control it needs to be worth creating: the

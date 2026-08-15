@@ -414,14 +414,41 @@ class PaintUITestCase: XCTestCase {
         nodeItem.tap()
     }
 
-    /// Same menu again, for §4.4's effect layer — a `.compositing` leaf that grades the backdrop
-    /// beneath it and holds no pixels of its own.
+    /// §4.4's effect layer — a leaf that grades the backdrop beneath it and holds no pixels of its
+    /// own — **created the only way it can be now: as a value layer, then flipped into effect mode.**
+    ///
+    /// There is no "Effect Layer" item in the add menu any more, and this helper's two-step shape is
+    /// the point rather than an inconvenience worked around. The effect layer stopped being a
+    /// `LayerKind` of its own and became a *mode* of `.value`, told apart by whether `Layer.effect` is
+    /// present; a menu entry for it would have been a second way to create one kind, differing only
+    /// in which mode it arrived in, and an artist who picked the wrong one would have had to delete
+    /// the layer and start again rather than flip the picker already sitting in its options.
+    ///
+    /// So the route is: add the value layer, open its options, and pick a grade from the Mode row.
+    /// **Brightness / Contrast** because it is what the retired menu item created — the identity
+    /// instance, so a document built by this helper is the same document the old one built.
+    ///
+    /// Leaves the layer's options panel **open**, exactly as the picker leaves it. Callers that want
+    /// the canvas clear should close the panel, which is what the row-based helpers above also expect.
     func addEffectLayerFromAddMenu(_ app: XCUIApplication) {
-        let addButton = app.buttons["layerPanel.addButton"]
-        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.press(forDuration: 1.0)
-        let item = app.buttons["layerPanel.addEffectButton"]
-        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        addValueLayerFromAddMenu(app)
+
+        // The new layer is active the moment it lands, so one tap on its row opens options rather
+        // than merely selecting it — the same two-meanings-of-a-tap the value-layer test relies on.
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The add menu should have created a second layer")
+        row.tap()
+
+        let modeButton = app.buttons["layerOptions.valueModeButton"]
+        XCTAssertTrue(modeButton.waitForExistence(timeout: 5),
+                      "A value layer's options should offer the Mode row that chooses between its two modes")
+        modeButton.tap()
+
+        // `effectMenuSlug(.brightnessContrast(…))` — "Brightness / Contrast" lower-cased with the
+        // punctuation stripped. Quoting the slug rather than the label for the reason the slug exists:
+        // it survives a rewording of the visible name.
+        let item = app.buttons["layerOptions.valueMode.brightnesscontrast"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "The Mode menu should list the effect catalogue")
         item.tap()
     }
 

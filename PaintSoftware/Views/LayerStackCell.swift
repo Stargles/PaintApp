@@ -67,6 +67,11 @@ final class LayerStackCell: UITableViewCell {
     /// §4.3's row kind, as `"node,<mixMode>"` or `"slot,<index>"`. Which slot a row is is otherwise
     /// only readable from its position among its siblings, which is exactly the thing worth pinning.
     private let compositorMarker = UIView()
+    /// §4.4's grade, as `effectMenuSlug` — set on any row applying one, layer or node. Its own probe
+    /// rather than a third answer on `compositorMarker` because the two are independent facts: a
+    /// value layer in effect mode can also be a node's operand, and `"input,0"` is what a test asks
+    /// that row about. One probe, one question.
+    private let effectMarker = UIView()
 
     private var contentLeading: NSLayoutConstraint!
     private var isFolderRow = false
@@ -90,7 +95,7 @@ final class LayerStackCell: UITableViewCell {
         for view in [guideContainer, disclosureButton, visibilityButton, thumbnailView, folderIconView,
                      nameLabel, subtitleLabel, opacitySlider, currentMarker, folderOptionsButton,
                      maskSourceButton, fillReferenceButton, bakedMarker, vectorMarker, folderMarker,
-                     blendModeMarker, compositorMarker] {
+                     blendModeMarker, compositorMarker, effectMarker] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -147,7 +152,8 @@ final class LayerStackCell: UITableViewCell {
         fillReferenceButton.isHidden = true
         fillReferenceButton.addTarget(self, action: #selector(toggleFillReference), for: .touchUpInside)
 
-        for marker in [bakedMarker, vectorMarker, folderMarker, blendModeMarker, compositorMarker] {
+        for marker in [bakedMarker, vectorMarker, folderMarker, blendModeMarker, compositorMarker,
+                       effectMarker] {
             marker.isAccessibilityElement = true
             marker.isUserInteractionEnabled = false
             marker.backgroundColor = .clear
@@ -236,6 +242,11 @@ final class LayerStackCell: UITableViewCell {
             compositorMarker.heightAnchor.constraint(equalToConstant: 1),
             compositorMarker.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             compositorMarker.topAnchor.constraint(equalTo: contentView.topAnchor),
+
+            effectMarker.widthAnchor.constraint(equalToConstant: 1),
+            effectMarker.heightAnchor.constraint(equalToConstant: 1),
+            effectMarker.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10),
+            effectMarker.topAnchor.constraint(equalTo: contentView.topAnchor),
         ])
 
         // The name sits after the thumbnail on layer rows and after the folder icon on folder rows,
@@ -318,9 +329,24 @@ final class LayerStackCell: UITableViewCell {
     /// **A Mix node's mode shows even at Normal**, unlike a layer's. It is the whole content of the
     /// node's op (§4.3), so Normal there is a pick the artist made rather than the absence of one —
     /// and a Mix node with nothing after its name would look like a node whose op had gone missing.
+    ///
+    /// **§4.4's grade shows for the same reason, and it is the newest thing here.** A value layer is
+    /// two things chosen by one field, and both arrive under a name (`addValueLayer` calls the layer
+    /// after its effect, but a rename or a mode flip parts the two immediately) — so a row reading
+    /// "Value 2" while the layer is in fact a Gaussian Blur is precisely the invisible state this
+    /// method exists to prevent. A node's grade is the same fact about the other wrapper, and lands
+    /// where its Mix mode would: it is the whole content of what the node does.
     private func title(for model: LayerRowModel) -> String {
         var parts = [model.name]
         if let mix = model.mixMode { parts.append(mix.displayName) }
+        // **Suppressed when the name already is the grade**, which is now the common case rather than
+        // a coincidence: entering effect mode renames the layer or node to the effect's `displayName`
+        // (`CanvasManager.setLayerEffect` / `setNodeEffect`), so appending it unconditionally produced
+        // "Gaussian Blur  ·  Gaussian Blur". Compared against the *name* rather than gated on
+        // `hasCustomName`, because what makes the suffix redundant is that the row already says it —
+        // an artist who types "Gaussian Blur" by hand has said it too, and a suffix is not owed to
+        // them for having agreed with the generator.
+        if let effect = model.effect, effect.displayName != model.name { parts.append(effect.displayName) }
         // `!= .normal` rather than `isBlending`: "Clip to Below" answers false to the second, because
         // it composites source-over and expresses itself as a mask (§7) — but it is still a pick the
         // artist made and still needs to show here, which is a question about the picker rather than
@@ -365,6 +391,7 @@ final class LayerStackCell: UITableViewCell {
         blendModeMarker.accessibilityIdentifier = "layerPanel.folder.\(model.name).blendMode"
         blendModeMarker.accessibilityValue = model.blendMode.rawValue
         configureCompositorMarker(model)
+        configureEffectMarker(model)
     }
 
     /// Overwrites whatever a recycled cell's last row left on the probe — a row that is neither a
@@ -376,12 +403,20 @@ final class LayerStackCell: UITableViewCell {
     /// in, which is what the named "Input A"/"Input B" slot folders used to carry and which is
     /// otherwise only readable by comparing row frames. A node nested inside a node reports the
     /// first: what it is outranks where it sits.
+    ///
+    /// **`node,effect` is the third op a node can have**, and it needs saying here because it is
+    /// otherwise indistinguishable from the ordinary one: `setNodeEffect` reshapes the op to `.stack`
+    /// when it sets a grade, so an effect node and a bare stack node both read `compositorOp ==
+    /// .stack` and this probe would report `node,stack` for both. *Which* grade is on `effectMarker`
+    /// rather than appended here, so a test asking "is this a node, and of what shape" and a test
+    /// asking "what grade is applied" read two values that cannot be confused for one another.
     private func configureCompositorMarker(_ model: LayerRowModel) {
         let identifier = model.isFolder
             ? "layerPanel.folder.\(model.name).compositor" : "layerPanel.row.\(model.layerIndex).compositor"
         if model.kind == .compositorNode {
             compositorMarker.accessibilityIdentifier = identifier
-            compositorMarker.accessibilityValue = "node,\(model.mixMode?.rawValue ?? "stack")"
+            let op = model.effect != nil ? "effect" : (model.mixMode?.rawValue ?? "stack")
+            compositorMarker.accessibilityValue = "node,\(op)"
         } else if let input = model.nodeInputIndex {
             compositorMarker.accessibilityIdentifier = identifier
             compositorMarker.accessibilityValue = "input,\(input)"
@@ -389,6 +424,24 @@ final class LayerStackCell: UITableViewCell {
             compositorMarker.accessibilityIdentifier = nil
             compositorMarker.accessibilityValue = nil
         }
+    }
+
+    /// §4.4's grade as `effectMenuSlug` — the same stable spelling the picker's menu items carry, so
+    /// a test that taps `layerOptions.valueMode.gaussianblur` reads `gaussianblur` back off the row
+    /// rather than matching against a `displayName` that a wording change would move.
+    ///
+    /// Cleared, identifier and all, on a row with no grade: `configure` runs on recycled cells, and a
+    /// stale identifier here would make an unrelated row answer a query about somebody else's effect
+    /// — the failure `configureCompositorMarker`'s doc records for its own probe.
+    private func configureEffectMarker(_ model: LayerRowModel) {
+        guard let effect = model.effect else {
+            effectMarker.accessibilityIdentifier = nil
+            effectMarker.accessibilityValue = nil
+            return
+        }
+        effectMarker.accessibilityIdentifier = model.isFolder
+            ? "layerPanel.folder.\(model.name).effect" : "layerPanel.row.\(model.layerIndex).effect"
+        effectMarker.accessibilityValue = effectMenuSlug(effect)
     }
 
     private func configureLayerRow(_ model: LayerRowModel) {
@@ -437,6 +490,7 @@ final class LayerStackCell: UITableViewCell {
         blendModeMarker.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).blendMode"
         blendModeMarker.accessibilityValue = model.blendMode.rawValue
         configureCompositorMarker(model)
+        configureEffectMarker(model)
     }
 
     /// §6.5's picker chrome: the mask checkmark and the fill-reference button, added to the row for

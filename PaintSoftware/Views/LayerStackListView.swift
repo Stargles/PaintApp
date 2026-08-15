@@ -669,8 +669,26 @@ struct LayerRowModel: Equatable {
     // MARK: - Compositor nodes (§4.3)
 
     /// A Mix node's mode — the whole content of its op, so unlike `blendMode` it shows on the row
-    /// even at Normal. Nil on every other kind of row, including a `.stack` node, which has no mode.
+    /// even at Normal. Nil on every other kind of row, including a `.stack` node, which has no mode,
+    /// and including a node that has been given a grade instead — `setNodeEffect` clears the op back
+    /// to `.stack`, so a node is never both at once and this field is nil exactly when `effect` is not.
     var mixMode: BlendMode? = nil
+
+    /// The grade this row applies, from **either** of §4.4's two wrappers: a `.value` layer in effect
+    /// mode (`Layer.layerEffect`) or a folder/node carrying `LayerFolder.effect`.
+    ///
+    /// **One field for both, because the row draws one thing.** The two wrappers differ in where the
+    /// grade is stored and in nothing the row can show — a Gaussian Blur is a Gaussian Blur whether a
+    /// layer or a node is applying it — and a `layerEffect`/`nodeEffect` pair would be two fields the
+    /// cell had to coalesce anyway, at every read.
+    ///
+    /// It exists at all for the reason `blendMode` and `mixMode` do, which `LayerStackCell.title(for:)`
+    /// states: the row is the only place an artist checks a stack at a glance, and a value layer
+    /// reading "Value 2" while it is in fact a Gaussian Blur is the kind of state that is invisible
+    /// until the options panel is opened on the right row. Carried as the `Effect` rather than as its
+    /// name so the cell can derive both the display name and `effectMenuSlug`'s stable test value
+    /// without the two being kept in step by hand here.
+    var effect: Effect? = nil
     /// Which input of its parent node this row is, if its parent is one — **0 is the backdrop**.
     /// Carried for the cell's test probe, since input index is now position and nothing else, so
     /// "which operand is this" is otherwise only readable by comparing row frames.
@@ -701,7 +719,11 @@ struct LayerRowModel: Equatable {
             case .group:          kind = .group
             case .compositorNode: kind = .compositorNode
             }
-            if case .mix(let mode)? = folder?.compositorOp { mixMode = mode }
+            // Read in this order on purpose: `setNodeEffect` forces the op to `.stack` when it sets a
+            // grade, so a node carrying one has no `.mix` to report and the `if case` simply does not
+            // fire. The guard is belt and braces against a hand-written manifest that says both.
+            effect = folder?.effect
+            if effect == nil, case .mix(let mode)? = folder?.compositorOp { mixMode = mode }
             nodeInputIndex = folder.flatMap { LayerRowModel.inputIndex(of: $0.id, parent: $0.parentFolderID, manager: manager) }
             isExpanded = folder?.isExpanded ?? true
             name = folder?.name ?? "Folder"
@@ -732,6 +754,10 @@ struct LayerRowModel: Equatable {
             opacity = layer?.opacity ?? 1
             blendMode = layer?.blendMode ?? .normal
             isVector = layer?.kind == .vector
+            // `layerEffect`, never `effect` — the accessor is the only place "is this layer grading"
+            // is decided (a `.raster` layer that once carried a grade still has the field set), and
+            // the row must say what the renderer does rather than what the storage holds.
+            effect = layer?.layerEffect
             isFillReference = layer?.isFillReference ?? false
             thumbnail = layer?.thumbnail
             folderName = manager.folders.first { $0.id == layer?.parentFolderID }?.name

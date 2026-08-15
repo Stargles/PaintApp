@@ -191,6 +191,11 @@ struct LayerOptionsPanel: View {
     /// menu belongs to the node whose row was tapped, so opening layer A's mask menu, going back, and
     /// then opening layer B must not land on B's.
     @State private var showingMaskMenu = false
+    /// `showingMaskMenu`'s twin for the effect knobs. Two booleans rather than one `enum SubMenu`,
+    /// matching what the panel already had: the pair is mutually exclusive by construction because
+    /// only one row can be tapped to open one, and an enum would be a third state ("neither") that
+    /// the pair already expresses.
+    @State private var showingEffectSettings = false
     @State private var showingValueColorPicker = false
     /// The fill as it stood when the colour picker opened, so the whole picking session lands as one
     /// undo step and a picker opened and dismissed unchanged records none. See `valueColorRow`.
@@ -211,6 +216,18 @@ struct LayerOptionsPanel: View {
                     maskMenu(canvasManager: canvasManager, target: .layer(canvasManager.layers[index].id),
                              mask: canvasManager.layers[index].alphaMask,
                              onBack: { showingMaskMenu = false }, onClose: onClose)
+                } else if showingEffectSettings, let effect = canvasManager.layers[index].layerEffect {
+                    // `layerEffect` rather than `effect`, so the sub-menu closes itself if the layer
+                    // stops being in effect mode underneath it — an undo of the pick that opened it
+                    // is the ordinary way that happens, and rendering knobs for a grade that is no
+                    // longer applied would be a panel editing nothing.
+                    EffectSettingsMenu(
+                        effect: effect,
+                        onChange: { canvasManager.setLayerEffect(layerIndex: index, to: $0) },
+                        onEditBegan: { canvasManager.beginStructureGesture() },
+                        onEditEnded: { canvasManager.commitStructureGesture(name: "Effect") },
+                        onBack: { showingEffectSettings = false },
+                        onClose: onClose)
                 } else {
                     editRows(index: index)
                 }
@@ -228,7 +245,10 @@ struct LayerOptionsPanel: View {
         // The panel is reused in place when the artist opens another row's options (`DrawingView`
         // swaps the id, not the view), so the sub-menu has to be closed here rather than relying on
         // the state being torn down.
-        .onChange(of: layerID) { _, _ in showingMaskMenu = false }
+        .onChange(of: layerID) { _, _ in
+            showingMaskMenu = false
+            showingEffectSettings = false
+        }
         // A panel torn down with the colour picker still open would leave `valueColorRow`'s undo
         // bracket open, and the next unrelated edit would record itself inside it. Drop it instead:
         // the colour the artist picked stays applied, it simply records no step of its own.
@@ -243,7 +263,10 @@ struct LayerOptionsPanel: View {
             Button("Save") {
                 guard let index = layerIndex, canvasManager.layers.indices.contains(index) else { return }
                 let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { canvasManager.layers[index].name = trimmed }
+                // Through `renameLayer` rather than writing `name` here, so the rename records that
+                // it was the artist's — see `Layer.hasCustomName`. The folder alert below has always
+                // routed through `renameFolder`; this is the same shape.
+                if !trimmed.isEmpty { canvasManager.renameLayer(at: index, to: trimmed) }
             }
         }
     }
@@ -254,12 +277,37 @@ struct LayerOptionsPanel: View {
         header(for: index)
         Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-        // §4.5: on a value layer the colour *is* the layer, so it sits above everything that only
-        // modifies it. Absent on every other kind, the way Rasterize is absent off a vector layer —
-        // `setLayerFill` refuses a non-`.value` layer anyway, so offering the control there would be
-        // a swatch that does nothing.
+        // §4.5: a value layer is one of two things, and this is where it is told which. The picker
+        // sits above everything that only modifies the layer, because in either mode it *is* the
+        // layer. Absent on every other kind — `setLayerEffect` and `setLayerFill` both refuse a
+        // non-`.value` layer anyway, so offering either control there would be a control that does
+        // nothing.
         if canvasManager.layers[index].kind == .value {
-            valueColorRow(index: index)
+            valueModeRow(index: index)
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
+            // **Gated on `layerEffect`, not on `valueFill`.** The two look like complements and are
+            // not quite: `valueFill` additionally requires a non-nil `fill`, so a `.value` layer that
+            // has none — only reachable from a hand-written manifest, since `addValueLayer` always
+            // stamps one — would answer nil to both and fall into the effect branch with no effect to
+            // edit. Effect mode *is* `layerEffect != nil`; everything else is flat colour, including
+            // the layer that has not been given a colour yet, which is what the swatch is for.
+            if let effect = canvasManager.layers[index].layerEffect {
+                // Effect mode: the grade's knobs, behind a row rather than inline. Levels alone is
+                // five sliders and Gradient Map is a list, which is the same argument the Mask row
+                // made first — hence the same shape, the same chevron and the same Back button.
+                effectSettingsRow(title: effect.displayName,
+                                  identifier: "layerOptions.effectSettings") {
+                    showingEffectSettings = true
+                }
+            } else {
+                // Flat-colour mode: the colour *is* the layer, so its swatch is the first thing
+                // under the picker that chose it. Absent in effect mode, where the fill is inert
+                // storage the render never reads — a swatch there would be a colour the artist can
+                // pick and never see (`Layer.valueFill` argues the asymmetry, and `setLayerFill`'s
+                // doc points here for where "you cannot pick this right now" belongs).
+                valueColorRow(index: index)
+            }
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
         }
 
@@ -267,11 +315,19 @@ struct LayerOptionsPanel: View {
 
         Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-        blendModeRow(current: canvasManager.layers[index].blendMode) { mode in
-            canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
-        }
+        // **Hidden on a value layer that is grading**, and only there. `RenderTree`'s leaf derivation
+        // pins such a leaf to `.normal` whatever the layer stores — an effect replaces the backdrop
+        // it graded rather than compositing a second picture over it, so there is no second thing for
+        // a mode to combine — which makes the control a lie in that one state. It stays in
+        // flat-colour mode, where a flat colour genuinely is a second picture and genuinely blends,
+        // and on every other kind.
+        if canvasManager.layers[index].layerEffect == nil {
+            blendModeRow(current: canvasManager.layers[index].blendMode) { mode in
+                canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
+            }
 
-        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+        }
 
         optionsAction("Rename", systemImage: "pencil", identifier: "layerOptions.rename") {
             draftName = canvasManager.layers[index].name
@@ -295,6 +351,60 @@ struct LayerOptionsPanel: View {
         optionsAction("Delete", systemImage: "trash", identifier: "layerOptions.delete", role: .destructive) {
             leavingMaskEdit { canvasManager.deleteLayer(at: index) }
         }
+    }
+
+    /// §4.5's mode picker — **the owner's complaint, in one row**: "the effect layer has default set
+    /// to Brightness/contrast and I dont know where to change that or its settings."
+    ///
+    /// One menu spanning both modes rather than a segmented control plus a separate effect picker.
+    /// The two are the same question — *what is this layer* — and the answer is either a flat colour
+    /// or one named grade, so splitting it across two controls would make picking Curves a two-step
+    /// operation whose first step (switch to effect mode) has no meaning on its own.
+    ///
+    /// "Flat Colour" sits above the effect sections because it is `setLayerEffect(to: nil)`: the
+    /// absence of a grade *is* the other mode (`Layer.effect`'s doc is emphatic that the field's
+    /// presence is the discriminant and there is no third `mode` enum), so a menu that offered it
+    /// anywhere but first would be listing the default among the specialisations.
+    private func valueModeRow(index: Int) -> some View {
+        let current = canvasManager.layers[index].layerEffect
+        return Menu {
+            Section {
+                Button {
+                    canvasManager.setLayerEffect(layerIndex: index, to: nil)
+                } label: {
+                    if current == nil {
+                        Label("Flat Colour", systemImage: "checkmark")
+                    } else {
+                        Text("Flat Colour")
+                    }
+                }
+                .accessibilityIdentifier("layerOptions.valueMode.flat")
+            }
+            effectMenuSections(current: current, identifierPrefix: "layerOptions.valueMode") { picked in
+                canvasManager.setLayerEffect(layerIndex: index, to: picked)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text("Mode").foregroundColor(.white)
+                Spacer()
+                Text(current?.displayName ?? "Flat Colour")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("layerOptions.valueModeButton")
+        // `effectMenuSlug` rather than `displayName`, for `blendModeRow`'s reason: it is derived from
+        // the name but stripped of punctuation and case, so it survives a wording change that a test
+        // reading the visible label would not. "flat" is the one hand-written value, matching the
+        // menu item's own identifier suffix.
+        .accessibilityValue(current.map(effectMenuSlug) ?? "flat")
     }
 
     /// §4.5's colour, on the layer that *is* one: a swatch that opens a picker — the same shape the
@@ -413,16 +523,17 @@ struct LayerOptionsPanel: View {
 /// wording change, unlike reading the visible label back — so a UI test can confirm a pick stuck
 /// after the panel closes and reopens, the same way `layerOptions.passThroughToggle` does.
 ///
-/// §4.3's Mix node points this same control at its **op** rather than at the folder's own blend into
-/// its parent — hence `title`, `identifier` and `groups`, which are the whole of the difference. A
-/// second picker for a second thing spelled `BlendMode` would be fourteen cases kept in step by hand.
-private func blendModeRow(title: String = "Blend Mode", identifier: String = "blendMode",
-                          groups: [[BlendMode]] = BlendMode.menuGroups,
-                          current: BlendMode, onSelect: @escaping (BlendMode) -> Void) -> some View {
+/// **It no longer serves §4.3's Mix node.** It used to, through `title`/`identifier`/`groups`
+/// parameters, back when a node's op was a `BlendMode` and nothing else. A node's op is now a blend
+/// *or* a grade (`FolderOptionsPanel.nodeOperationRow`), and the two must be picked from one list
+/// because each clears the other — so that row builds its own `Menu` and this one went back to being
+/// the plain layer/folder blend picker it started as. The parameters went with it: a defaulted
+/// parameter no call site overrides is a claim about flexibility that has stopped being true.
+private func blendModeRow(current: BlendMode, onSelect: @escaping (BlendMode) -> Void) -> some View {
     Menu {
-        ForEach(groups.indices, id: \.self) { groupIndex in
+        ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
             Section {
-                ForEach(groups[groupIndex], id: \.self) { mode in
+                ForEach(BlendMode.menuGroups[groupIndex], id: \.self) { mode in
                     Button {
                         onSelect(mode)
                     } label: {
@@ -432,13 +543,13 @@ private func blendModeRow(title: String = "Blend Mode", identifier: String = "bl
                             Text(mode.displayName)
                         }
                     }
-                    .accessibilityIdentifier("layerOptions.\(identifier).\(mode.rawValue)")
+                    .accessibilityIdentifier("layerOptions.blendMode.\(mode.rawValue)")
                 }
             }
         }
     } label: {
         HStack(spacing: 8) {
-            Text(title).foregroundColor(.white)
+            Text("Blend Mode").foregroundColor(.white)
             Spacer()
             Text(current.displayName)
                 .font(.caption)
@@ -451,8 +562,42 @@ private func blendModeRow(title: String = "Blend Mode", identifier: String = "bl
         .padding(.vertical, 10)
         .contentShape(Rectangle())
     }
-    .accessibilityIdentifier("layerOptions.\(identifier)Button")
+    .accessibilityIdentifier("layerOptions.blendModeButton")
     .accessibilityValue(current.rawValue)
+}
+
+/// The "Effect Settings ▸" row — `maskRow`'s shape for `maskMenu`'s reason, and file-level for
+/// `maskRow`'s other reason: a layer's grade and a node's grade must not come to look like two
+/// different features because two panels drew the same row twice.
+///
+/// A plain `Button` around the whole row here, unlike `maskRow`, which needs its texts queryable as
+/// `staticTexts` and so puts its tap target in an `.overlay` beside them. Nothing on this row is read
+/// as text by a test — the effect's identity rides the row's own `accessibilityValue` — so folding
+/// the label into one element costs nothing and keeps the row simple.
+private func effectSettingsRow(title: String, identifier: String,
+                               onOpen: @escaping () -> Void) -> some View {
+    Button(action: onOpen) {
+        HStack(spacing: 10) {
+            Image(systemName: "slider.horizontal.3").frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Effect Settings").foregroundColor(.white)
+                Text(title.isEmpty ? "Tune this grade" : title)
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.gray)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier(identifier)
+    .accessibilityValue(title)
 }
 
 /// The picker's list with "Clip to Below" dropped, for a compositor op.
@@ -539,37 +684,15 @@ private func maskRow(mask: AlphaMask?, onOpen: @escaping () -> Void) -> some Vie
 private func maskMenu(canvasManager: CanvasManager, target: MaskSource, mask: AlphaMask?,
                       onBack: @escaping () -> Void, onClose: @escaping () -> Void) -> some View {
     Group {
-        HStack(spacing: 8) {
-            Button(action: onBack) {
-                HStack(spacing: 3) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .bold))
-                    Text("Back").font(.subheadline)
-                }
-                .foregroundColor(.white)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("layerOptions.maskBack")
-
-            Spacer()
-
-            Text("Mask")
-                .font(.headline)
-                .foregroundColor(.white)
-                .accessibilityIdentifier("layerOptions.maskMenuTitle")
-
-            Spacer()
-
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-            }
-            .accessibilityIdentifier("layerOptions.close")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        // Shared with `EffectSettingsMenu` (see `optionsSubMenuHeader`) rather than kept as this
+        // menu's own copy, so the two sub-menus have one Back in one place at one size — the rail
+        // now has two depths to come out of and an artist should not have to learn each one's exit.
+        // The two identifiers are passed rather than defaulted because this menu shipped first and
+        // several UI tests tap `layerOptions.maskBack` by name.
+        optionsSubMenuHeader(title: "Mask",
+                             backIdentifier: "layerOptions.maskBack",
+                             titleIdentifier: "layerOptions.maskMenuTitle",
+                             onBack: onBack, onClose: onClose)
 
         Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
@@ -610,7 +733,8 @@ private func maskSubtitle(_ mask: AlphaMask?) -> String {
 /// **Also the node menu (§4.3)**, because a node is a folder — `DrawingView.layerPanelRail` routes
 /// on "is this id a folder" and cannot tell them apart. The sections below ask the model what this
 /// particular folder is rather than the panel being forked: a node swaps its Blend Mode row and its
-/// Pass Through toggle for the Mix picker, and keeps everything else a folder has.
+/// Pass Through toggle for the Operation picker — one list holding both the blends and §4.4's grades,
+/// since a node does exactly one of them — and keeps everything else a folder has.
 struct FolderOptionsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     let folderID: UUID
@@ -621,6 +745,9 @@ struct FolderOptionsPanel: View {
     /// `LayerOptionsPanel.showingMaskMenu`'s twin — the mask menu is reachable from a folder's and a
     /// node's options too, since §6.2 gives all three the same `alphaMask`.
     @State private var showingMaskMenu = false
+    /// `LayerOptionsPanel.showingEffectSettings`'s twin, for the same reason: §4.4's grade sits on
+    /// `LayerFolder` exactly as it sits on `Layer`, so a node's knobs are the same panel.
+    @State private var showingEffectSettings = false
 
     private var folderIndex: Int? { canvasManager.folders.firstIndex { $0.id == folderID } }
     private var folder: LayerFolder? { canvasManager.folders.first { $0.id == folderID } }
@@ -631,23 +758,43 @@ struct FolderOptionsPanel: View {
                 maskMenu(canvasManager: canvasManager, target: .folder(canvasManager.folders[index].id),
                          mask: canvasManager.folders[index].alphaMask,
                          onBack: { showingMaskMenu = false }, onClose: onClose)
+            } else if showingEffectSettings, let effect = folder?.effect {
+                // Closes itself if the node stops carrying a grade — `LayerOptionsPanel`'s rule, and
+                // here it is reachable two ways rather than one: undo, or picking a blend mode,
+                // which `setMixBlendMode` clears the effect for.
+                EffectSettingsMenu(
+                    effect: effect,
+                    onChange: { canvasManager.setNodeEffect(folderID, to: $0) },
+                    onEditBegan: { canvasManager.beginStructureGesture() },
+                    onEditEnded: { canvasManager.commitStructureGesture(name: "Effect") },
+                    onBack: { showingEffectSettings = false },
+                    onClose: onClose)
             } else if let index = folderIndex, canvasManager.folders.indices.contains(index) {
                 header(for: index)
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-                // §4.3: for a Mix, the mode *is* the op — the whole of what the node does with its
-                // two inputs — and it is the node's **only** dropdown. The folder's own blend mode
-                // row below is hidden for a node (§4.3's second owner decision): a node's output
-                // always lands Normal on whatever is beneath it, so two dropdowns on one row would
-                // be clutter whose second entry the derivation ignores. Blending a finished node
-                // onto the stack is still reachable — put it in an ordinary folder and set that
-                // folder's mode.
-                if case .mix(let mode)? = folder?.compositorOp {
-                    blendModeRow(title: "Mix Mode", identifier: "mixMode",
-                                 groups: compositorOpModeGroups, current: mode) { picked in
-                        canvasManager.setMixBlendMode(folderID, to: picked)
-                    }
+                // §4.3: for a node the op *is* what it does, and it is the node's **only** dropdown.
+                // The folder's own blend mode row below is hidden for a node (§4.3's second owner
+                // decision): a node's output always lands Normal on whatever is beneath it, so two
+                // dropdowns on one row would be clutter whose second entry the derivation ignores.
+                // Blending a finished node onto the stack is still reachable — put it in an ordinary
+                // folder and set that folder's mode.
+                if folder?.isCompositorNode == true {
+                    nodeOperationRow(folder: folder)
+
                     Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
+                    // The grade's knobs, on the same "Effect Settings ▸" row a value layer gets, for
+                    // the reason the layer's is behind a row at all: Levels is five sliders and this
+                    // panel is 240pt wide. Present only in the state that has knobs to show — a node
+                    // folding two inputs has an op, not a grade.
+                    if let effect = folder?.effect {
+                        effectSettingsRow(title: effect.displayName,
+                                          identifier: "layerOptions.nodeEffectSettings") {
+                            showingEffectSettings = true
+                        }
+                        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                    }
                 }
 
                 // Pass Through is inert on a node and is not offered: a node folds its inputs
@@ -729,7 +876,10 @@ struct FolderOptionsPanel: View {
         .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
         // `LayerOptionsPanel`'s rule: the panel is reused in place when another node's options open,
         // so the sub-menu closes here rather than with the view.
-        .onChange(of: folderID) { _, _ in showingMaskMenu = false }
+        .onChange(of: folderID) { _, _ in
+            showingMaskMenu = false
+            showingEffectSettings = false
+        }
         .alert("Rename Folder", isPresented: $isRenaming) {
             TextField("Name", text: $draftName)
                 .accessibilityIdentifier("layerOptions.nameField")
@@ -739,6 +889,74 @@ struct FolderOptionsPanel: View {
                 if !trimmed.isEmpty { canvasManager.renameFolder(folderID, to: trimmed) }
             }
         }
+    }
+
+    /// §4.3's op picker, widened to §4.4's grades — **one list, because a node does exactly one
+    /// thing.** `setMixBlendMode` and `setNodeEffect` each clear what the other sets, in one undo
+    /// step, so the two halves of this menu are two answers to one question rather than two settings
+    /// that could both be on; a second dropdown for effects would let the artist set both and then
+    /// have to be told, afterwards, that only one took.
+    ///
+    /// Titled "Operation" now that it lists more than blends. **The identifiers stay `mixMode`**,
+    /// which is not a hedge either: `layerOptions.mixModeButton` and `layerOptions.mixMode.multiply`
+    /// are what the UI tests tap and what pins that picking Multiply reaches `compositorOp`, and a
+    /// rename would break those for a display-string change. The `accessibilityValue` likewise stays
+    /// the blend's raw value while a blend is set — an effect reports `effectMenuSlug` instead, which
+    /// no `BlendMode.rawValue` collides with.
+    ///
+    /// A `.stack` node with no grade reads "Stack": it is what `addCompositorNode(op: .stack)` and
+    /// clearing an effect both leave behind, and a node whose picker read blank would look like a
+    /// node whose op had gone missing — the same argument `LayerStackCell.title(for:)` makes for
+    /// showing a Mix's mode even at Normal.
+    private func nodeOperationRow(folder: LayerFolder?) -> some View {
+        let effect = folder?.effect
+        let mixMode: BlendMode? = { if case .mix(let mode)? = folder?.compositorOp { return mode }; return nil }()
+        return Menu {
+            // The blend groups keep their own sections (`BlendMode.menuGroups`: darkening,
+            // lightening, contrast) rather than being flattened under one "Blend" header — the
+            // effect groups below are sections too, so SwiftUI's native dividers already separate
+            // blends from effects, and a header would be the only label in a menu that has none.
+            ForEach(compositorOpModeGroups.indices, id: \.self) { groupIndex in
+                Section {
+                    ForEach(compositorOpModeGroups[groupIndex], id: \.self) { mode in
+                        Button {
+                            canvasManager.setMixBlendMode(folderID, to: mode)
+                        } label: {
+                            // Ticked only while no grade is set: `compositorOp` still says `.mix`
+                            // under an effect for exactly as long as nothing has reshaped it, and a
+                            // checkmark beside a blend that is not what the node does would be the
+                            // panel disagreeing with the render.
+                            if effect == nil, mode == mixMode {
+                                Label(mode.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(mode.displayName)
+                            }
+                        }
+                        .accessibilityIdentifier("layerOptions.mixMode.\(mode.rawValue)")
+                    }
+                }
+            }
+            effectMenuSections(current: effect, identifierPrefix: "layerOptions.mixMode") { picked in
+                canvasManager.setNodeEffect(folderID, to: picked)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text("Operation").foregroundColor(.white)
+                Spacer()
+                Text(effect?.displayName ?? mixMode?.displayName ?? "Stack")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("layerOptions.mixModeButton")
+        .accessibilityValue(effect.map(effectMenuSlug) ?? mixMode?.rawValue ?? "stack")
     }
 
     private func header(for index: Int) -> some View {
