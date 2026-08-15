@@ -3,6 +3,50 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15)
+
+The product owner reports it from their iPad: pick Fill and the canvas will not pan, pinch or rotate;
+pick any other tool and it does. **Unexplained and not fixed.**
+
+Three simulator attempts failed to reproduce it — including a `-configuration Release` build and a
+real two-finger drag rather than the canned `pinch`/`rotate` gestures — and the canvas moved every
+time, so this is not something the shipped XCUITests are failing to notice. It may be device-specific
+(a real pencil/palm in play, `UIPencilInteraction`, or hover events the simulator never delivers).
+
+Do not "fix" it by guessing at recognizer priorities. **Next step is a capture, not a patch**: turn on
+the action recorder (see CLAUDE.md), reproduce it on the iPad, and read which recognizer answered what
+— the recording carries every state transition and every `shouldRequireFailureOf` answer, which is
+exactly the evidence the simulator refused to produce.
+
+## A mask sourced from a graded group can be stale (2026-08-15)
+
+A group used as a mask **source** whose effect reshapes coverage — blur, outline, bloom, Sobel,
+sharpen — can serve a mask computed before the grade changed.
+
+`MaskResolver`'s cache key is built per-*layer*, from `stack.leafLayerIndices`, and a folder is not a
+leaf: a folder's grade cannot reach the key at all, so changing it does not invalidate anything. Only
+effects that change *coverage* show it; a grade that only moves colour leaves the thresholded alpha
+where it was.
+
+Fixing it means putting node grades into the mask cache key, which is a change of its own and not an
+extension of the per-layer version — the key would have to walk the stack's folders as well as its
+leaves. Deliberately not attempted alongside the effect UI.
+
+## Whether UIKit honours a `.began -> .failed` transition is unverified, in both directions (2026-08-15)
+
+`StrokeGestureRecognizer.failTrackedStroke` exists to fail a stroke that has already begun, and
+**nothing in the suite reaches it.** Every two-finger gesture — synthetic *and* real, confirmed by an
+action recording — delivers both touches in a single event, so the recognizer is still `.possible`
+and takes the legal `.possible -> .failed` guard instead.
+
+So the question is open on both sides: it is not established that UIKit honours the transition, and it
+is not established that it refuses. A defensive conditional readback is in place and is documented in
+the code as unproven — do not read its presence as evidence it works.
+
+What would settle it: a test that delivers the second touch in **its own event**, some frames after
+the first, so the recognizer is genuinely `.began` when the failure arrives. Until someone writes
+that, treat the path as unexercised.
+
 ## The onion skin renders unmasked (2026-08-15)
 
 `PreviousCelOnionSkinSource` rasterizes the previous cel with `PixelOps.rasterize(cel:)` and applies

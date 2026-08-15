@@ -14,14 +14,23 @@ toolset, and a frame-by-frame animation timeline.
   live drag-to-adjust before committing, and per-layer "fill reference" boundaries
 - **Select & Move**: lasso/rectangle/automatic (magic wand) selection, move/duplicate with
   resize/rotate/mirror, and a selection-clipped paint/fill mode
-- **Layers**: raster and vector layers, opacity, visibility, fill-reference toggle, object (photo)
-  layers with on-canvas transform handles, and groups that composite as parentheses — isolated or
-  pass-through, with their own opacity, blend mode and mask
+- **Layers**: three kinds — **raster** and **vector** hold pixels, and a **value** layer holds none.
+  Plus opacity, visibility, fill-reference toggle, object (photo) layers with on-canvas transform
+  handles, and groups that composite as parentheses — isolated or pass-through, with their own
+  opacity, blend mode and mask
+- **Value layers, two modes in one kind**: with no effect set it is one flat colour across the canvas
+  (Photoshop's Solid Colour layer); set an effect on it and it becomes an adjustment layer, grading
+  everything below it inside its own container. Which mode it is in is decided by whether it carries
+  an effect — there is no separate kind and no mode switch to keep in sync
 - **Compositing**: 25 blend modes on layers and groups, following W3C Compositing Level 1 rather than
   `CGBlendMode` where the two disagree; render-time alpha masks (never baked, raster and vector
-  alike, including "clip to below"); compositor **nodes** whose input slots take a whole stack each;
-  and **effect layers** — a grade applied to everything beneath it in its container. Blur, bloom and
-  a set of per-pixel effects ship; see [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md)
+  alike, including "clip to below"); and compositor **nodes** — a node's direct children are its
+  inputs, bottom child first, and its dropdown picks either a blend op (two inputs) or one of the
+  effects (one input). See [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md)
+- **Effects**: 13, all configurable from the layer panel — levels, curves, brightness/contrast, HSV
+  shift, gradient map, chromatic aberration, posterize, noise, gaussian/directional blur, bloom,
+  sobel, sharpen and outline — with a curve editor and a gradient-stop editor for the two that need
+  them. One shader per effect, used by both wrappers (value layer and node)
 - **Canvas**: adjustable padding margin, flip horizontal/vertical, custom size presets
 - **Vector eraser**: three CSP-style modes (erase, cut points, cut to intersection). An eraser *is* a
   stroke — it is an `.erase` element in the same z-ordered display list as the paint it eats, so it
@@ -64,14 +73,21 @@ PaintSoftware/
 │   ├── ColorConversion.swift / ColorMath.swift
 │   ├── ThumbnailRenderer.swift
 │   └── AppVersion.swift
+├── Debug/                       # off-by-default diagnostics (see "Action recorder" in CLAUDE.md)
+│   ├── ActionRecorder.swift     #   records touches/recognizers/model changes to JSONL
+│   └── WindowEventTap.swift     #   the one `sendEvent` interception it installs while recording
 └── Views/                       # SwiftUI + UIKit-bridged views
     ├── CanvasView.swift, DrawingView.swift, ContentView-adjacent panels
     ├── TopToolbar.swift, SideToolbar.swift
-    ├── LayerPanel.swift, AnimationTimeline.swift, TimelineTrackView.swift
+    ├── LayerPanel.swift, LayerStackListView.swift, LayerStackCell.swift, EffectSection.swift
+    ├── AnimationTimeline.swift, TimelineTrackView.swift
     ├── ColorPickerPanel.swift, BrushSettingsPanel.swift, EraserSettingsPanel.swift,
     │   FillSettingsPanel.swift, SelectPanel.swift
     ├── ObjectTransformOverlayView.swift, FloatingPieceOverlayView.swift, SelectionOverlayView.swift
     ├── GalleryView.swift, GalleryTileView.swift, CanvasSizePickerView.swift, ActionsMenu.swift
+    └── ActionRecorderControls.swift
+tools/
+└── recording2xcuitest.py        # turns an action recording into a draft XCUITest
 ```
 
 ## Requirements
@@ -114,7 +130,11 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
    panel for its full settings (shape, stabilization, grain, etc.).
 3. Pick a color from the color picker, or a saved palette swatch.
 4. Draw with your finger or Apple Pencil (toggle "Apple Pencil only" in the side rail if you want to
-   ignore accidental finger/palm touches while drawing with a Pencil).
+   ignore accidental finger/palm touches while drawing with a Pencil). The toggle gates **strokes and
+   the fill tool alike**; two-finger pan/zoom/rotate stays on a finger either way.
+5. If a touch cannot draw — no layers, the active layer hidden, or a layer with no drawing surface —
+   a banner appears under the top toolbar saying which, with the fix as a button. It dismisses itself
+   and never interrupts the stroke.
 
 ### Fill
 1. Select the Fill tool and tap inside a region bounded by content on the current layer's fill
@@ -134,11 +154,30 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 
 ### Layers
 1. Open the Layers panel from the top toolbar.
-2. Add a raster or vector layer, or insert a photo as an object layer, from the "+" menu.
+2. **Tap** "+" for the menu: a raster, vector or value layer, a group, a compositor node, or a photo
+   as an object layer. The new item lands **directly above the active layer, inside that layer's own
+   container** — not at the top of the document.
 3. Adjust opacity with the slider, toggle visibility with the eye icon, tap a row to make it active.
 4. Tap the active row again for its options menu (rename, blend mode, merge, delete). While one is
    open every row carries a checkmark to clip that layer to, and a drop to make it a fill boundary.
+   Mask and Effect Settings each open as a sub-menu in place, with a Back button.
 5. Swipe a row to Duplicate or Delete.
+6. Drag a row to reorder it. Dropping onto another layer reorders — it does not group; drop onto a
+   folder or node row to go inside one. The row you are dragging leaves its slot, and an orange
+   guide shows where it will land and at what indent.
+
+### Value layers and effects
+1. Add a value layer from the "+" menu. Out of the box it is a flat colour — pick it from the row's
+   colour swatch.
+2. Set **Mode** in its options menu to any of the 13 effects and it becomes an adjustment layer,
+   grading everything beneath it inside its own container. In effect mode the colour swatch and the
+   blend-mode row are hidden: an effect layer's output always lands Normal.
+3. **Effect Settings ▸** opens the knobs for whichever effect is set, including a curve editor
+   (Curves) and a gradient-stop editor (Gradient Map).
+4. A compositor node's operation dropdown offers the same effects beneath the blend ops. A blend op
+   takes two inputs; an effect op takes one, so it grades that input's composite as a unit.
+5. A value layer or node renames itself to follow the effect you pick, unless you have renamed it by
+   hand — after which it keeps your name.
 
 ### Animation
 1. Expand the timeline at the bottom to manage cels/frames.
@@ -156,17 +195,21 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 Metal Toolchain component (`xcodebuild -downloadComponent MetalToolchain`), a one-time per-machine
 install.
 
-**Drawing not working** — make sure a layer is selected and visible (eye icon); if "Apple Pencil
-only" is toggled on (side rail) and you're using a simulator or a finger, toggle it off.
+**Drawing not working** — the app says why in a banner under the top toolbar (no layers, hidden
+layer, or a layer with no drawing surface) and offers the fix. If nothing happens at all and no
+banner appears, "Apple Pencil only" is probably on (side rail) while you are using a simulator or a
+finger — that gates fill as well as strokes, and is deliberately silent.
 
 **UI tests failing on iPhone** — this app's layout assumes an iPad; run the test suite against an
 iPad simulator destination.
 
 ## Known limitations / open work
 
-See [BUGS.md](BUGS.md) for the tracked list. Notable ones: square/custom brush stamps are
-approximated as tiled round dabs (not true shaped stamps yet); Distort/Warp transform modes render
-identically to Uniform; the Adjust panel and Cut/Copy/Paste are still "Coming soon" stubs.
+See [BUGS.md](BUGS.md) for the tracked list. Notable ones: **two-finger pan/pinch/rotate is reported
+dead on device while the Fill tool is selected**, unexplained and unreproduced on the simulator;
+square/custom brush stamps are approximated as tiled round dabs (not true shaped stamps yet);
+Distort/Warp transform modes render identically to Uniform; the Adjust panel and Cut/Copy/Paste are
+still "Coming soon" stubs.
 
 ## License
 

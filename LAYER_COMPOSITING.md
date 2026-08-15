@@ -68,6 +68,10 @@ Cheap to break, expensive to relearn.
    an explicit choice that nothing may recompute. The two differ on purpose. §6.6.
 10. **Mask edits coalesce into one undo step per mask-edit session.** §6.6.
 11. **Build order is foundation-first**: tree, then compositor, then features. §11.
+12. **There are three layer kinds, not four.** `.value` is one kind with two modes, decided by
+    whether `Layer.effect` is set — flat colour, or the adjustment-layer wrapper of decision 8. §4.5.
+13. **A node's operation is one dropdown**: a blend op (two inputs) or an effect (one). No node has a
+    blend mode of its own, and no layer or node carries both an op and a grade. §4.3.
 
 ## 4. The render tree
 
@@ -133,9 +137,10 @@ not needed changes bytes, not just cost.
 
 ### 4.3 Compositor nodes
 
-A second way to composite, alongside blend modes: a node added from the layers menu that combines
-**two or more inputs** into one output. The owner's model: *"like a blender node, where there are
-layers inside of it which get combined in some kind of operation and then outputted."*
+A second way to composite, alongside blend modes: a node added from the layers menu that runs an
+operation over its inputs and yields one output. The owner's model: *"like a blender node, where there
+are layers inside of it which get combined in some kind of operation and then outputted."* How many
+inputs is the operation's business — a blend op takes two, an effect op takes one.
 
 **A node's children are its inputs.** One direct child, one input — a layer, a folder, or another
 node. There is no separate slot object, and **input index is position**: the bottom child is input 0,
@@ -188,6 +193,29 @@ stale row from before a structural edit goes through the same call. `moving:` is
 child. Ordinary folders and variadic ops declare no maximum. The contiguity invariant generalises
 unchanged — each input is a contiguous span, and the node's span is the union of its inputs' spans.
 
+**The op dropdown holds blend ops and effects, and an effect op is the arity-1 case.** One dropdown,
+two sections: pick a blend and the node takes two inputs; pick one of §7's thirteen effects and it
+takes one, grading that input's composite as a unit. That second form is §4.4's node wrapper, and it
+needed **no `CompositorOp.effect` case, no backend branch and no Metal change**: it is stored as
+`op == .stack` plus `LayerFolder.effect`, because folding one input is exactly what `.stack` already
+does and `RenderNode.effect` is already carried off the folder for any op and applied after the fold
+by both backends. A whole enum case would have duplicated the grade's storage, forced a branch into
+both `fold`s and both halves of `CompositorRole`'s `Codable`, and left two places a grade could live
+that have to agree.
+
+Three consequences, each settled:
+
+- **Arity is stated on `LayerFolder.maxInputCount`, not on `CompositorOp.arity`.** `.stack` is
+  genuinely variadic; what caps this node at one is the grade hanging beside it, and a `CompositorOp`
+  is a value the folder holds and cannot see the folder holding it.
+- **The two writers each clear what the other set.** `setNodeEffect` and `setMixBlendMode` are the
+  only ones, and the pair must never both be live: an op that both blends two inputs and grades one
+  is two unrelated answers to "what does this node do", with nothing to say which runs first.
+- **A node already holding two children keeps both when the artist picks an effect**, so
+  `maxInputCount` reads 1 against a real count of 2 and the node grades the assembled pair. Nothing
+  is destroyed by a dropdown. `canDrop`'s `<` handles the over-count exactly right — no third child
+  may land, and reordering the two that are there stays legal.
+
 **Deleting a node promotes its children**, exactly like deleting an ordinary folder. There is no
 special case and no `deleteCompositorNode`: that existed only because a promoted *slot* folder would
 have been stranded, tagged as input to a node that no longer exists.
@@ -228,19 +256,40 @@ children.
 
 Every effect in §7 ships in two wrappers over **one shader**:
 
-- **As a stack layer** (`LayerKind.compositing`, the case already reserved in
-  [LayerKind.swift:9](PaintSoftware/Models/LayerKind.swift:9)) — it grades everything below it
-  *within its own container*, the Photoshop adjustment-layer model. Fast for the common case.
-- **As a 1-input node** — it grades only what is dragged into its input slot, the Blender model.
-  Precise, and composes with multi-input nodes.
+- **As a stack layer** — a `.value` layer carrying `Layer.effect`, grading everything accumulated
+  below it *within its own container*: the Photoshop adjustment-layer model. Fast for the common case.
+- **As a 1-input node** — a `.stack` node carrying `LayerFolder.effect` (§4.3), grading that node's
+  own composite: the Blender model. Precise, and composes with multi-input nodes.
 
 Only the input-resolution rule differs: *"the accumulated backdrop so far in this container"* versus
-*"this slot's composite."* Both hand the same texture to the same kernel. Nothing else in the design
-branches on which wrapper was used.
+*"this node's assembled input."* Both hand the same texture to the same kernel, and both store the
+grade in a field named `effect` on the thing that wraps it, so `RenderNode.effect` is one field for
+both — the wrapper is the *position in the tree*, not the data. Nothing else in the design branches
+on which wrapper produced the input, and keeping it that way is the point.
 
 Container scoping is what keeps the layer form predictable: an effect layer inside a group cannot
 reach outside it. That is also what makes an isolated group (§4.2) the right default — the grade
 stops at the parenthesis.
+
+**The layer form has no blend mode of its own**, matching §4.3's rule for nodes. The renderer already
+pinned an effect-carrying leaf to `.normal`, so the row's blend dropdown was setting a value nothing
+read; it is now hidden in effect mode rather than left to lie. Wrap the layer in a folder to blend a
+grade's result.
+
+**The retired `compositing` kind — read this before touching `LayerKind`'s decoder.** The effect
+layer was its own `LayerKind` for one phase, written to disk as the literal string `"compositing"`.
+It is not a kind any more, and `LayerKind.decodeMigratingEffectLayers` reads that string as `.value`;
+the grade is already sitting in the manifest's own `effect` key, and a non-nil `effect` on a `.value`
+layer *is* effect mode, so nothing else in the document needs touching.
+
+**Without that line the whole project fails to open, silently.** `LayerKind` is a bare
+`String, Codable` enum with a synthesized decoder, and `decodeIfPresent` substitutes its default only
+when the key is *absent* — a key that is present and unparseable throws. That throw escapes
+`LayerManifest.init(from:)`, escapes `JSONDecoder.decode`, and lands in `ProjectStore.loadManifest`'s
+`try?`, which turns it into nil and makes `load(from:)` return nil for the **entire** document. Not
+one lost layer: the artist's project simply refuses to open with nothing anywhere saying why. An
+unrecognised string still throws, deliberately — a silent fallback to `.raster` would present a
+genuinely corrupt manifest as a layer whose content had been deleted.
 
 **Proxy layers — explicitly deferred, do not build.** The same layer or group appearing in two
 positions turns the tree into a DAG, needing cycle detection and a content-keyed render cache so the
@@ -251,26 +300,45 @@ parent.
 
 ### 4.5 Value layers
 
-`LayerKind.value` holds no pixels either. It carries `Layer.fill` and *is* one flat colour across the
-whole canvas, alpha included — Photoshop's Solid Colour layer. It blends with what is under it like
-any other leaf, and it is an operand of a Mix node.
+`LayerKind.value` holds no pixels, and is **two things chosen by one field**. With `Layer.effect`
+absent it carries `Layer.fill` and *is* one flat colour across the whole canvas, alpha included —
+Photoshop's Solid Colour layer. With `Layer.effect` set it is §4.4's stack wrapper — Photoshop's
+adjustment layer. `Layer.valueFill` and `Layer.layerEffect` are the two accessors that read the mode
+out; nothing else asks.
 
-**Why it earns its keep.** `Mix(A, B, mode)` where A and B are single layers is identical to stacking
-B over A with that mode (§4.3 says so, and that redundancy is deliberate). A value layer is the honest
-answer to "why use a node at all": `Mix(folder-of-drawings, grey 50%, Multiply)` combines the folder
-as a unit and *then* halves it, which a flat stack cannot express.
+**One kind with two modes rather than two kinds**, and that is the owner's call rather than a tidying.
+The two never coexist on one layer — an adjustment layer that is also a flat colour is not a picture
+anyone can describe — so a kind apiece made the mutually-exclusive pair expressible twice, once as
+`kind` and once as which payload happened to be set, with nothing keeping them honest. It also made
+"change this layer from a grade to a colour" a kind rewrite, which every `kind ==` test in the app has
+an opinion about, instead of the one-field edit it now is. The panel follows: **one Mode menu** listing
+Flat Colour and the thirteen effects, not a segmented control plus a separate picker.
+
+**Why the flat colour earns its keep.** `Mix(A, B, mode)` where A and B are single layers is identical
+to stacking B over A with that mode (§4.3 says so, and that redundancy is deliberate). A value layer is
+the honest answer to "why use a node at all": `Mix(folder-of-drawings, grey 50%, Multiply)` combines
+the folder as a unit and *then* halves it, which a flat stack cannot express. It also blends with what
+is beneath it like any other leaf, which is the flat-background and tint case.
 
 **The fill resolves in `renderSources(atFrame:)`, and that placement is the design.** A value layer
 becomes an ordinary `LayerRenderSource` at the frame-aware boundary, so the compositor never learns
 value layers exist and neither backend has a case for one. **Keyframed values are wanted eventually
-and are deliberately not built** — the seam is what this phase buys: a later phase puts a track inside
-`ValueFill`, `resolvedColor(atFrame:)` reads it, and that call site is already passing the frame.
+and are deliberately not built** — the seam is what that phase bought: a later phase puts a track
+inside `ValueFill`, `resolvedColor(atFrame:)` reads it, and that call site is already passing the
+frame.
 
 Two consequences worth stating rather than rediscovering. A value layer is **not a fill-tool reference
 by default** (`Layer.isFillReference`): it is opaque everywhere, so the ordinary visibility default
 would wall the fill tool in across the entire document. And **as a mask source it is a cliff, not a
 gradient** — §6.3's threshold means any alpha above ~28/255 gives full coverage everywhere and
 anything below gives none. Harmless, and deliberately not special-cased.
+
+**A value layer and a node auto-rename to follow their effect, and stop the moment the artist does
+not.** `hasCustomName` on both `Layer` and `LayerFolder` is the latch: `setNodeEffect` /
+`setMixBlendMode` / the value layer's Mode menu rename as they reshape, and a hand-typed name turns
+the latch on for good. The reason is sharpest on a node — a node does exactly one thing, so "Mix 1" on
+a node since set to Gaussian Blur does not merely read stale, it names an operation the node no longer
+performs.
 
 ## 5. The compositor
 
@@ -621,9 +689,7 @@ that need the multi-pass buffer (blur, bloom), with Sobel/Sharpen/Outline alongs
 **The first six have shipped as kernels** — `Effect` in [Effect.swift](PaintSoftware/Models/Effect.swift),
 `applyEffect` in `Composite.metal`, `EffectReference` as the CPU reference, measured against each other
 by `EffectParityLogicTests`. Curves ship alongside Levels: both resolve to the same 256-entry table in
-Swift, so a third curve shape is a case in `Effect` and no shader change. **Neither §4.4 wrapper exists
-yet** — nothing puts an effect into the tree, so no document can hold one; the wrappers are what add
-`var effect: Effect?` to the manifest, with one `decodeIfPresent` and no migration.
+Swift, so a third curve shape is a case in `Effect` and no shader change.
 
 **Sobel, Sharpen/unsharp and Outline (phase 9c) have also shipped as kernels**, on the same multi-pass
 contract blur and bloom established — no new abstraction. Sobel is one direct 3×3 gather (kind 10);
@@ -635,6 +701,13 @@ relationship `sharpen(r, −1) ≡ blur(r)`, and a hand-counted width-1 spot che
 8) — in `EffectMultiPassLogicTests`, not a parity sweep alone. Outline's colour is EffectParams' first
 appended field (`colorR/G/B`, end-of-struct, both declarations); its cost is quadratic, so it is capped
 by `Effect.maxOutlineRadius` rather than `maxBlurTaps`.
+
+**All thirteen are now configurable, which they were not before.** `setLayerEffect` shipped with no UI
+caller anywhere in `Views/` for two phases, so an effect layer was creatable and stayed the identity
+grade forever. `EffectSection.swift` is that caller: one settings menu per effect behind the row's
+**Effect Settings ▸**, including the two that needed real editors rather than sliders — a curve editor
+for Curves and a stop editor for Gradient Map. Both §4.4 wrappers reach the same menu, since both store
+the grade in a field called `effect`.
 
 Where an effect had a published definition it follows it, and the choice is recorded next to the code:
 Photoshop/GIMP Levels, **CSS Filter Effects Level 1** for brightness and contrast, W3C Compositing
@@ -737,13 +810,16 @@ later and rewriting for one.
    no blend mode expresses. Try both against the shipped node UI before committing. Variadic arity is
    now also the *cheapest* of the three: with input index being position, a variadic op is simply one
    whose `canDrop` cap is absent.
-3. **Effect as a 1-input node** (§4.4's second wrapper, "9b") — not built. The seam is already cut:
-   `RenderNode.effect` is one field for *both* wrappers, because the wrapper is the position in the
-   tree rather than the data. So 9b is `LayerFolder.effect` in storage, one `decodeIfPresent`, and
-   one grade call after `fold` in each backend. Nothing else branches on which wrapper produced the
-   input, and keeping it that way is the point.
-4. **§7's last three effects** — Sobel, sharpen/unsharp and outline. They want the multi-pass
-   contract blur and bloom established, not new abstraction.
+3. ~~Effect as a 1-input node~~ — **closed.** It landed as an *op* in the node's own dropdown
+   (§4.3), which is why it cost no enum case and no backend branch. The prediction that the seam was
+   already cut held: `RenderNode.effect` carried both wrappers unchanged.
+4. ~~§7's last three effects~~ — **closed.** Sobel, sharpen/unsharp and outline ship on the multi-pass
+   contract blur and bloom established, with no new abstraction.
+5. **A folder's grade cannot reach the mask cache key.** `MaskResolver`'s key is per-*layer*, via
+   `stack.leafLayerIndices`, and a folder is not a leaf — so a group used as a mask *source* whose
+   effect reshapes coverage (blur, outline, bloom, Sobel, sharpen) can serve a stale mask. Fixing it
+   means putting node grades into the key, which is a change of its own rather than an extension of
+   the per-layer version. Tracked in [BUGS.md](BUGS.md).
 
 ## 11. Build order
 
@@ -762,7 +838,10 @@ it is small and none of them fight a moving substrate.
 | ~~**6**~~ | ~~Alpha masks (§6), incl. `MaskParityLogicTests`~~ | **done** — engine resolves masks in both backends at delta 0, raster and vector pixel-identically; the rows pick sources through the same cycle rule; the live stroke is clipped by the same `ResolvedMask` object the compositor applies |
 | ~~**7**~~ | ~~Tier 2 blend modes~~ | **done** — eleven modes, both backends, measured against the spec |
 | ~~**8**~~ | ~~Compositor nodes: node-as-folder storage, panel chrome (§4.3)~~ | **done** — a 2-input Mix renders, and `Mix(A,B,mode)` measures equal to stacking B over A with that mode at delta 0 across all 25 modes and both backends. Input slot folders were the original storage and were **deleted**: a node's children are its inputs, index is position, and old documents migrate at decode |
-| **9** | Tier 3 effects, as layer *and* node (§4.4, §7) | **partly** — the cheap per-pixel kernels, blur and bloom ship, and 9a's effect-as-a-layer wrapper with them; 9b (effect as a 1-input *node*) and §7's last three effects are open |
+| ~~**9**~~ | ~~Tier 3 effects, as layer *and* node (§4.4, §7)~~ | **done** — thirteen effects in both wrappers and both backends. The layer wrapper is a mode of `.value` rather than a kind of its own; the node wrapper is an op in the node's own dropdown, stored as `.stack` + `LayerFolder.effect`, so neither backend nor `Composite.metal` changed for it |
+| ~~**10**~~ | ~~Make it usable: configure every effect, and fix the layer panel's structural gestures (§4.3–4.5)~~ | **done** — `EffectSection.swift` is `setLayerEffect`'s first UI caller (curve and gradient-stop editors included); "+" opens on tap and inserts above the active layer in that layer's own container; drop-onto-layer reorders instead of auto-grouping; the three modal alerts became one self-dismissing banner |
+
+**The build list is closed.** What remains is in §10 and [BUGS.md](BUGS.md), not in this table.
 
 Phases 0–3 are the risky ones; 4 onward are additive. §9.2's background renderer stays deferred
 until the sequencer exists — only §9.1's substrate is in scope here, and it landed inside phase 2.

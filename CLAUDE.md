@@ -72,7 +72,15 @@ before something was deleted will silently resurrect it, and the count is the on
 
   ```bash
   SUITES=(); for s in $(ls PaintSoftwareUITests/*.swift | xargs -n1 basename | sed 's/\.swift$//' | grep -E "LogicTests$|CharacterizationTests$|^PerfBaselineTests$"); do SUITES+=(-only-testing:PaintSoftwareUITests/$s); done
+  xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
+    -destination 'platform=iOS Simulator,id=75C8B97E-47AF-484B-B7D2-CA7EB1B51B03' \
+    "${SUITES[@]}" -parallel-testing-enabled NO -derivedDataPath build/DerivedData
   ```
+  **`-parallel-testing-enabled NO` on every run that is not the full suite.** The scheme carries
+  `parallelizable = "YES"` (PaintSoftware.xcscheme:48) and that is correct — it is the whole cost
+  model above — but clones only earn their keep when there are many classes to distribute across
+  them. The logic tier is ~250 s of work total, so the clone boots cost more than they save, and
+  this section already warns that leftover clones cause "nearly every mystery failure".
 
 - **A red xcresult is evidence about a *binary*, not about your working tree** — the same trap as the
   banner, pointing the other way. `test-without-building` reuses whatever bundle was last compiled,
@@ -94,7 +102,43 @@ the confirmation. Do not re-run the suite to decide whether a failure was real.*
 xcrun simctl shutdown all; xcrun simctl erase 75C8B97E-47AF-484B-B7D2-CA7EB1B51B03
 xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
   -destination 'platform=iOS Simulator,id=75C8B97E-47AF-484B-B7D2-CA7EB1B51B03' \
-  -only-testing:PaintSoftwareUITests/<Suite>/<test> -derivedDataPath build/DerivedData
+  -only-testing:PaintSoftwareUITests/<Suite>/<test> \
+  -parallel-testing-enabled NO -derivedDataPath build/DerivedData
+```
+
+**`-parallel-testing-enabled NO` is not optional here**, and its absence is what the owner was
+watching when they asked why running one test spawns three iPads: the scheme is parallelizable, so
+xcodebuild clones the device even for a single test, and the clone boots are pure cost when there is
+one class to distribute. Measured 2026-08-15, same test, twice: without the flag it ran on `Clone 1
+of eraser-mutex-test`; with it, on `eraser-mutex-test` itself (the xcresult's `deviceId` is the UDID
+above), and the string "Clone" appears nowhere in the run. **Do not change the scheme** — the full
+suite is 18.8 min *because of* that setting.
+
+If a run is killed mid-flight, sweep for strays before blaming the next failure on your change:
+
+```bash
+xcrun simctl list devices | grep -i clone     # then: xcrun simctl delete <udid>
+```
+A run that finishes normally tears its own clones down — both runs above left zero behind — so
+anything this finds is debris from a run that did not.
+
+**One simulator, many worktrees: check who else is on it before you erase it.** The multi-session
+protocol at the top gives each session its own worktree but they all inherit the same UDID from this
+file, and `simctl shutdown all` + `erase` is not scoped to the caller — it kills whatever another
+session is running on that device *and* takes your own run down with it. It surfaces as
+`Mach error -308 - (ipc/mig) server died` or `Invalid device state`, which reads exactly like a flaky
+simulator and is not. Session 25 lost three runs to it before looking:
+
+```bash
+pgrep -fl xcodebuild                                   # another session's test run?
+```
+If one is live, either wait for it or take a device of your own and leave theirs alone:
+
+```bash
+UDID=$(xcrun simctl create "<slug>" com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M4-8GB \
+  com.apple.CoreSimulator.SimRuntime.iOS-26-5) && xcrun simctl boot "$UDID"
+# ... run with -destination "platform=iOS Simulator,id=$UDID" ...
+xcrun simctl delete "$UDID"                            # when you are done
 ```
 
 Passes clean → environmental. Say so in the summary, name the test, and move on; it is not a
@@ -135,6 +179,46 @@ Auto-resign for the 7-day free-account cert: `/Library/LaunchDaemons/com.paintap
 
 Simulator testing runs locally too — the Tailscale/SSH `deploy/mac/*` scripts are for the Windows
 machine, not this Mac.
+
+## Action recorder — get the bug off the owner's iPad instead of guessing at a simulator
+
+The owner can reproduce a device-only bug in four seconds; an agent poking a simulator cannot
+reproduce it at all. `PaintSoftware/Debug/ActionRecorder.swift` turns those four seconds into one
+greppable JSONL file. **Reach for it before spending runs trying to reproduce something the owner
+saw and you can't** — the fill-tool gesture bug in [BUGS.md](BUGS.md) is exactly that shape.
+
+**Turning it on**: Actions menu → **"Record My Actions"**, in its own section just below the
+pencil-only toggle. Reproduce the bug, then **"Stop Recording"**. Off by default and free when off — the
+`UIWindow.sendEvent` interception is *uninstalled* on stop, not merely flag-checked, so the drawing
+path pays one static `Bool` load per hook site and nothing else.
+
+**Where recordings land**: `Documents/Recordings/recording-yyyyMMdd-HHmmss.jsonl`, inside the app
+container. The Actions menu lists them with Share and Delete, so the owner can AirDrop one straight
+out. To pull one over the cable instead:
+
+```bash
+xcrun devicectl device copy from --device E3B83820-DF74-5042-B52B-0D5BA17E4877 \
+  --domain-type appDataContainer --domain-identifier Starg.PaintSoftware \
+  --source "Documents/Recordings/<file>" --destination ./
+```
+
+**What is in it**: every touch with its pencil-vs-finger type and hit-test target, every gesture
+recognizer state transition, every answer `shouldRequireFailureOf` gave and who it named, model
+changes and canvas transforms — all on one clock, so cause sits beside effect.
+
+**Its one real limitation, and it is not a missing identifier in the app.** A tap on SwiftUI chrome
+records its *position* but not the control's identifier (`"target": null`), because **iOS only builds
+SwiftUI's accessibility identities when an accessibility client is attached to the process** — which
+there isn't, on the owner's own iPad. Canvas and timeline touches are UIKit and record fully. When you
+read a file full of nulls: the `hitClass` and the `model` line just after the touch usually name what
+was tapped, and the emitted window-normalised coordinate still replays. Record with an XCUITest runner
+attached if you need every element named. `WindowEventTap.resolveTarget`'s doc comment carries the
+measurement.
+
+`tools/recording2xcuitest.py <file>.jsonl` turns a recording into a **draft** XCUITest — the tedious
+90% (which element, what order, how far apart), not something that compiles untouched. It refuses to
+downgrade a pencil touch to a finger, because XCUITest cannot synthesise a pencil at all and a quiet
+downgrade would give a green test for a broken app.
 
 ## graphify
 
