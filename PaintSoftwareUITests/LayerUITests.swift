@@ -23,7 +23,7 @@ final class LayerPanelUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap() // Now two layers; the new one (index 1) is topmost and active by default.
+        addVectorLayerFromOpenPanel(app) // Now two layers; the new one (index 1) is topmost and active by default.
 
         let bottomRow = app.staticTexts["layerPanel.row.0"]
         XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
@@ -65,8 +65,8 @@ final class LayerPanelUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap() // layers: [0, 1], current = 1
-        addButton.tap() // layers: [0, 1, 2], current = 2
+        addVectorLayerFromOpenPanel(app) // layers: [0, 1], current = 1
+        addVectorLayerFromOpenPanel(app) // layers: [0, 1, 2], current = 2
 
         let middleRow = app.staticTexts["layerPanel.row.1"]
         XCTAssertTrue(middleRow.waitForExistence(timeout: 5))
@@ -101,7 +101,7 @@ final class LayerPanelUITests: PaintUITestCase {
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
         for _ in 0..<4 {
-            addButton.tap()
+            addVectorLayerFromOpenPanel(app)
         }
         // layers: [0,1,2,3,4], current = 4
 
@@ -144,8 +144,8 @@ final class LayerPanelUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap()
-        addButton.tap()
+        addVectorLayerFromOpenPanel(app)
+        addVectorLayerFromOpenPanel(app)
         // layers bottom-to-top: [Vector 1, Vector 2, Vector 3]; displayed top-to-bottom: 3, 2, 1.
         // Vector is the default kind, so both the canvas's first layer and the `+` produce
         // `addVectorLayer`'s "Vector N" naming.
@@ -192,26 +192,44 @@ final class LayerPanelUITests: PaintUITestCase {
                        "Deleting the active view should fall back to 'All'")
     }
 
-    /// Dropping one layer squarely onto another wraps the pair in a new folder, keeping the order
-    /// they were already in.
-    func testDroppingLayerOntoLayerCreatesFolderWithBoth() throws {
+    /// Dropping one layer squarely onto another **reorders it and creates nothing** — the inverse of
+    /// what this test used to assert, and the owner's decision.
+    ///
+    /// Auto-grouping was a folder the artist never asked for, produced by a gesture they meant as a
+    /// reorder: the drag that overshot by half a row wrapped two layers in a "Folder 1" that then had
+    /// to be found, opened and dissolved. Grouping is still reachable — the pinch — and that is the
+    /// deliberate split: the destructive-to-the-tree operation now needs a gesture nobody performs by
+    /// accident, and the one people perform constantly does the harmless thing.
+    ///
+    /// **`dropDY: 0.5` is load-bearing here, and is why the assertion is about the folder rather than
+    /// only about the order.** A plain layer row no longer has an "onto" band at all: `dropOnto` losing
+    /// its grouping branch would have left the middle 40% of every row resolving to a destination the
+    /// drop then reinterpreted as "above", so the row was split in half instead and there is no dead
+    /// band left. The exact midpoint is the pixel that used to group, so it is the one worth dropping
+    /// on; landing at `midY` resolves to the lower half, which puts the dragged layer beneath its
+    /// target.
+    func testDroppingLayerOntoLayerReordersItAndCreatesNoFolder() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap() // layers: [Vector 1, Vector 2]
+        addVectorLayerFromOpenPanel(app) // layers: [Vector 1, Vector 2]
 
         dragRow(layerCell(app, layerIndex: 1), onto: layerCell(app, layerIndex: 0), dropDY: 0.5)
 
-        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5),
-                      "Dropping a layer onto another should create a folder holding both")
-        XCTAssertEqual(rowFolder(app, layerIndex: 0), "Folder 1")
-        XCTAssertEqual(rowFolder(app, layerIndex: 1), "Folder 1")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Vector 2",
-                       "The dragged layer was above the target and should still be above it")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Vector 1")
+        XCTAssertFalse(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 2),
+                       "A layer landing on a layer must not conjure a folder the artist did not ask for")
+        XCTAssertEqual(rowFolder(app, layerIndex: 0), "", "Both layers stay at the top level…")
+        XCTAssertEqual(rowFolder(app, layerIndex: 1), "", "…in the container they were already in")
+
+        // Both are still here, and the drop was a real move rather than a no-op: `layerPanel.row.N` is
+        // indexed by array position (bottom-to-top), so the dragged "Vector 2" passing below "Vector 1"
+        // swaps which name each index reports.
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Vector 2",
+                       "The dragged layer came to rest beneath its target")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Vector 1")
     }
 
     /// Dropping onto a folder header moves the layer inside it — the interaction that used to be
@@ -223,7 +241,7 @@ final class LayerPanelUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap() // layers: [Vector 1, Vector 2]
+        addVectorLayerFromOpenPanel(app) // layers: [Vector 1, Vector 2]
         addFolderFromAddMenu(app)
         XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
         XCTAssertEqual(rowFolder(app, layerIndex: 0), "", "Sanity: the layer starts outside the folder")
@@ -296,7 +314,7 @@ final class LayerPanelUITests: PaintUITestCase {
         // draft asserted the opposite here and failed on its own false premise rather than on a bug.
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap()
+        addVectorLayerFromOpenPanel(app)
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5),
                       "The added layer becomes row 1 and takes the selection with it")
 
@@ -398,7 +416,7 @@ final class LayerPanelUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap()
+        addVectorLayerFromOpenPanel(app)
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
 
         app.staticTexts["layerPanel.row.1"].tap()   // already selected after the add: opens options
@@ -526,7 +544,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap()
+        addVectorLayerFromOpenPanel(app)
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
 
         XCTAssertFalse(app.buttons["layerPanel.row.0.maskSource"].exists,
@@ -575,7 +593,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         openLayerPanel(app)
         let addLayer = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addLayer.waitForExistence(timeout: 5)) // the panel has to finish presenting first
-        addLayer.tap() // layers: [Vector 1 (drawn on), Vector 2]
+        addVectorLayerFromOpenPanel(app) // layers: [Vector 1 (drawn on), Vector 2]
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
 
         let top = app.staticTexts["layerPanel.row.1"]
@@ -844,7 +862,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
 
         openLayerPanel(app)
-        app.buttons["layerPanel.addButton"].tap() // layer 1, topmost and active
+        addVectorLayerFromOpenPanel(app) // layer 1, topmost and active
         app.buttons["toolbar.layersButton"].tap()
 
         setBrushColor(app, hex: "FF00FF")

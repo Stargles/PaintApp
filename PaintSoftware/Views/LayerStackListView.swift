@@ -4,8 +4,8 @@ import UIKit
 /// The layer stack list, built on `UITableView` rather than SwiftUI's `List`.
 ///
 /// Three of the interactions this list needs have no SwiftUI expression:
-/// * **dropping a row *onto* another row** (onto a folder to move into it, onto a layer to wrap
-///   both in a new folder) — `List`'s `onMove` only ever reports an insertion *between* rows;
+/// * **dropping a row *onto* another row** (onto a folder or a compositor node, to move inside it)
+///   — `List`'s `onMove` only ever reports an insertion *between* rows;
 /// * **two-finger pinch across two adjacent rows** to merge them, which needs the raw touch
 ///   locations of a live gesture;
 /// * **exact row heights**, which SwiftUI's List padding kept inflating for indented rows.
@@ -60,7 +60,20 @@ struct LayerStackListView: UIViewRepresentable {
         // Press-and-hold reorder state.
         var dragRowID: UUID?
         var pendingDragID: UUID?
-        var dragSnapshot: UIView?
+        /// The row under the finger, as a **live `LayerStackCell`** rather than the
+        /// `snapshotView(afterScreenUpdates:)` bitmap this used to be.
+        ///
+        /// The owner asked that the hover look like the drop: "the look when hovering should mirror
+        /// the look when it is let go." A bitmap is a picture of the row at its *old* depth and
+        /// cannot be re-drawn at a new one — the indent and the tree guide are baked into its pixels
+        /// — so mirroring the drop would have meant translating the image sideways by
+        /// `indentPerLevel` and drawing a guide line beside it by hand: a second renderer for the
+        /// same row, correct only for as long as someone kept it in step with `LayerStackCell`.
+        /// A real cell configured from the dragged row's own model *is* the settled look, by
+        /// construction (`LayerStackCell.applyDropPreview`).
+        ///
+        /// It costs one off-screen cell for the length of a drag, which is what a snapshot cost too.
+        var dragProxy: LayerStackCell?
         var dragTouchOffset: CGFloat = 0
         var dropTarget: DropTarget?
         /// Set for the one `reload()` that immediately follows a drop, which must not animate: the
@@ -182,19 +195,29 @@ struct LayerStackListView: UIViewRepresentable {
 
         // MARK: - Drop resolution
 
-        /// A drop landing *between* rows. The row order and `layers` don't line up (folder headers
-        /// are interleaved, collapsed contents are hidden, and `layers` runs bottom-to-top), so
-        /// rather than translating indices this replays the move on the row list and reads off the
-        /// two things that decide the result: the row that ends up directly above the dragged one
-        /// (which folder it lands in) and the row directly below it (what it comes to rest on).
-        func dropBetween(draggedID: UUID, insertionIndex: Int) {
-            guard let from = rows.firstIndex(where: { $0.id == draggedID }) else { return }
+        /// What a between-rows drop would produce, worked out without performing it: the row list as
+        /// it would then read, where the dragged row lands in it, and which folder it ends up in.
+        ///
+        /// The row order and `layers` don't line up (folder headers are interleaved, collapsed
+        /// contents are hidden, and `layers` runs bottom-to-top), so rather than translating indices
+        /// this replays the move on the row list and reads off the two things that decide the result:
+        /// the row that ends up directly above the dragged one (which folder it lands in) and the row
+        /// directly below it (what it comes to rest on).
+        ///
+        /// **Split out of `dropBetween` so the hover preview can ask the same question the drop will
+        /// answer.** The owner's complaint is that the hover does not say where the row is going; the
+        /// only way a preview can be right about that is to run the destination arithmetic rather
+        /// than approximate it, and a second copy of this replay would be a second thing to keep in
+        /// step with `restackLayer`'s rules.
+        func plannedDrop(draggedID: UUID, insertionIndex: Int)
+            -> (rows: [LayerRowModel], newIndex: Int, moved: LayerRowModel, parentFolderID: UUID?)? {
+            guard let from = rows.firstIndex(where: { $0.id == draggedID }) else { return nil }
             var reordered = rows
             let moved = reordered.remove(at: from)
             // `insertionIndex` counts the dragged row itself; drop it once the row is pulled out.
             let target = min(max(insertionIndex > from ? insertionIndex - 1 : insertionIndex, 0), reordered.count)
             reordered.insert(moved, at: target)
-            guard let newIndex = reordered.firstIndex(where: { $0.id == draggedID }) else { return }
+            guard let newIndex = reordered.firstIndex(where: { $0.id == draggedID }) else { return nil }
 
             // Dropping directly under a folder header puts the row inside that folder; otherwise it
             // joins whatever the row above belongs to. That makes "append to the end of a folder"
@@ -213,6 +236,16 @@ struct LayerStackListView: UIViewRepresentable {
                !canvasManager.canDrop(inContainer: container, moving: moved.id) {
                 parentFolderID = canvasManager.folders.first { $0.id == container }?.parentFolderID
             }
+            return (reordered, newIndex, moved, parentFolderID)
+        }
+
+        /// A drop landing *between* rows — `plannedDrop`'s answer, performed.
+        func dropBetween(draggedID: UUID, insertionIndex: Int) {
+            guard let plan = plannedDrop(draggedID: draggedID, insertionIndex: insertionIndex) else { return }
+            let reordered = plan.rows
+            let newIndex = plan.newIndex
+            let moved = plan.moved
+            let parentFolderID = plan.parentFolderID
 
             if moved.isFolder {
                 // Only the header moved in `reordered`; its contents are still at their old spots,
@@ -226,7 +259,21 @@ struct LayerStackListView: UIViewRepresentable {
             }
         }
 
-        /// A drop landing squarely *on* a row: into the folder, or wrapping two layers in a new one.
+        /// A drop landing squarely *on* a row: into the folder or node it names.
+        ///
+        /// **Landing on a plain layer no longer wraps the pair in a new folder**, which is the
+        /// owner's second reorder complaint answered: the gesture that means "put this here" was
+        /// silently also the gesture that means "and make a group", so a reorder that overshot by
+        /// twenty points restructured the document. It now rests above the target, the same
+        /// `restackLayer(above: .layer(...))` the folder-onto-layer branch has always used — one
+        /// meaning per gesture. `CanvasManager.groupLayers` is untouched and still public: nine-odd
+        /// logic tests build fixtures with it, and it remains the right call for a *deliberate*
+        /// grouping command if one is ever added to the menu.
+        ///
+        /// Reachable in practice only for a folder or node target, because `resolveDropTarget` stops
+        /// resolving a hover over a plain layer to `.onto` at all. The layer branch stays as the
+        /// honest answer for a target that arrives here anyway rather than as a `fatalError` about a
+        /// state the two functions have to agree about across a file.
         func dropOnto(draggedID: UUID, targetRow: Int) {
             guard rows.indices.contains(targetRow) else { return }
             let target = rows[targetRow]
@@ -247,7 +294,9 @@ struct LayerStackListView: UIViewRepresentable {
                 // loose layer in a third folder would be more surprising than useful.
                 canvasManager.restackFolder(dragged.id, above: .layer(target.id), parentFolderID: target.parentFolderID)
             } else {
-                canvasManager.groupLayers(dragged.id, with: target.id)
+                // The same rest-above, now for a layer too. It takes the target's container, which
+                // is what "landing on it" has always meant for the folder case three lines up.
+                canvasManager.restackLayer(dragged.id, above: .layer(target.id), parentFolderID: target.parentFolderID)
             }
         }
 
@@ -386,7 +435,9 @@ extension LayerStackListView.Coordinator {
 
     /// Where a dragged row would land if it were released now.
     enum DropTarget: Equatable {
-        /// Into this row: a folder to move inside it, a layer to wrap both in a new folder.
+        /// Into this row — a folder or a compositor node, to move inside it. `resolveDropTarget`
+        /// only ever produces this for a folder row: a plain layer stopped being an "onto" target
+        /// when landing on one stopped meaning "group the pair" (see `dropOnto`).
         case onto(rowIndex: Int)
         /// Between rows, at this index in the current row order.
         case between(insertionIndex: Int)
@@ -404,29 +455,27 @@ extension LayerStackListView.Coordinator {
             guard canvasManager.maskEditTarget == nil,
                   let path = tableView.indexPathForRow(at: point),
                   rows.indices.contains(path.row),
-                  let cell = tableView.cellForRow(at: path),
-                  let snapshot = cell.snapshotView(afterScreenUpdates: true) else { return }
+                  let cell = tableView.cellForRow(at: path) else { return }
 
-            dragRowID = rows[path.row].id
-            snapshot.frame = cell.frame
-            snapshot.layer.shadowColor = UIColor.black.cgColor
-            snapshot.layer.shadowOpacity = 0.5
-            snapshot.layer.shadowRadius = 8
-            snapshot.layer.shadowOffset = CGSize(width: 0, height: 4)
-            snapshot.backgroundColor = UIColor.black.withAlphaComponent(0.75)
-            snapshot.layer.cornerRadius = 8
-            tableView.addSubview(snapshot)
-            dragSnapshot = snapshot
+            let model = rows[path.row]
+            dragRowID = model.id
+            let proxy = makeDragProxy(for: model, frame: cell.frame)
+            tableView.addSubview(proxy)
+            dragProxy = proxy
             dragTouchOffset = point.y - cell.frame.midY
 
-            cell.contentView.alpha = 0.25
+            // **Hidden, not dimmed.** It used to sit at alpha 0.25, which the owner read as a bug —
+            // and fairly: the row is under the finger, so a ghost of it left behind says the row is
+            // in two places. Hiding it lets `animateRowShifts` close the stack up around the hole,
+            // which is the same preview every other drop position already gets.
+            cell.contentView.isHidden = true
             tableView.isScrollEnabled = false
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            UIView.animate(withDuration: 0.15) { snapshot.transform = CGAffineTransform(scaleX: 1.03, y: 1.03) }
+            UIView.animate(withDuration: 0.15) { proxy.transform = CGAffineTransform(scaleX: 1.03, y: 1.03) }
 
         case .changed:
-            guard let snapshot = dragSnapshot else { return }
-            snapshot.center.y = point.y - dragTouchOffset
+            guard let proxy = dragProxy else { return }
+            proxy.center.y = point.y - dragTouchOffset
             updateDropTarget(for: point)
 
         case .ended:
@@ -462,9 +511,18 @@ extension LayerStackListView.Coordinator {
         }
     }
 
-    /// Resolves a finger position into a drop target. The middle 40% of a row means *into* it —
-    /// deliberately generous, because hitting a folder was the fiddliest part of the old list — and
-    /// the outer bands mean "between", above or below.
+    /// Resolves a finger position into a drop target.
+    ///
+    /// **On a folder or node row** the middle 40% means *into* it — deliberately generous, because
+    /// hitting a folder was the fiddliest part of the old list — and the outer bands mean "between",
+    /// above or below.
+    ///
+    /// **On a plain layer row the whole height splits in half**, above and below, with no middle band
+    /// at all. That follows directly from `dropOnto` no longer grouping: with nothing left for a
+    /// layer target to *mean*, the middle 40% of every layer row would resolve to an `.onto` that
+    /// `updateDropTarget` then has to bounce back to `.between` — and it would bounce it to the row's
+    /// *top* edge whichever half the finger was in, so the bottom fifth of every row would silently
+    /// insert above rather than below. Half and half is what the drop actually does.
     private func resolveDropTarget(at point: CGPoint) -> DropTarget? {
         guard let tableView, !rows.isEmpty else { return nil }
         guard let path = tableView.indexPathForRow(at: point), rows.indices.contains(path.row) else {
@@ -473,6 +531,9 @@ extension LayerStackListView.Coordinator {
             return point.y < firstRect.minY ? .between(insertionIndex: 0) : .between(insertionIndex: rows.count)
         }
         let rect = tableView.rectForRow(at: path)
+        guard rows[path.row].isFolder else {
+            return .between(insertionIndex: point.y < rect.midY ? path.row : path.row + 1)
+        }
         let band = rect.height * 0.3
         if point.y < rect.minY + band { return .between(insertionIndex: path.row) }
         if point.y > rect.maxY - band { return .between(insertionIndex: path.row + 1) }
@@ -504,6 +565,85 @@ extension LayerStackListView.Coordinator {
         dropTarget = resolved
         animateRowShifts()
         renderDropFeedback()
+        renderDragProxyDepth()
+    }
+
+    /// Builds the floating row the finger carries: a real cell, configured from the dragged row's own
+    /// model, with the drag chrome the snapshot used to carry laid on top of it.
+    ///
+    /// **Its accessibility is switched off entirely.** A configured `LayerStackCell` stamps
+    /// `layerPanel.row.<n>` and every probe identifier onto its subviews, and a second live view
+    /// carrying the identifiers of a row that is also still in the table would give XCUITest two
+    /// elements answering to one name — a flake that would only ever show up mid-gesture.
+    /// `isUserInteractionEnabled` goes with it: the proxy's eye, slider and options button are real
+    /// controls, and a touch landing on one mid-drag would fire it.
+    private func makeDragProxy(for model: LayerRowModel, frame: CGRect) -> LayerStackCell {
+        let proxy = LayerStackCell(style: .default, reuseIdentifier: nil)
+        proxy.frame = frame
+        proxy.configure(with: model)
+        proxy.isUserInteractionEnabled = false
+        proxy.accessibilityElementsHidden = true
+        proxy.backgroundColor = UIColor.black.withAlphaComponent(0.75)
+        proxy.layer.cornerRadius = 8
+        proxy.layer.shadowColor = UIColor.black.cgColor
+        proxy.layer.shadowOpacity = 0.5
+        proxy.layer.shadowRadius = 8
+        proxy.layer.shadowOffset = CGSize(width: 0, height: 4)
+        // A cell the table never owned gets no layout pass of its own, so its constraints have to be
+        // resolved by hand or it renders as a bare rounded rectangle with nothing in it.
+        proxy.layoutIfNeeded()
+        return proxy
+    }
+
+    /// Re-indents the floating row to the depth it would settle at, and marks the container it is
+    /// about to enter with `LayerStackCell`'s orange pending guide.
+    ///
+    /// This is the mirror the owner asked for, and it is a mirror rather than an imitation because
+    /// the destination is computed by the same code the drop runs (`plannedDrop` / the `.onto`
+    /// branch's `folderID`) and drawn by the same code the settled row uses
+    /// (`LayerStackCell.applyDropPreview`). Animated, and at `animateRowShifts`'s own duration, so
+    /// the row sliding right and the stack opening beneath it read as one movement.
+    private func renderDragProxyDepth() {
+        guard let proxy = dragProxy, let draggedID = dragRowID,
+              let model = rows.first(where: { $0.id == draggedID }) else { return }
+        // With no resolved target — the finger is somewhere the list has no answer for — the proxy
+        // falls back to the row's *current* placement rather than to depth 0, so a drag that wanders
+        // off the list does not flash the row out to the root and back.
+        let placement = previewPlacement(draggedID: draggedID)
+            ?? (depth: model.depth, isNesting: model.parentFolderID != nil)
+        UIView.animate(withDuration: 0.22, delay: 0,
+                       options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]) {
+            proxy.applyDropPreview(depth: placement.depth, isNesting: placement.isNesting)
+        }
+    }
+
+    /// Where the dragged row would render if released now: the nesting depth, and whether that puts
+    /// it inside a container at all.
+    ///
+    /// `isNesting` is true whenever the destination has a parent — **not** only when that parent is a
+    /// new one. "You will be inside this container" is the fact the orange guide states, and it is
+    /// worth stating for a reorder within a folder too: the alternative (orange only when the parent
+    /// changes) means the line blinks off as the finger passes over the folder the row already lives
+    /// in, which reads as the drop having stopped being a nesting drop.
+    private func previewPlacement(draggedID: UUID) -> (depth: Int, isNesting: Bool)? {
+        guard let dropTarget else { return nil }
+        let parentID: UUID?
+        switch dropTarget {
+        case .onto(let rowIndex):
+            guard rows.indices.contains(rowIndex) else { return nil }
+            // `folderID` is nil for a plain-layer target, which `dropOnto` treats as "rest above it,
+            // in its container" — so the container is the same one either way.
+            parentID = rows[rowIndex].folderID ?? rows[rowIndex].parentFolderID
+        case .between(let insertionIndex):
+            guard let plan = plannedDrop(draggedID: draggedID, insertionIndex: insertionIndex) else { return nil }
+            parentID = plan.parentFolderID
+        }
+        guard let parentID else { return (depth: 0, isNesting: false) }
+        // The parent's own row carries its depth; a container whose header is scrolled out of the row
+        // list at all (a collapsed ancestor) cannot be a destination, so the lookup cannot miss for a
+        // target the gesture actually resolved.
+        let parentDepth = rows.first { $0.id == parentID }?.depth ?? 0
+        return (depth: parentDepth + 1, isNesting: true)
     }
 
     /// Highlights the folder/layer a drop would land *into*. A drop landing *between* rows needs no
@@ -519,9 +659,11 @@ extension LayerStackListView.Coordinator {
         }
     }
 
-    /// Shifts rows to make room for the dragged row at the drop target, so the user sees
-    /// where the row will land before releasing. The source row stays dimmed; all others
-    /// slide to their preview positions.
+    /// Shifts rows to make room for the dragged row at the drop target, so the user sees where the
+    /// row will land before releasing. The source row is hidden outright (see `handleReorderDrag`'s
+    /// `.began`) and every other row slides to its preview position — which, for a `.onto` target, is
+    /// the stack closed up over the hole the lift left, since the row is going inside something
+    /// rather than back into the list.
     private func animateRowShifts() {
         guard let tableView, let draggedID = dragRowID, let dropTarget else { return }
         guard let srcIndex = rows.firstIndex(where: { $0.id == draggedID }) else { return }
@@ -580,10 +722,18 @@ extension LayerStackListView.Coordinator {
     private func finishDrag() {
         guard let tableView else { return }
         pendingDragID = dragRowID
-        dragSnapshot?.removeFromSuperview()
-        dragSnapshot = nil
+        dragProxy?.removeFromSuperview()
+        dragProxy = nil
+        // Every per-drag visual on every visible cell, cleared unconditionally — including the cells
+        // this drag never touched, because a cancelled gesture (`handleReorderDrag`'s `default:`)
+        // reaches here too and there is no record of which rows were shifted. The hidden source row
+        // is the one that matters: leave it hidden after a cancel and the artist has lost a layer.
+        //
+        // The proxy carries the *depth* preview and is thrown away above, so there is nothing here to
+        // undo for it — which is the point of putting it on a view the table does not own rather
+        // than on the hovered cell.
         for case let cell as LayerStackCell in tableView.visibleCells {
-            cell.contentView.alpha = 1
+            cell.contentView.isHidden = false
             cell.setDropHighlight(false)
             cell.transform = .identity
         }

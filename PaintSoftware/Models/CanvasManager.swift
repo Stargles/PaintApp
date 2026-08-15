@@ -548,12 +548,61 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Layers
 
+    /// Where a newly added layer goes: **directly above the active layer, inside the active layer's
+    /// own container.** Every `add*Layer` below routes through this, so "+" means one thing.
+    ///
+    /// The old answer was `layers.append(...)`, which is the top of the *root* container however deep
+    /// the artist was working — add a layer while painting inside a group and the new one appeared at
+    /// the very top of the document, outside the group, several rows away from what it was for. It
+    /// also never set `parentFolderID`, so the escape was silent rather than a drag away.
+    ///
+    /// **Why `currentLayerIndex + 1` cannot break the contiguous-span invariant** (`layerStackRows`:
+    /// a folder's layers occupy a contiguous span of `layers`, and a span *is* a subtree in array
+    /// form). Write `a` for the active index and `p` for its `parentFolderID`. The insertion point is
+    /// the boundary between `a` and `a + 1`. Take any folder `F` with a span:
+    ///
+    /// - If the boundary is **strictly inside** `F`'s span — `F.lower <= a` and `F.upper >= a + 1` —
+    ///   then `a` is inside `F`'s span, so layer `a` is in `F`'s subtree, so `p` is `F` or something
+    ///   nested in `F`. The new layer therefore belongs in `F`'s subtree too, and `F`'s span simply
+    ///   grows by one and stays contiguous. This is the mid-folder case, and the nested case: every
+    ///   folder the boundary is strictly inside is an ancestor of `p`, and *only* ancestors of `p`
+    ///   can be strictly inside it.
+    /// - If `F.upper == a` — the active layer is **last in its folder** — the boundary is `F`'s upper
+    ///   edge. When `F` is `p` or an ancestor of `p` the span extends by one; otherwise `F` is
+    ///   untouched and the new layer lands just above its block. Either way nothing is split.
+    /// - If `F.lower == a + 1` — the active layer sits at root **immediately below a folder's span** —
+    ///   the boundary is `F`'s lower edge, `F` is not an ancestor of `p`, and the new layer lands
+    ///   below all of `F`. `F`'s span shifts up by one, intact.
+    ///
+    /// So the only folders whose spans the insert enters are exactly the ones the new layer is a
+    /// member of, which is what contiguity asks. No clamp is needed here, unlike `restackLayer` —
+    /// that one takes an anchor chosen by a *drag*, which can name a container the anchor is not in.
+    ///
+    /// **`layers` empty, or `currentLayerIndex == -1`** (which `deleteLayer` sets when the last layer
+    /// goes): there is no active layer to be above, so the answer is the top of the root container —
+    /// `layers.count`, a boundary no span can be strictly inside since every span ends at or before
+    /// `layers.count - 1`, with no parent folder. For an empty `layers` that is index 0, the only
+    /// legal index there is.
+    private var newLayerPlacement: (index: Int, parentFolderID: UUID?) {
+        guard layers.indices.contains(currentLayerIndex) else { return (layers.count, nil) }
+        return (currentLayerIndex + 1, layers[currentLayerIndex].parentFolderID)
+    }
+
+    /// Inserts a freshly built layer at `newLayerPlacement` and makes it active. The one place the
+    /// placement is spent, so the four `add*Layer` methods cannot drift on where "+" puts things.
+    private func insertNewLayer(_ build: (UUID?) -> Layer) {
+        let placement = newLayerPlacement
+        layers.insert(build(placement.parentFolderID), at: placement.index)
+        currentLayerIndex = placement.index
+    }
+
     func addLayer(name: String? = nil) {
         withStructureUndo(name: "Add Layer") {
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-            let layer = Layer(id: UUID(), name: name ?? "Layer \(layers.count + 1)", opacity: 1.0, isVisible: true, cels: [cel])
-            layers.append(layer)
-            currentLayerIndex = layers.count - 1
+            insertNewLayer { parent in
+                Layer(id: UUID(), name: name ?? "Layer \(layers.count + 1)", opacity: 1.0,
+                      isVisible: true, parentFolderID: parent, cels: [cel])
+            }
         }
     }
 
@@ -565,9 +614,10 @@ final class CanvasManager: ObservableObject {
         withStructureUndo(name: "Add Vector Layer") {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: size), vector: .empty(size: size))
-            let layer = Layer(id: UUID(), name: name ?? "Vector \(layers.count + 1)", opacity: 1.0, isVisible: true, kind: .vector, cels: [cel])
-            layers.append(layer)
-            currentLayerIndex = layers.count - 1
+            insertNewLayer { parent in
+                Layer(id: UUID(), name: name ?? "Vector \(layers.count + 1)", opacity: 1.0,
+                      isVisible: true, kind: .vector, parentFolderID: parent, cels: [cel])
+            }
         }
     }
 
@@ -1296,8 +1346,30 @@ final class CanvasManager: ObservableObject {
         folders[idx].isExpanded.toggle()
     }
 
-    /// Creates an empty folder. It shows up at the top of the layer stack (see `layerStackRows`)
-    /// until layers are dragged into it.
+    /// The container the active layer sits in, or nil when it sits at the top level (or when there is
+    /// no active layer at all) — **what "+" should add into**, and the folder half of
+    /// `newLayerPlacement`.
+    ///
+    /// A property rather than a new default for `addFolder`/`addCompositorNode` below, and that was a
+    /// close call. Those two take `parentFolderID: UUID?` where nil means the root, so making nil mean
+    /// "inherit" instead would have silently rewritten ~96 existing call sites that pass nothing and
+    /// mean root — several of which run with the active layer inside a folder (`restackLayer` preserves
+    /// the active layer across a move into one), so the change would land as a handful of fixtures
+    /// quietly building a different tree than they describe, with no compile error anywhere. Swift has
+    /// no way to distinguish "passed nil" from "passed nothing" for an `Optional` parameter short of a
+    /// double optional or an enum, both of which read as puzzles at every call site to buy a default.
+    ///
+    /// So the inheritance is stated at the call site instead: the panel's "+" passes this, and every
+    /// other caller goes on meaning exactly what it says.
+    var activeContainerID: UUID? {
+        layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].parentFolderID : nil
+    }
+
+    /// Creates an empty folder. It shows up at the top of the container that holds it (see
+    /// `layerStackRows`) until layers are dragged into it.
+    ///
+    /// `parentFolderID` nil is the root, explicitly — pass `activeContainerID` to put the folder
+    /// beside whatever the artist is working on, which is what the panel's "+" does.
     @discardableResult
     func addFolder(name: String? = nil, parentFolderID: UUID? = nil) -> UUID {
         let folder = LayerFolder(id: UUID(),
@@ -1320,6 +1392,9 @@ final class CanvasManager: ObservableObject {
     /// folder per input; §4.3's redesign deleted slots, so a node is now created exactly the way a
     /// folder is and is filled the same way — by dragging layers and folders into it. Input index is
     /// position: the bottom child is input 0, the backdrop.
+    ///
+    /// `parentFolderID` follows `addFolder`'s rule: nil is the root, explicitly, and the panel's "+"
+    /// passes `activeContainerID` to land the node beside what the artist is working on.
     ///
     /// The op reshapes after creation too — `setMixBlendMode` picks a blend, `setNodeEffect` picks a
     /// grade, and each clears the other — so this is the starting op rather than the only one it can

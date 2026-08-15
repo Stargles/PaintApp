@@ -113,7 +113,7 @@ final class FillContainmentUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap() // "Vector 2" is added on top and becomes active; "Vector 1" (blank) stays underneath.
+        addVectorLayerFromOpenPanel(app) // "Vector 2" is added on top and becomes active; "Vector 1" (blank) stays underneath.
 
         layersButton.tap() // Close the panel so it can't cover the canvas.
 

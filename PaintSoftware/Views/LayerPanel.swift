@@ -100,8 +100,15 @@ struct LayerPanel: View {
                     Label("Value Layer", systemImage: "paintpalette")
                 }
                 .accessibilityIdentifier("layerPanel.addValueButton")
+                // `activeContainerID` on these two and not on the three above, which is not an
+                // oversight: `addLayer`/`addVectorLayer`/`addValueLayer` resolve the container
+                // themselves (`newLayerPlacement`), because inserting *above the active layer* is
+                // only meaningful inside that layer's own folder. `addFolder`/`addCompositorNode`
+                // still read nil as the root — see `activeContainerID`'s doc for why they were left
+                // that way — so the inheritance has to be spelled out here or a folder created while
+                // the artist works inside a group lands at the top level instead of beside them.
                 Button {
-                    closingOptions { canvasManager.addFolder() }
+                    closingOptions { canvasManager.addFolder(parentFolderID: canvasManager.activeContainerID) }
                 } label: {
                     Label("Folder", systemImage: "folder")
                 }
@@ -110,7 +117,10 @@ struct LayerPanel: View {
                 // one — a folder whose children are its inputs. It arrives empty, like a folder, and
                 // is filled the same way: drag things into it, bottom child first.
                 Button {
-                    closingOptions { canvasManager.addCompositorNode(op: .mix(.normal)) }
+                    closingOptions {
+                        canvasManager.addCompositorNode(op: .mix(.normal),
+                                                        parentFolderID: canvasManager.activeContainerID)
+                    }
                 } label: {
                     Label("Mix Node", systemImage: "camera.filters")
                 }
@@ -120,11 +130,13 @@ struct LayerPanel: View {
                     .font(.title3)
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
-            } primaryAction: {
-                // Vector is the default kind — a tap on `+` gives one, and the menu above is where
-                // raster is asked for by name.
-                closingOptions { canvasManager.addVectorLayer() }
             }
+            // **No `primaryAction:`, deliberately.** It used to claim a plain tap for
+            // `addVectorLayer`, which made the menu reachable only by press-and-hold — an affordance
+            // nothing on screen advertised, and the owner's complaint: the "+" spawned a kind they
+            // had not asked for and the list of kinds was hidden behind a gesture. Without the
+            // closure SwiftUI's default `Menu` behaviour applies and any tap opens the list, so the
+            // kind is always a deliberate pick and the long-press is no longer load-bearing.
             .accessibilityIdentifier("layerPanel.addButton")
         }
         .padding(.horizontal, 16)

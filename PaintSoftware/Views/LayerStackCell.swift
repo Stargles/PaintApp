@@ -562,13 +562,29 @@ final class LayerStackCell: UITableViewCell {
         fillReferenceButton.accessibilityValue = model.isFillReference ? "1" : "0"
     }
 
+    /// A guide line for a container the row already sits in. Faint on purpose: it is standing
+    /// structure, and at full strength a deep stack reads as a barcode.
+    private static let restingGuideColor = UIColor.systemYellow.withAlphaComponent(0.35)
+    /// A guide line for a container the row is *about to* be dropped into — the owner's request,
+    /// verbatim: "having that orange vertical line appear in the group to signal the tree structure
+    /// when the layer is hovering". Orange rather than a brighter yellow, and near-opaque rather than
+    /// at 0.35, because it has to answer a different question from every other line on screen:
+    /// "where this is going" against "where things already are". A stronger yellow would read as one
+    /// more resting guide that happened to be nearer the eye.
+    private static let pendingGuideColor = UIColor.systemOrange.withAlphaComponent(0.95)
+
     /// Vertical guide lines, one per enclosing folder, so nesting depth reads at a glance.
-    private func updateGuides(depth: Int) {
+    ///
+    /// `pendingLevel` marks one of them as a container the row has not entered yet — see
+    /// `applyDropPreview`, which is the only caller that passes it. The colour is reassigned on every
+    /// call rather than only when it changes, because the line views are pooled and reused: a cell
+    /// that once rendered a pending guide would otherwise keep it orange for every row it is
+    /// recycled into.
+    private func updateGuides(depth: Int, pendingLevel: Int? = nil) {
         guideWidth.constant = CGFloat(depth) * Self.indentPerLevel
 
         while guideLines.count < depth {
             let line = UIView()
-            line.backgroundColor = UIColor.systemYellow.withAlphaComponent(0.35)
             line.translatesAutoresizingMaskIntoConstraints = false
             guideContainer.addSubview(line)
             NSLayoutConstraint.activate([
@@ -582,7 +598,31 @@ final class LayerStackCell: UITableViewCell {
         }
         for (index, line) in guideLines.enumerated() {
             line.isHidden = index >= depth
+            let isPending = index == pendingLevel
+            line.backgroundColor = isPending ? Self.pendingGuideColor : Self.restingGuideColor
+            // The pending line is drawn thicker as well as differently coloured. Colour alone is the
+            // one channel an artist may not have — this app has no colour-blind mode, and orange
+            // against yellow is the pair that goes first — so the signal is carried twice.
+            line.transform = isPending ? CGAffineTransform(scaleX: 2, y: 1) : .identity
         }
+    }
+
+    /// Re-draws this cell's indentation and guides at a depth its row model does **not** have — the
+    /// drag proxy's whole reason for being a real `LayerStackCell` rather than a bitmap.
+    ///
+    /// The owner asked for the hover to mirror the drop: "the look when hovering should mirror the
+    /// look when it is let go". The only way to guarantee that literally is for the same code to draw
+    /// both, which is what this buys — the proxy under the finger is a cell configured from the
+    /// dragged row's own `LayerRowModel`, indented by `updateGuides` exactly as the settled row will
+    /// be, rather than a second renderer kept in step with this one by hand.
+    ///
+    /// **Only ever called on the proxy**, never on a cell the table owns. A live cell's depth comes
+    /// from its row model through `configure(with:)`, and a transient override applied to one would
+    /// survive into whatever row the cell was next recycled for — the compounding one-slot-off class
+    /// of bug `LayerStackListView.handleReorderDrag`'s `.ended` case records for preview transforms.
+    func applyDropPreview(depth: Int, isNesting: Bool) {
+        updateGuides(depth: depth, pendingLevel: isNesting && depth > 0 ? depth - 1 : nil)
+        layoutIfNeeded()
     }
 
     /// Tints both rows of a live pinch so it's clear which two are about to merge.
@@ -591,8 +631,10 @@ final class LayerStackCell: UITableViewCell {
         refreshBackground()
     }
 
-    /// Outlines the row a drag would drop *into* — a folder to move inside it, a layer to wrap the
-    /// pair in a new folder.
+    /// Outlines the row a drag would drop *into*. Folders and compositor nodes only now: dropping a
+    /// layer squarely onto another layer used to wrap the pair in a new folder, and no longer does
+    /// (see `LayerStackListView.dropOnto`), so a plain layer row is never a drop target and never
+    /// gets this outline.
     func setDropHighlight(_ on: Bool) {
         isDropHighlighted = on
         refreshBackground()
@@ -629,6 +671,10 @@ final class LayerStackCell: UITableViewCell {
         // A reorder drag leaves preview translations on the cells it shifted; a cell recycled while
         // one is still applied would otherwise render its new row at the old row's offset.
         transform = .identity
+        // The lifted row is hidden outright for as long as the drag lasts (`handleReorderDrag`),
+        // and a cell recycled while hidden — the table is free to do that the moment the row scrolls
+        // out — would come back as an invisible row somewhere else entirely.
+        contentView.isHidden = false
     }
 
     // MARK: - Actions

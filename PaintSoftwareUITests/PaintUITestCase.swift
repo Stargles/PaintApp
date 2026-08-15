@@ -392,8 +392,34 @@ class PaintUITestCase: XCTestCase {
         layersButton.tap()
     }
 
-    /// The panel's "+" is a Menu with a primaryAction (tap adds a vector layer, the default kind),
-    /// so reaching the Folder item means long-pressing it to open the menu first.
+    /// Adds a vector layer through the panel's "+" menu, with the panel **already open** — the
+    /// replacement for the bare `addButton.tap()` that used to do this in one gesture.
+    ///
+    /// **The "+" no longer adds anything by itself.** It carried a `primaryAction` that made a plain
+    /// tap mean `addVectorLayer`, which left the list of kinds reachable only by press-and-hold; the
+    /// owner's complaint was that the button spawned a kind they had not asked for behind an
+    /// affordance nothing advertised. With the closure gone, SwiftUI's default `Menu` behaviour
+    /// applies and *any* tap opens the list, so every add is now two taps: the "+", then the kind.
+    ///
+    /// Vector because that is the kind the primaryAction used to pick, so every caller that was
+    /// written against the one-tap shortcut keeps the document it was written for. Callers that want
+    /// another kind have a helper per kind below.
+    ///
+    /// The long-pressing helpers below were not rewritten to tap: a long press opens the menu now as
+    /// it did before (it is only the *tap* whose meaning changed), so leaving them alone keeps this
+    /// commit's diff to the sites whose behaviour actually moved.
+    func addVectorLayerFromOpenPanel(_ app: XCUIApplication) {
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+        let item = app.buttons["layerPanel.addVectorButton"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "The add menu should offer a Vector Layer option")
+        item.tap()
+    }
+
+    /// The panel's "+" is a plain Menu, so a press-and-hold opens it and the Folder item can be
+    /// tapped. (A plain tap opens it too, since the `primaryAction` that used to claim the tap for
+    /// `addVectorLayer` is gone — see `addVectorLayerFromOpenPanel`.)
     func addFolderFromAddMenu(_ app: XCUIApplication) {
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))

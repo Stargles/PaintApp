@@ -118,7 +118,7 @@ final class UndoAndLayerHistoryUITests: PaintUITestCase {
         openLayerPanel(app)
         let addLayer = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addLayer.waitForExistence(timeout: 5)) // the panel has to finish presenting first
-        addLayer.tap() // layers: [Vector 1, Vector 2] — vector is the default kind
+        addVectorLayerFromOpenPanel(app) // layers: [Vector 1, Vector 2] — vector is the default kind
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
         app.buttons["toolbar.layersButton"].tap() // close the panel so it can't cover the timeline
 
@@ -157,7 +157,7 @@ final class UndoAndLayerHistoryUITests: PaintUITestCase {
         layersButton.tap() // reopen
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap() // layer 1 added and made active
+        addVectorLayerFromOpenPanel(app) // layer 1 added and made active
 
         layersButton.tap() // close to draw again
         start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6))
@@ -227,7 +227,7 @@ final class UndoAndLayerHistoryUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap() // layer 1 added, becomes active; layer 0 keeps its stroke
+        addVectorLayerFromOpenPanel(app) // layer 1 added, becomes active; layer 0 keeps its stroke
 
         swipeDeleteLayerRow(app, layerIndex: 0)
         XCTAssertTrue(app.staticTexts["layerPanel.row.0"].waitForExistence(timeout: 5))
@@ -251,8 +251,8 @@ final class UndoAndLayerHistoryUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap()
-        addButton.tap()
+        addVectorLayerFromOpenPanel(app)
+        addVectorLayerFromOpenPanel(app)
         // layers bottom-to-top: [Vector 1, Vector 2, Vector 3]; displayed top-to-bottom: 3, 2, 1.
 
         let bottomRow = app.staticTexts["layerPanel.row.0"]
