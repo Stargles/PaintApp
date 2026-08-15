@@ -3,6 +3,49 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## `testMovingThePlayheadRebuildsTheBlendedCanvas` is order-dependent (2026-08-15)
+
+Not load, and not a product regression — **state left in the simulator by whatever test ran before
+it**. Measured three ways on an erased simulator, quiet machine:
+
+| run | result |
+|---|---|
+| full boundary suite (961 tests) | **failed** |
+| with one other `LayerUITests` case, erased first | **failed** |
+| genuinely alone (`totalTestCount: 1`), erased first | **passed** |
+
+It dies at `LayerUITests.swift:657`, which is `row.waitForExistence` inside the `setBlendMode`
+helper — a **missing layer row**, nothing to do with the playhead or the composite its name
+describes. Two other tests call that same helper with the same `layerIndex: 1` after the same
+`drawCrossedStrokesOnTwoLayers` setup and both pass, so the row identifier is not broken.
+
+The likely mechanism is that `launchIntoEditor` does not guarantee a fresh document, so a prior
+test's project is restored and the panel does not hold the two layers this test assumes. The fix
+belongs in the test's setup, not in the app. **Do not "fix" it by re-running until green.**
+
+## The multi-pass effect decline path is reasoned-correct and uncovered (2026-08-15)
+
+`EffectPipelines.encode` returns `false` for "declined — fall back to `EffectReference`", and its
+caller now honours that with `guard effects.encode(…) else { pool.release(scratch); return false }`.
+Nothing tests it: the decline only fires when the device refuses a texture allocation, which a
+healthy simulator never does, so the guard is verified by reading rather than by running.
+
+Worth knowing *how* it got there, because the shape recurs. Merging `tmp/p9-layer` and
+`tmp/p9-multipass` created it out of two changes git reported no conflict between, because they
+touched different lines: `encode` returned `Void` on one branch, so the caller ignoring its result
+was correct; the other branch made it `@discardableResult -> Bool`. Merged, the caller discarded the
+signal, `@discardableResult` suppressed the warning that would have caught it, and a decline
+proceeded to `mix()` with an **unwritten pool texture** — stale pixels presented as a result.
+
+## A green backend-parity test does not prove both backends ran (2026-08-15)
+
+Every parity test appends the Metal case only `if CompositorMetalEngine.shared != nil`, and
+`xcresulttool get test-results activities` on a full run shows only Start/Set Up/Tear Down — no
+console log, no activity naming the backend. So a green parity sweep is equally consistent with
+CoreGraphics-only execution on both sides of the comparison. The tests are honest; their green
+under-determines what it exercised. Fix once, generally: an `XCTContext.runActivity` per iteration
+recording which backend(s) actually ran.
+
 ## Duplicating a cel or a layer drops the in-between's `interpolation` recipe (2026-08-14)
 
 Both per-cel copy sites build `Cel(...)` without passing `interpolation`:

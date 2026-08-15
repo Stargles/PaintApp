@@ -671,8 +671,20 @@ later and rewriting for one.
    corner until it turned out that corner belongs to the layer rail and every trailing dropdown, and
    a view declared last in that `ZStack` hit-tests above them. "Clip to below" itself shipped in 6a,
    as a mask whose source is implied.
-2. **Compositor node ops** — §7 lists the *effects*; the multi-input ops themselves (Mix, and which
-   others take 2+ inputs) want a pass once the node UI exists and there is something to try them on.
+2. **Compositor node ops** — §7 lists the *effects*; which ops take 2+ inputs beyond Mix is still
+   open, but phase 8 narrowed it sharply. Because `Mix(A,B,mode)` is measured equal to stacking B
+   over A with that mode, **every blend mode is already a 2-input op**, and per-slot opacity, blend
+   and mask cover crossfade and weighting. So the honest candidate list is short: variadic arity as
+   pure ergonomics (a variadic Add over N slots is a chain of `Mix(.add)` and buys only the absence
+   of nesting), and a real matte/key op that consumes B as *coverage* rather than as colour, which
+   no blend mode expresses. Try both against the shipped node UI before committing.
+3. **Effect as a 1-input node** (§4.4's second wrapper, "9b") — not built. The seam is already cut:
+   `RenderNode.effect` is one field for *both* wrappers, because the wrapper is the position in the
+   tree rather than the data. So 9b is `LayerFolder.effect` in storage, one `decodeIfPresent`, and
+   one grade call after `fold` in each backend. Nothing else branches on which wrapper produced the
+   input, and keeping it that way is the point.
+4. **§7's last three effects** — Sobel, sharpen/unsharp and outline. They want the multi-pass
+   contract blur and bloom established, not new abstraction.
 
 ## 11. Build order
 
@@ -690,8 +702,8 @@ it is small and none of them fight a moving substrate.
 | ~~**5b**~~ | ~~§5.2's sandwich, so the live canvas shows a blended layer~~ | **done** — exact at rest, snaps on lift |
 | ~~**6**~~ | ~~Alpha masks (§6), incl. `MaskParityLogicTests`~~ | **done** — engine resolves masks in both backends at delta 0, raster and vector pixel-identically; the rows pick sources through the same cycle rule; the live stroke is clipped by the same `ResolvedMask` object the compositor applies |
 | ~~**7**~~ | ~~Tier 2 blend modes~~ | **done** — eleven modes, both backends, measured against the spec |
-| **8** | Compositor nodes: slot-as-folder storage, panel chrome (§4.3) | a 2-input Mix node renders |
-| **9** | Tier 3 effects, as layer *and* node (§4.4, §7) | cheap per-pixel set first, then the multi-pass ones |
+| ~~**8**~~ | ~~Compositor nodes: slot-as-folder storage, panel chrome (§4.3)~~ | **done** — a 2-input Mix renders, and `Mix(A,B,mode)` measures equal to stacking B over A with that mode at delta 0 across all 25 modes and both backends |
+| **9** | Tier 3 effects, as layer *and* node (§4.4, §7) | **partly** — the cheap per-pixel kernels, blur and bloom ship, and 9a's effect-as-a-layer wrapper with them; 9b (effect as a 1-input *node*) and §7's last three effects are open |
 
 Phases 0–3 are the risky ones; 4 onward are additive. §9.2's background renderer stays deferred
 until the sequencer exists — only §9.1's substrate is in scope here, and it landed inside phase 2.

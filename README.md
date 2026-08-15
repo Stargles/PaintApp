@@ -15,7 +15,13 @@ toolset, and a frame-by-frame animation timeline.
 - **Select & Move**: lasso/rectangle/automatic (magic wand) selection, move/duplicate with
   resize/rotate/mirror, and a selection-clipped paint/fill mode
 - **Layers**: raster and vector layers, opacity, visibility, fill-reference toggle, object (photo)
-  layers with on-canvas transform handles
+  layers with on-canvas transform handles, and groups that composite as parentheses — isolated or
+  pass-through, with their own opacity, blend mode and mask
+- **Compositing**: 25 blend modes on layers and groups, following W3C Compositing Level 1 rather than
+  `CGBlendMode` where the two disagree; render-time alpha masks (never baked, raster and vector
+  alike, including "clip to below"); compositor **nodes** whose input slots take a whole stack each;
+  and **effect layers** — a grade applied to everything beneath it in its container. Blur, bloom and
+  a set of per-pixel effects ship; see [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md)
 - **Canvas**: adjustable padding margin, flip horizontal/vertical, custom size presets
 - **Vector eraser**: three CSP-style modes (erase, cut points, cut to intersection). An eraser *is* a
   stroke — it is an `.erase` element in the same z-ordered display list as the paint it eats, so it

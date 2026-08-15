@@ -25,9 +25,26 @@ Xcode lives at `/Applications/Xcode.app`; `xcodebuild`/`xcrun` are on PATH. Meta
 toolchain once: `xcodebuild -downloadComponent MetalToolchain`.
 
 - **Fast tier (~1–2 min)** — the pure-logic `*LogicTests` run headless. Use constantly.
-- **Full run (~22 min)** — XCUITests are 99% of the runtime. Phase boundaries only, and
+- **Full run (~26 min)** — XCUITests are 99% of the runtime. Phase boundaries only, and
   `simctl shutdown all` + `erase` the simulator *immediately before* it: leftover parallel clones
   are the cause of nearly every mystery failure.
+
+### Why the full run is 26 minutes when the work is only ~9
+
+**`xcodebuild` distributes parallel work per test *class*, never per test**, so a class is
+indivisible and the longest one sets the critical path. Measured 2026-08-15 over 961 tests: four
+clones received 482 / 324 / 74 / **44** tests, and two of them sat idle on the home screen for most
+of the run while the last ground on. Nearly all the time is in six UI classes —
+ToolsAndSelection 424 s, TimelineAndUndo 392 s, VectorShapeAndRecovery 389 s, VectorEraser 357 s,
+Fill 277 s, Layer 107 s — about 1,950 s of work in **six indivisible units across four workers**.
+Every one of the ~900 logic tests together adds only ~250 s.
+
+So the lever is granularity, not worker count: **split those six into two or three classes each**
+and there are 12–18 packable units instead of 6. Methods moved between classes *in the same file*
+need no `project.pbxproj` edit. The floor is one test —
+`TimelineAndUndoUITests.testInterpolateModeEndToEndFromGestureToScrub` alone is **189 s** — so going
+below ~3 min means decomposing that one. **Verify any such split by test count from the xcresult**,
+because a test that stops running still prints green.
 - Use the dedicated simulator by UDID: `eraser-mutex-test`,
   `75C8B97E-47AF-484B-B7D2-CA7EB1B51B03`. Passing `-destination name=...` for a device this Mac
   doesn't have (there is no "iPad Pro 13-inch (M4)" — it is an M5) does **not** error; xcodebuild
