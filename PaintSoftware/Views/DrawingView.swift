@@ -115,6 +115,16 @@ struct DrawingView: View {
                 PerfHUDOverlay(canvasManager: canvasManager, isVisible: $isPerfHUDVisible)
                     .padding(.top, 64)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                // "You are being recorded" (see ActionRecorderControls.swift). Renders nothing at
+                // all unless a recording is live, and never hit-tests. Tucked under the perf HUD's
+                // toggle on the leading side rather than trailing: the trailing edge is where the
+                // layer rail and every dropdown live, and a badge sitting on top of the panel the
+                // artist is trying to photograph for a bug report is worse than useless.
+                ActionRecorderIndicator()
+                    .padding(.top, 104)
+                    .padding(.leading, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .background(Color.black)
@@ -132,6 +142,11 @@ struct DrawingView: View {
         // The layer options menu belongs to the layer panel — it can't outlive it.
         .onChange(of: activePanel) { _, panel in
             if panel != .layers { layerOptionsID = nil }
+            // `activePanel` is view `@State`, not manager state, so this is the only place it can be
+            // observed from. Which panel is open decides what a canvas touch even means (see
+            // `Coordinator.gestureRecognizer(_:shouldRecognizeSimultaneouslyWith:)` and the select
+            // overlay's `isCapturingGestures`), so a recording without it can't explain itself.
+            ActionRecorder.ifRecording { $0.model("activePanel", String(describing: panel)) }
         }
         // §6.5's mask-edit session *is* the open options menu, so it is driven from the one piece of
         // state that says which menu that is. Every way the menu can close — its own X, a structural

@@ -406,6 +406,10 @@ struct CanvasView: UIViewRepresentable {
                 let host = LayerHostView()
                 host.strokeView.layerID = layer.id
                 host.strokeView.canvasManager = canvasManager
+                // Debug-recorder name only (see `setUpGestures`). Per-layer rather than a bare
+                // "stroke": every layer has one of these, and `shouldRequireFailureOf` names exactly
+                // one of them, so a recording has to be able to tell them apart.
+                host.strokeView.strokeRecognizer.name = "stroke.\(layer.id.uuidString.prefix(8))"
                 // Live guide feedback goes straight to the overlay, not through SwiftUI state — a
                 // `@Published` write per touch sample would re-run every view body for the drag.
                 host.strokeView.guideOverlayNeedsUpdate = { [weak self] samples in
@@ -1631,6 +1635,20 @@ struct CanvasView: UIViewRepresentable {
             }
             lastAppliedTransform = (scale, rotation, offset)
 
+            // After the identity guard above, so the recording gets one line per *actual* change
+            // rather than one per SwiftUI pass — the guard already thins this to the transitions a
+            // reader cares about. Both halves go in: the committed baseline and the live gesture
+            // contribution are folded together only when every one of pan/pinch/rotation has ended
+            // (`commitLiveTransformIfAllEnded`), so a recording that shows `live` never returning to
+            // identity is showing a gesture that never finished.
+            ActionRecorder.ifRecording {
+                $0.transform(committedScale: committedScale, committedRotation: committedRotation,
+                             committedOffset: committedOffset,
+                             liveScale: liveScale, liveRotation: liveRotation, liveOffset: liveOffset,
+                             appliedScale: scale, appliedRotation: rotation,
+                             appliedOffset: CGSize(width: offset.width, height: offset.height))
+            }
+
             container.transform = CGAffineTransform.identity.rotated(by: rotation).scaledBy(x: scale, y: scale)
             container.center = CGPoint(x: baseCenter.x + offset.width, y: baseCenter.y + offset.height)
         }
@@ -1663,30 +1681,39 @@ struct CanvasView: UIViewRepresentable {
         /// every recognizer on this view was a stock UIKit type whose `@objc` action never sees a
         /// `UITouch`, so none of them *could* have asked. See `TouchTypePressRecognizer`.
         ///
+        /// **`UIGestureRecognizer.name` is set on every recognizer here purely so `ActionRecorder`
+        /// can name it in a recording** — the debug recorder discovers recognizers by walking the
+        /// view hierarchy for named ones rather than having each register itself, which is what keeps
+        /// it free when off (see `WindowEventTap.rescanRecognizers`). `name` is a debugging-only
+        /// property; nothing in the app reads it, and setting it changes no behaviour.
         func setUpGestures(on view: UIView) {
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.minimumNumberOfTouches = 2
             pan.maximumNumberOfTouches = 2
             pan.delegate = self
             pan.cancelsTouchesInView = false
+            pan.name = "canvas.pan"
             view.addGestureRecognizer(pan)
             panRecognizer = pan
 
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinch.delegate = self
             pinch.cancelsTouchesInView = false
+            pinch.name = "canvas.pinch"
             view.addGestureRecognizer(pinch)
             pinchRecognizer = pinch
 
             let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotation(_:)))
             rotation.delegate = self
             rotation.cancelsTouchesInView = false
+            rotation.name = "canvas.rotation"
             view.addGestureRecognizer(rotation)
             rotationRecognizer = rotation
 
             let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap))
             twoFingerTap.numberOfTouchesRequired = 2
             twoFingerTap.cancelsTouchesInView = false
+            twoFingerTap.name = "canvas.twoFingerTap"
             view.addGestureRecognizer(twoFingerTap)
 
             // Drives the shape constraint snap: reports the live canvas touch count, and two or more
@@ -1695,6 +1722,7 @@ struct CanvasView: UIViewRepresentable {
             // started seconds ago — "keep the pen down, then drop a finger to snap it."
             let touchCounter = TouchCountRecognizer(target: self, action: nil)
             touchCounter.delegate = self
+            touchCounter.name = "canvas.touchCounter"
             touchCounter.onCountChanged = { [weak self] count in
                 self?.canvasTouchCountChanged(count)
             }
@@ -1704,6 +1732,7 @@ struct CanvasView: UIViewRepresentable {
             let threeFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap))
             threeFingerTap.numberOfTouchesRequired = 3
             threeFingerTap.cancelsTouchesInView = false
+            threeFingerTap.name = "canvas.threeFingerTap"
             view.addGestureRecognizer(threeFingerTap)
 
             twoFingerTap.require(toFail: threeFingerTap)
@@ -1721,6 +1750,7 @@ struct CanvasView: UIViewRepresentable {
             fillPress.delegate = self
             fillPress.cancelsTouchesInView = false
             fillPress.isEnabled = false
+            fillPress.name = "canvas.fillPress"
             view.addGestureRecognizer(fillPress)
             fillTapRecognizer = fillPress
 
@@ -1739,6 +1769,7 @@ struct CanvasView: UIViewRepresentable {
             catchAll.delegate = self
             catchAll.cancelsTouchesInView = false
             catchAll.isEnabled = false
+            catchAll.name = "canvas.catchAll"
             view.addGestureRecognizer(catchAll)
             catchAllTapRecognizer = catchAll
         }

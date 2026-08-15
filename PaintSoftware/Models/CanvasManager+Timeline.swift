@@ -88,6 +88,11 @@ extension CanvasManager {
                 scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
         }
+        // Cel/block spawn. Worth a line of its own because it usually happens *implicitly* — drawing
+        // on an empty frame spawns a block from inside `onStrokeBegan` (see
+        // `Coordinator.attachSpawnedCelIfFrameIsEmpty`), so a recording showing a stroke followed by
+        // a cel appearing is showing something the artist never asked for by name.
+        recordLayerStackChange("added cel on layer \(layerIndex) at frame \(startFrame), length \(frameCount)")
         return true
     }
 

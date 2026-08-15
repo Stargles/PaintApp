@@ -63,6 +63,15 @@ struct ActionsMenu: View {
                 .frame(height: 1)
                 .padding(.vertical, 4)
 
+            // Debug capture: record what the artist actually did, hand us the file. Default OFF and
+            // inert while off — see `ActionRecorder.isCapturing`.
+            ActionRecorderSection(canvasManager: canvasManager)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(height: 1)
+                .padding(.vertical, 4)
+
             Button { notice = "Cut isn't available yet" } label: {
                 row(icon: "scissors", title: "Cut")
             }

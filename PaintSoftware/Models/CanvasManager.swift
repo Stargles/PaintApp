@@ -155,7 +155,15 @@ final class CanvasManager: ObservableObject {
     var guideSpacingDrag: (guideID: UUID, chart: SpacingChart, recipe: InterpolationRecipe)?
 
     @Published var currentLayerIndex: Int = 0 {
-        didSet { if oldValue != currentLayerIndex { handleActiveContextChanged() } }
+        didSet {
+            if oldValue != currentLayerIndex {
+                handleActiveContextChanged()
+                // Debug recorder (off by default; see `ActionRecorder.isCapturing`). The *value*, not
+                // just the fact of a change — "which layer was active" is what decides where a stroke
+                // landed and which stroke recognizer the transform gestures were waiting on.
+                ActionRecorder.ifRecording { $0.model("currentLayerIndex", String(currentLayerIndex)) }
+            }
+        }
     }
 
     /// True while the whole active *vector* layer is being moved/rotated/scaled via the on-canvas
@@ -289,7 +297,16 @@ final class CanvasManager: ObservableObject {
     @Published var transformMode: TransformMode = .uniform
     @Published var magicWandTolerance: Double = 0.15
     @Published var selection: Selection?
-    @Published var floatingPiece: FloatingPiece?
+    @Published var floatingPiece: FloatingPiece? {
+        didSet {
+            // Only the transitions in and out are recorded, not every transform tick: a floating
+            // piece is the state that makes the Move bottom bar appear and makes the select overlay
+            // stop capturing gestures (`DrawingView`, `CanvasView.updateSelectionOverlay`), and
+            // "there is one now" / "there isn't any more" is the whole of what a reader needs.
+            guard (oldValue == nil) != (floatingPiece == nil) else { return }
+            ActionRecorder.ifRecording { $0.model("floatingPiece", floatingPiece == nil ? "nil" : "active") }
+        }
+    }
     /// Single-slot clipboard for the timeline's Copy/Paste block menu — holds a cel's content (not
     /// its position), set by `copyCel` and consumed non-destructively by `pasteCel`.
     @Published var copiedCel: CopiedCel?
@@ -301,7 +318,12 @@ final class CanvasManager: ObservableObject {
     @Published var brushSize: CGFloat = 5.0
     @Published var brushOpacity: Double = 1.0
     @Published var brushColor: Color = .black
-    @Published var selectedTool: Tool = .pen
+    @Published var selectedTool: Tool = .pen {
+        didSet {
+            guard oldValue != selectedTool else { return }
+            ActionRecorder.ifRecording { $0.model("selectedTool", String(describing: selectedTool)) }
+        }
+    }
     /// Defaults key for `pencilOnlyDrawing`. About the user's *hardware*, not any one drawing, so it
     /// belongs to the app rather than a project's manifest.
     static let pencilOnlyDefaultsKey = "paintapp.pencilOnlyDrawing"
@@ -313,6 +335,10 @@ final class CanvasManager: ObservableObject {
         didSet {
             guard oldValue != pencilOnlyDrawing else { return }
             UserDefaults.standard.set(pencilOnlyDrawing, forKey: Self.pencilOnlyDefaultsKey)
+            // Recorded because it is the gate that decides whether a `.direct` touch draws at all —
+            // a recording showing finger touches that produce no stroke is explained entirely by
+            // this line being `true` somewhere above them.
+            ActionRecorder.ifRecording { $0.model("pencilOnlyDrawing", pencilOnlyDrawing ? "true" : "false") }
         }
     }
 
@@ -407,7 +433,12 @@ final class CanvasManager: ObservableObject {
     @Published var fps: Int = 24
     @Published var sceneFrameCount: Int = 12
     @Published var currentFrame: Int = 0 {
-        didSet { if oldValue != currentFrame { handleActiveContextChanged() } }
+        didSet {
+            if oldValue != currentFrame {
+                handleActiveContextChanged()
+                ActionRecorder.ifRecording { $0.model("currentFrame", String(currentFrame)) }
+            }
+        }
     }
     @Published var isOnionSkinEnabled: Bool = true
     @Published var onionSkinOpacity: Double = 0.3
@@ -548,6 +579,20 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Layers
 
+    /// Writes a layer-stack change into an active debug recording, with the resulting shape of the
+    /// stack rather than only the fact that something happened — the stack is what decides which
+    /// `StrokeGestureRecognizer` exists and which one the transform gestures wait on, so "now 3
+    /// layers, active 2" is the part a reader needs. `internal`, not `private`: `CanvasManager` is
+    /// split across extension files (see the note at the top of this file) and `addCel` calls this
+    /// from `CanvasManager+Timeline`.
+    ///
+    /// Costs one static `Bool` load when nothing is recording; the string is never built.
+    func recordLayerStackChange(_ what: String) {
+        ActionRecorder.ifRecording {
+            $0.model("layers", "\(what) — now \(layers.count) layers, active \(currentLayerIndex)")
+        }
+    }
+
     /// Where a newly added layer goes: **directly above the active layer, inside the active layer's
     /// own container.** Every `add*Layer` below routes through this, so "+" means one thing.
     ///
@@ -604,6 +649,7 @@ final class CanvasManager: ObservableObject {
                       isVisible: true, parentFolderID: parent, cels: [cel])
             }
         }
+        recordLayerStackChange("added raster layer")
     }
 
     /// Adds a `.vector` layer: brush strokes are stored as geometry (see `VectorCanvas`) so they can
@@ -619,6 +665,7 @@ final class CanvasManager: ObservableObject {
                       isVisible: true, kind: .vector, parentFolderID: parent, cels: [cel])
             }
         }
+        recordLayerStackChange("added vector layer")
     }
 
     /// Adds a `.value` layer — the kind that draws nothing of its own (§4.5) — in whichever of its two
@@ -661,6 +708,9 @@ final class CanvasManager: ObservableObject {
                       fill: ValueFill(color: color), parentFolderID: parent, cels: [cel])
             }
         }
+        // One constructor, two modes (see the doc above), so one recorder line that names which —
+        // the recorder's two separate `addEffectLayer`/`addValueLayer` lines collapsed with them.
+        recordLayerStackChange(effect == nil ? "added value layer" : "added effect layer")
     }
 
     /// **The one generator for a value layer's automatic name**, so the name it is born with and the
@@ -777,6 +827,7 @@ final class CanvasManager: ObservableObject {
                 handleActiveContextChanged()
             }
         }
+        recordLayerStackChange("deleted layer at \(index)")
     }
 
     // MARK: - Playhead

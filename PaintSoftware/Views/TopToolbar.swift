@@ -12,7 +12,11 @@ struct TopToolbar: View {
     var body: some View {
         HStack(spacing: 10) {
             iconButton(system: "square.grid.2x2", isActive: false, action: onOpenGallery)
+            // Identified so a test — or a converted recording — can reach the Actions menu, which is
+            // where the debug recorder's own switch lives (`ActionRecorderSection`). Six of the seven
+            // toolbar buttons already carry one; this is the seventh.
             iconButton(system: "wrench.and.screwdriver", isActive: activePanel == .actions) { toggle(.actions) }
+                .accessibilityIdentifier("toolbar.actionsButton")
             iconButton(system: "slider.horizontal.3", isActive: activePanel == .adjust) { toggle(.adjust) }
             iconButton(system: "lasso", isActive: activePanel == .select) { toggle(.select) }
                 .accessibilityIdentifier("toolbar.selectButton")
