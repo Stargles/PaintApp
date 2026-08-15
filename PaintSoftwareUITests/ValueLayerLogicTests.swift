@@ -473,4 +473,23 @@ final class ValueLayerLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(delta, Self.tolerance,
                                  "A faded, blended, masked value layer differs by \(delta) between the backends")
     }
+
+    /// The value-layer half of `duplicateLayer`'s content carry. Green since §4.5 landed, kept
+    /// because the effect half of the same line was broken from phase 9a until it was found here —
+    /// two fields, one argument list, and only one of them had a test.
+    func testDuplicatingAValueLayerCarriesItsColour() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.layers[0].kind = .value
+        manager.layers[0].fill = ValueFill(color: Self.teal)
+
+        XCTAssertEqual(manager.layers[0].valueFill?.color, Self.teal,
+                       "Premise: the layer being duplicated is a value layer with a colour on it")
+
+        manager.duplicateLayer(at: 0)
+
+        XCTAssertEqual(manager.layers.count, 2, "Premise: the duplicate landed")
+        XCTAssertEqual(manager.layers[1].valueFill?.color, Self.teal,
+                       "The copy is the same colour. Without `fill:` it keeps `kind == .value` and "
+                       + "renders nothing, which is indistinguishable from a broken layer")
+    }
 }

@@ -1026,4 +1026,33 @@ final class EffectLayerLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(delta, Self.tolerance,
                                  "A faded, masked effect node differs by \(delta) between the backends")
     }
+
+    /// **Duplicating an effect layer must carry its grade**, and before this test it did not:
+    /// `duplicateLayer` copied `kind` but not `effect`, so the copy stayed a `.compositing` layer
+    /// whose `compositingEffect` was nil — an adjustment layer that silently stopped adjusting.
+    ///
+    /// The cel copy above it in `duplicateLayer` is the same idea for raster and vector: a layer's
+    /// content has to come with it. An effect layer's content simply is not in a cel, so nothing in
+    /// that copy reached it. §4.5's value layer has the identical shape and `fill` was carried when
+    /// it landed; this is the older half of the same line, found while writing that one.
+    ///
+    /// Asserts the premise first — that the source really carries a grade — because a fixture whose
+    /// source had no effect would let a copy that drops every effect pass green.
+    func testDuplicatingAnEffectLayerCarriesItsGrade() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.layers[0].kind = .compositing
+        manager.layers[0].effect = Self.brighten
+
+        XCTAssertEqual(manager.layers[0].compositingEffect, Self.brighten,
+                       "Premise: the layer being duplicated is an effect layer with a grade on it")
+
+        manager.duplicateLayer(at: 0)
+
+        XCTAssertEqual(manager.layers.count, 2, "Premise: the duplicate landed")
+        XCTAssertEqual(manager.layers[1].kind, .compositing,
+                       "The copy keeps its kind — that half was never broken")
+        XCTAssertEqual(manager.layers[1].compositingEffect, Self.brighten,
+                       "The copy grades exactly as the original does. Without `effect:` on the copy it "
+                       + "reads as an unconfigured effect layer: right kind, no grade, no visible reason")
+    }
 }
