@@ -341,17 +341,40 @@ final class CompositorMetalEngine {
                 guard fold(op, inputs, of: request, front: &groupFront, back: &groupBack,
                            encoder: encoder, pool: pool, masks: &masks,
                            width: width, height: height) else { return false }
+                // §4.4's second wrapper (phase 9b), mirroring the leaf case's grade above verbatim —
+                // same acquire/encode/mix/swap/release shape, just against `groupFront`/`groupBack`
+                // instead of `front`/`back`. Runs immediately after the fold, before the mask-clip
+                // below, because it grades the node's own just-assembled composite.
+                //
                 // The node's mask clips the assembled composite, never the children and never a
                 // slot — the same placement the CPU reference uses and the reason a masked group
                 // buffers at all. `groupBack` is free here (the fold above left the result in
                 // `groupFront`), so the clip costs a dispatch and no allocation.
+                //
+                // **The mask-clip is skipped when this node has an effect**, and `over`'s opacity
+                // below passes 1 rather than `node.opacity` in that case: `mix` below already consumed
+                // both internally, the same crossfade `compositeEffectMix` does for the leaf, and
+                // applying either again here would double it.
                 var assembled = groupFront
-                if let mask = maskTexture(for: node, of: request, cache: &masks) {
+                if let effect = node.effect {
+                    guard let effects, let scratch = pool.acquire() else { return false }
+                    guard effects.encode(effect, source: groupFront, into: scratch, encoder: encoder) else {
+                        pool.release(scratch)
+                        return false
+                    }
+                    mix(base: groupFront, graded: scratch,
+                        coverage: maskTexture(for: node, of: request, cache: &masks),
+                        opacity: node.opacity, into: groupBack, encoder: encoder,
+                        width: width, height: height)
+                    swap(&groupFront, &groupBack)
+                    pool.release(scratch)
+                    assembled = groupFront
+                } else if let mask = maskTexture(for: node, of: request, cache: &masks) {
                     apply(mask: mask, to: groupFront, into: groupBack, encoder: encoder,
                           width: width, height: height)
                     assembled = groupBack
                 }
-                over(source: assembled, opacity: node.opacity, mode: node.blendMode,
+                over(source: assembled, opacity: node.effect != nil ? 1 : node.opacity, mode: node.blendMode,
                      front: &front, back: &back, encoder: encoder, width: width, height: height)
             }
         }

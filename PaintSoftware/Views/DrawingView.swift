@@ -150,6 +150,21 @@ struct DrawingView: View {
         } message: {
             Text("This layer is hidden. Show it to draw on it.")
         }
+        // Alert shown when the user tries to draw but the active layer is an effect layer
+        // (`.compositing`) — it holds no pixels, so the owner's call is a no-op with feedback
+        // instead of losing the stroke into a cel nothing renders. No action to offer here (unlike
+        // the two alerts above, which each fix the blocker in place): switching layers is the only
+        // way forward, and the artist can already see and do that behind the alert.
+        .alert("No Drawing Surface", isPresented: Binding(
+            get: { canvasManager.needsEffectLayerAlert },
+            set: { if !$0 { canvasManager.needsEffectLayerAlert = false } }
+        )) {
+            Button("OK", role: .cancel) {
+                canvasManager.needsEffectLayerAlert = false
+            }
+        } message: {
+            Text("This layer has no drawing surface. Switch to a raster or vector layer to draw.")
+        }
     }
 
     /// The layer stack rail: just under half the screen wide, running the full height below the top

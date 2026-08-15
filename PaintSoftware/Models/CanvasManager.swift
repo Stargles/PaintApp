@@ -492,6 +492,12 @@ final class CanvasManager: ObservableObject {
     /// Set to true when the user touches the canvas with a drawing tool but the active layer is
     /// hidden. `DrawingView` presents an alert offering to show the layer. Reset on dismissal.
     @Published var needsVisibilityAlert: Bool = false
+    /// Set to true when the user touches the canvas with a drawing tool but the active layer is a
+    /// `.compositing` effect layer — it holds no pixels (`addEffectLayer`'s doc), so a stroke there
+    /// has nowhere to go. The owner's call: keep the layer selected so its grade stays editable, but
+    /// make the draw gesture a no-op rather than silently losing the ink into a cel nothing renders.
+    /// `DrawingView` presents an alert saying so. Reset on dismissal.
+    @Published var needsEffectLayerAlert: Bool = false
 
     /// Ticks the debounce. The *what* travels in `pendingThumbnailRegens` rather than in the value,
     /// because `.debounce` keeps only the last element it saw — carrying `(layerIndex, celIndex)`

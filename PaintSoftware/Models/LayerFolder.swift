@@ -42,6 +42,13 @@ struct LayerFolder: Identifiable {
     /// every folder in every project saved before phase 8, and the whole of why that needs no
     /// migration. Follows `alphaMask`'s recipe exactly: optional, absent means "not one".
     var compositorRole: CompositorRole? = nil
+
+    /// §4.4's second wrapper (phase 9b): a grade applied once to this folder's finished composite —
+    /// the 1-input node form, where "input" is *this container's own slot composite* rather than the
+    /// accumulated backdrop a `.compositing` layer grades. No `CompositorRole` case is needed for
+    /// it: presence alone makes an ordinary `.stack`-arity-1 folder an effect node, the same recipe
+    /// `alphaMask` and `compositorRole` above already use — optional, absent means "not one".
+    var effect: Effect? = nil
 }
 
 // MARK: - Compositor nodes (§4.3)

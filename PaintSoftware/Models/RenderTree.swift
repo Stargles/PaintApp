@@ -223,8 +223,15 @@ extension RenderNode {
         guard case .node(let op, _) = content else { return false }
         // `!= 1` rather than `< 1`: the identity is the thing being tested, and `setFolderOpacity`
         // clamps to 0...1 so the two are the same test for every value that can reach here.
+        //
+        // **`effect != nil` (phase 9b).** A node's grade runs on its own assembled composite — see
+        // `grade`'s doc — so that composite has to exist as a buffer before the grade can read it. A
+        // `.stack`-op folder with opacity 1, mode normal and no mask would otherwise answer false
+        // here and take the direct/pass-through path in both backends, which draws its children
+        // straight onto the parent's accumulator and never assembles anything to grade — silently
+        // dropping the effect rather than applying it.
         return op.needsOwnBuffer || opacity != 1 || blendMode.isBlending || !masks.isEmpty
-            || (isIsolated && enclosesABlend)
+            || (isIsolated && enclosesABlend) || effect != nil
     }
 
     /// Whether anything inside this node **blends against the backdrop this node is drawn onto** —
@@ -600,7 +607,14 @@ extension CanvasManager {
                                   // be an input to it in any sense the op could use.
                                   isIsolated: folder.isInputSlot ? true : folder.isIsolated,
                                   masks: masks(ofNode: folder.id, declared: folder.alphaMask,
-                                               clippingTo: folder.blendMode == .clipToBelow ? below : nil))
+                                               clippingTo: folder.blendMode == .clipToBelow ? below : nil),
+                                  // §4.4's second wrapper (phase 9b): the folder's own grade, carried
+                                  // through unconditionally like the leaf's `effect: effect` above.
+                                  // Unlike the leaf, the node's `blendMode` above is *not* forced to
+                                  // `.normal` for having an effect — it is only forced for
+                                  // `isInputSlot`, and a node's graded output is a source with its
+                                  // own mode (§4.4), which is exactly what the layer form cannot have.
+                                  effect: folder.effect)
             }
         }
     }

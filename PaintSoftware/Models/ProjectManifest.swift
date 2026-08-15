@@ -156,6 +156,12 @@ struct FolderManifest: Codable {
     /// the same argument, and `opacity` below for the one field that cannot be written this way.
     var compositorRole: CompositorRole? = nil
 
+    /// The folder's grade (§4.4's second wrapper, phase 9b), written only when there is one —
+    /// `LayerManifest.effect` above settles the recipe (`Effect`'s persistence note), and it is
+    /// `alphaMask`'s: nil is what every project saved before 9b says, so absence is the whole
+    /// migration this field needs.
+    var effect: Effect? = nil
+
     /// **Not persisted, and derived at decode time.** True when this folder arrived without the
     /// group-property keys — which is to say it was written while `toggleFolderVisibility` still
     /// wrote through to every descendant. `ProjectStore.load` is the only reader; see the §10.3
@@ -164,7 +170,7 @@ struct FolderManifest: Codable {
 
     init(id: UUID, name: String, isExpanded: Bool, isVisible: Bool, parentFolderID: UUID? = nil,
          opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true,
-         alphaMask: AlphaMask? = nil, compositorRole: CompositorRole? = nil) {
+         alphaMask: AlphaMask? = nil, compositorRole: CompositorRole? = nil, effect: Effect? = nil) {
         self.id = id
         self.name = name
         self.isExpanded = isExpanded
@@ -175,6 +181,7 @@ struct FolderManifest: Codable {
         self.isIsolated = isIsolated
         self.alphaMask = alphaMask
         self.compositorRole = compositorRole
+        self.effect = effect
     }
 
     // Custom decoding for the same reason `LayerManifest` has one: a synthesized decoder demands
@@ -195,6 +202,7 @@ struct FolderManifest: Codable {
         // decision makes it anyway. Throwing here would cost the artist the whole document to save
         // a graph edge, and a document that renders is the standing preference (see `canMask`).
         compositorRole = (try? container.decodeIfPresent(CompositorRole.self, forKey: .compositorRole)) ?? nil
+        effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
         // `opacity` stands in for the whole group-property set, so **it must keep being written
         // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`
         // plays with the interpolation registries — would make every untouched folder in every
@@ -204,7 +212,7 @@ struct FolderManifest: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, isExpanded, isVisible, parentFolderID, opacity, blendMode, isIsolated, alphaMask
-        case compositorRole
+        case compositorRole, effect
     }
 }
 

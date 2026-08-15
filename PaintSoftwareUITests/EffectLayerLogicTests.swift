@@ -734,4 +734,296 @@ final class EffectLayerLogicTests: XCTestCase {
         }
         XCTContext.runActivity(named: "[multipass layer] blur two-axis spread: \(table.joined(separator: " · "))") { _ in }
     }
+
+    // MARK: - (5) §4.4's second wrapper: effect as a 1-input node (phase 9b)
+    //
+    // No `CompositorRole` case is involved: an effect node is an ordinary `.stack`-arity folder
+    // (`compositorOp` reads `.stack` for any folder whose `compositorRole` isn't `.node`) carrying a
+    // non-nil `effect` — `LayerFolder.effect`'s doc states presence-alone as the whole recipe, and
+    // these tests mutate `manager.folders[idx].effect` directly, the same way the file's leaf tests
+    // above mutate `manager.layers[1].effect`/`.kind` — no dedicated mutator exists or is needed for
+    // this phase's scope.
+    //
+    // The one claim worth its own tests, not inherited from (1)-(4) above: **input resolution.** A
+    // stack layer grades "the backdrop accumulated so far in this container" (everything below it);
+    // a node grades "this slot's composite" (only what was dragged into it). Same kernel, same
+    // `grade`/`mix` primitive, different input — and `testAnEffectNodeGradesOnlyItsOwnSlotAndNot...`
+    // below is the one assertion that would fail if 9b had accidentally reused 9a's input rule.
+
+    /// **The node form's defining difference from the layer form (§4.4): input resolution.** A stack
+    /// layer grades everything below it, container-wide (see the very first test in this file). A
+    /// node grades only what is inside it — a sibling below the folder, in the same container, is
+    /// untouched.
+    func testAnEffectNodeGradesOnlyItsOwnSlotAndNotWhatIsBelowItInTheContainer() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        // Below/outside the folder: full-canvas grey, a sibling in the same container.
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
+        manager.addLayer()
+        // Inside the folder: grey confined to the left half, so the node's own extent is legible in
+        // the composite even after grading.
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(grey, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+        let folder = manager.addFolder(name: "Effect Node")
+        manager.layers[1].parentFolderID = folder
+        guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
+            return XCTFail("addFolder must produce a folder")
+        }
+
+        guard let ungraded = composite(manager) else { return XCTFail("Fixture must composite") }
+        XCTAssertEqual(pixel(ungraded, 8, 32), opaqueGrey(128),
+                       "Premise: ungraded, the left half (inside the folder) is plain grey")
+        XCTAssertEqual(pixel(ungraded, 48, 32), opaqueGrey(128),
+                       "Premise: ungraded, the right half (outside it) is plain grey too")
+
+        manager.folders[idx].effect = Self.brighten
+        guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
+        let graded = brightenedByTheSpec(128)
+        XCTAssertEqual(pixel(image, 8, 32), opaqueGrey(graded),
+                       "Inside the node's own slot, the grade applies. Got RGBA \(pixel(image, 8, 32))")
+        XCTAssertEqual(pixel(image, 48, 32), opaqueGrey(128),
+                       "Outside the node's slot — the sibling layer beneath the folder in the same container — "
+                       + "the layer form would have graded this too (§4.4's 'everything below it'), but the node "
+                       + "form grades only what was dragged into it. Got RGBA \(pixel(image, 48, 32))")
+    }
+
+    /// **Unlike the layer form, a node's own blend mode survives derivation and reaches the compositor
+    /// (§4.4): its graded output is a source with its own mode**, not a backdrop replacement. Multiply
+    /// against a backdrop lighter than the graded result must darken it — `.normal` (what the leaf form
+    /// is pinned to, `testAnEffectLayerCarriesNoBlendModeButStillClipsToBelow`) would just replace the
+    /// backdrop outright and ignore it.
+    func testAnEffectNodeCarriesItsOwnBlendModeUnlikeTheLayerForm() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(UIColor(white: 200.0 / 255, alpha: 1)))
+        manager.addLayer()
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, fullCanvas(grey))
+        let folder = manager.addFolder(name: "Effect Node")
+        manager.layers[1].parentFolderID = folder
+        guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
+            return XCTFail("addFolder must produce a folder")
+        }
+        manager.folders[idx].effect = Self.brighten
+
+        XCTAssertEqual(manager.renderTree.first(where: { $0.id == folder })?.blendMode, .normal,
+                       "Premise: an untouched folder's node still defaults to normal")
+        manager.folders[idx].blendMode = .multiply
+        XCTAssertEqual(manager.renderTree.first(where: { $0.id == folder })?.blendMode, .multiply,
+                       "A node's blend mode is derived verbatim and is never forced to `.normal` for carrying "
+                       + "an effect, unlike the leaf form")
+
+        guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
+        let graded = brightenedByTheSpec(128)
+        XCTAssertEqual(graded, 154, "The spec's arithmetic on grey 128, stated so the fixture's premise is legible")
+        let got = pixel(image, 32, 32)[0]
+        XCTAssertLessThan(got, graded,
+                          "A multiply node's graded output (\(graded)) over a lighter backdrop (200) must darken "
+                          + "toward the backdrop, not replace it the way `.normal` would. Got \(got)")
+    }
+
+    /// The node-form analogue of `testOpacityMixesTheGradeBackTowardTheUngradedBackdrop`: the mix is
+    /// toward the node's own ungraded slot composite, the same `compositeEffectMix` primitive with a
+    /// different input.
+    func testOpacityOnAnEffectNodeMixesTowardItsOwnUngradedSlotComposite() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
+        let folder = manager.addFolder(name: "Effect Node")
+        manager.layers[0].parentFolderID = folder
+        guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
+            return XCTFail("addFolder must produce a folder")
+        }
+        manager.folders[idx].effect = Self.brighten
+        manager.folders[idx].opacity = 0.5
+
+        guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
+        let expected = (128 + brightenedByTheSpec(128)) / 2
+        XCTAssertEqual(expected, 141, "Half way between the node's ungraded slot composite and the graded one")
+        XCTAssertEqual(pixel(image, 32, 32), opaqueGrey(expected), "Got RGBA \(pixel(image, 32, 32))")
+    }
+
+    /// The node-form analogue of `testAMaskRestrictsWhereTheGradeApplies`.
+    func testAMaskOnAnEffectNodeRestrictsWhereItsGradeApplies() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+        manager.layers[0].isVisible = false
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, fullCanvas(grey))
+        let folder = manager.addFolder(name: "Effect Node")
+        manager.layers[1].parentFolderID = folder
+        guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
+            return XCTFail("addFolder must produce a folder")
+        }
+        manager.folders[idx].effect = Self.brighten
+        manager.folders[idx].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+
+        guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
+        XCTAssertEqual(pixel(image, 16, 32), opaqueGrey(brightenedByTheSpec(128)),
+                       "Inside the mask, the node's grade applies. Got RGBA \(pixel(image, 16, 32))")
+        XCTAssertEqual(pixel(image, 48, 32), opaqueGrey(128),
+                       "Outside it, the node's own ungraded slot composite comes through byte for byte. "
+                       + "Got RGBA \(pixel(image, 48, 32))")
+    }
+
+    /// The gap this phase's plan flagged that §10.3's 'seam already cut' framing did not mention:
+    /// `needsOwnBuffer` needed a fifth clause, `effect != nil`, or a plain `.stack` folder carrying
+    /// only a grade (opacity 1, mode normal, no mask) takes the direct/pass-through path and the
+    /// effect is silently never applied. And `enclosesABlend`'s existing `$0.effect != nil` check
+    /// (phase 9a, stated generically over leaf *and* node children) must force an enclosing isolated
+    /// group to buffer for a node exactly as it already does for a leaf.
+    func testAnEffectNodeBuffersItselfAndItsEnclosingIsolatedGroup() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
+        let outer = manager.addFolder(name: "Outer")
+        let inner = manager.addFolder(name: "Effect Node", parentFolderID: outer)
+        manager.layers[0].parentFolderID = inner
+        manager.setFolderIsolated(outer, isIsolated: true)
+        guard let innerIdx = manager.folders.firstIndex(where: { $0.id == inner }) else {
+            return XCTFail("addFolder must produce the inner folder")
+        }
+
+        // `inner` is nested one level inside `outer`, so it is not in the flat top-level
+        // `renderTree` array — only `outer` is — and has to be found by walking `outer`'s own
+        // `.node` inputs, the same way the compositor itself descends.
+        guard let plainNode = findNode(inner, in: manager.renderTree) else {
+            return XCTFail("The inner folder must be in the tree")
+        }
+        XCTAssertFalse(plainNode.needsOwnBuffer, "Premise: an untouched folder declines a buffer")
+        guard let plainOuter = findNode(outer, in: manager.renderTree) else {
+            return XCTFail("The outer folder must be in the tree")
+        }
+        XCTAssertFalse(plainOuter.needsOwnBuffer,
+                       "Premise: an isolated group holding nothing but all-normal children declines a buffer too")
+
+        manager.folders[innerIdx].effect = Self.brighten
+
+        guard let node = findNode(inner, in: manager.renderTree) else {
+            return XCTFail("The inner folder must be in the tree")
+        }
+        XCTAssertTrue(node.needsOwnBuffer,
+                      "A folder carrying only an effect (opacity 1, mode normal, no mask) must still buffer, or "
+                      + "the direct/pass-through path draws its children straight onto the parent's accumulator "
+                      + "and the grade is silently never applied")
+
+        guard let outerNode = findNode(outer, in: manager.renderTree) else {
+            return XCTFail("The outer group must be in the tree")
+        }
+        XCTAssertTrue(outerNode.needsOwnBuffer,
+                      "An isolated group enclosing an effect node must buffer too, or the grade reaches the outer "
+                      + "backdrop — `enclosesABlend`'s `$0.effect != nil` clause, generalized in phase 9a from "
+                      + "the leaf case to the node")
+    }
+
+    /// Depth-first search through `renderTree`'s `.node` inputs — the top-level array only holds the
+    /// document's root entries, so a folder nested inside another folder (as `inner` is inside
+    /// `outer` above) has to be found by walking the same `.node(op:inputs:)` structure the
+    /// compositor itself descends through, rather than by a flat `.first(where:)`.
+    private func findNode(_ id: UUID, in nodes: [RenderNode]) -> RenderNode? {
+        for node in nodes {
+            if node.id == id { return node }
+            if case .node(_, let inputs) = node.content {
+                for input in inputs {
+                    if let found = findNode(id, in: input) { return found }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The node-form analogue of `testACompositingLayerDerivesIntoALeafCarryingItsEffect`:
+    /// `RenderNode.effect` is one field for both wrappers, and this is the folder's half of that claim.
+    func testAFolderDerivesIntoANodeCarryingItsEffect() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
+        let folder = manager.addFolder(name: "Effect Node")
+        manager.layers[0].parentFolderID = folder
+        guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
+            return XCTFail("addFolder must produce a folder")
+        }
+
+        XCTAssertNil(manager.renderTree.first(where: { $0.id == folder })?.effect,
+                    "Premise: an untouched folder carries no effect")
+
+        manager.folders[idx].effect = Self.brighten
+        XCTAssertEqual(manager.renderTree.first(where: { $0.id == folder })?.effect, Self.brighten,
+                       "The node carries the folder's grade verbatim — the same `RenderNode.effect` field the "
+                       + "leaf uses, because the wrapper is the position in the tree rather than the data")
+    }
+
+    /// The node-form analogue of `testAnEffectSurvivesAManifestRoundTripAndItsAbsenceNeedsNoMigration`:
+    /// `FolderManifest.effect`, `ProjectStore`'s two plumbing sites, and the `decodeIfPresent`.
+    func testAFolderEffectSurvivesAManifestRoundTripAndItsAbsenceNeedsNoMigration() throws {
+        let manifest = FolderManifest(id: UUID(), name: "Effect Node", isExpanded: true, isVisible: true,
+                                      effect: Self.brighten)
+        let data = try JSONEncoder().encode(manifest)
+        let decoded = try JSONDecoder().decode(FolderManifest.self, from: data)
+        XCTAssertEqual(decoded.effect, Self.brighten, "The grade round-trips through the folder manifest")
+
+        // What every project saved before phase 9b looks like: the key is simply absent.
+        let plain = FolderManifest(id: UUID(), name: "Group", isExpanded: true, isVisible: true)
+        let plainData = try JSONEncoder().encode(plain)
+        XCTAssertFalse(String(data: plainData, encoding: .utf8)?.contains("effect") ?? true,
+                       "A folder with no effect writes no key, so its manifest is byte-for-byte what it was")
+        XCTAssertNil(try JSONDecoder().decode(FolderManifest.self, from: plainData).effect)
+    }
+
+    /// One spectrum floor inside one effect node.
+    private func spectrumUnderAnEffectNode(_ effect: Effect) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, spectrumImage())
+        let folder = manager.addFolder(name: "Effect Node")
+        manager.layers[0].parentFolderID = folder
+        guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
+            XCTFail("addFolder must produce a folder")
+            return manager
+        }
+        manager.folders[idx].effect = effect
+        return manager
+    }
+
+    /// The node-form analogue of `testTheBackendsAgreeOnAnEffectLayer`, over the same sweep and the
+    /// same 4096-pixel spectrum — the one difference is the wrapper, so a delta here that (1)'s layer
+    /// sweep does not show would be the Metal side of the node's `mix`/`over` path, not the kernel.
+    func testTheBackendsAgreeOnAnEffectNode() throws {
+        try skipUnlessGPUAvailable()
+
+        var deltas: [(String, Int)] = []
+        for (name, effect) in Self.sweep {
+            guard let (gpu, cpu) = gpuAndCPU(spectrumUnderAnEffectNode(effect)) else { return }
+            deltas.append((name, maxChannelDelta(gpu, cpu)))
+        }
+        let table = deltas.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+        XCTContext.runActivity(named: "[effect node] GPU-vs-CPU max channel delta: \(table)") { _ in }
+
+        for (name, delta) in deltas {
+            XCTAssertLessThanOrEqual(delta, Self.tolerance,
+                                     "\(name) as a node differs by \(delta) between the backends. Table: \(table)")
+        }
+    }
+
+    /// The node-form analogue of `testTheBackendsAgreeOnAFadedAndMaskedEffectLayer` — the fixture that
+    /// actually exercises the Metal side's `mix(...)` call this phase's plan flagged as unverified
+    /// (open question: whether the node's mask and opacity are consumed inside the grade, or handled
+    /// by the generic post-fold pipeline). Both backends implement the "inside the grade" answer; a
+    /// mismatch here is exactly what a wrong split between the two would produce.
+    func testTheBackendsAgreeOnAFadedAndMaskedEffectNode() throws {
+        try skipUnlessGPUAvailable()
+
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 40, height: 64)))
+        manager.layers[0].isVisible = false
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, spectrumImage())
+        let folder = manager.addFolder(name: "Effect Node")
+        manager.layers[1].parentFolderID = folder
+        guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
+            return XCTFail("addFolder must produce a folder")
+        }
+        manager.folders[idx].effect = Self.brighten
+        manager.folders[idx].opacity = 0.6
+        manager.folders[idx].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+
+        guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
+        let delta = maxChannelDelta(gpu, cpu)
+        XCTContext.runActivity(named: "[effect node] faded + masked GPU-vs-CPU max channel delta: \(delta)") { _ in }
+        XCTAssertLessThanOrEqual(delta, Self.tolerance,
+                                 "A faded, masked effect node differs by \(delta) between the backends")
+    }
 }

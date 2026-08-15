@@ -597,10 +597,14 @@ struct CanvasView: UIViewRepresentable {
                 // drawable on a frame no block covers, and the first stroke spawns the block (see
                 // `attachSpawnedCelIfFrameIsEmpty`). Gating it here was the outer half of the
                 // blank-frame bug — the touch never even reached the stroke view to be acted on.
+                // `.compositing` excluded too: an effect layer holds no pixels for a stroke to land
+                // in (`addEffectLayer`'s doc), so its host declines interaction the same way a
+                // vector layer mid-transform does, and the catch-all below takes the touch instead.
                 let shouldInteract = (index == canvasManager.currentLayerIndex)
                     && canvasManager.selectedTool != .fill
                     && activePanel != .select && canvasManager.floatingPiece == nil
                     && !(canvasManager.isVectorTransforming && layer.kind == .vector)
+                    && layer.kind != .compositing
                 if host.isUserInteractionEnabled != shouldInteract {
                     host.isUserInteractionEnabled = shouldInteract
                 }
@@ -613,13 +617,17 @@ struct CanvasView: UIViewRepresentable {
             // blanking is a `layer.mask` and rides on top of all three (see `LayerHostView.setBlanked`).
             updateSandwich(tree: tree, engaged: sandwichEngaged)
 
-            // Enable the catch-all gesture when no layers exist or the active layer is hidden —
-            // by its own switch or by a group's gating it (§4.1), either reads as "hidden" here.
+            // Enable the catch-all gesture when no layers exist, the active layer is hidden — by its
+            // own switch or by a group's gating it (§4.1), either reads as "hidden" here — or the
+            // active layer is a `.compositing` effect layer, which `shouldInteract` above has just
+            // as deliberately declined interaction for.
             let needsCatch: Bool
             if canvasManager.layers.isEmpty {
                 needsCatch = true
             } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) {
+                let layer = canvasManager.layers[canvasManager.currentLayerIndex]
                 needsCatch = !canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex)
+                    || layer.kind == .compositing
             } else {
                 needsCatch = false
             }
@@ -1840,6 +1848,9 @@ struct CanvasView: UIViewRepresentable {
             } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
                       !canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex) {
                 canvasManager.needsVisibilityAlert = true
+            } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
+                      canvasManager.layers[canvasManager.currentLayerIndex].kind == .compositing {
+                canvasManager.needsEffectLayerAlert = true
             }
         }
 

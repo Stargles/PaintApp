@@ -440,16 +440,39 @@ enum CoreGraphicsCompositor {
                 // makes a group isolated there), so a buffered group is an isolated group here,
                 // and `isIsolated` is what decides the case that is still free to differ:
                 // opacity 1, mode normal, something inside that blends.
+                // §4.4's second wrapper (phase 9b): if this node carries a grade, it runs inside the
+                // same renderer, immediately after the fold assembles the node's own composite —
+                // `grade` reads `inner.currentImage` (that composite) as its backdrop and `.copy`s
+                // the graded result back into `inner`, exactly mirroring how the leaf case above
+                // grades `context.currentImage` in place. That makes `assembled` the *graded*
+                // composite by the time this closure returns.
                 let assembled = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
-                    .image { inner in fold(op, inputs, of: request, in: bounds, context: inner) }
+                    .image { inner in
+                        fold(op, inputs, of: request, in: bounds, context: inner)
+                        if let effect = node.effect {
+                            grade(effect, by: node, of: request, in: bounds, context: inner)
+                        }
+                    }
                 // The node's mask clips the node, so it lands on the assembled composite — which is
                 // the same rule its opacity and its blend mode follow, and the reason
                 // `needsOwnBuffer` counts a mask as a reason to allocate. It clips the *result* of
                 // a fold, never the slots that went into it, for exactly the reason it clips a
                 // group rather than its children.
-                let clipped = assembled.cgImage.map { masked($0, by: node, of: request) }
-                    .map { UIImage(cgImage: $0, scale: 1, orientation: .up) } ?? assembled
-                draw(clipped, mode: node.blendMode, opacity: node.opacity, in: bounds, context: context)
+                //
+                // **Skipped when this node has an effect.** `grade` already consumed `node.masks` and
+                // `node.opacity` internally to crossfade the graded pixels back toward the ungraded
+                // fold result (`compositeEffectMix`'s mix-not-source-over math) — reapplying the mask
+                // here and `node.opacity` below would be the same double-application the 9a leaf case
+                // avoids by `continue`-ing straight past its own mask/opacity draw once it grades.
+                let clipped: UIImage
+                if node.effect != nil {
+                    clipped = assembled
+                } else {
+                    clipped = assembled.cgImage.map { masked($0, by: node, of: request) }
+                        .map { UIImage(cgImage: $0, scale: 1, orientation: .up) } ?? assembled
+                }
+                draw(clipped, mode: node.blendMode, opacity: node.effect != nil ? 1 : node.opacity,
+                     in: bounds, context: context)
             }
         }
     }
