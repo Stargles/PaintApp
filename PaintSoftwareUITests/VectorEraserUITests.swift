@@ -14,7 +14,15 @@ import XCTest
 /// `readVectorMarker` reports paint strokes and erase punches as separate counts precisely so these
 /// tests can tell those three outcomes apart — against one total, "cut in two" and "punched over"
 /// are the same number.
-final class VectorEraserUITests: PaintUITestCase {
+/// Shared helpers for the three classes below, split out of the original single
+/// `VectorEraserUITests` class so xcodebuild — which parallelises by class, not by file — can
+/// distribute this file's 8 tests across more than one worker. See PaintUITestCase.swift:3-8 for
+/// the same pattern applied to the file's siblings.
+///
+/// Widened from `private` to `fileprivate` (rather than promoted to `internal` on
+/// `PaintUITestCase`) because every one of these six helpers is used only by tests in this file —
+/// there was no reason to widen their visibility past it.
+class VectorEraserTestSupport: PaintUITestCase {
 
     // MARK: - Helpers
 
@@ -23,7 +31,7 @@ final class VectorEraserUITests: PaintUITestCase {
     /// an arbitrary starting tool takes one tap to select and one to open — but only one if the
     /// eraser was already the active tool. Probing for the panel's own slider is what makes this
     /// work from either state.
-    private func openEraserPanel(_ app: XCUIApplication) {
+    fileprivate func openEraserPanel(_ app: XCUIApplication) {
         let sizeSlider = app.sliders["eraserPanel.sizeSlider"]
         app.buttons["toolbar.eraserButton"].tap()
         if sizeSlider.waitForExistence(timeout: 2) { return }
@@ -31,19 +39,19 @@ final class VectorEraserUITests: PaintUITestCase {
         XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "The eraser panel should open")
     }
 
-    private func closeEraserPanel(_ app: XCUIApplication) {
+    fileprivate func closeEraserPanel(_ app: XCUIApplication) {
         app.buttons["toolbar.eraserButton"].tap()
         XCTAssertTrue(app.sliders["eraserPanel.sizeSlider"].waitForNonExistence(timeout: 5),
                       "The eraser panel should close, leaving the canvas unobstructed")
     }
 
-    private var modePicker: (XCUIApplication) -> XCUIElement {
+    fileprivate var modePicker: (XCUIApplication) -> XCUIElement {
         { $0.segmentedControls["eraserPanel.vectorModePicker"] }
     }
 
     /// Opens the eraser panel, taps the named segment, and closes the panel again — leaving the
     /// eraser selected and the canvas clear to draw on.
-    private func selectVectorEraserMode(_ app: XCUIApplication, _ segment: String) {
+    fileprivate func selectVectorEraserMode(_ app: XCUIApplication, _ segment: String) {
         openEraserPanel(app)
         let picker = modePicker(app)
         XCTAssertTrue(picker.waitForExistence(timeout: 5),
@@ -56,7 +64,7 @@ final class VectorEraserUITests: PaintUITestCase {
     }
 
     /// Sets the eraser's diameter via the panel slider (range 1...200 — see `StrokeSettingsPanel`).
-    private func setEraserSize(_ app: XCUIApplication, normalized: CGFloat) {
+    fileprivate func setEraserSize(_ app: XCUIApplication, normalized: CGFloat) {
         openEraserPanel(app)
         let slider = app.sliders["eraserPanel.sizeSlider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
@@ -67,12 +75,17 @@ final class VectorEraserUITests: PaintUITestCase {
     /// Reads `canvas.host`'s accessibility value, which `CanvasHostView` sources from
     /// `StrokeCanvasView.lastVectorGestureTrace` — "<scratchRole>,<livePreviewFrames>" for the last
     /// finished vector gesture.
-    private func gestureTrace(_ canvas: XCUIElement) -> (role: String, frames: Int)? {
+    fileprivate func gestureTrace(_ canvas: XCUIElement) -> (role: String, frames: Int)? {
         guard let value = canvas.value as? String else { return nil }
         let parts = value.split(separator: ",")
         guard parts.count == 2, let frames = Int(parts[1]) else { return nil }
         return (String(parts[0]), frames)
     }
+}
+
+/// The vector-mode-picker tests: does the three-way control appear on the right layer type, and
+/// does tapping a segment actually reach the commit.
+final class ModePickerUITests: VectorEraserTestSupport {
 
     // MARK: - The picker itself
 
@@ -134,6 +147,12 @@ final class VectorEraserUITests: PaintUITestCase {
                        + "is the assertion that proves the picker reached the commit — if it reads 1, "
                        + "Mode 1 ran instead and the segment tap went nowhere")
     }
+
+}
+
+/// Mode 1 (the default `.erase` punch): cuts-and-punches, the end-to-end deletion exemption, and
+/// the live preview it publishes during the drag.
+final class Mode1UITests: VectorEraserTestSupport {
 
     // MARK: - Mode 1
 
@@ -250,6 +269,14 @@ final class VectorEraserUITests: PaintUITestCase {
                              + "Exactly 1 frame is the touch-down frame alone, i.e. a preview that "
                              + "never follows the finger")
     }
+
+}
+
+/// The two cutting modes (Mode 2 "Cut", Mode 3 "To Cross"): the shared no-live-preview property,
+/// and Mode 3's per-crossing resolution.
+final class CuttingModesUITests: VectorEraserTestSupport {
+
+    // MARK: - Cutting modes share no live preview
 
     /// The other side of the same plumbing, and the reason `.none` exists as a distinct role: Modes
     /// 2 and 3 have nothing to preview — Mode 3 commits during the drag and Mode 2 on lift, so the
