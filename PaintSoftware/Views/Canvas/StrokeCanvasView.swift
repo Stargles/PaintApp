@@ -270,11 +270,15 @@ final class StrokeCanvasView: UIView {
     /// chip, a touch on this layer's canvas assigns the stroke under it to that group instead of
     /// drawing. Consumed even on a miss — a stray dot would be worse than a no-op — and answered
     /// only by the current layer's view, since assignment targets the cel under the playhead there.
+    ///
+    /// Answers "is this a vector layer?" from `LayerKind`, **not** from `vectorCanvas != nil` — see
+    /// the note on `handleBegin` for why those two stopped being the same question.
     private func consumeAsMotionGroupTap(_ touch: UITouch) -> Bool {
         guard let manager = canvasManager, manager.isInterpolateMode,
-              manager.armedMotionGroupID != nil, vectorCanvas != nil,
+              manager.armedMotionGroupID != nil,
               manager.layers.indices.contains(manager.currentLayerIndex),
-              manager.layers[manager.currentLayerIndex].id == layerID else { return false }
+              manager.layers[manager.currentLayerIndex].id == layerID,
+              manager.layers[manager.currentLayerIndex].kind == .vector else { return false }
         consumedAsMotionGroupTap = true
         manager.assignArmedMotionGroup(atCanvasPoint: StrokeInput(touch: touch, in: self).position)
         return true
@@ -284,11 +288,13 @@ final class StrokeCanvasView: UIView {
     /// this layer's canvas draws a guide stroke instead of ink. Timestamped because a guide's stylus
     /// velocity *is* its easing curve. Consumes the touch even when refused at lift, for the same
     /// reason as `consumeAsMotionGroupTap`: no stray ink instead.
+    ///
+    /// Same `LayerKind` test as `consumeAsMotionGroupTap`, for the same reason — see `handleBegin`.
     private func beginGuideStrokeIfArmed(_ touch: UITouch) -> Bool {
         guard let manager = canvasManager, manager.isInterpolateMode, manager.isDrawingGuide,
-              vectorCanvas != nil,
               manager.layers.indices.contains(manager.currentLayerIndex),
-              manager.layers[manager.currentLayerIndex].id == layerID else { return false }
+              manager.layers[manager.currentLayerIndex].id == layerID,
+              manager.layers[manager.currentLayerIndex].kind == .vector else { return false }
         let input = StrokeInput(touch: touch, in: self)
         guideStartTime = input.timestamp
         currentGuideSamples = [TimedSample(point: input.position, pressure: input.pressure, time: 0)]
@@ -321,6 +327,26 @@ final class StrokeCanvasView: UIView {
         guideOverlayNeedsUpdate?([])
     }
 
+    /// **Why the two interpolate-mode gates run before `onStrokeBegan` and still work.**
+    ///
+    /// `onStrokeBegan` is where the coordinator spawns a block on a frame that has none and hands
+    /// this view the new cel's tiers (`attachSpawnedCelIfFrameIsEmpty`), so before it returns
+    /// `vectorCanvas` is nil on exactly the frames that have no block yet. Both gates used to ask
+    /// `vectorCanvas != nil` as their "is this a vector layer?" test, which is true for a vector layer
+    /// *with a block under the playhead* and false for a vector layer without one — so on an empty
+    /// frame both gates silently answered no, and an artist with Guide lit or a motion group armed got
+    /// a spawned block and a stroke of ink instead of the guide or the retag they asked for. It is the
+    /// same shape of mistake as the blank-frame drawing bug, one layer up.
+    ///
+    /// The fix is in the gates, not in this ordering: they now ask `LayerKind`, which does not depend
+    /// on whether a cel exists yet. Moving `onStrokeBegan?()` above them instead — the obvious reading
+    /// of "fix the ordering" — was rejected, and would have been a worse bug than the one it closed.
+    /// `onStrokeBegan` latches `isSandwichStrokeLive` and arms the shape-detection timer, and neither
+    /// gate's exit path reaches `onStrokeEnded` (`handleEnd` returns at its own guide/retag checks).
+    /// Running it first would therefore strand both latches past lift on every guide stroke and every
+    /// retag tap, leaving the canvas parked in its mid-stroke approximation while idle — precisely the
+    /// failure `CanvasView`'s `onStrokeBegan` comment orders `sandwichStrokeBegan` after the cel spawn
+    /// to avoid. It would also spawn a block for a guide stroke, which is not a drawing at all.
     private func handleBegin(_ touch: UITouch) {
         if beginGuideStrokeIfArmed(touch) { return }
         if consumeAsMotionGroupTap(touch) { return }
