@@ -115,7 +115,9 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
    references.
 2. Drag to adjust threshold/gap-closing/edge-overlap live before it commits; it also stays adjustable
    after lifting your finger until you draw elsewhere or start a new fill.
-3. Toggle which layers count as fill boundaries from a layer's swipe-to-Edit menu ("Fill Reference").
+3. Toggle which layers count as fill boundaries with each row's drop button, shown while a layer's
+   options menu is open. Shown layers are boundaries and hidden ones are not, until you say otherwise
+   — after which your choice sticks through the eye icon.
 
 ### Select & Move
 1. Pick a selection mode (lasso, rectangle, or automatic/magic-wand) from the Select bar.
@@ -128,7 +130,9 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 1. Open the Layers panel from the top toolbar.
 2. Add a raster or vector layer, or insert a photo as an object layer, from the "+" menu.
 3. Adjust opacity with the slider, toggle visibility with the eye icon, tap a row to make it active.
-4. Swipe a row to Edit (rename, toggle Fill Reference) or Delete.
+4. Tap the active row again for its options menu (rename, blend mode, merge, delete). While one is
+   open every row carries a checkmark to clip that layer to, and a drop to make it a fill boundary.
+5. Swipe a row to Duplicate or Delete.
 
 ### Animation
 1. Expand the timeline at the bottom to manage cels/frames.

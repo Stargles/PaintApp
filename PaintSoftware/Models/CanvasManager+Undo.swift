@@ -99,23 +99,35 @@ extension CanvasManager {
         recordStructureChange(name: name, from: before, to: captureStructure())
     }
 
+    /// Opens a gesture bracket. **Nests**, for the same reason `withStructureUndo` does: only the
+    /// outermost scope captures a baseline, so one user action is one undo step even when a bracket
+    /// spans another — a mask-edit session (§6.6) is open for as long as a layer's options menu is,
+    /// and the rows under it can start an opacity drag inside it.
     func beginStructureGesture() {
+        structureGestureDepth += 1
+        guard structureGestureDepth == 1 else { return }
         // Same rule as `withStructureUndo`: bake transients before the baseline snapshot, so the
         // drag about to start doesn't span a shape/fill that wasn't committed when it began.
         beginCanvasEdit()
         gestureSnapshot = captureStructure()
     }
 
+    /// Closes a bracket, recording the step only when the outermost one closes. An inner `name` is
+    /// discarded rather than winning: the step belongs to the action that spans the others.
     func commitStructureGesture(name: String) {
-        guard let before = gestureSnapshot else { return }
+        if structureGestureDepth > 0 { structureGestureDepth -= 1 }
+        guard structureGestureDepth == 0, let before = gestureSnapshot else { return }
         gestureSnapshot = nil
         recordStructureChange(name: name, from: before, to: captureStructure())
     }
 
     /// Drops a gesture's snapshot without recording anything — for a drag that ended up changing
     /// nothing, or was cancelled. Leaving the snapshot in place instead would hand it to whichever
-    /// gesture committed next, which would then record an undo step spanning both.
+    /// gesture committed next, which would then record an undo step spanning both. Cancelling an
+    /// *inner* bracket keeps the outer one's baseline: the enclosing action is still in progress.
     func cancelStructureGesture() {
+        if structureGestureDepth > 0 { structureGestureDepth -= 1 }
+        guard structureGestureDepth == 0 else { return }
         gestureSnapshot = nil
     }
 }

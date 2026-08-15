@@ -479,7 +479,7 @@ extension CanvasManager {
                 vector: cel.vector?.makeCopy(), thumbnail: cel.thumbnail)
         }
         var copy = Layer(id: UUID(), name: source.name + " copy", opacity: source.opacity,
-                         isVisible: source.isVisible, isFillReference: source.isFillReference,
+                         isVisible: source.isVisible, fillReferenceOverride: source.fillReferenceOverride,
                          kind: source.kind, blendMode: source.blendMode, alphaMask: source.alphaMask,
                          parentFolderID: source.parentFolderID, cels: cels)
         copy.thumbnail = source.thumbnail

@@ -62,8 +62,10 @@ Cheap to break, expensive to relearn.
 7. **Vector is the default layer kind**, and empty vector layers must be free to match. §8.
 8. **Every effect is available both as a stack layer and as a 1-input node** — same shader, different
    input-resolution rule. §4.4.
-9. **A mask ignores its source's visibility.** A hidden layer still masks, so a dedicated invisible
-   mask-shape layer works and an eye toggle never silently repaints. §6.6.
+9. **A mask ignores its source's visibility; fill reference follows it, unless the artist said
+   otherwise.** A hidden layer still masks, so a dedicated invisible mask-shape layer works and an eye
+   toggle never silently repaints — while fill reference defaults from visibility and is overridden by
+   an explicit choice that nothing may recompute. The two differ on purpose. §6.6.
 10. **Mask edits coalesce into one undo step per mask-edit session.** §6.6.
 11. **Build order is foundation-first**: tree, then compositor, then features. §11.
 
@@ -455,21 +457,47 @@ Two limits a later phase inherits:
 
 ### 6.5 UI
 
+**An open options menu *is* the mask-edit session for the node it names.** There is no switch to
+enter one: the menu already says which layer or group is being edited, so a control inside it saying
+"…and mask this one" was a second answer to a question already answered. Every layer and group row
+grows two trailing controls for as long as a menu is open — a **mask checkmark**, which is how
+sources are picked, and a **fill-reference drop** (§6.6) beside it.
+
+**Both settings live on the rows and nowhere else.** The menu is where a node's own properties are —
+blend mode, invert, rename, the structural actions — and the rows are where per-layer answers to the
+menu's question are given. A control that appeared in both places would be two ways to say one thing,
+which is what the Mask switch was and what the labelled Fill Reference switch beside it became the
+moment the rows could answer. `FillSettingsPanel` carries the sentence explaining what the drop does,
+since a glyph cannot.
+
 **Mask-edit mode is modal state on `CanvasManager`** (`maskEditTarget`), not view `@State`, so the
-layer rows can double as the source picker and the live canvas can dim everything that is not a
-legal source while a session is open. A Mask toggle sits beside Fill Reference in `LayerOptionsPanel`
-and beside Pass Through in `FolderOptionsPanel` — §6.2 masks groups too, so both menus carry it.
-Turning it on enters the session; the panel header becomes a "Mask Sources — *name*" bar with a
-**Done** exit, since the options popover that opened the session is long closed by then.
+rows can double as the picker and the live canvas can dim everything that is not a legal source.
+`syncMaskEditSession` is the only way in or out, driven from the one piece of view state that says
+which menu is open, so there is no second path to forget. What stays in the menu is what has nowhere
+in a row to live: the source count, and `invert`, which belongs to the mask rather than to any one
+source.
 
 - **The picker filters through the same `canMask` cycle rule derivation uses**, not a second copy of
-  it, so it cannot offer a source the engine would then ignore (§6.2).
+  it, so it cannot offer a source the engine would then ignore (§6.2). An illegal row's checkmark is
+  dimmed and inert rather than removed, and the node under edit gets its own glyph, since "this is
+  what you are editing" reads differently from "this would cycle".
 - **Structural edits are refused for the duration** — swipe delete/duplicate, long-press reorder,
   pinch-merge. Allowing one would nest it inside the session's open `beginStructureGesture` bracket
-  rather than reject it, which is a stranger outcome than not starting.
-- **Picking any row force-enables the mask.** So re-opening the picker on a mask paused from the
-  panel and touching a row silently un-pauses it. Simpler than threading a stay-paused mode through,
-  and the one place the session semantics could reasonably want a different answer.
+  rather than reject it, which is a stranger outcome than not starting. The menu's *own* structural
+  actions (delete, duplicate, merge, rasterize, and the panel's "+") close the session first instead
+  of being refused: the artist asked for a delete, not for a picker.
+- **A row keeps everything else it had.** The eye, the thumbnail, the opacity slider and the options
+  button all stay live, because a session is now the ordinary state of having a menu open rather than
+  a mode entered on purpose. That is what makes `beginStructureGesture` nesting load-bearing (§6.6).
+- **A row's tap keeps its ordinary meaning** — select, or expand. It meant "pick this as a source"
+  only while the picker had no control of its own.
+- **Picking a row enables the mask**, which is no longer an override: with the Mask switch gone there
+  is no paused state to override, so `isEnabled` is exactly "has sources" — set on the first pick and
+  cleared by `dropping(_:)` when the last one goes. Pausing a mask without discarding its list is an
+  affordance the app no longer offers; un-checking the sources is how a mask is turned off.
+- **A compositor node and an input slot are not mask targets and carry no checkmark.** §4.3 stores
+  both as folders so the tree arithmetic is reused, not because they are content anyone clips: a node
+  holds only its slots, and a slot holds whatever was dropped into it.
 - Fill's flood need not be bounded by the mask — spill outside is invisible anyway, so it is a
   nicety, deferrable.
 - **`MaskParityLogicTests`**: a raster layer and a vector layer with identical content and identical
@@ -478,13 +506,34 @@ Turning it on enters the session; the panel header becomes a "Mask Sources — *
 ### 6.6 Lifecycle
 
 - **A mask ignores its source's visibility** — a hidden source still contributes its alpha, so a
-  dedicated invisible mask-shape layer works and an eye toggle never silently repaints. Unlike
-  `isFillReference`, which hiding a layer does clear.
+  dedicated invisible mask-shape layer works and an eye toggle never silently repaints. Deliberately
+  unlike fill reference below; do not unify them.
 - **A deleted source drops out of `sources`**; an emptied list disables the mask rather than clipping
   everything. Undo restores both together (`withStructureUndo`).
 - **Mask edits coalesce into one undo step per mask-edit session** — `beginMaskEdit`/`endMaskEdit`
   bracket with `beginStructureGesture`/`commitStructureGesture` and every edit between them nests
-  through `withStructureUndo`'s depth guard, the same mechanism the opacity slider uses.
+  through `withStructureUndo`'s depth guard, the same mechanism the opacity slider uses. The bracket
+  opens on the session's **first write**, not on entry: entry is now as ordinary as opening a menu, so
+  bracketing there would record an empty step for every menu merely looked at — and creating the empty
+  `AlphaMask` that used to give that step something to hold would hang a mask off every node whose
+  menu was ever opened.
+- **`beginStructureGesture` nests**, the way `withStructureUndo` always has: only the outermost
+  bracket captures a baseline and only its close records. The rows stay live under an open menu
+  (§6.5), so an opacity drag begins a bracket inside the session's — without the depth the inner
+  `begin` overwrites the session's baseline and its `commit` consumes it.
+
+**Fill reference is a decision with a default, and the two are stored apart.** `isFillReference` is
+derived: `fillReferenceOverride ?? isVisible`. So a layer nobody has answered for is a boundary when
+shown and not when hidden, and a layer somebody *has* answered for keeps that answer through every
+visibility change, including while hidden. Only the nil case is ever recomputed.
+
+The distinction is the whole rule, because the effective value cannot carry it: a hidden layer reading
+"not a reference" could be either. Four places used to write the effective value through on a
+visibility change — `toggleLayerVisibility`, `applyViewPreset`, clearing the view, and the §4.1 load
+migration — and each of them silently discarded a choice the artist had made. All four are gone; the
+default falls out of the derivation instead. Only the override persists (`LayerManifest`, written just
+when it is non-nil), so absence in a manifest *is* "follow the default" and every older project
+decodes to the behaviour it already had.
 
 ## 7. Blend modes and effects — the build list
 
@@ -615,10 +664,13 @@ later and rewriting for one.
 1. **Mask threshold and antialias constants** (§6.3) — judged, not derived. `AlphaMask.threshold`
    (0.1) and `AlphaMask.antialiasHalfWidth` (0.01) are what the product owner picked by eye on the
    iPad, against a soft brush, in a Release build — replacing 0.5/0.05, 6b's pre-hardware guess.
-   `MaskTuningOverlay` and the two `static var`s stay rather than being deleted: the owner may want to
-   re-check the judgement once the live-stroke bug currently competing for iPad time is fixed. Delete
-   the harness (see the MASK-TUNE comments) once that re-check happens or is waved off. "Clip to
-   below" itself shipped in 6a, as a mask whose source is implied.
+   `MaskTuningSection` and the two `static var`s stay rather than being deleted: the owner may want
+   to re-check the judgement once the live-stroke bug currently competing for iPad time is fixed.
+   Delete the harness (see the MASK-TUNE comments) once that re-check happens or is waved off. The
+   sliders live in the layer options menu; they were a floating panel in the canvas's top-trailing
+   corner until it turned out that corner belongs to the layer rail and every trailing dropdown, and
+   a view declared last in that `ZStack` hit-tests above them. "Clip to below" itself shipped in 6a,
+   as a mask whose source is implied.
 2. **Compositor node ops** — §7 lists the *effects*; the multi-input ops themselves (Mix, and which
    others take 2+ inputs) want a pass once the node UI exists and there is something to try them on.
 
@@ -636,7 +688,7 @@ it is small and none of them fight a moving substrate.
 | ~~**4**~~ | ~~Group properties: isolated/pass-through, opacity, visibility migration (§4.1–4.2)~~ | **done** — groups composite as parentheses, both backends on one buffer rule |
 | ~~**5a**~~ | ~~Tier 1 blend modes on layers and groups (§7)~~ | **done** — fourteen modes, both backends, picker and row badge |
 | ~~**5b**~~ | ~~§5.2's sandwich, so the live canvas shows a blended layer~~ | **done** — exact at rest, snaps on lift |
-| ~~**6**~~ | ~~Alpha masks (§6), incl. `MaskParityLogicTests`~~ | **done** — engine resolves masks in both backends at delta 0, raster and vector pixel-identically; the mask-edit UI picks sources through the same cycle rule; the live stroke is clipped by the same `ResolvedMask` object the compositor applies |
+| ~~**6**~~ | ~~Alpha masks (§6), incl. `MaskParityLogicTests`~~ | **done** — engine resolves masks in both backends at delta 0, raster and vector pixel-identically; the rows pick sources through the same cycle rule; the live stroke is clipped by the same `ResolvedMask` object the compositor applies |
 | ~~**7**~~ | ~~Tier 2 blend modes~~ | **done** — eleven modes, both backends, measured against the spec |
 | **8** | Compositor nodes: slot-as-folder storage, panel chrome (§4.3) | a 2-input Mix node renders |
 | **9** | Tier 3 effects, as layer *and* node (§4.4, §7) | cheap per-pixel set first, then the multi-pass ones |

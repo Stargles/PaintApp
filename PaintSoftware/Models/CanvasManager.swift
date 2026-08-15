@@ -844,25 +844,29 @@ final class CanvasManager: ObservableObject {
     var fillGestureCelID: UUID?
     var fillGestureBaseBaked: UIImage?  // layer's baked pixels before this gesture (undo/composite base)
 
-    /// Toggles whether a layer contributes to the fill tool's boundary (its Edit-menu "Fill Reference"
-    /// switch). Independent of visibility, so a hidden layer can still be turned back on as a reference.
+    /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — written by the
+    /// row's drop button, which is the only control that sets it.
+    ///
+    /// **Writes the override even when the effective value doesn't move.** Setting a visible layer to
+    /// "yes" looks like a no-op today and is the difference between it staying a reference when it is
+    /// hidden later and silently dropping out; the guard is on the *decision*, not on the value the
+    /// decision currently produces.
     func setFillReference(layerIndex: Int, isReference: Bool) {
         guard layers.indices.contains(layerIndex) else { return }
-        guard layers[layerIndex].isFillReference != isReference else { return }
+        guard layers[layerIndex].fillReferenceOverride != isReference else { return }
         withStructureUndo(name: "Fill Reference") {
-            layers[layerIndex].isFillReference = isReference
+            layers[layerIndex].fillReferenceOverride = isReference
         }
     }
 
-    /// Flips a layer's visibility and, by default, its fill-reference state with it — a hidden layer is
-    /// fill-excluded and a shown one is a fill reference (overridable afterward from the layer options).
+    /// Flips a layer's visibility. A layer nobody has decided about follows visibility as its fill
+    /// boundary too — that fall-out is `Layer.isFillReference`'s own default (§6.6) rather than a
+    /// write from here, which is what keeps it from overwriting a choice the artist did make.
     /// When a view preset is active, the change is saved into that preset automatically.
     func toggleLayerVisibility(layerIndex: Int) {
         guard layers.indices.contains(layerIndex) else { return }
         withStructureUndo(name: "Toggle Visibility") {
-            let nowVisible = !layers[layerIndex].isVisible
-            layers[layerIndex].isVisible = nowVisible
-            layers[layerIndex].isFillReference = nowVisible
+            layers[layerIndex].isVisible.toggle()
             saveVisibilityToActiveView()
         }
     }
@@ -965,10 +969,11 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Mask-edit mode (§6.5, §6.6)
     //
-    // The layer panel's rows are the picker: `beginMaskEdit` opens the session, a tap routes to
-    // `toggleMaskSource`, and `endMaskEdit` is the explicit exit §6.5 asks for. Every mutation in
-    // between goes through the by-index/by-id `setAlphaMask` overloads above, so it is still true
-    // that those two calls are the only place `alphaMask` is ever written.
+    // Every layer panel row carries a mask checkmark for as long as one node's options menu is open:
+    // opening the menu *is* the session (`syncMaskEditSession`), a checkmark routes to
+    // `toggleMaskSource`, and closing the menu ends it. Every mutation in between goes through the
+    // by-index/by-id `setAlphaMask` overloads above, so it is still true that those two calls are
+    // the only place `alphaMask` is ever written.
 
     /// Reads whichever of `Layer.alphaMask`/`LayerFolder.alphaMask` `target` names.
     func alphaMask(for target: MaskSource) -> AlphaMask? {
@@ -990,50 +995,66 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Enters mask-edit mode for `target`, creating an empty enabled mask first if it has none so
-    /// the picker always has something to toggle sources into.
-    ///
-    /// **One undo step per session (§6.6), not one per row tapped.** `beginStructureGesture` opens
-    /// the bracket before anything is written, so the "create a mask" write above and every
-    /// `toggleMaskSource` before `endMaskEdit()` land inside `withStructureUndo`'s depth guard as
-    /// nested no-ops rather than as steps of their own — the same coalescing the opacity slider
-    /// already relies on.
+    /// Enters mask-edit mode for `target`. Nothing is written yet — see `withMaskSessionUndo`.
     func beginMaskEdit(for target: MaskSource) {
         guard maskEditTarget == nil else { return } // one session at a time
-        beginStructureGesture()
-        if alphaMask(for: target) == nil {
-            setAlphaMask(AlphaMask(), for: target)
-        }
         maskEditTarget = target
     }
 
-    /// The explicit exit §6.5 asks for, as opposed to "tap away" — closes the session and records
-    /// whatever changed as the one step. Safe to call with nothing pending.
+    /// Closes the session and records whatever it changed as the one step. Safe to call with nothing
+    /// pending, and idempotent — the panel calls it both from the action about to edit structure and
+    /// again when SwiftUI notices the menu closed.
     func endMaskEdit() {
         guard maskEditTarget != nil else { return }
         maskEditTarget = nil
+        guard maskSessionIsRecording else { return }
+        maskSessionIsRecording = false
         commitStructureGesture(name: "Mask")
     }
 
-    /// Flips whether `source` clips the mask under edit — the picker row's tap.
+    /// **One undo step per session (§6.6), not one per checkmark — opened on the first write rather
+    /// than on entry.** Every mask write in the session runs through here, so the bracket exists from
+    /// the first one onwards and the `setAlphaMask` calls after it land inside `withStructureUndo`'s
+    /// depth guard as nested no-ops, the same coalescing the opacity slider relies on.
+    ///
+    /// Lazy because the session now begins whenever a node's options menu opens (§6.5). Bracketing on
+    /// entry would record an empty step for every menu the artist merely looked at, and creating the
+    /// empty `AlphaMask` there — which is what used to give that step something to hold — would hang
+    /// a mask off every node whose menu was ever opened.
+    private func withMaskSessionUndo(_ body: () -> Void) {
+        if maskEditTarget != nil, !maskSessionIsRecording {
+            maskSessionIsRecording = true
+            beginStructureGesture()
+        }
+        body()
+    }
+
+    /// Flips whether `source` clips the node under edit — a row's mask checkmark.
     ///
     /// Refuses a cyclic `source` via `canMask` even though the picker is expected to already filter
     /// with the same call before offering the row (§6.2: "the picker must filter with this call, do
     /// not write a second rule") — this is the one path both a correctly filtered row and a stale
     /// one still on screen from before a structural edit both go through, so it is where the rule is
     /// enforced rather than only trusted.
+    ///
+    /// **Picking enables the mask**, which is no longer the override it was when a Mask switch could
+    /// pause one: with that switch gone, `isEnabled` is exactly "has sources", set here and cleared
+    /// by `dropping(_:)` when the last one goes. The field stays in the model because §6.2 persists
+    /// it and the render tree reads it.
     func toggleMaskSource(_ source: MaskSource) {
         guard let target = maskEditTarget, canMask(target.id, with: source) else { return }
-        var mask = alphaMask(for: target) ?? AlphaMask()
-        if mask.sources.contains(source) {
-            // `dropping(_:)` is also §6.6's deletion rule — reused rather than re-stated, so
-            // "the list emptied" disables the mask exactly once, however it emptied.
-            mask = mask.dropping(source)
-        } else {
-            mask.sources.append(source)
-            mask.isEnabled = true
+        withMaskSessionUndo {
+            var mask = alphaMask(for: target) ?? AlphaMask()
+            if mask.sources.contains(source) {
+                // `dropping(_:)` is also §6.6's deletion rule — reused rather than re-stated, so
+                // "the list emptied" disables the mask exactly once, however it emptied.
+                mask = mask.dropping(source)
+            } else {
+                mask.sources.append(source)
+                mask.isEnabled = true
+            }
+            setAlphaMask(mask, for: target)
         }
-        setAlphaMask(mask, for: target)
     }
 
     /// Whether `source` currently clips the node under edit — a picker row's checkmark.
@@ -1060,28 +1081,37 @@ final class CanvasManager: ObservableObject {
         return maskEditAllows(.layer(layers[index].id)) ? 1 : 0.25
     }
 
-    /// Turns a node's mask on or off without discarding its source list — the options panel's own
-    /// switch, distinct from a session's picker. Kept separate from `dropping(_:)` disabling one
-    /// that's been emptied by *deletion* (§6.6): this is the artist choosing to pause a mask they
-    /// mean to come back to, not the model reacting to a source disappearing.
-    func setMaskEnabled(_ enabled: Bool, for target: MaskSource) {
-        guard var mask = alphaMask(for: target), mask.isEnabled != enabled else { return }
-        mask.isEnabled = enabled
-        setAlphaMask(mask, for: target)
-    }
-
-    /// Sets `invert` on a node's mask (§6.5) — works whether or not a session is currently open,
-    /// nesting into one via the same `withStructureUndo` depth guard as everything else here.
+    /// Sets `invert` on a node's mask (§6.5) — the options menu's own switch, which sits beside the
+    /// rows that carry the checkmarks rather than in them, since inverting is a property of the
+    /// mask and not of any one source. Coalesces into the open session like a pick does.
     func setMaskInvert(_ invert: Bool, for target: MaskSource) {
         guard var mask = alphaMask(for: target), mask.invert != invert else { return }
-        mask.invert = invert
-        setAlphaMask(mask, for: target)
+        withMaskSessionUndo {
+            mask.invert = invert
+            setAlphaMask(mask, for: target)
+        }
     }
 
-    /// Removes a node's mask entirely — the options panel toggle's off position when there is no
-    /// mask-edit session open to end instead.
-    func removeMask(for target: MaskSource) {
-        setAlphaMask(nil, for: target)
+    /// Keeps §6.5's modal state in step with which options menu is open, which is the whole of what
+    /// enters and leaves the session now that the Mask switch is gone: the menu names its target
+    /// already, so a second control that said "…and mean it" was the redundancy the owner called out.
+    ///
+    /// Compositor nodes and input slots are deliberately not targets. §4.3 stores both as folders so
+    /// the tree arithmetic is reused, but a slot holds whatever was dropped into it and a node holds
+    /// only its slots — neither is content an artist would clip, and their rows carry no checkmark
+    /// for the same reason.
+    func syncMaskEditSession(toOptionsTarget id: UUID?) {
+        var target: MaskSource?
+        if let id {
+            if let folder = folders.first(where: { $0.id == id }) {
+                target = (folder.isCompositorNode || folder.isInputSlot) ? nil : .folder(id)
+            } else if layers.contains(where: { $0.id == id }) {
+                target = .layer(id)
+            }
+        }
+        guard target != maskEditTarget else { return }
+        endMaskEdit()
+        if let target { beginMaskEdit(for: target) }
     }
 
     /// Toggles whether a folder's child layers are shown in the layer panel.
@@ -1348,4 +1378,18 @@ final class CanvasManager: ObservableObject {
     /// Callers instead bracket the whole gesture: `beginStructureGesture()` at `.began`,
     /// `commitStructureGesture(name:)` at `.ended`/`.cancelled`.
     var gestureSnapshot: StructureSnapshot?
+
+    /// How many gesture brackets are open, so an inner one nests instead of clobbering the outer's
+    /// snapshot — `withStructureUndo`'s rule, applied to the continuous form.
+    ///
+    /// It became reachable when the mask-edit session grew to span an open layer options menu (§6.5):
+    /// the rows stay live underneath it, so an opacity drag now begins a bracket inside the session's.
+    /// Without the depth, that drag's `begin` overwrites the session's baseline and its `commit`
+    /// records a step from the wrong one, leaving the session with nothing to commit at all.
+    var structureGestureDepth = 0
+
+    /// Whether the open mask-edit session has already opened its undo bracket (§6.6). Nil-until-used
+    /// rather than opened in `beginMaskEdit`, because the session now begins whenever a layer's
+    /// options menu opens: bracketing there would record an empty step for every menu merely looked at.
+    var maskSessionIsRecording = false
 }

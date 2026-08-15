@@ -71,7 +71,9 @@ struct FillSettingsPanel: View {
                 }
                 .padding(.horizontal)
 
-                Text("Set which layers bound the fill in the Layers panel — each layer's Edit menu has a Fill Reference switch.")
+                // The one place left that says out loud what the row's drop glyph means, now that the
+                // labelled switch is gone. Worth keeping for that reason rather than as panel filler.
+                Text("Set which layers bound the fill in the Layers panel — open any layer's options and tap the drop on each row. Shown layers bound the fill until you say otherwise.")
                     .font(.caption)
                     .foregroundColor(.gray)
                     .padding(.horizontal)

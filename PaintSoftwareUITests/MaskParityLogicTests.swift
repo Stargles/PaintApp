@@ -535,7 +535,7 @@ final class MaskParityLogicTests: XCTestCase {
     // MARK: - MASK-TUNE's cache invalidation (temporary; delete this test alongside the harness)
 
     /// **The harness's one way to fail.** `AlphaMask.threshold`/`.antialiasHalfWidth` are `static
-    /// var`s the on-iPad tuning harness (`MaskTuningOverlay`) writes — they are not stored properties
+    /// var`s the on-iPad tuning harness (`MaskTuningSection`) writes — they are not stored properties
     /// of the `AlphaMask` values `CacheKey` hashes, so a slider write is invisible to the key on its
     /// own. Without `tuningGeneration` folded into that key (see `AlphaMask.swift`,
     /// `MaskResolver.CacheKey`), this would keep handing back the `ResolvedMask` computed under the
@@ -948,8 +948,8 @@ final class MaskParityLogicTests: XCTestCase {
 
         manager.toggleMaskSource(.layer(a))   // as if the row had been tapped anyway
         manager.toggleMaskSource(.layer(b))
-        XCTAssertEqual(manager.layers[1].alphaMask?.sources, [],
-                       "Both refused picks leave the mask exactly as `beginMaskEdit` left it — empty, not cyclic")
+        XCTAssertNil(manager.layers[1].alphaMask,
+                     "Both refused picks leave nothing behind at all — a session writes its first mask when something is actually picked")
     }
 
     /// **§6.6's other headline, at the panel's own action rather than a direct model mutation.**
@@ -963,8 +963,74 @@ final class MaskParityLogicTests: XCTestCase {
 
         manager.toggleLayerVisibility(layerIndex: sourceIndex)
 
-        XCTAssertFalse(manager.layers[sourceIndex].isFillReference, "Hiding clears fill-reference, same as ever")
+        XCTAssertFalse(manager.layers[sourceIndex].isFillReference,
+                       "Hiding drops a *defaulted* fill reference, same as ever")
         XCTAssertEqual(manager.layers[1].alphaMask?.sources, [.layer(manager.layers[sourceIndex].id)],
                        "But the mask naming this layer as a source is untouched — hiding a source never silently repaints")
+    }
+
+    /// **The session is the open menu, and merely opening one writes nothing.** It used to create an
+    /// empty enabled `AlphaMask` on entry so its undo bracket had something to hold; entry is now as
+    /// ordinary as tapping a selected layer, so doing that to five layers in a row would have hung a
+    /// mask off each of them and pushed five empty steps onto the stack.
+    func testOpeningAndClosingASessionWithoutPickingWritesNothing() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        let stepsBefore = manager.history.undoStack.count
+
+        manager.beginMaskEdit(for: .layer(manager.layers[1].id))
+        manager.endMaskEdit()
+
+        XCTAssertNil(manager.layers[1].alphaMask, "A menu that was only looked at leaves no mask behind")
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore, "…and no undo step either")
+    }
+
+    /// **§4.3's node and slot are folders in storage and not mask targets.** `syncMaskEditSession` is
+    /// the whole of what enters the mode now, so this is where "their rows carry no checkmark" is
+    /// actually decided — a node holds only its slots and a slot holds whatever was dropped in it.
+    func testOpeningANodeOrSlotMenuOpensNoSession() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let node = manager.addCompositorNode(op: .mix(.normal))
+        guard let slot = manager.folders.first(where: { $0.parentFolderID == node })?.id else {
+            return XCTFail("A Mix node is created with its slots")
+        }
+
+        manager.syncMaskEditSession(toOptionsTarget: node)
+        XCTAssertNil(manager.maskEditTarget, "A node composites its slots; there is nothing on it to clip")
+        manager.syncMaskEditSession(toOptionsTarget: slot)
+        XCTAssertNil(manager.maskEditTarget, "And a slot is a receptacle, not content")
+
+        let group = manager.addFolder(name: "Group")
+        manager.syncMaskEditSession(toOptionsTarget: group)
+        XCTAssertEqual(manager.maskEditTarget, .folder(group), "An ordinary group is a target — §6.2 masks groups")
+
+        manager.syncMaskEditSession(toOptionsTarget: manager.layers[0].id)
+        XCTAssertEqual(manager.maskEditTarget, .layer(manager.layers[0].id),
+                       "Moving to another menu moves the session rather than needing it closed first")
+
+        manager.syncMaskEditSession(toOptionsTarget: nil)
+        XCTAssertNil(manager.maskEditTarget, "Closing the menu closes the session")
+    }
+
+    /// **A row stays live under an open menu, so its opacity drag begins a bracket inside the
+    /// session's.** Before `beginStructureGesture` nested, the inner `begin` overwrote the session's
+    /// baseline and the inner `commit` consumed it, which left the mask picks recorded against the
+    /// wrong starting point and the session with nothing to commit at all.
+    func testAnOpacityDragInsideASessionStillLeavesOneUndoStep() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        let target = manager.layers[1].id
+        let stepsBefore = manager.history.undoStack.count
+
+        manager.beginMaskEdit(for: .layer(target))
+        manager.toggleMaskSource(.layer(manager.layers[0].id))
+        manager.beginStructureGesture()                     // the row's slider touching down
+        manager.layers[1].opacity = 0.4
+        manager.commitStructureGesture(name: "Opacity")     // …and lifting, still mid-session
+        manager.endMaskEdit()
+
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore + 1,
+                       "The session spans the drag, so the visit is one step and not two")
+        manager.undo()
+        XCTAssertNil(manager.layers[1].alphaMask, "Which reverts both halves together")
+        XCTAssertEqual(manager.layers[1].opacity, 1, accuracy: 0.0001)
     }
 }

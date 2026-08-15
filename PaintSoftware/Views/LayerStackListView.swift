@@ -93,6 +93,19 @@ struct LayerStackListView: UIViewRepresentable {
                     // (`onRequestOptions`/`layerOptionsID`) either way; which panel renders is
                     // resolved from the id in `DrawingView.layerPanelRail`.
                     cell.onOpenFolderOptions = { [weak self] in self?.onRequestOptions?(model.id) }
+                    // §6.5's picker, now a per-row control rather than the row's whole tap. Routed
+                    // through `maskEditAllows` — the same `canMask` call the row's own glyph used to
+                    // decide whether to offer itself — so a stale row still on screen from just
+                    // before a structural edit lands here as a no-op rather than a cyclic pick.
+                    cell.onToggleMaskSource = { [weak self] in
+                        guard let self, self.canvasManager.maskEditAllows(model.maskSource) else { return }
+                        self.canvasManager.toggleMaskSource(model.maskSource)
+                    }
+                    cell.onToggleFillReference = { [weak self] in
+                        guard let self, self.canvasManager.layers.indices.contains(model.layerIndex) else { return }
+                        self.canvasManager.setFillReference(layerIndex: model.layerIndex,
+                                                            isReference: !model.isFillReference)
+                    }
                     cell.onOpacityChange = { [weak self] value in
                         guard let self else { return }
                         if let folderID = model.folderID {
@@ -312,17 +325,10 @@ extension LayerStackListView.Coordinator: UITableViewDelegate {
         guard rows.indices.contains(indexPath.row) else { return }
         let row = rows[indexPath.row]
 
-        // §6.5: mid-session, a tap means "toggle this as a source" instead of whatever it would
-        // otherwise mean (select, expand). `maskEditAllows` is the same `canMask` call the row's own
-        // dimming already used to decide whether to offer itself, so a stale row from just before a
-        // structural edit lands here as a no-op rather than a silently-accepted cyclic pick.
-        if canvasManager.maskEditTarget != nil {
-            if canvasManager.maskEditAllows(row.maskSource) {
-                canvasManager.toggleMaskSource(row.maskSource)
-            }
-            return
-        }
-
+        // A tap keeps its ordinary meaning through a session. It stopped meaning "pick this as a
+        // source" when the checkmark became a control of its own (§6.5): the session is now just an
+        // open options menu, and a panel whose every row answered to the menu instead of to itself
+        // would be a strange price for having one open.
         if let folderID = row.folderID {
             canvasManager.toggleFolderExpanded(folderID)
             return
@@ -644,6 +650,14 @@ struct LayerRowModel: Equatable {
     /// §6.5: whether `CanvasManager.maskEditTarget` is set at all, baked into every row so the cell
     /// can tell "not editing" apart from "editing, and this one happens to read false" below.
     var isMaskEditActive: Bool = false
+    /// Whether this row may carry the mask checkmark at all. A layer or a group can clip another
+    /// node; §4.3's compositor node and input slot are folders only in storage — a node holds
+    /// nothing but its slots and a slot holds whatever was dropped in it, so neither is content to
+    /// clip to, and offering the control would promise a pick the tree has no meaning for.
+    var showsMaskControl: Bool = false
+    /// Whether this row may carry the fill-reference button. Layers only: `isFillReference` is a
+    /// `Layer` property and the fill walks layers, so a folder has no answer to give (§6.6).
+    var showsFillReferenceControl: Bool = false
     /// This row is one of the edited node's current `sources` — a picker row's checkmark.
     var isMaskSourceSelected: Bool = false
     /// This row would close a cycle if picked (§6.2) — dimmed and inert rather than removed, so the
@@ -749,6 +763,8 @@ struct LayerRowModel: Equatable {
             isMaskSourceSelected = manager.isMaskSource(maskSource)
             isMaskEligible = manager.maskEditAllows(maskSource)
             isMaskEditTarget = target == maskSource
+            showsMaskControl = kind == .layer || kind == .group
+            showsFillReferenceControl = kind == .layer
         }
     }
 }

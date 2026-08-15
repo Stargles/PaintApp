@@ -34,7 +34,6 @@ extension CanvasManager {
                 activeViewPresetIndex = -1
                 for idx in layers.indices where !layers[idx].isVisible {
                     layers[idx].isVisible = true
-                    layers[idx].isFillReference = true
                 }
                 for idx in folders.indices where !folders[idx].isVisible {
                     folders[idx].isVisible = true
@@ -68,11 +67,14 @@ extension CanvasManager {
     }
 
     /// Applies a view preset's visibility snapshot to all layers and folders.
+    ///
+    /// Visibility only: a preset is a record of what the artist wanted *shown*, and fill reference
+    /// follows from it for every layer that has no explicit answer of its own (§6.6). Writing it here
+    /// as well would make flipping views the one gesture that silently discards that answer.
     private func applyViewPreset(_ preset: ViewPreset) {
         for idx in layers.indices {
             if let vis = preset.layerVisibility[layers[idx].id] {
                 layers[idx].isVisible = vis
-                layers[idx].isFillReference = vis
             }
         }
         for idx in folders.indices {

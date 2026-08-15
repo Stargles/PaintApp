@@ -237,11 +237,17 @@ struct LayerManifest: Codable {
     /// note settles the recipe, and it is `alphaMask`'s: nil is what every project saved before
     /// effects existed says, so absence is the whole migration this field needs.
     var effect: Effect? = nil
+    /// `Layer.fillReferenceOverride` (§6.6), written only when the artist has actually answered.
+    /// Absence is the whole point rather than a gap: it is what "follow the default" *is*, so every
+    /// project saved before this key — where fill reference was derived from visibility at load —
+    /// decodes to exactly the behaviour it had.
+    var fillReferenceOverride: Bool? = nil
     var cels: [CelManifest]
 
     init(id: UUID, name: String, opacity: Double, isVisible: Bool, kind: LayerKind = .raster,
          parentFolderID: String? = nil, blendMode: BlendMode = .normal,
-         alphaMask: AlphaMask? = nil, effect: Effect? = nil, cels: [CelManifest]) {
+         alphaMask: AlphaMask? = nil, effect: Effect? = nil,
+         fillReferenceOverride: Bool? = nil, cels: [CelManifest]) {
         self.id = id
         self.name = name
         self.opacity = opacity
@@ -251,6 +257,7 @@ struct LayerManifest: Codable {
         self.blendMode = blendMode
         self.alphaMask = alphaMask
         self.effect = effect
+        self.fillReferenceOverride = fillReferenceOverride
         self.cels = cels
     }
 
@@ -268,10 +275,12 @@ struct LayerManifest: Codable {
         blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
         alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
+        fillReferenceOverride = try container.decodeIfPresent(Bool.self, forKey: .fillReferenceOverride)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask, effect, cels
+        case id, name, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask, effect
+        case fillReferenceOverride, cels
     }
 }
 

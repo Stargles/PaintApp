@@ -5,11 +5,19 @@ struct Layer: Identifiable {
     var name: String
     var opacity: Double
     var isVisible: Bool
+    /// The artist's own answer to "is this layer a fill boundary", or nil for "never asked" (§6.6).
+    ///
+    /// The distinction is the whole of the rule: a layer nobody has decided about follows the
+    /// default, which tracks visibility, so hiding a layer drops it as a boundary and showing it
+    /// brings it back. A layer somebody *has* decided about keeps that decision through every
+    /// visibility change, including while hidden — a choice the artist made is not the model's to
+    /// recompute. Without the nil case the two are indistinguishable and the recompute clobbers the
+    /// choice, which is exactly what this used to do.
+    var fillReferenceOverride: Bool? = nil
     /// Whether this layer's content contributes to the fill tool's boundary walls. The fill uses the
-    /// union of all layers with this set (see `CanvasManager.fillReferenceSources`). Defaults to true;
-    /// hiding a layer clears it (hidden layers are fill-excluded by default) and it can be toggled back
-    /// on independently from the layer's Edit menu. See [[feedback-vector-layer-extensibility]].
-    var isFillReference: Bool = true
+    /// union of all layers with this set (see `CanvasManager.fillReferenceSources`).
+    /// See [[feedback-vector-layer-extensibility]].
+    var isFillReference: Bool { fillReferenceOverride ?? isVisible }
     var kind: LayerKind = .raster
     /// The grade a `.compositing` layer applies (§4.4), or nil on a layer that draws pixels instead.
     ///

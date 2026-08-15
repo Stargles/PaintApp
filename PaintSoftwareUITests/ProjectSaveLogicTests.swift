@@ -252,6 +252,26 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// existing projects decode unchanged" is a claim about JSON that has already been written to
     /// disk, and the only way to test it honestly is to load JSON without those keys in it. A decoder
     /// read back to itself would pass while `decodeIfPresent` was `decode`.
+    /// Rewrites a saved manifest into what a build from before §6.6's override wrote: no
+    /// `fillReferenceOverride` key on any layer, since that build had no such field.
+    private func stripFillReferenceOverridesFromSavedManifest(at url: URL,
+                                                              file: StaticString = #filePath, line: UInt = #line) {
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              var layers = json["layers"] as? [[String: Any]] else {
+            return XCTFail("The saved package should carry a manifest with a layers array", file: file, line: line)
+        }
+        for index in layers.indices {
+            layers[index].removeValue(forKey: "fillReferenceOverride")
+        }
+        json["layers"] = layers
+        guard let rewritten = try? JSONSerialization.data(withJSONObject: json) else {
+            return XCTFail("The stripped manifest should re-encode", file: file, line: line)
+        }
+        try? rewritten.write(to: manifestURL)
+    }
+
     private func stripGroupPropertiesFromSavedManifest(at url: URL,
                                                        file: StaticString = #filePath, line: UInt = #line) {
         let manifestURL = url.appendingPathComponent("manifest.json")
@@ -332,7 +352,6 @@ final class ProjectSaveLogicTests: XCTestCase {
         for index in manager.folders.indices { manager.folders[index].isVisible = false }
         for index in manager.layers.indices where index < 2 {
             manager.layers[index].isVisible = false
-            manager.layers[index].isFillReference = false
         }
 
         let url = projectURL()
@@ -347,7 +366,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertTrue(reloaded.layers[0].isVisible && reloaded.layers[1].isVisible,
                       "Un-hiding the group must bring its contents back, at any depth")
         XCTAssertTrue(reloaded.layers[0].isFillReference,
-                      "isFillReference moves with visibility, the pairing toggleLayerVisibility keeps")
+                      "Fill reference comes back with visibility, since nothing ever answered for this layer by hand (§6.6)")
     }
 
     /// The other half, and the reason the signal is the absence of a key rather than a version number:
@@ -387,7 +406,6 @@ final class ProjectSaveLogicTests: XCTestCase {
         manager.toggleFolderVisibility(group)
         for index in manager.layers.indices where index < 2 {
             manager.layers[index].isVisible = false
-            manager.layers[index].isFillReference = false
         }
         manager.addViewPreset()
 
@@ -420,6 +438,61 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(folder(reloaded, named: "Outer")?.isVisible, true)
         XCTAssertTrue(reloaded.layers[0].isVisible)
         XCTAssertFalse(reloaded.layers[1].isVisible, "The migration only fires under a hidden group")
+    }
+
+    /// **What a pre-§6.6 document decodes to, asserted rather than assumed — and it is not what the
+    /// build that wrote it produced.**
+    ///
+    /// `isFillReference` was never persisted. The old loader passed no value for it at all, so every
+    /// layer in every reopened project came back `true` on the stored default — a hidden layer
+    /// included, even though hiding it in-session had just set it `false`. Saving and reopening
+    /// silently promoted every hidden layer back to a fill boundary; the state that survived the
+    /// round trip was not the state the artist left.
+    ///
+    /// Deriving it fixes that by construction, so an old file now decodes to what the session that
+    /// saved it actually had. **This is a deliberate behaviour change on existing documents**, in the
+    /// only direction §6.6 permits, and it is here so it is a decision on the record rather than a
+    /// surprise: nothing is lost, because the old value carried no information — it was `true` for
+    /// every layer regardless of what the artist had done.
+    func testAPreOverrideDocumentDecodesFromVisibilityRatherThanTheOldStoredDefault() throws {
+        let manager = makeManager()
+        manager.toggleLayerVisibility(layerIndex: 1)      // hidden, so fill-excluded in-session
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        stripFillReferenceOverridesFromSavedManifest(at: url)   // exactly what the old build wrote
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        XCTAssertTrue(reloaded.layers[0].isFillReference, "A shown layer is a boundary — same answer the old build gave")
+        XCTAssertFalse(reloaded.layers[1].isFillReference,
+                       "A hidden one is not. The old build answered `true` here, discarding the exclusion the save had captured")
+        XCTAssertNil(reloaded.layers[1].fillReferenceOverride,
+                     "…and it is the default answering, not a decision invented by the loader")
+    }
+
+    /// **§6.6's fill-reference decision has to survive the round trip or it is not a decision.** The
+    /// effective value never was persisted — it was recomputed from visibility at load — so writing
+    /// only the override is what makes "explicit wins" true tomorrow as well as this session, and
+    /// leaving the key out for an unanswered layer is what an older project already looks like.
+    func testAnExplicitFillReferenceSurvivesASaveAndLoadButADefaultedOneIsRederived() throws {
+        let manager = makeManager()
+        manager.setFillReference(layerIndex: 0, isReference: true)
+        manager.toggleLayerVisibility(layerIndex: 0)   // hidden, and still a reference by decision
+        manager.toggleLayerVisibility(layerIndex: 1)   // hidden, and not by default
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+
+        let data = try Data(contentsOf: url.appendingPathComponent("manifest.json"))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let layerJSON = try XCTUnwrap(json["layers"] as? [[String: Any]])
+        XCTAssertEqual(layerJSON[0]["fillReferenceOverride"] as? Bool, true)
+        XCTAssertNil(layerJSON[1]["fillReferenceOverride"],
+                     "A layer nobody answered for writes no key — absence is what \"follow the default\" is")
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        XCTAssertTrue(reloaded.layers[0].isFillReference, "The decision came back with the document")
+        XCTAssertFalse(reloaded.layers[1].isFillReference, "And the default was re-derived from the visibility that did")
     }
 
     // MARK: - Compositor nodes (§4.3)

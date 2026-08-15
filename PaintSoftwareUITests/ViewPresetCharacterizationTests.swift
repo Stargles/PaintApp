@@ -14,7 +14,8 @@ import UIKit
 /// * `deleteViewPreset` re-points `activeViewPresetIndex` differently depending on whether the
 ///   deleted preset was before, at, or after the active one — and its nested `selectViewPreset`
 ///   call must coalesce into a single undo step.
-/// * `isFillReference` rides along with `isVisible` everywhere visibility is applied.
+/// * `isFillReference` follows `isVisible` everywhere visibility is applied — but only for a layer
+///   nobody has answered for by hand (§6.6), which is the line these pin from both sides.
 ///
 /// See `CanvasManagerTestSupport.swift` for why these compile as plain unit tests inside the UI
 /// test target, and for the characterization-vs-specification distinction.
@@ -127,7 +128,60 @@ final class ViewPresetCharacterizationTests: XCTestCase {
 
         XCTAssertTrue(manager.layers[0].isVisible)
         XCTAssertTrue(manager.layers[0].isFillReference,
-                      "`isFillReference` rides along with `isVisible` everywhere visibility is applied")
+                      "`isFillReference` follows `isVisible` wherever visibility is applied, for a layer nobody answered for")
+    }
+
+    // MARK: - The default versus the decision (§6.6)
+
+    /// **The rule the owner asked for, in one test: on by default, off when hidden, and an explicit
+    /// answer beats both.** The two halves are indistinguishable from the effective value alone — a
+    /// hidden layer reading "not a reference" could be either — which is exactly why the decision is
+    /// stored separately from what it currently produces.
+    func testAnExplicitFillReferenceSurvivesHidingWhileADefaultedOneDoesNot() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        XCTAssertTrue(manager.layers[0].isFillReference, "On by default")
+        XCTAssertTrue(manager.layers[1].isFillReference)
+
+        manager.setFillReference(layerIndex: 0, isReference: true)   // the same value, said out loud
+
+        manager.toggleLayerVisibility(layerIndex: 0)
+        manager.toggleLayerVisibility(layerIndex: 1)
+
+        XCTAssertTrue(manager.layers[0].isFillReference,
+                      "An artist who asked for this layer to wall the fill in keeps it while it is hidden")
+        XCTAssertFalse(manager.layers[1].isFillReference, "Off when hidden, for a layer nobody answered for")
+
+        manager.toggleLayerVisibility(layerIndex: 1)
+        XCTAssertTrue(manager.layers[1].isFillReference, "…and back on when it is shown again")
+    }
+
+    /// The other direction, and the one an eye toggle used to undo: excluded by hand, shown again,
+    /// still excluded.
+    func testShowingALayerDoesNotUndoAnExplicitExclusion() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.setFillReference(layerIndex: 0, isReference: false)
+
+        manager.toggleLayerVisibility(layerIndex: 0)
+        manager.toggleLayerVisibility(layerIndex: 0)
+
+        XCTAssertTrue(manager.layers[0].isVisible)
+        XCTAssertFalse(manager.layers[0].isFillReference,
+                       "Hiding and re-showing is not an answer to a question the artist already answered")
+    }
+
+    /// Flipping views is the third place that used to write fill reference through, and the one that
+    /// would have re-armed itself every time the artist switched view.
+    func testApplyingAViewDoesNotOverwriteAnExplicitFillReference() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        manager.toggleLayerVisibility(layerIndex: 0)          // hidden, and defaulted off with it
+        manager.addViewPreset()
+        manager.setFillReference(layerIndex: 0, isReference: true)
+        manager.selectViewPreset(at: -1)
+
+        manager.selectViewPreset(at: 0)
+
+        XCTAssertFalse(manager.layers[0].isVisible, "The preset still hides it, which is what a preset is for")
+        XCTAssertTrue(manager.layers[0].isFillReference, "But it has no say over a decision it never recorded")
     }
 
     func testApplyingAViewLeavesLayersItHasNoEntryForAlone() {
