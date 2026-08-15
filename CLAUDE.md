@@ -65,6 +65,16 @@ because a test that stops running still prints green.
   SUITES=(); for s in $(ls PaintSoftwareUITests/*.swift | xargs -n1 basename | sed 's/\.swift$//' | grep -E "LogicTests$|CharacterizationTests$|^PerfBaselineTests$"); do SUITES+=(-only-testing:PaintSoftwareUITests/$s); done
   ```
 
+- **A red xcresult is evidence about a *binary*, not about your working tree** — the same trap as the
+  banner, pointing the other way. `test-without-building` reuses whatever bundle was last compiled,
+  so editing a source file and re-running it tests the *old* code while reporting against the new
+  commit. Session 24 spent an opus worker "fixing" three effects that were already correct: a Sobel
+  divisor of 4 had been changed to `1/√20` before the commit, but the failing run predated the
+  rebuild, and every reported byte (128 where 114 was wanted, 90 where 81 was) is exactly the ratio
+  `√20/4 = 1.118` between the two constants. Before debugging a numeric failure, diff the constant
+  the test names against the value it reports — that is thirty seconds and it settles which of the
+  two you are looking at. Use plain `test` (which builds) unless you have a reason not to.
+
 ### Triaging a failed XCUITest — do this before suspecting your change
 
 A one-off XCUITest failure here is environmental far more often than it is real, and re-running the
