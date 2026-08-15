@@ -29,22 +29,31 @@ toolchain once: `xcodebuild -downloadComponent MetalToolchain`.
   `simctl shutdown all` + `erase` the simulator *immediately before* it: leftover parallel clones
   are the cause of nearly every mystery failure.
 
-### Why the full run is 26 minutes when the work is only ~9
+### Why the full run costs what it does
 
 **`xcodebuild` distributes parallel work per test *class*, never per test**, so a class is
-indivisible and the longest one sets the critical path. Measured 2026-08-15 over 961 tests: four
-clones received 482 / 324 / 74 / **44** tests, and two of them sat idle on the home screen for most
-of the run while the last ground on. Nearly all the time is in six UI classes —
-ToolsAndSelection 424 s, TimelineAndUndo 392 s, VectorShapeAndRecovery 389 s, VectorEraser 357 s,
-Fill 277 s, Layer 107 s — about 1,950 s of work in **six indivisible units across four workers**.
-Every one of the ~900 logic tests together adds only ~250 s.
+indivisible and the longest one sets the critical path. That is the whole cost model, and it is why
+class granularity — not worker count — is the lever.
 
-So the lever is granularity, not worker count: **split those six into two or three classes each**
-and there are 12–18 packable units instead of 6. Methods moved between classes *in the same file*
-need no `project.pbxproj` edit. The floor is one test —
-`TimelineAndUndoUITests.testInterpolateModeEndToEndFromGestureToScrub` alone is **189 s** — so going
-below ~3 min means decomposing that one. **Verify any such split by test count from the xcresult**,
-because a test that stops running still prints green.
+Measured 2026-08-15, before and after splitting the six heavy UI classes into three each:
+
+| | tests | wall clock |
+|---|---|---|
+| six indivisible UI classes | 961 | 25.7 min |
+| eighteen | 1023 | **18.8 min** |
+
+Before the split four clones received 482 / 324 / 74 / **44** tests and two sat idle on the home
+screen while the last ground on; ~1,950 s of the run lived in six classes (ToolsAndSelection 424 s,
+TimelineAndUndo 392 s, VectorShapeAndRecovery 389 s, VectorEraser 357 s, Fill 277 s, Layer 107 s)
+against ~250 s for every logic test together.
+
+**The floor is now one test**: `InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`
+is 189 s and sits alone in its own class precisely so it starts immediately. Going meaningfully below
+~3 min means decomposing that one test, not splitting further.
+
+If you split a class again, **verify by test count from the xcresult** — a test that stops running
+still prints green — and take the count *before* you merge as well as after: a split branch cut
+before something was deleted will silently resurrect it, and the count is the only signal.
 - Use the dedicated simulator by UDID: `eraser-mutex-test`,
   `75C8B97E-47AF-484B-B7D2-CA7EB1B51B03`. Passing `-destination name=...` for a device this Mac
   doesn't have (there is no "iPad Pro 13-inch (M4)" — it is an M5) does **not** error; xcodebuild

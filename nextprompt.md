@@ -36,20 +36,16 @@ build order, §10 is what is still open.
    `Compositor.swift`, `MetalCompositor.swift`, `Composite.metal` and `RenderTree.swift` have a
    **zero-line diff** from the feature. Keyframes change one function and touch neither backend.
 
-## Verification owed — read this before you build anything
+## Where verification stands
 
-**The full XCUITest suite was not re-run this session.** The fast logic tier is green at
-**930: 928 passed, 0 failed, 2 skipped** (the two `PAINT_PERF_HEAVY` gates) on the merged tip. But the
-six-class → 18-class test split changed how the suite *schedules*, and that has never been validated
-end to end. Run it once, on an erased simulator on a quiet machine, before trusting a boundary number:
+**Boundary suite green: 1023 total, 1020 passed, 0 failed, 3 skipped, 18.8 minutes**, on an erased
+simulator on a quiet machine. Zero failures — the first full run this project has had with nothing to
+triage, environmental or otherwise. The fast logic tier is 930: 928 passed, 0 failed, 2 skipped.
 
-```bash
-xcrun simctl shutdown all; xcrun simctl erase 75C8B97E-47AF-484B-B7D2-CA7EB1B51B03
-```
-
-Expect roughly 990 tests. The split was verified three ways — the `func test` count held at 982 across
-the merge, the test target compiles, and all 18 new class symbols are present in the compiled
-`.xctest` with all 6 old names gone — so what is unproven is scheduling and wall-clock, not existence.
+That run also validated the test split end to end: 961 tests in 25.7 min became 1023 in 18.8 min,
+about 1.5x the throughput. The split had already been verified three other ways — the `func test`
+count held at 982 across the merge, the target compiles, and all 18 new class symbols are present in
+the compiled `.xctest` with all 6 old names gone — but scheduling is the thing only a full run proves.
 
 ## Still open
 
