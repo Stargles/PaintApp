@@ -65,6 +65,7 @@
 		DEC0DE9F0000000000000006 /* PaintSoftware/Engine/MetalEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE9F0000000000000005 /* PaintSoftware/Engine/MetalEffects.swift */; };
 		DEC0DE9F0000000000000008 /* EffectParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE9F0000000000000007 /* EffectParityLogicTests.swift */; };
 		DEC0DE9A0000000000000002 /* EffectLayerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE9A0000000000000001 /* EffectLayerLogicTests.swift */; };
+		DEC0DEA10000000000000002 /* ValueLayerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEA10000000000000001 /* ValueLayerLogicTests.swift */; };
 		DEC0DE9F000000000000000A /* EffectMultiPassLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE9F0000000000000009 /* EffectMultiPassLogicTests.swift */; };
 		DEC0DE6A0000000000000002 /* PaintSoftware/Models/AlphaMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE6A0000000000000001 /* PaintSoftware/Models/AlphaMask.swift */; };
 		DEC0DE6A0000000000000004 /* PaintSoftware/Engine/MaskResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE6A0000000000000003 /* PaintSoftware/Engine/MaskResolver.swift */; };
@@ -185,6 +186,7 @@
 		DEC0DE9F0000000000000005 /* PaintSoftware/Engine/MetalEffects.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MetalEffects.swift"; sourceTree = "<group>"; };
 		DEC0DE9F0000000000000007 /* EffectParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EffectParityLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE9A0000000000000001 /* EffectLayerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EffectLayerLogicTests.swift; sourceTree = "<group>"; };
+		DEC0DEA10000000000000001 /* ValueLayerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ValueLayerLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE9F0000000000000009 /* EffectMultiPassLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EffectMultiPassLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE6A0000000000000001 /* PaintSoftware/Models/AlphaMask.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/AlphaMask.swift"; sourceTree = "<group>"; };
 		DEC0DE6A0000000000000003 /* PaintSoftware/Engine/MaskResolver.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MaskResolver.swift"; sourceTree = "<group>"; };
@@ -334,6 +336,7 @@
 				DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */,
 				DEC0DE9F0000000000000007 /* EffectParityLogicTests.swift */,
 				DEC0DE9A0000000000000001 /* EffectLayerLogicTests.swift */,
+				DEC0DEA10000000000000001 /* ValueLayerLogicTests.swift */,
 				DEC0DE9F0000000000000009 /* EffectMultiPassLogicTests.swift */,
 				DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */,
 				DEC0DE0000000000000000A4 /* SandwichLogicTests.swift */,
@@ -579,6 +582,7 @@
 				DEC0DE9F0000000000000006 /* PaintSoftware/Engine/MetalEffects.swift in Sources */,
 				DEC0DE9F0000000000000008 /* EffectParityLogicTests.swift in Sources */,
 				DEC0DE9A0000000000000002 /* EffectLayerLogicTests.swift in Sources */,
+				DEC0DEA10000000000000002 /* ValueLayerLogicTests.swift in Sources */,
 				DEC0DE9F000000000000000A /* EffectMultiPassLogicTests.swift in Sources */,
 				DEC0DE6A0000000000000002 /* PaintSoftware/Models/AlphaMask.swift in Sources */,
 				DEC0DE6A0000000000000004 /* PaintSoftware/Engine/MaskResolver.swift in Sources */,

@@ -239,8 +239,10 @@ struct LayerManifest: Codable {
     var name: String
     var opacity: Double
     var isVisible: Bool
-    /// Mirrors `Layer.kind` (raster/vector/compositing). Persisted now (defaulting missing values
-    /// to `.raster`) so future layer kinds need no migration of already-saved projects.
+    /// Mirrors `Layer.kind` (raster/vector/compositing/value). Persisted now (defaulting missing
+    /// values to `.raster`) so future layer kinds need no migration of already-saved projects — which
+    /// is exactly what `.value` needed on arrival, since no document written before it contains the
+    /// string and every one of them still decodes to the raster layer it was.
     var kind: LayerKind
     /// The folder this layer belongs to, if any. Stored as a UUID string for forward compat.
     var parentFolderID: String? = nil
@@ -253,6 +255,11 @@ struct LayerManifest: Codable {
     /// note settles the recipe, and it is `alphaMask`'s: nil is what every project saved before
     /// effects existed says, so absence is the whole migration this field needs.
     var effect: Effect? = nil
+    /// A `.value` layer's flat colour (§4.5), written only when there is one — `ValueFill`'s
+    /// persistence note settles the recipe, and it is `effect`'s and `alphaMask`'s: nil is what every
+    /// project saved before value layers existed says, so absence is the whole migration this field
+    /// needs.
+    var fill: ValueFill? = nil
     /// `Layer.fillReferenceOverride` (§6.6), written only when the artist has actually answered.
     /// Absence is the whole point rather than a gap: it is what "follow the default" *is*, so every
     /// project saved before this key — where fill reference was derived from visibility at load —
@@ -262,7 +269,7 @@ struct LayerManifest: Codable {
 
     init(id: UUID, name: String, opacity: Double, isVisible: Bool, kind: LayerKind = .raster,
          parentFolderID: String? = nil, blendMode: BlendMode = .normal,
-         alphaMask: AlphaMask? = nil, effect: Effect? = nil,
+         alphaMask: AlphaMask? = nil, effect: Effect? = nil, fill: ValueFill? = nil,
          fillReferenceOverride: Bool? = nil, cels: [CelManifest]) {
         self.id = id
         self.name = name
@@ -273,6 +280,7 @@ struct LayerManifest: Codable {
         self.blendMode = blendMode
         self.alphaMask = alphaMask
         self.effect = effect
+        self.fill = fill
         self.fillReferenceOverride = fillReferenceOverride
         self.cels = cels
     }
@@ -291,11 +299,12 @@ struct LayerManifest: Codable {
         blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
         alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
+        fill = try container.decodeIfPresent(ValueFill.self, forKey: .fill)
         fillReferenceOverride = try container.decodeIfPresent(Bool.self, forKey: .fillReferenceOverride)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask, effect
+        case id, name, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask, effect, fill
         case fillReferenceOverride, cels
     }
 }

@@ -61,6 +61,46 @@ struct LayerRenderSource {
     // same way and a mask keys on the versions of a *set* of layers rather than of one.
 }
 
+extension LayerRenderSource {
+
+    /// One flat colour across the whole canvas — §4.5's value layer, resolved into a source the
+    /// compositor cannot tell apart from a layer somebody painted flat.
+    ///
+    /// **Built from bytes rather than drawn through a `UIGraphicsImageRenderer`, so the colour *is*
+    /// the bytes.** Both backends normalise a source through a device-RGB premultiplied context on the
+    /// way in — `CoreGraphicsCompositor.premultipliedBytes` and `MetalCompositor.upload`, which is the
+    /// pair whose agreeing on this conversion is half of why the backends can be compared byte for
+    /// byte at all — so a buffer already in exactly that layout passes through both unchanged, and the
+    /// two agree by construction rather than to within whatever a renderer's colour space and
+    /// preferred range happen to round to.
+    ///
+    /// Premultiplied, and `.toNearestOrEven` for the same reason every other byte path in this engine
+    /// uses it: it is the rule Metal's float→unorm8 conversion follows, so a fill below full alpha
+    /// lands on the byte the compositor would have produced rather than one step off it.
+    ///
+    /// Returns nil only for a degenerate canvas size, which is the answer the guard in
+    /// `makeRenderRequest` already gives for the same input.
+    static func solid(_ color: PaletteColor, canvasSize: CGSize) -> CGImage? {
+        let width = Int(canvasSize.width.rounded()), height = Int(canvasSize.height.rounded())
+        guard width > 0, height > 0 else { return nil }
+
+        let c = color.color.rgbaComponents
+        func byte(_ value: Double) -> UInt8 {
+            UInt8((min(max(value, 0), 1) * 255).rounded(.toNearestOrEven))
+        }
+        let texel = (r: byte(c.r * c.a), g: byte(c.g * c.a), b: byte(c.b * c.a), a: byte(c.a))
+
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        for offset in stride(from: 0, to: bytes.count, by: 4) {
+            bytes[offset] = texel.r
+            bytes[offset + 1] = texel.g
+            bytes[offset + 2] = texel.b
+            bytes[offset + 3] = texel.a
+        }
+        return CoreGraphicsCompositor.makeImage(fromPremultiplied: bytes, width: width, height: height)
+    }
+}
+
 /// One layer's pixels at one frame, **by model identity rather than by rendered result** — the key
 /// every cache downstream of a snapshot is allowed to use.
 ///
@@ -80,6 +120,13 @@ struct LayerRenderSource {
 /// Lifted out of `CanvasView.Coordinator` in phase 6, where it was `SandwichKey`'s private business
 /// until `MaskResolver` needed exactly the same answer. Two spellings of it would be two things to
 /// keep right.
+///
+/// **`valueFill` is the one component that does not come from a cel, and §4.5 is why.** A value
+/// layer's pixels are not in its cel — the colour *is* its content — so a document whose only change
+/// is that colour would leave every component above unmoved, and the two caches keyed on this would
+/// go on serving the old picture: §5.2's sandwich would keep showing the previous colour on canvas,
+/// and a mask reading that layer as a source would resolve to a stale coverage. Nil for every other
+/// kind, so no existing key moved when this field arrived.
 struct LayerContentVersion: Hashable {
     let celID: UUID
     let raster: ObjectIdentifier
@@ -88,9 +135,11 @@ struct LayerContentVersion: Hashable {
     let vectorVersion: Int
     let fillImage: ObjectIdentifier?
     let bakedImage: ObjectIdentifier?
+    let valueFill: ValueFill?
 
-    init(cel: Cel) {
+    init(cel: Cel, valueFill: ValueFill? = nil) {
         celID = cel.id
+        self.valueFill = valueFill
         raster = ObjectIdentifier(cel.raster)
         rasterVersion = cel.raster.version
         vector = cel.vector.map(ObjectIdentifier.init)
@@ -283,18 +332,50 @@ extension CanvasManager {
             guard layer.kind != .compositing,
                   layer.isVisible || maskSourceLayers.contains(index),
                   let celIndex = activeCelIndex(inLayer: index, atFrame: frame),
-                  let image = PixelOps.rasterize(cel: layer.cels[celIndex],
-                                                 canvasSize: canvasSize,
-                                                 quality: quality).cgImage
+                  let image = sourceImage(for: layer, celIndex: celIndex, atFrame: frame,
+                                          canvasSize: canvasSize, quality: quality)
             else {
                 sources.append(nil)
                 versions.append(nil)
                 continue
             }
             sources.append(LayerRenderSource(image: image))
-            versions.append(LayerContentVersion(cel: layer.cels[celIndex]))
+            versions.append(LayerContentVersion(cel: layer.cels[celIndex], valueFill: layer.valueFill))
         }
         return (sources, versions)
+    }
+
+    /// One layer's pixels at one frame — the cel flattened, or, for §4.5's value layer, its fill
+    /// resolved into a canvas-sized solid.
+    ///
+    /// **This is the frame-aware boundary the value layer's fill is resolved at, and that placement is
+    /// the one architectural decision the feature exists to get right.** `renderSources` already takes
+    /// the frame and already exists to turn "one layer" into "one layer's pixels at one frame", so a
+    /// value layer becomes an ordinary `LayerRenderSource` here and **the compositor never learns that
+    /// value layers exist** — neither backend has a leaf case for a colour, neither `RenderNode` nor
+    /// `RenderRequest` carries one, and a fill is indistinguishable downstream from a layer somebody
+    /// painted flat.
+    ///
+    /// The owner wants keyframed values eventually and explicitly does not want them built now. Doing
+    /// the read here is what makes that a one-function change later: a keyframe phase adds a track
+    /// inside `ValueFill`, `resolvedColor(atFrame:)` starts reading it, and this call site is already
+    /// passing the frame. Resolving anywhere further in (in `Compositor.draw`, or by giving
+    /// `RenderNode` a colour field) puts the constant somewhere the frame is not in scope, which is
+    /// precisely the seam this buys.
+    ///
+    /// A value layer's cel is blank and unrendered — kept, like an effect layer's, so that every
+    /// cel-lifecycle path in the app goes on working rather than the timeline learning about a layer
+    /// without cels. It still gates: the `activeCelIndex` guard above is what decides whether this
+    /// layer contributes at this frame at all, so deleting a value layer's block at frame *n* removes
+    /// its colour at *n*, which is what every other layer does and what the timeline shows.
+    @MainActor
+    private func sourceImage(for layer: Layer, celIndex: Int, atFrame frame: Int,
+                             canvasSize: CGSize, quality: RenderQuality) -> CGImage? {
+        if let fill = layer.valueFill {
+            return LayerRenderSource.solid(fill.resolvedColor(atFrame: frame), canvasSize: canvasSize)
+        }
+        return PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize,
+                                  quality: quality).cgImage
     }
 
     // MARK: - Mask sources (§6.2)

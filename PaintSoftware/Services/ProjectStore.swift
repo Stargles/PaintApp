@@ -159,6 +159,8 @@ enum ProjectStore {
             /// A `.compositing` layer's grade (§4.4). A value type, so unlike `vector` it needs no
             /// defensive copy to be safe to encode off main.
             let effect: Effect?
+            /// A `.value` layer's flat colour (§4.5). A value type, for `effect`'s reason.
+            let fill: ValueFill?
             let fillReferenceOverride: Bool?
             let cels: [CelContent]
         }
@@ -226,7 +228,7 @@ enum ProjectStore {
                 LayerContent(id: layer.id, name: layer.name, opacity: layer.opacity,
                              isVisible: layer.isVisible, kind: layer.kind,
                              parentFolderID: layer.parentFolderID, blendMode: layer.blendMode,
-                             alphaMask: layer.alphaMask, effect: layer.effect,
+                             alphaMask: layer.alphaMask, effect: layer.effect, fill: layer.fill,
                              fillReferenceOverride: layer.fillReferenceOverride,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
@@ -423,6 +425,7 @@ enum ProjectStore {
                 blendMode: layer.blendMode,
                 alphaMask: layer.alphaMask,
                 effect: layer.effect,
+                fill: layer.fill,
                 fillReferenceOverride: layer.fillReferenceOverride,
                 cels: celManifests
             ))
@@ -576,6 +579,7 @@ enum ProjectStore {
                 fillReferenceOverride: layerManifest.fillReferenceOverride,
                 kind: layerManifest.kind,
                 effect: layerManifest.effect,
+                fill: layerManifest.fill,
                 blendMode: layerManifest.blendMode,
                 alphaMask: layerManifest.alphaMask,
                 parentFolderID: parentID,

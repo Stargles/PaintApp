@@ -249,6 +249,29 @@ a subtree from elsewhere in the tree — that is already a DAG edge, §6.2), so 
 the infrastructure will largely exist. Nothing in this plan should assume a node has exactly one
 parent.
 
+### 4.5 Value layers
+
+`LayerKind.value` holds no pixels either. It carries `Layer.fill` and *is* one flat colour across the
+whole canvas, alpha included — Photoshop's Solid Colour layer. It blends with what is under it like
+any other leaf, and it is an operand of a Mix node.
+
+**Why it earns its keep.** `Mix(A, B, mode)` where A and B are single layers is identical to stacking
+B over A with that mode (§4.3 says so, and that redundancy is deliberate). A value layer is the honest
+answer to "why use a node at all": `Mix(folder-of-drawings, grey 50%, Multiply)` combines the folder
+as a unit and *then* halves it, which a flat stack cannot express.
+
+**The fill resolves in `renderSources(atFrame:)`, and that placement is the design.** A value layer
+becomes an ordinary `LayerRenderSource` at the frame-aware boundary, so the compositor never learns
+value layers exist and neither backend has a case for one. **Keyframed values are wanted eventually
+and are deliberately not built** — the seam is what this phase buys: a later phase puts a track inside
+`ValueFill`, `resolvedColor(atFrame:)` reads it, and that call site is already passing the frame.
+
+Two consequences worth stating rather than rediscovering. A value layer is **not a fill-tool reference
+by default** (`Layer.isFillReference`): it is opaque everywhere, so the ordinary visibility default
+would wall the fill tool in across the entire document. And **as a mask source it is a cliff, not a
+gradient** — §6.3's threshold means any alpha above ~28/255 gives full coverage everywhere and
+anything below gives none. Harmless, and deliberately not special-cased.
+
 ## 5. The compositor
 
 ### 5.1 GPU, via Metal

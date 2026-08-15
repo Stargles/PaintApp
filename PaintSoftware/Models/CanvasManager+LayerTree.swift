@@ -459,10 +459,14 @@ extension CanvasManager {
                 raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage,
                 vector: cel.vector?.makeCopy(), thumbnail: cel.thumbnail)
         }
+        // `fill` is carried because it *is* a value layer's content (§4.5): a copy without it keeps
+        // `kind == .value` and renders nothing, which is a layer the artist cannot tell from a broken
+        // one. Cel pixels are copied above for the same reason — this is that line, for the kind whose
+        // pixels are not in a cel.
         var copy = Layer(id: UUID(), name: source.name + " copy", opacity: source.opacity,
                          isVisible: source.isVisible, fillReferenceOverride: source.fillReferenceOverride,
-                         kind: source.kind, blendMode: source.blendMode, alphaMask: source.alphaMask,
-                         parentFolderID: source.parentFolderID, cels: cels)
+                         kind: source.kind, fill: source.fill, blendMode: source.blendMode,
+                         alphaMask: source.alphaMask, parentFolderID: source.parentFolderID, cels: cels)
         copy.thumbnail = source.thumbnail
         withStructureUndo(name: "Duplicate Layer") {
             layers.insert(copy, at: index + 1)

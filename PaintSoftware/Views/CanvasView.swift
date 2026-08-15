@@ -558,6 +558,29 @@ struct CanvasView: UIViewRepresentable {
 
                 let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame)
 
+                // §4.5's value layer on the live canvas: **a host with a background colour**, and
+                // nothing else. Its three content views stay empty — the colour is not in a cel — so
+                // the host's own background is what Core Animation draws, full-bleed, in stack order,
+                // under `host.alpha` (which already folds in group opacity) and behind
+                // `setBlanked`'s mask when the compositor takes over.
+                //
+                // **`needsCompositorOnCanvas` deliberately gains no clause for this**, and that is the
+                // check rather than an omission: a value layer at Normal with no mask is an ordinary
+                // opaque leaf, and a flat rect in a flat row of siblings is the one thing Core
+                // Animation is good at — so it draws exactly what the compositor would. Give it a
+                // blend mode or a mask and the *existing* clauses fire on it like any other leaf, and
+                // the sandwich takes over with the resolved solid source. A clause here would have
+                // pushed every document containing a flat colour onto the compositor for nothing.
+                //
+                // Resolved at `currentFrame` for `renderSources`' reason: the frame is the argument a
+                // later keyframe phase needs, and reading it here too keeps the live canvas and the
+                // composite asking the same question. Gated on `celIdx` for the same reason the
+                // snapshot is — a layer with no block at this frame contributes nothing at it.
+                let fillColour = (celIdx == nil ? nil : layer.valueFill).map {
+                    PixelOps.uiColor(from: $0.resolvedColor(atFrame: canvasManager.currentFrame).color)
+                }
+                if host.backgroundColor != fillColour { host.backgroundColor = fillColour }
+
                 let displayedBaked = bakedImageToDisplay(layerIndex: index, celIndex: celIdx)
                 if host.bakedImageView.image !== displayedBaked { host.bakedImageView.image = displayedBaked }
                 let bakedHidden = displayedBaked == nil
@@ -597,14 +620,15 @@ struct CanvasView: UIViewRepresentable {
                 // drawable on a frame no block covers, and the first stroke spawns the block (see
                 // `attachSpawnedCelIfFrameIsEmpty`). Gating it here was the outer half of the
                 // blank-frame bug — the touch never even reached the stroke view to be acted on.
-                // `.compositing` excluded too: an effect layer holds no pixels for a stroke to land
-                // in (`addEffectLayer`'s doc), so its host declines interaction the same way a
-                // vector layer mid-transform does, and the catch-all below takes the touch instead.
+                // `.compositing` and `.value` excluded too: neither holds pixels for a stroke to land
+                // in (`addEffectLayer`'s and `addValueLayer`'s docs), so their hosts decline
+                // interaction the same way a vector layer mid-transform does, and the catch-all below
+                // takes the touch instead.
                 let shouldInteract = (index == canvasManager.currentLayerIndex)
                     && canvasManager.selectedTool != .fill
                     && activePanel != .select && canvasManager.floatingPiece == nil
                     && !(canvasManager.isVectorTransforming && layer.kind == .vector)
-                    && layer.kind != .compositing
+                    && !layer.hasNoDrawingSurface
                 if host.isUserInteractionEnabled != shouldInteract {
                     host.isUserInteractionEnabled = shouldInteract
                 }
@@ -619,15 +643,15 @@ struct CanvasView: UIViewRepresentable {
 
             // Enable the catch-all gesture when no layers exist, the active layer is hidden — by its
             // own switch or by a group's gating it (§4.1), either reads as "hidden" here — or the
-            // active layer is a `.compositing` effect layer, which `shouldInteract` above has just
-            // as deliberately declined interaction for.
+            // active layer has no drawing surface at all (`.compositing`, `.value`), which
+            // `shouldInteract` above has just as deliberately declined interaction for.
             let needsCatch: Bool
             if canvasManager.layers.isEmpty {
                 needsCatch = true
             } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) {
                 let layer = canvasManager.layers[canvasManager.currentLayerIndex]
                 needsCatch = !canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex)
-                    || layer.kind == .compositing
+                    || layer.hasNoDrawingSurface
             } else {
                 needsCatch = false
             }
@@ -986,7 +1010,12 @@ struct CanvasView: UIViewRepresentable {
                     return held[index]
                 }
                 guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
-                return LayerContentVersion(cel: canvasManager.layers[index].cels[celIndex])
+                // `valueFill` alongside the cel, exactly as `renderSources` builds it: a value
+                // layer's content is its colour rather than its (blank) cel, so a key built from the
+                // cel alone would not move when the artist recolours one and the canvas would keep
+                // showing the cached composite. See `LayerContentVersion`.
+                return LayerContentVersion(cel: canvasManager.layers[index].cels[celIndex],
+                                           valueFill: canvasManager.layers[index].valueFill)
             }
             return SandwichKey(tree: tree, activeLayerIndex: active, frame: frame, contents: contents)
         }
@@ -1849,8 +1878,8 @@ struct CanvasView: UIViewRepresentable {
                       !canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex) {
                 canvasManager.needsVisibilityAlert = true
             } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
-                      canvasManager.layers[canvasManager.currentLayerIndex].kind == .compositing {
-                canvasManager.needsEffectLayerAlert = true
+                      canvasManager.layers[canvasManager.currentLayerIndex].hasNoDrawingSurface {
+                canvasManager.needsNoDrawingSurfaceAlert = true
             }
         }
 

@@ -492,12 +492,16 @@ final class CanvasManager: ObservableObject {
     /// Set to true when the user touches the canvas with a drawing tool but the active layer is
     /// hidden. `DrawingView` presents an alert offering to show the layer. Reset on dismissal.
     @Published var needsVisibilityAlert: Bool = false
-    /// Set to true when the user touches the canvas with a drawing tool but the active layer is a
-    /// `.compositing` effect layer — it holds no pixels (`addEffectLayer`'s doc), so a stroke there
-    /// has nowhere to go. The owner's call: keep the layer selected so its grade stays editable, but
-    /// make the draw gesture a no-op rather than silently losing the ink into a cel nothing renders.
-    /// `DrawingView` presents an alert saying so. Reset on dismissal.
-    @Published var needsEffectLayerAlert: Bool = false
+    /// Set to true when the user touches the canvas with a drawing tool but the active layer has no
+    /// drawing surface — a `.compositing` effect layer (`addEffectLayer`'s doc) or a `.value` layer
+    /// (`addValueLayer`'s), neither of which holds pixels, so a stroke there has nowhere to go.
+    ///
+    /// **One flag for both kinds rather than one per kind**, because it is one presentation of one
+    /// idea: the owner's call on the effect layer in phase 9b was to keep the layer selected so its
+    /// settings stay editable and make the draw gesture a no-op *that says so*, rather than silently
+    /// losing the ink into a cel nothing renders — and a value layer is the same requirement with the
+    /// same answer. `DrawingView` presents one alert. Reset on dismissal.
+    @Published var needsNoDrawingSurfaceAlert: Bool = false
 
     /// Ticks the debounce. The *what* travels in `pendingThumbnailRegens` rather than in the value,
     /// because `.debounce` keeps only the last element it saw — carrying `(layerIndex, celIndex)`
@@ -578,6 +582,41 @@ final class CanvasManager: ObservableObject {
               layers[layerIndex].effect != effect else { return }
         withStructureUndo(name: "Effect") {
             layers[layerIndex].effect = effect
+        }
+    }
+
+    /// Adds a `.value` layer: it draws nothing of its own and *is* one flat colour across the whole
+    /// canvas (§4.5), which is Photoshop's Solid Colour layer. It plugs into a Mix node as an operand,
+    /// and blends with what is under it like any other leaf.
+    ///
+    /// It still gets an empty cel, for `addEffectLayer`'s reason — every cel-lifecycle path in the app
+    /// assumes a layer has one, and a blank cel is free (§8.1). Nothing ever draws into it: the fill is
+    /// resolved into the snapshot's source at `renderSources`, and the cel's own (blank) pixels are
+    /// never rasterized.
+    ///
+    /// Defaulting to mid-grey at full alpha is deliberate. A value layer added at the top of the stack
+    /// turns the canvas one flat colour, which is correct and is what Photoshop does — so the first
+    /// thing the artist sees has to read as a deliberate colour rather than as a crash, and mid-grey is
+    /// also the constant the Mix-node case wants.
+    func addValueLayer(color: PaletteColor = ValueFill.defaultColor, name: String? = nil) {
+        withStructureUndo(name: "Add Value Layer") {
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1),
+                          raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
+            let layer = Layer(id: UUID(), name: name ?? "Value \(layers.count + 1)", opacity: 1.0,
+                              isVisible: true, kind: .value, fill: ValueFill(color: color), cels: [cel])
+            layers.append(layer)
+            currentLayerIndex = layers.count - 1
+        }
+    }
+
+    /// Replaces the colour on a value layer, leaving every other property alone. Nothing happens on a
+    /// layer that is not `.value` — the kind is what makes a fill live (`valueFill`), so writing one
+    /// onto a raster layer would store a value that never renders. `setLayerEffect`'s rule, verbatim.
+    func setLayerFill(layerIndex: Int, to fill: ValueFill) {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .value,
+              layers[layerIndex].fill != fill else { return }
+        withStructureUndo(name: "Value") {
+            layers[layerIndex].fill = fill
         }
     }
 

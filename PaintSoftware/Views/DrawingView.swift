@@ -150,17 +150,21 @@ struct DrawingView: View {
         } message: {
             Text("This layer is hidden. Show it to draw on it.")
         }
-        // Alert shown when the user tries to draw but the active layer is an effect layer
-        // (`.compositing`) — it holds no pixels, so the owner's call is a no-op with feedback
-        // instead of losing the stroke into a cel nothing renders. No action to offer here (unlike
-        // the two alerts above, which each fix the blocker in place): switching layers is the only
-        // way forward, and the artist can already see and do that behind the alert.
+        // Alert shown when the user tries to draw but the active layer holds no pixels — an effect
+        // layer (`.compositing`, phase 9b) or a value layer (`.value`, §4.5). The owner's call is a
+        // no-op with feedback instead of losing the stroke into a cel nothing renders. No action to
+        // offer here (unlike the two alerts above, which each fix the blocker in place): switching
+        // layers is the only way forward, and the artist can already see and do that behind the alert.
+        //
+        // **One alert for both kinds.** They are one idea — "this layer has no drawing surface" — and
+        // the wording phase 9b chose already says exactly that without naming the kind, so the value
+        // layer needed the presentation extended by a case rather than duplicated.
         .alert("No Drawing Surface", isPresented: Binding(
-            get: { canvasManager.needsEffectLayerAlert },
-            set: { if !$0 { canvasManager.needsEffectLayerAlert = false } }
+            get: { canvasManager.needsNoDrawingSurfaceAlert },
+            set: { if !$0 { canvasManager.needsNoDrawingSurfaceAlert = false } }
         )) {
             Button("OK", role: .cancel) {
-                canvasManager.needsEffectLayerAlert = false
+                canvasManager.needsNoDrawingSurfaceAlert = false
             }
         } message: {
             Text("This layer has no drawing surface. Switch to a raster or vector layer to draw.")
