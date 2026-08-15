@@ -52,11 +52,25 @@ struct OnionSkinFrame {
 struct PreviousCelOnionSkinSource: OnionSkinSource {
     func frames(for manager: CanvasManager) -> [OnionSkinFrame] {
         guard let canvasSize = manager.canvasSize,
-              manager.layers.indices.contains(manager.currentLayerIndex),
-              let celIdx = manager.activeCelIndex(inLayer: manager.currentLayerIndex, atFrame: manager.currentFrame - 1) else {
+              manager.layers.indices.contains(manager.currentLayerIndex) else { return [] }
+        let cels = manager.layers[manager.currentLayerIndex].cels
+
+        // **Step back from the START of the cel the playhead is in, never from the playhead itself.**
+        // A cel spans many frames — `addVectorLayer` mints one covering the whole scene — so
+        // `currentFrame - 1` from frame 5 of a 0..11 cel lands back *inside that same cel*, and the
+        // onion skin then draws the artwork the artist is currently drawing as a 30% ghost of
+        // itself. That ghost is invisible while the layer's own pixels sit on top of it, and a mask
+        // uncovers it: the composite correctly clips the layer, the unmasked ghost underneath does
+        // not, and ink appears outside the mask at low alpha. The doc comment above promises the
+        // previous *cel*; this is what actually finds one.
+        guard let currentCelIdx = manager.activeCelIndex(inLayer: manager.currentLayerIndex,
+                                                         atFrame: manager.currentFrame),
+              let celIdx = manager.activeCelIndex(inLayer: manager.currentLayerIndex,
+                                                  atFrame: cels[currentCelIdx].startFrame - 1),
+              celIdx != currentCelIdx else {
             return []
         }
-        let cel = manager.layers[manager.currentLayerIndex].cels[celIdx]
+        let cel = cels[celIdx]
         // Route through the shared cel-rasterisation path rather than reading `cel.raster` directly —
         // that path ignores a `.vector` cel's live strokes entirely, which onion-skinned a vector
         // layer to blank.

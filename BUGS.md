@@ -3,6 +3,28 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The onion skin renders unmasked (2026-08-15)
+
+`PreviousCelOnionSkinSource` rasterizes the previous cel with `PixelOps.rasterize(cel:)` and applies
+no mask, and `onionSkinView` sits below `sandwichBelowView` and is never blanked
+(`CanvasView.swift:46` vs `:54`, shown at `:1416-1419`). So a masked layer's onion skin draws ink
+outside the layer's own mask, at `onionSkinOpacity`.
+
+**Half of this shipped as a fix and half is deliberately deferred.** The half that shipped: the
+source asked for the cel at `currentFrame - 1`, but `addVectorLayer` mints ONE cel spanning the whole
+scene, so from any frame but the first that lookup returned *the cel being drawn on* and the onion
+skin ghosted the live artwork onto itself. Invisible normally — the layer's own pixels cover it — but
+a mask uncovers it, which is how the product owner found it: a red layer masked by a black one showed
+translucent red outside the mask on every frame of a block except frame 0. Fixed by stepping back
+from the current *cel's* `startFrame`, which is what the doc comment always promised.
+
+The residue: with two genuine cels, the previous cel's ghost is still unmasked, so the same leak
+returns. Not fixed here because the owner is overhauling onion skin into a proper customizable menu
+and this would be rewritten. When it is rewritten, reuse `resolveLiveMask(forLayerAt:)` /
+`RenderNode.masksClipping(leafAt:in:)` rather than writing a second mask-resolution path, and mind
+§6.4's warning that a `CALayer.mask` slot collision fails silently in whichever direction install
+order decides.
+
 ## `testMovingThePlayheadRebuildsTheBlendedCanvas` is order-dependent (2026-08-15)
 
 Not load, and not a product regression — **state left in the simulator by whatever test ran before
