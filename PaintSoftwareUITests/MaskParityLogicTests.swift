@@ -984,20 +984,19 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.undoStack.count, stepsBefore, "…and no undo step either")
     }
 
-    /// **§4.3's node and slot are folders in storage and not mask targets.** `syncMaskEditSession` is
-    /// the whole of what enters the mode now, so this is where "their rows carry no checkmark" is
-    /// actually decided — a node holds only its slots and a slot holds whatever was dropped in it.
-    func testOpeningANodeOrSlotMenuOpensNoSession() {
+    /// **§4.3's node is a mask target like any other folder.** It used to be excluded, and that was a
+    /// consequence of input slots rather than a decision about nodes: a node held only its slots and a
+    /// slot held only whatever was dropped in it, so neither was content anyone would clip. With slots
+    /// gone a node is a folder that composites its children, and §6.2's "a group can be masked and be
+    /// a mask source" applies to it unchanged — the mask clips the *folded result*
+    /// (`testAMixNodesMaskClipsTheFoldedResultRatherThanItsSlots`).
+    func testOpeningANodeMenuOpensASessionLikeAnyFolder() {
         let manager = CanvasFixture.manager(layerCount: 1)
         let node = manager.addCompositorNode(op: .mix(.normal))
-        guard let slot = manager.folders.first(where: { $0.parentFolderID == node })?.id else {
-            return XCTFail("A Mix node is created with its slots")
-        }
 
         manager.syncMaskEditSession(toOptionsTarget: node)
-        XCTAssertNil(manager.maskEditTarget, "A node composites its slots; there is nothing on it to clip")
-        manager.syncMaskEditSession(toOptionsTarget: slot)
-        XCTAssertNil(manager.maskEditTarget, "And a slot is a receptacle, not content")
+        XCTAssertEqual(manager.maskEditTarget, .folder(node),
+                       "A node's mask clips what it folds — the picture the slot-era exclusion could not offer")
 
         let group = manager.addFolder(name: "Group")
         manager.syncMaskEditSession(toOptionsTarget: group)

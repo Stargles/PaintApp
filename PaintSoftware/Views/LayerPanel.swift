@@ -90,9 +90,8 @@ struct LayerPanel: View {
                 }
                 .accessibilityIdentifier("layerPanel.addFolderButton")
                 // §4.3: a compositor node arrives from the same menu a folder does, because it *is*
-                // one — a folder whose children are its input slots. One tap creates the node and
-                // both slots (`addCompositorNode`), since a node without its operands is a shape
-                // none of the tree's guards would accept.
+                // one — a folder whose children are its inputs. It arrives empty, like a folder, and
+                // is filled the same way: drag things into it, bottom child first.
                 Button {
                     closingOptions { canvasManager.addCompositorNode(op: .mix(.normal)) }
                 } label: {
@@ -418,10 +417,10 @@ private func maskSubtitle(_ mask: AlphaMask?) -> String {
 /// the same way as `LayerOptionsPanel` (see `DrawingView.layerPanelRail`), and the two are mutually
 /// exclusive since both hang off the one `layerOptionsID`.
 ///
-/// **Also the node and slot menu (§4.3)**, because both are folders — `DrawingView.layerPanelRail`
-/// routes on "is this id a folder" and cannot tell them apart. Each section below asks the model
-/// what this particular folder is rather than the panel being forked three ways: a node adds the Mix
-/// picker, and a slot drops the three controls that would promise it is an ordinary folder.
+/// **Also the node menu (§4.3)**, because a node is a folder — `DrawingView.layerPanelRail` routes
+/// on "is this id a folder" and cannot tell them apart. The sections below ask the model what this
+/// particular folder is rather than the panel being forked: a node swaps its Blend Mode row and its
+/// Pass Through toggle for the Mix picker, and keeps everything else a folder has.
 struct FolderOptionsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     let folderID: UUID
@@ -440,9 +439,12 @@ struct FolderOptionsPanel: View {
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
                 // §4.3: for a Mix, the mode *is* the op — the whole of what the node does with its
-                // two inputs — so it is the first thing in the panel and sits above the folder's own
-                // blend mode below, which answers the different question of how the node's finished
-                // composite meets whatever contains it.
+                // two inputs — and it is the node's **only** dropdown. The folder's own blend mode
+                // row below is hidden for a node (§4.3's second owner decision): a node's output
+                // always lands Normal on whatever is beneath it, so two dropdowns on one row would
+                // be clutter whose second entry the derivation ignores. Blending a finished node
+                // onto the stack is still reachable — put it in an ordinary folder and set that
+                // folder's mode.
                 if case .mix(let mode)? = folder?.compositorOp {
                     blendModeRow(title: "Mix Mode", identifier: "mixMode",
                                  groups: compositorOpModeGroups, current: mode) { picked in
@@ -451,11 +453,12 @@ struct FolderOptionsPanel: View {
                     Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
                 }
 
-                // §4.3: an input slot is always isolated — an input that blended against the backdrop
-                // beneath its own node would not be an input in any sense the op could use — so there
-                // is no toggle to offer. The derivation forces `isIsolated` for a slot regardless;
-                // showing a switch that the render tree overrides is the UX half of the same rule.
-                if folder?.isInputSlot != true {
+                // Pass Through is inert on a node and is not offered: a node folds its inputs
+                // against each other in buffers of its own (`CompositorOp.needsOwnBuffer` is
+                // structural for `.mix`), so there is no reading of "blend with the layers below
+                // this group" the op could honour. Showing a switch the render tree overrides is the
+                // same mistake the slot version of this guard was avoiding.
+                if folder?.isCompositorNode != true {
                     // §4.2: isolated is the default — children blend only against each other — and
                     // pass-through is the toggle, off by default. The switch reads directly as
                     // `!isIsolated` so its "on" position matches its label rather than the model's.
@@ -479,23 +482,22 @@ struct FolderOptionsPanel: View {
                 }
 
                 // §6.2: a group is as legal a mask *target* as a layer, the same way it's a legal
-                // source — `maskSection` doesn't know or care which kind of node it was handed.
-                // §4.3's node and slot are folders in storage but not content anyone clips, so they
-                // open no session (`syncMaskEditSession`) and their rows carry no checkmark — a mask
-                // summary here would name a picker that isn't running.
-                if folder?.isCompositorNode != true && folder?.isInputSlot != true {
-                    maskSection(canvasManager: canvasManager, target: .folder(canvasManager.folders[index].id),
-                               mask: canvasManager.folders[index].alphaMask)
+                // source — `maskSection` doesn't know or care which kind of node it was handed, and
+                // **a compositor node is included**. The exclusion here was a consequence of input
+                // slots, not a decision about nodes: a node held only its slots, so there was
+                // nothing on it to clip. A node's mask clips its *folded result*, which is a picture
+                // the slot version could not offer and which the compositor already renders
+                // (`testAMixNodesMaskClipsTheFoldedResultRatherThanItsInputs`).
+                maskSection(canvasManager: canvasManager, target: .folder(canvasManager.folders[index].id),
+                           mask: canvasManager.folders[index].alphaMask)
 
-                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-                }
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-                // A slot's own blend mode would be a second answer to the question its node's op
-                // already answers — §4.3's "Mix(A, B, .multiply) is deliberately the same math as
-                // stacking B over A with blend mode multiply" is precisely the collision — and §4.3
-                // does not say which of the two wins. Not offered where it cannot be honoured
-                // unambiguously; the mode for an operand is the node's, above.
-                if folder?.isInputSlot != true {
+                // The folder's own blend mode — how its finished composite meets whatever contains
+                // it. Not offered on a node: §4.3's second owner decision gives a node one dropdown,
+                // the Mix Mode above, and pins its output to Normal. Not offered where it cannot be
+                // honoured, which is the same rule the slot version of this guard was applying.
+                if folder?.isCompositorNode != true {
                     blendModeRow(current: canvasManager.folders[index].blendMode) { mode in
                         canvasManager.setFolderBlendMode(folderID, to: mode)
                     }
@@ -507,19 +509,16 @@ struct FolderOptionsPanel: View {
                     draftName = canvasManager.folders[index].name
                     isRenaming = true
                 }
-                // §4.3: a slot exists because its node's arity says so, and `deleteFolder` refuses
-                // one. Asked of the manager rather than re-derived here, so the panel and the guard
-                // cannot disagree about which folders have a Delete. A *node* keeps its — the whole
-                // subtree goes as one undo step, which the label says out loud.
-                if canvasManager.canDeleteFolder(folderID) {
-                    optionsAction(folder?.isCompositorNode == true ? "Delete Node and Inputs" : "Delete",
-                                  systemImage: "trash", identifier: "layerOptions.deleteFolder", role: .destructive) {
-                        // Same rule as the layer menu's: end the session before a structural edit so
-                        // it lands as its own undo step rather than inside the session's bracket.
-                        canvasManager.endMaskEdit()
-                        canvasManager.deleteFolder(folderID)
-                        onClose()
-                    }
+                // Plain "Delete", on a node as on any folder: §4.3's first owner decision makes
+                // deleting a node a promote like every other folder deletion, so there is no longer
+                // a subtree going with it for the label to warn about.
+                optionsAction("Delete", systemImage: "trash",
+                              identifier: "layerOptions.deleteFolder", role: .destructive) {
+                    // Same rule as the layer menu's: end the session before a structural edit so it
+                    // lands as its own undo step rather than inside the session's bracket.
+                    canvasManager.endMaskEdit()
+                    canvasManager.deleteFolder(folderID)
+                    onClose()
                 }
             } else {
                 Text("Folder no longer exists.")

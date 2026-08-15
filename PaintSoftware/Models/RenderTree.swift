@@ -522,11 +522,23 @@ extension CanvasManager {
     private func renderNodes(inContainer container: UUID?) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.
         let stack = Array(containerEntries(inContainer: container).reversed())
+        // **Whether these entries are a node's operands rather than an ordinary stack.** Three rules
+        // below key on it, and all three used to key on the child being a slot-tagged folder — which
+        // stopped being expressible when a node's inputs became its plain children, and which never
+        // covered a *layer* dropped straight in as an operand even while slots existed.
+        let containerIsNode = container
+            .flatMap { id in folders.first { $0.id == id } }?.isCompositorNode == true
         return stack.enumerated().map { position, entry in
             // What "Clip to below" clips to: the entry one step down in this same container, which
             // after the reverse above is the previous element. Nothing below means nothing to clip
             // to, and the layer simply draws — the same answer Photoshop gives.
-            let below: MaskSource? = position > 0 ? source(of: stack[position - 1]) : nil
+            //
+            // **Inside a node there is deliberately no "below".** The entry one step down is the
+            // *other operand*, and inputs are isolated from each other (§4.3) — letting input B clip
+            // to input A would reintroduce exactly the cross-input dependency isolation exists to
+            // prevent, and would do it silently, as a mask nobody picked. Suppressed rather than
+            // resolved-and-ignored so the mask never enters `masks(ofNode:…)` at all.
+            let below: MaskSource? = position > 0 && !containerIsNode ? source(of: stack[position - 1]) : nil
             switch entry {
             case .layer(let index):
                 let layer = layers[index]
@@ -550,7 +562,12 @@ extension CanvasManager {
                                   // this untouched, because it was never a mode by the time it got
                                   // here — it is the mask on the next line, and on an adjustment
                                   // layer it means what Photoshop means by clipping one.
-                                  blendMode: effect == nil ? layer.blendMode.compositedMode : .normal,
+                                  //
+                                  // **A layer dropped straight into a node is an operand**, and an
+                                  // operand's own mode is the node's op asked a second time — so it
+                                  // is pinned here for the same reason the folder case below is.
+                                  blendMode: effect != nil || containerIsNode
+                                      ? .normal : layer.blendMode.compositedMode,
                                   isIsolated: false,
                                   masks: masks(ofNode: layer.id, declared: layer.alphaMask,
                                                clippingTo: layer.blendMode == .clipToBelow ? below : nil),
@@ -563,15 +580,16 @@ extension CanvasManager {
                 // the group properties below have somewhere to hang even with nothing inside — and
                 // so a group that is empty only at this frame doesn't blink out of the tree.
                 let children = renderNodes(inContainer: folder.id)
-                // **A compositor node's children are exactly its slots (§4.3)**, so each becomes an
-                // input of its own; an ordinary folder is the same thing at arity 1, one slot
-                // holding all of them. Splitting the same child list either way is what keeps the
-                // leaf order identical to `layers` however a folder happens to be tagged.
+                // **A compositor node's children *are* its inputs (§4.3)**, one each, whether a child
+                // is a folder or a bare layer; an ordinary folder is the same thing at arity 1, one
+                // input holding all of them. Splitting the same child list either way is what keeps
+                // the leaf order identical to `layers` however a folder happens to be tagged.
                 //
                 // `containerEntries` ranks top-to-bottom and `stack` above reversed it, so
                 // `children` is bottom-to-top and **input 0 is the lowest row** — the backdrop that
-                // "slot 1 composites over slot 0" names, which is the direction a plain stack
-                // already reads.
+                // "input 1 composites over input 0" names, which is the direction a plain stack
+                // already reads. Index is position and nothing else, which is what makes dragging
+                // one child above the other swap the operands.
                 return RenderNode(id: folder.id,
                                   content: .node(op: folder.compositorOp ?? .stack,
                                                  inputs: folder.isCompositorNode ? children.map { [$0] } : [children]),
@@ -580,40 +598,46 @@ extension CanvasManager {
                                   // identity, so an untouched folder remains a no-op in the tree —
                                   // that is `LayerFolder`'s doing now rather than this line's.
                                   opacity: folder.opacity, isVisible: folder.isVisible,
-                                  // A slot's own mode is forced to `.normal` regardless of what the
-                                  // folder stores (§4.3) — the panel already refuses it a blend-mode
-                                  // control for the same reason: the node's op is the one answer to
-                                  // "how do these inputs combine", and a slot blending under that as
-                                  // well would be a second, unresolved answer to the same question
-                                  // (`FolderOptionsPanel`'s comment on that omission — §4.3 never says
-                                  // which wins).
+                                  // **Two forcings, and they are different rules that happen to write
+                                  // the same value.**
                                   //
-                                  // This is not a behaviour change. Every slot draws into a buffer
-                                  // `fold` has just zero-filled — slot 0 straight into the node's own,
-                                  // every other slot into one of its own — so a slot's mode was always
-                                  // blending against transparency and reading as Normal regardless,
-                                  // the same rule §4.2 already settled for a layer at the bottom of an
-                                  // isolated group, just guaranteed for a slot rather than incidental.
-                                  // Stating it here turns that guarantee into the derivation's own
-                                  // contract instead of a side effect of how `fold` happens to zero
-                                  // its buffers, so a future change there cannot make a slot's stored
-                                  // mode start leaking into the picture unannounced. Opacity and masks
-                                  // are untouched: both scale what a slot draws regardless of the
-                                  // backdrop, so both stay real — measured together in
-                                  // `testASlotsOwnBlendModeIsInertButItsOpacityStillFades`.
-                                  blendMode: folder.isInputSlot ? .normal : folder.blendMode.compositedMode,
-                                  // An input slot is isolated whatever it stores (§4.3): an input
-                                  // that blended against the backdrop under its own node would not
-                                  // be an input to it in any sense the op could use.
-                                  isIsolated: folder.isInputSlot ? true : folder.isIsolated,
+                                  // `containerIsNode` — an *operand's* own mode is forced, because
+                                  // the node's op is the one answer to "how do these inputs combine"
+                                  // and an operand blending under that as well would be a second,
+                                  // unresolved answer to the same question. Not a behaviour change:
+                                  // every input draws into a buffer `fold` has just zero-filled, so
+                                  // an operand's mode was always blending against transparency and
+                                  // reading as Normal regardless — §4.2's already-settled rule for
+                                  // the bottom of an isolated container, guaranteed here rather than
+                                  // left incidental, so a future change to how `fold` zeroes its
+                                  // buffers cannot make a stored mode start leaking into the picture.
+                                  // Opacity and masks are untouched: both scale what an input draws
+                                  // regardless of the (always transparent) backdrop, so both stay
+                                  // real — measured together in
+                                  // `testAnInputsOwnBlendModeIsInertButItsOpacityStillFades`.
+                                  //
+                                  // `folder.isCompositorNode` — a *node's* own mode is forced, which
+                                  // is §4.3's second owner decision rather than an arithmetic
+                                  // consequence: a Mix has one dropdown, the op inside it, and its
+                                  // finished output always lands Normal on whatever is beneath it.
+                                  // Blending a node onto the stack is still reachable — put it in an
+                                  // ordinary folder and set that folder's mode. The field stays
+                                  // stored and simply goes unread, exactly like a slot's used to.
+                                  blendMode: containerIsNode || folder.isCompositorNode
+                                      ? .normal : folder.blendMode.compositedMode,
+                                  // An input is isolated whatever it stores (§4.3): an input that
+                                  // blended against the backdrop under its own node would not be an
+                                  // input to it in any sense the op could use.
+                                  isIsolated: containerIsNode ? true : folder.isIsolated,
                                   masks: masks(ofNode: folder.id, declared: folder.alphaMask,
                                                clippingTo: folder.blendMode == .clipToBelow ? below : nil),
                                   // §4.4's second wrapper (phase 9b): the folder's own grade, carried
                                   // through unconditionally like the leaf's `effect: effect` above.
-                                  // Unlike the leaf, the node's `blendMode` above is *not* forced to
-                                  // `.normal` for having an effect — it is only forced for
-                                  // `isInputSlot`, and a node's graded output is a source with its
-                                  // own mode (§4.4), which is exactly what the layer form cannot have.
+                                  // Unlike the leaf, an *effect* node's `blendMode` above is not
+                                  // forced to `.normal` for having an effect — a graded output is a
+                                  // source with its own mode (§4.4), which is exactly what the layer
+                                  // form cannot have. An effect node is an ordinary `.stack` folder
+                                  // carrying a grade, so neither clause above fires on it.
                                   effect: folder.effect)
             }
         }

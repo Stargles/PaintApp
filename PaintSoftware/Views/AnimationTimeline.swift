@@ -579,7 +579,6 @@ struct AnimationTimeline: View {
         switch kind {
         case .group:          return "folder.fill"
         case .compositorNode: return "camera.filters"
-        case .inputSlot:      return "tray"
         }
     }
 
@@ -588,10 +587,9 @@ struct AnimationTimeline: View {
     private func reorderGesture(for row: LayerStackRow) -> some Gesture {
         LongPressGesture(minimumDuration: 0.5)
             .onEnded { _ in
-                // §4.3: an input slot's position among its siblings *is* its index, so no drag of
-                // one has a meaning. `restackFolder` refuses it either way — the lift is what has to
-                // not happen, here as in the layer panel, or the row picks up and snaps back.
-                guard row.folderID.map(canvasManager.canRestackFolder) ?? true else { return }
+                // Every row lifts. The one refusal that used to live here — an input slot, whose
+                // position among its siblings *was* its stored index — went with the slots (§4.3);
+                // a node's operands are ordinary children and reordering them is the point.
                 draggingRowID = row.id
                 dragTranslation = 0
                 dragOffsetRows = 0

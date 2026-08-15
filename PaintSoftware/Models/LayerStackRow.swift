@@ -10,21 +10,19 @@ enum LayerStackRow: Identifiable, Equatable {
 
     /// What a folder row *is* in a compositor graph (§4.3).
     ///
-    /// Carried on the row rather than looked up again by each consumer because a node and an input
-    /// slot are stored as ordinary `LayerFolder`s — containment, spans and the ordering rules
-    /// deliberately cannot tell the three apart, so the presented row list is the first place the
-    /// distinction exists at all, and the layer panel and the timeline read one answer rather than
-    /// each deriving their own.
+    /// Carried on the row rather than looked up again by each consumer because a node is stored as an
+    /// ordinary `LayerFolder` — containment, spans and the ordering rules deliberately cannot tell
+    /// the two apart, so the presented row list is the first place the distinction exists at all, and
+    /// the layer panel and the timeline read one answer rather than each deriving their own.
     ///
-    /// **A payload rather than two more cases of `LayerStackRow`.** A node and a slot are folders in
-    /// every structural sense, and `isFolder`/`folderID` — which the drop resolution, the restack
-    /// anchors and the row heights all ask — are asking exactly that. Splitting them out would make
-    /// every one of those call sites answer a question it was not asking, and would let a `default:`
-    /// clause silently drop a node row instead of failing to compile.
+    /// **A payload rather than another case of `LayerStackRow`.** A node is a folder in every
+    /// structural sense, and `isFolder`/`folderID` — which the drop resolution, the restack anchors
+    /// and the row heights all ask — are asking exactly that. Splitting it out would make every one
+    /// of those call sites answer a question it was not asking, and would let a `default:` clause
+    /// silently drop a node row instead of failing to compile.
     enum FolderKind: Equatable {
         case group
         case compositorNode
-        case inputSlot
     }
 
     var id: UUID {
@@ -61,15 +59,8 @@ enum LayerStackRow: Identifiable, Equatable {
 
 extension LayerStackRow.FolderKind {
 
-    /// Reads §4.3's `compositorRole` tag off a folder. The three are mutually exclusive by
-    /// construction — `compositorRole` is one enum — so the order of these tests carries no meaning.
+    /// Reads §4.3's `compositorRole` tag off a folder.
     init(_ folder: LayerFolder) {
-        if folder.isCompositorNode {
-            self = .compositorNode
-        } else if folder.isInputSlot {
-            self = .inputSlot
-        } else {
-            self = .group
-        }
+        self = folder.isCompositorNode ? .compositorNode : .group
     }
 }

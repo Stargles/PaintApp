@@ -133,78 +133,96 @@ not needed changes bytes, not just cost.
 
 ### 4.3 Compositor nodes
 
-A second way to composite, alongside blend modes: a node added from the layers menu that takes **two
-or more inputs below it**, each input holding layers or further nodes.
+A second way to composite, alongside blend modes: a node added from the layers menu that combines
+**two or more inputs** into one output. The owner's model: *"like a blender node, where there are
+layers inside of it which get combined in some kind of operation and then outputted."*
 
-**A group is this same thing with one input slot.** One renderer covers both; a "folder" is
-`.node(op: .stack, inputs: [children])`.
+**A node's children are its inputs.** One direct child, one input — a layer, a folder, or another
+node. There is no separate slot object, and **input index is position**: the bottom child is input 0,
+the backdrop, and the one above it is input 1, composited over it. That is the direction a plain
+stack already reads, so a two-input node and a two-layer stack agree about which one is on top, and
+**dragging one child above the other swaps the operands** — the affordance fixed slots never had.
 
-**Each input slot derives as its own `RenderNode`**, rather than being folded into a shared
-accumulator the way an ordinary folder's children are — which is what makes "always isolated"
-expressible at all, and is why a slot reads its own opacity, blend mode and mask off the folder the
-same way any folder does. **Slot 0 is the backdrop, and it is the lowest row**: a Mix is "slot 1
-composited over slot 0", the direction a plain stack already reads, so `inputSlots(ofNode:)` always
-returns slot 0 first and the panel presents Input B above Input A for the same reason it presents any
-higher layer above a lower one. (A slot's own *blend mode* is the one field this does not make live —
-every slot draws into a backdrop the fold has just zero-filled, so it always reads as Normal by §4.2's
-already-settled rule for the bottom of an isolated container, structural here rather than incidental;
-the panel does not offer it a control for exactly that reason.)
+**A group is this same thing with one input.** One renderer covers both; a "folder" is
+`.node(op: .stack, inputs: [children])`, and a node is `inputs: children.map { [$0] }`.
 
-**Storage — no new tree arithmetic, guarded in three places rather than the one this section used to
-admit.** A node's input slot is stored as an ordinary `LayerFolder`, auto-created and tagged with its
-owning node and slot index, and:
-
-- **undeletable** — `CanvasManager.canDeleteFolder`/`deleteFolder` refuse it
-  (`testDeletingAnInputSlotIsRefused`), because a slot exists because its op's arity says so, and
-  deleting one would leave the node an operand short with nothing left to say why;
-- **fixed in the panel** — `canRestackFolder` refuses to let a slot be dragged out of its node or
-  reordered among its siblings (`testDraggingAnInputSlotOutOfItsNodeIsRefused`), because a slot's
-  position among its siblings *is* its index; letting a drag move it would leave the stored index and
-  the presented order as two answers to one question. An operand is reordered by moving what is
-  *inside* its slot, never the slot itself;
-- and **ranked by index while empty**, which is the one this section did not admit. An empty folder
-  ordinarily floats to the top of its container — correct for an ordinary folder, wrong for a slot:
-  filling Input B before Input A would otherwise float the still-empty Input A above it and silently
-  invert which one is the backdrop. `containerEntries` ranks an unfilled slot by its index instead,
-  fixed by `testFillingTheUpperSlotFirstStillLeavesInputAAsTheBackdrop` — do not undo it.
-
-So containment, restack and the panel's row generation still reuse the existing machinery, but not
-*unchanged*: the three guards above are new logic standing in front of it, not new arithmetic inside
-it. The contiguity invariant itself does generalise cleanly, exactly as claimed — each slot is a
-contiguous span, and the node's span is the union of its adjacent slots' spans.
+**Each input derives as its own `RenderNode`**, rather than being folded into a shared accumulator
+the way an ordinary folder's children are — which is what makes "always isolated" expressible at all,
+and is why an input reads its own opacity and mask off the layer or folder it came from the same way
+anything else does.
 
 ```
-▼ [Node] Mix                    ← CompositorNode row
-   ▼ Input B                    ← slot folder (undeletable) — higher slot, presents on top
+▼ [Node] Mix  Multiply         ← CompositorNode row; one dropdown, the op
+   ▼ Highlights                ← input 1 — an ordinary folder, presents on top
        Layer 1
-   ▼ Input A                    ← slot 0, the backdrop — presents at the bottom
-       Layer 3
-       Layer 2
+     Sketch                    ← input 0, the backdrop — a bare layer is as legal an operand
 ```
 
-**Arity** is declared by the op: `.fixed(2)` for Mix, `.variadic(min: 2)` for Add/Max. Variadic nodes
-get add/remove-slot controls. An input slot is **always isolated** — otherwise "input" is meaningless.
+**Two fields the derivation refuses to read, for two different reasons.**
+
+- **An operand's own blend mode**, by geometry. Every input draws into a buffer `fold` has just
+  zero-filled, so an operand's mode always blends against transparency and reads as Normal by §4.2's
+  rule for the bottom of an isolated container. Stating it in the derivation makes that a contract
+  rather than a side effect of how `fold` zeroes its buffers. Opacity and masks beside it stay live —
+  they scale what an operand draws regardless of the backdrop
+  (`testAnInputsOwnBlendModeIsInertButItsOpacityStillFades`, both backends, every mode).
+- **A node's own blend mode**, by decision. A node's output always lands Normal on whatever is
+  beneath it, and the panel shows one dropdown per node — Mix Mode, the operation *inside* — because
+  two dropdowns on one row read as clutter and the second one's job is still reachable: put the node
+  in an ordinary folder and set the folder's mode
+  (`testANodesOwnBlendModeIsInertButItsChildrensOpacityAndMasksAreNot`).
+
+**`Clip to below` does not resolve inside a node.** It clips to the entry one step down in the same
+container, which inside a node is the *other operand* — a cross-input dependency the isolation rule
+exists to prevent. Suppressed in the derivation, measured on pixels in
+`testAClipToBelowInputDoesNotClipToTheOtherInput`, with the ordinary-folder case asserted beside it so
+the suppression cannot pass by clip-to-below having stopped working.
+
+**Storage — no new tree arithmetic, and now one guard rather than three.** A node is an ordinary
+`LayerFolder` carrying `compositorRole = .node(op:)`. Containment, spans, the restack arithmetic and
+the panel's rows all reuse the existing machinery. The one thing standing in front of it is **arity**:
+a `.mix` is `.fixed(2)`, so a third child is refused — in `canDrop(inContainer:moving:)`, which the
+panel reads to decline a drag before it lands, and again in `restackLayer`/`restackFolder`, because a
+stale row from before a structural edit goes through the same call. `moving:` is what keeps a
+*reorder* inside a full node legal: the count does not grow when the thing being dragged is already a
+child. Ordinary folders and variadic ops declare no maximum. The contiguity invariant generalises
+unchanged — each input is a contiguous span, and the node's span is the union of its inputs' spans.
+
+**Deleting a node promotes its children**, exactly like deleting an ordinary folder. There is no
+special case and no `deleteCompositorNode`: that existed only because a promoted *slot* folder would
+have been stranded, tagged as input to a node that no longer exists.
+
+**Migration from the slot era.** A node saved before this design is a node folder plus child folders
+tagged `{"kind":"slot", …}`. `CompositorRole.decodeIfSupported` reads that tag as *no role*, and the
+document becomes a node whose operands are those folders in the order they already sat in — because
+`parentFolderID` already named the node and `containerEntries` already ranked them bottom-to-top. The
+folders keep their "Input A"/"Input B" names, which is harmless. No migration pass, and the operand
+order is asserted rather than assumed
+(`testANodeSavedWithInputSlotFoldersOpensWithItsOperandsInSlotOrder`).
 
 **Arity is a property of a whole document, not of every shape a node can take mid-gesture.** §5.2's
-sandwich cuts the tree at the active leaf, and cutting a `.fixed(2)` Mix produces a one-slot Mix on
+sandwich cuts the tree at the active leaf, and cutting a `.fixed(2)` Mix produces a one-input Mix on
 one side of the cut — a shape its own arity says cannot exist
 (`SandwichLogicTests.testAHalfOfATwoSlotMixKeepsTheOpAndLosesASlot`). Both backends fold it correctly
 regardless (`CompositorParityLogicTests.testAMixWithOneSlotIsThatSlotAssembled`), which is what makes
-the sandwich legal — but no validator downstream may assume a node's slot count still matches its
+the sandwich legal — but no validator downstream may assume a node's input count still matches its
 op's arity. A sandwich half is not a document.
 
 `Mix(A, B, .multiply)` is the same math as stacking B over A with blend mode multiply — **measured
 now, not asserted**: 0 on every channel, for all 25 modes, on both backends
 (`CompositorParityLogicTests.testMixIsTheSameMathAsStackingTheUpperSlotOverTheLowerOne`). A channel
 step was the expected answer, the same reason `testNestedGroupOpacityCompounds` needs a tolerance: a
-Mix runs slot 1 through a buffer of its own before folding it, one more 8-bit premultiplied
-requantization than the stack pays. It comes out exact because that extra step is a *copy* — slot 1
+Mix runs input 1 through a buffer of its own before folding it, one more 8-bit premultiplied
+requantization than the stack pays. It comes out exact because that extra step is a *copy* — input 1
 composited onto transparency is lossless in premultiplied 8-bit, so the fold receives the identical
 bytes the stack hands its blend. No kernel closes that gap, because there was never one open; none
 should be added.
 
 That redundancy is the point (it is why Blender has both): the stack is ergonomic for painting, the
-graph is ergonomic for effects with more than one input. Do not try to unify them away.
+graph is ergonomic for effects with more than one input. Do not try to unify them away. **The node
+earns its keep only when an input holds more than one layer** — with two single-layer operands it is
+literally the stack, which under this design means the artist puts a folder in as one of the two
+children.
 
 ### 4.4 Effects are both a layer and a node
 
@@ -495,9 +513,10 @@ source.
   is no paused state to override, so `isEnabled` is exactly "has sources" — set on the first pick and
   cleared by `dropping(_:)` when the last one goes. Pausing a mask without discarding its list is an
   affordance the app no longer offers; un-checking the sources is how a mask is turned off.
-- **A compositor node and an input slot are not mask targets and carry no checkmark.** §4.3 stores
-  both as folders so the tree arithmetic is reused, not because they are content anyone clips: a node
-  holds only its slots, and a slot holds whatever was dropped into it.
+- **A compositor node is a mask target and a mask source like any other folder.** It was excluded
+  while §4.3 had input slots — a node held only its slots and a slot only what was dropped into it,
+  so neither was content anyone clips. A node composites ordinary children now, and its mask clips
+  the folded result (`testAMixNodesMaskClipsTheFoldedResultRatherThanItsSlots`).
 - Fill's flood need not be bounded by the mask — spill outside is invisible anyway, so it is a
   nicety, deferrable.
 - **`MaskParityLogicTests`**: a raster layer and a vector layer with identical content and identical
@@ -673,11 +692,13 @@ later and rewriting for one.
    as a mask whose source is implied.
 2. **Compositor node ops** — §7 lists the *effects*; which ops take 2+ inputs beyond Mix is still
    open, but phase 8 narrowed it sharply. Because `Mix(A,B,mode)` is measured equal to stacking B
-   over A with that mode, **every blend mode is already a 2-input op**, and per-slot opacity, blend
+   over A with that mode, **every blend mode is already a 2-input op**, and per-input opacity, blend
    and mask cover crossfade and weighting. So the honest candidate list is short: variadic arity as
-   pure ergonomics (a variadic Add over N slots is a chain of `Mix(.add)` and buys only the absence
+   pure ergonomics (a variadic Add over N inputs is a chain of `Mix(.add)` and buys only the absence
    of nesting), and a real matte/key op that consumes B as *coverage* rather than as colour, which
-   no blend mode expresses. Try both against the shipped node UI before committing.
+   no blend mode expresses. Try both against the shipped node UI before committing. Variadic arity is
+   now also the *cheapest* of the three: with input index being position, a variadic op is simply one
+   whose `canDrop` cap is absent.
 3. **Effect as a 1-input node** (§4.4's second wrapper, "9b") — not built. The seam is already cut:
    `RenderNode.effect` is one field for *both* wrappers, because the wrapper is the position in the
    tree rather than the data. So 9b is `LayerFolder.effect` in storage, one `decodeIfPresent`, and
@@ -702,7 +723,7 @@ it is small and none of them fight a moving substrate.
 | ~~**5b**~~ | ~~§5.2's sandwich, so the live canvas shows a blended layer~~ | **done** — exact at rest, snaps on lift |
 | ~~**6**~~ | ~~Alpha masks (§6), incl. `MaskParityLogicTests`~~ | **done** — engine resolves masks in both backends at delta 0, raster and vector pixel-identically; the rows pick sources through the same cycle rule; the live stroke is clipped by the same `ResolvedMask` object the compositor applies |
 | ~~**7**~~ | ~~Tier 2 blend modes~~ | **done** — eleven modes, both backends, measured against the spec |
-| ~~**8**~~ | ~~Compositor nodes: slot-as-folder storage, panel chrome (§4.3)~~ | **done** — a 2-input Mix renders, and `Mix(A,B,mode)` measures equal to stacking B over A with that mode at delta 0 across all 25 modes and both backends |
+| ~~**8**~~ | ~~Compositor nodes: node-as-folder storage, panel chrome (§4.3)~~ | **done** — a 2-input Mix renders, and `Mix(A,B,mode)` measures equal to stacking B over A with that mode at delta 0 across all 25 modes and both backends. Input slot folders were the original storage and were **deleted**: a node's children are its inputs, index is position, and old documents migrate at decode |
 | **9** | Tier 3 effects, as layer *and* node (§4.4, §7) | **partly** — the cheap per-pixel kernels, blur and bloom ship, and 9a's effect-as-a-layer wrapper with them; 9b (effect as a 1-input *node*) and §7's last three effects are open |
 
 Phases 0–3 are the risky ones; 4 onward are additive. §9.2's background renderer stays deferred

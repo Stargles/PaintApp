@@ -41,6 +41,9 @@ struct LayerFolder: Identifiable {
     /// What this folder is in a compositor graph (§4.3), or nil for an ordinary group — which is
     /// every folder in every project saved before phase 8, and the whole of why that needs no
     /// migration. Follows `alphaMask`'s recipe exactly: optional, absent means "not one".
+    ///
+    /// One case now, not two: a node's inputs are its ordinary children, so there is nothing left to
+    /// tag them with. See `CompositorRole` below for the migration that retires the old `.slot` tag.
     var compositorRole: CompositorRole? = nil
 
     /// §4.4's second wrapper (phase 9b): a grade applied once to this folder's finished composite —
@@ -55,27 +58,17 @@ struct LayerFolder: Identifiable {
 
 /// What a folder is inside a compositor graph.
 ///
-/// §4.3's storage decision, stated as a field: **a node is a folder whose children are exactly its
-/// slot folders, and a slot is an ordinary folder that is auto-created, undeletable, and tagged with
-/// its owning node and slot index.** Containment, spans, the restack arithmetic and the panel's rows
-/// all go on reading a plain `LayerFolder` and need no case of their own.
+/// §4.3's storage decision, stated as a field: **a node is a folder, and its children are its
+/// inputs** — one per direct child, in stacking order, bottom child first. Containment, spans, the
+/// restack arithmetic and the panel's rows all go on reading a plain `LayerFolder` and need no case
+/// of their own, and a node's operands need no tag at all: **input index is position**.
 ///
-/// What the tag buys is the two behaviours that have no precedent anywhere in the tree: a folder that
-/// refuses to be deleted, and a set of siblings that must stay adjacent. Both are enforced *before*
-/// the shape breaks (`CanvasManager.deleteFolder`, and the drop guards in `CanvasManager+LayerTree`)
-/// rather than repaired after, because a stranded slot carries nothing that says which node it lost.
+/// One case, deliberately. The enum survives the deletion of `.slot` because the *op* still has to be
+/// stored somewhere and because a future op arrives as data on this case rather than as a new field.
 enum CompositorRole: Equatable {
 
-    /// This folder is a compositor node: its children are its input slots, and `op` combines them.
+    /// This folder is a compositor node: its children are its inputs, and `op` combines them.
     case node(op: CompositorOp)
-
-    /// This folder is input slot `index` of the node folder `node`.
-    ///
-    /// **Index 0 is the backdrop.** §4.3 defines a Mix as "slot 1 composited over slot 0", which is
-    /// the direction a plain stack already reads — lower row underneath — so a two-input node and a
-    /// two-layer stack agree about which one is on top. `containerEntries` is what keeps this index
-    /// and the order the slots present in from drifting apart.
-    case slot(node: UUID, index: Int)
 }
 
 extension CompositorRole: Codable {
@@ -83,7 +76,7 @@ extension CompositorRole: Codable {
     // The op is written as its own string rather than as `CompositorOp`'s layout: that enum belongs
     // to the compositor and gains a case whenever an op is added, and a document already on disk must
     // not change meaning when it does.
-    private enum CodingKeys: String, CodingKey { case kind, op, mixMode, node, index }
+    private enum CodingKeys: String, CodingKey { case kind, op, mixMode }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -95,9 +88,6 @@ extension CompositorRole: Codable {
             default:
                 self = .node(op: .stack)
             }
-        case "slot":
-            self = .slot(node: try container.decode(UUID.self, forKey: .node),
-                         index: try container.decode(Int.self, forKey: .index))
         case let kind:
             throw DecodingError.dataCorruptedError(forKey: .kind, in: container,
                                                    debugDescription: "Unknown compositor role \"\(kind)\"")
@@ -116,17 +106,32 @@ extension CompositorRole: Codable {
                 try container.encode("mix", forKey: .op)
                 try container.encode(mode, forKey: .mixMode)
             }
-        case .slot(let node, let index):
-            try container.encode("slot", forKey: .kind)
-            try container.encode(node, forKey: .node)
-            try container.encode(index, forKey: .index)
         }
+    }
+
+    /// **The whole of the input-slot migration, written as a line someone can find.**
+    ///
+    /// A node saved before this change is a node folder plus two child folders tagged
+    /// `{"kind":"slot", …}` holding the artwork. Read that tag as *no role* and the same document
+    /// becomes a node with two plain-folder children in the same order — `parentFolderID` already
+    /// names the node and `containerEntries` already ranks them bottom-to-top, so slot 0 stays the
+    /// backdrop. The folders keep their "Input A"/"Input B" names, which is harmless and still reads.
+    ///
+    /// Not left to `FolderManifest`'s `try?`, which would swallow a thrown "unknown role" into nil and
+    /// migrate correctly by accident, riding on error handling that exists for a different reason (an
+    /// op from a future build). A migration nobody can grep for is a migration nobody can change.
+    static func decodeIfSupported<K: CodingKey>(from container: KeyedDecodingContainer<K>,
+                                                forKey key: K) throws -> CompositorRole? {
+        guard container.contains(key), !(try container.decodeNil(forKey: key)) else { return nil }
+        let stored = try container.nestedContainer(keyedBy: CodingKeys.self, forKey: key)
+        guard try stored.decode(String.self, forKey: .kind) != "slot" else { return nil }
+        return try container.decode(CompositorRole.self, forKey: key)
     }
 }
 
 extension LayerFolder {
 
-    /// True when this folder is a node, whose children are its input slots.
+    /// True when this folder is a node, whose direct children are its inputs.
     var isCompositorNode: Bool { compositorOp != nil }
 
     /// How this node combines its inputs, or nil when the folder is not a node. An ordinary folder
@@ -136,17 +141,11 @@ extension LayerFolder {
         return nil
     }
 
-    var isInputSlot: Bool { inputSlotIndex != nil }
-
-    /// Which input this folder is, if it is one. Zero is the backdrop.
-    var inputSlotIndex: Int? {
-        if case .slot(_, let index)? = compositorRole { return index }
-        return nil
-    }
-
-    /// The node this folder is an input to, if it is one.
-    var owningNodeID: UUID? {
-        if case .slot(let node, _)? = compositorRole { return node }
-        return nil
+    /// How many direct children this folder will accept, or nil for "as many as the artist likes" —
+    /// every ordinary folder, and every variadic node. The one number the drop guards enforce, in
+    /// `canDrop(inContainer:moving:)` and again in the restacks it fronts for.
+    var maxInputCount: Int? {
+        guard case .fixed(let count)? = compositorOp?.arity else { return nil }
+        return count
     }
 }

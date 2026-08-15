@@ -285,10 +285,9 @@ final class LayerStackCell: UITableViewCell {
         visibilityButton.accessibilityIdentifier = model.isFolder
             ? "layerPanel.folder.\(model.name).visibility" : "layerPanel.row.\(model.layerIndex).visibility"
 
-        // Four kinds where this was `if model.isFolder`. The three folder kinds share their whole
-        // geometry — a node and a slot are groups in storage and there is nothing to lay out
-        // differently — so what the switch actually picks is the glyph, its tint, and the marker,
-        // which is the entire visible difference between "a folder" and "an operand of a node".
+        // Three kinds where this was `if model.isFolder`. The two folder kinds share their whole
+        // geometry — a node is a group in storage and there is nothing to lay out differently — so
+        // what the switch actually picks is the glyph and its tint.
         switch model.kind {
         case .layer:
             configureLayerRow(model)
@@ -298,10 +297,6 @@ final class LayerStackCell: UITableViewCell {
             // Two overlapping circles: the node combines its inputs, which is the one thing about it
             // a glyph can say.
             configureFolderRow(model, icon: "camera.filters", tint: .systemTeal)
-        case .inputSlot:
-            // A receptacle rather than a container — a slot is where artwork is *put*, and it cannot
-            // be deleted or dragged the way the folder glyph would promise.
-            configureFolderRow(model, icon: "tray", tint: .systemTeal)
         }
 
         configureMaskEdit(model)
@@ -372,18 +367,25 @@ final class LayerStackCell: UITableViewCell {
         configureCompositorMarker(model)
     }
 
-    /// Overwrites whatever a recycled cell's last row left on the probe — an ordinary folder and a
-    /// layer both clear it, so a stale "slot,0" can't linger on a reused cell and make an unrelated
-    /// row answer as an operand.
+    /// Overwrites whatever a recycled cell's last row left on the probe — a row that is neither a
+    /// node nor an operand clears it, so a stale `input,0` can't linger on a reused cell and make an
+    /// unrelated row answer as an operand.
+    ///
+    /// Two answers on one probe. `node,<mode>` says the row *is* a node, which nothing structural
+    /// otherwise distinguishes; `input,<index>` says the row is the *n*th operand of the node it sits
+    /// in, which is what the named "Input A"/"Input B" slot folders used to carry and which is
+    /// otherwise only readable by comparing row frames. A node nested inside a node reports the
+    /// first: what it is outranks where it sits.
     private func configureCompositorMarker(_ model: LayerRowModel) {
-        switch model.kind {
-        case .compositorNode:
-            compositorMarker.accessibilityIdentifier = "layerPanel.folder.\(model.name).compositor"
+        let identifier = model.isFolder
+            ? "layerPanel.folder.\(model.name).compositor" : "layerPanel.row.\(model.layerIndex).compositor"
+        if model.kind == .compositorNode {
+            compositorMarker.accessibilityIdentifier = identifier
             compositorMarker.accessibilityValue = "node,\(model.mixMode?.rawValue ?? "stack")"
-        case .inputSlot:
-            compositorMarker.accessibilityIdentifier = "layerPanel.folder.\(model.name).compositor"
-            compositorMarker.accessibilityValue = "slot,\(model.inputSlotIndex ?? -1)"
-        case .group, .layer:
+        } else if let input = model.nodeInputIndex {
+            compositorMarker.accessibilityIdentifier = identifier
+            compositorMarker.accessibilityValue = "input,\(input)"
+        } else {
             compositorMarker.accessibilityIdentifier = nil
             compositorMarker.accessibilityValue = nil
         }

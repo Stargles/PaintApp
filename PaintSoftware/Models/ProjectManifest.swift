@@ -150,10 +150,11 @@ struct FolderManifest: Codable {
     /// §10.3 migration reads its *absence* as a signal.
     var alphaMask: AlphaMask? = nil
 
-    /// The folder's compositor role (§4.3) — node, input slot, or absent for an ordinary group.
-    /// Absent is what every project saved before phase 8 carries and what every folder nobody has
-    /// built a node out of carries, which is one meaning rather than two: see `alphaMask` above for
-    /// the same argument, and `opacity` below for the one field that cannot be written this way.
+    /// The folder's compositor role (§4.3) — node, or absent for an ordinary group. Absent is what
+    /// every project saved before phase 8 carries and what every folder nobody has built a node out
+    /// of carries, which is one meaning rather than two: see `alphaMask` above for the same argument,
+    /// and `opacity` below for the one field that cannot be written this way. A third meaning — the
+    /// retired `"slot"` tag — joins them at decode time; see `CompositorRole.decodeIfSupported`.
     var compositorRole: CompositorRole? = nil
 
     /// The folder's grade (§4.4's second wrapper, phase 9b), written only when there is one —
@@ -197,11 +198,18 @@ struct FolderManifest: Codable {
         blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
         isIsolated = try container.decodeIfPresent(Bool.self, forKey: .isIsolated) ?? true
         alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
-        // Swallowed rather than propagated: a role this build cannot read — a future op, a truncated
-        // slot tag — degrades the folder to an ordinary one, which is exactly what §4.3's storage
-        // decision makes it anyway. Throwing here would cost the artist the whole document to save
-        // a graph edge, and a document that renders is the standing preference (see `canMask`).
-        compositorRole = (try? container.decodeIfPresent(CompositorRole.self, forKey: .compositorRole)) ?? nil
+        // Two different "no role" answers, kept apart on purpose.
+        //
+        // `decodeIfSupported` is the *migration*: a `"slot"` tag from a document saved while nodes
+        // had input-slot folders decodes as an ordinary folder, so the node's operands become its
+        // plain children in the order they already sat in (§4.3). Stated as a call rather than left
+        // to the `try?` below, which would have produced the same result by accident.
+        //
+        // The `try?` is the *tolerance*: a role this build genuinely cannot read — an op from a
+        // future version — degrades the folder to an ordinary one rather than costing the artist the
+        // whole document to save a graph edge. A document that renders is the standing preference
+        // (see `canMask`).
+        compositorRole = (try? CompositorRole.decodeIfSupported(from: container, forKey: .compositorRole)) ?? nil
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
         // `opacity` stands in for the whole group-property set, so **it must keep being written
         // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`

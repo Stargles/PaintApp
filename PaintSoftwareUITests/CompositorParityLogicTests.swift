@@ -1211,43 +1211,43 @@ final class CompositorParityLogicTests: XCTestCase {
         }
     }
 
-    /// **The collision `FolderOptionsPanel` refuses to offer a control for.** A slot is stored as an
-    /// ordinary `LayerFolder` (§4.3), so it structurally carries its own `blendMode` — but the panel
-    /// never shows it a blend-mode row, because "a slot's own mode would be a second answer to the
-    /// question its node's op already answers" (`LayerPanel.swift`'s comment on that omission) and
-    /// §4.3 never says which of the two wins. That leaves the field reachable only through
-    /// `CanvasManager.setFolderBlendMode` directly, through undo, or through a hand-edited document —
-    /// paths the panel does not gate.
-    ///
-    /// **Measured here rather than assumed: a slot's own mode never reaches a backdrop to blend
-    /// against, so it is not ignored *by policy*, it is inert *by geometry*, for every mode on either
-    /// slot, on both backends.** `CoreGraphicsCompositor.fold` and `CompositorMetalEngine.fold` both
-    /// zero-fill the buffer a slot draws into before drawing it — slot 0 straight into the node's own
-    /// fresh buffer, every other slot into a fresh buffer of its own — so a slot's mode always blends
-    /// against transparency and reads as Normal by the same rule §4.2 already settled for a layer at
-    /// the bottom of an isolated group. A slot is *always* in that position, never only incidentally,
-    /// so the value is silently dropped in every document that could exist rather than in an edge
-    /// case of one.
-    ///
-    /// **Opacity is the contrast that tells "ignored" apart from "nothing on this folder does
-    /// anything".** It scales what a slot draws regardless of the (always-transparent) backdrop
-    /// underneath, so it survives into the fold — the second half of this test is what confirms that
-    /// is still true, so a future change cannot silently swallow opacity the same way geometry already
-    /// swallows blend mode.
-    func testASlotsOwnBlendModeIsInertButItsOpacityStillFades() {
-        let manager = CanvasFixture.manager(layerCount: 2)
+    /// A node holding two operands over a grey floor, plus a hidden shape to mask with. `operands`
+    /// are the two child folders, input 0 first; `shape` is a left-half rectangle on a hidden layer.
+    private func nodeFixture(mode: BlendMode = .normal)
+        -> (manager: CanvasManager, node: UUID, operands: [UUID], shape: MaskSource) {
+        let manager = CanvasFixture.manager(layerCount: 4)
+        let whole = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        // 0: the mask shape, hidden — a source, not content (§6.6 forces its visibility on).
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
-                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 48, height: 48)))
+                                      CanvasFixture.solidImage(blue, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+        manager.layers[0].isVisible = false
+        // 1: the floor the node's output lands on, so a node blend mode would have somewhere to show.
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(UIColor(white: 128.0 / 255, alpha: 1), rect: whole))
+        CanvasFixture.setBakedContent(manager, layerIndex: 2, CanvasFixture.solidImage(red, rect: whole))
+        CanvasFixture.setBakedContent(manager, layerIndex: 3,
                                       CanvasFixture.solidImage(green, rect: CGRect(x: 16, y: 16, width: 48, height: 48)))
         let ids = manager.layers.map(\.id)
-        // The op itself stays `.normal` so the only thing this fixture can possibly be measuring is
-        // the slot's own field, never confused with the Mix mode `testMixIsTheSameMathAs…` above
-        // already covers.
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
-        let slots = manager.inputSlots(ofNode: node)
-        manager.restackLayer(ids[1], above: .folder(slots[1].id), parentFolderID: slots[1].id)
-        manager.restackLayer(ids[0], above: .folder(slots[0].id), parentFolderID: slots[0].id)
+        let node = manager.addCompositorNode(op: .mix(mode), name: "Mix")
+        let inputA = manager.addFolder(name: "A", parentFolderID: node)
+        let inputB = manager.addFolder(name: "B", parentFolderID: node)
+        manager.restackLayer(ids[2], above: .folder(inputA), parentFolderID: inputA)
+        manager.restackLayer(ids[3], above: .folder(inputB), parentFolderID: inputB)
+        return (manager, node, [inputA, inputB], .layer(ids[0]))
+    }
+
+    /// **§4.3's second owner decision, measured: a node has no blend mode of its own.** Its output
+    /// always lands Normal on whatever is beneath it — one dropdown per node, the Mix mode, the
+    /// operation *inside*. The folder still carries a `blendMode` field, because every folder does
+    /// and because an older document already has one set, so this is a value the derivation refuses
+    /// to read rather than a value that cannot be stored.
+    ///
+    /// **The contrast is what makes it a decision rather than a node's properties going unread
+    /// wholesale**: its children's opacity and masks still reach the picture, on both backends. The
+    /// slot-era version of this test measured the same shape one level down
+    /// (`testAnInputsOwnBlendModeIsInertButItsOpacityStillFades`, below, is what that became).
+    func testANodesOwnBlendModeIsInertButItsChildrensOpacityAndMasksAreNot() {
+        let (manager, node, operands, shape) = nodeFixture()
 
         var backends: [CompositorBackend] = [.coreGraphics]
         if CompositorMetalEngine.shared != nil { backends.append(.metal) }
@@ -1259,28 +1259,140 @@ final class CompositorParityLogicTests: XCTestCase {
                 continue
             }
 
-            for slotIndex in [0, 1] {
-                for mode in BlendMode.allCases where mode != .clipToBelow && mode != .normal {
-                    manager.setFolderBlendMode(slots[slotIndex].id, to: mode)
-                    guard let changed = composite(manager) else {
-                        XCTFail("\(backend): must still composite with slot \(slotIndex) at \(mode.displayName)")
-                        manager.setFolderBlendMode(slots[slotIndex].id, to: .normal)
-                        continue
-                    }
-                    XCTAssertEqual(maxChannelDelta(baseline, changed), 0,
-                                   "\(backend): slot \(slotIndex)'s own blend mode (\(mode.displayName)) moved a pixel — it should be exactly as unobservable as any content at the bottom of an isolated container (§4.2)")
-                    manager.setFolderBlendMode(slots[slotIndex].id, to: .normal)
+            for mode in BlendMode.allCases where mode != .clipToBelow && mode != .normal {
+                manager.setFolderBlendMode(node, to: mode)
+                guard let changed = composite(manager) else {
+                    XCTFail("\(backend): must still composite with the node at \(mode.displayName)")
+                    manager.setFolderBlendMode(node, to: .normal)
+                    continue
                 }
+                XCTAssertEqual(maxChannelDelta(baseline, changed), 0,
+                               "\(backend): the node's own blend mode (\(mode.displayName)) moved a pixel over the grey floor beneath it — a node blends its inputs, it does not blend itself onto the stack (§4.3)")
+                manager.setFolderBlendMode(node, to: .normal)
             }
 
-            manager.setFolderOpacity(slots[1].id, to: 0.4)
+            manager.setFolderOpacity(operands[1], to: 0.4)
             guard let faded = composite(manager) else {
-                XCTFail("\(backend): must composite with slot 1 faded")
+                XCTFail("\(backend): must composite with input 1 faded")
                 continue
             }
             XCTAssertGreaterThan(maxChannelDelta(baseline, faded), 0,
-                                 "\(backend): a slot's own opacity should still fade its content into the fold — unlike blend mode, it is not swallowed by the always-transparent backdrop a slot draws into")
-            manager.setFolderOpacity(slots[1].id, to: 1)
+                                 "\(backend): an operand's own opacity still fades its content into the fold — the node's inertness is about its mode, not about everything hanging off it")
+            manager.setFolderOpacity(operands[1], to: 1)
+
+            guard let index = manager.folders.firstIndex(where: { $0.id == operands[1] }) else {
+                XCTFail("\(backend): the operand folder should exist")
+                continue
+            }
+            manager.folders[index].alphaMask = AlphaMask(sources: [shape])
+            guard let masked = composite(manager) else {
+                XCTFail("\(backend): must composite with input 1 masked")
+                continue
+            }
+            XCTAssertGreaterThan(maxChannelDelta(baseline, masked), 0,
+                                 "\(backend): and an operand's mask still clips what it contributes to the fold")
+            manager.folders[index].alphaMask = nil
+        }
+    }
+
+    /// **An operand's own blend mode is inert too, and for a different reason** — geometry rather than
+    /// decision. `CoreGraphicsCompositor.fold` and `CompositorMetalEngine.fold` both zero-fill the
+    /// buffer an input draws into before drawing it — input 0 straight into the node's own fresh
+    /// buffer, every other input into a fresh buffer of its own — so an operand's mode always blends
+    /// against transparency and reads as Normal by the same rule §4.2 already settled for a layer at
+    /// the bottom of an isolated group. An operand is *always* in that position, never only
+    /// incidentally, so the value is dropped in every document that could exist rather than in an
+    /// edge case of one.
+    ///
+    /// **A bare layer as an operand is swept beside the folder, and that is the case §4.3's redesign
+    /// added.** The old rule keyed on the child being a slot-tagged folder; a layer dropped straight
+    /// into a node was not one, and its mode would have reached the fold.
+    func testAnInputsOwnBlendModeIsInertButItsOpacityStillFades() {
+        let (manager, node, operands, _) = nodeFixture()
+        // Input 1 becomes a bare layer rather than a folder, so the sweep covers both kinds of child.
+        // Deleting the wrapper promotes the layer into the node in place, which is §4.3's first owner
+        // decision doing the setup work — and keeps the child count at the arity throughout.
+        guard let bareLayer = manager.descendantLayerIndices(ofFolder: operands[1]).first
+            .map({ manager.layers[$0].id }) else {
+            return XCTFail("Setup: input 1 should hold a layer")
+        }
+        manager.deleteFolder(operands[1])
+        XCTAssertEqual(manager.directChildCount(inContainer: node), 2, "Setup: a folder operand and a bare-layer operand")
+
+        var backends: [CompositorBackend] = [.coreGraphics]
+        if CompositorMetalEngine.shared != nil { backends.append(.metal) }
+
+        for backend in backends {
+            Compositor.backend = backend
+            guard let baseline = composite(manager) else {
+                XCTFail("\(backend): the filled Mix must composite")
+                continue
+            }
+
+            for mode in BlendMode.allCases where mode != .clipToBelow && mode != .normal {
+                manager.setFolderBlendMode(operands[0], to: mode)
+                guard let index = manager.layers.firstIndex(where: { $0.id == bareLayer }) else {
+                    XCTFail("\(backend): the bare operand should still exist")
+                    continue
+                }
+                manager.layers[index].blendMode = mode
+                guard let changed = composite(manager) else {
+                    XCTFail("\(backend): must still composite with the operands at \(mode.displayName)")
+                    continue
+                }
+                XCTAssertEqual(maxChannelDelta(baseline, changed), 0,
+                               "\(backend): an operand's own blend mode (\(mode.displayName)) moved a pixel — it should be exactly as unobservable as any content at the bottom of an isolated container (§4.2), whether the operand is a folder or a bare layer")
+                manager.setFolderBlendMode(operands[0], to: .normal)
+                manager.layers[index].blendMode = .normal
+            }
+
+            manager.setFolderOpacity(operands[0], to: 0.4)
+            guard let faded = composite(manager) else {
+                XCTFail("\(backend): must composite with input 0 faded")
+                continue
+            }
+            XCTAssertGreaterThan(maxChannelDelta(baseline, faded), 0,
+                                 "\(backend): an operand's own opacity should still fade its content into the fold — unlike blend mode, it is not swallowed by the always-transparent backdrop an operand draws into")
+            manager.setFolderOpacity(operands[0], to: 1)
+        }
+    }
+
+    /// **The hazard the redesign had to close, measured on pixels.** `Clip to below` resolves against
+    /// the entry one step down *in the same container* — which inside a node is the other operand. Two
+    /// bare layers as the two inputs is the shape that makes it reachable, and honouring it would let
+    /// input 1 clip to input 0 and quietly reintroduce exactly the cross-input dependency isolation
+    /// exists to prevent.
+    ///
+    /// The fixture makes the wrong answer visible: input 0 covers only the left half, so a clipped
+    /// input 1 would vanish on the right and let the floor beneath the node show through.
+    func testAClipToBelowInputDoesNotClipToTheOtherInput() {
+        let manager = CanvasFixture.manager(layerCount: 3)
+        let whole = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, CanvasFixture.solidImage(blue, rect: whole))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 2, CanvasFixture.solidImage(green, rect: whole))
+        let ids = manager.layers.map(\.id)
+        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
+        manager.restackLayer(ids[2], above: .folder(node), parentFolderID: node)
+        guard let upper = manager.layers.firstIndex(where: { $0.id == ids[2] }) else {
+            return XCTFail("Setup: input 1 should exist")
+        }
+        manager.layers[upper].blendMode = .clipToBelow
+
+        var backends: [CompositorBackend] = [.coreGraphics]
+        if CompositorMetalEngine.shared != nil { backends.append(.metal) }
+        for backend in backends {
+            Compositor.backend = backend
+            guard let composited = composite(manager) else {
+                XCTFail("\(backend): the fixture must composite")
+                continue
+            }
+            XCTAssertEqual(pixel(composited, 48, 32), [0, 255, 0, 255],
+                           "\(backend): input 1 draws whole. Clipped to input 0 it would stop at x=32 and this would be the blue floor. Got RGBA \(pixel(composited, 48, 32))")
+            XCTAssertEqual(pixel(composited, 16, 32), [0, 255, 0, 255],
+                           "\(backend): and over input 0 it is unchanged either way — stated so the assertion above cannot pass because the layer stopped drawing altogether")
         }
     }
 

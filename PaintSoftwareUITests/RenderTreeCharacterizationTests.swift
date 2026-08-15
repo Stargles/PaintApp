@@ -434,74 +434,174 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
     // MARK: - Compositor nodes (§4.3)
 
-    /// A node with two populated slots is the first tree in the app with more than one input, and
-    /// this pins all three things §4.3 says about it: the op reaches the tree, each slot is an input
-    /// of its own rather than another entry in a shared one, and **slot 0 is the lower row** — the
-    /// backdrop that "slot 1 composites over slot 0" names.
+    /// Sets a layer's stored blend mode by id, so a fixture can keep saying which layer it means
+    /// after a restack has moved the indices around.
+    private func setBlendMode(_ mode: BlendMode, ofLayer id: UUID, in manager: CanvasManager) {
+        guard let index = manager.layers.firstIndex(where: { $0.id == id }) else {
+            return XCTFail("Setup: the layer should still exist")
+        }
+        manager.layers[index].blendMode = mode
+    }
+
+    /// A node with two operands is the first tree in the app with more than one input, and this pins
+    /// all three things §4.3 says about it: the op reaches the tree, **each child is an input of its
+    /// own** rather than another entry in a shared one, and **input 0 is the lower row** — the
+    /// backdrop that "input 1 composites over input 0" names.
     ///
-    /// Slot order is read off the presented order rather than off the stored index, so a test that
-    /// only checked the index would pass while the panel drew the operands the other way round.
-    func testAMixNodeDerivesToOneInputPerSlotWithSlotZeroAsTheBackdrop() {
+    /// Operand order is read off the presented order, which is now the *only* place it lives: there
+    /// is no stored slot index left for a test to check instead, which is precisely what makes
+    /// dragging one child above the other swap the operands.
+    func testAMixNodeDerivesToOneInputPerChildWithTheLowestAsTheBackdrop() {
         let manager = namedManager(["A", "B"])
         let ids = manager.layers.map(\.id)
         let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
-        let slots = manager.inputSlots(ofNode: node)
-        XCTAssertEqual(slots.map(\.name), ["Input A", "Input B"], "Setup: `.fixed(2)` should bring two named slots, slot 0 first")
+        manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
+        manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
 
-        manager.restackLayer(ids[1], above: .folder(slots[1].id), parentFolderID: slots[1].id)
-        manager.restackLayer(ids[0], above: .folder(slots[0].id), parentFolderID: slots[0].id)
-
-        assertRenderTreeMatchesFlatOrder(manager, "after filling both slots")
-        assertFolderSpansAreContiguous(manager, "after filling both slots")
-        XCTAssertEqual(renderRows(manager), ["0:Mix", "1:Input A", "2:A", "1:Input B", "2:B"],
-                       "Bottom-to-top, the backdrop slot comes first and each slot encloses its own contents")
+        assertRenderTreeMatchesFlatOrder(manager, "after filling both inputs")
+        assertFolderSpansAreContiguous(manager, "after filling both inputs")
+        XCTAssertEqual(renderRows(manager), ["0:Mix", "1:A", "1:B"],
+                       "Bottom-to-top, the backdrop comes first and each operand is an input of its own")
 
         guard case .node(let op, let inputs) = manager.renderTree.first?.content else {
             return XCTFail("The node folder should derive to a `.node`")
         }
         XCTAssertEqual(op, .mix(.multiply), "The folder's op is what the compositor switches on")
-        XCTAssertEqual(inputs.count, 2, "Two slots are two inputs, not two entries in one")
-        XCTAssertEqual(inputs.map { $0.map(\.id) }, [[slots[0].id], [slots[1].id]],
-                       "Input 0 is the lower slot — §4.3's backdrop, and the direction a plain stack already reads")
-        XCTAssertTrue(inputs.flatMap { $0 }.allSatisfy(\.isIsolated),
-                      "§4.3: an input slot is always isolated, or \"input\" means nothing")
+        XCTAssertEqual(inputs.count, 2, "Two children are two inputs, not two entries in one")
+        XCTAssertEqual(inputs.map { $0.map(\.id) }, [[ids[0]], [ids[1]]],
+                       "Input 0 is the lower row — §4.3's backdrop, and the direction a plain stack already reads")
     }
 
-    /// Isolation on a slot is not read off the folder, it is asserted by the derivation — so a slot
-    /// someone has switched to pass-through, by an older build or a hand-edited document, still
-    /// derives isolated rather than blending against whatever sits under the node.
-    func testASlotDerivesIsolatedEvenWhenTheFolderSaysPassThrough() {
-        let manager = namedManager(["A"])
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
-        let slots = manager.inputSlots(ofNode: node)
-        manager.restackLayer(manager.layers[0].id, above: .folder(slots[0].id), parentFolderID: slots[0].id)
+    /// The same tree after the operands are dragged past each other. **A test that only counted the
+    /// inputs would pass with them swapped**, which is a different picture, so the order is the
+    /// assertion.
+    func testDraggingOneOperandBelowTheOtherSwapsTheInputsInTheDerivedTree() {
+        let manager = namedManager(["A", "B"])
+        let ids = manager.layers.map(\.id)
+        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
+        manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
 
-        guard let index = manager.folders.firstIndex(where: { $0.id == slots[0].id }) else {
-            return XCTFail("Setup: the slot folder should exist")
-        }
-        manager.folders[index].isIsolated = false
+        manager.restackLayer(ids[1], above: .bottom, parentFolderID: node)
 
         guard case .node(_, let inputs) = manager.renderTree.first?.content else {
             return XCTFail("The node folder should derive to a `.node`")
         }
-        XCTAssertEqual(inputs.first?.first?.isIsolated, true)
+        XCTAssertEqual(inputs.map { $0.map(\.id) }, [[ids[1]], [ids[0]]],
+                       "B is the backdrop now — the operands swapped, not merely reordered on screen")
+        XCTAssertEqual(renderRows(manager), ["0:Mix", "1:B", "1:A"])
+        assertRenderTreeMatchesFlatOrder(manager, "after swapping the operands")
     }
 
-    /// An ordinary folder is unchanged by any of this — it is still one slot holding all its
-    /// children, which is the arity-1 case §4.3 says a group is.
-    func testAnOrdinaryFolderStillDerivesToASingleStackedSlot() {
+    /// A node's operands are isolated and Normal whatever the folders and layers store, and **that
+    /// now has to cover a layer child too** — the old rule keyed on the child being a slot-tagged
+    /// folder, which a bare layer dropped straight in as an operand never was.
+    func testEveryChildOfANodeDerivesIsolatedAndNormalWhateverItStores() {
+        let manager = namedManager(["A", "B"])
+        let ids = manager.layers.map(\.id)
+        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        let group = manager.addFolder(name: "Operand")
+        manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
+        manager.restackFolder(group, above: .folder(node), parentFolderID: node)
+        manager.restackLayer(ids[1], above: .folder(group), parentFolderID: group)
+
+        // Both operands set to things the derivation must override: a pass-through folder blending
+        // screen, and a layer blending multiply.
+        guard let index = manager.folders.firstIndex(where: { $0.id == group }) else {
+            return XCTFail("Setup: the operand folder should exist")
+        }
+        manager.folders[index].isIsolated = false
+        manager.folders[index].blendMode = .screen
+        setBlendMode(.multiply, ofLayer: ids[0], in: manager)
+
+        guard case .node(_, let inputs) = manager.renderTree.first?.content else {
+            return XCTFail("The node folder should derive to a `.node`")
+        }
+        XCTAssertEqual(inputs.count, 2)
+        XCTAssertEqual(inputs.first?.first?.id, ids[0], "Setup: input 0 is the bare layer")
+        XCTAssertEqual(inputs.first?.first?.blendMode, .normal,
+                       "A layer operand's own mode is the node's op asked twice, so the derivation pins it — the case slot-tagging could not express")
+        XCTAssertEqual(inputs.last?.first?.blendMode, .normal, "…and a folder operand's likewise")
+        XCTAssertEqual(inputs.last?.first?.isIsolated, true,
+                       "An input that blended against the backdrop under its own node would not be an input in any sense the op could use")
+    }
+
+    /// **A node's own blend mode is inert (§4.3's second owner decision).** One dropdown per node —
+    /// the Mix mode, the operation inside — and the finished output always lands Normal on whatever
+    /// is beneath it. The stored field survives, because an older document carries one, and simply
+    /// goes unread; opacity beside it does not, which is what makes this a decision about the mode
+    /// rather than a node's properties going unread wholesale.
+    func testANodesOwnBlendModeIsInertButItsOpacityStillFades() {
+        let manager = namedManager(["A", "B"])
+        let ids = manager.layers.map(\.id)
+        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
+        manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
+        manager.setFolderBlendMode(node, to: .screen)
+
+        XCTAssertEqual(manager.folders.first { $0.id == node }?.blendMode, .screen, "Premise: the field still stores it")
+        XCTAssertEqual(manager.renderTree.first?.blendMode, .normal,
+                       "…and the derivation does not read it. A node blends its inputs; it does not blend itself onto the stack")
+
+        manager.setFolderOpacity(node, to: 0.4)
+        XCTAssertEqual(manager.renderTree.first?.opacity, 0.4, "Opacity is untouched by that decision")
+    }
+
+    /// **`Clip to below` must not resolve across a node's inputs.** The derivation clips to the entry
+    /// one step down in the same container, which inside a node is the *other operand* — and inputs
+    /// are isolated from each other, so honouring it would quietly reintroduce the cross-input
+    /// dependency the isolation rule exists to prevent.
+    func testAClipToBelowOperandDoesNotClipToTheOtherInput() {
+        let manager = namedManager(["A", "B"])
+        let ids = manager.layers.map(\.id)
+        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
+        manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
+        setBlendMode(.clipToBelow, ofLayer: ids[1], in: manager)
+
+        guard case .node(_, let inputs) = manager.renderTree.first?.content else {
+            return XCTFail("The node folder should derive to a `.node`")
+        }
+        XCTAssertEqual(inputs.last?.first?.masks, [],
+                       "Input 1 must carry no implicit mask — clipping to input 0 is exactly the cross-input read isolation forbids")
+    }
+
+    /// The other half of the claim above, and the reason it is not simply "clip-to-below stopped
+    /// working": the same two layers, in the same relative positions, inside an *ordinary* folder
+    /// still resolve the clip against the entry one step down.
+    func testAClipToBelowLayerStillClipsInsideAnOrdinaryFolder() {
+        let manager = namedManager(["A", "B"])
+        let ids = manager.layers.map(\.id)
+        let group = manager.addFolder(name: "Group")
+        manager.restackLayer(ids[0], above: .folder(group), parentFolderID: group)
+        manager.restackLayer(ids[1], above: .folder(group), parentFolderID: group)
+        setBlendMode(.clipToBelow, ofLayer: ids[1], in: manager)
+
+        guard case .node(_, let inputs) = manager.renderTree.first(where: { $0.id == group })?.content else {
+            return XCTFail("The folder should derive to a `.node`")
+        }
+        XCTAssertEqual(inputs.first?.last?.masks.first?.sources, [.layer(ids[0])],
+                       "In an ordinary container the entry one step down is what it clips to, unchanged")
+    }
+
+    /// An ordinary folder is unchanged by any of this — it is still one input holding all its
+    /// children, which is the arity-1 case §4.3 says a group is, and it keeps its own blend mode.
+    func testAnOrdinaryFolderStillDerivesToASingleStackedInput() {
         let manager = namedManager(["A", "B"])
         let folder = manager.addFolder(name: "Group")
         for id in manager.layers.map(\.id) {
             manager.restackLayer(id, above: .folder(folder), parentFolderID: folder)
         }
+        manager.setFolderBlendMode(folder, to: .screen)
 
         guard case .node(let op, let inputs) = manager.renderTree.first?.content else {
             return XCTFail("A folder should still derive to a `.node`")
         }
         XCTAssertEqual(op, .stack)
-        XCTAssertEqual(inputs.count, 1, "No role means one slot, however many children are in it")
+        XCTAssertEqual(inputs.count, 1, "No role means one input, however many children are in it")
         XCTAssertEqual(inputs.first?.count, 2)
+        XCTAssertEqual(manager.renderTree.first?.blendMode, .screen,
+                       "Only a *node's* mode is pinned — a group's is the whole of how it meets the stack below it")
         assertRenderTreeMatchesFlatOrder(manager)
     }
 }

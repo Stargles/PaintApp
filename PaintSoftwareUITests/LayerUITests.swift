@@ -924,13 +924,14 @@ final class LayerUITests: PaintUITestCase {
 
     // MARK: - §4.3 compositor nodes
     //
-    // A node and its input slots are stored as ordinary `LayerFolder`s, so every one of these would
-    // pass trivially against three identical folder rows. What each asserts is the *difference* the
-    // panel draws on top of that sameness — which is the whole of phase 8's UI.
+    // A node is stored as an ordinary `LayerFolder`, so every one of these would pass trivially
+    // against two identical folder rows. What each asserts is the *difference* the panel draws on top
+    // of that sameness — the node badge, the operand positions, and the two controls a node does not
+    // get.
 
-    /// One tap creates the node and both its operands: a node without its slots is a shape none of
-    /// the tree's guards would accept, so `addCompositorNode` never leaves one on screen.
-    func testAddingMixNodeShowsTheNodeAndBothInputSlotsWithTheBackdropLowest() throws {
+    /// One tap creates the node, and nothing else: a node arrives empty like a folder and is filled
+    /// the same way. The row has to say it is a node, because nothing structural distinguishes it.
+    func testAddingMixNodeShowsAnEmptyNodeRow() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
@@ -938,42 +939,35 @@ final class LayerUITests: PaintUITestCase {
 
         XCTAssertTrue(app.staticTexts["layerPanel.folder.Mix 1"].waitForExistence(timeout: 5),
                       "The node row should appear as soon as it's created, with nothing in it")
-        XCTAssertTrue(app.staticTexts["layerPanel.folder.Input A"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["layerPanel.folder.Input B"].waitForExistence(timeout: 5))
-
         XCTAssertEqual(app.otherElements["layerPanel.folder.Mix 1.compositor"].value as? String, "node,normal",
                        "The row has to say it is a node — nothing structural distinguishes it from a folder")
-        XCTAssertEqual(app.otherElements["layerPanel.folder.Input A.compositor"].value as? String, "slot,0")
-        XCTAssertEqual(app.otherElements["layerPanel.folder.Input B.compositor"].value as? String, "slot,1")
-
-        // §4.3 fixes slot 0 as the backdrop, and the panel expresses that by position alone — an
-        // empty Input A floating to the top of its node the way any other empty folder would is the
-        // trap the ordering rule exists to close.
-        XCTAssertGreaterThan(folderCell(app, named: "Input A").frame.minY,
-                             folderCell(app, named: "Input B").frame.minY,
-                             "Input A is the backdrop, so it presents below Input B")
+        XCTAssertFalse(app.staticTexts["layerPanel.folder.Input A"].exists,
+                       "Input slot folders are gone: a node's operands are whatever the artist drags in")
     }
 
-    /// A node that cannot be filled is decoration. The drop goes through the same restack the folder
-    /// drops use — a slot is an ordinary container, and only the *node header* refuses a drop.
-    func testALayerDropsIntoAnInputSlotAndReportsItAsItsFolder() throws {
+    /// A node that cannot be filled is decoration. The drop goes through the same restack a folder
+    /// drop uses, and the layer becomes **input 0** — the backdrop — because it is the only child.
+    func testALayerDropsStraightIntoANodeAndBecomesItsFirstInput() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
         addMixNodeFromAddMenu(app)
-        XCTAssertTrue(app.staticTexts["layerPanel.folder.Input A"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Mix 1"].waitForExistence(timeout: 5))
         XCTAssertEqual(rowFolder(app, layerIndex: 0), "", "Setup: the layer starts outside the node")
 
-        dragRow(layerCell(app, layerIndex: 0), onto: folderCell(app, named: "Input A"), dropDY: 0.5)
+        dragRow(layerCell(app, layerIndex: 0), onto: folderCell(app, named: "Mix 1"), dropDY: 0.5)
 
-        XCTAssertEqual(rowFolder(app, layerIndex: 0), "Input A",
-                       "A slot takes a drop like any other folder — that is the whole point of storing it as one")
+        XCTAssertEqual(rowFolder(app, layerIndex: 0), "Mix 1",
+                       "A node takes a drop like any other folder — that is the whole point of storing it as one")
+        XCTAssertEqual(app.otherElements["layerPanel.row.0.compositor"].value as? String, "input,0",
+                       "And the row says which operand it is, which the named slot folders used to carry")
     }
 
-    /// The mode is the entire content of a Mix's op, so it is editable, it shows on the row without
-    /// opening options (§7's rule, applied to a node), and it is a *different* pick from the node's
-    /// own blend mode — which the same folder also carries, and which must not move with it.
-    func testMixNodeModeIsEditableSeparatelyFromTheNodesOwnBlendMode() throws {
+    /// The mode is the entire content of a Mix's op, so it is editable and it shows on the row without
+    /// opening options (§7's rule, applied to a node). **It is also the node's only dropdown** —
+    /// §4.3's second owner decision took the folder's own blend mode away, because a node's output
+    /// always lands Normal on whatever is beneath it.
+    func testMixNodeModeIsTheNodesOnlyDropdown() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
@@ -984,8 +978,10 @@ final class LayerUITests: PaintUITestCase {
         let mixPicker = app.buttons["layerOptions.mixModeButton"]
         XCTAssertTrue(mixPicker.waitForExistence(timeout: 5), "A node's options lead with its op")
         XCTAssertEqual(mixPicker.value as? String, "normal", "A fresh Mix starts at Normal")
-        XCTAssertEqual(app.buttons["layerOptions.blendModeButton"].value as? String, "normal",
-                       "Setup: the node's own blend into its parent is a second, separate control")
+        XCTAssertFalse(app.buttons["layerOptions.blendModeButton"].exists,
+                       "Two dropdowns on one row is the clutter the owner called out, and the second one's job is done by putting the node in a folder")
+        XCTAssertFalse(app.switches["layerOptions.passThroughToggle"].exists,
+                       "Pass Through is inert on a node — a `.mix` always buffers, so there is no reading of it the op could honour")
 
         mixPicker.tap()
         let multiply = app.buttons["layerOptions.mixMode.multiply"]
@@ -993,8 +989,6 @@ final class LayerUITests: PaintUITestCase {
         multiply.tap()
 
         XCTAssertEqual(mixPicker.value as? String, "multiply")
-        XCTAssertEqual(app.buttons["layerOptions.blendModeButton"].value as? String, "normal",
-                       "Picking a Mix mode must not move the node's own blend mode — they are different questions")
         XCTAssertEqual(app.otherElements["layerPanel.folder.Mix 1.compositor"].value as? String, "node,multiply",
                        "And the row shows it immediately, the way a layer's blend mode does")
 
@@ -1006,35 +1000,25 @@ final class LayerUITests: PaintUITestCase {
                        "The picker should reflect the node's op, not reset when the panel reopens")
     }
 
-    /// A slot's options menu is where "this is not an ordinary folder" has to be visible: it cannot
-    /// be deleted, it is always isolated (§4.3), and its own blend mode would be a second answer to
-    /// the question its node's op already answers. Rename is the control that proves the panel
-    /// actually opened rather than the assertions passing on an empty screen.
-    func testInputSlotOptionsOfferNeitherDeleteNorPassThroughNorItsOwnBlendMode() throws {
+    /// The two controls a node keeps, and one it gained. Rename and Delete are the folder menu's,
+    /// unchanged — **Delete is plain "Delete" now**, because deleting a node promotes its children
+    /// like any folder (§4.3's first owner decision) rather than taking the subtree with it. The mask
+    /// section is the gain: a node's mask clips its folded result, which the slot-era node had nothing
+    /// to offer it for.
+    func testANodesOptionsKeepRenameDeleteAndTheMaskSection() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
         addMixNodeFromAddMenu(app)
-        XCTAssertTrue(app.staticTexts["layerPanel.folder.Input A"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Mix 1"].waitForExistence(timeout: 5))
 
-        app.buttons["layerPanel.folder.Input A.options"].tap()
-        XCTAssertTrue(app.buttons["layerOptions.rename"].waitForExistence(timeout: 5),
-                      "Sanity: the slot's options menu opened")
-
-        XCTAssertFalse(app.buttons["layerOptions.deleteFolder"].exists,
-                       "A slot exists because its node's arity says so — `deleteFolder` refuses one, so the panel must not offer it")
-        XCTAssertFalse(app.switches["layerOptions.passThroughToggle"].exists,
-                       "A slot is always isolated (§4.3); the derivation overrides the flag, so a switch here would do nothing")
-        XCTAssertFalse(app.buttons["layerOptions.blendModeButton"].exists,
-                       "The node's op is what combines its inputs — a per-slot mode is the same lever twice")
-
-        // The node itself keeps all three, which is what makes the absences above a decision about
-        // slots rather than about compositor folders generally.
-        app.buttons["layerOptions.close"].tap()
         app.buttons["layerPanel.folder.Mix 1.options"].tap()
-        XCTAssertTrue(app.buttons["layerOptions.deleteFolder"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.switches["layerOptions.passThroughToggle"].exists)
-        XCTAssertTrue(app.buttons["layerOptions.blendModeButton"].exists)
+        XCTAssertTrue(app.buttons["layerOptions.rename"].waitForExistence(timeout: 5),
+                      "Sanity: the node's options menu opened")
+        XCTAssertTrue(app.buttons["layerOptions.deleteFolder"].exists,
+                      "A node is deletable like any folder, and the label no longer warns about inputs going with it")
+        XCTAssertEqual(app.buttons["layerOptions.deleteFolder"].label, "Delete")
+        XCTAssertTrue(app.staticTexts["layerOptions.maskSummary"].exists,
+                      "The mask section shows on a node: its mask clips the folded result")
     }
-
 }

@@ -497,18 +497,20 @@ final class ProjectSaveLogicTests: XCTestCase {
 
     // MARK: - Compositor nodes (§4.3)
 
-    /// A document containing a Mix node saves and loads as the same graph: the node's op, and each
-    /// slot still tagged with the node it belongs to and which input it is. Everything else about a
-    /// slot is an ordinary folder and is covered by the group-property round trip above — which is
-    /// §4.3's storage decision holding, not a gap in this test.
-    func testAMixNodeRoundTripsThroughSaveAndLoad() {
+    /// A document containing a Mix node saves and loads as the same graph: the node's op, and its
+    /// operands in the order they were in. A node's inputs are its ordinary children now (§4.3), so
+    /// **the whole of the operand order is the containment and ranking the round trip already
+    /// preserves** — which is the storage decision holding, not a gap in this test.
+    func testAMixNodeRoundTripsThroughSaveAndLoadWithItsOperandsInOrder() {
         let manager = makeManager()
         let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
-        let slots = manager.inputSlots(ofNode: node)
-        XCTAssertEqual(slots.count, 2, "Setup: a `.fixed(2)` op should bring two slots with it")
-
-        let backdropLayerID = manager.layers[0].id
-        manager.restackLayer(backdropLayerID, above: .folder(slots[0].id), parentFolderID: slots[0].id)
+        let backdropID = manager.layers[0].id
+        let overID = manager.layers[1].id
+        // Backdrop first, then the layer that composites over it — dropped in that order, so a load
+        // that reordered them would show up as a swap rather than as a missing child.
+        manager.restackLayer(backdropID, above: .folder(node), parentFolderID: node)
+        manager.restackLayer(overID, above: .folder(node), parentFolderID: node)
+        XCTAssertEqual(inputLayerIDs(manager, ofNode: node), [backdropID, overID], "Setup: input 0 is the backdrop")
 
         let url = projectURL()
         saveAndWait(manager, to: url)
@@ -518,12 +520,110 @@ final class ProjectSaveLogicTests: XCTestCase {
 
         XCTAssertEqual(reloaded.folders.first { $0.id == node }?.compositorRole, .node(op: .mix(.multiply)),
                        "The op is the graph — a node that came back roleless would be silently demoted to a plain group")
-        XCTAssertEqual(reloaded.inputSlots(ofNode: node).map(\.compositorRole),
-                       [.slot(node: node, index: 0), .slot(node: node, index: 1)],
-                       "Both slots should come back tagged with their owner and index, and in the same order")
-        XCTAssertEqual(reloaded.inputSlots(ofNode: node).map(\.name), ["Input A", "Input B"])
-        XCTAssertEqual(reloaded.layers.first { $0.id == backdropLayerID }?.parentFolderID, slots[0].id,
-                       "A layer inside a slot is held by the slot folder like any other child — containment is unchanged by §4.3")
+        XCTAssertEqual(inputLayerIDs(reloaded, ofNode: node), [backdropID, overID],
+                       "Both operands come back, and in the same order — a swap here is a different picture, not a cosmetic difference")
+    }
+
+    /// **§4.3's input-slot migration, and the only test that can disprove it.** A node saved while
+    /// nodes had input-slot folders is a node folder plus two children tagged
+    /// `{"kind":"slot","node":…,"index":…}`. Reading that tag as *no role* has to leave the same
+    /// document: a node whose two operands are those folders, **input 0 still the one that was slot
+    /// 0** — because `parentFolderID` already named the node and the ranking already ran
+    /// bottom-to-top.
+    ///
+    /// Written by saving today's shape and injecting the retired tag, rather than by hand-rolling a
+    /// whole manifest: everything else about the package then really is what `ProjectStore` writes,
+    /// so a failure here is the migration and not a fixture typo.
+    ///
+    /// **Asserts the order, not the count.** Two children in the wrong order is exactly what a
+    /// migration that dropped the ranking would produce, and it passes any count-shaped assertion.
+    func testANodeSavedWithInputSlotFoldersOpensWithItsOperandsInSlotOrder() {
+        let manager = makeManager()
+        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        let inputA = manager.addFolder(name: "Input A", parentFolderID: node)
+        let inputB = manager.addFolder(name: "Input B", parentFolderID: node)
+        let backdropID = manager.layers[0].id
+        let overID = manager.layers[1].id
+        manager.restackLayer(backdropID, above: .folder(inputA), parentFolderID: inputA)
+        manager.restackLayer(overID, above: .folder(inputB), parentFolderID: inputB)
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        tagFoldersAsInputSlotsInSavedManifest(at: url, node: node, slots: [inputA, inputB])
+
+        guard let reloaded = ProjectStore.load(from: url) else {
+            return XCTFail("An old document must still open — a migration that throws costs the artist the file")
+        }
+        XCTAssertNil(reloaded.folders.first { $0.id == inputA }?.compositorRole,
+                     "A `slot` tag decodes as no role at all — the folder is ordinary now")
+        XCTAssertNil(reloaded.folders.first { $0.id == inputB }?.compositorRole)
+        XCTAssertEqual(reloaded.folders.first { $0.id == node }?.compositorRole, .node(op: .mix(.multiply)),
+                       "The node itself is untouched by the migration")
+
+        XCTAssertEqual(reloaded.inputs(ofNode: node).map(inputName(in: reloaded)), ["Input A", "Input B"],
+                       "Slot 0 was the backdrop and input 0 is the backdrop, so the operands must come back in that order — reversed here is a different picture")
+        XCTAssertEqual(inputLayerIDs(reloaded, ofNode: inputA), [backdropID],
+                       "…and each old slot still holds the artwork that was in it")
+        XCTAssertEqual(inputLayerIDs(reloaded, ofNode: inputB), [overID])
+    }
+
+    /// A folder written by a build that had never heard of input slots and a folder written by one
+    /// that had are both ordinary folders after the load; this is the *encode* half — the retired tag
+    /// is not writable, so no document saved from here on carries one.
+    func testTheRetiredSlotTagIsNotWritable() throws {
+        let node = FolderManifest(id: UUID(), name: "Mix", isExpanded: true, isVisible: true,
+                                  compositorRole: .node(op: .mix(.screen)))
+        let data = try JSONEncoder().encode(node)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let role = try XCTUnwrap(object["compositorRole"] as? [String: Any])
+        XCTAssertEqual(role["kind"] as? String, "node")
+        XCTAssertNil(role["index"], "The slot payload has no encoder left — `CompositorRole` is one case")
+    }
+
+    /// Rewrites a saved manifest so the named folders carry the retired `slot` tag, which is exactly
+    /// what a document saved before §4.3's redesign holds.
+    private func tagFoldersAsInputSlotsInSavedManifest(at url: URL, node: UUID, slots: [UUID],
+                                                       file: StaticString = #filePath, line: UInt = #line) {
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              var folders = json["folders"] as? [[String: Any]] else {
+            return XCTFail("The saved package should carry a manifest with a folders array", file: file, line: line)
+        }
+        var tagged = 0
+        for index in folders.indices {
+            guard let id = folders[index]["id"] as? String,
+                  let slot = slots.firstIndex(where: { $0.uuidString == id }) else { continue }
+            folders[index]["compositorRole"] = ["kind": "slot", "node": node.uuidString, "index": slot]
+            tagged += 1
+        }
+        XCTAssertEqual(tagged, slots.count, "Fixture: every slot folder should have been found and tagged",
+                       file: file, line: line)
+        json["folders"] = folders
+        guard let rewritten = try? JSONSerialization.data(withJSONObject: json) else {
+            return XCTFail("The rewritten manifest should re-encode", file: file, line: line)
+        }
+        try? rewritten.write(to: manifestURL)
+    }
+
+    /// The `layers` ids held directly by a container, bottom-to-top — the operand order, read the
+    /// same way the derivation reads it.
+    @MainActor
+    private func inputLayerIDs(_ manager: CanvasManager, ofNode nodeID: UUID) -> [UUID] {
+        manager.inputs(ofNode: nodeID).compactMap { entry in
+            guard case .layer(let index) = entry, manager.layers.indices.contains(index) else { return nil }
+            return manager.layers[index].id
+        }
+    }
+
+    @MainActor
+    private func inputName(in manager: CanvasManager) -> (CanvasManager.ContainerEntry) -> String {
+        { entry in
+            switch entry {
+            case .layer(let index): return manager.layers.indices.contains(index) ? manager.layers[index].name : "?"
+            case .folder(let folder): return folder.name
+            }
+        }
     }
 
     /// **The no-migration claim, stated as the only thing that could disprove it.** A folder written
@@ -538,6 +638,13 @@ final class ProjectSaveLogicTests: XCTestCase {
         let decoded = try JSONDecoder().decode(FolderManifest.self, from: Data(json.utf8))
 
         XCTAssertNil(decoded.compositorRole, "No role key means an ordinary folder, which is what every pre-phase-8 folder is")
+        XCTAssertNil(try JSONDecoder().decode(
+            FolderManifest.self,
+            from: Data("""
+            {"id":"\(UUID().uuidString)","name":"Input A","isExpanded":true,"isVisible":true,"opacity":1,
+             "compositorRole":{"kind":"slot","node":"\(UUID().uuidString)","index":0}}
+            """.utf8)).compositorRole,
+            "And a retired `slot` tag also means an ordinary folder — `decodeIfSupported`, not a throw the `try?` happens to swallow")
         XCTAssertFalse(decoded.wasSavedBeforeGroupProperties,
                        "`opacity` was present, so the §10.3 migration must stay disarmed — the new field must not disturb that signal")
         XCTAssertEqual(decoded.opacity, 0.5)
