@@ -141,6 +141,27 @@ UDID=$(xcrun simctl create "<slug>" com.apple.CoreSimulator.SimDeviceType.iPad-P
 xcrun simctl delete "$UDID"                            # when you are done
 ```
 
+**A device of your own stops you erasing someone else's. It does not stop you starving the machine —
+wrap every run in [tools/simlock.sh](tools/simlock.sh).**
+
+```bash
+tools/simlock.sh xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
+  -destination "platform=iOS Simulator,id=$UDID" ... -parallel-testing-enabled NO
+```
+
+`pgrep` above is a check, not a lock, and it fails precisely when it matters: several sessions each
+look, each see an idle machine, and all start at once. Measured 2026-08-16 with every session
+correctly holding its own device — 8 cores, 5 booted simulators, 5 concurrent `xcodebuild` runs,
+**1–3% idle**. At that load a suite does not merely run slowly, **it returns wrong answers**: the same
+shape-hold test passed and failed on the same binary depending on contention, and an agent spent a
+cycle tuning a timing constant against what was actually CPU starvation. That is the banner-vs-count
+trap in a new costume — a red result that is evidence about the machine, not about the code.
+
+`simlock.sh` holds one of `SIMLOCK_SLOTS` (default 2) for the life of the command, queues when they
+are taken, and reclaims a slot whose owner died so one `^C` cannot wedge the machine for everyone
+after. It needs no daemon and no cleanup. Raise the slot count only on a machine with more cores;
+two is sized for this one, where the full suite already fans out to four clones of its own.
+
 Passes clean → environmental. Say so in the summary, name the test, and move on; it is not a
 finding and does not need a fix. Fails clean → now it is yours, and you have a 30-second loop to
 debug it in instead of a 22-minute one.
