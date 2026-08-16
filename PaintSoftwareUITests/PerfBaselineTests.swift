@@ -1395,6 +1395,10 @@ final class PerfBaselineTests: XCTestCase {
     func testRenderResolutionScalesRebuildCost() {
         let manager = compositorManager(layerCount: 6)
         warmTheGPU()
+        // Named, not inherited — see `testWhereAWarmCompositeSpendsItself`, where trusting the global
+        // silently measured the wrong backend because cases run in name order and its predecessors
+        // write `.coreGraphics` back.
+        Compositor.backend = Compositor.defaultBackend
 
         func rebuild(at resolution: RenderResolution) -> Double {
             manager.renderResolution = resolution
@@ -1418,6 +1422,7 @@ final class PerfBaselineTests: XCTestCase {
         // is wrong here: `rebuild` is what writes it, so the restore has to outlive all three calls
         // and there is no scope that ends between them.
         UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
+        Compositor.backend = Compositor.defaultBackend
 
         report("render resolution, 6 layers at 2048x2048 (3 composites)", [
             ("full", milliseconds(full)),
@@ -1433,6 +1438,113 @@ final class PerfBaselineTests: XCTestCase {
         // not a ratio the simulator's timings could ever hold to.
         XCTAssertLessThan(half, max(full, 0.001),
                           "Half resolution composites a quarter of the pixels and must not cost more")
+    }
+
+    /// **Where a warm GPU composite actually spends itself — the number that decides whether
+    /// scissoring dispatches to a dirty rectangle is worth building.**
+    ///
+    /// The intuition behind dirty rectangles is unarguable in the abstract: a stroke touches a small
+    /// region and compositing the whole canvas for it is waste. But it only pays if the per-pixel
+    /// dispatches are where the time goes, and after the upload cache landed that stopped being
+    /// obvious — a composite still pays a *fixed* toll no scissor can reduce: one `compositeFill`, a
+    /// command buffer, `waitUntilCompleted`, and a full-canvas `getBytes` into a `CGImage` the view
+    /// layer can show.
+    ///
+    /// So this separates the two by measuring the same canvas at two layer counts and reading the
+    /// line. Cost is `intercept + layers · slope`: the slope is one `compositeOver` dispatch and is
+    /// exactly what a scissor shrinks, and the intercept is the per-composite floor that a scissor
+    /// cannot touch at all — it would take *rendering into a displayable surface instead of reading
+    /// back* to move that.
+    ///
+    /// Both counts are measured warm, because cold would measure the uploads instead and every leaf
+    /// in the live canvas is warm by the second rebuild.
+    ///
+    /// ### Measured twice per backend, Debug on the simulator, and the answer is not close
+    ///
+    /// | | CoreGraphics | | Metal | |
+    /// |---|---|---|---|---|
+    /// | one layer | 9.0 ms | 9.0 ms | 12.0 ms | 11.8 ms |
+    /// | eight layers | 73.7 ms | 58.1 ms | 17.8 ms | 13.9 ms |
+    /// | **per-layer slope** | **9.2 ms** | **7.0 ms** | **0.8 ms** | **0.3 ms** |
+    /// | fixed intercept | −0.3 ms | 2.0 ms | 11.2 ms | 11.5 ms |
+    /// | fixed share of six layers | 0% | 5% | 69% | 86% |
+    ///
+    /// **The two backends have opposite shapes, and that is the finding.** CoreGraphics is ~8 ms per
+    /// layer with no floor worth speaking of, so its cost is the document; Metal is a ~11.4 ms floor
+    /// with a slope at or near the noise, so its cost is the *frame*. Seven extra canvas-sized layers
+    /// cost the GPU between two and six milliseconds and cost the CPU another fifty.
+    ///
+    /// That floor is the command buffer round-trip plus the 16.8 MB `getBytes` and the `CGImage`
+    /// built on it — everything that happens once per composite regardless of what is in it.
+    ///
+    /// **So scissoring dispatches to a dirty rectangle would target 14–31% of the cost.** That is the
+    /// finding, and it is the opposite of what the idea promises: the waste is real, but it is not in
+    /// the per-pixel maths any more — the upload cache already removed the part that scaled with the
+    /// document. What is left is a per-frame toll that a smaller dispatch region does not reduce,
+    /// because the frame still ends by moving a whole canvas across the CPU/GPU boundary so a
+    /// `UIImageView` can show it. Removing *that* — compositing into a surface the view layer can
+    /// display directly, rather than reading back — is where the next real win is, and it would make
+    /// a dirty rectangle worth revisiting afterwards rather than before.
+    ///
+    /// **The ratio is simulator-bound; the shape of the argument is not.** A simulator models neither
+    /// an iPad's GPU bandwidth nor its submit latency, so do not quote 86% as a device figure. What
+    /// carries over is that a full-canvas per-pixel dispatch on an M-series GPU is a fraction of a
+    /// millisecond while a 16.8 MB readback and a `CGImage` allocation are real CPU work at any
+    /// canvas size. Confirming it on the device is a profile, not a guess, and is worth doing before
+    /// anybody spends a phase on scissoring.
+    @MainActor
+    func testWhereAWarmCompositeSpendsItself() {
+        warmTheGPU()
+
+        func cost(layerCount: Int, on backend: CompositorBackend) -> Double {
+            Compositor.backend = backend
+            return cost(layerCount: layerCount)
+        }
+
+        func cost(layerCount: Int) -> Double {
+            let manager = compositorManager(layerCount: layerCount)
+            guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else { return 0 }
+            func once() { autoreleasepool { _ = Compositor.composite(request) } }
+            once()  // warm: fills the upload cache for this fixture's leaves
+            // Averaged over several, because at these durations one run is mostly host noise — the
+            // whole point here is a slope between two numbers, and a slope amplifies whatever error
+            // is in either end of it.
+            let runs = 5
+            return measuringPeakMemory { for _ in 0..<runs { once() } }.seconds / Double(runs)
+        }
+
+        // **Both backends, and the backend is set explicitly rather than inherited.** Every other case
+        // in this section ends by writing `.coreGraphics` back into the global, and cases run in name
+        // order — so a test that merely trusted "the app's default" measured whichever backend its
+        // alphabetical predecessor happened to leave behind. That is not hypothetical: this case was
+        // written that way and reported `backend=coreGraphics` with a 9% fixed share, the exact
+        // opposite conclusion to the one it draws, and the only reason it was caught is that `report`
+        // prints the backend. Anything here that depends on the global has to name it.
+        for backend in [CompositorBackend.coreGraphics, .metal] {
+            let one = cost(layerCount: 1, on: backend)
+            let eight = cost(layerCount: 8, on: backend)
+            let slope = (eight - one) / 7
+            let intercept = one - slope
+            // What fraction of the fixture the rest of this section uses is floor rather than
+            // per-layer work — i.e. the share a perfectly scissored dispatch would leave exactly
+            // where it is.
+            let sixLayer = intercept + 6 * slope
+            let fixedShare = sixLayer > 0 ? intercept / sixLayer : 0
+
+            report("warm composite decomposition at 2048x2048, \(backend)", [
+                ("oneLayer", milliseconds(one)),
+                ("eightLayers", milliseconds(eight)),
+                ("perLayerSlope", milliseconds(slope)),
+                ("fixedIntercept", milliseconds(intercept)),
+                ("fixedShareOfSixLayers", String(format: "%.0f%%", fixedShare * 100)),
+            ])
+
+            // No assertion on the split — it is a design input, not a contract, and the honest ceiling
+            // on it is the same one every case here uses.
+            XCTAssertLessThan(eight, 30.0,
+                              "Eight warm \(backend) composites of a flat stack taking half a minute is structural")
+        }
+        Compositor.backend = Compositor.defaultBackend
     }
 
     /// **What a grade costs a composite**, on each backend, for a one-pass effect and a two-pass one.
