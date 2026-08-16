@@ -6,27 +6,39 @@ One section per bug, newest first.
 ## The smart-shape hold needs the pen to keep reporting while it is still (2026-08-16)
 
 `ShapeHoldClock` decides the hold from `UITouch.timestamp` — the newest sample seen minus the newest
-that moved — because that is the only clock a main-thread stall cannot fake, and because it makes the
-straightened-stroke bug unrepresentable rather than merely caught. **Its one assumption is that a pen
-held still keeps delivering `touchesMoved`.** If the input source goes silent while stationary, the
-newest timestamp stops advancing and the hold never completes.
+that moved — because that is the only clock a main-thread stall or a stalled delivery can't fake, and
+because it makes the straightened-stroke bug unrepresentable rather than merely caught. **Its one
+assumption is that a pen held still keeps delivering `touchesMoved`.** If the input source goes silent
+while stationary, the newest timestamp stops advancing and the hold never completes.
 
-**Measured: XCUITest's synthetic touch is such a source.** `PaintUITestCase.drawAndHoldShape` uses
-`press(forDuration:thenDragTo:withVelocity:thenHoldForDuration: 1.5)`, and after it `canvas.host`
-publishes `shape:none` — the hold does not fire at all, where the old wall-clock timer fired reliably.
-So the runner delivers less than 0.8 s of sample time during a 1.5 s stationary hold.
+**Measured against XCUITest, and the result is *intermittent*, which is the finding.** Of three tests
+driven by `PaintUITestCase.drawAndHoldShape` (`press(forDuration:thenDragTo:thenHoldForDuration: 1.5)`),
+`testHeldStrokeBecomesAShapeThatTheEraserCanRemove` passed — so the runner *does* deliver samples
+through a stationary hold, and 0.8 s of them accumulated. But
+`CanvasTransformFreezeUITests.testPinchingWithAPendingShape...` read `shape:none` straight after the
+same helper, so on that run they did not. The runs were taken on a machine at 1–3% idle with five
+other simulators live, which is the obvious suspect for the difference and is not evidence about a
+pencil either way.
 
-That is a fact about the test harness, not yet about an Apple Pencil, and the two are not the same
-input path — a real digitizer reports while in contact and a hand tremors. **It is unverified on
-device and the simulator cannot verify it.** What settles it: an `ActionRecorder` capture (CLAUDE.md)
-of a pencil held still on the canvas for two seconds, counting the `"event":"touch","phase":"moved"`
-lines during the still period and their `t` spacing — those carry the pencil's own clock, the same one
-this decision runs on. Samples continuing at roughly digitizer rate confirms the design; a run that
-stops dead falsifies it, and the answer then is a measured "the pen goes silent after N ms" rather
-than a wall-clock threshold brought back.
+So the assumption is **neither confirmed nor falsified**, and the honest summary is that the hold is
+now sensitive to how densely the input source reports while stationary, where the old wall-clock timer
+was not sensitive to it at all. Two things are needed before this is settled:
 
-Either way the shape-hold UI tests need a driver that keeps sending samples through the hold, since
-the current helper does not.
+ 1. A re-run of `ShapeRecoveryUITests` and `CanvasTransformFreezeUITests` on a quiet machine, per
+    CLAUDE.md's triage loop. Intermittent-under-load is exactly the shape that section warns about.
+ 2. **The device answer, which the simulator cannot give**: an `ActionRecorder` capture of a pencil
+    held still on the canvas for two seconds, counting the `"event":"touch","phase":"moved"` lines
+    during the still period and their `t` spacing — those carry the pencil's own clock, the same one
+    this decision runs on. Samples continuing at roughly digitizer rate confirms the design; a run
+    that stops dead falsifies it, and the answer then is a measured "the pen goes silent after N ms"
+    rather than a wall-clock threshold brought back.
+
+Also unresolved from the same run: `ShapeRecoveryUITests.testDraggingALinesStartHandleMovesThatEndAndLeavesTheOther`
+failed on "the line should have moved off its original path". That is a handle-drag assertion, not a
+hold one, so it has two possible causes — the hold not firing on that run, or the handle hit-target
+change (`reach` is now `22 / canvasScale` instead of a fixed 28 canvas units, which is *larger* on
+screen and should make grabbing easier, so it is not the obvious reading). Not diagnosed; re-run it
+isolated first.
 
 ## A stroke begun under a timeline popover stops being delivered, with no terminal callback (2026-08-16)
 
