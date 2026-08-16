@@ -3,6 +3,31 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The smart-shape hold needs the pen to keep reporting while it is still (2026-08-16)
+
+`ShapeHoldClock` decides the hold from `UITouch.timestamp` — the newest sample seen minus the newest
+that moved — because that is the only clock a main-thread stall cannot fake, and because it makes the
+straightened-stroke bug unrepresentable rather than merely caught. **Its one assumption is that a pen
+held still keeps delivering `touchesMoved`.** If the input source goes silent while stationary, the
+newest timestamp stops advancing and the hold never completes.
+
+**Measured: XCUITest's synthetic touch is such a source.** `PaintUITestCase.drawAndHoldShape` uses
+`press(forDuration:thenDragTo:withVelocity:thenHoldForDuration: 1.5)`, and after it `canvas.host`
+publishes `shape:none` — the hold does not fire at all, where the old wall-clock timer fired reliably.
+So the runner delivers less than 0.8 s of sample time during a 1.5 s stationary hold.
+
+That is a fact about the test harness, not yet about an Apple Pencil, and the two are not the same
+input path — a real digitizer reports while in contact and a hand tremors. **It is unverified on
+device and the simulator cannot verify it.** What settles it: an `ActionRecorder` capture (CLAUDE.md)
+of a pencil held still on the canvas for two seconds, counting the `"event":"touch","phase":"moved"`
+lines during the still period and their `t` spacing — those carry the pencil's own clock, the same one
+this decision runs on. Samples continuing at roughly digitizer rate confirms the design; a run that
+stops dead falsifies it, and the answer then is a measured "the pen goes silent after N ms" rather
+than a wall-clock threshold brought back.
+
+Either way the shape-hold UI tests need a driver that keeps sending samples through the hold, since
+the current helper does not.
+
 ## A stroke begun under a timeline popover stops being delivered, with no terminal callback (2026-08-16)
 
 **One bug, two symptoms, and the eraser is the clean view of it.** With a timeline block menu open,
