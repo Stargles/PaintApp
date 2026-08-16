@@ -392,6 +392,16 @@ extension CanvasManager {
         // sources are rasterized into it, the masks resolve at it, and both backends size their
         // buffers from it, so nothing downstream has to know a scale was applied at all. The view
         // stretches the result back over the canvas (`makeSandwichView`'s `.scaleToFill`).
+        //
+        // **One size for all three halves, and it is forced rather than chosen.** The tempting design
+        // is to render `full` natively and only reduce `below`/`above` — the artist would then see a
+        // sharp picture at rest and a soft one only while a stroke is down, which is strictly the
+        // nicer behaviour. It is not available here: the three requests share one `sources` array, and
+        // that sharing is the reason this is one call instead of three (see this function's note — the
+        // snapshot is the expensive half at 276 ms against an 84 ms composite). Two sizes means two
+        // snapshots, which costs more than the reduced composites save. So a reduced setting is soft
+        // at rest as well as mid-stroke, and making it otherwise is a change to how snapshots are
+        // taken rather than a change to this line.
         let renderSize = renderResolution.renderSize(for: canvasSize)
 
         // From the *whole* tree, not from either half — see `RenderRequest.maskStacks`.
