@@ -1324,6 +1324,13 @@ final class PerfBaselineTests: XCTestCase {
     /// composites over one shared `sources` array pay the ~100 MB upload three times over. On a stack
     /// with no effect in it the CPU is 8x faster here, which is what makes step 2 the prerequisite for
     /// the flag flip rather than an optimisation on top of it.
+    ///
+    /// **After the upload cache and the reused pool: cpu 74.6 ms, gpuCold 258.6 ms, gpuWarm 31.3 ms**,
+    /// with `scratchAllocated` at 0 and eleven cache hits per warm rebuild (six leaves for `full`,
+    /// three for `below`, two for `above`). Warm is 15.7x the old figure and 2.4x the CPU — and warm
+    /// is the state the live canvas is in, because a rebuild follows an edit to *one* layer. Cold
+    /// still loses to the CPU, which is the honest shape of this: the GPU wins every frame after the
+    /// first one at a given canvas size.
     @MainActor
     func testSandwichRebuildCostOnBothBackends() {
         let manager = compositorManager(layerCount: 6)
@@ -1359,6 +1366,8 @@ final class PerfBaselineTests: XCTestCase {
             ("gpuWarm", milliseconds(gpuWarm)),
             ("gpuAvailable", "\(CompositorMetalEngine.shared != nil)"),
             ("scratchAllocated", "\(CompositorMetalEngine.shared?.lastScratchAllocated ?? -1)"),
+            ("uploadHits", "\(CompositorMetalEngine.shared?.uploadCacheCounts.hits ?? -1)"),
+            ("uploadMisses", "\(CompositorMetalEngine.shared?.uploadCacheCounts.misses ?? -1)"),
         ])
 
         // Ceiling only, in this file's house style — read the reported numbers, do not tighten this.
@@ -1388,6 +1397,11 @@ final class PerfBaselineTests: XCTestCase {
     /// noise of the uploads around it. That single pair of numbers is the whole case for the flag:
     /// the flat-stack comparison favours the CPU 38 against 256, and any document carrying an
     /// adjustment layer reverses it by a factor of 28.
+    ///
+    /// **After the upload cache, with both backends warm: cpuUngraded 43.9 ms, cpuGraded 7047.5 ms,
+    /// gpuUngraded 21.0 ms, gpuGraded 18.8 ms.** The flat-stack comparison has flipped too — the GPU
+    /// is now ahead on the case it used to lose — and the graded comparison is 375x. There is no
+    /// remaining document shape among this file's fixtures where the CPU backend is the faster one.
     @MainActor
     func testEffectCompositeCostOnBothBackends() {
         let onePass = gradedCompositorManager(
@@ -1406,8 +1420,15 @@ final class PerfBaselineTests: XCTestCase {
         let cpuGraded = cost(gradedRequest)
         warmTheGPU()
         Compositor.backend = .metal
+        // **Both GPU figures are warm, and the pairing is the point of the test.** The two fixtures
+        // are separate `CanvasManager`s, so their cels are different objects and one does not warm
+        // the other's entries — measuring the graded one warm against the plain one cold would
+        // report the upload cache as though it were the grade, with the sign that flatters the GPU.
+        // A discarded run apiece puts both on the same footing, which is the footing the live canvas
+        // is in: a rebuild follows an edit to one layer, not to a document nobody has opened.
+        _ = cost(plainRequest)
         let gpuPlain = cost(plainRequest)
-        _ = cost(gradedRequest)                 // cold, discarded: fills the engine's caches
+        _ = cost(gradedRequest)
         let gpuGraded = cost(gradedRequest)
         Compositor.backend = .coreGraphics
 
