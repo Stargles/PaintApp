@@ -1374,6 +1374,67 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertLessThan(cpu, 30.0, "Three CPU composites of a flat 6-layer stack taking half a minute is structural")
     }
 
+    /// **What each render-resolution setting is worth**, so the Actions menu's three options can be
+    /// described to an artist in time rather than in percentages.
+    ///
+    /// Compositing is per-pixel almost everywhere, so the naive prediction is that cost tracks area —
+    /// 0.56x at 75% and 0.25x at half. It will not land there exactly, and the gap is the interesting
+    /// part: the fixed costs per composite (the command buffer, the encoder, the `CGImage` hand-off)
+    /// do not shrink with the canvas, and at reduced sizes the *snapshot* — `PixelOps.rasterize`
+    /// drawing native-resolution tiers down into a smaller context — is doing resampling it did not
+    /// have to do at full. Measured on the same fixture, backend held to the app's default.
+    ///
+    /// **Measured three times, Debug on the simulator, because one run of this is not worth quoting:**
+    /// full 46.0 / 116.9 / 38.1 ms, threeQuarter 28.8 / 29.3 / 32.0, half 12.9 / 12.2 / 13.1. The two
+    /// reduced settings are steady to within a millisecond or two and `full` swings by 3x, which is
+    /// the useful thing this told us and not a defect in the measurement: at full resolution the
+    /// rebuild is long enough to collide with whatever else the host is doing, and at half it is short
+    /// enough not to. Read it as **half ≈ a third of full, three-quarters ≈ two-thirds** and do not
+    /// quote the per-run ratios, which range from 0.10 to 0.34 for the same setting.
+    @MainActor
+    func testRenderResolutionScalesRebuildCost() {
+        let manager = compositorManager(layerCount: 6)
+        warmTheGPU()
+
+        func rebuild(at resolution: RenderResolution) -> Double {
+            manager.renderResolution = resolution
+            guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 3) else { return 0 }
+            func once() {
+                autoreleasepool {
+                    _ = Compositor.composite(requests.full)
+                    _ = Compositor.composite(requests.below)
+                    _ = Compositor.composite(requests.above)
+                }
+            }
+            once()  // warm: each resolution is its own set of cache keys, by pixel dimensions
+            return measuringPeakMemory { once() }.seconds
+        }
+
+        let full = rebuild(at: .full)
+        let threeQuarter = rebuild(at: .threeQuarter)
+        let half = rebuild(at: .half)
+        // Removing the key rather than writing `.full` back — see `SandwichLogicTests.tearDown`, which
+        // carries what this leak looked like when it was not cleaned up. `defer` would be tidier and
+        // is wrong here: `rebuild` is what writes it, so the restore has to outlive all three calls
+        // and there is no scope that ends between them.
+        UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
+
+        report("render resolution, 6 layers at 2048x2048 (3 composites)", [
+            ("full", milliseconds(full)),
+            ("threeQuarter", milliseconds(threeQuarter)),
+            ("half", milliseconds(half)),
+            ("threeQuarterRatio", String(format: "%.2f", full > 0 ? threeQuarter / full : 0)),
+            ("halfRatio", String(format: "%.2f", full > 0 ? half / full : 0)),
+            ("backend", "\(Compositor.backend)"),
+        ])
+
+        // The setting has to actually do something — a picker that changes no pixel count is worse
+        // than no picker. Deliberately loose: the claim is "half resolution is cheaper than full",
+        // not a ratio the simulator's timings could ever hold to.
+        XCTAssertLessThan(half, max(full, 0.001),
+                          "Half resolution composites a quarter of the pixels and must not cost more")
+    }
+
     /// **What a grade costs a composite**, on each backend, for a one-pass effect and a two-pass one.
     ///
     /// The split is the point. `brightnessContrast` is one dispatch over the canvas and resolves

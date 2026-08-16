@@ -38,6 +38,44 @@ final class SandwichLogicTests: XCTestCase {
     private let cyan = UIColor(red: 0, green: 1, blue: 1, alpha: 1)
     private let grey = UIColor(white: 128.0 / 255, alpha: 1)
 
+    /// **Held to CoreGraphics so that every "exact" in this file goes on meaning what it said.**
+    ///
+    /// The claims here are about the *walk* — that the `below` half is a prefix of the same one and
+    /// so is a copy rather than a requantization, that a folder that carries nothing costs nothing.
+    /// Isolating that means holding the backend fixed, exactly as `CompositorParityLogicTests` fixes
+    /// it when it wants to vary one thing at a time.
+    ///
+    /// It was not pinned before because it did not need to be: `Compositor.backend` defaulted to
+    /// `.coreGraphics` and no test here moved it. Now that the app ships `.metal`,
+    /// `testTheSandwichCostsAtMostAChannelStepWhereAlphaIsFractional`'s exact-0 assertion fails —
+    /// **and it fails for a real reason rather than a spurious one**, which is why the answer is to
+    /// pin here and measure the shipped configuration in a case of its own
+    /// (`testTheShippedBackendCostsTheLowerHalfAtMostOneChannelStep`) rather than to loosen this. The
+    /// reassembly draws GPU-composited halves through UIKit and compares them against a GPU-composited
+    /// whole, so the step is the documented backend-to-backend tolerance arriving in a new place, not
+    /// the sandwich's own arithmetic changing.
+    override func setUp() {
+        super.setUp()
+        Compositor.backend = .coreGraphics
+    }
+
+    /// **`renderResolution` writes through to `UserDefaults`, and a test that sets it poisons every
+    /// test that runs after it — in this process and in the next run on the same simulator.**
+    ///
+    /// Learned the hard way rather than anticipated: the three render-resolution cases below set it to
+    /// `.half` and `.threeQuarter`, and every `CanvasManager()` reads the stored value in its property
+    /// initialiser, so eight unrelated cases in this file started compositing at 32² and failing with
+    /// "Widths differ: 32 is not 64". Nothing in the failure named the setting.
+    ///
+    /// Removing the key rather than writing `.full` back, because those are different states: the key
+    /// being absent is what a fresh install has, and it is the only one of the two that leaves the
+    /// simulator's defaults exactly as this file found them.
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
+        Compositor.backend = Compositor.defaultBackend
+        super.tearDown()
+    }
+
     // MARK: - Fixtures
 
     /// `count` layers, each an opaque rectangle overlapping its neighbours so that any two of them
@@ -861,5 +899,105 @@ final class SandwichLogicTests: XCTestCase {
         XCTAssertEqual(requests.full.sources.map { $0 == nil }, reference.sources.map { $0 == nil })
         assertPixelsIdentical(Compositor.composite(requests.full), Compositor.composite(reference),
                               "And the frame composites to the same picture either way")
+    }
+
+    // MARK: - The shipped configuration
+
+    /// **What the exactness above costs in the backend the app actually runs**, measured rather than
+    /// assumed, because `setUp` pins this file to CoreGraphics and something has to check the other
+    /// one.
+    ///
+    /// `testTheSandwichCostsAtMostAChannelStepWhereAlphaIsFractional` asserts the lower half is exact
+    /// — 0, not "small" — and its argument is structural: `below` is a prefix of the same walk, drawn
+    /// into a still-transparent context, so it is a copy. That argument is about the *walk* and it
+    /// survives the flip untouched. What does not survive is the arithmetic being identical on both
+    /// sides of the comparison: mid-stroke the canvas shows GPU-composited halves recombined by Core
+    /// Animation, and it is measured against a GPU-composited whole, so the two backends' float→unorm8
+    /// rounding meets in a place it did not before.
+    ///
+    /// One step is the tolerance `CompositorParityLogicTests` already pins between the backends for
+    /// every blend mode, so this asserts the same bound rather than a new one — and it is worth having
+    /// as its own case so that a future change which makes it *two* is a failure with a name on it,
+    /// rather than a slow drift nobody is watching.
+    func testTheShippedBackendCostsTheLowerHalfAtMostOneChannelStep() {
+        Compositor.backend = Compositor.defaultBackend
+        let manager = stack(5)
+        for (offset, opacity) in [0.37, 0.53, 0.41, 0.29].enumerated() {
+            manager.layers[offset + 1].opacity = opacity
+        }
+        guard let low = makeSandwichAndExact(manager, active: 4) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        let delta = maxChannelDelta(low.sandwich, low.exact)
+        print("[sandwich] lower-half delta on \(Compositor.defaultBackend): \(delta)")
+        XCTAssertLessThanOrEqual(delta, 1,
+                                 "The lower half is still a prefix of the same walk; a delta of \(delta) "
+                                 + "is a different picture rather than the backends' documented rounding step")
+    }
+
+    // MARK: - Render resolution
+
+    /// **The containment `RenderResolution` claims, asserted rather than described.** The setting is
+    /// safe to leave switched on only because it cannot reach anything that is written down — so the
+    /// two halves of that are one test: the sandwich shrinks, and the request every other consumer
+    /// builds does not.
+    func testRenderResolutionScalesTheSandwichAndLeavesEveryOtherRequestAlone() {
+        let manager = stack(3)
+        guard let canvasSize = manager.canvasSize else { return XCTFail("Fixture needs a canvas size") }
+        manager.renderResolution = .half
+
+        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+              let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+            return XCTFail("Fixture must produce both shapes of request")
+        }
+
+        let halved = CGSize(width: canvasSize.width / 2, height: canvasSize.height / 2)
+        for (name, request) in [("full", requests.full), ("below", requests.below), ("above", requests.above)] {
+            XCTAssertEqual(request.canvasSize, halved, "The \(name) request renders at the chosen resolution")
+        }
+        XCTAssertEqual(reference.canvasSize, canvasSize,
+                       "`makeRenderRequest` is what the thumbnail and the saved package go through, and "
+                       + "a live-canvas preference must never reach either")
+
+        // The sources have to shrink with the request, not merely the buffers it composites into: a
+        // canvas-sized leaf under a half-sized full-canvas dispatch is the wrong-size-texture case
+        // `RenderResolution.renderSize` guards against, and it is a garbage frame rather than a soft
+        // one.
+        XCTAssertEqual(requests.full.sources.compactMap { $0 }.first?.image.width, Int(halved.width),
+                       "Sources are rasterized at the render size, not merely composited into it")
+        XCTAssertEqual(Compositor.composite(requests.full)?.width, Int(halved.width))
+        XCTAssertEqual(Compositor.composite(reference)?.width, Int(canvasSize.width))
+    }
+
+    /// `.full` has to be the exact identity, not "close enough at 100%" — otherwise the default
+    /// setting would route every document through a resize that rounds, and the byte-parity the
+    /// compositor tests pin would hold for the compositor and not for what reaches it.
+    func testFullResolutionIsTheIdentityByteForByte() {
+        let manager = stack(3)
+        manager.renderResolution = .full
+        guard let scaled = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+              let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+            return XCTFail("Fixture must produce both shapes of request")
+        }
+        XCTAssertEqual(scaled.full.canvasSize, reference.canvasSize)
+        assertPixelsIdentical(Compositor.composite(scaled.full), Compositor.composite(reference),
+                              "Full resolution must be the same walk over the same pixels it always was")
+    }
+
+    /// An odd canvas is where a scale factor turns into an off-by-one, and 75% of an odd number is
+    /// the case that exercises both roundings at once — see `RenderResolution.renderSize` for why
+    /// this is rounded upstream of the backends rather than inside them.
+    func testAnOddCanvasAtThreeQuartersKeepsSourcesAndCompositeTheSameSize() {
+        let manager = stack(3)
+        manager.canvasSize = CGSize(width: 65, height: 63)
+        manager.renderResolution = .threeQuarter
+        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1) else {
+            return XCTFail("Fixture must produce a sandwich")
+        }
+        let composite = Compositor.composite(requests.full)
+        XCTAssertEqual(composite?.width, requests.full.sources.compactMap { $0 }.first?.image.width,
+                       "A source wider than the composite reading it is a garbage frame on the GPU")
+        XCTAssertEqual(composite?.height, requests.full.sources.compactMap { $0 }.first?.image.height)
+        XCTAssertEqual(composite?.width, 49, "65 * 0.75 = 48.75, rounded once, upstream of both backends")
     }
 }

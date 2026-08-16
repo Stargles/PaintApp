@@ -817,7 +817,9 @@ final class CompositorParityLogicTests: XCTestCase {
     // MARK: - The GPU backend
 
     override func tearDown() {
-        Compositor.backend = .coreGraphics
+        // The default rather than `.coreGraphics` — see `Compositor.defaultBackend` for what
+        // restoring the literal cost once the default stopped being it.
+        Compositor.backend = Compositor.defaultBackend
         super.tearDown()
     }
 

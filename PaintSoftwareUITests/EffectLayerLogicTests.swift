@@ -70,7 +70,9 @@ final class EffectLayerLogicTests: XCTestCase {
     }
 
     override func tearDown() {
-        Compositor.backend = .coreGraphics
+        // The default rather than `.coreGraphics` — see `Compositor.defaultBackend` for what
+        // restoring the literal cost once the default stopped being it.
+        Compositor.backend = Compositor.defaultBackend
         MaskResolver.clearCache()
         super.tearDown()
     }

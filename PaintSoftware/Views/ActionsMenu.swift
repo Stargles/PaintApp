@@ -58,6 +58,8 @@ struct ActionsMenu: View {
 
             pencilOnlyToggle
 
+            renderResolutionControl
+
             Rectangle()
                 .fill(Color.white.opacity(0.15))
                 .frame(height: 1)
@@ -112,6 +114,46 @@ struct ActionsMenu: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .accessibilityIdentifier("actions.fingersCanPaintToggle")
+    }
+
+    /// How large the live canvas's composites are rendered (see `RenderResolution`). Persists across
+    /// launches, like the toggle above it and unlike `Compositor.backend`, which is a development
+    /// seam and deliberately not a user choice.
+    ///
+    /// **Sits directly under "Fingers Can Paint" rather than in its own section**, because the two are
+    /// the same kind of thing: a preference about this iPad and this artist's hands, rather than a
+    /// command that does something to the drawing. Everything above the divider acts on the document;
+    /// everything below it is a setting.
+    ///
+    /// A segmented picker, not a slider: there are three values and the artist should be able to see
+    /// all of them and land on one exactly. The subtitle says what the trade *is*, because "50%" on
+    /// its own does not tell anybody that the export is unaffected — which is the fact that makes the
+    /// setting safe to leave on.
+    private var renderResolutionControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: "square.resize").frame(width: 24)
+                Text("Render Resolution")
+                Spacer()
+            }
+            .foregroundColor(.white)
+
+            Picker("Render Resolution", selection: $canvasManager.renderResolution) {
+                ForEach(RenderResolution.allCases) { resolution in
+                    Text(resolution.title).tag(resolution)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("actions.renderResolutionPicker")
+
+            Text("Lower settings redraw layered artwork faster and look softer while you work. "
+                 + "Your artwork, exports and thumbnails are always saved at full size.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
     /// Adjustable light-grey drawable margin around the canvas (see `CanvasManager.setCanvasPadding`).

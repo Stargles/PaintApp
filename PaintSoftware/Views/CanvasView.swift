@@ -904,6 +904,20 @@ struct CanvasView: UIViewRepresentable {
             sandwichKey = key
             if key != sandwichCacheKey { startSandwichRebuild(for: key) }
 
+            // **Nearest-neighbour is right at full resolution and wrong below it.** `makeSandwichView`
+            // chooses `.nearest` because the composite is exactly canvas-sized, so the only scaling is
+            // the container's zoom transform and bilinear would blur pixels the host views keep crisp.
+            // A reduced-resolution composite breaks that premise: the image is genuinely smaller than
+            // the view, so *something* has to interpolate, and nearest turns one composite pixel into
+            // a hard 2x2 block. That reads as a broken renderer rather than as a soft preview, which
+            // is the difference between an artist using this setting and reporting it as a bug.
+            let filter: CALayerContentsFilter =
+                canvasManager.renderResolution == .full ? .nearest : .linear
+            if belowView.layer.magnificationFilter != filter {
+                belowView.layer.magnificationFilter = filter
+                aboveView.layer.magnificationFilter = filter
+            }
+
             // **Trap 1: do not blank the hosts until the first composite has landed.** On the very
             // first engage there is nothing cached, and blanking now would flash an empty canvas for
             // however long the rebuild takes.
@@ -1036,6 +1050,13 @@ struct CanvasView: UIViewRepresentable {
             let frame: Int
             /// Parallel to `layers`; nil where a layer has no cel at this frame.
             let contents: [LayerContentVersion?]
+            /// **An evaluation input like any other, and the one that is easiest to leave out.**
+            /// `RenderResolution` changes the size of all three cached images without changing a
+            /// single thing this key otherwise reads — not the tree, not a content version, not the
+            /// frame — so omitting it leaves the canvas showing the previous resolution's images until
+            /// something unrelated happens to move the key. That is not a stale *picture*, which this
+            /// cache tolerates by design; it is a control that visibly does nothing when you use it.
+            let renderResolution: RenderResolution
         }
 
         private func makeSandwichKey(tree: [RenderNode]) -> SandwichKey {
@@ -1069,7 +1090,8 @@ struct CanvasView: UIViewRepresentable {
                                            valueFill: canvasManager.layers[index].valueFill,
                                            effect: canvasManager.layers[index].layerEffect)
             }
-            return SandwichKey(tree: tree, activeLayerIndex: active, frame: frame, contents: contents)
+            return SandwichKey(tree: tree, activeLayerIndex: active, frame: frame, contents: contents,
+                               renderResolution: canvasManager.renderResolution)
         }
 
         // MARK: Rebuilding

@@ -71,7 +71,18 @@ enum Compositor {
     /// and an artist has no way to tell them apart except by waiting. The user-facing performance knob
     /// added alongside this is render resolution, which changes the *picture* and is therefore a
     /// choice somebody can actually make.
-    static var backend: CompositorBackend = .metal
+    static var backend: CompositorBackend = defaultBackend
+
+    /// What `backend` is in a process nobody has reconfigured — **the value a test's `tearDown`
+    /// restores, and the reason it is a named constant rather than a literal repeated in five files.**
+    ///
+    /// Four suites already set `.coreGraphics` in `setUp` (they want the reference implementation) and
+    /// wrote `.coreGraphics` back in `tearDown`, which was a correct restore for exactly as long as
+    /// that was also the default. The moment it stopped being one, those `tearDown`s became a way for
+    /// one suite to switch every suite that runs after it in the same process off the shipped backend
+    /// — silently, since the tests would go on passing against the slower path they were not written
+    /// to be measuring. Restoring *this* is what cannot rot.
+    static let defaultBackend: CompositorBackend = .metal
 
     /// Composites one frame. Pure: every input is a value the caller owns, so this is safe to call
     /// from any thread — which is the whole point of §9.1 point 3 and what makes §9.2's background

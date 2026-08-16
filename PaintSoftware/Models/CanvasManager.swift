@@ -342,6 +342,33 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// Defaults key for `renderResolution`. About the *machine* and the artist's tolerance for a soft
+    /// preview, not about any one drawing — the same argument `pencilOnlyDefaultsKey` makes, and the
+    /// reason neither of these is in a project's manifest. A document carried to a faster iPad should
+    /// not bring a downgraded canvas with it.
+    static let renderResolutionDefaultsKey = "paintapp.renderResolution"
+
+    /// How large the live canvas's composites are rendered — see `RenderResolution`, which carries
+    /// what it does and does not reach.
+    ///
+    /// Absent a stored preference this is `.full`, and that direction is not arbitrary: the failure
+    /// mode of defaulting to a reduced setting is an artist who never opens this menu concluding the
+    /// app renders softly, with nothing on screen to suggest a control exists. The failure mode of
+    /// defaulting to full is that they find the app slow on a heavy document — which is the state
+    /// they were in before this setting existed, and which sends them looking.
+    @Published var renderResolution: RenderResolution =
+        UserDefaults.standard.string(forKey: CanvasManager.renderResolutionDefaultsKey)
+            .flatMap(RenderResolution.init(rawValue:)) ?? .full
+    {
+        didSet {
+            guard oldValue != renderResolution else { return }
+            UserDefaults.standard.set(renderResolution.rawValue, forKey: Self.renderResolutionDefaultsKey)
+            // Recorded for the reason `pencilOnlyDrawing` is: a recording whose canvas looks soft, or
+            // whose composites are unexpectedly cheap, is explained entirely by this line.
+            ActionRecorder.ifRecording { $0.model("renderResolution", renderResolution.rawValue) }
+        }
+    }
+
     /// The full brush preset currently active (shape, hardness, spacing, stabilization, dynamics,
     /// scatter/rotation jitter, grain, blend mode). `brushSize`/`brushOpacity` above stay separate
     /// published properties rather than folded into this because `SideToolbar`'s sliders bind

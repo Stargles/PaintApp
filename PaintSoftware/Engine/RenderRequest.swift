@@ -183,6 +183,69 @@ struct LayerContentVersion: Hashable {
     }
 }
 
+/// How large the **live canvas's** composites are rendered, as a fraction of the canvas.
+///
+/// **A different axis from `RenderQuality`, and the two are deliberately not merged.** Quality is
+/// about how a *stroke* is put down — `.preview` stamps one `CGPath` where `.full` stamps hundreds of
+/// dabs — and it changes what a layer's own pixels look like at full size. This changes how many
+/// pixels there are. An artist choosing between them is choosing between "slightly different mark"
+/// and "same picture, softer", which are not the same trade and should not share a control.
+///
+/// **It reaches only `makeSandwichRequests`, and that containment is the whole safety argument.**
+/// Everything else that composites goes through `makeRenderRequest` and is untouched: the project
+/// thumbnail, the saved package, `MaskResolver`'s source stacks. So this setting cannot degrade
+/// anything that is written to disk or looked at later — the only thing it can make smaller is the
+/// image on screen right now, which is regenerated from scratch on the next rebuild.
+///
+/// **And it only bites on documents that engage the compositor at all** (`isSandwichEngaged` →
+/// `needsCompositorOnCanvas`). A stack with no blend modes, masks, effects or nodes stays on Core
+/// Animation's row of layer hosts at native resolution and this setting does nothing to it. That is
+/// the right shape for a performance knob: it is inert exactly where there was no problem, and it
+/// applies exactly to the documents that made the artist reach for it.
+enum RenderResolution: String, CaseIterable, Identifiable {
+    case full
+    case threeQuarter
+    case half
+
+    var id: String { rawValue }
+
+    var scale: CGFloat {
+        switch self {
+        case .full:         return 1
+        case .threeQuarter: return 0.75
+        case .half:         return 0.5
+        }
+    }
+
+    /// What the artist reads. Percentages rather than names like "Draft", because the number is the
+    /// thing they can reason about — half resolution is visibly half, and a word would have to be
+    /// learned.
+    var title: String {
+        switch self {
+        case .full:         return "Full"
+        case .threeQuarter: return "75%"
+        case .half:         return "50%"
+        }
+    }
+
+    /// The canvas size a composite at this resolution is rendered into.
+    ///
+    /// **Rounded to whole pixels here rather than left to the backends**, because they do not all
+    /// round in the same place: `Compositor` takes `Int(width.rounded())` while `PixelOps.rasterize`
+    /// hands the fractional size to a `UIGraphicsImageRenderer`. An odd canvas at 75% would then
+    /// produce a source one pixel wider than the composite reading it, which on the GPU is a
+    /// full-canvas dispatch over a texture of the wrong size — a garbage frame, not a soft one. One
+    /// rounding, upstream of both, removes the question.
+    ///
+    /// `max(1, …)` because a degenerate canvas must stay degenerate in the same direction the rest of
+    /// the pipeline already guards for, rather than becoming a zero-sized texture allocation.
+    func renderSize(for canvasSize: CGSize) -> CGSize {
+        guard self != .full else { return canvasSize }
+        return CGSize(width: max(1, (canvasSize.width * scale).rounded()),
+                      height: max(1, (canvasSize.height * scale).rounded()))
+    }
+}
+
 /// The canvas backdrop, when the request wants one drawn under the stack.
 ///
 /// Optional because the two consumers disagree and both are right: the live canvas paints a
@@ -324,13 +387,20 @@ extension CanvasManager {
         let tree = renderTree
         guard let halves = tree.split(atLeaf: activeLayerIndex) else { return nil }
 
+        // **`renderResolution` is applied here and nowhere else**, which is what makes it a live-canvas
+        // setting rather than a document one — see the type. One size for the whole request: the
+        // sources are rasterized into it, the masks resolve at it, and both backends size their
+        // buffers from it, so nothing downstream has to know a scale was applied at all. The view
+        // stretches the result back over the canvas (`makeSandwichView`'s `.scaleToFill`).
+        let renderSize = renderResolution.renderSize(for: canvasSize)
+
         // From the *whole* tree, not from either half — see `RenderRequest.maskStacks`.
         let maskStacks = maskSourceStacks(of: tree)
-        let snapshot = renderSources(atFrame: frame, canvasSize: canvasSize, quality: quality,
+        let snapshot = renderSources(atFrame: frame, canvasSize: renderSize, quality: quality,
                                      alsoIncluding: maskedLayerIndices(in: maskStacks))
         func request(_ tree: [RenderNode]) -> RenderRequest {
             RenderRequest(tree: tree, sources: snapshot.sources, contentVersions: snapshot.versions,
-                          maskStacks: maskStacks, frame: frame, canvasSize: canvasSize,
+                          maskStacks: maskStacks, frame: frame, canvasSize: renderSize,
                           background: nil, quality: quality)
         }
         return SandwichRequests(full: request(tree),

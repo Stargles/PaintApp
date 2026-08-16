@@ -26,12 +26,16 @@ toolset, and a frame-by-frame animation timeline.
   `CGBlendMode` where the two disagree; render-time alpha masks (never baked, raster and vector
   alike, including "clip to below"); and compositor **nodes** — a node's direct children are its
   inputs, bottom child first, and its dropdown picks either a blend op (two inputs) or one of the
-  effects (one input). See [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md)
+  effects (one input). Runs on the GPU (Metal), with the Core Graphics implementation kept as the
+  byte-for-byte reference it is measured against and as the fallback where there is no GPU. See
+  [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md)
 - **Effects**: 13, all configurable from the layer panel — levels, curves, brightness/contrast, HSV
   shift, gradient map, chromatic aberration, posterize, noise, gaussian/directional blur, bloom,
   sobel, sharpen and outline — with a curve editor and a gradient-stop editor for the two that need
   them. One shader per effect, used by both wrappers (value layer and node)
-- **Canvas**: adjustable padding margin, flip horizontal/vertical, custom size presets
+- **Canvas**: adjustable padding margin, flip horizontal/vertical, custom size presets, and a
+  **render resolution** setting (Full / 75% / 50%) that trades live-canvas sharpness for speed on
+  heavily layered artwork — it reaches only what is on screen, never the saved file or the export
 - **Vector eraser**: three CSP-style modes (erase, cut points, cut to intersection). An eraser *is* a
   stroke — it is an `.erase` element in the same z-ordered display list as the paint it eats, so it
   is non-destructive and undoable, and Mode 1 splits a cleanly severed stroke into real pieces
