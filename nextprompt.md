@@ -1,132 +1,130 @@
-# Next session — the layer-compositing project, after the phase 9 close-out
+# Handoff — UX pass round 2 (2026-08-16)
 
-You are the Orchestrator. `main` is the checkpoint and everything below is merged and pushed. Branch
-off `origin/main` per [CLAUDE.md](CLAUDE.md). [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md) §11 is the
-build order, §10 is what is still open.
+You are picking up an owner-feedback pass. Read this whole file, then `git fetch` and check the
+branch tips below against reality — **assume this file is stale until you have verified it**, per
+CLAUDE.md's own warning about handoff notes.
 
-## What shipped this session
+## Read these first
 
-| what | note |
+1. [CLAUDE.md](CLAUDE.md) — operating manual. The simulator, test-count and `simlock.sh` sections
+   are load-bearing and were all learned the hard way.
+2. [BUGS.md](BUGS.md) — open issues, including several this pass added or amended.
+3. This file.
+
+## State of the work
+
+`tmp/uxpass2` is the integration branch, **7 commits ahead of `main`, fast-tier green at 947 tests /
+0 failures** (verified twice, second time covering the block-drag + timeline-menu combination since
+both touched `TimelineTrackView.swift`).
+
+Landed on `tmp/uxpass2`:
+
+| Owner item | What shipped |
 |---|---|
-| **9b** — effect as a 1-input node | §4.4's second wrapper. `LayerFolder.effect`, one grade call after `fold` in each backend |
-| **9c** — Sobel, sharpen/unsharp, outline | §7, on the multi-pass contract. Four independent defences, all live |
-| **§4.3 redesign** — a node's children ARE its inputs | input-slot folders deleted from the product |
-| **§4.5** — the value layer | non-drawable, one flat colour, plugs into a Mix or blends with what's below |
-| **Mask sub-menu** | tapping Mask replaces the edit menu; Back returns. The tuning harness is now a feature |
-| **Test splits** | six heavy XCUITest classes → 18. Longest single unit 424s → ~189s |
-| onion skin ghosting a cel onto itself | fixed |
-| `testMovingThePlayheadRebuildsTheBlendedCanvas` order-dependence | fixed in setup, not by re-running |
-| `duplicateLayer` dropping `effect` | phase-9a bug, silent since 9a |
+| 2 — value layer Mode → Blend Mode | One merged row; `setLayerBlendMode` clears the grade, mirroring `setMixBlendMode`/`setNodeEffect` |
+| 5 — remove Adjust icon | Icon, enum case and `StubToolPanel.swift` deleted; the panel was a placeholder with no feature |
+| 6 — timeline frame cap | `goToFrame` raises `sceneFrameCount` instead of clamping; playback bounds use `contentEndFrame` and are unaffected |
+| 3a/3b — add-drawing menu | Gap tap now needs the same two-stage gate the cel tap had; three popovers collapsed into one |
+| 7 — block resize + shuffle | Push-not-shrink on both edges, cascade stops at first non-collision, length preserved; shuffle UI |
+| — | Stale `EffectLayerLogicTests` repair + new test for the clearing behaviour |
+| — | `tools/simlock.sh` test mutex |
 
-## Owner decisions — settled, do not re-ask
+**Branches not yet merged.** All were cut from `ea31aa2`, so **rebase each onto `tmp/uxpass2` before
+`--ff-only` merging**, in this order (later ones touch files earlier ones changed):
 
-1. **The sandwich through a blending Mix: not yet.** Delta 255 is structural, snaps correct on lift.
-2. **Drawing on a layer with no drawing surface**: stays selected, gesture is a no-op *with feedback*.
-   One mechanism (`Layer.hasNoDrawingSurface` → the "No Drawing Surface" alert) serves both the
-   effect layer and the value layer. Do not invent a second.
-3. **"Pause this mask" does not come back.** `isEnabled` means exactly "has sources".
-4. **The antialias constant stays 0.01.** §6.3's smoothstep is vestigial at that value (~0.34 px of
-   ramp) — say so rather than claiming a purpose it no longer serves.
-5. **§10.2 — ship neither new node op.** Not variadic arity, not the matte/key op. Masking on nodes
-   shipped instead. Re-ask about matte against whatever that turns out not to cover.
-6. **A Mix node has no blend mode of its own** — output is always Normal; wrap it in a folder to blend
-   the result. **Deleting a node promotes its children**, like any folder.
-7. **Value layers will be keyframable eventually, but not yet.** The seam is built and is the whole
-   point: the colour resolves in `renderSources(atFrame:)`, which already has the frame, so
-   `Compositor.swift`, `MetalCompositor.swift`, `Composite.metal` and `RenderTree.swift` have a
-   **zero-line diff** from the feature. Keyframes change one function and touch neither backend.
+- `tmp/compperf` @ `2797363` — 7 commits. **Blocked on two gates, see below.**
+- `tmp/shapefix` @ `9537209` — 4 commits. **Blocked on an owner recording, see below.**
+- `tmp/layergest` @ `0ae718b` — 2 commits. Was triaging one UI failure
+  (`testOpeningALayerMenuPutsMaskAndFillControlsOnTheRows`) in isolation; get that verdict first.
+- `tmp/stamping` — was at base when this was written; the agent may not have committed. Check.
 
-## Where verification stands
+Worktrees exist for all of the above plus `tmp/blockdrag`, `tmp/efftest`, `tmp/tlmenus` (all three
+already merged — **remove those three worktrees and delete their branches**).
 
-**Boundary suite green: 1023 total, 1020 passed, 0 failed, 3 skipped, 18.8 minutes**, on an erased
-simulator on a quiet machine. Zero failures — the first full run this project has had with nothing to
-triage, environmental or otherwise. The fast logic tier is 930: 928 passed, 0 failed, 2 skipped.
+## The two big findings, so you do not re-derive them
 
-That run also validated the test split end to end: 961 tests in 25.7 min became 1023 in 18.8 min,
-about 1.5x the throughput. The split had already been verified three other ways — the `func test`
-count held at 982 across the merge, the target compiles, and all 18 new class symbols are present in
-the compiled `.xctest` with all 6 old names gone — but scheduling is the thing only a full run proves.
+**1. The compositor was never on the GPU.** `Compositor.backend` defaulted to `.coreGraphics` and
+nothing in the app ever set `.metal` — only test files did. The Metal compositor was complete,
+parity-tested, and dead in the shipped binary. `tmp/compperf` fixes the upload cost first (it had no
+cache and rebuilt every layer's bytes per composite, ~100 MB/frame), then flips the default.
+Measured, Debug/simulator, 6 layers at 2048²: one repaint 491.8 ms → **31.3 ms**; the same plus one
+adjustment layer **7047 ms → 18.8 ms**.
 
-## Still open
+Dirty-rect scissoring was **deliberately not built**, and the reasoning should survive: per-layer GPU
+cost is now 0.3–0.8 ms while the *fixed* per-frame cost is ~11.4 ms (69–86% of a frame), and that
+fixed part is the readback that copies the finished image off the GPU. Scissoring cannot touch it.
+**The next real win is eliminating the readback** — render into a `CAMetalLayer` — and dirty rects
+become worthwhile only after that.
 
-- **`setLayerEffect` has no UI caller.** An effect layer is now *creatable* but not *configurable*: it
-  arrives as an identity Brightness/Contrast and stays that way forever. This is the same gap that
-  hid `addEffectLayer` and `addValueLayer` for three phases, one level in. An effect picker is a
-  design decision — ask the owner what it should look like rather than guessing.
-- **Onion skin overhaul.** The owner wants it to get its own menu and be customizable. Two things to
-  fold in, both in [BUGS.md](BUGS.md): the ghost renders **unmasked** (reuse
-  `resolveLiveMask(forLayerAt:)` / `RenderNode.masksClipping(leafAt:in:)`, do not write a second
-  mask-resolution path, and mind §6.4's warning that a `CALayer.mask` slot collision fails silently);
-  and a cel spanning many frames means "the previous drawing" is often nothing at all.
-- **A full Mix node refuses new children**, so dragging a layer out of an operand folder *up into* the
-  node is refused. Workaround is deleting the wrapper folder, which promotes in place. Rough edge the
-  fixed slots did not have — worth a second look if the owner hits it.
-- **No test uses a vector layer as a mask SOURCE.** Every `MaskParityLogicTests` fixture bakes raster
-  content into the source; the two vector cases make the vector layer the *masked* one. The owner's
-  original repro was vector-masked-by-vector, and the compositor was cleared by reading rather than
-  running.
-- **The solid for a value layer is minted per request with no memo.** Cheaper than a rasterize and off
-  the drawing path, but canvas-sized. If it shows in `PerfBaselineTests`, key a memo on `(hex, size)`
-  — a pure value, so it cannot go stale.
-- §10 items the redesign did not touch.
+**2. The "stroke turns into a line" bug is a stub, not a lag spike.** The owner worked this out and
+they were right. There is no stall: the popover teardown was **measured at 0.43 ms** against a
+hypothesis of ~800 ms. What happens is that touch delivery to the stroke *stops* a few samples in
+with **no terminal callback at all — not even cancel** (which is why the stub survives the pen lift
+and dies only when the next stroke rebuilds the scratch). The 0.8 s "freeze" the owner perceived is
+exactly the shape-hold constant elapsing with nothing left to reset it. The eraser shows the same
+stub without a line, because the shape detector is gated to pen/pencil.
 
-## The two hazards this project keeps paying for
+**The stub is traced but NOT fixed.** That is the most valuable piece of open work. Two candidates
+reading could not separate: a mid-sequence `isUserInteractionEnabled`/removal flip (`reconcileLayers`
+writes both), or UIKit dropping the sequence via the popover's presentation overlay. `BUGS.md` has
+the write-up. Note `StrokeGestureRecognizer.failTrackedStroke` is an existing BUGS.md entry — a path
+that fails an already-begun stroke which *nothing in the suite reaches* — and it is the right shape
+for this.
 
-**1. A green test proves its two operands are equal — which is not always the two things its name
-claims it compared.** Six instances now. The purest was
-`testDefaultSourceReturnsExactlyThePreviousCel`, which compared the current cel against itself
-because its fixture had only one cel. **Write the premise assertion**: assert the fixture is what the
-test thinks it is before asserting anything about behaviour.
+## Blocked on the owner — ask for these
 
-Corollary that cost real time this session: *merging* a branch cut before a deletion can silently
-resurrect what was deleted. Splitting `LayerUITests` brought back four tests for input-slot UI that
-no longer exists. Nothing complained — the only signal was the total reading 986 against a 982
-baseline. **Take a count before you merge and compare after.**
+1. **An ActionRecorder capture of a pencil held still for two seconds.** `tmp/shapefix` replaces the
+   wall-clock shape-hold timer with one measured in `UITouch.timestamp`, which is correct under both
+   the old and new diagnosis. Its one assumption is that a parked pencil keeps sending samples.
+   XCUITest's synthetic touch reports intermittently under load, so the simulator cannot settle it.
+   `BUGS.md` says exactly what to count in the JSONL. **Do not merge `tmp/shapefix` without this.**
+2. **A big-canvas, many-layer test on the actual iPad**, for `tmp/compperf`. The compositor now
+   caches up to 192 MB of layers plus scratch; on a 4000² canvas total GPU memory could reach
+   ~450 MB. There is a memory-warning purge but it is unverified on device.
+3. **Six shape questions** already put to the owner and unanswered: handle size; whether an oval's
+   axis drag should no longer rotate; whether snap should work after the pen lifts; whether
+   rectangles want mid-edge handles; whether an interrupted stroke should regain its hold window;
+   and whether a stroke cut short by the app's own menu should keep its ink (it is discarded on
+   purpose today, so a two-finger zoom mid-stroke cannot leave an un-undoable mark).
 
-Second corollary, and it is a trap specific to this codebase's UI tests: **a SwiftUI
-`.accessibilityIdentifier` on a container propagates to its descendants and beats their own.**
-`MaskTuningSection` carried one on its container stack, so both tuning sliders surfaced under the
-container's name and `maskTuning.threshold` named nothing at all — a test querying it would have
-found no element and, depending on how it asked, passed by never running. Wrapping a row in a
-`Button` does the same thing for a different reason: the label's subviews fold into one element, so
-`layerOptions.maskSummary` would have stopped existing as a `staticTexts` element. Put the tap target
-in an `.overlay` beside the texts instead. When you add an identifier, query it once and confirm it
-resolves before writing assertions against it.
+## Also gating `tmp/compperf`
 
-**2. A red xcresult is evidence about a *binary*, not about your working tree.** `test-without-building`
-reuses the last compiled bundle. This session spent an opus worker "fixing" three effects that were
-already correct: the run predated the rebuild, and every reported byte was the ratio between the
-draft constant (`1/4`) and the committed one (`1/√20`). **Before debugging a numeric failure, diff the
-constant the test names against the value it reports.** Thirty seconds against hours. Now recorded in
-CLAUDE.md next to the `** TEST SUCCEEDED **` warning, which is the same trap pointing the other way.
+**The XCUITest tier never completed** on that branch — two attempts, one killed by a concurrent
+session, one stalled under contention. It changes the live canvas path, so that is a real gate.
+Two test-hygiene traps it fixed are worth knowing: a persisted preference set by a test leaks through
+`UserDefaults` into later tests *and the next run on the same simulator*, and four suites restored a
+literal `.coreGraphics` in `tearDown`, which would have quietly switched later suites off the shipped
+backend (hence `Compositor.defaultBackend`).
 
-The effect abstraction has a structural version of hazard 1: both backends consume the same
-Swift-resolved values, so **a parity sweep cannot catch a mistake in the resolution** — both sides
-make it identically and pass green, and a same-author re-derivation in the test is not independent
-either. What works: impulse response against mathematics, separable-vs-direct-2D, a hand-computed
-spot check at a degenerate radius, an independent transcription in a different number of stages.
+## Process — read this, it cost this session real time
 
-## Machine and delegation discipline
+- **Wrap every `xcodebuild` in `tools/simlock.sh`.** This Mac hit 1–3% idle with 5 concurrent runs,
+  and contention does not just slow tests, it **returns wrong answers** — the same shape-hold test
+  passed and failed on the same binary, and an agent nearly tuned a shipped constant against CPU
+  starvation.
+- **Launch agents in waves of two or three, not one per work item.** The lock bounds the machine, not
+  the plan. The owner asked for this explicitly.
+- **Agents park waiting on test runs without committing.** Read their worktree directly — `git log`,
+  `git status`, the log file — rather than waiting for a resume round-trip. Tell them to commit
+  before waiting; several left work loose.
+- **Agents do not delete their simulators even when told to.** Sweep `xcrun simctl list devices`
+  yourself. Keep `eraser-mutex-test`; delete anything else you did not create.
+- The owner's behavioural theories are high-quality evidence and have twice beaten a code-tracing
+  agent. When a report names a duration, grep for that number before theorising.
 
-- Read `totalTestCount` from the xcresult, never the banner. Build `-only-testing` flags into a shell
-  ARRAY and pass `"${SUITES[@]}"` — zsh does not word-split unquoted `$VAR`.
-- A PASS under load is trustworthy; a FAIL under load is not. Read a failure's `file:line` before
-  believing its name.
-- **Set `model` explicitly on every delegated agent** — an omitted model inherits opus. Budget is
-  3 opus + 8 sonnet; opus for design-bearing work, sonnet for measurement, code-tracing and surveys.
-- The real ceiling is the two simulators, not the agent cap. Use
-  `/Users/juliapark/.config/paintapp/simlock.sh` with the literal `@SIM@` token, never `$SIM_UDID`.
-  One worktree per worker; workers run only the suites their own change touches.
-- **Ask the owner product questions in plain language** and define any term the project invented.
-  They judge behaviour, not internals.
-- `simlock.sh` still reaps a lock older than an hour even when its owner is alive, then erases the
-  device out from under it. Reap on a dead owner unconditionally; apply the age check only when the
-  pid is missing.
-- The graphify `PreToolUse` hook rebuilds in the background and leaves `graphify-out/GRAPH_REPORT.md`
-  dirty in the main worktree, which aborts a `--ff-only` merge. `git checkout --` it before merging.
+## Still open from BUGS.md, unrelated to this pass
 
-## Before you run out of context
+Duplicating a cel/layer drops its interpolation recipe (needs a product call on UUID remapping);
+Duplicate is a silent no-op against an adjacent neighbour; brush presets reset live size/opacity;
+onion skin renders unmasked; a mask sourced from a graded group can be stale; the fill-tool
+gap-closing UI test is still skipped. Also: a green backend-parity test does not prove both backends
+ran — **that matters much more now that Metal is the default**, and it should be closed alongside
+`tmp/compperf`.
 
-Rewrite this file and commit it, addressed to an Orchestrator — including this instruction. Write it
-early; a handoff written while you still have room is worth more than a complete one you never get to
-write. Land it on `main`.
+## Close-out, when the above is merged
+
+`git rebase origin/main` on `tmp/uxpass2`, `--ff-only` into main from the main worktree, remove every
+`PaintApp-*` worktree and `tmp/*` branch, append one line to [SESSION_LOG.md](SESSION_LOG.md) and drop
+the oldest so only five remain. Docs still need the prune CLAUDE.md asks for — `LAYER_COMPOSITING.md`
+is 870 lines and the feature is done, and BUGS.md still lists the Adjust panel as "Coming soon" when
+it was deleted this pass.
