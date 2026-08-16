@@ -93,6 +93,15 @@ Things that are cheap to break and expensive to relearn.
 12. **Experiment before believing a fix.** `Engine/Deform` compiles standalone with `swiftc` (~5 s a
     loop vs ~90 s through `xcodebuild test`); one session refuted three plausible fixes that way, one
     of which the literature positively recommended.
+13. **Registration is independent of stored sample density; the deformation is not.**
+    `ARAPRegistration` resamples every stroke to `samplesPerStroke` (16) by arc length before it
+    scores anything, so how finely a stroke was recorded cannot move the fit. `InterpolationEvaluator`
+    then warps the stroke by mapping **each stored sample**, so density *is* the resolution of the
+    bend. That asymmetry is what constrains `StrokeSampleGate`: its threshold is radial, which can
+    only push two stored samples one threshold further apart than the input already had them — so a
+    slow stroke becomes as coarse as a fast one already is, and no coarser. A deviation-based
+    simplifier (Douglas-Peucker and relatives) was rejected for exactly this: it collapses a straight
+    run to two points, and two points bend as a straight line under a warp that should curve them.
 
 ### What the papers say
 

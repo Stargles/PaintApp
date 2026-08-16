@@ -56,6 +56,7 @@ PaintSoftware/
 │   ├── BrushStamper.swift       #   shared stamp pipeline (shape/dynamics/grain)
 │   ├── Brush.swift / BrushLibrary.swift
 │   ├── StrokeInput.swift / StrokeStabilizer.swift
+│   ├── StrokeSampleGate.swift   #   which input samples become stored geometry (distance, not time)
 │   ├── StrokeGeometry.swift / VectorEraser.swift  # vector eraser geometry + the three modes
 │   ├── InterpolationEvaluator.swift / GuidePath.swift
 │   ├── Deform/                  #   lattice + ARAP deformation (app-type-free)

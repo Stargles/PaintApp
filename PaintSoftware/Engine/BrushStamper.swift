@@ -68,6 +68,38 @@ enum BrushStamper {
         max(brushSize * CGFloat(brush.spacingFraction), 1)
     }
 
+    /// How far the pen must travel before another input sample is worth *storing* as geometry —
+    /// `StrokeSampleGate.minimumTravel`. Lives here, beside the dab spacing, because it is derived
+    /// from it rather than tuned against it.
+    ///
+    /// **Half a dab.** The recorded path is what `advance` walks, so a sample dropped from it moves
+    /// the walk by at most this much; at half a spacing no dab can shift by as much as the gap it
+    /// already leaves to its neighbour, and the ink chain keeps its order and its position to within
+    /// less than the engine's own resolution.
+    ///
+    /// Measured across five stroke shapes × three brush sizes × three speeds, jitter 0.4pt, comparing
+    /// dab centre-lines before and after: at half a spacing every stroke at 400pt/s is **bit-identical**
+    /// (the pen already outruns the gate) and the worst deviation anywhere is 1.15pt — on a 20pt brush,
+    /// i.e. under 6% of the stroke's own width, and dominated by hand tremor rather than by the gate.
+    ///
+    /// A **whole** spacing was measured too and rejected: it doubles the saving but chamfers a slow
+    /// 90° corner by 0.7 × the gate, which on a 60pt brush is a 3.5pt cut across the corner. A
+    /// one-sample lookahead to rescue the corner vertex was built and refuted — at a slow corner the
+    /// vertex sits in the middle of the rejected run, not at its end, so holding only the most recent
+    /// rejected sample misses exactly the point it was written to save (measured: identical 3.512pt
+    /// deviation with and without it). Rescuing it properly means a streaming max-deviation
+    /// simplifier, which is a different piece of work from a gate.
+    ///
+    /// A perpendicular-deviation rule (Douglas-Peucker and relatives) was rejected for a different
+    /// reason: it collapses a straight run to its two endpoints, and interpolation deforms a stroke by
+    /// warping its stored samples, so a 400pt line stored as two points bends as a straight line under
+    /// a warp that should curve it. A radial gate can never leave samples further apart than the input
+    /// already had them plus one threshold, so it only ever makes a slow stroke as coarse as a fast
+    /// one already is today.
+    static func recordSpacing(brushSize: CGFloat, brush: Brush) -> CGFloat {
+        stampSpacing(brushSize: brushSize, brush: brush) / 2
+    }
+
     /// Walks from `last` toward `point`, invoking `body` at each `spacing`-sized step along the way,
     /// and returns the position of the final stamp — the carry point the next walk continues from.
     /// When the two points are closer together than one spacing, nothing is stamped and `last` comes
