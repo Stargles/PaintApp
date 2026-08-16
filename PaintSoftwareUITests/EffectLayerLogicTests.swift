@@ -367,12 +367,20 @@ final class EffectLayerLogicTests: XCTestCase {
     /// replaces the backdrop it grades — there are not two things to compose. Clip-to-below survives
     /// that untouched, because by the time the tree is built it is a mask and not a mode, which is
     /// what makes clipping an adjustment layer to the one below it work with no code of its own.
+    ///
+    /// **Written straight to `layers[1].blendMode`, not through `setLayerBlendMode`.** Since the UX
+    /// pass merged the value layer's Mode menu into Blend Mode, that setter clears `effect` the moment
+    /// a `.value` layer carrying one is given a new blend mode (see its doc) — so calling it twice here
+    /// would drop the effect after the first line, and the second assertion would no longer be about an
+    /// effect layer at all. This test is about what the *derivation* does with effect-plus-blend-mode,
+    /// however that combination is reached; `testPickingABlendModeClearsAValueLayersGradeAndRenamesIt`
+    /// below is what pins the setter clearing it.
     func testAnEffectLayerCarriesNoBlendModeButStillClipsToBelow() {
         let manager = greyUnderAnEffect()
-        manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
+        manager.layers[1].blendMode = .multiply
         XCTAssertEqual(manager.renderTree[1].blendMode, .normal, "A mode on an effect layer has nothing to compose")
 
-        manager.setLayerBlendMode(layerIndex: 1, to: .clipToBelow)
+        manager.layers[1].blendMode = .clipToBelow
         XCTAssertEqual(manager.renderTree[1].blendMode, .normal, "Clip to below is never a mode by this point")
         XCTAssertEqual(manager.renderTree[1].masks.count, 1,
                        "It is a mask whose source is the entry beneath — the same machinery any layer gets")
@@ -1281,6 +1289,31 @@ final class EffectLayerLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[1].name, "Sky tint", "…nor a second grade")
         manager.setLayerEffect(layerIndex: 1, to: nil)
         XCTAssertEqual(manager.layers[1].name, "Sky tint", "…nor going back to a flat colour")
+    }
+
+    /// **`setLayerBlendMode`'s half of the same collapse** — the two tests above are `setLayerEffect`'s.
+    /// The owner merged the value layer's separate Mode menu into Blend Mode (one row, one choice), so
+    /// picking a blend now answers "what does this layer do" exactly as picking a grade always has, and
+    /// the two can no longer coexist: choosing a blend on an effect-carrying layer clears the grade and
+    /// falls through to the same rename rule, mirroring `testACompositorNodeRenamesItselfToFollowItsOpAndItsGrade`'s
+    /// node version of the identical collapse.
+    func testPickingABlendModeClearsAValueLayersGradeAndRenamesIt() {
+        let manager = greyUnderAnEffect()
+        XCTAssertEqual(manager.layers[1].name, "Brightness / Contrast", "Premise: named for the grade it carries")
+
+        manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
+        XCTAssertNil(manager.layers[1].effect, "Picking a blend leaves nothing for the grade to have graded with")
+        XCTAssertEqual(manager.layers[1].blendMode, .multiply, "…and the blend itself is still recorded")
+        XCTAssertEqual(manager.layers[1].name, "Value 2",
+                       "The row must not go on advertising a grade the layer no longer applies")
+
+        // The artist's own name is never the picker's to take back — the same flag `setLayerEffect`
+        // answers to above.
+        manager.setLayerEffect(layerIndex: 1, to: Self.brighten)
+        manager.renameLayer(at: 1, to: "Sky tint")
+        manager.setLayerBlendMode(layerIndex: 1, to: .screen)
+        XCTAssertNil(manager.layers[1].effect, "The second blend pick clears a second grade the same way")
+        XCTAssertEqual(manager.layers[1].name, "Sky tint", "…but a hand-picked name survives a blend pick too")
     }
 
     /// **The rename and the grade are one undo step.** They are one edit as far as the artist is
