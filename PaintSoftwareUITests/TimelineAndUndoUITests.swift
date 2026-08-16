@@ -344,11 +344,16 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         XCTAssertLessThan(shrunk.length, 12, "Setup: the drag has to leave a gap to add a block into")
 
         // Tap two frames past the block's own right edge — an offset beyond the element's bounds,
-        // which is the only handle a test has on an empty timeline slot.
-        firstBlock.coordinate(withNormalizedOffset:
-            CGVector(dx: (Double(shrunk.length) + 2.0) / Double(shrunk.length), dy: 0.5)).tap()
+        // which is the only handle a test has on an empty timeline slot. Two taps, not one: the
+        // slot's menu is gated the same way a block's already was (tap once to select the frame,
+        // tap the now-selected frame again to open its menu), so the first tap only moves the
+        // playhead there and the second is what raises "Add Drawing".
+        let gapSlot = firstBlock.coordinate(withNormalizedOffset:
+            CGVector(dx: (Double(shrunk.length) + 2.0) / Double(shrunk.length), dy: 0.5))
+        gapSlot.tap()
+        gapSlot.tap()
         let addDrawing = app.buttons["Add Drawing"]
-        XCTAssertTrue(addDrawing.waitForExistence(timeout: 5), "Tapping an empty slot opens its menu")
+        XCTAssertTrue(addDrawing.waitForExistence(timeout: 5), "A second tap on the selected empty slot opens its menu")
         addDrawing.tap()
 
         // Keyframe C: the same L, moved right.

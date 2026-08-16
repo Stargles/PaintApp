@@ -496,16 +496,27 @@ struct TimelineTrackView: UIViewRepresentable {
         /// ("Add Drawing" / "Paste") at the tapped frame instead, same as tapping an existing block
         /// opens its options menu.
         ///
-        /// The tap also *selects* what it landed on — that layer, that frame — before the menu goes
-        /// up. Opening the menu used to be the whole of it, so the playhead stayed wherever it was
-        /// and the empty slot you were pointing at was never the one that got selected.
+        /// Same two-stage contract as `handleTapOnCel`: a tap only *selects* the layer and frame it
+        /// landed on; the menu opens on a second tap that lands on the spot already selected. Before
+        /// this gate the menu opened on every tap, which is what the owner reported as "the add
+        /// drawing menu... shows up just when I click on an empty cel" — a single tap was enough,
+        /// with no chance to point at a slot without a menu popping up over it.
         func handleTapOnGap(layerIndex: Int, start: Int, length: Int, tappedFrame: Int, anchor: CGRect) {
             let clamped = max(start, min(tappedFrame, start + length - 1))
-            canvasManager.currentLayerIndex = layerIndex
-            // Slots past the end of the scene have no frame to move to yet; "Add Drawing" extends
-            // the scene and lands the playhead there itself.
-            if clamped < canvasManager.sceneFrameCount { canvasManager.goToFrame(clamped) }
-            onRequestGapMenu?(layerIndex, clamped, anchor)
+            if layerIndex == canvasManager.currentLayerIndex, clamped == canvasManager.currentFrame {
+                onRequestGapMenu?(layerIndex, clamped, anchor)
+            } else {
+                canvasManager.currentLayerIndex = layerIndex
+                // No ceiling to guard against any more: `goToFrame` itself raises `sceneFrameCount`
+                // to admit wherever it's sent (see its own doc comment) rather than the caller having
+                // to keep a frame in bounds before calling it. The old `if clamped < sceneFrameCount`
+                // guard here predated that and was very likely the "only happens sometimes" the owner
+                // reported — a tap past the scene's current end skipped `goToFrame` entirely, so
+                // `currentFrame` never became the tapped frame, and the *next* tap on that same slot
+                // compared against a stale `currentFrame` and satisfied the gate on the first tap
+                // instead of the second.
+                canvasManager.goToFrame(clamped)
+            }
         }
     }
 }

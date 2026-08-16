@@ -4,11 +4,12 @@ import XCTest
 /// until the project is closed and reopened.
 ///
 /// The owner isolated the trigger by hand: **a stroke that begins while the timeline's empty-slot
-/// popover is still open.** Tap an empty cel slot, do not touch the "Add Drawing" / "Paste" menu it
-/// raises, and draw straight through it — the canvas is dead afterwards. Dismiss the menu first and
-/// draw, and it is fine. Everything the original report carried around that (two layers, two-frame
-/// blocks, a layer switch) is scenery: the layer switch was performed by tapping a cel slot, which
-/// is what raises the popover.
+/// popover is still open.** Tap an empty cel slot until its "Add Drawing" / "Paste" menu raises
+/// (one tap selects it, a second tap on the now-selected slot opens the menu — see CHANGE 1 of the
+/// owner's later "add drawing" pass), do not touch the menu, and draw straight through it — the
+/// canvas is dead afterwards. Dismiss the menu first and draw, and it is fine. Everything the
+/// original report carried around that (two layers, two-frame blocks, a layer switch) is scenery:
+/// the layer switch was performed by tapping a cel slot, which is what raises the popover.
 ///
 /// So `testCanvasFreezesWhenAStrokeBeginsWhileTheSlotPopoverIsOpen` is the bug and
 /// `testCanvasStillTransformsWhenTheSlotPopoverIsDismissedFirst` is the control that must keep
@@ -51,9 +52,16 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         assertPinchMovesCanvas(app, canvas, "Setup: the canvas pinches before any of this")
 
         let slot = try emptySlotCoordinate(app)
+        // Two taps, not one: the empty slot's menu is gated the same way a block's is (tap once to
+        // select the frame, tap the now-selected frame again to open its menu) since CHANGE 1 of the
+        // owner's "add drawing" pass — a single tap used to raise it directly, which was the other
+        // half of that same report ("shows up just when I click on an empty cel"). The bug this test
+        // pins is about the *popover*, not about how many taps raise it, so the fixture just needs to
+        // land on the new contract.
+        slot.tap()
         slot.tap()
         XCTAssertTrue(app.buttons["Add Drawing"].waitForExistence(timeout: 5),
-                      "PREMISE: tapping the empty slot has to raise the slot menu")
+                      "PREMISE: a second tap on the already-selected empty slot has to raise the slot menu")
 
         // Straight into the stroke, with the menu still up and untouched. This one touch both
         // dismisses the popover and starts the stroke, which is the whole trigger.
@@ -80,10 +88,12 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         assertPinchMovesCanvas(app, canvas, "Setup: the canvas pinches before any of this")
 
         let slot = try emptySlotCoordinate(app)
+        // See the matching comment in the test above: two taps to open the slot menu, not one.
+        slot.tap()
         slot.tap()
         let addDrawing = app.buttons["Add Drawing"]
         XCTAssertTrue(addDrawing.waitForExistence(timeout: 5),
-                      "PREMISE: tapping the empty slot has to raise the slot menu")
+                      "PREMISE: a second tap on the already-selected empty slot has to raise the slot menu")
         dismissPopover(app)
         XCTAssertFalse(addDrawing.exists, "PREMISE: the menu has to be closed before this stroke")
 
