@@ -549,6 +549,43 @@ final class CanvasManager: ObservableObject {
         notice = CanvasNotice(kind)
     }
 
+    /// A pinch-to-merge the layer panel is holding for confirmation rather than applying — set when
+    /// `mergeBlendModeWouldBeLost` says the pair's blend mode(s) would not survive `mergeLayers`.
+    ///
+    /// **Not `CanvasNotice`.** That banner's whole design is to inform *after* the fact, with no way
+    /// to gate or cancel an action already taken (its own doc: "does not take a tap to get rid of").
+    /// This has to pause the merge until the artist answers, which is a different shape of interrupt
+    /// — the owner's own request was a prompt that can be proceeded with or backed out of, not a
+    /// sentence that fades on its own while the merge has already happened.
+    ///
+    /// `Identifiable` so `LayerPanel` can drive a SwiftUI `.alert(presenting:)` straight off it; a
+    /// fresh `id` per raise for `CanvasNotice.raise`'s reason, though nothing here re-raises the same
+    /// pair today.
+    @Published var pendingMergeConfirmation: PendingMergeConfirmation?
+
+    struct PendingMergeConfirmation: Identifiable, Equatable {
+        let id = UUID()
+        let firstID: UUID
+        let secondID: UUID
+    }
+
+    /// Runs the merge a confirmed prompt named, then clears it.
+    ///
+    /// Re-reads nothing from the moment the prompt was raised except the two ids: `mergeLayers`
+    /// re-validates both are still layers with an active cel at the current frame, so a merge
+    /// confirmed after some other edit removed one of the pair fails the same guard an unconfirmed
+    /// call would, rather than needing its own staleness check here.
+    func confirmPendingMerge() {
+        guard let pending = pendingMergeConfirmation else { return }
+        pendingMergeConfirmation = nil
+        mergeLayers(pending.firstID, pending.secondID)
+    }
+
+    /// Backs out of a pending merge confirmation without applying it — the prompt's "Cancel".
+    func cancelPendingMerge() {
+        pendingMergeConfirmation = nil
+    }
+
     /// Ticks the debounce. The *what* travels in `pendingThumbnailRegens` rather than in the value,
     /// because `.debounce` keeps only the last element it saw — carrying `(layerIndex, celIndex)`
     /// directly would regenerate only the last-scheduled cel of a burst and leave earlier ones

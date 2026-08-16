@@ -318,6 +318,28 @@ extension CanvasManager {
         return (index - span.lowerBound) <= (span.upperBound + 1 - index) ? span.lowerBound : span.upperBound + 1
     }
 
+    /// Walks `container` outward through `levels` enclosing folders — the horizontal half of a
+    /// between-drop's parent resolution: dragging left backs the row out of one enclosing folder per
+    /// `LayerStackCell.indentPerLevel` of travel, and this is the walk that says which folder it lands
+    /// in once it has (`LayerStackListView.Coordinator.plannedDrop` is the caller, converting the
+    /// drag's x-position into `levels`). The owner's ask, verbatim: "moving it left, the orange line
+    /// disappears and it does not get put into the folder. For nested folders, moving it more left
+    /// moves it out of more folders."
+    ///
+    /// Stops early at the top level (`container` goes nil) rather than looping past it — walking
+    /// further left than the tree is deep just means "top level", not an error. A pure function of
+    /// `folders` kept here, in the file already compiled into the UI test target's logic-test group
+    /// (see `CanvasManagerTestSupport.swift`), rather than inlined in the view's gesture handler where
+    /// it would need `LayerStackListView`'s UIKit machinery pulled in just to pin it with a test.
+    func containerAfterExiting(_ container: UUID?, levels: Int) -> UUID? {
+        var current = container
+        for _ in 0..<levels {
+            guard let id = current else { break }
+            current = folders.first { $0.id == id }?.parentFolderID
+        }
+        return current
+    }
+
     /// Re-stacks `layerID` so it sits directly above `anchor`, inside `parentFolderID`.
     func restackLayer(_ layerID: UUID, above anchor: StackAnchor, parentFolderID: UUID?) {
         guard let from = layers.firstIndex(where: { $0.id == layerID }),
@@ -395,6 +417,26 @@ extension CanvasManager {
             }
         }
         return folder.id
+    }
+
+    /// Whether merging these two layers would lose either one's blend mode — the one loss the pinch's
+    /// confirmation warns about (the owner's own wording: "if you do this its just going to apply the
+    /// normal blend mode instead").
+    ///
+    /// A pure predicate rather than folded into `mergeLayers` itself, so `handlePinch` can ask it
+    /// *before* running an irreversible flatten and route a lossy pair through a confirmation instead
+    /// of applying it silently — `mergeLayers` has no notion of "ask first" and should not grow one
+    /// just for its one UI caller.
+    ///
+    /// Checks `blendMode` only. `PixelOps.flatten` (below) always composites with `blendMode: .normal`
+    /// hard-coded, so any other mode on either layer never survives — that is the loss this answers
+    /// for. A `.value` layer's grade or flat colour is a different, worse loss (its whole content, not
+    /// its blend mode) and is excluded from the pinch gesture entirely instead (`handlePinch`'s
+    /// `.began`), so this function is never asked about one.
+    func mergeBlendModeWouldBeLost(_ firstID: UUID, _ secondID: UUID) -> Bool {
+        guard let first = layers.first(where: { $0.id == firstID }),
+              let second = layers.first(where: { $0.id == secondID }) else { return false }
+        return first.blendMode != .normal || second.blendMode != .normal
     }
 
     /// Flattens two layers into one at the current frame — the pinch-together gesture in the layer

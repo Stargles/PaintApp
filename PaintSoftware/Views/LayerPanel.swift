@@ -33,6 +33,24 @@ struct LayerPanel: View {
             let stillSelected = canvasManager.layers.indices.contains(index) && canvasManager.layers[index].id == openID
             if !stillSelected { optionsLayerID = nil }
         }
+        // The pinch's own confirmation (`CanvasManager.pendingMergeConfirmation`) — a blocking
+        // Merge/Cancel rather than `CanvasNotice`'s banner, because this has to pause the merge until
+        // answered instead of reporting on one already done. `isPresented`'s setter is what catches a
+        // swipe-to-dismiss/tap-outside dismissal, which produces no button tap of its own; without it
+        // the model would still think a confirmation was pending after the alert had already gone.
+        .alert("Merge Layers?",
+               isPresented: Binding(
+                   get: { canvasManager.pendingMergeConfirmation != nil },
+                   set: { isPresented in if !isPresented { canvasManager.cancelPendingMerge() } }
+               ),
+               presenting: canvasManager.pendingMergeConfirmation) { _ in
+            Button("Cancel", role: .cancel) { canvasManager.cancelPendingMerge() }
+                .accessibilityIdentifier("layerPanel.mergeConfirm.cancel")
+            Button("Merge") { canvasManager.confirmPendingMerge() }
+                .accessibilityIdentifier("layerPanel.mergeConfirm.merge")
+        } message: { _ in
+            Text("One of these layers uses a blend mode other than Normal. Merging will apply Normal blend mode to the result instead.")
+        }
     }
 
     // MARK: - Header

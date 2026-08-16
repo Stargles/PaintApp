@@ -197,9 +197,10 @@ final class LayerPanelUITests: PaintUITestCase {
     ///
     /// Auto-grouping was a folder the artist never asked for, produced by a gesture they meant as a
     /// reorder: the drag that overshot by half a row wrapped two layers in a "Folder 1" that then had
-    /// to be found, opened and dissolved. Grouping is still reachable — the pinch — and that is the
-    /// deliberate split: the destructive-to-the-tree operation now needs a gesture nobody performs by
-    /// accident, and the one people perform constantly does the harmless thing.
+    /// to be found, opened and dissolved. A destructive combine is still reachable — the two-finger
+    /// pinch, which flattens the pair with `CanvasManager.mergeLayers` rather than grouping them — and
+    /// that is the deliberate split: the destructive-to-the-tree operation now needs a gesture nobody
+    /// performs by accident, and the one people perform constantly does the harmless thing.
     ///
     /// **`dropDY: 0.5` is load-bearing here, and is why the assertion is about the folder rather than
     /// only about the order.** A plain layer row no longer has an "onto" band at all: `dropOnto` losing

@@ -76,10 +76,29 @@ struct LayerStackListView: UIViewRepresentable {
         var dragProxy: LayerStackCell?
         var dragTouchOffset: CGFloat = 0
         var dropTarget: DropTarget?
+        /// The finger's x at `.began`, so `.changed` can measure how far left/right it has travelled
+        /// since. `UILongPressGestureRecognizer` has no `.translation(in:)` (that's
+        /// `UIPanGestureRecognizer`-only), so the delta has to be hand-tracked against a captured
+        /// start point — the same pattern `dragTouchOffset` already uses for the y-axis.
+        var dragStartX: CGFloat = 0
+        /// How many enclosing folders leftward drag has backed the row out of — one
+        /// `LayerStackCell.indentPerLevel` of travel per level, floored so small jitter doesn't step
+        /// it and clamped at 0 so rightward motion can never nest *deeper* than the row's natural drop
+        /// target. The owner's ask, verbatim: "if I have it in that position and move it left, the
+        /// orange line disappears and it does not get put into the folder. For nested folders, moving
+        /// it more left moves it out of more folders when it is eventually placed."
+        var dragExitLevel: Int = 0
+        /// The `dragExitLevel` last rendered by `updateDropTarget`. `dropTarget` alone is the vertical
+        /// row index and does not change as the finger moves sideways at a fixed height, so without a
+        /// second thing to compare, that function's early-return guard would never notice an exit-level
+        /// change and the orange guide would freeze until the finger also moved vertically.
+        var lastRenderedExitLevel: Int = 0
         /// Set for the one `reload()` that immediately follows a drop, which must not animate: the
         /// finger has just put the row where it goes, and animating the diff on top of that slides
         /// it in from wherever the old order had it. See `handleReorderDrag`'s `.ended` case.
         var isSettlingDrop = false
+        /// The `.began` work `handleReorderDrag` defers — see `secondTouchGraceInterval`'s doc.
+        var pendingReorderCommit: DispatchWorkItem?
 
         init(canvasManager: CanvasManager) {
             self.canvasManager = canvasManager
@@ -209,7 +228,11 @@ struct LayerStackListView: UIViewRepresentable {
         /// only way a preview can be right about that is to run the destination arithmetic rather
         /// than approximate it, and a second copy of this replay would be a second thing to keep in
         /// step with `restackLayer`'s rules.
-        func plannedDrop(draggedID: UUID, insertionIndex: Int)
+        /// `exitLevels` backs the landing out of that many enclosing folders beyond the one the
+        /// vertical position alone would choose — the horizontal half of a drop, from a leftward drag
+        /// (`dragExitLevel`). Defaulted to 0 so every caller that only cares about vertical placement
+        /// (the preview's fallback path, tests written before this existed) is unchanged.
+        func plannedDrop(draggedID: UUID, insertionIndex: Int, exitLevels: Int = 0)
             -> (rows: [LayerRowModel], newIndex: Int, moved: LayerRowModel, parentFolderID: UUID?)? {
             guard let from = rows.firstIndex(where: { $0.id == draggedID }) else { return nil }
             var reordered = rows
@@ -227,6 +250,11 @@ struct LayerStackListView: UIViewRepresentable {
                 let above = reordered[newIndex - 1]
                 parentFolderID = above.isFolder ? above.id : above.parentFolderID
             }
+            // The horizontal half of the drop — `canvasManager.containerAfterExiting` walks one
+            // `parentFolderID` outward per exited level. The anchor/index math above and
+            // `clampInsertion`'s own nudge to the exited folder's nearer edge don't need to know this
+            // happened; they just see a different (or nil) container to land in.
+            parentFolderID = canvasManager.containerAfterExiting(parentFolderID, levels: exitLevels)
             // A node holds only as many operands as its op takes (§4.3), so a drop that would be the
             // third child of a `.fixed(2)` Mix has no resting place in it. Sent to the node's own
             // container rather than left to `restackLayer`'s refusal: a drop that silently does
@@ -240,8 +268,8 @@ struct LayerStackListView: UIViewRepresentable {
         }
 
         /// A drop landing *between* rows — `plannedDrop`'s answer, performed.
-        func dropBetween(draggedID: UUID, insertionIndex: Int) {
-            guard let plan = plannedDrop(draggedID: draggedID, insertionIndex: insertionIndex) else { return }
+        func dropBetween(draggedID: UUID, insertionIndex: Int, exitLevels: Int = 0) {
+            guard let plan = plannedDrop(draggedID: draggedID, insertionIndex: insertionIndex, exitLevels: exitLevels) else { return }
             let reordered = plan.rows
             let newIndex = plan.newIndex
             let moved = plan.moved
@@ -331,6 +359,16 @@ struct LayerStackListView: UIViewRepresentable {
                 let lower = rows[max(firstPath.row, secondPath.row)]
                 // Only two plain layers merge — folders would need their contents flattened first.
                 guard !upper.isFolder, !lower.isFolder else { return }
+                // A `.value` layer (§4.4's grade, §4.5's flat colour) holds no pixels of its own —
+                // `mergeLayers` rasterizes its cel, which is blank, so pinching one in bakes a hole
+                // where its grade or colour used to be rather than merely losing a blend mode. That
+                // is content loss, not the "normal blend mode instead" trade the confirmation below
+                // offers, so it is excluded from the gesture entirely, the same way a folder already
+                // is, rather than folded into wording that would undersell what actually happens.
+                guard canvasManager.layers.indices.contains(upper.layerIndex),
+                      canvasManager.layers.indices.contains(lower.layerIndex),
+                      canvasManager.layers[upper.layerIndex].kind != .value,
+                      canvasManager.layers[lower.layerIndex].kind != .value else { return }
                 pinchPair = (upper.id, lower.id)
                 setPinchHighlight(true)
 
@@ -339,7 +377,17 @@ struct LayerStackListView: UIViewRepresentable {
                 if gesture.scale < 0.6 {
                     setPinchHighlight(false)
                     pinchPair = nil
-                    canvasManager.mergeLayers(pair.0, pair.1)
+                    // A blend mode neither layer carries stays lossless — `mergeLayers` is exactly
+                    // what "Merge Down" already calls. One that would be discarded
+                    // (`mergeBlendModeWouldBeLost`; `PixelOps.flatten` always composites `.normal`,
+                    // per `mergeLayers`'s own doc) is routed through a confirmation instead of applied
+                    // silently — the owner's own ask: "if so then just throw a prompt telling the user
+                    // that if they do this its just going to apply the normal blend mode instead."
+                    if canvasManager.mergeBlendModeWouldBeLost(pair.0, pair.1) {
+                        canvasManager.pendingMergeConfirmation = .init(firstID: pair.0, secondID: pair.1)
+                    } else {
+                        canvasManager.mergeLayers(pair.0, pair.1)
+                    }
                     // Cancel the recognizer so one pinch can't fire a second merge.
                     gesture.isEnabled = false
                     gesture.isEnabled = true
@@ -443,6 +491,27 @@ extension LayerStackListView.Coordinator {
         case between(insertionIndex: Int)
     }
 
+    /// How long `.began` waits before committing its visual side effects (hiding the row, floating
+    /// the drag proxy, locking scroll) — long enough that a second finger landing to start a pinch
+    /// (`handlePinch`) still has a chance to join before this recognizer has visibly taken over.
+    ///
+    /// **Why this exists.** Both recognizers are attached with `shouldRecognizeSimultaneouslyWith`
+    /// returning true (deliberately — see that method's own comment), on the theory that
+    /// `UIPinchGestureRecognizer` needing two touches is separation enough from a one-touch long
+    /// press. It is not: `numberOfTouchesRequired` is never set on `longPress` (default 1), so it
+    /// only needs one finger held within its allowable movement for `minimumPressDuration` — a
+    /// condition a real pinch attempt satisfies incidentally, because landing two fingers on two
+    /// *specific adjacent rows* before squeezing takes real aim, and that aim routinely outlasts half
+    /// a second with the first-landed finger nearly still. Once committed, hiding the row and
+    /// floating the proxy reads as a reorder-drag from the user's side regardless of what the second
+    /// finger does next.
+    ///
+    /// This narrows the race, it does not close it — a second finger landing after the grace window
+    /// elapses is indistinguishable from no second finger at all. Kept short on purpose: the ordinary
+    /// one-finger drag is the far more common gesture, and every millisecond here is paid by that one
+    /// too.
+    private static let secondTouchGraceInterval: TimeInterval = 0.12
+
     @objc func handleReorderDrag(_ gesture: UILongPressGestureRecognizer) {
         guard let tableView else { return }
         let point = gesture.location(in: tableView)
@@ -454,32 +523,32 @@ extension LayerStackListView.Coordinator {
             // not starting the drag.
             guard canvasManager.maskEditTarget == nil,
                   let path = tableView.indexPathForRow(at: point),
-                  rows.indices.contains(path.row),
-                  let cell = tableView.cellForRow(at: path) else { return }
+                  rows.indices.contains(path.row) else { return }
+            // Two fingers already down by the time this recognizes is as strong a pinch signal as one
+            // that joins moments later (below) — no need to wait out the grace window for it.
+            guard gesture.numberOfTouches < 2 else { return }
 
-            let model = rows[path.row]
-            dragRowID = model.id
-            let proxy = makeDragProxy(for: model, frame: cell.frame)
-            tableView.addSubview(proxy)
-            dragProxy = proxy
-            dragTouchOffset = point.y - cell.frame.midY
+            dragStartX = point.x
+            dragExitLevel = 0
+            lastRenderedExitLevel = 0
 
-            // **Hidden, not dimmed.** It used to sit at alpha 0.25, which the owner read as a bug —
-            // and fairly: the row is under the finger, so a ghost of it left behind says the row is
-            // in two places. Hiding it lets `animateRowShifts` close the stack up around the hole,
-            // which is the same preview every other drop position already gets.
-            cell.contentView.isHidden = true
-            tableView.isScrollEnabled = false
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            UIView.animate(withDuration: 0.15) { proxy.transform = CGAffineTransform(scaleX: 1.03, y: 1.03) }
+            let rowID = rows[path.row].id
+            pendingReorderCommit?.cancel()
+            let commit = DispatchWorkItem { [weak self] in self?.commitReorderStart(gesture: gesture, rowID: rowID) }
+            pendingReorderCommit = commit
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.secondTouchGraceInterval, execute: commit)
 
         case .changed:
             guard let proxy = dragProxy else { return }
             proxy.center.y = point.y - dragTouchOffset
+            dragExitLevel = max(0, Int(((dragStartX - point.x) / LayerStackCell.indentPerLevel).rounded(.down)))
             updateDropTarget(for: point)
 
         case .ended:
+            pendingReorderCommit?.cancel()
+            pendingReorderCommit = nil
             let target = dropTarget
+            let exitLevel = dragExitLevel
             // Preview shifts come off *before* the reorder, never across it. A preview translation
             // is an offset from the row's old position; once the model reorders, the table lays the
             // same cell out at its new position and that stale offset is added on top of it, so
@@ -497,7 +566,7 @@ extension LayerStackListView.Coordinator {
             case .onto(let rowIndex):
                 dropOnto(draggedID: draggedID, targetRow: rowIndex)
             case .between(let insertionIndex):
-                dropBetween(draggedID: draggedID, insertionIndex: insertionIndex)
+                dropBetween(draggedID: draggedID, insertionIndex: insertionIndex, exitLevels: exitLevel)
             }
             // Re-diff straight away rather than waiting for SwiftUI's own `updateUIView`, so the
             // new row order is on screen in the same frame the finger let go.
@@ -506,9 +575,44 @@ extension LayerStackListView.Coordinator {
             isSettlingDrop = false
 
         default:
+            pendingReorderCommit?.cancel()
+            pendingReorderCommit = nil
             finishDrag()
             pendingDragID = nil
         }
+    }
+
+    /// The `.began` work `handleReorderDrag` used to do inline, now deferred by
+    /// `secondTouchGraceInterval` so a joining second finger can still win the gesture to a pinch.
+    /// Bails silently if that grace elapsed without a live single-finger press to commit — the press
+    /// already ended or was cancelled, or (the case this exists for) was joined by a second touch.
+    ///
+    /// Re-resolves the row from `rowID` rather than trusting a captured `IndexPath`: identity is the
+    /// one thing guaranteed to still name the same row if anything reordered the list in the
+    /// meantime, the same reason `dropBetween`/`dropOnto` key off ids rather than indices.
+    private func commitReorderStart(gesture: UILongPressGestureRecognizer, rowID: UUID) {
+        guard let tableView,
+              gesture.state == .began || gesture.state == .changed,
+              gesture.numberOfTouches < 2,
+              let rowIndex = rows.firstIndex(where: { $0.id == rowID }),
+              let cell = tableView.cellForRow(at: IndexPath(row: rowIndex, section: 0)) else { return }
+
+        let point = gesture.location(in: tableView)
+        let model = rows[rowIndex]
+        dragRowID = model.id
+        let proxy = makeDragProxy(for: model, frame: cell.frame)
+        tableView.addSubview(proxy)
+        dragProxy = proxy
+        dragTouchOffset = point.y - cell.frame.midY
+
+        // **Hidden, not dimmed.** It used to sit at alpha 0.25, which the owner read as a bug —
+        // and fairly: the row is under the finger, so a ghost of it left behind says the row is
+        // in two places. Hiding it lets `animateRowShifts` close the stack up around the hole,
+        // which is the same preview every other drop position already gets.
+        cell.contentView.isHidden = true
+        tableView.isScrollEnabled = false
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        UIView.animate(withDuration: 0.15) { proxy.transform = CGAffineTransform(scaleX: 1.03, y: 1.03) }
     }
 
     /// Resolves a finger position into a drop target.
@@ -561,8 +665,12 @@ extension LayerStackListView.Coordinator {
                 resolved = .between(insertionIndex: rowIndex)
             }
         }
-        guard resolved != dropTarget else { return }
+        // `dropTarget` alone is the vertical row index, which a purely horizontal move never
+        // changes — checking `dragExitLevel` too is what lets dragging left/right at a fixed height
+        // still re-render the preview.
+        guard resolved != dropTarget || dragExitLevel != lastRenderedExitLevel else { return }
         dropTarget = resolved
+        lastRenderedExitLevel = dragExitLevel
         animateRowShifts()
         renderDropFeedback()
         renderDragProxyDepth()
@@ -635,7 +743,8 @@ extension LayerStackListView.Coordinator {
             // in its container" — so the container is the same one either way.
             parentID = rows[rowIndex].folderID ?? rows[rowIndex].parentFolderID
         case .between(let insertionIndex):
-            guard let plan = plannedDrop(draggedID: draggedID, insertionIndex: insertionIndex) else { return nil }
+            guard let plan = plannedDrop(draggedID: draggedID, insertionIndex: insertionIndex,
+                                         exitLevels: dragExitLevel) else { return nil }
             parentID = plan.parentFolderID
         }
         guard let parentID else { return (depth: 0, isNesting: false) }
@@ -740,6 +849,8 @@ extension LayerStackListView.Coordinator {
         tableView.isScrollEnabled = true
         dragRowID = nil
         dropTarget = nil
+        dragExitLevel = 0
+        lastRenderedExitLevel = 0
     }
 }
 

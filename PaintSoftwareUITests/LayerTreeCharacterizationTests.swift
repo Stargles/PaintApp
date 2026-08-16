@@ -637,4 +637,109 @@ final class LayerTreeCharacterizationTests: XCTestCase {
                      "An ordinary folder must not acquire an op — a folder the artist made is not a node")
         XCTAssertEqual(manager.folders.first { $0.id == node }?.compositorOp, .mix(.normal))
     }
+
+    // MARK: - Horizontal drag exit (the owner's "moving it left" bug)
+    //
+    // `containerAfterExiting` is the pure walk `LayerStackListView.Coordinator.plannedDrop` uses to
+    // turn a leftward drag into "back the row out of N enclosing folders" — pinned here, on
+    // `CanvasManager` directly, rather than through the view's gesture handling (see that function's
+    // own doc for why it lives on this side of the UIKit/logic boundary).
+
+    func testContainerAfterExitingOneLevelReturnsTheImmediateParent() {
+        let manager = namedManager(["A"])
+        let outer = manager.addFolder(name: "Outer")
+        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+
+        XCTAssertEqual(manager.containerAfterExiting(inner, levels: 1), outer,
+                       "One exited level backs out to Inner's own parent")
+    }
+
+    func testContainerAfterExitingTwoLevelsReachesTheGrandparent() {
+        let manager = namedManager(["A"])
+        let outer = manager.addFolder(name: "Outer")
+        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+
+        XCTAssertNil(manager.containerAfterExiting(inner, levels: 2),
+                     "Two exited levels clears Outer too — Inner has no grandparent, so this is the top level")
+    }
+
+    func testContainerAfterExitingZeroLevelsLeavesTheContainerUnchanged() {
+        let manager = namedManager(["A"])
+        let outer = manager.addFolder(name: "Outer")
+
+        XCTAssertEqual(manager.containerAfterExiting(outer, levels: 0), outer,
+                       "No horizontal drag at all must not change the vertical answer")
+    }
+
+    func testContainerAfterExitingPastTheRootStaysAtTheRootRatherThanCrashing() {
+        let manager = namedManager(["A"])
+        let outer = manager.addFolder(name: "Outer")
+
+        XCTAssertNil(manager.containerAfterExiting(outer, levels: 5),
+                     "Dragging further left than the tree is deep just means 'top level', not an error")
+    }
+
+    func testContainerAfterExitingANilContainerStaysNil() {
+        let manager = namedManager(["A"])
+
+        XCTAssertNil(manager.containerAfterExiting(nil, levels: 3),
+                     "Already at the top level: there is nothing further out to walk to")
+    }
+
+    // MARK: - Merge confirmation (pinch-to-merge)
+    //
+    // The pinch's own gesture-recognition race is UIKit-level and lives in
+    // `LayerStackListView.Coordinator` (see `secondTouchGraceInterval`'s doc); what is pure logic, and
+    // what is pinned here, is the *predicate* that decides whether a merge needs confirming, and the
+    // confirm/cancel bookkeeping around it — both plain `CanvasManager` state.
+
+    func testMergeBlendModeWouldBeLostWhenEitherLayerIsNotNormal() {
+        let manager = namedManager(["Bottom", "Top"])
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
+
+        XCTAssertFalse(manager.mergeBlendModeWouldBeLost(bottom, top), "Both Normal: nothing would be lost")
+
+        manager.layers[1].blendMode = .multiply
+        XCTAssertTrue(manager.mergeBlendModeWouldBeLost(bottom, top), "Top's Multiply never survives `PixelOps.flatten`'s hard-coded Normal")
+
+        manager.layers[1].blendMode = .normal
+        manager.layers[0].blendMode = .screen
+        XCTAssertTrue(manager.mergeBlendModeWouldBeLost(bottom, top), "Bottom's mode is lost exactly the same way")
+    }
+
+    func testMergeBlendModeWouldBeLostIsFalseForAnUnknownPair() {
+        let manager = namedManager(["A"])
+        XCTAssertFalse(manager.mergeBlendModeWouldBeLost(UUID(), UUID()),
+                       "Neither id resolves to a layer — nothing to warn about, and nothing to crash on")
+    }
+
+    func testConfirmingAPendingMergeRunsItAndClearsThePrompt() {
+        let manager = namedManager(["Bottom", "Top"])
+        manager.layers[1].blendMode = .multiply
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
+
+        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top)
+        manager.confirmPendingMerge()
+
+        XCTAssertNil(manager.pendingMergeConfirmation, "The prompt clears itself once answered")
+        XCTAssertEqual(manager.layers.count, 1, "…and the merge it was holding actually ran")
+        XCTAssertEqual(manager.layers[0].blendMode, .normal,
+                       "The owner's own wording: proceeding applies Normal blend mode to the result")
+    }
+
+    func testCancellingAPendingMergeLeavesBothLayersUntouched() {
+        let manager = namedManager(["Bottom", "Top"])
+        manager.layers[1].blendMode = .multiply
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
+
+        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top)
+        manager.cancelPendingMerge()
+
+        XCTAssertNil(manager.pendingMergeConfirmation)
+        XCTAssertEqual(manager.layers.count, 2, "Cancel means cancel — no merge happened")
+        XCTAssertEqual(manager.layers[1].blendMode, .multiply, "…and nothing about either layer changed")
+    }
 }
