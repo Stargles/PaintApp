@@ -373,12 +373,17 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         XCTAssertEqual(pasteManager.layers[0].cels.first { $0.startFrame == 4 }?.frameCount, 9)
     }
 
-    // MARK: - Edge resizing pushes into the neighbour
+    // MARK: - Edge resizing pushes the neighbour along, instead of shrinking or stopping at it
 
-    /// `resizeCelRightEdge` used to hard-clamp at the next block's `startFrame`. It now pushes: the
-    /// neighbour gives up frames from its leading edge instead of stopping the drag dead. These pin
-    /// the push, its one-frame floor, and the "already one frame long is an immovable wall" case,
-    /// none of which had coverage.
+    /// The contract these pin is not the original one. `resizeCelRightEdge` used to hard-clamp at
+    /// the next block's `startFrame - 1` and shrink that neighbour from its own leading edge — which
+    /// made a one-frame neighbour an immovable wall the drag simply could not get past. The owner
+    /// overruled that: with two-or-more blocks side by side, extending the first one right is now
+    /// supposed to shove the others along, each keeping its own length, not eat into them. See the
+    /// doc comments on `resizeCelRightEdge`/`resizeCelLeftEdge` in `CanvasManager+Timeline.swift` for
+    /// the full argument, including why every push has to be computed from a gesture's baseline
+    /// rather than the live model — `testOutAndBackRightEdgeDragWithinOneGestureRestoresEveryPushed
+    /// NeighbourExactly` below is what that baseline requirement is actually for.
     func testDraggingTheRightEdgeIntoTheNextCelPushesItRatherThanStopping() {
         let manager = CanvasFixture.manager()
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 5)])
@@ -386,39 +391,86 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 5)
 
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 5])
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [5, 3],
-                       "The neighbour keeps its end frame (8) and gives up its first two frames")
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [5, 5],
+                       "The neighbour keeps its length (5) and its end moves with it — translating, not shrinking")
         assertNoOverlappingCels(manager)
     }
 
-    func testDraggingTheRightEdgeStopsOneFrameShortOfConsumingTheNeighbour() {
+    /// A three-deep chain: pushing the first block far enough has to carry the second *and* the
+    /// third along, each still full length, not just shove the immediate neighbour and stop.
+    func testDraggingTheRightEdgeThroughMultipleNeighboursPushesAllOfThemTransitively() {
         let manager = CanvasFixture.manager()
-        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 5)])
+        CanvasFixture.setCelLayout(manager, layerIndex: 0,
+                                   [(start: 0, length: 3), (start: 3, length: 2), (start: 5, length: 2), (start: 7, length: 2)])
 
-        // The neighbour ends at 8; asking to run right through it must leave it one frame long.
-        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 40)
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 6)
 
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 7])
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [7, 1],
-                       "A block can't be squeezed out of existence — its floor is one frame")
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 6, 8, 10])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [6, 2, 2, 2],
+                       "All three later blocks moved, none of them shrank")
         assertNoOverlappingCels(manager)
     }
 
-    func testANeighbourAlreadyOneFrameLongIsAnImmovableWall() {
+    /// The owner's own worked example, verbatim, resolving what "push the neighbours" means when it
+    /// was first ambiguous whether the *whole* track downstream should shift or only the blocks the
+    /// resize actually collides with: "you have 4 animation blocks in frames 1 2 3 and 5. Extend
+    /// block 1 to occupy frames 1 and 2. The second and third animation block should move to frame 3
+    /// and 4 respectively, and the fifth animation block shouldn't move." The fourth block (at frame
+    /// 5) is the point of the example — the cascade in `resizeCelRightEdge` already stops the instant
+    /// a successor's baseline doesn't overlap the running cursor, and this is the owner's own case for
+    /// why that has to be true rather than shifting everything downstream by the same amount.
+    func testOwnersWorkedExampleFourBlocksCascadeStopsAtTheFirstNonCollision() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0,
+                                   [(start: 1, length: 1), (start: 2, length: 1), (start: 3, length: 1), (start: 5, length: 1)])
+
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 3)   // block 1 now occupies frames 1 and 2
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [1, 3, 4, 5],
+                       "Blocks 2 and 3 move to 3 and 4; block 4, at frame 5, has nothing left pushing on it and doesn't move")
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [2, 1, 1, 1])
+        assertNoOverlappingCels(manager)
+    }
+
+    /// The owner's second worked example, verbatim: "you have 2 animation blocks, the first on frame
+    /// 1 and the second on frames 2 and 3. You extend block 1 to occupy frame 1 and 2, then block 2
+    /// should now be 3 and 4 (animation block length preserved)." The parenthetical is the owner
+    /// stating the core invariant themselves — length survives the push unconditionally, which is
+    /// this file's whole departure from the contract it used to pin.
+    func testOwnersWorkedExampleTwoBlocksLengthPreservedThroughThePush() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 1, length: 1), (start: 2, length: 2)])
+
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 3)   // block 1 now occupies frame 1 and 2
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [1, 3])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [2, 2],
+                       "Block 2 is still 2 frames long, now at 3 and 4")
+        assertNoOverlappingCels(manager)
+    }
+
+    /// The bug this fixes, in one test: a neighbour this short used to stop the drag outright because
+    /// shrinking it below one frame was refused and there was nothing else the old contract could do.
+    /// Translating doesn't touch its length, so it has nothing to refuse — it just moves.
+    func testANeighbourOneFrameLongIsNoLongerAnImmovableWall() {
         let manager = CanvasFixture.manager()
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 1)])
 
         manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 9)
 
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 3])
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [3, 1],
-                       "There is nothing left to give, so the drag can't advance at all")
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 9])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [9, 1],
+                       "Still one frame long, just nine frames further along than where it started")
         assertNoOverlappingCels(manager)
     }
 
-    /// The push is an edit to the neighbour, not a temporary displacement: pulling the dragged block
-    /// back afterwards opens a gap rather than restoring the neighbour.
-    func testPullingTheRightEdgeBackAfterAPushLeavesAGapRatherThanRestoringTheNeighbour() {
+    /// Two *independent* calls — no gesture bracket open between them — each treat wherever the
+    /// model currently stands as their own baseline, so the second call has no way to know the first
+    /// call's push was part of the "same" drag. Pulling back therefore leaves a gap rather than
+    /// restoring the neighbour. This is the correct behavior for two unrelated edits; it is exactly
+    /// what `beginStructureGesture`/`gestureSnapshot` exist to prevent *within* one continuous drag —
+    /// see the bracketed version of this test below.
+    func testPullingTheRightEdgeBackAcrossTwoIndependentCallsLeavesAGapRatherThanRestoringTheNeighbour() {
         let manager = CanvasFixture.manager()
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 5)])
 
@@ -426,8 +478,31 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 3)
 
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 6])
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [3, 2],
-                       "Frames 3..<6 are now empty; the neighbour stays where the push put it")
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [3, 5],
+                       "Frames 3..<6 are now empty; the neighbour, still 5 long, stays where the first call put it")
+        assertNoOverlappingCels(manager)
+    }
+
+    /// The idempotence the correctness of the whole rewrite hinges on: `TimelineTrackView`'s pan
+    /// handler calls `resizeCelRightEdge` on every `.changed` event of a *single* drag, bracketed by
+    /// `beginStructureGesture()`/`commitStructureGesture(name:)`. Dragging out and back within that
+    /// one bracket must restore every pushed block exactly, because every call reads its baseline
+    /// from `gestureSnapshot` (frozen at `.began`) rather than from whatever the previous call left
+    /// behind — contrast with the unbracketed version above, where restoration is explicitly *not*
+    /// what happens.
+    func testOutAndBackRightEdgeDragWithinOneGestureRestoresEveryPushedNeighbourExactly() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3), (start: 3, length: 5)])
+
+        manager.beginStructureGesture()
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 5)   // pushes the neighbour
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 8)   // pushes it further
+        manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 3)   // back to where the drag started
+        manager.commitStructureGesture(name: "Resize Frame")
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 3],
+                       "Every intermediate push undone — this is the drift Change 1 exists to fix")
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [3, 5])
         assertNoOverlappingCels(manager)
     }
 
@@ -451,40 +526,91 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [1])
     }
 
-    /// The mirror image on the left edge: dragging back into the previous block shrinks it from its
-    /// *trailing* edge, floored at one frame.
+    /// The mirror image on the left edge: dragging back into the previous block translates it
+    /// earlier, keeping its length, instead of shrinking it from its trailing edge.
     func testDraggingTheLeftEdgeIntoThePreviousCelPushesItRatherThanStopping() {
         let manager = CanvasFixture.manager()
-        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 5), (start: 5, length: 3)])
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 3, length: 5), (start: 8, length: 3)])
 
-        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 3)
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 6)
 
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 3])
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [3, 5],
-                       "The previous block keeps its start frame and loses its last two frames")
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [1, 6])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [5, 5],
+                       "The previous block keeps its length (5) and its start moves with it")
         assertNoOverlappingCels(manager)
     }
 
-    func testDraggingTheLeftEdgeStopsOneFrameShortOfConsumingThePreviousCel() {
+    /// A three-deep chain walking left, mirroring the right edge's transitive test — with enough room
+    /// before frame 0 that the floor never engages, so this isolates the cascade from the clamp.
+    func testDraggingTheLeftEdgeThroughMultipleNeighboursPushesAllOfThemTransitively() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0,
+                                   [(start: 10, length: 2), (start: 12, length: 2), (start: 14, length: 2), (start: 16, length: 3)])
+
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 3, newStartFrame: 11)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [5, 7, 9, 11])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [2, 2, 2, 8],
+                       "All three earlier blocks moved, none of them shrank")
+        assertNoOverlappingCels(manager)
+    }
+
+    /// Frame 0 is a hard floor, but it only clips the shortfall — a push that reaches it is still a
+    /// push, just capped, not silently refused outright the way `testDraggingTheLeftEdgeIsANoOp...`
+    /// below is.
+    func testDraggingTheLeftEdgeIsFlooredAtFrameZeroWhenThePushWouldGoFurther() {
         let manager = CanvasFixture.manager()
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 2, length: 5), (start: 7, length: 3)])
 
         manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 0)
 
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [2, 3])
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [1, 7],
-                       "The previous block starts at 2 and keeps one frame, so the floor is 3")
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 5])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [5, 5],
+                       "The previous block is pushed exactly to frame 0, keeping its full length, and the dragged block follows it as far as that allows")
         assertNoOverlappingCels(manager)
     }
 
-    func testAPreviousCelAlreadyOneFrameLongIsAnImmovableWall() {
+    /// The previous block already sits flush against frame 0 with nothing to give — the push has
+    /// nowhere to put it, so the whole drag is a no-op rather than a partial or negative one.
+    func testDraggingTheLeftEdgeIsANoOpWhenThePredecessorAlreadyHasNoRoomToGive() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 5), (start: 5, length: 3)])
+
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 3)
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 5])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [5, 3],
+                       "Nothing moved: the previous block was already touching frame 0")
+        assertNoOverlappingCels(manager)
+    }
+
+    /// Left-edge mirror of the right edge's out-and-back test — the deficit-and-shift floor logic is
+    /// enough more involved than the right edge's unbounded push that it earns its own idempotence
+    /// check rather than trusting the mirror to be exact by inspection.
+    func testOutAndBackLeftEdgeDragWithinOneGestureRestoresEveryPushedNeighbourExactly() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 2, length: 5), (start: 7, length: 3)])
+
+        manager.beginStructureGesture()
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 5)   // pushes the previous block
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 0)   // pushes it into the floor
+        manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 7)   // back to where the drag started
+        manager.commitStructureGesture(name: "Resize Frame")
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [2, 7])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [5, 3])
+        assertNoOverlappingCels(manager)
+    }
+
+    func testAPreviousCelOneFrameLongIsNoLongerAnImmovableWall() {
         let manager = CanvasFixture.manager()
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 4, length: 1), (start: 5, length: 3)])
 
         manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 0)
 
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [4, 5])
-        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [1, 3])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 1])
+        XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [1, 7],
+                       "Still one frame long, just pushed down to frame 0 instead of staying put")
         assertNoOverlappingCels(manager)
     }
 

@@ -171,9 +171,12 @@ extension CanvasManager {
     func extendCelToEnd(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
-        // Clamped at the next block's start rather than left to `resizeCelRightEdge`'s own ceiling:
-        // that one pushes into the neighbour, which is right for a deliberate edge drag but not for
-        // a menu item whose whole promise is "fill the empty space after this".
+        // Clamped here at the next block's start rather than left to `resizeCelRightEdge`, which no
+        // longer has a ceiling of its own to fall back on — it now pushes a neighbour (and whatever
+        // is past it) out of the way instead of stopping at it, on the strength of being a deliberate
+        // edge drag the artist is watching happen. A menu item is not that: its whole promise is
+        // "fill the empty space after this," so it still needs its own stop, and this clamp is now
+        // the only thing standing between it and pushing every block after it down the timeline.
         let stop = neighborBounds(layerIndex: layerIndex, celIndex: celIndex).upperBound
         withStructureUndo(name: "Extend Frame") {
             resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex,
@@ -204,43 +207,88 @@ extension CanvasManager {
         return (lower, upper ?? Int.max)
     }
 
-    /// The block immediately after `celIndex` on the same layer, if any. Cels never overlap, so
-    /// "after" is just the smallest start frame among the ones that don't begin before this cel.
-    private func nextCelIndex(layerIndex: Int, after celIndex: Int) -> Int? {
-        let cel = layers[layerIndex].cels[celIndex]
-        return layers[layerIndex].cels.indices
-            .filter { $0 != celIndex && layers[layerIndex].cels[$0].startFrame >= cel.startFrame }
-            .min { layers[layerIndex].cels[$0].startFrame < layers[layerIndex].cels[$1].startFrame }
-    }
-
-    /// The block immediately before `celIndex` on the same layer, if any.
-    private func previousCelIndex(layerIndex: Int, before celIndex: Int) -> Int? {
-        let cel = layers[layerIndex].cels[celIndex]
-        return layers[layerIndex].cels.indices
-            .filter { $0 != celIndex && layers[layerIndex].cels[$0].endFrame <= cel.startFrame }
-            .max { layers[layerIndex].cels[$0].endFrame < layers[layerIndex].cels[$1].endFrame }
-    }
-
     /// Drag the block's left edge: keeps the right edge fixed, changes startFrame/frameCount.
     /// Deliberately NOT wrapped in `withStructureUndo` here — `TimelineTrackView`'s pan handler
     /// calls this on every `.changed` event of the drag, so it brackets the whole gesture itself
     /// with `beginStructureGesture()`/`commitStructureGesture(name:)` instead of one step per call.
     ///
-    /// Dragging past the block before it doesn't stop at that block — it pushes into it, and the
-    /// neighbour gives up frames from its trailing edge. See `resizeCelRightEdge` for the floor.
+    /// **This replaces the old contract, on the owner's explicit instruction, not an oversight.**
+    /// It used to stop the drag dead at `previous.startFrame + 1`, shrinking the previous block from
+    /// its trailing edge — argued at the time as "how timeline editors generally behave." The owner
+    /// disagreed: with two-or-more blocks side by side, extending one into a neighbour is now
+    /// supposed to shove that neighbour out of the way, keeping its own length, rather than eat into
+    /// it or wall the drag off. So: dragging past the block before this one translates it earlier by
+    /// the overlap, `frameCount` unchanged, and — new, since a chain of one-frame blocks used to each
+    /// be their own immovable wall — keeps walking earlier through however many further blocks the
+    /// push reaches, translating each one in turn. See `resizeCelRightEdge`'s comment for the mirror
+    /// image and for why every push is computed from a fixed baseline rather than the live model.
+    ///
+    /// The one direction `resizeCelRightEdge` doesn't have to answer for: frame 0. A block dragged
+    /// far enough left eventually asks something to occupy a negative frame, which doesn't exist.
+    /// Two ways to fail to do that: stop the resize once it would (what this does), or let it happen
+    /// and clip/wrap silently. Silent clipping was rejected — it would mean the previous block's
+    /// reported length disagrees with what the handle visually did, which is a worse bug than the
+    /// resize just refusing to go further, and "refusing to go further" is exactly what a floor at
+    /// frame 0 already reads as everywhere else in this file (a cel can't be squeezed below one
+    /// frame; this is the same shape, applied to the timeline's own edge instead of a neighbour's
+    /// minimum length).
     func resizeCelLeftEdge(layerIndex: Int, celIndex: Int, newStartFrame: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        let cel = layers[layerIndex].cels[celIndex]
-        let previous = previousCelIndex(layerIndex: layerIndex, before: celIndex)
-        let floor = previous.map { layers[layerIndex].cels[$0].startFrame + 1 } ?? 0
-        let clampedStart = max(floor, min(newStartFrame, cel.endFrame - 1))
+        // Baseline for every position in this call — the resized cel's own anchor (its endFrame,
+        // which this edge never moves) and every predecessor's untouched start/length — comes from
+        // `gestureSnapshot` when a drag has one open, not from `layers` as it currently stands. See
+        // `resizeCelRightEdge`'s comment for why: reading the live (already-pushed) state here is
+        // exactly the bug that made dragging out and back not restore the neighbours.
+        let baseline = gestureSnapshot?.layers ?? layers
+        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return }
+        let baselineCel = baseline[layerIndex].cels[celIndex]
+        let requestedStart = min(newStartFrame, baselineCel.endFrame - 1)
+
+        // Predecessors this push could reach, nearest first — the direction the cascade walks.
+        let predecessors = baseline[layerIndex].cels.enumerated()
+            .filter { $0.offset != celIndex && $0.element.endFrame <= baselineCel.startFrame }
+            .sorted { $0.element.startFrame > $1.element.startFrame }
+
+        // Provisional cascade at the *requested* start, before the frame-0 floor is applied: walk
+        // the predecessors nearest first, and push each one whose baseline end the resize would
+        // overlap so its new end sits exactly at the running cursor, then continue from its new
+        // (earlier) start. The first predecessor the cursor doesn't reach stops the walk — cels never
+        // overlap each other at baseline, so if that one isn't pushed, nothing further back is either.
+        var provisional: [(index: Int, newStart: Int, frameCount: Int)] = []
+        var cursor = requestedStart
+        for (index, predecessor) in predecessors {
+            guard predecessor.endFrame > cursor else { break }
+            let newStart = cursor - predecessor.frameCount
+            provisional.append((index, newStart, predecessor.frameCount))
+            cursor = newStart
+        }
+
+        // `cursor` is now the leading edge of whichever block this push reaches furthest — the
+        // resized block itself if it reached no predecessor, or the earliest pushed predecessor
+        // otherwise. Below 0 there's nowhere for it to go, so the *entire* provisional cascade,
+        // resized block included, is shifted later by exactly the shortfall. Shifting the whole
+        // cascade uniformly can't introduce a new overlap with an un-pushed predecessor further back:
+        // the cascade only ever moves later by this shift, i.e. away from them, never toward.
+        let deficit = max(0, -cursor)
+        let clampedStart = requestedStart + deficit
 
         layers[layerIndex].cels[celIndex].startFrame = clampedStart
-        layers[layerIndex].cels[celIndex].frameCount = cel.endFrame - clampedStart
+        layers[layerIndex].cels[celIndex].frameCount = baselineCel.endFrame - clampedStart
 
-        if let previous, layers[layerIndex].cels[previous].endFrame > clampedStart {
-            layers[layerIndex].cels[previous].frameCount =
-                clampedStart - layers[layerIndex].cels[previous].startFrame
+        let pushedIndices = Set(provisional.map(\.index))
+        for entry in provisional {
+            guard layers[layerIndex].cels.indices.contains(entry.index) else { continue }
+            layers[layerIndex].cels[entry.index].startFrame = entry.newStart + deficit
+            layers[layerIndex].cels[entry.index].frameCount = entry.frameCount
+        }
+        // Every predecessor the cascade *didn't* reach this call is written back to its own baseline
+        // — not left alone — so a call that pushed it earlier (a bigger drag, or an earlier `.changed`
+        // in the same gesture) and then eases off actually gives it back rather than leaving it
+        // wherever the largest push so far put it.
+        for (index, predecessor) in predecessors where !pushedIndices.contains(index) {
+            guard layers[layerIndex].cels.indices.contains(index) else { continue }
+            layers[layerIndex].cels[index].startFrame = predecessor.startFrame
+            layers[layerIndex].cels[index].frameCount = predecessor.frameCount
         }
     }
 
@@ -248,27 +296,74 @@ extension CanvasManager {
     /// (as a one-shot call, not a gesture) by `extendCelToEnd`, which supplies its own undo wrap
     /// since this method doesn't register one itself — see `resizeCelLeftEdge`'s comment.
     ///
-    /// Extending block A into block B shrinks B from its leading edge rather than stopping A dead at
-    /// B's start. B's floor is one frame — a block can't be squeezed out of existence, so A stops at
-    /// `B.endFrame - 1`, and a B that is *already* one frame long is an immovable wall. Pulling A
-    /// back afterwards leaves B where the push put it (a gap opens instead), which is how timeline
-    /// editors generally behave: the push is an edit to B, not a temporary displacement.
+    /// **This replaces the old contract, on the owner's explicit instruction, not an oversight.** It
+    /// used to clamp at `next.endFrame - 1`, shrinking the next block from its leading edge, with a
+    /// one-frame floor that made an already-short neighbour an immovable wall the drag simply
+    /// couldn't push past. That was deliberate at the time — the doc comment here argued it matched
+    /// how timeline editors generally behave — but two-or-more-blocks-side-by-side is exactly the
+    /// case the owner called out: extending the first one right is supposed to make room by carrying
+    /// the second one along, not by eating it or stopping at it. So now: extending into a neighbour
+    /// translates it right by the overlap, `frameCount` unchanged (so a one-frame block is no longer
+    /// a wall — it just moves, one frame and all), and the push is transitive: if the neighbour's own
+    /// new position would in turn overlap *its* neighbour, that one moves too, and so on down the row.
+    /// There is no ceiling any more (nothing to stop at), so unlike the left edge this direction has
+    /// no floor to enforce either — the scene simply grows to fit, same as it already does with no
+    /// neighbour at all.
+    ///
+    /// **Every push below is computed from a baseline, never from the live model, and this is the
+    /// point the whole rewrite hinges on.** `TimelineTrackView`'s pan handler calls this on every
+    /// `.changed` event with the SAME already-open gesture — `beginStructureGesture()` at `.began`,
+    /// this on every touch-move, `commitStructureGesture(name:)` at `.ended`. A version that read the
+    /// neighbour's *current* (possibly already-pushed) position each time was tried first and drifts:
+    /// call 1 pushes B forward, call 2 sees B already forward and, once the finger reverses, has no
+    /// way to tell "B moved because of an earlier bigger push in this same drag" from "B was drawn
+    /// there to begin with" — so retracting the drag back to zero left B stranded downstream instead
+    /// of restoring it, because every push only ever ratcheted forward and nothing ever undid one.
+    /// `gestureSnapshot` (see `CanvasManager+Undo.swift`) already exists for exactly this shape of
+    /// problem and is already captured at `.began` by the same `beginStructureGesture()` call the
+    /// resize handles use for undo — reading pushes from it, instead of from `layers`, means every
+    /// `.changed` event recomputes the *whole* result fresh from where the gesture started, so an
+    /// out-and-back drag lands every block exactly where it began. Outside a gesture (a one-shot call
+    /// from a test, or from `extendCelToEnd`) `gestureSnapshot` is nil and the live model stands in
+    /// for it, which is just "the baseline is wherever things currently are" — correct for a single
+    /// call, same as it always was.
     func resizeCelRightEdge(layerIndex: Int, celIndex: Int, newEndFrame: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        let cel = layers[layerIndex].cels[celIndex]
-        let next = nextCelIndex(layerIndex: layerIndex, after: celIndex)
-        let ceiling = next.map { layers[layerIndex].cels[$0].endFrame - 1 } ?? Int.max
-        let clampedEnd = min(ceiling, max(newEndFrame, cel.startFrame + 1))
+        let baseline = gestureSnapshot?.layers ?? layers
+        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return }
+        let baselineCel = baseline[layerIndex].cels[celIndex]
+        let clampedEnd = max(newEndFrame, baselineCel.startFrame + 1)
 
-        layers[layerIndex].cels[celIndex].frameCount = clampedEnd - cel.startFrame
+        layers[layerIndex].cels[celIndex].startFrame = baselineCel.startFrame
+        layers[layerIndex].cels[celIndex].frameCount = clampedEnd - baselineCel.startFrame
 
-        if let next, layers[layerIndex].cels[next].startFrame < clampedEnd {
-            let neighbour = layers[layerIndex].cels[next]
-            layers[layerIndex].cels[next].startFrame = clampedEnd
-            layers[layerIndex].cels[next].frameCount = neighbour.endFrame - clampedEnd
+        // Successors this push could reach, nearest first, from the same baseline the resized cel's
+        // own new end was just computed from.
+        let successors = baseline[layerIndex].cels.enumerated()
+            .filter { $0.offset != celIndex && $0.element.startFrame >= baselineCel.endFrame }
+            .sorted { $0.element.startFrame < $1.element.startFrame }
+
+        // Walk forward: push every successor the running cursor still overlaps, translating it by
+        // however much (frameCount unchanged) and advancing the cursor past it, exactly mirroring the
+        // left edge's backward walk. The first successor not overlapped stops the cascade — and every
+        // successor at or past that point is written back to its own baseline explicitly, for the
+        // same "give it back on retraction" reason `resizeCelLeftEdge` does.
+        var cursor = clampedEnd
+        var pushing = true
+        for (index, successor) in successors {
+            guard layers[layerIndex].cels.indices.contains(index) else { continue }
+            if pushing, successor.startFrame < cursor {
+                layers[layerIndex].cels[index].startFrame = cursor
+                layers[layerIndex].cels[index].frameCount = successor.frameCount
+                cursor += successor.frameCount
+            } else {
+                pushing = false
+                layers[layerIndex].cels[index].startFrame = successor.startFrame
+                layers[layerIndex].cels[index].frameCount = successor.frameCount
+            }
         }
 
-        sceneFrameCount = max(sceneFrameCount, clampedEnd)
+        sceneFrameCount = max(sceneFrameCount, cursor)
     }
 
     /// Drag the block body: repositions it (startFrame changes, length unchanged), clamped to not
