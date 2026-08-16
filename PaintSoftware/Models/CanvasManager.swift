@@ -832,8 +832,25 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Playhead
 
+    /// **No ceiling.** The playhead goes wherever it is sent, and the scene grows to admit it.
+    ///
+    /// It used to clamp to `sceneFrameCount - 1`, which on a new document is 12 — so the ruler drew
+    /// columns the playhead flatly refused to visit, because `TimelineTrackView.displayedFrameCount`
+    /// always lays out a screenful past the right edge while this clamped to the scene. Scrubbing
+    /// stopped dead partway across a track that visibly continued. The owner's report: "im not sure
+    /// why I cannot move the time selection in the timeline past a certian frame (default is 12)".
+    ///
+    /// Raising `sceneFrameCount` rather than dropping the clamp outright is what keeps every
+    /// downstream reader honest without touching any of them: `effectiveLoopRange` clamps markers
+    /// into the scene, `stepFrame` walks to its end, and the frame label counts against it — all
+    /// three would have needed their own new ceiling otherwise. And it is what the field already is;
+    /// `contentEndFrame`'s doc is emphatic that `sceneFrameCount` is the laid-out length of the
+    /// *timeline*, not the length of the animation, and that it only ever ratchets upward. Playback
+    /// is unaffected for exactly that reason — it bounds itself with `contentEndFrame`, so parking
+    /// the playhead out in empty space does not add empty frames to the animation.
     func goToFrame(_ frame: Int) {
-        currentFrame = max(0, min(frame, sceneFrameCount - 1))
+        currentFrame = max(0, frame)
+        sceneFrameCount = max(sceneFrameCount, currentFrame + 1)
     }
 
     /// `loopStartFrame`/`loopEndFrame` clamped into the current scene length and ordered — the scene
@@ -866,10 +883,10 @@ final class CanvasManager: ObservableObject {
     /// animation ends — with no markers set that is the last drawn frame, not the last laid-out one
     /// (see `contentEndFrame`).
     ///
-    /// Only the looping branch wraps. With looping off this still walks out into the empty track up
-    /// to `sceneFrameCount`, which is how the playhead reaches a blank frame to start a new block on
-    /// in the first place; clamping it to the content would make those frames unreachable from the
-    /// transport buttons.
+    /// Only the looping branch wraps. With looping off this walks out into the empty track without a
+    /// ceiling, which is how the playhead reaches a blank frame to start a new block on in the first
+    /// place; clamping it to the content would make those frames unreachable from the transport
+    /// buttons.
     func stepFrame(by delta: Int) {
         var next = currentFrame + delta
         if isLoopEnabled {
@@ -877,10 +894,13 @@ final class CanvasManager: ObservableObject {
             let end = playbackEndFrame
             if next < start { next = end }
             if next > end { next = start }
-        } else {
-            next = max(0, min(next, sceneFrameCount - 1))
+            currentFrame = next
+            return
         }
-        currentFrame = next
+        // Not clamped to the scene either — `goToFrame` is the one place the playhead's bounds are
+        // decided, so the transport button and a ruler scrub cannot disagree about where the timeline
+        // ends. It walks out into the empty track and the track grows to meet it.
+        goToFrame(next)
     }
 
     // MARK: - Playback bounds
@@ -1142,10 +1162,31 @@ final class CanvasManager: ObservableObject {
     }
 
     /// Sets a layer's blend mode (§7). Undoable as one step, like every other discrete pick.
+    /// **On a value layer, picking a blend clears the grade** — `setMixBlendMode`'s rule, arriving here
+    /// because the owner asked for the same collapse the node picker already had: "Move all the things
+    /// in mode into blend mode for value." One menu now answers *what is this layer*, and the two
+    /// answers it offers are mutually exclusive, so the setter that writes one has to clear the other.
+    ///
+    /// Without this, the merged menu could leave both set: `RenderTree`'s leaf derivation pins an
+    /// effect-carrying leaf to `.normal` whatever the layer stores, so the artist would pick Multiply,
+    /// see the checkmark move, and watch nothing change on the canvas. That is the state the row is
+    /// meant to make unreachable rather than the state it explains afterwards.
+    ///
+    /// Two writes, one undo step, and the rename inside it — `setLayerEffect` argues all three, and a
+    /// layer still named "Gaussian Blur" after the blur was cleared is the same lie told backwards.
+    /// Ordinary layers are untouched: they have no grade for a blend to conflict with.
     func setLayerBlendMode(layerIndex: Int, to mode: BlendMode) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].blendMode != mode else { return }
+        guard layers.indices.contains(layerIndex) else { return }
+        let clearsEffect = layers[layerIndex].kind == .value && layers[layerIndex].effect != nil
+        guard layers[layerIndex].blendMode != mode || clearsEffect else { return }
         withStructureUndo(name: "Blend Mode") {
             layers[layerIndex].blendMode = mode
+            if clearsEffect {
+                layers[layerIndex].effect = nil
+                if !layers[layerIndex].hasCustomName {
+                    layers[layerIndex].name = Self.defaultValueLayerName(effect: nil, ordinal: layers.count)
+                }
+            }
         }
     }
 

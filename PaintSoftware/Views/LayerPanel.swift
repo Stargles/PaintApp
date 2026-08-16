@@ -295,7 +295,7 @@ struct LayerOptionsPanel: View {
         // non-`.value` layer anyway, so offering either control there would be a control that does
         // nothing.
         if canvasManager.layers[index].kind == .value {
-            valueModeRow(index: index)
+            valueBlendModeRow(index: index)
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
             // **Gated on `layerEffect`, not on `valueFill`.** The two look like complements and are
@@ -327,13 +327,11 @@ struct LayerOptionsPanel: View {
 
         Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-        // **Hidden on a value layer that is grading**, and only there. `RenderTree`'s leaf derivation
-        // pins such a leaf to `.normal` whatever the layer stores — an effect replaces the backdrop
-        // it graded rather than compositing a second picture over it, so there is no second thing for
-        // a mode to combine — which makes the control a lie in that one state. It stays in
-        // flat-colour mode, where a flat colour genuinely is a second picture and genuinely blends,
-        // and on every other kind.
-        if canvasManager.layers[index].layerEffect == nil {
+        // **A value layer's blend row is up top, merged with its grades** (`valueBlendModeRow`), so it
+        // must not appear a second time down here. This one is for every other kind, where a blend is a
+        // modifier on content the layer already has rather than the answer to what the layer *is* — and
+        // where there is no grade for it to conflict with, so it needs none of the merged row's rules.
+        if canvasManager.layers[index].kind != .value {
             blendModeRow(current: canvasManager.layers[index].blendMode) { mode in
                 canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
             }
@@ -365,41 +363,62 @@ struct LayerOptionsPanel: View {
         }
     }
 
-    /// §4.5's mode picker — **the owner's complaint, in one row**: "the effect layer has default set
-    /// to Brightness/contrast and I dont know where to change that or its settings."
+    /// §4.5's mode picker and the blend picker, as **one row** — the owner's call, in their words:
+    /// "Move all the things in mode into blend mode for value."
     ///
-    /// One menu spanning both modes rather than a segmented control plus a separate effect picker.
-    /// The two are the same question — *what is this layer* — and the answer is either a flat colour
-    /// or one named grade, so splitting it across two controls would make picking Curves a two-step
-    /// operation whose first step (switch to effect mode) has no meaning on its own.
+    /// This is `nodeOperationRow`'s shape applied to a layer, and for the same reason: a value layer
+    /// does exactly one thing. It is either a flat colour composited in some mode, or it is a grade
+    /// over the backdrop — and those are two answers to one question, not two settings that could both
+    /// be on. `setLayerBlendMode` and `setLayerEffect` each clear what the other sets, in one undo
+    /// step, so the state where both are set never exists.
     ///
-    /// "Flat Colour" sits above the effect sections because it is `setLayerEffect(to: nil)`: the
-    /// absence of a grade *is* the other mode (`Layer.effect`'s doc is emphatic that the field's
-    /// presence is the discriminant and there is no third `mode` enum), so a menu that offered it
-    /// anywhere but first would be listing the default among the specialisations.
-    private func valueModeRow(index: Int) -> some View {
-        let current = canvasManager.layers[index].layerEffect
+    /// **"Flat Colour" is gone as a menu item, and that is the merge rather than a loss.** It used to
+    /// be `setLayerEffect(to: nil)` under its own name; now every blend mode in the list *is* that call
+    /// plus a mode, so an artist leaving effect mode picks the mode they want to leave into instead of
+    /// picking "flat" and then picking a mode. Normal is the one they will usually want and it sits
+    /// first in `BlendMode.menuGroups`, exactly where "Flat Colour" used to be.
+    ///
+    /// **The identifiers are the blend row's, not the old Mode row's**, because this row *is* the blend
+    /// row now — `layerOptions.blendModeButton` and `layerOptions.blendMode.<rawValue>` are what the
+    /// suite already taps for a blend, and effects join them under `effectMenuSlug`, which no
+    /// `BlendMode.rawValue` collides with. `nodeOperationRow` argues the same choice from the other
+    /// direction, where the op identifiers were the ones already in the tests.
+    ///
+    /// Full `BlendMode.menuGroups`, unlike `compositorOpModeGroups`: Clip to Below is meaningless on a
+    /// node whose operands are named slots, but a value layer sits in an ordinary stack with something
+    /// under it, so the implicit source resolves and the mode means what it says.
+    private func valueBlendModeRow(index: Int) -> some View {
+        let effect = canvasManager.layers[index].layerEffect
+        let blend = canvasManager.layers[index].blendMode
         return Menu {
-            Section {
-                Button {
-                    canvasManager.setLayerEffect(layerIndex: index, to: nil)
-                } label: {
-                    if current == nil {
-                        Label("Flat Colour", systemImage: "checkmark")
-                    } else {
-                        Text("Flat Colour")
+            ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
+                Section {
+                    ForEach(BlendMode.menuGroups[groupIndex], id: \.self) { mode in
+                        Button {
+                            canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
+                        } label: {
+                            // Ticked only while no grade is set. `blendMode` still holds whatever was
+                            // last picked underneath an effect, and a checkmark beside a mode the
+                            // renderer is currently ignoring would be the panel disagreeing with the
+                            // canvas — `nodeOperationRow` makes this same argument about `compositorOp`.
+                            if effect == nil, mode == blend {
+                                Label(mode.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(mode.displayName)
+                            }
+                        }
+                        .accessibilityIdentifier("layerOptions.blendMode.\(mode.rawValue)")
                     }
                 }
-                .accessibilityIdentifier("layerOptions.valueMode.flat")
             }
-            effectMenuSections(current: current, identifierPrefix: "layerOptions.valueMode") { picked in
+            effectMenuSections(current: effect, identifierPrefix: "layerOptions.blendMode") { picked in
                 canvasManager.setLayerEffect(layerIndex: index, to: picked)
             }
         } label: {
             HStack(spacing: 8) {
-                Text("Mode").foregroundColor(.white)
+                Text("Blend Mode").foregroundColor(.white)
                 Spacer()
-                Text(current?.displayName ?? "Flat Colour")
+                Text(effect?.displayName ?? blend.displayName)
                     .font(.caption)
                     .foregroundColor(.gray)
                     .lineLimit(1)
@@ -411,12 +430,10 @@ struct LayerOptionsPanel: View {
             .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
-        .accessibilityIdentifier("layerOptions.valueModeButton")
-        // `effectMenuSlug` rather than `displayName`, for `blendModeRow`'s reason: it is derived from
-        // the name but stripped of punctuation and case, so it survives a wording change that a test
-        // reading the visible label would not. "flat" is the one hand-written value, matching the
-        // menu item's own identifier suffix.
-        .accessibilityValue(current.map(effectMenuSlug) ?? "flat")
+        .accessibilityIdentifier("layerOptions.blendModeButton")
+        // The grade's slug while grading, the blend's raw value otherwise — the same two-vocabulary
+        // value `nodeOperationRow` reports, so a test can read which of the two answers is live.
+        .accessibilityValue(effect.map(effectMenuSlug) ?? blend.rawValue)
     }
 
     /// §4.5's colour, on the layer that *is* one: a swatch that opens a picker — the same shape the

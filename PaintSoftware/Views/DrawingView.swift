@@ -270,10 +270,10 @@ struct DrawingView: View {
     private static let topToolbarClearance: CGFloat = 56
 
     /// Which side of the toolbar the open menu's icon lives on, so the dropdown lands under it. The
-    /// gallery/actions/adjust icons are leading; brush/fill/layers/color are trailing.
+    /// gallery/actions icons are leading; brush/fill/layers/color are trailing.
     private var panelAlignment: Alignment {
         switch activePanel {
-        case .actions, .adjust:
+        case .actions:
             return .topLeading
         default:
             return .topTrailing
@@ -287,8 +287,6 @@ struct DrawingView: View {
             EmptyView()
         case .actions:
             ActionsMenu(canvasManager: canvasManager)
-        case .adjust:
-            StubToolPanel(title: "Adjust", systemImage: "slider.horizontal.3")
         case .select:
             EmptyView() // Select's UI is the bottom bar, shown whenever the tool is engaged — see above.
         case .move:

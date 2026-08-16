@@ -1,7 +1,12 @@
 import SwiftUI
 
+/// **No `adjust` case.** The toolbar carried a slider icon for one, and behind it was
+/// `StubToolPanel` — a placeholder that had never grown a feature. Every grade the artist can
+/// actually apply lives on a value layer's own Blend Mode menu (`LayerPanel.valueBlendModeRow`),
+/// reached from the layer they want to grade, which is where the owner said it belongs: "the adjust
+/// icon at the top can be removed, its what the layer edit does."
 enum ActivePanel: Equatable {
-    case none, actions, adjust, select, move, layers, brush, color, fill, eraser
+    case none, actions, select, move, layers, brush, color, fill, eraser
 }
 
 struct TopToolbar: View {
@@ -17,7 +22,6 @@ struct TopToolbar: View {
             // toolbar buttons already carry one; this is the seventh.
             iconButton(system: "wrench.and.screwdriver", isActive: activePanel == .actions) { toggle(.actions) }
                 .accessibilityIdentifier("toolbar.actionsButton")
-            iconButton(system: "slider.horizontal.3", isActive: activePanel == .adjust) { toggle(.adjust) }
             iconButton(system: "lasso", isActive: activePanel == .select) { toggle(.select) }
                 .accessibilityIdentifier("toolbar.selectButton")
             iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.isVectorTransforming) { toggleMove() }

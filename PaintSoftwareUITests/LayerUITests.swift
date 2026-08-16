@@ -480,10 +480,12 @@ final class LayerPanelUITests: PaintUITestCase {
         XCTAssertEqual(row.label, "Brightness / Contrast",
                        "The row must say what the layer is, not the flat-colour name it was created with")
 
-        // The Mode row is the panel's own report of which mode the layer is in, and it is the
-        // assertion that the pick actually landed rather than merely being tapped.
-        XCTAssertEqual(app.buttons["layerOptions.valueModeButton"].value as? String, "brightnesscontrast",
-                       "Picking a grade from Mode is what puts a value layer into effect mode")
+        // The Blend Mode row is the panel's own report of which mode the layer is in, and it is the
+        // assertion that the pick actually landed rather than merely being tapped. It reports the
+        // grade's slug while grading and the blend's raw value otherwise, so this value is also the
+        // assertion that the merged row did not leave both answers set.
+        XCTAssertEqual(app.buttons["layerOptions.blendModeButton"].value as? String, "brightnesscontrast",
+                       "Picking a grade from Blend Mode is what puts a value layer into effect mode")
         XCTAssertFalse(app.buttons["layerOptions.valueColorButton"].exists,
                        "…and the flat colour's swatch goes away with it — the fill is inert in this mode")
 

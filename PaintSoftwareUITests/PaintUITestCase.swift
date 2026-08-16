@@ -465,16 +465,19 @@ class PaintUITestCase: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5), "The add menu should have created a second layer")
         row.tap()
 
-        let modeButton = app.buttons["layerOptions.valueModeButton"]
+        // One row, not two: a value layer's grades live in its Blend Mode menu below the blends
+        // (`LayerPanel.valueBlendModeRow`), which is the owner's merge of the old Mode row into this
+        // one. The identifiers are the blend row's for that reason.
+        let modeButton = app.buttons["layerOptions.blendModeButton"]
         XCTAssertTrue(modeButton.waitForExistence(timeout: 5),
-                      "A value layer's options should offer the Mode row that chooses between its two modes")
+                      "A value layer's options should offer the Blend Mode row that chooses between its two modes")
         modeButton.tap()
 
         // `effectMenuSlug(.brightnessContrast(…))` — "Brightness / Contrast" lower-cased with the
         // punctuation stripped. Quoting the slug rather than the label for the reason the slug exists:
         // it survives a rewording of the visible name.
-        let item = app.buttons["layerOptions.valueMode.brightnesscontrast"]
-        XCTAssertTrue(item.waitForExistence(timeout: 5), "The Mode menu should list the effect catalogue")
+        let item = app.buttons["layerOptions.blendMode.brightnesscontrast"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "The Blend Mode menu should list the effect catalogue")
         item.tap()
     }
 
