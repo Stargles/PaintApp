@@ -3,137 +3,51 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A stroke begun under a timeline popover stops being delivered, with no terminal callback (2026-08-16)
 
-## An interrupted stroke stubs, and no terminal callback runs (2026-08-16)
+**One bug, two symptoms, and the eraser is the clean view of it.** With a timeline block menu open,
+draw straight through it:
 
-A stroke begun while a timeline popover is open stops being processed a few samples in. Touch
-delivery to the recognizer stops and **no terminal callback fires — crucially not cancel** — which is
-why the stub survives the pen lift and dies only when the next stroke rebuilds `vectorScratch`
-(`StrokeCanvasView.swift`).
+ * *Eraser* — the owner: "it leaves a tiny stroke start. When I try to use the eraser again, it
+   disappears and the new eraser stroke is only shown."
+ * *Pen* — the same stub, then 0.8 s later a straight line replaces the stroke.
 
-With the pen this reads as "the stroke turns into a line after a lag spike": the smart-shape hold
-timer has nothing left to reset it, so it completes 0.8 s later and replaces the ink with a detected
-line. The perceived lag spike is exactly that hold constant elapsing, not a stall — the popover
-teardown itself was **measured at 0.43 ms**. With the eraser the same stub appears without the line,
-because shape detection is gated to pen/pencil.
+**The 0.8 s is the tell, and it is the owner's own deduction.** It is exactly
+`ShapeHoldClock.holdInterval`. What reads as a lag spike is not a stall at all — a separate
+measurement puts the popover dismissal at 0.43 ms — it is the stub sitting there while the hold runs
+undisturbed to completion, because `handleStrokeMoved` is the only thing that re-arms it and it has
+stopped being called. The pen then has shape detection to paint over the evidence; the eraser does
+not, so it shows the stub bare.
 
-**Two candidates that reading could not separate**: a mid-sequence `isUserInteractionEnabled`/removal
-flip (`CanvasView.reconcileLayers` writes both, `CanvasView.swift:388`), or UIKit dropping the touch
-sequence via the popover's presentation overlay. Nothing here picks between them yet.
+Two things follow by reading, and together they narrow the mechanism sharply:
 
-This is the shape the entry below (`StrokeGestureRecognizer.failTrackedStroke`) already names: a path
-that fails an already-begun stroke which nothing in the suite reaches. Next step is a capture — the
-action recorder (see CLAUDE.md) on the owner's iPad, reproducing a stroke started under an open
-timeline popover, read for where in the touch sequence delivery actually stops.
+ 1. **`touchesMoved` stops reaching `StrokeGestureRecognizer`.** Nothing else lets the hold complete
+    while the artist is still drawing.
+ 2. **No terminal callback runs — not `onEnd`, and crucially not `onCancel`.** A lift commits, and
+    `handleCancel` rolls the partial stroke back and repaints *inline*; either would clear the stub at
+    lift. The stub instead survives the lift and disappears only when the *next* stroke starts, which
+    is `beginVectorStroke` rebuilding `vectorScratch` from the untouched canvas — or, equally, the
+    next `touchesBegan` finding `trackedTouch` still set and taking `failTrackedStroke`.
 
-## An eraser stroke interrupted by a timeline popover is lost, and wiped by the next stroke (2026-08-16)
+So the thing to look for is a path that **stops touch delivery without `touchesCancelled` being
+called on the recognizer**. Two candidates reading cannot separate: a view-level
+`isUserInteractionEnabled`/removal flip mid-sequence (`reconcileLayers` writes both, and the same
+switch is implicated in the Fill entry below), or UIKit dropping the sequence as the popover's
+presentation overlay is torn down. Instrumenting the touch lifecycle is what separates them.
 
-The owner: "When I interrupt with the eraser, it doesn't collapse into a line. Instead it leaves a
-tiny stroke start. When I try to use the eraser again, it disappears and the new eraser stroke is only
-shown." Same setup as the smart-line bug — a stroke begun while a timeline block menu is still open.
+**Do not "fix" it by deferring the popover teardown** — that directly reopens the canvas-freeze bug
+`CanvasTransformFreezeUITests` pins; see `AnimationTimeline`'s comment there.
 
-The half that is settled: **the tool gate holds.** `startShapeDetection` returns early for anything
-but pen/pencil, and the owner confirms the eraser does not straighten. That was the falsifying check
-for the smart-shape diagnosis, and it passed.
+The *line* half is already closed from the other end: the smart-shape hold is now a subtraction
+between two `UITouch.timestamp`s (`ShapeHoldClock`), so a stroke whose samples stop arriving can never
+complete a hold. That fix stands under both this diagnosis and the dead lag-spike one, but it only
+suppresses the line — the stub itself is untouched and the pen would stub silently like the eraser.
 
-The half that is open: the interrupted eraser stroke never commits, and the stub the artist sees is a
-*preview*, not content. On a vector layer the eraser previews into `vectorScratch` (Mode 1 loads it
-from `vectorCanvas.render()` and punches into the copy); `endVectorStroke` is what turns that into a
-real `erase(alongPath:)` and tears the scratch down. **A stub that survives the lift and disappears
-only when the next stroke starts is the signature of a stroke that reached neither `handleEnd` nor
-`handleCancel`** — the next `touchesBegan` finds `trackedTouch` still set, takes `failTrackedStroke`,
-and *that* cancel is what finally rolls the scratch back. Every other reading was checked and does not
-fit: a normal lift commits, and `handleCancel` rebuilds the display inline, so both would clear the
-stub at lift rather than one gesture later.
-
-If that is right, the cause is the popover teardown stranding `StrokeGestureRecognizer` mid-sequence —
-the same teardown behind the smart-line bug, and the one `CanvasTransformFreezeUITests` pins. **Do not
-"fix" it by deferring the teardown** (see that suite, and `AnimationTimeline`'s comment).
-
-The real question underneath is a product call, not an engineering one: `handleCancel` discards a
-partial stroke on purpose — "as far as the document is concerned this stroke never happened" — because
-that is what makes a two-finger pan begun mid-stroke leave no permanent, un-undoable mark. Whether a
-cancel caused by *the app's own popover* should also throw the artist's ink away is the owner's
-decision, and committing it instead would reopen the pan case. Not changed unilaterally.
-
-Next step is a recording, and the line that names it now exists (`"stroke cancelled — partial stroke
-discarded, no undo step"`, plus `shape:` on `canvas.host`'s label). A recording showing that note is
-this diagnosis; a recording with no terminal transition for the stroke recognizer at all is the strand.
-
-## XCUITests cannot launch into the editor on the iPad 9 (2026-08-16)
-
-The logic tier runs on the owner's device beautifully — 991 tests in 36 s, Release, against 3 min on
-the simulator — but **every XCUITest fails in `launchIntoEditor`**, before it has touched anything it
-is about to test. 18 of 18 in `SandwichCompositingUITests` + `BlendModesAndCompositorUITests`, all at
-the same line.
-
-The trace says why: `Tap "sizePicker.createButton"` → `Computed hit point {-1, -1} after scrolling to
-visible`, so the tap never lands and `timeline.frameLabel` never appears. That is the size picker
-laying out differently on a 10.2" 4:3 screen (2160x1620) than on the iPad Pro 13" every UI suite was
-written against — a test-fixture problem on the device, not a product bug, and nothing to do with the
-compositor.
-
-Worth fixing because device runs are 5x faster than the simulator and are the only place the memory
-behaviour is real. Likely fix: make `launchIntoEditor` scroll the size picker or dismiss it by
-keyboard rather than tapping a button that can land off-screen. Until then, **device testing means
-the logic tier only**, and the UI suites stay on the simulator.
-
-## Drawing on a vector layer at 4K is capped at ~19 fps by the live stroke preview (2026-08-16)
-
-**Measured on the owner's iPad 9, Release** (`PerfBaselineTests.testTheLiveStrokePreviewCostsFourTimesMoreOnAVectorLayerThanARaster`):
-one dab costs **53.8 ms on a vector layer at 4096²** against 4.0 ms on a raster layer — a ceiling of
-**19 fps** before anything else in the frame, against 250 fps for raster. At 2048² it is 16.4 ms
-against 3.0 ms. The owner reports 17 fps.
-
-`StrokeCanvasView.refreshDisplay`'s `.overlay` branch runs once per touch-move and does four
-canvas-sized things where the raster path does one: it allocates a **fresh** canvas-sized
-`UIGraphicsImageRenderer` bitmap, draws the committed vector render into it, renders the live scratch,
-and draws that over the top. At 4096² the allocation alone is 64 MiB, per dab.
-
-**This is not the compositor and it is not this branch.** No composite runs during a dab —
-`makeSandwichKey` freezes the active layer's content version for the duration of a stroke precisely so
-the compositor stays off the drawing path — and `refreshDisplay` predates the Metal work. The owner's
-own experiment proves it from the other side: halving `renderResolution` cuts a sandwich rebuild from
-40.6 ms to 13.1 ms on that device and **changed the frame rate not at all**, because
-`RenderResolution` is applied in `makeSandwichRequests` and reaches nothing on this path.
-
-**The fix, and it belongs in its own branch.** Stop compositing the two into one bitmap: give the
-scratch its own `UIImageView`/`CALayer` over the committed one and let Core Animation composite them,
-which it is doing anyway. That deletes the per-dab allocation and both blits, leaving only
-`scratch.renderToUIImage()` — the raster path's cost. It is a change to the most gesture-sensitive
-code in the app (`vectorScratchRole` has three modes and `.replacement` and `.none` behave
-differently), so it wants its own branch and its own pass through the vector-eraser UI suites, not a
-rider on a compositor-memory fix.
-
-## The project thumbnail composites the whole canvas to make a 320x320 tile (2026-08-16)
-
-`ProjectStore.SaveSnapshot` builds a full `makeRenderRequest` at native canvas size, composites it,
-and hands the result to `ThumbnailRenderer.render(…, thumbnailSize: 320x320)`. On a 4096² document
-that is 16.8M pixels rendered to fill 102k — and on a 3 GB device the GPU path declines it
-(`CompositorBudget`, which sizes only the *live canvas* down), so it lands on the CoreGraphics
-reference. With a bloom and a blur in the stack that is minutes of background CPU per save.
-
-**Not a regression from the Metal flip** — with the old `.coreGraphics` default the thumbnail took
-exactly the same path — and on a device with room it is now much faster than it was. Left alone here
-because fixing it properly means deciding what size a thumbnail composite should be and checking that
-against `ProjectSaveLogicTests`, which is a save-path change and not a crash fix. The shape of the
-fix: give `makeRenderRequest` an optional render size the way `makeSandwichRequests` has one, and
-have `ProjectStore` ask for something near the tile's own size.
-
-## The Metal composite hands Core Animation a non-native pixel format (2026-08-16)
-
-`CompositorMetalEngine.readBack` builds its `CGImage` as `premultipliedLast` RGBA in device RGB;
-Core Animation's native layout on iOS is BGRA premultiplied-*first*. So assigning one to
-`UIImageView.image` costs a full-canvas convert-and-copy inside the CA commit, on the main thread —
-three of them per sandwich rebuild, 64 MiB each at 4096². The CoreGraphics backend never paid it: a
-`UIGraphicsImageRenderer` image is already in CA's format, so this arrived with the backend flip and
-is invisible to every headless benchmark, which stops at the `CGImage`.
-
-**Unmeasured on device** — it is a hitch per stroke-lift rather than a sustained cost, so it is not
-the 17 fps above. Worth fixing next: `bgra8Unorm` for the two accumulator textures would produce
-byte-identical pixel *values* (Metal presents both formats to a shader as RGBA) with a CA-native
-byte order, at the cost of one runtime capability check. Verify with `CompositorParityLogicTests`,
-which compares values rather than layouts and so would not itself notice the change.
+Underneath sits a product call, not an engineering one: `handleCancel` discards a partial stroke on
+purpose — "as far as the document is concerned this stroke never happened" — because that is what
+stops a two-finger pan begun mid-stroke from leaving a permanent, un-undoable mark. Whether a cancel
+caused by *the app's own popover* should also throw the artist's ink away is the owner's decision, and
+committing it instead would reopen the pan case. Not changed unilaterally.
 
 ## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15)
 
@@ -272,8 +186,8 @@ product call, not just a fix.
 
 - Distort/Warp transform modes render and gesture identically to Uniform but still appear in the Move
   bottom-bar picker.
-- ActionsMenu's Cut/Copy/Paste/Drawing Guide are "Coming soon"; the timeline block menu's
-  "Select Multiple" is permanently disabled.
+- Adjust panel and ActionsMenu's Cut/Copy/Paste/Drawing Guide are "Coming soon"; the timeline block
+  menu's "Select Multiple" is permanently disabled.
 - No UI to change `fps` (fixed at 24) or edit scene length directly.
 - Square/custom brushes are tiled round dabs, not true shaped stamps (scalloped edges, seam
   build-up); per-stamp `.normal` compositing builds opacity up where a stroke crosses itself, which
