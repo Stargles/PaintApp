@@ -19,12 +19,23 @@ struct TimelineTrackView: UIViewRepresentable {
     @ObservedObject var canvasManager: CanvasManager
     var rowHeight: CGFloat
     var rulerHeight: CGFloat
-    /// Each menu callback carries the on-screen rect of the thing that was tapped — the block, the
-    /// empty slot, the ruler column — in window coordinates, so `AnimationTimeline` can hang its
-    /// popover off that rect instead of off the timeline panel as a whole.
-    var onRequestBlockMenu: (Int, Int, CGRect) -> Void
-    var onRequestGapMenu: (Int, Int, CGRect) -> Void
-    var onRequestLoopMenu: (Int, CGRect) -> Void
+    /// What a tap resolved to: which of the timeline's three menus, and the values needed to build
+    /// it, so `AnimationTimeline` never has to re-derive anything from raw indices.
+    ///
+    /// This used to be three separate callbacks (`onRequestBlockMenu`/`onRequestGapMenu`/
+    /// `onRequestLoopMenu`) driving three parallel `@State` triples on `AnimationTimeline` — one
+    /// `Bool` + payload + anchor apiece, for what was structurally the same "a menu is open here"
+    /// state three times over. That is what the owner meant by "these two menus are coded off of
+    /// the same engine... make them into one": one request type in, one popover out.
+    enum MenuRequest: Equatable {
+        case block(layerIndex: Int, celIndex: Int)
+        case gap(layerIndex: Int, frame: Int)
+        case loop(frame: Int)
+    }
+    /// Carries the on-screen rect of the thing that was tapped — the block, the empty slot, the
+    /// ruler column — in window coordinates, so `AnimationTimeline` can hang its popover off that
+    /// rect instead of off the timeline panel as a whole.
+    var onRequestMenu: (MenuRequest, CGRect) -> Void
     /// A vector block was dropped on a raster layer. The drop is *not* applied here — the timeline
     /// hands the request up so `AnimationTimeline` can ask about the rasterization first, and the
     /// answer comes back through `CanvasManager.moveCelToLayer(…, rasterizing: true)`.
@@ -61,9 +72,7 @@ struct TimelineTrackView: UIViewRepresentable {
         context.coordinator.canvasManager = canvasManager
         context.coordinator.rowHeight = rowHeight
         context.coordinator.rulerHeight = rulerHeight
-        context.coordinator.onRequestBlockMenu = onRequestBlockMenu
-        context.coordinator.onRequestGapMenu = onRequestGapMenu
-        context.coordinator.onRequestLoopMenu = onRequestLoopMenu
+        context.coordinator.onRequestMenu = onRequestMenu
         context.coordinator.onRequestRasterizeConfirm = onRequestRasterizeConfirm
         context.coordinator.relayout()
     }
@@ -77,9 +86,7 @@ struct TimelineTrackView: UIViewRepresentable {
         var canvasManager: CanvasManager
         var rowHeight: CGFloat = 34
         var rulerHeight: CGFloat = 18
-        var onRequestBlockMenu: ((Int, Int, CGRect) -> Void)?
-        var onRequestGapMenu: ((Int, Int, CGRect) -> Void)?
-        var onRequestLoopMenu: ((Int, CGRect) -> Void)?
+        var onRequestMenu: ((MenuRequest, CGRect) -> Void)?
         var onRequestRasterizeConfirm: ((CanvasManager.CelDropRequest) -> Void)?
 
         weak var scrollView: UIScrollView?
@@ -174,7 +181,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 rulerView.accessibilityIdentifier = "timeline.ruler"
                 rulerView.onScrub = { [weak self] frame in self?.canvasManager.goToFrame(frame) }
                 rulerView.onNumberTap = { [weak self] frame, columnRect in
-                    self?.onRequestLoopMenu?(frame, columnRect)
+                    self?.onRequestMenu?(.loop(frame: frame), columnRect)
                 }
                 contentView.addSubview(rulerView)
                 scrollView.panGestureRecognizer.require(toFail: rulerView.panRecognizer)
@@ -484,7 +491,7 @@ struct TimelineTrackView: UIViewRepresentable {
             let cel = canvasManager.layers[layerIndex].cels[celIndex]
             let clamped = max(cel.startFrame, min(tappedFrame, cel.endFrame - 1))
             if layerIndex == canvasManager.currentLayerIndex, clamped == canvasManager.currentFrame {
-                onRequestBlockMenu?(layerIndex, celIndex, anchor)
+                onRequestMenu?(.block(layerIndex: layerIndex, celIndex: celIndex), anchor)
             } else {
                 canvasManager.currentLayerIndex = layerIndex
                 canvasManager.goToFrame(clamped)
@@ -504,7 +511,7 @@ struct TimelineTrackView: UIViewRepresentable {
         func handleTapOnGap(layerIndex: Int, start: Int, length: Int, tappedFrame: Int, anchor: CGRect) {
             let clamped = max(start, min(tappedFrame, start + length - 1))
             if layerIndex == canvasManager.currentLayerIndex, clamped == canvasManager.currentFrame {
-                onRequestGapMenu?(layerIndex, clamped, anchor)
+                onRequestMenu?(.gap(layerIndex: layerIndex, frame: clamped), anchor)
             } else {
                 canvasManager.currentLayerIndex = layerIndex
                 // No ceiling to guard against any more: `goToFrame` itself raises `sceneFrameCount`

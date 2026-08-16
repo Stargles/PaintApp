@@ -33,29 +33,30 @@ struct AnimationTimeline: View {
     /// Vertical distance between two track rows — the row plus the `VStack` spacing between them.
     private var rowPitch: CGFloat { rowHeight + 2 }
 
-    // Every one of the three menus is a popover hung off the thing that was tapped rather than a
-    // confirmation dialog centred on the panel: `menuAnchor` is that thing's rect in window
-    // coordinates, reported up by `TimelineTrackView`. A dialog was appearing over the timeline
-    // itself, covering the very block or column it was about to act on.
-
-    // Tapping a frame that's already the current playhead position opens the block's options menu
-    // (ToonSquid-style: first tap moves the cursor there, a second tap on the same spot opens it).
-    @State private var showBlockMenu = false
-    @State private var menuLayerIndex: Int?
-    @State private var menuCelIndex: Int?
-    @State private var blockMenuAnchor: CGRect = .zero
-
-    // Tapping an empty slot opens an "Add Drawing" / "Paste" menu instead of directly creating a
-    // cel that extends to the end of the gap.
-    @State private var showGapMenu = false
-    @State private var gapLayerIndex: Int?
-    @State private var gapFrame: Int?
-    @State private var gapMenuAnchor: CGRect = .zero
-
-    // Tapping the already-selected frame's number on the ruler opens the start/end loop menu.
-    @State private var showLoopMenu = false
-    @State private var loopMenuFrame: Int?
-    @State private var loopMenuAnchor: CGRect = .zero
+    // The timeline's three menus (block options / gap "Add Drawing" / ruler loop-range) are a
+    // popover hung off the thing that was tapped rather than a confirmation dialog centred on the
+    // panel: `menuAnchor` is that thing's rect in window coordinates, reported up by
+    // `TimelineTrackView`. A dialog was appearing over the timeline itself, covering the very block
+    // or column it was about to act on.
+    //
+    // They used to be three independent `Bool` + payload + anchor triples (`showBlockMenu`/
+    // `menuLayerIndex`/`menuCelIndex`/`blockMenuAnchor`, and the same shape twice more for the gap
+    // and loop menus) wired to three separate `TimelineTrackView` callbacks. All three were always
+    // the same underlying question — "is a menu open, and if so which one, over what, and where" —
+    // asked three times, which is what the owner meant by "these two menus are coded off of the
+    // same engine... make them into one": one `TimelineMenu` case answers all three at once, and it
+    // is nil exactly when no menu is open, so there is no separate `Bool` to fall out of sync with
+    // the payload it's supposed to be describing (the bug behind CHANGE 1's gap-menu gate was
+    // exactly that kind of drift, just one state variable's worth instead of three's).
+    //
+    // `TimelineMenu` is a `typealias` for `TimelineTrackView.MenuRequest` rather than a fresh
+    // private enum with the same three cases: `TimelineTrackView`'s own callback already has to
+    // name a case for "which menu, with what payload" to fire it (see `onRequestMenu` there), and a
+    // second, identically-shaped enum here would only exist to be switched into the first one on
+    // every call — the same trap as `CanvasManager.CelDropRequest`, which `onRequestRasterizeConfirm`
+    // already stores directly for the same reason.
+    private typealias TimelineMenu = TimelineTrackView.MenuRequest
+    @State private var timelineMenu: (menu: TimelineMenu, anchor: CGRect)?
 
     // Interpolate mode's options popover, opened by a second tap on the timeline's interpolate
     // button (the first tap enters the mode).
@@ -104,22 +105,8 @@ struct AnimationTimeline: View {
                             canvasManager: canvasManager,
                             rowHeight: rowHeight,
                             rulerHeight: rulerHeight,
-                            onRequestBlockMenu: { layerIndex, celIndex, anchor in
-                                menuLayerIndex = layerIndex
-                                menuCelIndex = celIndex
-                                blockMenuAnchor = anchor
-                                showBlockMenu = true
-                            },
-                            onRequestGapMenu: { layerIndex, frame, anchor in
-                                gapLayerIndex = layerIndex
-                                gapFrame = frame
-                                gapMenuAnchor = anchor
-                                showGapMenu = true
-                            },
-                            onRequestLoopMenu: { frame, anchor in
-                                loopMenuFrame = frame
-                                loopMenuAnchor = anchor
-                                showLoopMenu = true
+                            onRequestMenu: { request, anchor in
+                                timelineMenu = (request, anchor)
                             },
                             onRequestRasterizeConfirm: { request in
                                 pendingRasterizeDrop = request
@@ -155,9 +142,9 @@ struct AnimationTimeline: View {
         // stroke — the same contract `DrawingView` already applies to the top-bar dropdowns, and for
         // a sharper reason than tidiness.
         //
-        // These three are `.popover`s, and a popover left to its own dismissal is dismissed *by* the
-        // touch that lands outside it. When that touch is the start of a stroke, the presentation is
-        // torn down in the middle of the touch sequence, and UIKit then never sends
+        // `timelineMenu` drives a `.popover`, and a popover left to its own dismissal is dismissed
+        // *by* the touch that lands outside it. When that touch is the start of a stroke, the
+        // presentation is torn down in the middle of the touch sequence, and UIKit then never sends
         // `StrokeGestureRecognizer` its `reset()`: the recognizer is stranded in a terminal-but-not-
         // `.failed` state, and
         // `CanvasView.Coordinator.gestureRecognizer(_:shouldRequireFailureOf:)` has all three
@@ -169,9 +156,7 @@ struct AnimationTimeline: View {
         // so the popover is on its way out before the sequence it would otherwise break is underway.
         // Pinned by `CanvasTransformFreezeUITests`.
         .onReceive(canvasManager.interactionBegan) {
-            if showGapMenu { showGapMenu = false }
-            if showBlockMenu { showBlockMenu = false }
-            if showLoopMenu { showLoopMenu = false }
+            timelineMenu = nil
         }
         .onDisappear { stopPlayback() }
     }
@@ -187,20 +172,29 @@ struct AnimationTimeline: View {
 
     // MARK: - Menus
 
-    /// Three zero-content views parked exactly where the tapped block / slot / ruler column is, each
-    /// carrying one popover. SwiftUI can only anchor a popover to a view, so the anchor has to exist
-    /// as a view; these are transparent and take no touches, so nothing about the timeline changes
-    /// while no menu is up.
+    /// One zero-content view parked exactly where the tapped block / slot / ruler column is,
+    /// carrying the single popover for whichever menu `timelineMenu` says is open. SwiftUI can only
+    /// anchor a popover to a view, so the anchor has to exist as a view; it's transparent and takes
+    /// no touches, so nothing about the timeline changes while no menu is up. When `timelineMenu`
+    /// is nil the rect falls back to `.zero` — harmless, since `isPresented` is false at the same
+    /// time and a popover with no content presented has nothing to anchor.
     private var menuAnchorLayer: some View {
         GeometryReader { proxy in
             let origin = proxy.frame(in: .global).origin
-            ZStack(alignment: .topLeading) {
-                menuAnchor(blockMenuAnchor, relativeTo: origin, isPresented: $showBlockMenu) { blockMenu }
-                menuAnchor(gapMenuAnchor, relativeTo: origin, isPresented: $showGapMenu) { gapMenu }
-                menuAnchor(loopMenuAnchor, relativeTo: origin, isPresented: $showLoopMenu) { loopMenu }
+            menuAnchor(timelineMenu?.anchor ?? .zero, relativeTo: origin, isPresented: isTimelineMenuPresented) {
+                timelineMenuContent
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// `.popover(isPresented:)` wants a `Bool`, but `timelineMenu` is the one piece of state that
+    /// answers both "is a menu open" and "which one" — this derives the former from the latter. The
+    /// setter is what makes the system's *own* dismissal (tap outside the popover, swipe down on
+    /// iPhone's compact presentation) clear `timelineMenu` too, rather than leaving a stale payload
+    /// behind a `Bool` that had already gone false.
+    private var isTimelineMenuPresented: Binding<Bool> {
+        Binding(get: { timelineMenu != nil }, set: { if !$0 { timelineMenu = nil } })
     }
 
     /// Two things about this order are load-bearing.
@@ -222,36 +216,43 @@ struct AnimationTimeline: View {
             .position(x: rect.midX - origin.x, y: rect.midY - origin.y)
     }
 
+    /// The one menu's content, resolved from whichever case `timelineMenu` currently holds.
+    ///
+    /// The `.block` branch keeps the same `canvasManager.layers.indices.contains(layerIndex)` guard
+    /// the old `blockMenu` had: a block can be deleted (by undo, by another gesture) while its menu
+    /// is up, and the popover must not survive that — showing stale actions for a cel that no longer
+    /// exists, or worse, crashing on the array access those actions perform. `.gap` and `.loop` carry
+    /// no such stale reference (a frame number and a layer index used only to set `currentLayerIndex`
+    /// are never subscripted), so they need no equivalent guard — same as before the merge.
     @ViewBuilder
-    private var blockMenu: some View {
-        if let layerIndex = menuLayerIndex, let celIndex = menuCelIndex,
-           canvasManager.layers.indices.contains(layerIndex) {
-            menuList {
-                // Copy only snapshots the block's content onto the clipboard — it doesn't touch the
-                // timeline. Pasting it somewhere else happens from the target empty slot's own menu.
-                menuButton("Copy", icon: "doc.on.doc") {
-                    canvasManager.copyCel(layerIndex: layerIndex, celIndex: celIndex)
-                }
-                menuButton("Select Multiple", icon: "square.on.square.dashed") { }
-                    .disabled(true)
-                menuButton("Extend to End", icon: "arrow.right.to.line") {
-                    canvasManager.extendCelToEnd(layerIndex: layerIndex, celIndex: celIndex)
-                }
-                menuButton("Clear", icon: "eraser") {
-                    canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex)
-                }
-                if canvasManager.layers[layerIndex].cels.count > 1 {
-                    menuButton("Delete", icon: "trash", role: .destructive) {
-                        canvasManager.deleteCel(layerIndex: layerIndex, celIndex: celIndex)
+    private var timelineMenuContent: some View {
+        switch timelineMenu?.menu {
+        case .block(let layerIndex, let celIndex):
+            if canvasManager.layers.indices.contains(layerIndex) {
+                menuList {
+                    // Copy only snapshots the block's content onto the clipboard — it doesn't touch
+                    // the timeline. Pasting it somewhere else happens from the target empty slot's
+                    // own menu.
+                    menuButton("Copy", icon: "doc.on.doc") {
+                        canvasManager.copyCel(layerIndex: layerIndex, celIndex: celIndex)
+                    }
+                    menuButton("Select Multiple", icon: "square.on.square.dashed") { }
+                        .disabled(true)
+                    menuButton("Extend to End", icon: "arrow.right.to.line") {
+                        canvasManager.extendCelToEnd(layerIndex: layerIndex, celIndex: celIndex)
+                    }
+                    menuButton("Clear", icon: "eraser") {
+                        canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex)
+                    }
+                    if canvasManager.layers[layerIndex].cels.count > 1 {
+                        menuButton("Delete", icon: "trash", role: .destructive) {
+                            canvasManager.deleteCel(layerIndex: layerIndex, celIndex: celIndex)
+                        }
                     }
                 }
             }
-        }
-    }
 
-    @ViewBuilder
-    private var gapMenu: some View {
-        if let layerIndex = gapLayerIndex, let frame = gapFrame {
+        case .gap(let layerIndex, let frame):
             menuList {
                 menuButton("Add Drawing", icon: "plus.square") {
                     canvasManager.currentLayerIndex = layerIndex
@@ -266,12 +267,8 @@ struct AnimationTimeline: View {
                     }
                 }
             }
-        }
-    }
 
-    @ViewBuilder
-    private var loopMenu: some View {
-        if let frame = loopMenuFrame {
+        case .loop(let frame):
             menuList {
                 menuButton("Set Loop Start", icon: "arrow.right.to.line") { canvasManager.setLoopStart(frame) }
                 menuButton("Set Loop End", icon: "arrow.left.to.line") { canvasManager.setLoopEnd(frame) }
@@ -281,6 +278,9 @@ struct AnimationTimeline: View {
                     }
                 }
             }
+
+        case nil:
+            EmptyView()
         }
     }
 
@@ -295,9 +295,7 @@ struct AnimationTimeline: View {
                             action: @escaping () -> Void) -> some View {
         Button(role: role) {
             action()
-            showBlockMenu = false
-            showGapMenu = false
-            showLoopMenu = false
+            timelineMenu = nil
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: icon).frame(width: 20)
