@@ -693,25 +693,64 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     // what is pinned here, is the *predicate* that decides whether a merge needs confirming, and the
     // confirm/cancel bookkeeping around it — both plain `CanvasManager` state.
 
-    func testMergeBlendModeWouldBeLostWhenEitherLayerIsNotNormal() {
+    func testMergeLossKindIsNilWhenBothLayersAreNormalAndPixelBearing() {
         let manager = namedManager(["Bottom", "Top"])
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
 
-        XCTAssertFalse(manager.mergeBlendModeWouldBeLost(bottom, top), "Both Normal: nothing would be lost")
+        XCTAssertNil(manager.mergeLossKind(bottom, top), "Both Normal, both raster: nothing would be lost")
+    }
+
+    func testMergeLossKindReportsBlendModeWhenEitherLayerIsNotNormal() {
+        let manager = namedManager(["Bottom", "Top"])
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
 
         manager.layers[1].blendMode = .multiply
-        XCTAssertTrue(manager.mergeBlendModeWouldBeLost(bottom, top), "Top's Multiply never survives `PixelOps.flatten`'s hard-coded Normal")
+        XCTAssertEqual(manager.mergeLossKind(bottom, top), .blendMode,
+                       "Top's Multiply never survives `PixelOps.flatten`'s hard-coded Normal")
 
         manager.layers[1].blendMode = .normal
         manager.layers[0].blendMode = .screen
-        XCTAssertTrue(manager.mergeBlendModeWouldBeLost(bottom, top), "Bottom's mode is lost exactly the same way")
+        XCTAssertEqual(manager.mergeLossKind(bottom, top), .blendMode, "Bottom's mode is lost exactly the same way")
     }
 
-    func testMergeBlendModeWouldBeLostIsFalseForAnUnknownPair() {
+    /// The coordinator's correction to the first pass of this fix: a `.value` layer is not excluded
+    /// from the pinch, it is confirmed — silently refusing the gesture on a pair that looks perfectly
+    /// mergeable is the same "control that does nothing" shape the owner has flagged elsewhere.
+    func testMergeLossKindReportsValueLayerContentForAGradeOrFlatColourLayer() {
+        let manager = CanvasFixture.manager()
+        manager.layers.removeAll()
+        manager.addLayer(name: "Bottom")
+        manager.addValueLayer(name: "Top")   // lands above Bottom — insertNewLayer's rule
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
+        XCTAssertEqual(manager.layers[1].kind, .value, "Setup: Top is the value layer")
+
+        XCTAssertEqual(manager.mergeLossKind(bottom, top), .valueLayerContent,
+                       "A grade/flat-colour layer holds no pixels — merging discards its content, not just a blend mode")
+    }
+
+    /// A `.value` layer with a non-Normal blend mode set on it (inert today, but still stored — see
+    /// `Layer.blendMode`'s doc) reports the content loss, not the blend-mode loss: losing the whole
+    /// layer is the more urgent thing to tell the artist, and reporting both would need a second UI
+    /// this predicate has no reason to grow.
+    func testMergeLossKindPrefersValueLayerContentOverBlendModeWhenBothApply() {
+        let manager = CanvasFixture.manager()
+        manager.layers.removeAll()
+        manager.addLayer(name: "Bottom")
+        manager.addValueLayer(name: "Top")
+        manager.layers[1].blendMode = .multiply
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
+
+        XCTAssertEqual(manager.mergeLossKind(bottom, top), .valueLayerContent)
+    }
+
+    func testMergeLossKindIsNilForAnUnknownPair() {
         let manager = namedManager(["A"])
-        XCTAssertFalse(manager.mergeBlendModeWouldBeLost(UUID(), UUID()),
-                       "Neither id resolves to a layer — nothing to warn about, and nothing to crash on")
+        XCTAssertNil(manager.mergeLossKind(UUID(), UUID()),
+                     "Neither id resolves to a layer — nothing to warn about, and nothing to crash on")
     }
 
     func testConfirmingAPendingMergeRunsItAndClearsThePrompt() {
@@ -720,7 +759,7 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
 
-        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top)
+        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top, lossKind: .blendMode)
         manager.confirmPendingMerge()
 
         XCTAssertNil(manager.pendingMergeConfirmation, "The prompt clears itself once answered")
@@ -729,13 +768,34 @@ final class LayerTreeCharacterizationTests: XCTestCase {
                        "The owner's own wording: proceeding applies Normal blend mode to the result")
     }
 
+    /// The `.value` case, confirmed through: proceeding on a graded/flat-colour layer bakes a blank
+    /// cel into the survivor, exactly as `mergeLayers` already does for any `.value` layer merged
+    /// through the "Merge Down" button — the confirmation changes whether the artist is asked, not
+    /// what the merge itself does.
+    func testConfirmingAPendingMergeOfAValueLayerFlattensItAsMergeLayersAlwaysHas() {
+        let manager = CanvasFixture.manager()
+        manager.layers.removeAll()
+        manager.addLayer(name: "Bottom")
+        manager.addValueLayer(name: "Top")
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
+
+        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top, lossKind: .valueLayerContent)
+        manager.confirmPendingMerge()
+
+        XCTAssertNil(manager.pendingMergeConfirmation)
+        XCTAssertEqual(manager.layers.count, 1)
+        XCTAssertEqual(manager.layers[0].id, bottom, "The lower layer survives — Top, the value layer, is the one absorbed")
+        XCTAssertEqual(manager.layers[0].kind, .raster, "The survivor is never left `.value` — same rule as any other merge")
+    }
+
     func testCancellingAPendingMergeLeavesBothLayersUntouched() {
         let manager = namedManager(["Bottom", "Top"])
         manager.layers[1].blendMode = .multiply
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
 
-        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top)
+        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top, lossKind: .blendMode)
         manager.cancelPendingMerge()
 
         XCTAssertNil(manager.pendingMergeConfirmation)

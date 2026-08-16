@@ -48,8 +48,11 @@ struct LayerPanel: View {
                 .accessibilityIdentifier("layerPanel.mergeConfirm.cancel")
             Button("Merge") { canvasManager.confirmPendingMerge() }
                 .accessibilityIdentifier("layerPanel.mergeConfirm.merge")
-        } message: { _ in
-            Text("One of these layers uses a blend mode other than Normal. Merging will apply Normal blend mode to the result instead.")
+        } message: { pending in
+            // Worded to which loss it actually is — `CanvasManager.MergeLossKind.confirmationMessage`
+            // — rather than one sentence stretched to cover both a blend mode reset and a colour/grade
+            // being discarded outright.
+            Text(pending.lossKind.confirmationMessage)
         }
     }
 

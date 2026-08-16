@@ -358,17 +358,15 @@ struct LayerStackListView: UIViewRepresentable {
                 let upper = rows[min(firstPath.row, secondPath.row)]
                 let lower = rows[max(firstPath.row, secondPath.row)]
                 // Only two plain layers merge — folders would need their contents flattened first.
+                // A `.value` layer (§4.4's grade, §4.5's flat colour) is still a plain layer here and
+                // pinches like any other; it is not excluded. An earlier version of this fix did
+                // exclude it, on the reasoning that merging one discards a whole grade/colour rather
+                // than merely a blend mode — true, but the remedy made the pinch a silent no-op on a
+                // pair that looks perfectly mergeable, which is the exact "control that does nothing
+                // with no feedback" shape this owner has flagged repeatedly elsewhere in this pass.
+                // `mergeLossKind` below still catches it; it just answers with a confirmation instead
+                // of with silence.
                 guard !upper.isFolder, !lower.isFolder else { return }
-                // A `.value` layer (§4.4's grade, §4.5's flat colour) holds no pixels of its own —
-                // `mergeLayers` rasterizes its cel, which is blank, so pinching one in bakes a hole
-                // where its grade or colour used to be rather than merely losing a blend mode. That
-                // is content loss, not the "normal blend mode instead" trade the confirmation below
-                // offers, so it is excluded from the gesture entirely, the same way a folder already
-                // is, rather than folded into wording that would undersell what actually happens.
-                guard canvasManager.layers.indices.contains(upper.layerIndex),
-                      canvasManager.layers.indices.contains(lower.layerIndex),
-                      canvasManager.layers[upper.layerIndex].kind != .value,
-                      canvasManager.layers[lower.layerIndex].kind != .value else { return }
                 pinchPair = (upper.id, lower.id)
                 setPinchHighlight(true)
 
@@ -377,14 +375,15 @@ struct LayerStackListView: UIViewRepresentable {
                 if gesture.scale < 0.6 {
                     setPinchHighlight(false)
                     pinchPair = nil
-                    // A blend mode neither layer carries stays lossless — `mergeLayers` is exactly
-                    // what "Merge Down" already calls. One that would be discarded
-                    // (`mergeBlendModeWouldBeLost`; `PixelOps.flatten` always composites `.normal`,
-                    // per `mergeLayers`'s own doc) is routed through a confirmation instead of applied
-                    // silently — the owner's own ask: "if so then just throw a prompt telling the user
-                    // that if they do this its just going to apply the normal blend mode instead."
-                    if canvasManager.mergeBlendModeWouldBeLost(pair.0, pair.1) {
-                        canvasManager.pendingMergeConfirmation = .init(firstID: pair.0, secondID: pair.1)
+                    // A pair with no blend mode and no `.value` layer stays lossless —
+                    // `mergeLayers` is exactly what "Merge Down" already calls. One `mergeLossKind`
+                    // flags (a blend mode `PixelOps.flatten` would silently reset to Normal, or a
+                    // `.value` layer whose grade/colour would be discarded entirely) is routed through
+                    // a confirmation instead of applied silently — the owner's own ask: "if so then
+                    // just throw a prompt telling the user" what will happen, worded to which of the
+                    // two it actually is (`MergeLossKind.confirmationMessage`).
+                    if let loss = canvasManager.mergeLossKind(pair.0, pair.1) {
+                        canvasManager.pendingMergeConfirmation = .init(firstID: pair.0, secondID: pair.1, lossKind: loss)
                     } else {
                         canvasManager.mergeLayers(pair.0, pair.1)
                     }

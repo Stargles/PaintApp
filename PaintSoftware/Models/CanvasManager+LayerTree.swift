@@ -419,24 +419,27 @@ extension CanvasManager {
         return folder.id
     }
 
-    /// Whether merging these two layers would lose either one's blend mode — the one loss the pinch's
-    /// confirmation warns about (the owner's own wording: "if you do this its just going to apply the
-    /// normal blend mode instead").
+    /// What merging these two layers would lose, if anything — the question the pinch's confirmation
+    /// asks before calling `mergeLayers`. Nil means the merge is lossless and may run without asking.
     ///
     /// A pure predicate rather than folded into `mergeLayers` itself, so `handlePinch` can ask it
     /// *before* running an irreversible flatten and route a lossy pair through a confirmation instead
     /// of applying it silently — `mergeLayers` has no notion of "ask first" and should not grow one
     /// just for its one UI caller.
     ///
-    /// Checks `blendMode` only. `PixelOps.flatten` (below) always composites with `blendMode: .normal`
-    /// hard-coded, so any other mode on either layer never survives — that is the loss this answers
-    /// for. A `.value` layer's grade or flat colour is a different, worse loss (its whole content, not
-    /// its blend mode) and is excluded from the pinch gesture entirely instead (`handlePinch`'s
-    /// `.began`), so this function is never asked about one.
-    func mergeBlendModeWouldBeLost(_ firstID: UUID, _ secondID: UUID) -> Bool {
+    /// `.value` checked before blend mode, so a layer that is both (a graded/flat-colour layer with a
+    /// non-Normal mode set on it, which does nothing today but is still stored) reports the loss that
+    /// actually matters more. See `CanvasManager.MergeLossKind` for what each case means and why a
+    /// `.value` layer is answered here rather than excluded from the gesture — merging one is
+    /// undoable through the same `withStructureUndo` every merge already uses, so a confirmation is
+    /// something the artist can act on, where a silent refusal would just be a pinch that does
+    /// nothing.
+    func mergeLossKind(_ firstID: UUID, _ secondID: UUID) -> MergeLossKind? {
         guard let first = layers.first(where: { $0.id == firstID }),
-              let second = layers.first(where: { $0.id == secondID }) else { return false }
-        return first.blendMode != .normal || second.blendMode != .normal
+              let second = layers.first(where: { $0.id == secondID }) else { return nil }
+        if first.kind == .value || second.kind == .value { return .valueLayerContent }
+        if first.blendMode != .normal || second.blendMode != .normal { return .blendMode }
+        return nil
     }
 
     /// Flattens two layers into one at the current frame — the pinch-together gesture in the layer

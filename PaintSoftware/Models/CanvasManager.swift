@@ -550,7 +550,7 @@ final class CanvasManager: ObservableObject {
     }
 
     /// A pinch-to-merge the layer panel is holding for confirmation rather than applying — set when
-    /// `mergeBlendModeWouldBeLost` says the pair's blend mode(s) would not survive `mergeLayers`.
+    /// `mergeLossKind` says the pair would lose something `mergeLayers` cannot preserve.
     ///
     /// **Not `CanvasNotice`.** That banner's whole design is to inform *after* the fact, with no way
     /// to gate or cancel an action already taken (its own doc: "does not take a tap to get rid of").
@@ -567,6 +567,39 @@ final class CanvasManager: ObservableObject {
         let id = UUID()
         let firstID: UUID
         let secondID: UUID
+        let lossKind: MergeLossKind
+    }
+
+    /// What a pinch-merge would lose, as answered by `mergeLossKind`. Two cases because they are
+    /// genuinely different losses, not two phrasings of one — a `Bool` here is what forced an earlier
+    /// version of this fix to exclude `.value` layers from the gesture rather than warn about them,
+    /// which traded one silent-failure shape (a lossy merge with no warning) for another (a pinch that
+    /// does nothing, on a layer combination that looked mergeable). Neither is acceptable on its own;
+    /// this is what lets both be handled the same way — a confirmation whose wording matches the loss.
+    enum MergeLossKind: Equatable {
+        /// Either layer's blend mode is not Normal. `PixelOps.flatten` always composites with
+        /// `.normal` (see `mergeLayers`), so the mode is silently reset — the owner's own described
+        /// case, and the mildest of the two: content is unaffected, only how it combines with what
+        /// was under it.
+        case blendMode
+        /// Either layer is `.value` (§4.4's grade or §4.5's flat colour) — a layer that holds no
+        /// pixels of its own. `mergeLayers` rasterizes its cel, which is blank, so the merge discards
+        /// the grade or colour entirely rather than merely re-blending it. Worse than `.blendMode`,
+        /// and checked first by `mergeLossKind` for that reason: a pair with both problems reports
+        /// the one the artist needs told about more urgently.
+        case valueLayerContent
+
+        /// The confirmation's message — worded to the actual loss, not to a generic "blend mode"
+        /// guess. `CanvasNotice.message`'s pattern: wording lives with the case it belongs to, one
+        /// place, rather than duplicated at every presenting call site.
+        var confirmationMessage: String {
+            switch self {
+            case .blendMode:
+                return "One of these layers uses a blend mode other than Normal. Merging will apply Normal blend mode to the result instead."
+            case .valueLayerContent:
+                return "One of these layers is a colour or adjustment layer with no pixels of its own. Merging will flatten it into the layer below, and it will no longer be editable as its own colour or adjustment."
+            }
+        }
     }
 
     /// Runs the merge a confirmed prompt named, then clears it.
