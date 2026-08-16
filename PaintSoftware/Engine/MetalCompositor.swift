@@ -332,6 +332,36 @@ final class CompositorMetalEngine {
         self.psMask = mask
         self.psEffectMix = effectMix
         self.effects = EffectPipelines(device: device, library: library)
+
+        // **The valve that makes the caches above safe to hold on a device.** Everything this engine
+        // keeps between composites is a pure memoization — a cached upload is re-derivable from the
+        // request that asked for it, and a pooled scratch texture is re-derivable from nothing at all
+        // — so under pressure the correct move is to give all of it back and let the next frame be a
+        // cold one. That trade only exists because the fallback exists: the worst case here is the
+        // 258.6 ms cold composite `Compositor.backend` tabulates, not a failure.
+        //
+        // Registered rather than left to the OS because nothing else would free it. The upload cache
+        // is bounded by its own budget and the pool by nesting depth, so neither shrinks on its own
+        // when the artist switches to a different app mid-drawing — they sit at their high-water mark
+        // holding up to 192 MB against a document nobody is looking at.
+        //
+        // Delivered on the posting thread, so this can block main for as long as a composite takes if
+        // one is in flight. That is the right way round: a jettison that waits ~30 ms is cheaper than
+        // the termination it is trying to avoid.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            self?.purge()
+        }
+    }
+
+    /// Drops everything held between composites. Correctness-neutral by construction — see the
+    /// registration in `init` — so this is safe to call at any time and from any thread.
+    func purge() {
+        lock.lock()
+        defer { lock.unlock() }
+        uploads.removeAll()
+        pool = nil
     }
 
     /// How many scratch textures the last composite allocated. Reported by `PerfBaselineTests`;

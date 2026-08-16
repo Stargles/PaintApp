@@ -14,13 +14,39 @@ import UIKit
 
 /// Which implementation `Compositor.composite` uses.
 ///
-/// **Defaults to `.coreGraphics`, and that is still not a placeholder** — though phase 5 narrows the
-/// reason. The GPU is what §5.1 wants for per-pixel blend math over 4.2M pixels and that math now
-/// exists on both sides; what has not arrived is a consumer that needs it at interactive rates. The
-/// one offline consumer is the project thumbnail, where a whole composite is cheaper on the CPU than
-/// the upload the GPU pays first (measured: 84 ms against 1189 ms for six 2048² layers,
-/// `PerfBaselineTests`, simulator). §5.2's sandwich is the consumer that flips this, because it
-/// keeps its textures between frames and stops paying the upload every time.
+/// **Defaults to `.metal`, and the sentence that used to be here is what changed.** It read: "what
+/// has not arrived is a consumer that needs it at interactive rates … §5.2's sandwich is the consumer
+/// that flips this, because it keeps its textures between frames and stops paying the upload every
+/// time." The sandwich arrived, and then the second half of that prediction turned out to be the work
+/// rather than the consequence — the sandwich cached *composites* and the GPU went on re-uploading
+/// every leaf underneath them, three times per repaint, so the flag stayed off because turning it on
+/// would have been slower. `MetalCompositor`'s upload cache is what closed that, and the flip follows
+/// the measurement rather than the plan.
+///
+/// **The measurement, Debug on the simulator, 6 layers at 2048², both backends warm**
+/// (`PerfBaselineTests.testSandwichRebuildCostOnBothBackends` and
+/// `testEffectCompositeCostOnBothBackends`):
+///
+/// | | CoreGraphics | Metal |
+/// |---|---|---|
+/// | one repaint — three composites | 74.6 ms | **31.3 ms** |
+/// | flat 6-layer composite | 43.9 ms | **21.0 ms** |
+/// | the same, with one adjustment layer | 7047.5 ms | **18.8 ms** |
+///
+/// The third row is the one that decides it. An effect on the CPU snapshots the canvas, grades 4.2M
+/// pixels in Swift and writes a third buffer (`CoreGraphicsCompositor.grade`, slow on purpose because
+/// it is the oracle); on the GPU it is one more dispatch over a texture that is already resident and
+/// disappears into the noise. Seven seconds against nineteen milliseconds is not a tuning difference,
+/// and it is the shape every §4.4 document has.
+///
+/// **What is still true of the old default: the first composite at a given canvas size loses.** Cold,
+/// the GPU pays every upload with nothing cached — 258.6 ms against the CPU's 74.6 — so the win is
+/// "every frame after the first", not "every frame". The offline consumer this used to be argued
+/// against is the project thumbnail (`ProjectStore`), which composites once and is exactly that cold
+/// case; it is now marginally worse off and is not on any interactive path.
+///
+/// The simulator's GPU is not an iPad's and does not model its bandwidth, so treat every ratio above
+/// as directional. The *sign* is what the flip rests on, and it is the same sign in all three rows.
 ///
 /// **The fast tier can select either, which is new.** The `PaintSoftwareUITests` target opts out of
 /// the app's `PBXFileSystemSynchronizedRootGroup` and hand-lists its sources, so it had no shader of
@@ -39,7 +65,13 @@ enum Compositor {
     /// The active backend. A `static var` rather than a `UserDefaults`-backed setting because this is
     /// a development seam, not something a user chooses — `CanvasManager.pencilOnlyDrawing` is what a
     /// real persisted preference looks like in this codebase, and this is deliberately not that.
-    static var backend: CompositorBackend = .coreGraphics
+    ///
+    /// It stays a development seam now that the default has moved, and more so rather than less: the
+    /// only thing it selects between is a fast implementation and the slow one it is measured against,
+    /// and an artist has no way to tell them apart except by waiting. The user-facing performance knob
+    /// added alongside this is render resolution, which changes the *picture* and is therefore a
+    /// choice somebody can actually make.
+    static var backend: CompositorBackend = .metal
 
     /// Composites one frame. Pure: every input is a value the caller owns, so this is safe to call
     /// from any thread — which is the whole point of §9.1 point 3 and what makes §9.2's background
