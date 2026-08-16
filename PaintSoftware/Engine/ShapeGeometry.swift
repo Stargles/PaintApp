@@ -193,61 +193,109 @@ struct ShapeGeometry: Equatable {
         case top, bottom, left, right
     }
 
-    /// The geometry produced by dragging `corner` to `point` (a raw touch location in canvas space):
-    /// the dragged corner follows the touch, anchored by the fixed opposite corner. `rotation` is
-    /// carried through unchanged — a corner drag resizes, it doesn't turn the shape.
+    /// Where the handle diagonally opposite `corner` sits **in canvas space** — on the glass, where
+    /// the artist can see it. This is the point a corner drag has to hold still.
     ///
-    /// `point` is mapped back through `rotationTransform` first because the corner math is
-    /// axis-aligned in the shape's own *local* frame; without that a rotated rectangle resizes
-    /// toward the wrong corner.
-    func draggingCorner(_ corner: Corner, to point: CGPoint) -> ShapeGeometry {
+    /// It is not the same as the opposite corner of `boundingRect`: that is a *local* coordinate, and
+    /// `rotationTransform` pivots about a centre that a corner drag moves. Pinning the local one
+    /// leaves the anchor travelling across the canvas by (I − R(θ))·(C − C′) every frame, which the
+    /// drag then feeds back into itself — the owner's "weird movement".
+    func canvasAnchor(opposite corner: Corner) -> CGPoint {
         let r = boundingRect
-        let localPoint = point.applying(rotationTransform.inverted())
-        // The dragged corner is anchored by the fixed opposite corner.
-        let fixedX: CGFloat, fixedY: CGFloat
+        let local: CGPoint
         switch corner {
-        case .topLeft:     fixedX = r.maxX; fixedY = r.maxY
-        case .topRight:    fixedX = r.minX; fixedY = r.maxY
-        case .bottomLeft:  fixedX = r.maxX; fixedY = r.minY
-        case .bottomRight: fixedX = r.minX; fixedY = r.minY
+        case .topLeft:     local = CGPoint(x: r.maxX, y: r.maxY)
+        case .topRight:    local = CGPoint(x: r.minX, y: r.maxY)
+        case .bottomLeft:  local = CGPoint(x: r.maxX, y: r.minY)
+        case .bottomRight: local = CGPoint(x: r.minX, y: r.minY)
         }
+        return local.applying(rotationTransform)
+    }
+
+    /// Where the axis handle opposite `edge` sits in canvas space — the node an axis drag holds.
+    /// Same argument as `canvasAnchor(opposite:)` for corners.
+    func canvasAnchor(opposite edge: Edge) -> CGPoint {
+        let r = boundingRect
+        let local: CGPoint
+        switch edge {
+        case .top:    local = CGPoint(x: r.midX, y: r.maxY)
+        case .bottom: local = CGPoint(x: r.midX, y: r.minY)
+        case .left:   local = CGPoint(x: r.maxX, y: r.midY)
+        case .right:  local = CGPoint(x: r.minX, y: r.midY)
+        }
+        return local.applying(rotationTransform)
+    }
+
+    /// The geometry produced by dragging `corner` to `point` (a raw touch location in canvas space):
+    /// the dragged corner follows the touch while the diagonally opposite corner stays **fixed on
+    /// screen**. `rotation` is carried through unchanged — a corner drag resizes, it doesn't turn.
+    ///
+    /// The anchor is a canvas position, not a local one, and everything else is derived from it: the
+    /// touch is measured from the anchor and rotated into the shape's own axes (`v`), which gives the
+    /// new half-extents directly, and the new centre is placed back through R(θ) from the anchor. The
+    /// anchor's canvas position is invariant by construction. Anchoring in the local frame instead is
+    /// the bug this replaces — see `canvasAnchor(opposite:)`.
+    ///
+    /// Crossing the anchor **flips** rather than inverting: `abs` on each component keeps the rect
+    /// well-formed and mirrors it through the anchor, which is the shipped behaviour
+    /// `testDraggingACornerPastTheAnchorFlipsRatherThanInverting` pins. Note that at the instant of
+    /// the crossing the anchor stops being the *opposite* corner and becomes the dragged one's near
+    /// neighbour, which is why callers latch `anchor` at touch-down: recomputing it per frame would
+    /// jump to a different point the moment the drag crossed over.
+    func draggingCorner(_ corner: Corner, to point: CGPoint, anchor: CGPoint? = nil) -> ShapeGeometry {
+        let a = anchor ?? canvasAnchor(opposite: corner)
+        let d = CGPoint(x: point.x - a.x, y: point.y - a.y)
+        let ci = cos(-rotation), si = sin(-rotation)
+        // The touch in the shape's own axes, measured from the anchor.
+        let v = CGPoint(x: d.x * ci - d.y * si, y: d.x * si + d.y * ci)
+        let hw = abs(v.x) / 2, hh = abs(v.y) / 2
+        let cf = cos(rotation), sf = sin(rotation)
+        let mid = CGPoint(x: (v.x / 2) * cf - (v.y / 2) * sf,
+                          y: (v.x / 2) * sf + (v.y / 2) * cf)
+        // The new centre, back in canvas axes: half of `v`, rotated, out from the anchor.
+        let nc = CGPoint(x: a.x + mid.x, y: a.y + mid.y)
         var result = self
-        result.startPoint = CGPoint(x: min(localPoint.x, fixedX), y: min(localPoint.y, fixedY))
-        result.endPoint = CGPoint(x: max(localPoint.x, fixedX), y: max(localPoint.y, fixedY))
+        result.startPoint = CGPoint(x: nc.x - hw, y: nc.y - hh)
+        result.endPoint = CGPoint(x: nc.x + hw, y: nc.y + hh)
         return result
     }
 
     /// The geometry produced by dragging the `edge` handle to `point` (canvas space).
     ///
-    /// An oval's edge handles are *axis* handles: the touch sets both that axis's new half-length
-    /// (its distance from the centre) and the shape's rotation (its bearing from the centre), while
-    /// the perpendicular axis holds. Every other kind moves just that one edge of the bounding box,
-    /// in the shape's local frame — the same mapping `draggingCorner` uses — and leaves `rotation`
-    /// alone.
-    func draggingEdge(_ edge: Edge, to point: CGPoint) -> ShapeGeometry {
+    /// An oval's edge handles are *axis* handles, and the question one answers is "how long is this
+    /// axis, measured from the node opposite it" — so that opposite node is what holds still, exactly
+    /// as a corner drag holds the opposite corner. Two behaviours the previous version had are
+    /// deliberately gone: it transformed about the **centre** (the owner: the oval "treats the center
+    /// as the transformation origin instead of the opposite side node"), and it also wrote `rotation`
+    /// from the touch's bearing, so a resize swung the shape as it grew. You cannot hold a node fixed
+    /// while spinning the frame that node is defined in; turning the shape is the green rotation
+    /// handle's job, and having both do it is why an axis drag used to feel like a wrench.
+    ///
+    /// The touch's perpendicular component is discarded, so the oval stays on its own axis.
+    ///
+    /// Every other kind moves just that one edge of the bounding box, in the shape's local frame, and
+    /// leaves `rotation` alone. That branch is currently unreachable from the UI — `ShapeOverlayView`
+    /// gives rectangles four corner handles and no mid-edge ones.
+    func draggingEdge(_ edge: Edge, to point: CGPoint, anchor: CGPoint? = nil) -> ShapeGeometry {
         let r = boundingRect
         var result = self
         if kind == .oval {
-            let cx = r.midX, cy = r.midY
-            let W = r.width / 2, H = r.height / 2
-            var newW = W, newH = H, newRot = rotation
+            let a = anchor ?? canvasAnchor(opposite: edge)
+            let d = CGPoint(x: point.x - a.x, y: point.y - a.y)
+            let ci = cos(-rotation), si = sin(-rotation)
+            let v = CGPoint(x: d.x * ci - d.y * si, y: d.x * si + d.y * ci)
+            var hw = r.width / 2, hh = r.height / 2
+            var along = CGPoint.zero
             switch edge {
-            case .top:
-                let dx = point.x - cx, dy = cy - point.y
-                newH = hypot(dx, dy); newRot = atan2(dx, dy)
-            case .bottom:
-                let dx = cx - point.x, dy = point.y - cy
-                newH = hypot(dx, dy); newRot = atan2(dx, dy)
-            case .left:
-                let dx = cx - point.x, dy = cy - point.y
-                newW = hypot(dx, dy); newRot = atan2(dy, dx)
-            case .right:
-                let dx = point.x - cx, dy = point.y - cy
-                newW = hypot(dx, dy); newRot = atan2(dy, dx)
+            case .left, .right: hw = abs(v.x) / 2; along = CGPoint(x: v.x / 2, y: 0)
+            case .top, .bottom: hh = abs(v.y) / 2; along = CGPoint(x: 0, y: v.y / 2)
             }
-            result.startPoint = CGPoint(x: cx - newW, y: cy - newH)
-            result.endPoint = CGPoint(x: cx + newW, y: cy + newH)
-            result.rotation = newRot
+            let cf = cos(rotation), sf = sin(rotation)
+            let nc = CGPoint(x: a.x + along.x * cf - along.y * sf,
+                             y: a.y + along.x * sf + along.y * cf)
+            result.startPoint = CGPoint(x: nc.x - hw, y: nc.y - hh)
+            result.endPoint = CGPoint(x: nc.x + hw, y: nc.y + hh)
+            result.rotation = rotation
             return result
         }
         let localPoint = point.applying(rotationTransform.inverted())

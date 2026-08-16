@@ -124,6 +124,52 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
                                "THE BUG: two-finger pinch/pan/rotate is dead while the Fill tool is selected")
     }
 
+    /// The owner's third report, and the direct net under two changes made together.
+    ///
+    /// "If I then try to zoom in and out of the screen or even pan it, it for some reason zooms in
+    /// and out from the center of the canvas, not your fingers" — said while a smart shape was
+    /// pending. `beginAnchorIfNeeded` used to early-return whenever `shapeGestureActive`, on the rule
+    /// that two fingers over a pending shape meant "snap it, not pan it"; the only thing that then
+    /// seeded the anchor was `commitSnappedShapeIfTransforming`, which also **baked** the shape. So a
+    /// pending shape gave you a pinch with no anchor, which is a pinch about the container's own
+    /// centre — the canvas centre — and a shape that vanished into the layer as the price of getting
+    /// the anchor back.
+    ///
+    /// Both halves are asserted here, because fixing either alone ships a bug: delete the bake
+    /// without seeding the anchor and the canvas refuses to move at all while a shape is pending
+    /// (`updateLiveOffset` bails on a nil anchor), which looks nothing like the change that caused it.
+    ///
+    /// The offset half of `xform:` is what carries the anchoring: a pinch about the canvas centre
+    /// changes only the scale, while an anchored pinch also translates so the content under the
+    /// fingers stays put.
+    func testPinchingWithAPendingShapeMovesTheCanvasAndLeavesTheShapeAlone() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        XCTAssertEqual(readShapeState(app), "none", "PREMISE: nothing pending before the gesture")
+
+        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.30, dy: 0.35), to: CGVector(dx: 0.70, dy: 0.65))
+        XCTAssertEqual(readShapeState(app), "adjustable",
+                       "PREMISE: holding a stroke has to leave a shape in the adjustable state — "
+                       + "'following' here would mean the pen lift never reached the shape at all")
+
+        let before = readTransform(app)
+        canvas.pinch(withScale: 2.0, velocity: 1.5)
+        let after = readTransform(app)
+
+        XCTAssertNotEqual(before, after,
+                          "THE BUG (half 1): a pinch has to move the canvas while a shape is pending "
+                          + "(xform \(before) -> \(after))")
+        XCTAssertNotEqual(offsetFields(of: before), offsetFields(of: after),
+                          "THE BUG (half 1): the pinch has to anchor on the fingers, which moves the "
+                          + "canvas offset. Only the scale changing means it zoomed about the canvas "
+                          + "centre (xform \(before) -> \(after))")
+        XCTAssertEqual(readShapeState(app), "adjustable",
+                       "THE BUG (half 2): moving the viewport is not editing the canvas, so the "
+                       + "pending shape has to survive a pinch instead of baking into the layer")
+    }
+
     // MARK: - Fixture
 
     /// Launches into the editor and shortens the one layer's block so the track has an empty slot
@@ -205,11 +251,28 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
 
     /// The `xform:` field of `canvas.host`'s accessibility label — "scale,rotation,dx,dy".
     private func readTransform(_ app: XCUIApplication) -> String {
+        readField(app, "xform:")
+    }
+
+    /// The `shape:` field — "none" / "following" / "adjustable". See `publishCanvasState`.
+    private func readShapeState(_ app: XCUIApplication) -> String {
+        readField(app, "shape:")
+    }
+
+    private func readField(_ app: XCUIApplication, _ prefix: String) -> String {
         let label = app.otherElements["canvas.host"].label
-        guard let field = label.split(separator: " ").first(where: { $0.hasPrefix("xform:") }) else {
+        guard let field = label.split(separator: " ").first(where: { $0.hasPrefix(prefix) }) else {
             return "?(\(label))"
         }
-        return String(field.dropFirst("xform:".count))
+        return String(field.dropFirst(prefix.count))
+    }
+
+    /// Just the dx,dy half of an `xform:` value — the part that only moves when the gesture anchored
+    /// on the fingers rather than on the canvas centre.
+    private func offsetFields(of xform: String) -> String {
+        let parts = xform.split(separator: ",")
+        guard parts.count == 4 else { return xform }
+        return "\(parts[2]),\(parts[3])"
     }
 
     /// Closes an open popover without activating anything in it. UIKit puts a full-screen dismiss

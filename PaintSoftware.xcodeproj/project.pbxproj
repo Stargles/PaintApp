@@ -19,6 +19,8 @@
 		B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */; };
 		B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */; };
 		B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */; };
+		B2C3D4E5F6001122334455F2 /* PaintSoftware/Engine/ShapeHoldClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/ShapeHoldClock.swift */; };
+		B2C3D4E5F600112233445502 /* ShapeHoldClockLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */; };
 		9A7B5C3D1E2F000000000A02 /* PaintSoftware/Engine/StrokeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000A01 /* PaintSoftware/Engine/StrokeGeometry.swift */; };
 		9A7B5C3D1E2F000000000B02 /* PaintSoftware/Engine/StrokeSpatialIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000B01 /* PaintSoftware/Engine/StrokeSpatialIndex.swift */; };
 		9A7B5C3D1E2F000000000E02 /* VectorEraserLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000E01 /* VectorEraserLogicTests.swift */; };
@@ -149,6 +151,8 @@
 		B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeGeometry.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeDetector.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeDetectorLogicTests.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/ShapeHoldClock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeHoldClock.swift; sourceTree = "<group>"; };
+		B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeHoldClockLogicTests.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000A01 /* PaintSoftware/Engine/StrokeGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeGeometry.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000B01 /* PaintSoftware/Engine/StrokeSpatialIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeSpatialIndex.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000E01 /* VectorEraserLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserLogicTests.swift; sourceTree = "<group>"; };
@@ -324,6 +328,7 @@
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
+				B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
 				9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */,
 				5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */,
@@ -376,6 +381,7 @@
 				E538EEE418EF6AE18A4361C1 /* PaintSoftware/Engine/PinchMergeGate.swift */,
 				B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */,
 				B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */,
+				B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/ShapeHoldClock.swift */,
 				9A7B5C3D1E2F000000000A01 /* PaintSoftware/Engine/StrokeGeometry.swift */,
 				9A7B5C3D1E2F000000000B01 /* PaintSoftware/Engine/StrokeSpatialIndex.swift */,
 				9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */,
@@ -560,6 +566,8 @@
 				B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */,
 				B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */,
 				B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */,
+				B2C3D4E5F6001122334455F2 /* PaintSoftware/Engine/ShapeHoldClock.swift in Sources */,
+				B2C3D4E5F600112233445502 /* ShapeHoldClockLogicTests.swift in Sources */,
 				9A7B5C3D1E2F000000000A02 /* PaintSoftware/Engine/StrokeGeometry.swift in Sources */,
 				9A7B5C3D1E2F000000000B02 /* PaintSoftware/Engine/StrokeSpatialIndex.swift in Sources */,
 				9A7B5C3D1E2F000000000E02 /* VectorEraserLogicTests.swift in Sources */,

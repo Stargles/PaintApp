@@ -487,19 +487,112 @@ final class ShapeDetectorLogicTests: XCTestCase {
         XCTAssertEqual(dragged.rotation, rotation, accuracy: 0.001)
     }
 
-    func testDraggingAnOvalAxisHandleSetsBothLengthAndRotation() {
-        // Centre (100, 100), half-axes 50 x 20.
-        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 50, y: 80),
-                                  endPoint: CGPoint(x: 150, y: 120))
-        // Drag the right axis handle straight down from the centre, 60pt away.
-        let dragged = shape.draggingEdge(.right, to: CGPoint(x: 100, y: 160))
-        XCTAssertEqual(dragged.boundingRect.width / 2, 60, accuracy: 0.001, "dragged axis takes the touch distance")
-        XCTAssertEqual(dragged.boundingRect.height / 2, 20, accuracy: 0.001, "perpendicular axis is untouched")
-        XCTAssertEqual(dragged.rotation, .pi / 2, accuracy: 0.001, "rotation follows the touch's bearing")
-        XCTAssertEqual(dragged.center.x, 100, accuracy: 0.001, "an axis drag is symmetric about the centre")
-        XCTAssertEqual(dragged.center.y, 100, accuracy: 0.001)
+    /// Session 51, the owner's report: the oval "treats the center as the transformation origin
+    /// instead of the opposite side node", and an axis drag also *turned* the shape because it wrote
+    /// `rotation` from the touch's bearing. This replaces
+    /// `testDraggingAnOvalAxisHandleSetsBothLengthAndRotation`, which asserted both of those.
+    /// Session 51, and the assertion whose absence let the bug ship: the anchored corner must not
+    /// move **on the canvas**.
+    ///
+    /// The three tests above all read `boundingRect`, which is the shape's *local*, unrotated frame —
+    /// so they were satisfied by a corner drag that pinned a local coordinate while the corner
+    /// itself slid across the glass. It does slide: `rotationTransform` pivots about a centre that a
+    /// corner drag moves by half the drag delta, so a locally-fixed corner travels by
+    /// (I − R(θ))·(C − C′) every frame, and because the next frame's touch is mapped back through a
+    /// transform built from the new centre the error compounds — the owner's "weird movement".
+    func testDraggingACornerHoldsTheOppositeCornerFixedOnTheCanvas() {
+        let rotation: CGFloat = 0.7
+        let shape = ShapeGeometry(kind: .rectangle, startPoint: .zero,
+                                  endPoint: CGPoint(x: 100, y: 100), rotation: rotation)
+        let anchor = shape.canvasAnchor(opposite: .bottomRight)
+        let c = cos(rotation), s = sin(rotation)
+        // Touches expressed as an offset from the anchor along the shape's own axes, so every one of
+        // them stays on the same side of the anchor (crossing it is the flip case, tested separately).
+        for local in [CGPoint(x: 150, y: 120), CGPoint(x: 60, y: 200),
+                      CGPoint(x: 100, y: 100), CGPoint(x: 20, y: 30)] {
+            let touch = CGPoint(x: anchor.x + local.x * c - local.y * s,
+                                y: anchor.y + local.x * s + local.y * c)
+            let dragged = shape.draggingCorner(.bottomRight, to: touch, anchor: anchor)
+
+            let anchorAfter = dragged.canvasAnchor(opposite: .bottomRight)
+            XCTAssertEqual(anchorAfter.x, anchor.x, accuracy: 0.001)
+            XCTAssertEqual(anchorAfter.y, anchor.y, accuracy: 0.001)
+            // ...and the dragged corner is under the finger, which is the other half of the contract.
+            let draggedCorner = dragged.canvasAnchor(opposite: .topLeft)
+            XCTAssertEqual(draggedCorner.x, touch.x, accuracy: 0.001)
+            XCTAssertEqual(draggedCorner.y, touch.y, accuracy: 0.001)
+
+            XCTAssertEqual(dragged.boundingRect.width, local.x, accuracy: 0.001)
+            XCTAssertEqual(dragged.boundingRect.height, local.y, accuracy: 0.001)
+            XCTAssertEqual(dragged.rotation, rotation, accuracy: 0.001,
+                           "a corner drag resizes, it never rotates")
+        }
     }
 
+    /// Feeding the result back in, the way a real drag does frame after frame, must be stable — the
+    /// compounding drift is what the owner actually felt, and one frame of it is too small to see.
+    func testRepeatedCornerDragsWithALatchedAnchorDoNotDrift() {
+        let rotation: CGFloat = 0.7
+        var shape = ShapeGeometry(kind: .rectangle, startPoint: .zero,
+                                  endPoint: CGPoint(x: 100, y: 100), rotation: rotation)
+        let anchor = shape.canvasAnchor(opposite: .bottomRight)
+        let c = cos(rotation), s = sin(rotation)
+        for step in 1...40 {
+            let local = CGPoint(x: 100 + CGFloat(step), y: 100 + CGFloat(step) * 0.5)
+            let touch = CGPoint(x: anchor.x + local.x * c - local.y * s,
+                                y: anchor.y + local.x * s + local.y * c)
+            shape = shape.draggingCorner(.bottomRight, to: touch, anchor: anchor)
+        }
+        let anchorAfter = shape.canvasAnchor(opposite: .bottomRight)
+        XCTAssertEqual(anchorAfter.x, anchor.x, accuracy: 0.001,
+                       "40 frames of dragging must leave the anchor exactly where it started")
+        XCTAssertEqual(anchorAfter.y, anchor.y, accuracy: 0.001)
+        XCTAssertEqual(shape.boundingRect.width, 140, accuracy: 0.001)
+        XCTAssertEqual(shape.boundingRect.height, 120, accuracy: 0.001)
+    }
+
+    func testDraggingAnOvalAxisHandleAnchorsTheOppositeNode() {
+        // Centre (100, 100), half-axes 50 x 20 — so the left axis node is at (50, 100).
+        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 50, y: 80),
+                                  endPoint: CGPoint(x: 150, y: 120))
+        let leftNode = shape.canvasAnchor(opposite: .right)
+        XCTAssertEqual(leftNode.x, 50, accuracy: 0.001)
+        XCTAssertEqual(leftNode.y, 100, accuracy: 0.001)
+
+        // Drag the right axis handle down and to the right of the centre.
+        let dragged = shape.draggingEdge(.right, to: CGPoint(x: 100, y: 160))
+        let anchorAfter = dragged.canvasAnchor(opposite: .right)
+        XCTAssertEqual(anchorAfter.x, 50, accuracy: 0.001, "the opposite node is what holds still")
+        XCTAssertEqual(anchorAfter.y, 100, accuracy: 0.001)
+        // Measured from the anchor along the shape's own x axis: (100,160) is 50 along it.
+        XCTAssertEqual(dragged.boundingRect.width, 50, accuracy: 0.001,
+                       "the axis length is the touch's component along that axis, from the anchor")
+        XCTAssertEqual(dragged.boundingRect.height / 2, 20, accuracy: 0.001, "perpendicular axis is untouched")
+        XCTAssertEqual(dragged.rotation, 0, accuracy: 0.001,
+                       "an axis drag resizes; turning the shape is the rotation handle's job")
+    }
+
+    /// The same property on a rotated oval, which is where centre-anchoring was visibly wrong: the
+    /// node the artist is watching has to stay put on the glass, not in the shape's local frame.
+    func testDraggingARotatedOvalAxisHoldsItsAnchorOnTheCanvas() {
+        let rotation: CGFloat = 0.6
+        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 50, y: 80),
+                                  endPoint: CGPoint(x: 150, y: 120), rotation: rotation)
+        let anchor = shape.canvasAnchor(opposite: .right)
+        for target in [CGPoint(x: 200, y: 40), CGPoint(x: 130, y: 190), CGPoint(x: 90, y: 105)] {
+            let dragged = shape.draggingEdge(.right, to: target, anchor: anchor)
+            let after = dragged.canvasAnchor(opposite: .right)
+            XCTAssertEqual(after.x, anchor.x, accuracy: 0.001)
+            XCTAssertEqual(after.y, anchor.y, accuracy: 0.001)
+            XCTAssertEqual(dragged.rotation, rotation, accuracy: 0.001)
+            XCTAssertEqual(dragged.boundingRect.height, shape.boundingRect.height, accuracy: 0.001,
+                           "the perpendicular half-axis is held whatever the touch's perpendicular offset")
+        }
+    }
+
+    /// Rectangles get four corner handles and no mid-edge ones (`ShapeOverlayView.handleLayout`), so
+    /// this branch is currently unreachable from the UI — it is kept and pinned because the handle
+    /// set is a UI decision that could change back.
     func testDraggingARectangleEdgeMovesOnlyThatEdge() {
         let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 0, y: 0),
                                   endPoint: CGPoint(x: 100, y: 100))

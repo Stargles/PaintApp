@@ -6,7 +6,10 @@ import UIKit
 /// The preview is the *collapsed brush stroke* the shape will bake into — supplied as an already-
 /// rendered image by `CanvasManager.activeShapePreviewImage` — not a uniform stroked outline. That
 /// way the transient state looks exactly like the result, instead of visibly changing the instant it
-/// commits. A faint outline is drawn under it purely as a geometry guide for the handles.
+/// commits. A faint outline is drawn over it purely as a geometry guide for the handles. (Over, not
+/// under: `previewView` is a subview and `shapeLayer` is added to this view's own `layer` after it,
+/// so the outline is on top. The header said "under" for a long time, which would have had the next
+/// reader sizing its alpha and line width against the reverse of what happens.)
 ///
 /// Two visual modes:
 ///   1. **Following** (finger still down after hold-detection): preview only, no handles.
@@ -50,8 +53,10 @@ final class ShapeOverlayView: UIView {
 
     var onEndpointDragged: ((CGPoint, EndpointHandle) -> Void)?
     var onRotationDragged: ((CGFloat) -> Void)?
-    var onCornerDragged: ((CGPoint, CornerHandle) -> Void)?
-    var onEdgeDragged: ((CGPoint, EdgeHandle) -> Void)?
+    /// The third argument is the anchor latched at touch-down — the canvas point the drag must hold
+    /// still. See `activeAnchor`.
+    var onCornerDragged: ((CGPoint, CornerHandle, CGPoint?) -> Void)?
+    var onEdgeDragged: ((CGPoint, EdgeHandle, CGPoint?) -> Void)?
 
     /// Which end of a line is being dragged. Both ends used to report through one callback that
     /// unconditionally wrote `endPoint`, so grabbing the start handle moved the far end instead.
@@ -73,9 +78,40 @@ final class ShapeOverlayView: UIView {
 
     private struct HandleInfo { let kind: HandleKind; let layer: CALayer }
 
-    private static let handleSize: CGFloat = 12
-    private static let rotationHandleSize: CGFloat = 10
-    private static let rotationHandleOffset: CGFloat = 30
+    // MARK: - Handle chrome, in screen points
+
+    /// **A handle is chrome: it belongs to the screen, not to the artwork.** This view is pinned
+    /// edge-to-edge to the canvas container, whose transform carries `fitScale * committedScale *
+    /// liveScale`, so anything expressed in this view's own coordinates is canvas-sized by
+    /// construction — a 12-unit handle drew at 12 × that scale, which meant zooming out shrank the
+    /// handles and their touch targets with the drawing. (At a typical `fitScale` well under 1 they
+    /// were already smaller than 12 pt before the artist zoomed at all.) Every constant below is
+    /// therefore a *screen*-point figure divided back out by `canvasScale`.
+    ///
+    /// The drawn dot and the touch target are deliberately different sizes. 44 pt is Apple's HIG
+    /// minimum target, and a 44 pt white dot would cover the very corner it marks and hide the
+    /// artwork under it; a 14 pt target is a third of the minimum and unhittable with a fingertip.
+    /// So: 14 pt drawn, 44 pt hittable (`reach` is its radius).
+    private static let handleScreenSize: CGFloat = 14
+    private static let rotationHandleScreenSize: CGFloat = 14
+    private static let rotationHandleScreenOffset: CGFloat = 36
+    /// Radius of the touch target — half of the 44 pt HIG minimum.
+    private static let handleScreenReach: CGFloat = 22
+
+    /// The canvas container's current content scale, pushed down by `CanvasView.Coordinator` on every
+    /// transform change. Everything above is divided by this to land at its screen size.
+    var canvasScale: CGFloat = 1 {
+        didSet {
+            guard canvasScale != oldValue, canvasScale > 0 else { return }
+            applyScaleDependentGeometry()
+        }
+    }
+
+    private var handleSize: CGFloat { Self.handleScreenSize / canvasScale }
+    private var rotationHandleSize: CGFloat { Self.rotationHandleScreenSize / canvasScale }
+    private var rotationHandleOffset: CGFloat { Self.rotationHandleScreenOffset / canvasScale }
+    private var handleBorderWidth: CGFloat { 2 / canvasScale }
+    private var outlineWidth: CGFloat { 1 / canvasScale }
 
     // MARK: - Layers & gesture
 
@@ -85,6 +121,14 @@ final class ShapeOverlayView: UIView {
     private let handleLayer = CALayer()
     private var handles: [HandleInfo] = []
     private var activeHandle: HandleKind?
+    /// The canvas point the current corner/axis drag must hold still, latched at touch-down.
+    ///
+    /// Recomputing it per frame from the current geometry is stable while the drag stays on one side
+    /// of the anchor, but at the instant the drag crosses it the shape mirrors and the anchor stops
+    /// being the *opposite* handle — so a recomputed anchor would be a different point and the shape
+    /// would visibly jump. One latched field removes the discontinuity; `activeHandle` is already
+    /// tracked across the drag, so there is no new lifecycle here.
+    private var activeAnchor: CGPoint?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -115,7 +159,7 @@ final class ShapeOverlayView: UIView {
         // where the brush stroke is faint or the brush is very small.
         shapeLayer.fillColor = UIColor.clear.cgColor
         shapeLayer.strokeColor = UIColor.systemBlue.withAlphaComponent(0.55).cgColor
-        shapeLayer.lineWidth = 1
+        shapeLayer.lineWidth = outlineWidth
         shapeLayer.lineJoin = .round
         shapeLayer.lineCap = .round
         layer.addSublayer(shapeLayer)
@@ -140,6 +184,7 @@ final class ShapeOverlayView: UIView {
         self.shape = shape
         previewView.image = previewImage
         shapeLayer.path = shape.rotatedCGPath
+        shapeLayer.lineWidth = outlineWidth
 
         guard showHandles else { clearHandles(); return }
         // Rebuild only when the handle *set* changes; otherwise just move the existing layers.
@@ -157,12 +202,34 @@ final class ShapeOverlayView: UIView {
         previewView.image = image
     }
 
+    /// Re-applies everything sized in screen points after `canvasScale` moves.
+    ///
+    /// Routed through `rebuildHandles` rather than `repositionHandles` on purpose: the latter re-reads
+    /// each layer's *existing* `bounds.size` instead of the constant, so a scale change taken through
+    /// it would re-centre the handles at the old size and the zoom-invariance would appear to work
+    /// only when the shape kind happened to change.
+    private func applyScaleDependentGeometry() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        shapeLayer.lineWidth = outlineWidth
+        guard let shape, !handles.isEmpty else { return }
+        // A pinch can land while a handle is being dragged, and `rebuildHandles` goes through
+        // `clearHandles`, which drops the drag's identity. Carry it across: the drag is the same
+        // drag, only the chrome around it changed size.
+        let draggingHandle = activeHandle, draggingAnchor = activeAnchor
+        rebuildHandles(for: shape)
+        activeHandle = draggingHandle
+        activeAnchor = draggingAnchor
+    }
+
     // MARK: - Handle management
 
     private func clearHandles() {
         handles.forEach { $0.layer.removeFromSuperlayer() }
         handles.removeAll()
         activeHandle = nil
+        activeAnchor = nil
     }
 
     /// The handles a shape kind gets, and where they sit for the given geometry. The single source
@@ -172,7 +239,7 @@ final class ShapeOverlayView: UIView {
     /// handles stay glued to the axis-aligned layout even as the outline itself turns.
     private func handleLayout(for shape: ShapeGeometry) -> [(kind: HandleKind, position: CGPoint, isRotation: Bool)] {
         let r = shape.boundingRect
-        let rotationPointLocal = CGPoint(x: r.midX, y: r.minY - Self.rotationHandleOffset)
+        let rotationPointLocal = CGPoint(x: r.midX, y: r.minY - rotationHandleOffset)
         let t = shape.rotationTransform
         let unrotated: [(HandleKind, CGPoint, Bool)]
         switch shape.kind {
@@ -198,11 +265,11 @@ final class ShapeOverlayView: UIView {
     private func rebuildHandles(for shape: ShapeGeometry) {
         clearHandles()
         for entry in handleLayout(for: shape) {
-            let size = entry.isRotation ? Self.rotationHandleSize : Self.handleSize
+            let size = entry.isRotation ? rotationHandleSize : handleSize
             let h = CALayer()
             h.backgroundColor = entry.isRotation ? UIColor.systemGreen.cgColor : UIColor.white.cgColor
             h.borderColor = entry.isRotation ? UIColor.white.cgColor : UIColor.systemBlue.cgColor
-            h.borderWidth = 2
+            h.borderWidth = handleBorderWidth
             h.frame = CGRect(x: entry.position.x - size / 2, y: entry.position.y - size / 2,
                              width: size, height: size)
             handleLayer.addSublayer(h)
@@ -226,8 +293,12 @@ final class ShapeOverlayView: UIView {
     /// The handle *nearest* the point, within the enlarged hitbox — not merely the first one whose
     /// box contains it. On a short line the two endpoint hitboxes overlap, and taking the first
     /// match meant one end could never be grabbed at all.
+    ///
+    /// This nearest-wins search became *more* load-bearing when the target grew to the 44 pt HIG
+    /// minimum: adjacent corners of any shape under ~44 pt on screen now overlap too. Simplifying it
+    /// back to first-match would cost a small shape two of its four corners.
     private func handleKind(at point: CGPoint) -> HandleKind? {
-        let reach: CGFloat = Self.handleSize / 2 + 22
+        let reach = Self.handleScreenReach / canvasScale
         var best: (kind: HandleKind, distance: CGFloat)?
         for info in handles {
             let center = CGPoint(x: info.layer.frame.midX, y: info.layer.frame.midY)
@@ -250,7 +321,9 @@ final class ShapeOverlayView: UIView {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
         guard let touch = touches.first else { return }
-        activeHandle = handleKind(at: touch.location(in: self))
+        let kind = handleKind(at: touch.location(in: self))
+        activeHandle = kind
+        activeAnchor = kind.flatMap(anchor(for:))
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -262,25 +335,44 @@ final class ShapeOverlayView: UIView {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
         activeHandle = nil
+        activeAnchor = nil
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesCancelled(touches, with: event)
         activeHandle = nil
+        activeAnchor = nil
+    }
+
+    /// The canvas point a drag on `kind` has to hold still. Nil for the rotation handle (it pivots
+    /// about the centre, which does not move) and for line endpoints (each simply follows the touch).
+    private func anchor(for kind: HandleKind) -> CGPoint? {
+        guard let shape else { return nil }
+        switch kind {
+        case .cornerTL: return shape.canvasAnchor(opposite: .topLeft)
+        case .cornerTR: return shape.canvasAnchor(opposite: .topRight)
+        case .cornerBL: return shape.canvasAnchor(opposite: .bottomLeft)
+        case .cornerBR: return shape.canvasAnchor(opposite: .bottomRight)
+        case .axisTop: return shape.canvasAnchor(opposite: .top)
+        case .axisBottom: return shape.canvasAnchor(opposite: .bottom)
+        case .axisLeft: return shape.canvasAnchor(opposite: .left)
+        case .axisRight: return shape.canvasAnchor(opposite: .right)
+        case .start, .end, .rotation: return nil
+        }
     }
 
     private func report(_ kind: HandleKind, at point: CGPoint) {
         switch kind {
         case .start: onEndpointDragged?(point, .start)
         case .end: onEndpointDragged?(point, .end)
-        case .cornerTL: onCornerDragged?(point, .topLeft)
-        case .cornerTR: onCornerDragged?(point, .topRight)
-        case .cornerBL: onCornerDragged?(point, .bottomLeft)
-        case .cornerBR: onCornerDragged?(point, .bottomRight)
-        case .axisTop: onEdgeDragged?(point, .top)
-        case .axisBottom: onEdgeDragged?(point, .bottom)
-        case .axisLeft: onEdgeDragged?(point, .left)
-        case .axisRight: onEdgeDragged?(point, .right)
+        case .cornerTL: onCornerDragged?(point, .topLeft, activeAnchor)
+        case .cornerTR: onCornerDragged?(point, .topRight, activeAnchor)
+        case .cornerBL: onCornerDragged?(point, .bottomLeft, activeAnchor)
+        case .cornerBR: onCornerDragged?(point, .bottomRight, activeAnchor)
+        case .axisTop: onEdgeDragged?(point, .top, activeAnchor)
+        case .axisBottom: onEdgeDragged?(point, .bottom, activeAnchor)
+        case .axisLeft: onEdgeDragged?(point, .left, activeAnchor)
+        case .axisRight: onEdgeDragged?(point, .right, activeAnchor)
         case .rotation:
             guard let shape else { return }
             let c = shape.center

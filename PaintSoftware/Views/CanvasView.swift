@@ -16,7 +16,7 @@ struct CanvasView: UIViewRepresentable {
         // entered — see `Coordinator.SandwichPresentation` and `midStrokeEntryCount`. Stated here as
         // well as in the `didSet` because a `didSet` never fires for the initial value; the two
         // formats have to stay identical or the test helpers parse one of them into nothing.
-        host.accessibilityLabel = "sandwich:off entries:0"
+        host.accessibilityLabel = "sandwich:off entries:0 shape:none"
         host.canvasManager = canvasManager
 
         let container = UIView()
@@ -218,14 +218,16 @@ struct CanvasView: UIViewRepresentable {
             coordinator.updateShapeOverlay()
         }
         // Both handle drags are pure geometry — see `ShapeGeometry.draggingCorner`/`draggingEdge`.
-        // The whole resulting geometry is written back either way.
-        shapeOverlay.onCornerDragged = { [weak coordinator = context.coordinator] point, corner in
+        // The whole resulting geometry is written back either way. `anchor` is the canvas point the
+        // overlay latched at touch-down; passing nil would make the math recompute it every frame,
+        // which jumps the instant a drag crosses its own anchor.
+        shapeOverlay.onCornerDragged = { [weak coordinator = context.coordinator] point, corner, anchor in
             guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
-            coordinator.applyShapeDrag(shape.draggingCorner(corner, to: point))
+            coordinator.applyShapeDrag(shape.draggingCorner(corner, to: point, anchor: anchor))
         }
-        shapeOverlay.onEdgeDragged = { [weak coordinator = context.coordinator] point, edge in
+        shapeOverlay.onEdgeDragged = { [weak coordinator = context.coordinator] point, edge, anchor in
             guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
-            coordinator.applyShapeDrag(shape.draggingEdge(edge, to: point))
+            coordinator.applyShapeDrag(shape.draggingEdge(edge, to: point, anchor: anchor))
         }
 
         host.onLayout = { [weak coordinator = context.coordinator] in
@@ -306,8 +308,12 @@ struct CanvasView: UIViewRepresentable {
         private var isShapePreviewRenderScheduled = false
         /// Accumulated canvas-space stroke samples from the current stroke, for shape detection.
         private var shapeDetectionSamples: [VectorSample] = []
-        /// Fires after the user holds the finger still for ~1s — triggers shape detection.
+        /// Fixed-rate poll that asks `shapeHoldClock` whether the hold is done. The deadline does
+        /// *not* live here — the clock owns it, measured on the pen's own timestamps, so this
+        /// timer's firing time never enters the decision. See `ShapeHoldClock`.
         private var shapeHoldTimer: Timer?
+        /// Owns the hold decision. Rebuilt at the start of every detection stroke.
+        private var shapeHoldClock = ShapeHoldClock()
         private var shapeDetectionActive = false
         /// The stroke view that started the current detection stroke, to revert on shape found.
         private weak var shapeDetectionHost: LayerHostView?
@@ -449,20 +455,40 @@ struct CanvasView: UIViewRepresentable {
                     if let host { self.startShapeDetection(host: host) }
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
-                    self?.isSandwichStrokeLive = false
+                    guard let self else { return }
+                    self.isSandwichStrokeLive = false
                     // The clear needs applying for the same reason the latch does, and a cancel is
                     // the case with no publish to rely on at all: it restores the pre-touch content,
                     // so nothing about the model has moved for SwiftUI to notice. The key is back
                     // where the cached images were built, so this snaps straight to `full`.
-                    self?.applySandwichPresentationNow()
-                    self?.cancelShapeDetection()
-                    self?.canvasManager.refreshUndoRedoState()
+                    self.applySandwichPresentationNow()
+                    self.cancelShapeDetection()
+                    // A cancel has to release a following shape for the same reason a lift does, or
+                    // the shape is stranded: `shapeFingerDown` stays true, `isShapeInAdjustableState`
+                    // stays false, and `updateShapeOverlay` therefore draws the outline with **no
+                    // handles** and no interaction — a pending shape the artist can see and cannot
+                    // touch, with no gesture left that would ever release it. `StrokeCanvasView`'s
+                    // three cancel paths currently route a shape-following touch to `onStrokeEnded`
+                    // instead, so this is unreachable today; it is here because the two booleans live
+                    // on different objects (`shapeFollowingTouch` on the stroke view,
+                    // `shapeFingerDown` on the manager) and only one of the two exits was covered.
+                    if self.canvasManager.shapeGestureActive {
+                        self.canvasManager.endInteractiveShape()
+                        self.updateShapeOverlay()
+                    }
+                    // The cancel path discards whatever the stroke had painted, by design (see
+                    // `StrokeCanvasView.handleCancel`) — which from the artist's chair is "my stroke
+                    // vanished". Nothing named it in a recording before this line.
+                    ActionRecorder.ifRecording {
+                        $0.note("stroke cancelled — partial stroke discarded, no undo step")
+                    }
+                    self.canvasManager.refreshUndoRedoState()
                 }
                 // A second finger during shape following means "snap", not "pan" — keep the pen.
                 host.strokeView.strokeRecognizer.shouldIgnoreAdditionalTouches = { [weak self] in
                     self?.canvasManager.isShapeFollowingFinger ?? false
                 }
-                host.strokeView.onStrokeMoved = { [weak self, weak host] sample in
+                host.strokeView.onStrokeMoved = { [weak self, weak host] sample, penTime in
                     guard let self else { return }
                     if self.canvasManager.isShapeFollowingFinger {
                         // For lines, just move the endpoint. For rects & ovals, the finger angle
@@ -478,7 +504,7 @@ struct CanvasView: UIViewRepresentable {
                         }
                         self.updateShapeOverlay()
                     } else {
-                        self.handleStrokeMoved(sample, host: host)
+                        self.handleStrokeMoved(sample, penTime: penTime, host: host)
                     }
                 }
                 host.strokeView.strokeRecognizer.onAnyTouchBegan = { [weak self] in
@@ -766,21 +792,34 @@ struct CanvasView: UIViewRepresentable {
 
         /// Publishes the Coordinator's own state on `canvas.host`'s accessibility label, for the same
         /// reason `SandwichPresentation` documents above: none of it is otherwise visible to an
-        /// XCUITest. Three space-separated fields —
+        /// XCUITest. Four space-separated fields —
         ///
-        ///     sandwich:<off|rest|stroke> entries:<n> xform:<scale>,<rotation>,<dx>,<dy>
+        ///     sandwich:<off|rest|stroke> entries:<n> shape:<none|following|adjustable>
+        ///     xform:<scale>,<rotation>,<dx>,<dy>
         ///
-        /// — read by `LayerUITests` (the first two) and `CanvasTransformFreezeUITests` (the third).
+        /// — read by `LayerUITests` (the first two) and `CanvasTransformFreezeUITests` (the last two).
         /// `xform` carries the *effective* transform, committed plus whatever a gesture is
         /// contributing live, so "a two-finger gesture moved the canvas" is a value comparison
         /// across the gesture rather than something only `container.transform` knows.
+        ///
+        /// `shape` is here because "did that gesture bake my shape?" and "is the shape stuck?" are
+        /// both invisible otherwise — the overlay draws `CALayer`s, which carry no accessibility
+        /// identity at all, so a test could see the ink a shape *became* but never the pending shape
+        /// itself. It distinguishes `following` (pen still down) from `adjustable` (pen lifted,
+        /// handles live) rather than collapsing to a bool, because a shape left in `following` with
+        /// no pen on the glass is a stranded state, and telling the two apart is the whole diagnosis.
         private func publishCanvasState() {
             let scale = fitScale * committedScale * liveScale
             let rotation = committedRotation + liveRotation
             let dx = committedOffset.width + liveOffset.width
             let dy = committedOffset.height + liveOffset.height
+            let shapeState: String
+            if canvasManager.isShapeFollowingFinger { shapeState = "following" }
+            else if canvasManager.isShapeInAdjustableState { shapeState = "adjustable" }
+            else { shapeState = "none" }
             hostView?.accessibilityLabel = "sandwich:\(sandwichPresentation.rawValue)"
                 + " entries:\(midStrokeEntryCount)"
+                + " shape:\(shapeState)"
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
         }
 
@@ -1285,6 +1324,10 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func updateShapeOverlay() {
+            // First, and outside both guards: this is the funnel every shape-state transition already
+            // goes through, so it is where the published `shape:` field stays honest even on the
+            // passes that return early below.
+            publishCanvasState()
             guard let overlay = shapeOverlay, let container = containerView else { return }
             guard canvasManager.shapeGestureActive, let shape = canvasManager.resolvedShape else {
                 overlay.isActive = false
@@ -1292,6 +1335,9 @@ struct CanvasView: UIViewRepresentable {
             }
             let isAdjustable = canvasManager.isShapeInAdjustableState
             overlay.isActive = true
+            // Set here as well as in `applyTransform`, so neither ordering of "transform changed" vs
+            // "overlay appeared" can leave the handles the wrong size for a frame.
+            overlay.canvasScale = canvasContentScale
             // Render inline the first time so the shape isn't invisible for a frame; the
             // coalescing below carries subsequent renders.
             if canvasManager.activeShapePreviewImage == nil { canvasManager.renderActiveShapePreview() }
@@ -1550,17 +1596,43 @@ struct CanvasView: UIViewRepresentable {
             shapeDetectionActive = true
             shapeLastPoint = nil
             shapeFollowFrame = nil
+            armShapeHoldTimer()
+        }
+
+        /// Starts the poll that asks `shapeHoldClock` whether the pen has been still long enough.
+        ///
+        /// The timer only *asks*; its own firing time is not an input to the answer, which is a
+        /// subtraction between two `UITouch.timestamp`s. That is what makes a main-thread stall
+        /// unable to manufacture a hold — see `ShapeHoldClock` for the full argument, and for why a
+        /// wall-clock deadline (and then a tuned "was the app awake" threshold) were both wrong.
+        ///
+        /// A fixed-rate repeat rather than the old re-arm-per-sample: an Apple Pencil delivers ~120
+        /// samples a second, so re-scheduling a one-shot `Timer` on every one of them allocated on
+        /// the order of a hundred timers a second on the drawing hot path. Nothing needed the timer
+        /// rebuilt; only the deadline moved, and the deadline no longer lives on the timer at all.
+        private func armShapeHoldTimer() {
             shapeHoldTimer?.invalidate()
-            // Resets on meaningful moves — fires 0.8s after the finger stops.
-            shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
-                Task { @MainActor in
-                    self?.fireShapeDetection()
+            shapeHoldClock = ShapeHoldClock()
+            shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: ShapeHoldClock.tickInterval,
+                                                  repeats: true) { [weak self] timer in
+                // `MainActor.assumeIsolated` rather than a `Task { @MainActor in }` hop: the timer
+                // callback already runs on the main thread, so the hop was pure scheduling latency
+                // between the tick and the answer.
+                MainActor.assumeIsolated {
+                    // A repeating timer is retained by the run loop, so unlike the one-shot it used
+                    // to be it does not expire on its own — and a Coordinator torn down mid-stroke
+                    // would leave it ticking for the life of the process. Every ordinary exit
+                    // (`cancelShapeDetection`, `fireShapeDetection`) invalidates it; this covers the
+                    // one that has no `self` left to do so.
+                    guard let self else { timer.invalidate(); return }
+                    guard self.shapeDetectionActive else { return }
+                    if self.shapeHoldClock.isHoldComplete { self.fireShapeDetection() }
                 }
             }
         }
 
-        /// Last position the hold timer was (re)started at — filters out Apple Pencil's sub-pixel
-        /// micro-moves, which would otherwise prevent the timer from ever completing.
+        /// Last position that counted as movement — filters out Apple Pencil's sub-pixel micro-moves,
+        /// which would otherwise mean the pen is never still and the hold could never complete.
         private var shapeLastPoint: CGPoint?
 
         /// Captured on the first sample of shape following: finger position relative to the shape's
@@ -1576,23 +1648,28 @@ struct CanvasView: UIViewRepresentable {
             if refreshOverlay { updateShapeOverlay() }
         }
 
-        private func handleStrokeMoved(_ sample: VectorSample, host: LayerHostView?) {
+        private func handleStrokeMoved(_ sample: VectorSample, penTime: TimeInterval, host: LayerHostView?) {
             guard shapeDetectionActive else { return }
             guard let host, host === shapeDetectionHost else { return }
             shapeDetectionSamples.append(sample)
             let point = sample.point
-            // Only restart the timer past 2pt of movement — otherwise Pencil micro-moves never let it fire.
+            // Only past 2pt does a sample count as movement — otherwise Pencil micro-moves would
+            // mean the pen is never "still" and the hold could never complete.
+            let moved: Bool
             if let last = shapeLastPoint {
-                let dx = point.x - last.x, dy = point.y - last.y
-                guard hypot(dx, dy) > 2 else { return }
+                moved = hypot(point.x - last.x, point.y - last.y) > 2
+            } else {
+                moved = true
             }
-            shapeLastPoint = point
-            shapeHoldTimer?.invalidate()
-            shapeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
-                Task { @MainActor in
-                    self?.fireShapeDetection()
-                }
-            }
+            // **Every** sample is reported, moving or not: a sub-threshold sample is exactly what a
+            // parked pen delivers, and it is what advances the "how long has it been still" end of
+            // the subtraction. The old code returned here for those, which was fine when a wall-clock
+            // Timer was counting and is the whole signal now that the pen's clock is.
+            shapeHoldClock.sample(at: penTime, moved: moved)
+            // Deliberately only on a real move, as before: a sub-threshold sample must accumulate
+            // toward the 2pt threshold rather than resetting the reference under it, or a slow drag
+            // made entirely of micro-moves would read as stillness.
+            if moved { shapeLastPoint = point }
         }
 
         private func cancelShapeDetection() {
@@ -1604,9 +1681,16 @@ struct CanvasView: UIViewRepresentable {
         }
 
         private func fireShapeDetection() {
+            // Mandatory now the tick repeats. A one-shot Timer that has fired is already off the run
+            // loop, so dropping the reference used to be enough; a repeating one is retained by the
+            // run loop and would keep calling into a Coordinator whose detection is over, forever.
+            shapeHoldTimer?.invalidate()
             shapeHoldTimer = nil
             guard shapeDetectionActive else { return }
             shapeDetectionActive = false
+            // Read before anything resets it: this is the quantity the whole fix turns on, and a
+            // recording that shows it near 0 while wall clock jumped is the stall, stated.
+            let stillOnFire = shapeHoldClock.stillDuration
             let samples = shapeDetectionSamples
             shapeDetectionSamples.removeAll()
             guard samples.count >= 3,
@@ -1619,7 +1703,19 @@ struct CanvasView: UIViewRepresentable {
             shapeDetectionHost = nil
 
             let points = samples.map(\.point)
-            guard let shape = ShapeDetector.detect(from: points) else { return }
+            let shape = ShapeDetector.detect(from: points)
+            // The one line a recording of this bug had no way to contain: the stall and the vanished
+            // ink were both visible, but nothing said what joined them. Recording the `nil` outcome
+            // is half the point — a hold that detected nothing silently kills shape detection for the
+            // rest of the stroke (`shapeDetectionActive` is already false with no re-arm), which is
+            // its own confusing behaviour and is otherwise invisible.
+            ActionRecorder.ifRecording {
+                $0.note("shapeHold fired after \(ShapeDetector.pathLength(points).rounded())pt, "
+                        + "\(samples.count) samples, "
+                        + String(format: "%.2fs still on the pen's clock", stillOnFire)
+                        + " -> \(shape.map { String(describing: $0.kind) } ?? "none")")
+            }
+            guard let shape else { return }
 
             // Revert the partial stroke painted during the hold period.
             if host.strokeView.vectorCanvas != nil {
@@ -1630,8 +1726,9 @@ struct CanvasView: UIViewRepresentable {
 
             canvasManager.beginInteractiveShape(shape, samples: samples)
             updateShapeOverlay()
-            // A snapping finger may already have been down before the timer fired, so re-read the count.
-            canvasTouchCountChanged(touchCountRecognizer?.activeCount ?? 0)
+            // A snapping finger may already have been down before the timer fired, so re-read.
+            canvasTouchesChanged(total: touchCountRecognizer?.activeCount ?? 0,
+                                 fingers: touchCountRecognizer?.fingerCount ?? 0)
         }
 
         // MARK: - Fit / transform
@@ -1673,11 +1770,19 @@ struct CanvasView: UIViewRepresentable {
             return nearest
         }
 
+        /// What one canvas point measures on screen. The shape overlay divides its chrome by this so
+        /// handles stay a fixed size in screen points however far the artist has zoomed.
+        private var canvasContentScale: CGFloat { fitScale * committedScale * liveScale }
+
         private func applyTransform() {
             // Before the guards below, and before the no-op early return: the label has to track the
             // transform even on the passes that change nothing in Core Animation, or a test reads a
             // stale value. See `publishCanvasState`.
             publishCanvasState()
+            // Above the early return for exactly the reason stated for `publishCanvasState`: the
+            // identity guard skips passes that change nothing in Core Animation, and anything
+            // downstream that has to track the transform reads a stale value if it sits below.
+            shapeOverlay?.canvasScale = canvasContentScale
             guard let container = containerView, let baseCenter else { return }
             let scale = fitScale * committedScale * liveScale
             let rotation = effectiveRotation()
@@ -1772,15 +1877,16 @@ struct CanvasView: UIViewRepresentable {
             twoFingerTap.name = "canvas.twoFingerTap"
             view.addGestureRecognizer(twoFingerTap)
 
-            // Drives the shape constraint snap: reports the live canvas touch count, and two or more
-            // engage the snap after a short delay (see `canvasTouchCountChanged`). Unlike a
-            // two-finger long press, it still fires when a second touch joins a sequence the pen
-            // started seconds ago — "keep the pen down, then drop a finger to snap it."
+            // Drives the shape constraint snap: reports the live canvas touches split by type, and a
+            // finger joining a pen-held shape engages the snap after a short delay (see
+            // `canvasTouchesChanged`). Unlike a two-finger long press, it still fires when a touch
+            // joins a sequence the pen started seconds ago — "keep the pen down, then drop a finger
+            // to snap it."
             let touchCounter = TouchCountRecognizer(target: self, action: nil)
             touchCounter.delegate = self
             touchCounter.name = "canvas.touchCounter"
-            touchCounter.onCountChanged = { [weak self] count in
-                self?.canvasTouchCountChanged(count)
+            touchCounter.onTouchesChanged = { [weak self] total, fingers in
+                self?.canvasTouchesChanged(total: total, fingers: fingers)
             }
             view.addGestureRecognizer(touchCounter)
             touchCountRecognizer = touchCounter
@@ -1895,14 +2001,18 @@ struct CanvasView: UIViewRepresentable {
 
         /// Captures the touch centroid and container center at the start of whichever of
         /// pan/pinch/rotation begins first, so all three can share one anchor for this touch sequence.
+        ///
+        /// Seeded unconditionally, a pending shape included. This used to early-return while
+        /// `shapeGestureActive`, on the rule "two fingers on a pending shape mean snap it, not pan
+        /// the canvas", and the only thing that then seeded the anchor was
+        /// `commitSnappedShapeIfTransforming` — the same call that baked the shape the owner wanted
+        /// left alone. Delete that bake without this and `updateLiveOffset` bails on a nil
+        /// `gestureAnchorHost0`, so the canvas silently refuses to move at all whenever a shape is
+        /// pending: a dead-canvas symptom that looks nothing like the change that caused it. The old
+        /// rule now lives on the snap itself, gated to `isShapeFollowingFinger` in
+        /// `canvasTouchesChanged`, which is the more precise place for it.
         private func beginAnchorIfNeeded(at location: CGPoint) {
             canvasManager.cancelInteractiveFillDrag()
-            if canvasManager.shapeGestureActive {
-                // Two fingers on a pending shape mean "snap it," not "pan the canvas" — panning
-                // only takes over once `commitSnappedShapeIfTransforming` reads continued movement
-                // as "done editing" and anchors from there.
-                return
-            }
             guard gestureAnchorCenter0 == nil, let container = containerView else { return }
             gestureAnchorHost0 = location
             gestureAnchorCenter0 = container.center
@@ -1944,20 +2054,25 @@ struct CanvasView: UIViewRepresentable {
             gestureAnchorCenter0 = nil
             snapEngagedAt = nil
             // The shape snap isn't released here: it follows the touches themselves (see
-            // `canvasTouchCountChanged`), letting the pen lift out of a snapped shape while the
+            // `canvasTouchesChanged`), letting the pen lift out of a snapped shape while the
             // snapping finger is still down.
         }
 
         /// The shared body of the three canvas-transform gestures: identical state machine, only the
         /// live value each contributes differs (`applyLiveValue`; pan contributes none of its own).
         ///
-        /// Two orderings here are load-bearing:
-        /// 1. In `.changed`, the touch-count guard runs before `commitSnappedShapeIfTransforming` —
-        ///    a lifting finger can still produce one more `.changed` as the recognizer collapses
-        ///    from 2 touches to fewer, which must not be read as an intentional transform (a real
-        ///    shipped bug otherwise: lifting the second finger baked the shape instead of releasing it).
-        /// 2. `applyLiveValue` runs before `updateLiveOffset`, which reads `liveScale` to place the
-        ///    anchor — a stale scale would slip the content out from under the fingers by one event.
+        /// **Moving the viewport is not editing the canvas.** A pan/pinch/rotate changes what the
+        /// artist is looking at, not what is on the layer, so a pending smart shape must survive it —
+        /// the owner's report is exactly that two-finger moving the canvas baked the shape. Only an
+        /// edit that actually mutates content (a new stroke, a tool/layer/frame change, an undo) goes
+        /// through `beginCanvasEdit` and bakes it. `.changed` used to call a
+        /// `commitSnappedShapeIfTransforming` here that did the opposite.
+        ///
+        /// One ordering is load-bearing: `applyLiveValue` runs before `updateLiveOffset`, which reads
+        /// `liveScale` to place the anchor — a stale scale would slip the content out from under the
+        /// fingers by one event. The `numberOfTouches` guard also stays: a lifting finger can still
+        /// produce one more `.changed` as the recognizer collapses from 2 touches to fewer, and that
+        /// frame is not an intentional transform.
         private func handleTransformGesture<Recognizer: UIGestureRecognizer>(
             _ recognizer: Recognizer, applyLiveValue: (Recognizer) -> Void) {
             guard let host = hostView else { return }
@@ -1968,7 +2083,6 @@ struct CanvasView: UIViewRepresentable {
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
                 guard recognizer.numberOfTouches >= 2 else { return }
-                commitSnappedShapeIfTransforming(at: recognizer.location(in: host))
                 applyLiveValue(recognizer)
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .ended, .cancelled:
@@ -1998,11 +2112,33 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: - Two-finger snap constraint
 
-        /// Two or more touches, while a shape is pending, means the snap constraint: rectangle to
-        /// square, oval to circle, line to nearest 15°. Applies whether following the pen or already
-        /// adjustable.
-        private func canvasTouchCountChanged(_ count: Int) {
-            guard canvasManager.shapeGestureActive, count >= 2 else {
+        /// A finger joining a shape the **pen is still drawing** means the snap constraint: rectangle
+        /// to square, oval to circle, line to nearest 15°.
+        ///
+        /// The owner states the gesture as "keep the pen held down and put a finger on the canvas",
+        /// and the old predicate — an undifferentiated `count >= 2` — could not express that. It was
+        /// wrong in both directions at once: too strict, because pen-plus-one-finger never reaches
+        /// two if the pencil's `UITouch` is not delivered to this container-level recognizer, so the
+        /// snap simply never engaged while the pen was down; and too loose, because any two contacts
+        /// qualified, including the two fingers of an ordinary canvas pan. The second half is why the
+        /// owner saw it snap only *after* lifting the pen and pinching — that pinch was the first
+        /// moment the count unambiguously reached two, and the snap engaging there is also what fed
+        /// the shape into the transform-path bake.
+        ///
+        /// Restricting this to `isShapeFollowingFinger` (pen still down) is therefore not a
+        /// narrowing for its own sake — it is the companion change to removing the bake from the
+        /// transform path, and without it a two-finger pan over a pending shape would snap it.
+        private func canvasTouchesChanged(total: Int, fingers: Int) {
+            // The one fact this whole diagnosis could not settle by reading is whether the pencil's
+            // UITouch reaches a container-level recognizer at all — that is a UIKit runtime property,
+            // not a code fact, and BUGS.md's standing rule for device-only gesture bugs is that the
+            // next step is a capture, not a patch. This line is what makes the owner's own four
+            // seconds answer it. Not debug cruft; it costs one static Bool load when off.
+            ActionRecorder.ifRecording {
+                $0.model("shape.touches",
+                         "total:\(total) fingers:\(fingers) following:\(canvasManager.isShapeFollowingFinger)")
+            }
+            guard canvasManager.isShapeFollowingFinger, fingers >= 1 else {
                 shapeConstraintTimer?.invalidate()
                 shapeConstraintTimer = nil
                 releaseShapeConstraintAfterCurrentEvent()
@@ -2021,14 +2157,21 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// Releases the snap one run-loop turn later rather than inline: the same touch event that
-        /// drops the count below two can also be the pen lifting, and `endInteractiveShape` is what
+        /// ends the snapping gesture can also be the pen lifting, and `endInteractiveShape` is what
         /// makes a snap permanent. UIKit fires both recognizers in no defined order, so deferring
-        /// lets the lift land first regardless of ordering; the count is re-read so a finger that
+        /// lets the lift land first regardless of ordering; the signal is re-read so a finger that
         /// came straight back down doesn't lose its snap.
+        ///
+        /// The re-read predicate has to be the exact negation of `canvasTouchesChanged`'s engage
+        /// predicate. When the two disagree the snap either sticks after the gesture is over or drops
+        /// a frame early, which is why it is spelled out rather than left as "fewer than two touches".
         private func releaseShapeConstraintAfterCurrentEvent() {
             guard isShapeConstraintEngaged else { return }
             DispatchQueue.main.async { [weak self] in
-                guard let self, (self.touchCountRecognizer?.activeCount ?? 0) < 2 else { return }
+                guard let self else { return }
+                let stillSnapping = self.canvasManager.isShapeFollowingFinger
+                    && (self.touchCountRecognizer?.fingerCount ?? 0) >= 1
+                guard !stillSnapping else { return }
                 self.setShapeConstraint(false)
             }
         }
@@ -2039,19 +2182,6 @@ struct CanvasView: UIViewRepresentable {
             guard canvasManager.shapeGestureActive else { return }
             canvasManager.updateInteractiveShape(isConstrained: on)
             updateShapeOverlay()
-        }
-
-        /// While a shape is snapped, a two-finger pan/zoom/rotate means the user is done editing it:
-        /// bake it and hand the gesture to the canvas transform.
-        private func commitSnappedShapeIfTransforming(at location: CGPoint) {
-            guard canvasManager.isShapeInAdjustableState, isShapeConstraintEngaged else { return }
-            // Commit without clearing the constraint first: the shape must bake in the snapped
-            // form shown. `commitTransientsAndRefresh` drops the constraint once there's no shape left.
-            commitTransientsAndRefresh()
-            if gestureAnchorCenter0 == nil, let container = containerView {
-                gestureAnchorHost0 = location
-                gestureAnchorCenter0 = container.center
-            }
         }
 
         @objc func handleThreeFingerTap() {

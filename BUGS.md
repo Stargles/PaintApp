@@ -3,6 +3,7 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+
 ## An interrupted stroke stubs, and no terminal callback runs (2026-08-16)
 
 A stroke begun while a timeline popover is open stops being processed a few samples in. Touch
@@ -24,6 +25,41 @@ This is the shape the entry below (`StrokeGestureRecognizer.failTrackedStroke`) 
 that fails an already-begun stroke which nothing in the suite reaches. Next step is a capture — the
 action recorder (see CLAUDE.md) on the owner's iPad, reproducing a stroke started under an open
 timeline popover, read for where in the touch sequence delivery actually stops.
+
+## An eraser stroke interrupted by a timeline popover is lost, and wiped by the next stroke (2026-08-16)
+
+The owner: "When I interrupt with the eraser, it doesn't collapse into a line. Instead it leaves a
+tiny stroke start. When I try to use the eraser again, it disappears and the new eraser stroke is only
+shown." Same setup as the smart-line bug — a stroke begun while a timeline block menu is still open.
+
+The half that is settled: **the tool gate holds.** `startShapeDetection` returns early for anything
+but pen/pencil, and the owner confirms the eraser does not straighten. That was the falsifying check
+for the smart-shape diagnosis, and it passed.
+
+The half that is open: the interrupted eraser stroke never commits, and the stub the artist sees is a
+*preview*, not content. On a vector layer the eraser previews into `vectorScratch` (Mode 1 loads it
+from `vectorCanvas.render()` and punches into the copy); `endVectorStroke` is what turns that into a
+real `erase(alongPath:)` and tears the scratch down. **A stub that survives the lift and disappears
+only when the next stroke starts is the signature of a stroke that reached neither `handleEnd` nor
+`handleCancel`** — the next `touchesBegan` finds `trackedTouch` still set, takes `failTrackedStroke`,
+and *that* cancel is what finally rolls the scratch back. Every other reading was checked and does not
+fit: a normal lift commits, and `handleCancel` rebuilds the display inline, so both would clear the
+stub at lift rather than one gesture later.
+
+If that is right, the cause is the popover teardown stranding `StrokeGestureRecognizer` mid-sequence —
+the same teardown behind the smart-line bug, and the one `CanvasTransformFreezeUITests` pins. **Do not
+"fix" it by deferring the teardown** (see that suite, and `AnimationTimeline`'s comment).
+
+The real question underneath is a product call, not an engineering one: `handleCancel` discards a
+partial stroke on purpose — "as far as the document is concerned this stroke never happened" — because
+that is what makes a two-finger pan begun mid-stroke leave no permanent, un-undoable mark. Whether a
+cancel caused by *the app's own popover* should also throw the artist's ink away is the owner's
+decision, and committing it instead would reopen the pan case. Not changed unilaterally.
+
+Next step is a recording, and the line that names it now exists (`"stroke cancelled — partial stroke
+discarded, no undo step"`, plus `shape:` on `canvas.host`'s label). A recording showing that note is
+this diagnosis; a recording with no terminal transition for the stroke recognizer at all is the strand.
+
 ## XCUITests cannot launch into the editor on the iPad 9 (2026-08-16)
 
 The logic tier runs on the owner's device beautifully — 991 tests in 36 s, Release, against 3 min on

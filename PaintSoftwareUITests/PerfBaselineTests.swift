@@ -593,25 +593,22 @@ final class PerfBaselineTests: XCTestCase {
         }
     }
 
-    /// Baking a snapped shape is idempotent, which is what makes the two-finger-transform path cheap
-    /// without needing a per-gesture flag to guard it.
+    /// Baking a pending shape is idempotent however many times a caller asks for it.
     ///
-    /// Item 5.4 of the Stage 5 plan described `commitSnappedShapeIfTransforming` as baking the shape
-    /// "on every single `.changed` frame during a two-finger transform, combined with an
-    /// `objectWillChange.send()` per frame", and asked for a boolean reset on `.began` so it bakes
-    /// once. That is not what the code does. `commitInteractiveShape` opens with
-    /// `guard shapeGestureActive, let shape = resolvedShape else { return }` and clears
+    /// This used to be about the transform path: a `commitSnappedShapeIfTransforming` on every
+    /// `.changed` frame of a two-finger gesture, and whether 50 frames laid down 50 strokes. That
+    /// call is gone — moving the viewport is not editing the canvas, and the owner reported the bake
+    /// it caused as a bug — so the concern is no longer about frames. What survives it is the
+    /// property itself, which every remaining commit path still relies on: `commitInteractiveShape`
+    /// opens with `guard shapeGestureActive, let shape = resolvedShape else { return }` and clears
     /// `shapeGestureActive` on the way through, and its `objectWillChange.send()` sits in a `defer`
-    /// that is only reached past that guard — so the bake and the publish both happen exactly once
-    /// however many times the frame handler calls them. `commitSnappedShapeIfTransforming`'s own
-    /// guard (`isShapeInAdjustableState && isShapeConstraintEngaged`) then also fails on every later
-    /// frame, since committing clears both.
+    /// only reached past that guard — so the bake and the publish both happen exactly once. A tool
+    /// switch, a frame change and an undo can all reach `commitAllInteractiveState` for the same
+    /// pending shape within one turn, and each of them counts on that.
     ///
-    /// This test is here so that stays true. It drives the real state machine — begin a shape, lift
-    /// the pen into the adjustable state, then commit 50 times the way 50 `.changed` frames would —
-    /// and asserts one stroke lands, not 50. A regression that made the bake re-entrant would show up
-    /// as 50 overlapping strokes on the layer and 50 undo steps, which is exactly the shape of bug
-    /// the plan was worried about.
+    /// It drives the real state machine — begin a shape, engage the snap, lift the pen into the
+    /// adjustable state, then commit 50 times — and asserts one stroke lands, not 50. A regression
+    /// that made the bake re-entrant would show up as 50 overlapping strokes and 50 undo steps.
     func testCommittingASnappedShapeRepeatedlyBakesItExactlyOnce() {
         let manager = perfManager()
         manager.addVectorLayer(name: "Shape")
@@ -632,12 +629,12 @@ final class PerfBaselineTests: XCTestCase {
         manager.beginInteractiveShape(geometry, samples: samples)
         XCTAssertTrue(manager.shapeGestureActive)
 
-        // The snap engages, then the pen lifts — the state `commitSnappedShapeIfTransforming`
-        // requires (`isShapeInAdjustableState && isShapeConstraintEngaged`) before it will bake.
+        // The snap engages, then the pen lifts. That is the state every real commit path finds a
+        // shape in — adjustable, snapped, waiting for a tool switch or a new stroke to bake it.
         manager.updateInteractiveShape(isConstrained: true)
         manager.endInteractiveShape()
         XCTAssertTrue(manager.isShapeInAdjustableState,
-                      "Lifting the pen should leave the shape adjustable — the state a two-finger transform then bakes")
+                      "Lifting the pen should leave the shape adjustable — the state a later edit then bakes")
 
         let layerIndex = manager.currentLayerIndex
         let strokesBefore = manager.layers[layerIndex].cels[celIndex].vector?.strokes.count ?? 0

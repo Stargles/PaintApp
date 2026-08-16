@@ -60,7 +60,13 @@ final class StrokeCanvasView: UIView {
     /// Called when a stroke is abandoned rather than finished (see `StrokeGestureRecognizer.onCancel`).
     var onStrokeCancelled: (() -> Void)?
     /// Called for each coalesced touch sample during a stroke, in canvas coordinates.
-    var onStrokeMoved: ((VectorSample) -> Void)?
+    ///
+    /// The second argument is `UITouch.timestamp` — the pen's own hardware clock, which a
+    /// main-thread stall cannot affect. Carried alongside the sample rather than inside it for the
+    /// reason `StrokeInput.timestamp` gives at length: `VectorSample` is in every saved project and
+    /// on the hot path, so a timestamp there is a `Codable` migration and eight bytes a sample for a
+    /// field nothing persisted reads. `ShapeHoldClock` is the consumer.
+    var onStrokeMoved: ((VectorSample, TimeInterval) -> Void)?
     /// True after the smart-shape detector has reverted this stroke and begun a shape: subsequent
     /// moves/ends must not stamp (the raster was reset) but still route through `onStrokeMoved`/
     /// `onStrokeEnded` so the coordinator can follow the shape to its adjustable state on lift.
@@ -392,7 +398,7 @@ final class StrokeCanvasView: UIView {
                 // Shape detected on a vector layer; just forward positions to `onStrokeMoved`.
                 for sample in event.coalescedTouches(for: touch) ?? [touch] {
                     let input = StrokeInput(touch: sample, in: self)
-                    onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure))
+                    onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure), input.timestamp)
                 }
                 return
             }
@@ -403,7 +409,7 @@ final class StrokeCanvasView: UIView {
         if shapeFollowingTouch {
             for sample in event.coalescedTouches(for: touch) ?? [touch] {
                 let input = StrokeInput(touch: sample, in: self)
-                onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure))
+                onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure), input.timestamp)
             }
             return
         }
@@ -411,7 +417,7 @@ final class StrokeCanvasView: UIView {
             let input = StrokeInput(touch: sample, in: self)
             let smoothed = stabilizer.update(rawPoint: input.position)
             stampPath(to: smoothed, pressure: input.pressure, into: raster)
-            onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure))
+            onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure), input.timestamp)
         }
         refreshDisplay()
     }
@@ -611,7 +617,7 @@ final class StrokeCanvasView: UIView {
             let raw = isEraser && !vectorEraserMode.isStabilized
             let point = raw ? input.position : stabilizer.update(rawPoint: input.position)
             recordVectorSample(at: point, pressure: input.pressure)
-            onStrokeMoved?(VectorSample(x: point.x, y: point.y, pressure: input.pressure))
+            onStrokeMoved?(VectorSample(x: point.x, y: point.y, pressure: input.pressure), input.timestamp)
         }
         refreshDisplay()
     }
