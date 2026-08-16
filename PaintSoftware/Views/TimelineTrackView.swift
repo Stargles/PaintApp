@@ -221,6 +221,11 @@ struct TimelineTrackView: UIViewRepresentable {
                 // the ghost following the finger, so the copy still sitting in the row is hidden
                 // rather than reading as two copies of the same drawing.
                 row.hiddenCelID = (blockDrag?.sourceLayerIndex == entry.layerIndex) ? blockDrag?.celID : nil
+                // Also set before `update`: only the row the ghost is currently over previews making
+                // room for it (see `TimelineRowView.dragDisplacements`). A row the drag has since
+                // moved off simply gets nil here and its blocks ease back on their own, the same way
+                // they eased aside — no separate "undo the preview" path needed.
+                row.dragPreview = (blockDrag?.targetLayerIndex == entry.layerIndex) ? blockDrag : nil
                 row.update(cels: layers[entry.layerIndex].cels, sceneFrameCount: sceneFrameCount)
                 // The band a drop counts as landing on runs the full row *pitch*, gaps included, so
                 // there is no dead strip between rows where a drag resolves to nothing.
@@ -336,7 +341,10 @@ struct TimelineTrackView: UIViewRepresentable {
             scrollView?.isScrollEnabled = false
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
-            relayout()
+            // No separate `relayout()` call here: `updateBlockDrag` now issues one itself (see its
+            // comment) before it positions the ghost, which is exactly the ordering this needs —
+            // `layerRowGeometry` populated before `layoutDragChrome` reads it — so a second call
+            // immediately beforehand would only lay the same frame out twice for nothing.
             updateBlockDrag(at: point)
         }
 
@@ -355,6 +363,20 @@ struct TimelineTrackView: UIViewRepresentable {
                     toLayer: canvasManager.layers[drag.targetLayerIndex].id)
             blockDrag = drag
 
+            // `relayout()` is what re-derives the "other blocks slide out of the way" preview (see
+            // `TimelineRowView.dragDisplacements`), since that preview is read straight from
+            // `blockDrag` inside the same per-row loop that already runs there — there's no separate
+            // update path for it, on purpose, per the file's note about re-deriving from a relayout
+            // rather than animating a one-shot delta. It does not, on its own, move the ghost or the
+            // drop indicator (it only reorders their z-position), which is why `layoutDragChrome`
+            // still runs right after it, same as before this call existed. Calling `relayout()` on
+            // every `.changed` event isn't a new cost class for this view: `handlePinch`'s `.changed`
+            // case already does exactly this, unconditionally, for the same reason — a live gesture
+            // whose visual result depends on values that change every touch-move has nowhere cheaper
+            // to recompute them from. (`scrollViewDidScroll`'s call is the odd one out, gated behind
+            // "did the track actually need to grow" — that guard exists because scrolling has no
+            // per-event value of its own to re-derive; a drag and a pinch do.)
+            relayout()
             layoutDragChrome(for: drag)
         }
 
@@ -745,6 +767,20 @@ private final class TimelineRowView: UIView {
     /// merely passing over, which is why it is keyed by id rather than by a flag on one view.
     var hiddenCelID: UUID?
 
+    /// The drag this row should preview making room for, if the block in hand is currently hovering
+    /// over *this* layer — nil on every other row, including the source row once the finger has
+    /// moved to a different layer. Set alongside `hiddenCelID` on every `relayout`; see
+    /// `dragDisplacements(cels:)` for the math and for why only the target row moves.
+    var dragPreview: TimelineTrackView.Coordinator.BlockDrag?
+
+    /// What `dragDisplacements` computed for each cel the last time `update` ran, so the eased
+    /// animation only fires when the preview actually *changes*. `update` re-runs on every relayout,
+    /// and a live drag re-lays-out on every `.changed` event (`updateBlockDrag` calls `relayout()`
+    /// precisely so this preview tracks the finger) — without this cache, a block that isn't moving
+    /// would have `UIView.animate` restarted against it dozens of times a second and never visibly
+    /// settle into place.
+    private var appliedDisplacementFrames: [UUID: Int] = [:]
+
     lazy var panRecognizer: UIPanGestureRecognizer = {
         let gr = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         gr.maximumNumberOfTouches = 1
@@ -799,6 +835,9 @@ private final class TimelineRowView: UIView {
             view.removeFromSuperview()
             celViews.removeValue(forKey: id)
         }
+        appliedDisplacementFrames = appliedDisplacementFrames.filter { currentIDs.contains($0.key) }
+
+        let displacements = dragDisplacements(cels: cels)
 
         for segment in segments {
             guard case .cel(let cel, let arrayIndex) = segment.kind else { continue }
@@ -808,13 +847,29 @@ private final class TimelineRowView: UIView {
                 celViews[cel.id] = v
                 return v
             }()
-            let slotX = CGFloat(segment.start) * pixelsPerFrame
+            let displacedFrames = displacements[cel.id] ?? 0
+            let slotX = CGFloat(segment.start + displacedFrames) * pixelsPerFrame
             let slotWidth = CGFloat(segment.length) * pixelsPerFrame
             let isReference = coordinator.map {
                 $0.canvasManager.isInterpolateMode
                     && $0.canvasManager.isInterpolationReference(celID: cel.id, inLayer: layerID)
             } ?? false
-            view.setUntransformedFrame(CGRect(x: slotX, y: 0, width: slotWidth, height: bounds.height).insetBy(dx: 2, dy: 2))
+            let targetRect = CGRect(x: slotX, y: 0, width: slotWidth, height: bounds.height).insetBy(dx: 2, dy: 2)
+            if (appliedDisplacementFrames[cel.id] ?? 0) != displacedFrames {
+                // Only a *change* in the preview re-triggers the ease — see this row's
+                // `appliedDisplacementFrames` doc comment for why re-arming it on every relayout
+                // would never let a block visibly settle. `.beginFromCurrentState` matters here
+                // specifically: the finger can reverse direction mid-ease (drag past a block, then
+                // back before it's finished sliding out), and without it the second animation would
+                // jump to the first one's declared end value instead of easing from wherever the
+                // layer actually was.
+                appliedDisplacementFrames[cel.id] = displacedFrames
+                UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+                    view.setUntransformedFrame(targetRect)
+                }
+            } else {
+                view.setUntransformedFrame(targetRect)
+            }
             view.configure(isCurrent: isCurrentLayer, thumbnail: cel.thumbnail, isReference: isReference)
             view.setAccessibilityIdentifiers(base: "timeline.cel.\(layerIndex).\(arrayIndex)")
             // The `,ref` suffix is how a UI test reads the highlight: a border colour is not
@@ -826,6 +881,58 @@ private final class TimelineRowView: UIView {
             // accessibility identifier queryable) so nothing has to be rebuilt when it comes back.
             view.alpha = (cel.id == hiddenCelID) ? 0 : 1
         }
+    }
+
+    /// How far (in frames) each of this row's blocks should slide to open the gap the dragged block
+    /// would land in, keyed by cel id — the timeline's answer to `AnimationTimeline.rowOffset`, which
+    /// does the layer panel's version of the same thing (a picked-up row's neighbours slide one slot
+    /// the other way to open the drop). "One slot" there is a fixed row height; blocks here don't
+    /// share a common width, so it's redefined as the dragged block's own length instead — the
+    /// distance its departure actually opens up, or its arrival actually needs.
+    ///
+    /// This is a *preview*, not a rehearsal of what committing the drop will do. `shuffleCel` (same-
+    /// layer reorder) and `pushOverlappingCels` (cross-layer landing) both preserve whatever gaps
+    /// already sit between the *other* blocks; this doesn't attempt to, because doing so would mean
+    /// re-deriving position-indexed gap bookkeeping live on every touch-move for a number that's
+    /// discarded the instant the finger lifts and the real commit runs from the actual model instead.
+    /// Every block that's normally contiguous with its neighbours (the common case — `addCel` and
+    /// `resizeCel*Edge` both leave things touching) previews in exactly the position the commit will
+    /// put it in; a deliberately gapped layer can preview a few frames off from where `shuffleCel`
+    /// ultimately lands it, which is a cosmetic mismatch during the drag, not a wrong result once it
+    /// ends.
+    private func dragDisplacements(cels: [Cel]) -> [UUID: Int] {
+        guard let dragPreview else { return [:] }
+        let others = cels.filter { $0.id != dragPreview.celID }.sorted { $0.startFrame < $1.startFrame }
+        guard !others.isEmpty else { return [:] }
+
+        // Same formula `celInsertionIndex` uses in `CanvasManager+BlockDrag.swift`: how many of this
+        // row's other blocks the dragged one would land after, measured against each one's midpoint
+        // rather than its start so a small nudge near a boundary doesn't flip the order.
+        let targetOrder = others.filter {
+            CGFloat($0.startFrame) + CGFloat($0.frameCount) / 2 <= CGFloat(dragPreview.targetStartFrame)
+        }.count
+
+        var result: [UUID: Int] = [:]
+        if dragPreview.sourceLayerIndex == layerIndex {
+            // Same-layer drag: the block already holds one of these slots — hidden by `hiddenCelID`,
+            // not removed from `cels` — so this is a reshuffle. Blocks strictly between its old slot
+            // and its new one close the gap it's leaving and open the one it's landing in.
+            let sourceOrder = others.filter { $0.startFrame < dragPreview.originStartFrame }.count
+            guard sourceOrder != targetOrder else { return [:] }
+            let direction = targetOrder > sourceOrder ? -1 : 1
+            let lo = min(sourceOrder, targetOrder), hi = max(sourceOrder, targetOrder)
+            for (index, other) in others.enumerated() where index >= lo && index < hi {
+                result[other.id] = direction * dragPreview.frameCount
+            }
+        } else {
+            // Cross-layer drag: there is no old slot in this row to close, only a new one to open —
+            // everything from the landing point on makes room by moving later. Nothing before it
+            // moves, since (unlike the same-layer case) it was never displaced from there.
+            for (index, other) in others.enumerated() where index >= targetOrder {
+                result[other.id] = dragPreview.frameCount
+            }
+        }
+        return result
     }
 
     /// Fixed handle width rather than a fraction of the block: at high zoom a wide block would
