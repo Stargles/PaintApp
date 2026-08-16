@@ -1277,6 +1277,193 @@ final class PerfBaselineTests: XCTestCase {
                           "Six levels of transparent nesting should cost about what a flat stack costs")
     }
 
+    // MARK: - What the live canvas actually pays (LAYER_COMPOSITING.md §5.2)
+
+    /// The 6-layer stack with one §4.4 effect layer over it — `compositorManager`'s fixture is a stack
+    /// of flat rectangles and **never sets `node.effect`**, so every number above it is a number about
+    /// blending only. Nothing in this file measured a grade at all before this fixture.
+    @MainActor
+    private func gradedCompositorManager(layerCount: Int, effect: Effect) -> CanvasManager {
+        let manager = compositorManager(layerCount: layerCount)
+        manager.addValueLayer(effect: effect)
+        return manager
+    }
+
+    /// Warms `CompositorMetalEngine.shared` before a `.metal` measurement.
+    ///
+    /// The engine is a lazy failable singleton that builds four compute pipelines (plus
+    /// `EffectPipelines`' fifth) in its initialiser, and `MTLDevice.makeComputePipelineState` is the
+    /// expensive half of that. Paid once per process and never again, so charging it to whichever
+    /// composite happened to be first would report a startup cost as a frame cost — which is the
+    /// mistake `testCompositeCostAndMemoryAtCanvasResolution`'s 1189 ms GPU figure quietly contains.
+    /// The 64² request is deliberately tiny: it is here to touch the singleton, not to move bytes.
+    @MainActor
+    private func warmTheGPU() {
+        let warm = CanvasManager()
+        warm.canvasSize = CGSize(width: 64, height: 64)
+        warm.addLayer(name: "Warm")
+        guard let request = warm.makeRenderRequest(atFrame: 0, includeBackground: true) else { return }
+        _ = MetalCompositor.composite(request)
+    }
+
+    /// **What one live-canvas repaint costs**, which is not what any test above measures.
+    ///
+    /// `CanvasView.startSandwichRebuild` composites *three* requests per rebuild — `full`, `below`,
+    /// `above` — off the main thread, and a rebuild is what a lift, a layer switch, an opacity nudge or
+    /// an effect-slider tick each schedule. So the artist's felt latency is three composites, not one,
+    /// and the three share one `sources` array (see `makeSandwichRequests`), which is exactly the
+    /// sharing a per-leaf upload cache on the GPU side can convert into two free composites.
+    ///
+    /// Reported per backend so the flag flip has a before and an after. **Simulator numbers are
+    /// directional only** — the simulator's GPU is not the iPad's and does not model its bandwidth —
+    /// so read the ratio's sign, not its magnitude, and never quote these as device figures.
+    ///
+    /// **First measurement, Debug on the simulator, before any of this pass's changes: cpu 61.0 ms,
+    /// gpuCold 485.7 ms, gpuWarm 491.8 ms.** Cold and warm being the same number to within noise is
+    /// the finding, not an aside: it says the GPU path keeps *nothing* between composites, so three
+    /// composites over one shared `sources` array pay the ~100 MB upload three times over. On a stack
+    /// with no effect in it the CPU is 8x faster here, which is what makes step 2 the prerequisite for
+    /// the flag flip rather than an optimisation on top of it.
+    @MainActor
+    func testSandwichRebuildCostOnBothBackends() {
+        let manager = compositorManager(layerCount: 6)
+        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 3) else {
+            return XCTFail("The perf manager must produce a sandwich")
+        }
+
+        func rebuild() -> Double {
+            measuringPeakMemory {
+                autoreleasepool {
+                    _ = Compositor.composite(requests.full)
+                    _ = Compositor.composite(requests.below)
+                    _ = Compositor.composite(requests.above)
+                }
+            }.seconds
+        }
+
+        Compositor.backend = .coreGraphics
+        let cpu = rebuild()
+        warmTheGPU()
+        Compositor.backend = .metal
+        // Twice: the first pass fills whatever the engine caches between composites and the second is
+        // the steady state, which is the state a stroke-lift rebuild is actually in — every layer but
+        // the one just drawn on is unchanged. Both are reported because the gap between them *is* the
+        // cache's value, and a cold number alone would understate a warm path or flatter a broken one.
+        let gpuCold = rebuild()
+        let gpuWarm = rebuild()
+        Compositor.backend = .coreGraphics
+
+        report("sandwich rebuild, 6 layers at 2048x2048 (3 composites)", [
+            ("cpu", milliseconds(cpu)),
+            ("gpuCold", milliseconds(gpuCold)),
+            ("gpuWarm", milliseconds(gpuWarm)),
+            ("gpuAvailable", "\(CompositorMetalEngine.shared != nil)"),
+            ("scratchAllocated", "\(CompositorMetalEngine.shared?.lastScratchAllocated ?? -1)"),
+        ])
+
+        // Ceiling only, in this file's house style — read the reported numbers, do not tighten this.
+        XCTAssertLessThan(cpu, 30.0, "Three CPU composites of a flat 6-layer stack taking half a minute is structural")
+    }
+
+    /// **What a grade costs a composite**, on each backend, for a one-pass effect and a two-pass one.
+    ///
+    /// The split is the point. `brightnessContrast` is one dispatch over the canvas and resolves
+    /// entirely into `Effect.params`, so it measures the *wrapper* — snapshot the backdrop, grade every
+    /// pixel, mix it back. `blur` is two passes with 2·(3σ)+1 taps each, so it measures what a
+    /// neighbourhood kernel adds on top: this is the effect whose dirty-rect dilation is a radius
+    /// rather than zero, and the effect a scissored dispatch has to be conservative about.
+    ///
+    /// **The CPU grade is `EffectReference` at `-Onone` and legitimately costs seconds** — it is the
+    /// oracle the shader is measured against and is documented as slow on purpose
+    /// (`CoreGraphicsCompositor.grade`). That is exactly why the blur half is gated: a two-pass
+    /// convolution over 4.2M pixels in unoptimised Swift is a minute of runner time and a large peak,
+    /// which is the profile CLAUDE.md records as destabilising whatever shares the process. The
+    /// one-pass half stays ungated because it is the number that has to exist for the flag flip to be
+    /// defensible at all.
+    ///
+    /// **First measurement, Debug on the simulator: cpuUngraded 38.1 ms, cpuGraded 7069.1 ms,
+    /// gpuUngraded 255.7 ms, gpuGraded 247.3 ms.** So one effect layer costs the CPU backend **7.0
+    /// seconds** and costs the GPU backend *nothing measurable* — the grade delta on the GPU came out
+    /// at −8.4 ms, which is one extra dispatch over a texture that is already resident, lost in the
+    /// noise of the uploads around it. That single pair of numbers is the whole case for the flag:
+    /// the flat-stack comparison favours the CPU 38 against 256, and any document carrying an
+    /// adjustment layer reverses it by a factor of 28.
+    @MainActor
+    func testEffectCompositeCostOnBothBackends() {
+        let onePass = gradedCompositorManager(
+            layerCount: 6, effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2, contrast: 1.5)))
+        guard let plainRequest = compositorManager(layerCount: 6).makeRenderRequest(atFrame: 0, includeBackground: true),
+              let gradedRequest = onePass.makeRenderRequest(atFrame: 0, includeBackground: true) else {
+            return XCTFail("The perf manager must produce a request")
+        }
+
+        func cost(_ request: RenderRequest) -> Double {
+            measuringPeakMemory { autoreleasepool { _ = Compositor.composite(request) } }.seconds
+        }
+
+        Compositor.backend = .coreGraphics
+        let cpuPlain = cost(plainRequest)
+        let cpuGraded = cost(gradedRequest)
+        warmTheGPU()
+        Compositor.backend = .metal
+        let gpuPlain = cost(plainRequest)
+        _ = cost(gradedRequest)                 // cold, discarded: fills the engine's caches
+        let gpuGraded = cost(gradedRequest)
+        Compositor.backend = .coreGraphics
+
+        report("one-pass effect over 6 layers at 2048x2048", [
+            ("cpuUngraded", milliseconds(cpuPlain)),
+            ("cpuGraded", milliseconds(cpuGraded)),
+            ("cpuGradeDelta", milliseconds(cpuGraded - cpuPlain)),
+            ("gpuUngraded", milliseconds(gpuPlain)),
+            ("gpuGraded", milliseconds(gpuGraded)),
+            ("gpuGradeDelta", milliseconds(gpuGraded - gpuPlain)),
+            ("gpuAvailable", "\(CompositorMetalEngine.shared != nil)"),
+        ])
+
+        XCTAssertLessThan(cpuGraded, 60.0,
+                          "One canvas-sized grade past a minute is a structural regression, not -Onone")
+    }
+
+    /// The multi-pass half of the case above — see its doc comment for why this one is gated.
+    ///
+    /// ```
+    /// xcodebuild test … -only-testing:PaintSoftwareUITests/PerfBaselineTests/testMultiPassEffectCompositeCostOnBothBackends \
+    ///   PAINT_PERF_HEAVY=1
+    /// ```
+    @MainActor
+    func testMultiPassEffectCompositeCostOnBothBackends() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINT_PERF_HEAVY"] != nil,
+                          "Heavy: a two-pass convolution over 4.2M pixels through EffectReference at -Onone")
+        let blurred = gradedCompositorManager(layerCount: 6, effect: .blur(Effect.Blur(radius: 8)))
+        guard let request = blurred.makeRenderRequest(atFrame: 0, includeBackground: true) else {
+            return XCTFail("The perf manager must produce a request")
+        }
+
+        func cost() -> (seconds: Double, peakBytes: UInt64) {
+            measuringPeakMemory { autoreleasepool { _ = Compositor.composite(request) } }
+        }
+
+        Compositor.backend = .coreGraphics
+        let cpu = cost()
+        warmTheGPU()
+        Compositor.backend = .metal
+        _ = cost()
+        let gpu = cost()
+        Compositor.backend = .coreGraphics
+
+        report("two-pass blur (r=8) over 6 layers at 2048x2048", [
+            ("cpu", milliseconds(cpu.seconds)),
+            ("gpu", milliseconds(gpu.seconds)),
+            ("peakCPU", megabytes(cpu.peakBytes)),
+            ("peakGPU", megabytes(gpu.peakBytes)),
+            ("gpuAvailable", "\(CompositorMetalEngine.shared != nil)"),
+        ])
+
+        XCTAssertLessThan(cpu.seconds, 300.0,
+                          "A radius-8 separable blur past five minutes means the pass list is not separable any more")
+    }
+
     // MARK: - Alpha masks (LAYER_COMPOSITING.md §6)
 
     /// The 6-layer stack above, with layer 0 turned into a mask *shape* — the left half of the canvas
