@@ -99,6 +99,14 @@ Carried over:
   selected tool after a pick, on a miss as well as a hit. The composite runs on the existing serial
   `sandwichQueue` rather than a separate one, so a pick can't race a sandwich rebuild. 18 new
   `EyedropperLogicTests` plus one XCUITest.
+  Shipped with a bug the owner found on device: the picking touch also painted a brush stroke,
+  because `CanvasView`'s `shouldInteract` excluded `.fill` from the active layer's host but never
+  grew a matching exclusion for `.eyedropper`, so the host stayed interactive and the touch reached
+  both recognizers. Fixed by replacing that hand-maintained list — and `handleCatchAllTap`'s
+  separate hand-written twin of it — with one property, `Tool.paintsOnCanvas`: an exhaustive
+  `switch` with no `default:`, so a future tool cannot silently default into painting. Also defers
+  the eyedropper's tool-revert until the touch lifts, so a new contact arriving mid-gesture (a palm,
+  a steadying finger) can't be hit-tested into a host re-enabled early. 6 new `ToolLogicTests`.
 - **Say what an undo or redo just undid.** Reuses the existing `CanvasNotice` banner rather than adding
   a second mechanism, but the real substance was upstream: `UndoHistory.Action.name` was a plain
   `String`, hand-typed at each of ~70 registration sites with nothing stopping a typo or a missed site
