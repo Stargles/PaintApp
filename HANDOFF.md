@@ -1,132 +1,134 @@
-# Handoff — 2026-08-16
+# Handoff — 2026-08-17
 
-Written at the end of a UX-feedback pass. **Verify everything here before trusting it** — the previous
-handoff file was deleted this session precisely because it had gone stale, and this one decays the same
-way. `git log`, `git worktree list` and [TODO.md](TODO.md) are the live state; this is orientation.
+Written while winding down a session deliberately at its usage limit. **Verify everything here before
+trusting it** — `git log`, `git worktree list` and [TODO.md](TODO.md) are the live state; this is
+orientation. Read [CLAUDE.md](CLAUDE.md) first, then TODO.md (the owner's asks) and
+[BUGS.md](BUGS.md) (what we found).
 
-Read [CLAUDE.md](CLAUDE.md) first, then [TODO.md](TODO.md) (the owner's asks) and [BUGS.md](BUGS.md)
-(what we found).
+## The single most important fact, and it is new
 
-## The one genuinely new capability: you can test on the owner's iPad
+**The owner animates at 2048×1024, or 1080p. Not 4096².**
 
-This landed late and changes how you should work. Automation mode is enabled on the device, so
-`xcodebuild test` runs there directly:
+Every performance number in this repo was measured at 4096², which is **eight times the pixels**. Any
+area-scaling cost is overstated by ~8× against the document the owner actually uses, and a conclusion
+drawn at 4K may be about a canvas nobody works on. The 53.8 ms vector dab, the 3 s gallery thumbnail and
+the onion skin composite were all sized against the wrong document. **Benchmark at 2048×1024 and treat
+4096² as the stress case.** Recorded at the top of TODO.md's queue.
 
-```bash
-source ~/.config/paintapp/.env
-security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
-tools/simlock.sh xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
-  -configuration Release -destination "platform=iOS,id=E3B83820-DF74-5042-B52B-0D5BA17E4877" \
-  -only-testing:PaintSoftwareUITests/PerfBaselineTests \
-  -allowProvisioningUpdates -derivedDataPath build/DerivedDataDevice
-```
+The corollary is the useful half: costs that do *not* scale with area become relatively **more**
+important at the smaller canvas, and the existing 4K-biased measurements will have buried them.
 
-`PerfBaselineTests` completes there in **14 seconds**. Prefer it over the simulator for anything
-performance- or touch-related.
+## What landed this pass — eleven branches, all merged
 
-**Why it matters, with the numbers that prove it.** Every performance conclusion reached from the
-simulator this session was wrong by a wide margin, because the simulator borrows a Mac's GPU. Measured
-on the device, 6 layers at 2048²:
+`main` is green at **1132 tests / 1128 passed / 4 skipped / 0 failed**.
 
-| | CoreGraphics | Metal |
+Pinch-to-merge · the smart-shape snap · rectangle node dragging · a deterministic replacement for a
+flaky timing test · both lasso bugs · the cel-decode data-loss fix · the Add Text architecture ·
+one unified colour picker · the eyedropper (and its follow-up fix) · the undo/redo notice ·
+the canvas-edge fill boundary and lasso flood fill.
+
+Four of those are worth remembering for their *cause* rather than their fix, because the pattern repeated:
+
+- **The snap** was `UIGestureRecognizer.requiresExclusiveTouchType`, which **defaults to `YES`** and was
+  set nowhere in the app. A recognizer holding the pencil is closed to finger touches, and the filter
+  runs *at binding*, so the recognizer is never offered the touch and its `ignore` hook never fires. The
+  earlier `isMultipleTouchEnabled` fix was necessary but could never be sufficient: that flag is per
+  **view**, exclusivity is per **recognizer**.
+- **The eyedropper painted a stroke** because `shouldInteract` was a hand-maintained list of tool
+  exclusions that nobody updated. Now `Tool.paintsOnCanvas`, exhaustive, no `default:`.
+- **The undo notice** needed history entries to carry names; they did, as unenforced `String`s at ~70
+  sites. Now `HistoryActionLabel`, so the compiler enumerates the call sites.
+- **Rectangle node dragging** lost its anchor through a `= nil` default. The parameter is now required.
+
+The recurring lesson: **make the compiler do the remembering.** Every one of those bugs was a value that
+could go missing silently. Reach for an exhaustive switch or a required argument before a comment.
+
+## In flight, and what to do with it
+
+**`tmp/onion` — the only live branch.** Worktree at `../PaintApp-onion`. The ToonSquid-style onion skin
+panel: Drawings/Frames, Behind/In Front, count sliders with loop, Tinted/Original, linked opacity,
+per-slot sliders. Out-of-pegs is deliberately **out of scope** (owner's call) but the layout leaves room.
+
+Its performance story is settled and is the interesting part. First device numbers were catastrophic —
+190 ms for one skin, **1302 ms for ten**, at 4096². The orchestrator proposed reducing resolution;
+**the agent measured instead and proved that wrong**: 627² writes 6% of the pixels but still costs 20%,
+because `CGContext.draw(in:)` samples the whole source regardless of destination. The cost was source
+reads. The fix was `OnionSkinRasterCache` — reduce each cel once per version, draw 1:1 — giving on device:
+
+| | before | after |
 |---|---|---|
-| plain stack | 41.6 ms | **102.5 ms** |
-| with one grade | 240.3 ms | **30.3 ms** |
-| per-layer slope | 4.4 ms | **2.2 ms** |
-| fixed per-frame | **3.9 ms** | 7.3 ms |
-| peak memory | **382.6 MB** | 462.9 MB |
+| 1 skin | 189.6 ms | **11.9 ms** |
+| 10 skins | 1302.2 ms | **136.9 ms** |
+| peak memory | ~170 MB | **27 MB** |
 
-The simulator had said Metal was ~16–375× faster and led to "flip the default to Metal". The device
-says Metal is **half the per-layer cost but nearly double the fixed cost** — so it loses on simple
-documents and wins enormously on graded ones. The right shape is a predicate, not a default — that
-correction is merged as `CompositorBackend.automatic`.
+**Two things are open on it:**
 
-## Branch state
+1. **`skins5` (153.9 ms) measured LARGER than `skins10` (136.9 ms) on device.** Non-monotonic, so it
+   cannot be the warm draw — the simulator measured it cleanly linear. `sourceMiss` is 154.5 ms,
+   suspiciously close to the `skins5` figure, so the likely cause is cache-miss ordering contaminating
+   one measurement. **This blocks merge**: not because the headline numbers are wrong, but because the
+   test would report something other than what its name claims, and the next session would read those as
+   warm draws. Same family as a green suite that ran nothing.
+2. **The owner has since asked for resolution to be a *setting*** — "default half resolution, option to
+   make it full or quarter, etc on the onion skin menu" — replacing the fixed 1024 px cap. The wrinkle,
+   already passed to the agent: the readability cliff is **absolute** (512 px fails visibly, 768 is the
+   edge, 1024 is one clear step above), so a pure fraction-of-canvas setting gives unreadable skins on a
+   small document at the default. **Floor the fraction** at the readable size.
 
-`main` is pushed and green: **991 tests, 0 failures, verified on the owner's iPad in 36 s** (147 s on
-the simulator). One branch is live and **not** merged:
+Check that worktree for uncommitted work before anything else; it was asked to commit as this session
+ended, and it has 8 commits plus possible WIP.
 
-- ~~`tmp/compperf`~~ — **merged.** Metal compositing, device-aware memory budget, render-resolution
-  option. Fixed a real 4K crash: the owner's scene (4096², vector + bloom + blur) holds **six
-  canvas-sized textures = 384 MiB**, of which only the 64 MiB upload cache had any budget. `CompositorBudget`
-  now sizes composites to `physicalMemory/16` (192 MiB on the owner's iPad 9, capping 4096² to 2896²).
-  Also found: `PixelOps`' flatten memo was capped at 24 *entries* — **1.61 GB at 4096²** — and its
-  memory-warning observer did not exist despite the doc comment claiming it.
-  The blanket Metal default was **withdrawn** on device evidence and replaced by
-  `CompositorBackend.automatic`: any grade anywhere → Metal (2.7 ms vs 203.3 ms isolated grade delta),
-  otherwise ≥ 4 leaves — set above the timing crossover deliberately, because 2 ms/composite at two
-  leaves does not buy 80 MB on a 3 GB device.
-- **`tmp/shapefix`** (7 commits ahead, tip `1a6e05f`) — shape gesture fixes. Handles now sized in screen points (they
-  were in canvas points, drawing at 4.4 pt on a fitted canvas — that is the owner's "faint blue line,
-  no nodes"). Oval handles rotate with the diametrically opposite node anchored, verified headless at
-  1420 cases / 7020 assertions. Pinch-from-centre fixed. Smart-shape hold measured in `UITouch.timestamp`
-  rather than wall clock. **Open before merge:** device confirmation of the snap fix, including a
-  resting-palm test.
+**Drawings vs Frames is settled** — the owner confirmed the semantics (Drawings steps by drawing
+ignoring hold length; Frames steps by timeline frame, so several slots can resolve to the same drawing).
 
-To build onto the iPad, branch from `main`, merge `tmp/shapefix`, and install — the deploy steps are in
-CLAUDE.md, and `deploy/deploy.sh` must not be used because it pulls `main` and would never ship the
-branch.
+## The lasso flood fill may not do what the owner asked, on either layer kind
 
-## The two open bugs, with what is already known
+It merged, and its outer-boundary behaviour is right. But the core promise — *interior lines get filled
+over* — is in doubt on **both** layer kinds, for two different reasons, and both are in BUGS.md:
 
-Both are **diagnosed**; neither is fixed.
+- **Vector**: `VectorCanvas` orders elements fill=0, image=1, stroke=2, so fills render beneath strokes
+  and the dividing line draws straight back over the fill.
+- **Raster**: `Cel.fillImage` is documented as the bottom compositing tier, under `raster`'s live
+  strokes, and both `PixelOps.rasterizeUncached` and `commitInteractiveFill`'s raster branch draw
+  `cel.raster` last. So a line already on the same layer stays visible over a new lasso fill.
 
-**17 fps drawing on a 4K canvas — diagnosed, not fixed, and it was never the compositor.** One dab
-costs **53.8 ms on a vector layer at 4096²** against **4.0 ms on a raster layer**: a 19 fps ceiling
-against the owner's reported 17. `StrokeCanvasView.refreshDisplay`'s `.overlay` branch allocates a
-fresh canvas-sized bitmap per touch-move and blits the committed render plus the live scratch into it
-— four canvas-sized operations where raster does one. `renderResolution` is applied in
-`makeSandwichRequests` and never reaches that path, which is exactly why the owner's 50% test changed
-nothing. **Predates all of this work**; no composite runs during a dab at all. The fix is to give the
-scratch its own layer and let Core Animation composite the two. Its own branch — `vectorScratchRole`
-has three modes and it is the most gesture-sensitive code in the app. In BUGS.md with the numbers.
+The raster finding was reached by reproducing the two draw calls in isolation, **not** by running the
+gesture in the app — so it is high-confidence but unconfirmed end to end. **Confirm on the device before
+acting**: draw two compartments divided by a line on one raster layer, lasso across both, and see
+whether the line disappears. That is a thirty-second check and it decides whether this feature needs
+real work or none.
 
-**Snap does not engage** (pen down, shape formed, add a finger). Root cause found: every canvas view
-left `UIView.isMultipleTouchEnabled` at its `false` default — *"the view receives only the first touch
-event in a multitouch sequence"* — so the finger, arriving 0.4 s later in its own event, was dropped
-before any recognizer saw it. Two ActionRecorder captures were needed to establish this; both are in
-`~/Downloads/recording-2026081*.jsonl`. The same fact explains why `StrokeGestureRecognizer.failTrackedStroke`
-had never been reached (BUGS.md), since that path needs a later-arriving second touch.
+## Owner asks still queued
 
-**The fix makes palm rejection load-bearing for the first time**: a palm was previously harmless only
-because UIKit discarded it. It now arrives and must be refused by touch type. Test with a resting hand.
+Add Text stage 1 (the plan is in [ADD_TEXT.md](ADD_TEXT.md), six stages, decisions settled) · the
+oval-and-partial-oval unification (one feature, no modes — the owner explicitly removed the
+arc-vs-oval decision, and reintroducing a mode there is a misreading) · the onion panel finishing above.
 
-**Do not read `tmp/shapefix`'s green suite as evidence the snap fix is safe.** Its full run is 1086
-tests / 1079 passed / 2 failed / 5 skipped, but **every surface the fix touches is unreachable by
-XCUITest**: the rewritten `touchesBegan` branch only runs when a second touch arrives in a *later*
-event, and every synthetic two-finger gesture in this repo has been measured arriving in a single one.
-So the suite could not have caught a regression here either — its value is the surrounding surface,
-which is clean. The two failures (`ModePickerUITests` menu tap, and the 189 s
-`testInterpolateModeEndToEndFromGestureToScrub`) were re-run isolated on an erased device: **both
-passed, 0 failures.** Environmental. **The device is the only real test of this fix.**
+**A performance investigation was launched and deliberately cancelled** when usage ran short — ten
+agents over the drawing hot path, compositing and invalidation, memory, the app-switch freeze, timeline
+and playback, and save/load/startup, then a three-lens ranking and a synthesis. Its script survives at
+`.claude/projects/.../workflows/scripts/perf-investigation-wf_f6c930aa-045.js` and can be re-run as-is.
+**Its whole point is the recalibration at the top of this file**, so it is worth re-running rather than
+re-deriving. It was designed read-only so it never contends for simulators.
 
-## Process, learned expensively here
+## Two questions the owner has not answered
 
-- **`tools/simlock.sh` wraps every `xcodebuild`.** Five concurrent runs took this 8-core Mac to 1–3%
-  idle, and at that load suites do not merely run slowly — **they return wrong answers**. The same
-  shape-hold test passed and failed on the same binary depending on contention, and three separate
-  results this session had to be thrown away and re-measured.
-- **Three items in flight at most** (TODO.md). The lock bounds the machine; nothing bounds the plan but
-  this rule.
-- **Agents park waiting on test runs without committing.** Read their worktree directly — `git log`,
-  `git status`, the log file — instead of waiting for a resume round-trip. **Read, do not write.**
-  Committing into a live agent's worktree races with its own commit; it happened here (`1a6e05f`), the
-  agent correctly refused to assume the unexplained commit was benign and spent a cycle verifying its
-  diff and parent. Nothing was lost, but the next one might be. If work must be secured, message the
-  agent to commit it.
-- **Agents do not delete their simulators even when told to.** Sweep both device sets yourself;
-  clones live in `~/Library/Developer/XCTestDevices` and `xcrun simctl list devices | grep -i clone`
-  **cannot see them** (fixed in CLAUDE.md this session).
-- **Check for duplicate pbxproj object ids after any rebase** — two branches minted the same pair here
-  and git merged them silently, dropping a file from the test target with an error naming a symbol
-  neither branch had touched. Detector is in CLAUDE.md.
-- **The owner's behavioural reports are high-quality evidence.** They corrected two diagnoses and one
-  design this session. When a report names a duration, grep for that number: "a 0.8 s lag spike" turned
-  out to be the shape-hold constant elapsing, not a stall — the thing suspected of stalling was
-  measured at **0.43 ms**.
+- **Save semantics.** When a project loads and something in it was unreadable, may saving overwrite the
+  good original? A backup of the pre-save package exists, so the intact file survives. Refuse, save-as,
+  or prompt — all three change save behaviour for undamaged projects too, which is why the cel-decode fix
+  stopped at recording counts and logging them.
+- **Which faces belong in the font picker's favourites strip** (they asked for one; Add Text stage 1).
 
-## Blocked on the owner
+## Process, confirmed again this pass
 
-Nothing right now. Two device checks were outstanding and both came back: the pencil delivers ~59
-events/second while held still (confirming the pen-clock hold design), and the 4K scene crashes
-(fixed, pending re-test). The six shape questions are answered and recorded in TODO.md's done list.
+- **Agents park on test runs without committing.** It happened four times. Read their worktree directly
+  (`git log`, `git status`) rather than waiting for a resume round-trip, and **message them to commit** —
+  never commit into their worktree yourself, it races their own commit.
+- **`-only-testing` takes CLASS names, not FILE names.** After the session-24 split one file holds
+  several classes, and a selector naming a file that is not also a class matches nothing **and still
+  prints green**. This cost two silently-skipped tests in one merge and nearly shipped them.
+- **Take the test count on both sides of a merge and account for the delta exactly.** Every close-out
+  this pass did, and it is what proved nothing was dropped across eleven rebases.
+- **The owner's device reports keep being right**, and twice this session the orchestrator told them
+  something about their own build that was wrong by reasoning from branch state instead of from what was
+  installed. **Check what the build actually contains before telling the owner what they are seeing.**
