@@ -262,16 +262,34 @@ struct ShapeGeometry: Equatable {
 
     /// The geometry produced by dragging the `edge` handle to `point` (canvas space).
     ///
-    /// An oval's edge handles are *axis* handles, and the question one answers is "how long is this
-    /// axis, measured from the node opposite it" — so that opposite node is what holds still, exactly
-    /// as a corner drag holds the opposite corner. Two behaviours the previous version had are
-    /// deliberately gone: it transformed about the **centre** (the owner: the oval "treats the center
-    /// as the transformation origin instead of the opposite side node"), and it also wrote `rotation`
-    /// from the touch's bearing, so a resize swung the shape as it grew. You cannot hold a node fixed
-    /// while spinning the frame that node is defined in; turning the shape is the green rotation
-    /// handle's job, and having both do it is why an axis drag used to feel like a wrench.
+    /// **An oval's axis drag obeys one rule, and everything else is derived from it: the node
+    /// diametrically opposite the one being dragged stays fixed on the canvas.** With the anchor
+    /// pinned and the dragged node under the touch, the segment between the two carries both facts an
+    /// axis handle can express — its *length* is the axis extent, and its *direction* is the shape's
+    /// rotation. So a drag stretches and turns at once, and neither is bolted on: they are two
+    /// readings of the same segment. The owner asked for exactly this ("dragging an oval stretches it
+    /// in the direction, but I also want it to be able to rotate; the rule is just that the opposite
+    /// node across the ellipse is anchored"), and it is the same model the rectangle's corner drag
+    /// already uses — an anchor latched at touch-down, the dragged handle on the touch.
     ///
-    /// The touch's perpendicular component is discarded, so the oval stays on its own axis.
+    /// Two earlier behaviours are still deliberately gone. It transformed about the **centre** (the
+    /// owner: the oval "treats the center as the transformation origin instead of the opposite side
+    /// node"), which is what this anchoring replaces. And it took rotation from the *finger's bearing
+    /// about the centre* while separately resizing about that same centre — two different pivots
+    /// fighting over one drag, which is why it felt like a wrench. Rotation here is not a second
+    /// gesture read off the touch; it is the anchor-to-touch direction, which is the only direction
+    /// the axis can have once both of its ends are known.
+    ///
+    /// The perpendicular half-axis is carried through unchanged, so a drag lengthens one axis and
+    /// turns the shape without fattening it. Rotation is measured per-handle, because the four
+    /// handles sit on different ends of two different axes: `.right`/`.left` are the ends of the
+    /// local +x axis (canvas direction `(cos θ, sin θ)`), `.bottom`/`.top` the ends of the local +y
+    /// axis (`(−sin θ, cos θ)`), and dragging the near end rather than the far one reverses the
+    /// segment. An ellipse is symmetric under a half turn, so the π difference between a handle and
+    /// its opposite is a difference in `rotation`'s value only, never in the shape drawn.
+    ///
+    /// A touch landing exactly on the anchor has no direction to read, so it collapses the axis and
+    /// keeps the rotation the shape already had rather than snapping it to an arbitrary angle.
     ///
     /// Every other kind moves just that one edge of the bounding box, in the shape's local frame, and
     /// leaves `rotation` alone. That branch is currently unreachable from the UI — `ShapeOverlayView`
@@ -282,20 +300,27 @@ struct ShapeGeometry: Equatable {
         if kind == .oval {
             let a = anchor ?? canvasAnchor(opposite: edge)
             let d = CGPoint(x: point.x - a.x, y: point.y - a.y)
-            let ci = cos(-rotation), si = sin(-rotation)
-            let v = CGPoint(x: d.x * ci - d.y * si, y: d.x * si + d.y * ci)
-            var hw = r.width / 2, hh = r.height / 2
-            var along = CGPoint.zero
-            switch edge {
-            case .left, .right: hw = abs(v.x) / 2; along = CGPoint(x: v.x / 2, y: 0)
-            case .top, .bottom: hh = abs(v.y) / 2; along = CGPoint(x: 0, y: v.y / 2)
+            let length = hypot(d.x, d.y)
+            // Half the dragged axis is half the anchor→touch segment; the other axis is untouched.
+            let hw = (edge == .left || edge == .right) ? length / 2 : r.width / 2
+            let hh = (edge == .top || edge == .bottom) ? length / 2 : r.height / 2
+            // The centre is the segment's midpoint, which is what puts the anchor and the touch on
+            // opposite ends of it.
+            let nc = CGPoint(x: a.x + d.x / 2, y: a.y + d.y / 2)
+            let theta: CGFloat
+            if length > 1e-9 {
+                switch edge {
+                case .right:  theta = atan2(d.y, d.x)     // anchor is the left node: +x axis
+                case .left:   theta = atan2(-d.y, -d.x)   // anchor is the right node: −x axis
+                case .bottom: theta = atan2(-d.x, d.y)    // anchor is the top node: +y axis
+                case .top:    theta = atan2(d.x, -d.y)    // anchor is the bottom node: −y axis
+                }
+            } else {
+                theta = rotation
             }
-            let cf = cos(rotation), sf = sin(rotation)
-            let nc = CGPoint(x: a.x + along.x * cf - along.y * sf,
-                             y: a.y + along.x * sf + along.y * cf)
             result.startPoint = CGPoint(x: nc.x - hw, y: nc.y - hh)
             result.endPoint = CGPoint(x: nc.x + hw, y: nc.y + hh)
-            result.rotation = rotation
+            result.rotation = theta
             return result
         }
         let localPoint = point.applying(rotationTransform.inverted())

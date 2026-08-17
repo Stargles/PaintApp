@@ -27,7 +27,32 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     /// never reach `onEnd` and the shape would never reach its adjustable state.
     var shouldIgnoreAdditionalTouches: (() -> Bool)?
 
+    /// How many **fingers** are down alongside the tracked touch right now — the "keep the pen held
+    /// down and put a finger on the canvas" signal, reported from the recognizer that is already
+    /// holding the pen.
+    ///
+    /// **This is a second, independent source for a fact `TouchCountRecognizer` also reports, and the
+    /// duplication is the point.** That one lives on the canvas *container*, several views up from
+    /// wherever the touch actually lands, so it depends on the whole hit-test path staying open. This
+    /// one is on the view that is already receiving the pen's own samples, and the touch it counts is
+    /// the very touch `shouldIgnoreAdditionalTouches` is being consulted about — if the pen is
+    /// drawing, this recognizer is being fed, and a finger that joins the sequence arrives here or
+    /// nowhere. `Coordinator.refreshShapeConstraint` takes the larger of the two counts, so the snap
+    /// engages if *either* sees the finger, and records both so a capture says which did.
+    ///
+    /// Pencil touches are deliberately not counted: a second pencil is not the gesture, and the
+    /// tracked touch itself must never count as its own companion.
+    var onAccompanyingFingersChanged: ((Int) -> Void)?
+
     private var trackedTouch: UITouch?
+
+    /// Non-pencil touches that joined this sequence after `trackedTouch` and are being ignored rather
+    /// than failing the stroke. Held so their *lift* is reported too — `touchesEnded` below returns
+    /// early for any touch that is not the tracked one, so without this set a finger going down would
+    /// engage the snap and a finger coming up would never release it.
+    private var accompanyingFingers: Set<UITouch> = []
+
+    private func reportAccompanyingFingers() { onAccompanyingFingersChanged?(accompanyingFingers.count) }
 
     /// Every `state` write in this class goes through here so `ActionRecorder` sees the transition at
     /// the instant it happens.
@@ -57,7 +82,13 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
         super.touchesBegan(touches, with: event)
         onAnyTouchBegan?()
         if trackedTouch != nil {
-            guard shouldIgnoreAdditionalTouches?() != true else { return }
+            guard shouldIgnoreAdditionalTouches?() != true else {
+                let fingers = touches.filter { $0.type != .pencil && $0 !== trackedTouch }
+                guard !fingers.isEmpty else { return }
+                accompanyingFingers.formUnion(fingers)
+                reportAccompanyingFingers()
+                return
+            }
             failTrackedStroke()
             return
         }
@@ -80,6 +111,11 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesEnded(touches, with: event)
+        // Before the tracked-touch guard: a snapping finger lifting is not the tracked touch, and it
+        // is exactly the event that has to release the snap. Lifting the *pen* first while the finger
+        // stays down is a state the shape gesture supports (see `endInteractiveShape`), so the two
+        // are tracked independently rather than one clearing the other.
+        releaseAccompanying(touches)
         guard let trackedTouch, touches.contains(trackedTouch) else { return }
         transition(to: .ended)
         onEnd?(trackedTouch)
@@ -88,10 +124,17 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesCancelled(touches, with: event)
+        releaseAccompanying(touches)
         guard let trackedTouch, touches.contains(trackedTouch) else { return }
         transition(to: .cancelled)
         self.trackedTouch = nil
         onCancel?()
+    }
+
+    private func releaseAccompanying(_ touches: Set<UITouch>) {
+        guard !accompanyingFingers.isEmpty, !accompanyingFingers.isDisjoint(with: touches) else { return }
+        accompanyingFingers.subtract(touches)
+        reportAccompanyingFingers()
     }
 
     override func reset() {
@@ -101,6 +144,12 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
         // absence of which is the deadlock this recorder was built to catch.
         ActionRecorder.ifRecording { $0.recognizerTransition(self, to: .possible, source: "reset") }
         trackedTouch = nil
+        // `UITouch` objects are recycled by UIKit, so a stale member here would be indistinguishable
+        // from a live one on the next sequence — and a snap that never releases is worse than one
+        // that never engages. The sequence is over; the count is zero by definition.
+        guard !accompanyingFingers.isEmpty else { return }
+        accompanyingFingers.removeAll()
+        reportAccompanyingFingers()
     }
 
     /// Gives up a stroke already in progress. Failing without this left the partial stroke painted
