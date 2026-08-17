@@ -15,6 +15,7 @@
 		B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */; };
 		B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */; };
 		B2C3D4E5F6001122334455F2 /* PaintSoftware/Engine/StrokeSampleGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/StrokeSampleGate.swift */; };
+		A1544B279B52D0EE5E4CFCF2 /* PaintSoftware/Engine/PinchMergeGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E538EEE418EF6AE18A4361C1 /* PaintSoftware/Engine/PinchMergeGate.swift */; };
 		B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */; };
 		B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */; };
 		B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */; };
@@ -24,6 +25,7 @@
 		9A7B5C3D1E2F000000000D02 /* PaintSoftware/Engine/VectorEraser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */; };
 		9A7B5C3D1E2F000000000C02 /* StrokeGeometryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */; };
 		9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */; };
+		B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */; };
 		7C4A9E1B0D5F000000000102 /* RasterVectorParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */; };
 		7C4A9E1B0D5F000000000202 /* VectorEraserHybridLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */; };
 		7C4A9E1B0D5F000000000302 /* VectorEraserUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */; };
@@ -143,6 +145,7 @@
 		B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Brush.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeStabilizer.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/StrokeSampleGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeSampleGate.swift; sourceTree = "<group>"; };
+		E538EEE418EF6AE18A4361C1 /* PaintSoftware/Engine/PinchMergeGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/PinchMergeGate.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeGeometry.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeDetector.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeDetectorLogicTests.swift; sourceTree = "<group>"; };
@@ -152,6 +155,7 @@
 		9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VectorEraser.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeGeometryLogicTests.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeSampleGateLogicTests.swift; sourceTree = "<group>"; };
+		5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PinchMergeGateLogicTests.swift; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RasterVectorParityLogicTests.swift; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserHybridLogicTests.swift; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserUITests.swift; sourceTree = "<group>"; };
@@ -322,6 +326,7 @@
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
 				9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */,
+				5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */,
 				9A7B5C3D1E2F000000000E01 /* VectorEraserLogicTests.swift */,
 				DEC0DE000000000000000045 /* OnionSkinLogicTests.swift */,
 				DEC0DE0000000000000000A0 /* InterpolationEngineDiagnosticsLogicTests.swift */,
@@ -368,6 +373,7 @@
 				B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */,
 				B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */,
 				B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/StrokeSampleGate.swift */,
+				E538EEE418EF6AE18A4361C1 /* PaintSoftware/Engine/PinchMergeGate.swift */,
 				B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */,
 				B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */,
 				9A7B5C3D1E2F000000000A01 /* PaintSoftware/Engine/StrokeGeometry.swift */,
@@ -550,6 +556,7 @@
 				B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */,
 				B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */,
 				B2C3D4E5F6001122334455F2 /* PaintSoftware/Engine/StrokeSampleGate.swift in Sources */,
+				A1544B279B52D0EE5E4CFCF2 /* PaintSoftware/Engine/PinchMergeGate.swift in Sources */,
 				B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */,
 				B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */,
 				B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */,
@@ -560,6 +567,7 @@
 				9A7B5C3D1E2F000000000D02 /* PaintSoftware/Engine/VectorEraser.swift in Sources */,
 				9A7B5C3D1E2F000000000C02 /* StrokeGeometryLogicTests.swift in Sources */,
 				9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */,
+				B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */,
 				7C4A9E1B0D5F000000000102 /* RasterVectorParityLogicTests.swift in Sources */,
 				7C4A9E1B0D5F000000000202 /* VectorEraserHybridLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */,

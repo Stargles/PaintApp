@@ -56,6 +56,24 @@ struct LayerStackListView: UIViewRepresentable {
 
         /// The two rows a live pinch started on.
         private var pinchPair: (UUID, UUID)?
+        /// Each pinch touch's y position in the table's coordinate space, captured the instant it
+        /// lands — see `gestureRecognizer(_:shouldReceive:)` and `PinchMergeGate`'s doc for why
+        /// `.began` alone arrives too late to trust. Cleared whenever the pinch resets.
+        private var pinchTouchStartYs: [(touch: ObjectIdentifier, y: CGFloat)] = []
+        /// The pure decision logic `handlePinch` defers to — see `PinchMergeGate`'s doc. A stored
+        /// instance (rather than calling static helpers alone) so the merge-scale threshold is
+        /// declared once, in one place, matching the constant a test asserts against.
+        private var pinchGate = PinchMergeGate()
+        /// Weak reference to the reorder-drag recognizer, kept only so a second finger landing — an
+        /// unambiguous "this is not a single-finger drag" signal — can force it to give up a drag it
+        /// has already committed to. `handleReorderDrag`'s own `secondTouchGraceInterval` narrows this
+        /// race but, by its own doc, does not close it: a natural two-finger pinch can land its second
+        /// finger more than the 0.12s grace window after the first, well past the point
+        /// `UILongPressGestureRecognizer`'s 0.5s `minimumPressDuration` has already fired `.began` on
+        /// the first finger alone and committed the drag's visible side effects (row hidden, proxy
+        /// floating, scroll locked). `gestureRecognizer(_:shouldReceive:)` below is the deterministic
+        /// replacement: it fires at the exact moment the second touch arrives, no timer involved.
+        private weak var longPressGesture: UILongPressGestureRecognizer?
 
         // Press-and-hold reorder state.
         var dragRowID: UUID?
@@ -167,6 +185,8 @@ struct LayerStackListView: UIViewRepresentable {
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinch.delegate = self
             tableView.addGestureRecognizer(pinch)
+
+            longPressGesture = longPress
 
             reload()
         }
@@ -348,15 +368,21 @@ struct LayerStackListView: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 pinchPair = nil
+                defer { pinchTouchStartYs.removeAll() }
                 guard canvasManager.maskEditTarget == nil, gesture.numberOfTouches == 2 else { return }
-                let first = gesture.location(ofTouch: 0, in: tableView)
-                let second = gesture.location(ofTouch: 1, in: tableView)
-                guard let firstPath = tableView.indexPathForRow(at: first),
-                      let secondPath = tableView.indexPathForRow(at: second),
-                      abs(firstPath.row - secondPath.row) == 1,
-                      rows.indices.contains(firstPath.row), rows.indices.contains(secondPath.row) else { return }
-                let upper = rows[min(firstPath.row, secondPath.row)]
-                let lower = rows[max(firstPath.row, secondPath.row)]
+                // Prefer the y positions captured at touch-*down* (`gestureRecognizer(_:shouldReceive:)`)
+                // over a fresh `location(ofTouch:in:)` read here — see `PinchMergeGate`'s doc for why
+                // `.began` alone is too late on a 62pt-row list. Falling back to a live read keeps this
+                // working even in the (untested) case the delegate callback didn't fire for some reason.
+                let firstY = pinchTouchStartYs.first?.y ?? gesture.location(ofTouch: 0, in: tableView).y
+                let secondY = pinchTouchStartYs.count > 1
+                    ? pinchTouchStartYs[1].y
+                    : gesture.location(ofTouch: 1, in: tableView).y
+                let layout = rows.indices.map { index in
+                    PinchMergeGate.RowLayout(minY: tableView.rectForRow(at: IndexPath(row: index, section: 0)).minY,
+                                              maxY: tableView.rectForRow(at: IndexPath(row: index, section: 0)).maxY,
+                                              isFolder: rows[index].isFolder)
+                }
                 // Only two plain layers merge — folders would need their contents flattened first.
                 // A `.value` layer (§4.4's grade, §4.5's flat colour) is still a plain layer here and
                 // pinches like any other; it is not excluded. An earlier version of this fix did
@@ -366,13 +392,13 @@ struct LayerStackListView: UIViewRepresentable {
                 // with no feedback" shape this owner has flagged repeatedly elsewhere in this pass.
                 // `mergeLossKind` below still catches it; it just answers with a confirmation instead
                 // of with silence.
-                guard !upper.isFolder, !lower.isFolder else { return }
-                pinchPair = (upper.id, lower.id)
+                guard let picked = PinchMergeGate.pair(firstY: firstY, secondY: secondY, rows: layout) else { return }
+                pinchPair = (rows[picked.upper].id, rows[picked.lower].id)
                 setPinchHighlight(true)
 
             case .changed:
                 guard let pair = pinchPair else { return }
-                if gesture.scale < 0.6 {
+                if pinchGate.shouldMerge(scale: gesture.scale) {
                     setPinchHighlight(false)
                     pinchPair = nil
                     // A pair with no blend mode and no `.value` layer stays lossless —
@@ -395,7 +421,24 @@ struct LayerStackListView: UIViewRepresentable {
             default:
                 setPinchHighlight(false)
                 pinchPair = nil
+                pinchTouchStartYs.removeAll()
             }
+        }
+
+        /// Called the instant a second finger touches down while `longPressGesture` is already
+        /// tracking one. See that property's doc for why this replaces trusting
+        /// `secondTouchGraceInterval`'s timer.
+        private func cancelReorderForIncomingPinch() {
+            pendingReorderCommit?.cancel()
+            pendingReorderCommit = nil
+            if dragProxy != nil {
+                finishDrag()
+                pendingDragID = nil
+            }
+            // Toggling `isEnabled` is the standard way to force a `UIGestureRecognizer` to give up
+            // whatever it was tracking, outside its own state machine.
+            longPressGesture?.isEnabled = false
+            longPressGesture?.isEnabled = true
         }
 
         private func setPinchHighlight(_ on: Bool) {
@@ -857,6 +900,47 @@ extension LayerStackListView.Coordinator: UIGestureRecognizerDelegate {
     nonisolated func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         true
+    }
+
+    /// Called once per touch, at the moment it is first offered to one of this list's two
+    /// recognizers — before either has had any chance to move and change state. Two jobs, one per
+    /// recognizer, both explained on the properties they update:
+    ///
+    /// * for `longPressGesture`, a second touch arriving while it already tracks one is refused
+    ///   outright and treated as the deterministic "cancel the reorder drag" signal
+    ///   (`cancelReorderForIncomingPinch`) that `secondTouchGraceInterval`'s timer only approximated;
+    /// * for the pinch recognizer, every touch's y position is recorded in `pinchTouchStartYs` for
+    ///   `handlePinch`'s `.began` to read instead of re-querying `location(ofTouch:in:)` late (see
+    ///   `PinchMergeGate`'s doc for why that matters).
+    nonisolated func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                                       shouldReceive touch: UITouch) -> Bool {
+        MainActor.assumeIsolated {
+            handleShouldReceive(gestureRecognizer, touch: touch)
+        }
+    }
+
+    @MainActor
+    private func handleShouldReceive(_ gestureRecognizer: UIGestureRecognizer, touch: UITouch) -> Bool {
+        if gestureRecognizer === longPressGesture {
+            if gestureRecognizer.numberOfTouches >= 1 {
+                cancelReorderForIncomingPinch()
+                return false
+            }
+            return true
+        }
+        if let tableView, gestureRecognizer is UIPinchGestureRecognizer {
+            // The first touch of a fresh sequence — clear anything left over from an attempt that
+            // never reached `.began` (a single touch that lifted again without a second ever
+            // joining never fires `handlePinch` at all, so `.began`'s own reset never ran).
+            if gestureRecognizer.numberOfTouches == 0 {
+                pinchTouchStartYs.removeAll()
+            }
+            let id = ObjectIdentifier(touch)
+            if !pinchTouchStartYs.contains(where: { $0.touch == id }) {
+                pinchTouchStartYs.append((touch: id, y: touch.location(in: tableView).y))
+            }
+        }
+        return true
     }
 }
 
