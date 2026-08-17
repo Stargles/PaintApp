@@ -8,8 +8,6 @@ branch exists. **Three in flight at once**, unless the extras need no simulator 
 changelog — `git log` is the real history, and a list carried across passes stops meaning anything.
 Prune it first, before adding the new asks.
 
-## In flight
-
 ## The canvas size that actually matters
 
 **The owner works at 2048×1024, or 1080p — "likely the former" (2026-08-17).** Not 4096².
@@ -19,6 +17,30 @@ pixels** of 2048×1024. Any cost that scales with area is therefore overstated b
 document the owner actually animates on, and a conclusion drawn at 4K may be about a canvas nobody uses.
 Benchmark at 2048×1024 first and treat 4096² as the stress case, not the baseline. This applies to the
 17 fps entry below, the gallery thumbnail, and the onion skin composite alike.
+
+## In flight
+
+- [ ] **The onion skin panel — built, green, and parked unmerged** on `tmp/onion` (`f09f1bc`, worktree
+      `../PaintApp-onion`), 1123 tests / 1120 passed / 0 failed. Everything the owner asked for is
+      wired: Drawings|Frames (semantics confirmed by the owner), Behind|In Front, count sliders with the
+      loop toggle, Tinted|Original, the tint gradient, per-slot opacity sliders, and linked opacity on by
+      default. Out-of-pegs deliberately omitted, with the layout left able to take it.
+      Resolution is a **Full/Half/Quarter setting defaulting to Half**, the fraction floored at a
+      `readableFloorEdge` of 768 px so a small canvas cannot drop below the measured readability cliff
+      (512 px fails visibly — hatching collapses to moiré and 2 px strokes vanish).
+      **Three things stand between it and merge**, none of them a code problem:
+      1. A device re-run of both perf tests. Simulator numbers at 4096²: Full 262 ms / 1495 ms for
+         2 / 10 skins, Half 61 ms / 380 ms, Quarter 15 ms / 93 ms. Device is ~1.1× the simulator for this
+         workload. **Full at ten skins is worse than the pre-fix implementation was** — flagged below.
+      2. The owner's ruling on whether Full needs a warning in the UI, given the above.
+      3. A rebase onto current `main` and the merge. Conflict surface is exactly two places in
+         `CanvasView.swift` — `updateUIView`'s call order (`updateOnionSkin()` was moved up deliberately
+         so "In Front" out-ranks `sandwichAbove` while sitting below the chrome overlays) and
+         `makeUIView`'s subview construction. A trial rebase was clean.
+      Two facts recorded nowhere else: the device/simulator ratio above, and that **Half + 10 skins at
+      4096² thrashes** — only ~3 cached sources fit a 10-skin window, so every rebuild pays ~7 misses.
+      Quarter is the setting for that combination. Fixed the shipped double-application of opacity along
+      the way (skins drew at 0.09 instead of 0.3) and closed the "onion skin renders unmasked" bug.
 
 ## Queued
 
@@ -33,21 +55,16 @@ New this pass (owner, 2026-08-17):
       Owner's decisions, 2026-08-17: **iOS system fonts to begin with, behind a provider seam** so
       open-source font packs can be added later without touching call sites; and **delivered in stages,
       each one usable**, rather than as one branch that lands whole.
-- [ ] **Onion skin gets a real panel, modelled on ToonSquid's.** The owner supplied a screenshot and
-      [the reference](https://toonsquid.com/handbook/layers/onion_skin/). Controls, top to bottom:
-      **Drawings | Frames** (neighbouring drawings, vs neighbouring frames inside one drawing);
-      **Behind | In Front** (default Behind); a **Previous** and a **Next** count slider with a **loop**
-      toggle between them that wraps the skins around the first and last frame for cycle work;
-      **Tinted | Original Colors**; a tint gradient bar, red for previous and green for next, drawn over
-      a checkerboard so the alpha reads; **per-slot opacity sliders**, one per skin either side; and a
-      row of dots beneath them.
-      **Linked opacity is on by default** — the owner's emphasis: with it on the sliders move together,
-      linearly with each other, so dragging one drags the rest. Unlinking frees them individually.
-      The dots are ToonSquid's **out-of-pegs** — each temporarily offsets that skin via transform
-      handles, the centre one toggles them all, and the onion button turns red while any offset is
-      active. **Out of scope for now** (owner, 2026-08-17): build the panel without them. It is a
-      per-skin transform surface with its own handles and undo behaviour, and leaving it out roughly
-      halves this feature. Do not design the panel in a way that forecloses adding the row later.
+- [ ] **A performance pass, calibrated to 2048×1024.** The owner asked for it directly: *"any
+      performance enhancements that can be made to reduce memory, stop lagspikes, or increase fps?"* A
+      ten-agent read-only investigation was written and launched, then cancelled when the session ran out
+      of usage. **Re-run it rather than re-deriving it** — the script survives at
+      `.claude/projects/-Users-juliapark-Desktop-Kevin-P-PaintSoftware/*/workflows/scripts/perf-investigation-wf_f6c930aa-045.js`
+      and is re-invokable as-is. It surveys the drawing hot path, compositing and invalidation, memory,
+      the app-switch freeze, timeline and playback, and save/load/startup; then ranks through three
+      lenses and synthesises a programme. Its whole point is the recalibration above — including a
+      required list of candidates *overrated by 4K bias*, since naming the work not worth doing matters
+      as much as naming the work.
 - [ ] **An oval and a partial oval are one feature, with no modes.** The owner, asked whether a
       nearly-closed stroke should be snapped shut, answered by collapsing the whole design:
       *"The oval and arc feature should be the same feature with no modes. Whatever the user draws that
