@@ -1,7 +1,7 @@
 # Graph Report - PaintSoftware  (2026-08-17)
 
 ## Corpus Check
-- 191 files · ~539,212 words
+- 194 files · ~542,247 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `67f77beb`
+- Built from commit: `af9b13fa`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -63,7 +63,7 @@
 - RenderTreeCharacterizationTests
 - ContentView
 - PerfMonitor
-- CodingKeys
+- Layer
 - Codable
 - CanvasSizePickerView
 - WindowEventTap
@@ -125,7 +125,7 @@
 - Adjust panel / ActionsMenu Cut-Copy-Paste stubs
 - BlendMode
 - InterpolationModelLogicTests
-- Layer
+- CodingKeys
 - Composite.metal
 - PlaybackBoundsCharacterizationTests
 - GuideOverlayView
@@ -173,7 +173,7 @@
 - CanvasTransformFreezeUITests
 - ShapeHoldClock
 - run.sh
-- Tool
+- Hashable
 - LayerStackListView.Coordinator
 - SelectionMode
 - StructureSnapshot
@@ -189,7 +189,7 @@
 - .testTheOwnersCrashSceneCostsMoreTextureThanA3GBDeviceCanHold
 - .noteTransition
 - JSONValue
-- .recognizer
+- RecordingWriter
 - ManifestSkeleton
 - Handoff — 2026-08-16
 - StrokeSampleGate
@@ -288,7 +288,7 @@ Nodes (22): StrokeInput, TimeInterval, StrokeCanvasView, .brush, .isNoScratchRol
 
 ### Community 13 - "ActionRecorder"
 Cohesion: 0.10
-Nodes (23): FileHandle, ActionRecorder, .directory, .now, Recording, .id, .name, .sizeText (+15 more)
+Nodes (23): ActionRecorder, .directory, .now, Recording, .id, .name, .sizeText, CFTimeInterval (+15 more)
 
 ### Community 14 - "BrushEngineLogicTests"
 Cohesion: 0.14
@@ -315,8 +315,8 @@ Cohesion: 0.12
 Nodes (11): CGSize, Set, UIEvent, UIPanGestureRecognizer, UIPinchGestureRecognizer, UITouch, Void, TouchTypePressRecognizer (+3 more)
 
 ### Community 20 - ".transparentFormat"
-Cohesion: 0.11
-Nodes (22): Hashable, CelLocation, IntPoint, PixelOps, .rasterizeCacheBytes, RasterizeCache, .bytesResident, RasterizeKey (+14 more)
+Cohesion: 0.12
+Nodes (20): IntPoint, PixelOps, .rasterizeCacheBytes, RasterizeCache, .bytesResident, RasterizeKey, Bool, Cel (+12 more)
 
 ### Community 21 - "layers"
 Cohesion: 0.12
@@ -426,13 +426,13 @@ Nodes (14): App, task, AppScreen, editor, gallery, sizePicker, ContentView, .bod
 Cohesion: 0.13
 Nodes (15): CADisplayLink, ObservableObject, PerfHUDOverlay, .body, .hudBody, .toggleButton, .totalCelCount, PerfMonitor (+7 more)
 
-### Community 48 - "CodingKeys"
-Cohesion: 0.07
-Nodes (28): CodingKeys, alphaMask, backgroundColor, blendMode, canvasHeight, canvasPadding, canvasWidth, compositorRole (+20 more)
+### Community 48 - "Layer"
+Cohesion: 0.10
+Nodes (17): Layer, .hasNoDrawingSurface, .isFillReference, .layerEffect, .valueFill, BlendMode, Bool, Cel (+9 more)
 
 ### Community 49 - "Codable"
-Cohesion: 0.09
-Nodes (34): Codable, Kind, folder, layer, Decoder, ValueFill, CompositorRole, node (+26 more)
+Cohesion: 0.11
+Nodes (28): Codable, Kind, folder, layer, Decoder, ValueFill, CompositorRole, node (+20 more)
 
 ### Community 50 - "CanvasSizePickerView"
 Cohesion: 0.14
@@ -559,7 +559,7 @@ Cohesion: 0.07
 Nodes (26): Alignment, Kind, CanvasNotice, .actionTitle, .duration, .message, Kind, hiddenLayer (+18 more)
 
 ### Community 82 - "SandwichLogicTests"
-Cohesion: 0.10
+Cohesion: 0.09
 Nodes (7): Battery, SandwichLogicTests, BlendMode, CanvasManager, CGImage, Int, String
 
 ### Community 83 - "CGImage.cropping(to:) retains parent pixel data"
@@ -622,13 +622,13 @@ Nodes (31): BlendMode, add, clipToBelow, color, colorBurn, colorDodge, .composit
 Cohesion: 0.10
 Nodes (10): InterpolationModelLogicTests, CanvasManager, Data, Set, String, T, URL, UUID (+2 more)
 
-### Community 111 - "Layer"
-Cohesion: 0.05
-Nodes (40): CodingKey, CodingKeys, activeCells, cellSize, cols, originX, originY, rows (+32 more)
+### Community 111 - "CodingKeys"
+Cohesion: 0.04
+Nodes (57): CodingKey, CodingKeys, activeCells, cellSize, cols, originX, originY, rows (+49 more)
 
 ### Community 112 - "Composite.metal"
 Cohesion: 0.21
-Nodes (32): float3, blendChannels(), blendColor(), blendColorBurn(), blendColorDodge(), blendDarkerColor(), blendDivide(), blendExclusion() (+24 more)
+Nodes (31): float3, blendChannels(), blendColor(), blendColorBurn(), blendColorDodge(), blendDarkerColor(), blendDivide(), blendExclusion() (+23 more)
 
 ### Community 113 - "PlaybackBoundsCharacterizationTests"
 Cohesion: 0.13
@@ -695,8 +695,8 @@ Cohesion: 0.24
 Nodes (8): CGGradient, Key, CGContextDabTarget, DabGradientCache, Key, CGBlendMode, CGContext, UIColor
 
 ### Community 131 - "read"
-Cohesion: 0.37
-Nodes (22): read, applyEffect(), bloomCombine(), bloomThreshold(), blur1D(), chromaticAberration(), compositeEffectMix(), compositeFill() (+14 more)
+Cohesion: 0.35
+Nodes (23): read, applyEffect(), blendOver(), bloomCombine(), bloomThreshold(), blur1D(), chromaticAberration(), compositeEffectMix() (+15 more)
 
 ### Community 132 - "GuidePath"
 Cohesion: 0.22
@@ -715,7 +715,7 @@ Cohesion: 0.14
 Nodes (16): .body, InterpolateBar, .activeRecipe, .commandRow, .commands, .commitButton, .referenceButton, .referenceSummary (+8 more)
 
 ### Community 136 - ".launchIntoEditor"
-Cohesion: 0.11
+Cohesion: 0.12
 Nodes (14): BlendModesAndCompositorUITests, LayerPanelUITests, SandwichCompositingUITests, .crossing, Bool, CGVector, Int, String (+6 more)
 
 ### Community 137 - "EffectParams"
@@ -798,9 +798,9 @@ Nodes (6): CanvasTransformFreezeUITests, Int, String, XCUIApplication, XCUIEleme
 Cohesion: 0.19
 Nodes (9): ShapeHoldClock, .isHoldComplete, .stillDuration, Bool, TimeInterval, ShapeHoldClockLogicTests, Bool, Int (+1 more)
 
-### Community 159 - "Tool"
-Cohesion: 0.33
-Nodes (5): Tool, eraser, fill, pen, pencil
+### Community 159 - "Hashable"
+Cohesion: 0.25
+Nodes (7): Hashable, CelLocation, Tool, eraser, fill, pen, pencil
 
 ### Community 160 - "LayerStackListView.Coordinator"
 Cohesion: 0.13
@@ -903,7 +903,7 @@ Nodes (3): reap_stale(), release(), simlock.sh script
   BUGS.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **722 isolated node(s):** `graphify-guard.sh script`, `gallery`, `sizePicker`, `editor`, `.now` (+717 more)
+- **722 isolated node(s):** `In flight`, `Queued`, `Done this pass`, `graphify-guard.sh script`, `gallery` (+717 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **20 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -913,9 +913,9 @@ _Questions this graph is uniquely positioned to answer:_
 - **What is the exact relationship between `Stroke-delivery regression (pencil-only-drawing default)` and `Fill tool off-center fill vertically mirrored (regression)`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **Why does `CGFloat` connect `CGFloat` to `PaintUITestCase`, `ShapeGeometry`, `Coordinator`, `CanvasManager`, `VectorElement`, `ShapeOverlayView`, `Identifiable`, `cels`, `StrokeCanvasView`, `ActionRecorder`, `BrushEngineLogicTests`, `CanvasManager`, `UIKit`, `CGPoint`, `VectorEraserLogicTests`, `.setUpGestures`, `.transparentFormat`, `CanvasManager`, `VectorEraserHybridLogicTests`, `PerfBaselineTests`, `RasterLayerTexture`, `StrokeSpatialIndex`, `StrokeSettingsPanel`, `Coordinator`, `FloatingPieceOverlayView`, `AnimationTimeline`, `ProjectSaveLogicTests`, `LayerStackCell`, `TransformOverlaySupport.swift`, `EraserSettingsPanel`, `WindowEventTap`, `SideToolbar`, `LayerRowModel`, `ObjectTransformOverlayView`, `XCUIApplication`, `Lattice`, `AlphaMask`, `StrokeStabilizer`, `BrushStamper`, `CompositorParityLogicTests`, `CanvasManager`, `.rows`, `.apply`, `InterpolationRecipe`, `PointCloudIndex`, `CanvasNotice`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `EffectLayerLogicTests`, `ARAPLogicTests`, `.evaluate`, `InterpolationRenderLogicTests`, `InterpolationModelLogicTests`, `GuideOverlayView`, `DeformFactorization`, `.group`, `RenderQuality`, `VectorSample`, `InterpolationGuideLogicTests`, `.indices`, `CanvasManager`, `InterpolationEngineDiagnosticsLogicTests`, `CGContextDabTarget`, `GuidePath`, `.arched`, `TimedSample`, `InterpolateBar`, `.launchIntoEditor`, `RenderRequest`, `.manager`, `SpacingChart`, `OnionSkinLogicTests`, `Kind`, `PinchMergeGateLogicTests`, `.makeUIView`, `CanvasManager`, `CanvasTransformFreezeUITests`, `LayerStackListView.Coordinator`, `SelectionMode`, `CurveEditor`, `ActionsMenu`, `JSONValue`, `StrokeSampleGate`, `SandwichPresentation`?**
-  _High betweenness centrality (0.324) - this node is a cross-community bridge._
+  _High betweenness centrality (0.311) - this node is a cross-community bridge._
 - **Why does `CGPoint` connect `CGPoint` to `ShapeGeometry`, `CGContextDabTarget`, `.manager`, `GuidePath`, `ColorPickerPanel`, `TimedSample`, `Coordinator`, `VectorElement`, `ShapeOverlayView`, `Identifiable`, `InterpolationEngineDiagnosticsLogicTests`, `StrokeCanvasView`, `.arched`, `BrushEngineLogicTests`, `CanvasManager`, `UIKit`, `.manager`, `VectorEraserLogicTests`, `.setUpGestures`, `.transparentFormat`, `layers`, `CanvasManager`, `.makeUIView`, `CanvasManager`, `VectorEraserHybridLogicTests`, `PerfBaselineTests`, `RasterLayerTexture`, `StrokeSpatialIndex`, `SelectionMode`, `LayerStackListView.Coordinator`, `Coordinator`, `CurveEditor`, `AnimationTimeline`, `FloatingPieceOverlayView`, `ProjectSaveLogicTests`, `TransformOverlaySupport.swift`, `SelectionOverlayView`, `StrokeSampleGate`, `WindowEventTap`, `ObjectTransformOverlayView`, `SandwichPresentation`, `cels`, `Lattice`, `AlphaMask`, `StrokeStabilizer`, `BrushStamper`, `CanvasManager`, `CGFloat`, `InterpolationRecipe`, `PointCloudIndex`, `ARAPLogicTests`, `.evaluate`, `InterpolationRenderLogicTests`, `InterpolationModelLogicTests`, `GuideOverlayView`, `DeformFactorization`, `.group`, `VectorSample`, `InterpolationGuideLogicTests`, `.indices`?**
-  _High betweenness centrality (0.159) - this node is a cross-community bridge._
+  _High betweenness centrality (0.153) - this node is a cross-community bridge._
 - **Why does `.body` connect `CanvasNotice` to `ActivePanel`, `AnimationTimeline`, `SelectPanel`, `CanvasManager`, `ContentView`, `PerfMonitor`, `SideToolbar`, `SwiftUI`, `.makeUIView`?**
   _High betweenness centrality (0.078) - this node is a cross-community bridge._
 - **Are the 56 inferred relationships involving `CGPoint` (e.g. with `.init()` and `.finish()`) actually correct?**
