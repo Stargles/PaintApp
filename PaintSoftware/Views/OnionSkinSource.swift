@@ -313,28 +313,32 @@ enum OnionSkinPlanner {
 
         switch neighbourhood {
         case .drawings:
-            // Where distance 0 sits. In a gap there is no current cel, so distance 1 is the nearest
-            // cel on this side and the walk is anchored half a step in: `anchor + step * (d - 1)`.
+            // Where the walk starts, and the offset is the whole of the off-by-one.
+            //
+            // Standing *on* a drawing, the anchor is that drawing and distance 1 is one step off it,
+            // so `baseOffset` is 1. Standing in a *gap* there is no current drawing, so the anchor is
+            // already the nearest drawing on this side and distance 1 *is* the anchor — `baseOffset`
+            // 0. Both then read `anchor + step * (d - 1 + baseOffset)`.
             let anchor: Int
-            let firstDistanceOffset: Int
+            let baseOffset: Int
             if let currentCelIndex {
                 anchor = currentCelIndex
-                firstDistanceOffset = 1
+                baseOffset = 1
             } else if side == .previous {
                 guard let last = spans.lastIndex(where: { $0.end <= currentFrame }) else {
                     return Array(repeating: nil, count: count)
                 }
                 anchor = last
-                firstDistanceOffset = 0
+                baseOffset = 0
             } else {
                 guard let first = spans.firstIndex(where: { $0.start > currentFrame }) else {
                     return Array(repeating: nil, count: count)
                 }
                 anchor = first
-                firstDistanceOffset = 0
+                baseOffset = 0
             }
             return (1...count).map { d in
-                let raw = anchor + step * (d - firstDistanceOffset)
+                let raw = anchor + step * (d - 1 + baseOffset)
                 let index: Int?
                 if loops {
                     index = positiveModulo(raw, spans.count)

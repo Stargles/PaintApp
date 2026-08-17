@@ -16,6 +16,62 @@ final class TimelineGestureUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "Editor should load promptly after tapping Create Canvas")
     }
 
+    /// **The onion-skin panel's only UI test, deliberately.** What each control *decides* — which cel
+    /// a slot shows, what a linked drag does to the other sliders, how large the composite may be —
+    /// is `OnionSkinLogicTests`, headless and in two seconds. What XCUITest is needed for, and the
+    /// only thing it is asked for here, is that the two-stage button reaches the panel at all and
+    /// that every control the owner asked for is on it. A suite that drove ten rotated sliders
+    /// through a popover would cost minutes and pin layout rather than behaviour.
+    func testTheOnionSkinPanelOpensOnTheSecondTapAndCarriesEveryControl() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let button = app.buttons["timeline.onionSkinToggle"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+
+        // Onion skin ships on, so the first tap is already the second stage. The panel is not up
+        // before it — otherwise "the tap opened it" is not what this observed.
+        XCTAssertFalse(app.buttons["onionPanel.turnOff"].exists, "Setup: the panel starts closed")
+        button.tap()
+
+        let turnOff = app.buttons["onionPanel.turnOff"]
+        XCTAssertTrue(turnOff.waitForExistence(timeout: 5), "a tap while onion skin is on opens the panel")
+
+        for identifier in ["onionPanel.neighbourhoodPicker",
+                           "onionPanel.placementPicker",
+                           "onionPanel.previousCountSlider",
+                           "onionPanel.loopToggle",
+                           "onionPanel.nextCountSlider",
+                           "onionPanel.colouringPicker",
+                           "onionPanel.tintBar",
+                           "onionPanel.linkOpacityToggle",
+                           "onionPanel.previous.opacity1",
+                           "onionPanel.next.opacity1"] {
+            XCTAssertTrue(app.descendants(matching: .any)[identifier].waitForExistence(timeout: 3),
+                          "\(identifier) is on the panel")
+        }
+
+        // Linked is the owner's default and the panel must say so out loud, since it is the one
+        // setting whose effect is invisible until a slider is dragged.
+        XCTAssertEqual(app.descendants(matching: .any)["onionPanel.linkOpacityToggle"].value as? String, "on",
+                       "linked opacity is on by default")
+
+        // And the off switch really is the off switch: turning it off closes the panel with it, so
+        // the button cannot leave the artist with a panel describing something that is not drawing.
+        turnOff.tap()
+        XCTAssertTrue(waitForDisappearance(of: turnOff, timeout: 5),
+                      "turning onion skin off dismisses its panel")
+    }
+
+    /// `waitForExistence`'s missing twin. A polling loop was written first and is the wrong shape:
+    /// `waitForExistence` returns immediately while the element is still there, so the loop spins the
+    /// CPU for the whole timeout in exactly the failing case, on a machine CLAUDE.md records as
+    /// returning wrong answers under load.
+    private func waitForDisappearance(of element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element)
+        return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
+    }
+
     func testTappingCelBlockMovesPlayheadToTappedFrame() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -393,7 +449,15 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         // skin. The skin has its own logic test; this one is about the in-between.
         let onionSkin = app.buttons["timeline.onionSkinToggle"]
         XCTAssertTrue(onionSkin.waitForExistence(timeout: 5), "timeline.onionSkinToggle exists")
+        // **Two taps, not one, and the second is not optional.** The button is two-stage since the
+        // onion-skin panel landed (2026-08-17): onion skin is on by default, so the first tap opens
+        // the panel rather than switching it off, and the off switch lives inside the panel — see
+        // `AnimationTimeline.onionSkinButton` and `OnionSkinPanel`. A single tap here would leave the
+        // skin drawing and the probe below unable to tell an in-between from a keyframe's ghost.
         onionSkin.tap()
+        let turnOff = app.buttons["onionPanel.turnOff"]
+        XCTAssertTrue(turnOff.waitForExistence(timeout: 5), "the onion-skin panel opens on the second stage")
+        turnOff.tap()
 
         let probe = (dx: 0.48, dy: 0.42)
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy)),
