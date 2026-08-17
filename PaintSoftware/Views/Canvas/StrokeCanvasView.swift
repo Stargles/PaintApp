@@ -210,6 +210,25 @@ final class StrokeCanvasView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        // **A canvas touch hit-tests to this view, and `UIView` defaults this to `false`, which means
+        // "only the first touch of a multitouch sequence".** That is the whole of the pen-plus-finger
+        // snap bug: the owner's capture shows the finger reaching `UIWindow.sendEvent` and landing on
+        // this class, and then reaching no gesture recognizer anywhere in the chain — not the stroke
+        // recognizer here, not the touch counter on the container four views up. A touch arriving in a
+        // *later* event than the one already down is exactly the case the default drops, and it is why
+        // two fingers put down together pan the canvas perfectly while a finger added to a held pen
+        // does nothing at all.
+        //
+        // It is also why `StrokeGestureRecognizer.failTrackedStroke` has never once been reached in
+        // this repo (see BUGS.md): it is only reachable from a second touch in a later event, which is
+        // the class of touch that was never being delivered.
+        //
+        // **This does not weaken palm rejection — it is what makes it explicit rather than accidental.**
+        // Until now a palm landing mid-stroke was invisible to us and harmless only because UIKit
+        // discarded it. Now it arrives, and `touchesBegan` refuses it by *type*: a finger can never
+        // interrupt a pencil stroke. See that guard, which ships in the same change and is not
+        // optional alongside this line.
+        isMultipleTouchEnabled = true
         imageView.contentMode = .scaleToFill
         imageView.isUserInteractionEnabled = false
         // Native-resolution raster content should zoom blocky, not bilinearly blurred.

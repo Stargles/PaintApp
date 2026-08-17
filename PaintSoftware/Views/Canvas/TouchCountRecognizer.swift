@@ -37,6 +37,18 @@ final class TouchCountRecognizer: UIGestureRecognizer {
         delaysTouchesEnded = false
     }
 
+    /// Instrumentation only — behaviour is `super`'s, unchanged. See the twin in
+    /// `StrokeGestureRecognizer.ignore` for why a refusal is worth recording: this recognizer's whole
+    /// job is counting touches, so one it is never offered is indistinguishable, from the inside,
+    /// from one that never happened.
+    override func ignore(_ touch: UITouch, for event: UIEvent) {
+        ActionRecorder.ifRecording {
+            $0.note("ignore \($0.nameFor(self)) <- \(touch.type == .pencil ? "pencil" : "finger")"
+                    + " phase:\(touch.phase.rawValue) active:\(active.count)")
+        }
+        super.ignore(touch, for: event)
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
         active.formUnion(touches)

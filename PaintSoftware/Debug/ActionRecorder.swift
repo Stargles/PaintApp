@@ -280,6 +280,14 @@ final class ActionRecorder: ObservableObject {
         if let dropped = s.coalescedAway, dropped > 0 {
             fields.append(("skipped", .int(dropped)))
         }
+        // `.began` only, and the two that settle "was this touch ever offered to a recognizer".
+        // Written as a count plus a joined list rather than a JSON array so a reader can `grep gr:0`
+        // for the interesting case without a parser. See `TouchSample.boundRecognizers`.
+        if let viewClass = s.touchViewClass { fields.append(("touchView", .str(viewClass))) }
+        if let bound = s.boundRecognizers {
+            fields.append(("gr", .int(bound.count)))
+            fields.append(("grNames", .str(bound.joined(separator: ","))))
+        }
         write(line("touch", fields, at: s.time))
     }
 

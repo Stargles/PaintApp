@@ -49,6 +49,21 @@ struct TouchSample {
     /// How many `.moved` samples the coalescer dropped since the last one written. Recorded so a
     /// reader can tell "the pen stopped moving" from "we thinned the data here".
     let coalescedAway: Int?
+    /// `UITouch.view`'s class at the moment `sendEvent` was entered, or `"nil"`. **Distinct from
+    /// `hitClass`, which falls back to re-running `hitTest` when `view` is nil** — so the two agreeing
+    /// says UIKit bound the touch to a view, and `"nil"` here beside a plausible `hitClass` says the
+    /// touch was hit-tested somewhere real and then dropped. Recorded on `.began` only; it does not
+    /// change afterwards.
+    let touchViewClass: String?
+    /// The recognizers UIKit bound this touch to, by the names the rest of the file uses. Populated
+    /// during hit-testing, i.e. before `sendEvent`, so reading it here is reading UIKit's own decision
+    /// about which recognizers will be offered this touch — **not** what any of them then answered.
+    ///
+    /// This is the field that separates "never asked" from "asked and declined", which is the fork the
+    /// pen-plus-finger snap bug is stuck on: an empty list beside a full one on the pencil means the
+    /// touch never entered the gesture pipeline at all, and no amount of per-recognizer logic can see
+    /// it. `.began` only, for the same reason.
+    let boundRecognizers: [String]?
 }
 
 /// Intercepts `UIWindow.sendEvent(_:)` for the length of a recording, and nothing outside it.
@@ -322,6 +337,13 @@ struct TouchSample {
         }
     }
 
+    /// UIKit's own answer to "which recognizers is this touch going to", read before dispatch. Only
+    /// asked at `.began`: the binding is made during hit-testing and does not change, and asking on
+    /// every `.moved` would put a list on ~120 lines a second.
+    private func boundRecognizerNames(for touch: UITouch) -> [String] {
+        (touch.gestureRecognizers ?? []).map { displayName(for: $0) }
+    }
+
     private func makeSample(_ touch: UITouch, track: Track, phase: String, point: CGPoint,
                             time: Double, concurrent: Int, skipped: Int?, windowSize: CGSize) -> TouchSample {
         let frame = track.targetFrame
@@ -354,7 +376,10 @@ struct TouchSample {
             maxForce: isPencil ? touch.maximumPossibleForce : 0,
             altitude: isPencil ? touch.altitudeAngle : 0,
             azimuth: isPencil ? touch.azimuthAngle(in: nil) : 0,
-            coalescedAway: skipped
+            coalescedAway: skipped,
+            touchViewClass: phase == "began"
+                ? (touch.view.map { String(describing: type(of: $0)) } ?? "nil") : nil,
+            boundRecognizers: phase == "began" ? boundRecognizerNames(for: touch) : nil
         )
     }
 

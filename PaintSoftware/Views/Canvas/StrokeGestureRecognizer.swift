@@ -78,15 +78,70 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
         state = newState
     }
 
+    /// Instrumentation only — behaviour is `super`'s, unchanged.
+    ///
+    /// UIKit calls this when a touch is refused to this recognizer, which is the *other* way a touch
+    /// can be missing from `touchesBegan`. There is no overridable "should I ignore this" — the
+    /// decision is private, reached through the delegate's `gestureRecognizer(_:shouldReceive:)` —
+    /// but the refusal itself lands here, and that is the half worth recording. Pair it with the
+    /// `gr`/`grNames` fields the tap writes on the touch's own `began` line: those say whether this
+    /// recognizer was in the touch's bound set at all. Bound and then ignored is a delegate problem;
+    /// never bound is a delivery problem; silence in both is neither, and they want different fixes.
+    override func ignore(_ touch: UITouch, for event: UIEvent) {
+        ActionRecorder.ifRecording {
+            $0.note("ignore \($0.nameFor(self)) <- \(touch.type == .pencil ? "pencil" : "finger")"
+                    + " phase:\(touch.phase.rawValue) tracking:\(trackedTouch != nil)")
+        }
+        super.ignore(touch, for: event)
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
         onAnyTouchBegan?()
-        if trackedTouch != nil {
-            guard shouldIgnoreAdditionalTouches?() != true else {
-                let fingers = touches.filter { $0.type != .pencil && $0 !== trackedTouch }
+        if let tracked = trackedTouch {
+            let arrivals = touches.filter { $0 !== tracked }
+            // Nothing new began — UIKit does not re-deliver a touch's `began`, so this is defensive
+            // only, but every branch below reads "what arrived" and an empty answer means "nothing".
+            guard !arrivals.isEmpty else { return }
+            let fingers = arrivals.filter { $0.type != .pencil }
+            if shouldIgnoreAdditionalTouches?() == true {
+                // A smart shape is following the pen: this finger means "snap it". Counted, so the
+                // coordinator has the signal; the stroke keeps the recognizer either way.
                 guard !fingers.isEmpty else { return }
                 accompanyingFingers.formUnion(fingers)
                 reportAccompanyingFingers()
+                return
+            }
+            // **Palm rejection, stated rather than inherited.** Until `isMultipleTouchEnabled` was set
+            // on the canvas views (see `StrokeCanvasView.init`) a second touch in a later event was
+            // never delivered here at all, so a palm landing mid-stroke was harmless by accident. It
+            // arrives now, and it must not take the artist's stroke away: a hand resting on the glass
+            // is not a request to stop drawing, and `failTrackedStroke` discards everything painted so
+            // far with no undo step (see `handleCancel`).
+            //
+            // The rule is by *type*, not by count: **a finger cannot interrupt a pencil stroke.** A
+            // second pencil still can — that is not a palm, it is a different pen — and a finger can
+            // still interrupt a *finger* stroke, which is what hands a one-finger drag over to the
+            // two-finger canvas transform and is the behaviour this class was written around. So this
+            // narrows the fail path to exactly the sequences that meant it, and it is not a
+            // relaxation: before this line the palm did not reach the fail path either.
+            //
+            // Not counted as an accompanying finger. A palm that was already resting when the shape
+            // formed is not "adding a finger while the pen is down", and counting it would snap a
+            // shape the artist never asked to snap.
+            //
+            // **`ignore` rather than a bare `return`, and that part is load-bearing.** A recognizer is
+            // only `reset()` once *every* touch it is associated with has finished, so a palm merely
+            // left unhandled would keep this recognizer out of `.possible` for as long as the hand
+            // rests — after the pen has lifted and the stroke is long over. That recognizer is the one
+            // `Coordinator.gestureRecognizer(_:shouldRequireFailureOf:)` points canvas pan/pinch/
+            // rotate at, so the cost of getting this wrong is a canvas that will not move, which is a
+            // failure this file has seen from two other directions already. Disowning the touch is
+            // what keeps the palm out of that bookkeeping. The *snapping* finger in the branch above
+            // is deliberately not disowned: its `touchesEnded` is what releases the snap, and a
+            // disowned touch delivers nothing further here.
+            if tracked.type == .pencil, arrivals.count == fingers.count {
+                for finger in fingers { ignore(finger, for: event) }
                 return
             }
             failTrackedStroke()

@@ -10,6 +10,10 @@ struct CanvasView: UIViewRepresentable {
         let host = CanvasHostView()
         host.backgroundColor = .black
         host.clipsToBounds = true
+        // See `StrokeCanvasView.init` for the argument. Every view a canvas touch can be hit-tested
+        // into needs it, and the two below are the ones that take the touch when the layer hosts are
+        // interaction-disabled — which `reconcileLayers` does in five separate states.
+        host.isMultipleTouchEnabled = true
         host.isAccessibilityElement = true
         host.accessibilityIdentifier = "canvas.host"
         // Which rendering path the canvas is on, and how many times the mid-stroke one has been
@@ -21,6 +25,7 @@ struct CanvasView: UIViewRepresentable {
 
         let container = UIView()
         container.backgroundColor = .clear
+        container.isMultipleTouchEnabled = true
         host.addSubview(container)
 
         // Light-grey backing for the drawable padding margin: shows through wherever the paper is

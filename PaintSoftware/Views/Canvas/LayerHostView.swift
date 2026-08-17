@@ -15,6 +15,11 @@ final class LayerHostView: UIView {
     init() {
         super.init(frame: .zero)
 
+        // Set on every view a canvas touch can hit-test into, for the reason spelled out in
+        // `StrokeCanvasView.init`. `strokeView` covers itself; this covers the case where it is
+        // interaction-disabled and the touch lands here instead.
+        isMultipleTouchEnabled = true
+
         // The fill raster is always rendered at exactly canvasSize (see FloodFillEngine), matching this
         // view's bounds 1:1, so a plain stretch-to-fill can't introduce any resampling blur at the edges.
         fillImageView.contentMode = .scaleToFill
