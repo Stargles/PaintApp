@@ -49,9 +49,6 @@ New this pass (owner, 2026-08-17):
       of the lasso**, so if the lassoed region spans two compartments separated by a line, *the line is
       filled too* rather than acting as a wall.
 - [ ] **Fill tool option: treat the canvas edge as a line boundary. Default on.**
-- [ ] **Say what an undo or redo just undid.** A brief notice naming the action, using the same
-      transient notice mechanism already used elsewhere in the app (the owner does not recall where —
-      find it and reuse it rather than adding a second kind). Must not block or freeze the screen.
 
 Carried over:
 
@@ -66,6 +63,16 @@ Carried over:
 
 ## Done this pass
 
+- **Say what an undo or redo just undid.** Reuses the existing `CanvasNotice` banner rather than adding
+  a second mechanism, but the real substance was upstream: `UndoHistory.Action.name` was a plain
+  `String`, hand-typed at each of ~70 registration sites with nothing stopping a typo or a missed site
+  from compiling clean. It's now `HistoryActionLabel`, a ~70-case enum threaded through `recordUndo`,
+  `withStructureUndo`, `commitStructureGesture`, `withInterpolationUndo` and the five private
+  `register*Undo` helpers, so every one of those ~70 call sites had to name a case to keep building —
+  the compiler enumerates them, not a convention. `HistoryActionLabel.phrase`'s own switch has no
+  `default:` either, so a case added later without a phrase also fails to build. Found one real bug
+  while enumerating: raster erasing always recorded `"Stroke"` regardless of `isEraser`, unlike the
+  vector path, which already distinguished — fixed to `isEraser ? .erase : .brushStroke`.
 - The `try?` in `ProjectStore` that discarded a whole vector cel on one unreadable field. It wrapped
   the entire decode and fell back to `VectorCanvas.empty`, so a single field it could not read threw
   away every stroke, fill, image and erase mark on the cel — silently, and the next save wrote the loss
