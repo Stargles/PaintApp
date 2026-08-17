@@ -4,6 +4,10 @@ The owner's asks. [BUGS.md](BUGS.md) is for what we find. An item leaves when me
 branch exists. **Three in flight at once**, unless the extras need no simulator — see
 `tools/simlock.sh`.
 
+**At the start of a pass, empty "Done this pass".** It is a record of the pass you are in, not a
+changelog — `git log` is the real history, and a list carried across passes stops meaning anything.
+Prune it first, before adding the new asks.
+
 ## In flight
 
 - [ ] **Snap does not engage** — pen down, shape formed, add a finger, nothing. The
@@ -23,6 +27,30 @@ branch exists. **Three in flight at once**, unless the extras need no simulator 
 
 ## Queued
 
+New this pass (owner, 2026-08-17):
+
+- [ ] **Rectangle nodes misbehave once the rectangle is rotated.** Flat, dragging a node is correct.
+      Rotated, it produces unintended transforms. **The rule, in the owner's words: the node opposite
+      the one being dragged must not move.** Second half of the same ask: dragging a node *past* the
+      opposite edge should let the rectangle keep working, inverted into the other quadrants — today it
+      pushes the opposite edge instead. This is the rectangle twin of the oval fix already sitting on
+      `tmp/shapedev` ("oval handles rotate with the opposite node anchored"), so it should be built on
+      that branch and can reuse its headless harness.
+- [ ] **One colour picker, not two.** The canvas colour changer differs from the brush's; they should be
+      the same control. If a second implementation exists, delete it rather than leaving it unreferenced.
+- [ ] **A colour picker tool on the left sidebar, below the opacity slider**, for the brush.
+- [ ] **Add Text, in the Actions menu.** Fonts from a large selection, plus colour, size, spacing and
+      the rest of what a text tool carries. Move, rotate, and **distort by dragging each of the four
+      corners independently, giving a 3D-perspective warp** (a projective/homography transform, not an
+      affine one). **On a raster layer it bakes** once a canvas action follows it — a brush stroke,
+      eraser, fill — the way the fill tool and smart shapes already behave. **On a vector layer it stays
+      an editable object.** Large enough to be its own project, not a single branch.
+- [ ] **Say what an undo or redo just undid.** A brief notice naming the action, using the same
+      transient notice mechanism already used elsewhere in the app (the owner does not recall where —
+      find it and reuse it rather than adding a second kind). Must not block or freeze the screen.
+
+Carried over:
+
 - [ ] **17 fps drawing on a 4K canvas.** Diagnosed and **not** the compositor: one dab costs 53.8 ms on
       a vector layer at 4096² against 4.0 ms on raster, because `StrokeCanvasView.refreshDisplay`'s
       `.overlay` branch allocates a fresh canvas-sized bitmap per touch-move. `renderResolution` never
@@ -34,12 +62,4 @@ branch exists. **Three in flight at once**, unless the extras need no simulator 
 
 ## Done this pass
 
-- Value layer's Mode menu merged into Blend Mode
-- Adjust icon removed (its panel was an empty placeholder)
-- Timeline scrubbing past frame 12
-- Block resize pushes neighbours instead of shrinking them, with shuffle UI
-- Add-drawing menu gated; three timeline popovers collapsed into one
-- Layer drag un-nesting
-- Stroke cost follows a stroke's length, not its duration
-- Oval handles rotate with the opposite node anchored; handles sized in screen points
-- Compositor moved onto the GPU with a device-aware memory budget (merge gated on the 17 fps question)
+_(nothing yet — this pass began 2026-08-17)_
