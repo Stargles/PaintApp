@@ -53,7 +53,7 @@ merged; both were being actively worked when this was written, so re-read their 
   Also found: `PixelOps`' flatten memo was capped at 24 *entries* — **1.61 GB at 4096²** — and its
   memory-warning observer did not exist despite the doc comment claiming it.
   **Open before merge:** the Metal-vs-CoreGraphics predicate above, and the 17 fps question below.
-- **`tmp/shapefix`** (6 commits ahead) — shape gesture fixes. Handles now sized in screen points (they
+- **`tmp/shapefix`** (7 commits ahead, tip `1a6e05f`) — shape gesture fixes. Handles now sized in screen points (they
   were in canvas points, drawing at 4.4 pt on a fitted canvas — that is the owner's "faint blue line,
   no nodes"). Oval handles rotate with the diametrically opposite node anchored, verified headless at
   1420 cases / 7020 assertions. Pinch-from-centre fixed. Smart-shape hold measured in `UITouch.timestamp`
@@ -79,6 +79,16 @@ had never been reached (BUGS.md), since that path needs a later-arriving second 
 
 **The fix makes palm rejection load-bearing for the first time**: a palm was previously harmless only
 because UIKit discarded it. It now arrives and must be refused by touch type. Test with a resting hand.
+
+**Do not read `tmp/shapefix`'s green suite as evidence the snap fix is safe.** Its full run is 1086
+tests / 1079 passed / 2 failed / 5 skipped, but **every surface the fix touches is unreachable by
+XCUITest**: the rewritten `touchesBegan` branch only runs when a second touch arrives in a *later*
+event, and every synthetic two-finger gesture in this repo has been measured arriving in a single one.
+So the suite could not have caught a regression here either — its value is the surrounding surface,
+which is clean. The two failures (`ModePickerUITests` menu tap, and the 189 s
+`testInterpolateModeEndToEndFromGestureToScrub`) are both contention-shaped and the latter already
+failed-then-passed-in-isolation earlier this session; **re-run them isolated on a quiet machine before
+believing either.**
 
 ## Process, learned expensively here
 
