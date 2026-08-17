@@ -17,9 +17,13 @@ Prune it first, before adding the new asks.
       (`hitClass StrokeCanvasView`) but is bound to only 6 recognizers against the pen's 15, and
       **neither snap source — `stroke.*` nor `canvas.touchCounter` — is among them.** Never bound, so
       it is a delivery problem, not a delegate one. `tmp/snapbind`.
-- [ ] **Pinch to merge two layers does not work.** Owner, 2026-08-17 — was listed done, was never true
-      at the gesture level. The model layer (`mergeLayers`, `mergeLossKind`, the confirmation alert) is
-      sound and covered; **nothing tests the pinch itself**, which is how it shipped. `tmp/pinchmerge`.
+- [ ] **Rectangle nodes misbehave once the rectangle is rotated.** Flat, dragging a node is correct.
+      Rotated, it produces unintended transforms. **The rule, in the owner's words: the node opposite
+      the one being dragged must not move.** Second half of the same ask: dragging a node *past* the
+      opposite edge should let the rectangle keep working, inverted into the other quadrants — today it
+      pushes the opposite edge instead. The rectangle twin of the oval fix on `tmp/shapedev` ("oval
+      handles rotate with the opposite node anchored"), so it is built on that branch and reuses its
+      headless harness. `tmp/rectnode`.
 - [ ] **The two lasso bugs**, taken together — a stroke leaving the selection and re-entering counts as
       one and not two, and the lasso answers a finger while pencil-only mode is on. The second is
       likely a third instance of the `fillPress`/`catchAll` hole: a recognizer whose action never sees
@@ -29,22 +33,20 @@ Prune it first, before adding the new asks.
 
 New this pass (owner, 2026-08-17):
 
-- [ ] **Rectangle nodes misbehave once the rectangle is rotated.** Flat, dragging a node is correct.
-      Rotated, it produces unintended transforms. **The rule, in the owner's words: the node opposite
-      the one being dragged must not move.** Second half of the same ask: dragging a node *past* the
-      opposite edge should let the rectangle keep working, inverted into the other quadrants — today it
-      pushes the opposite edge instead. This is the rectangle twin of the oval fix already sitting on
-      `tmp/shapedev` ("oval handles rotate with the opposite node anchored"), so it should be built on
-      that branch and can reuse its headless harness.
 - [ ] **One colour picker, not two.** The canvas colour changer differs from the brush's; they should be
       the same control. If a second implementation exists, delete it rather than leaving it unreferenced.
-- [ ] **A colour picker tool on the left sidebar, below the opacity slider**, for the brush.
+- [ ] **An eyedropper on the left sidebar, below the opacity slider.** Confirmed with the owner
+      2026-08-17: a *tool* you select and then tap the canvas with to pick up the colour under it, not
+      a swatch that opens a picker.
 - [ ] **Add Text, in the Actions menu.** Fonts from a large selection, plus colour, size, spacing and
       the rest of what a text tool carries. Move, rotate, and **distort by dragging each of the four
       corners independently, giving a 3D-perspective warp** (a projective/homography transform, not an
       affine one). **On a raster layer it bakes** once a canvas action follows it — a brush stroke,
       eraser, fill — the way the fill tool and smart shapes already behave. **On a vector layer it stays
       an editable object.** Large enough to be its own project, not a single branch.
+      Owner's decisions, 2026-08-17: **iOS system fonts to begin with, behind a provider seam** so
+      open-source font packs can be added later without touching call sites; and **delivered in stages,
+      each one usable**, rather than as one branch that lands whole.
 - [ ] **Say what an undo or redo just undid.** A brief notice naming the action, using the same
       transient notice mechanism already used elsewhere in the app (the owner does not recall where —
       find it and reuse it rather than adding a second kind). Must not block or freeze the screen.
@@ -62,4 +64,10 @@ Carried over:
 
 ## Done this pass
 
-_(nothing yet — this pass began 2026-08-17)_
+- Pinch to merge two layers. Two independent faults: the row pair was latched in `.began`, which fires
+  only after the fingers have already moved, so a finger near a boundary had drifted into the next row
+  by the time it was read; and the long-press reorder drag was taking the gesture outright, a race its
+  own `secondTouchGraceInterval` comment had already documented and left open. Positions are now
+  captured in `shouldReceive`, at the instant a touch lands, and an in-progress reorder drag is
+  cancelled deterministically rather than on a timer. The decision logic lives in `PinchMergeGate` so
+  it can be tested headlessly — XCUITest has no API for a vertical two-finger pinch on two given rows.
