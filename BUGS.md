@@ -3,42 +3,62 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
-## The smart-shape hold needs the pen to keep reporting while it is still (2026-08-16)
+## XCUITest cannot drive the smart-shape hold, so two shape tests are skipped (2026-08-16)
 
 `ShapeHoldClock` decides the hold from `UITouch.timestamp` — the newest sample seen minus the newest
-that moved — because that is the only clock a main-thread stall or a stalled delivery can't fake, and
-because it makes the straightened-stroke bug unrepresentable rather than merely caught. **Its one
-assumption is that a pen held still keeps delivering `touchesMoved`.** If the input source goes silent
-while stationary, the newest timestamp stops advancing and the hold never completes.
+that *moved* — because that is the only clock a main-thread stall cannot fake. Its one assumption is
+that a pen held still keeps delivering `touchesMoved`. **On the device that is now confirmed**: the
+owner's `ActionRecorder` capture of a 4.4 s stationary pencil hold shows `skipped: 261`, ~59
+events/second arriving while the pen never crossed the recorder's 2 pt threshold, with a second touch
+in the same file independently agreeing at ~57/s.
 
-**Measured against XCUITest, and the result is *intermittent*, which is the finding.** Of three tests
-driven by `PaintUITestCase.drawAndHoldShape` (`press(forDuration:thenDragTo:thenHoldForDuration: 1.5)`),
-`testHeldStrokeBecomesAShapeThatTheEraserCanRemove` passed — so the runner *does* deliver samples
-through a stationary hold, and 0.8 s of them accumulated. But
-`CanvasTransformFreezeUITests.testPinchingWithAPendingShape...` read `shape:none` straight after the
-same helper, so on that run they did not. The runs were taken on a machine at 1–3% idle with five
-other simulators live, which is the obvious suspect for the difference and is not evidence about a
-pencil either way.
+**XCUITest's synthetic touch does not, and this is measured rather than inferred.** Instrumenting
+`handleStrokeMoved` to publish the clock's own state on `canvas.host` and running
+`drawAndHoldShape`'s gesture with `thenHoldForDuration` set to 0.0 s, 1.5 s and 3.0 s:
 
-So the assumption is **neither confirmed nor falsified**, and the honest summary is that the hold is
-now sensitive to how densely the input source reports while stationary, where the old wall-clock timer
-was not sensitive to it at all. Two things are needed before this is settled:
+| hold | samples | pen-clock span | greatest stillness |
+|---|---|---|---|
+| 0.0 s | 134 | 2.218 s | 0.000 s |
+| 1.5 s | 136 | 2.217 s | 0.000 s |
+| 3.0 s | 136 | 2.217 s | 0.000 s |
 
- 1. A re-run of `ShapeRecoveryUITests` and `CanvasTransformFreezeUITests` on a quiet machine, per
-    CLAUDE.md's triage loop. Intermittent-under-load is exactly the shape that section warns about.
- 2. **The device answer, which the simulator cannot give**: an `ActionRecorder` capture of a pencil
-    held still on the canvas for two seconds, counting the `"event":"touch","phase":"moved"` lines
-    during the still period and their `t` spacing — those carry the pencil's own clock, the same one
-    this decision runs on. Samples continuing at roughly digitizer rate confirms the design; a run
-    that stops dead falsifies it, and the answer then is a measured "the pen goes silent after N ms"
-    rather than a wall-clock threshold brought back.
+Identical — the drag and only the drag. `thenHoldForDuration` contributes no touch events at all, and
+neither does a *leading* `press(forDuration: 3.0)` (92 samples, 1.517 s, the drag again). The clock
+never accumulates a single millisecond, so no shape is ever detected and `shape:` stays `none`.
 
-Also unresolved from the same run: `ShapeRecoveryUITests.testDraggingALinesStartHandleMovesThatEndAndLeavesTheOther`
-failed on "the line should have moved off its original path". That is a handle-drag assertion, not a
-hold one, so it has two possible causes — the hold not firing on that run, or the handle hit-target
-change (`reach` is now `22 / canvasScale` instead of a fixed 28 canvas units, which is *larger* on
-screen and should make grabbing easier, so it is not the obvious reading). Not diagnosed; re-run it
-isolated first.
+**It cannot be tuned around, and the reason is structural.** XCUITest emits a move only when the
+interpolated position changes (a ~0.5 pt quantum: a 1 pt drag at 1 pt/s delivers exactly 2 samples
+0.484 s apart, which the app *does* see as 0.484 s of stillness). Within one gesture that spacing is
+uniform, and the public API has no multi-segment single-touch gesture — no way to express "travel,
+then be still". A drag slow enough to read as still reads as still from its first sample and fires
+the hold on a two-point stroke that detects as nothing. Fixing this needs XCTest's private event
+synthesis (`XCPointerEventPath` / `XCSynthesizedEventRecord`), which would also give the suite the
+two-finger drag `CanvasTransformFreezeUITests` documents as missing — deliberately not attempted here.
+
+**Do not weaken the clock to make these green.** A wall clock cannot tell a parked pen from a frozen
+app, which is the bug `ShapeHoldClock` exists to make unrepresentable, and the device data says the
+current design is right.
+
+Skipped, both with the reason in their doc comments:
+
+ * `CanvasTransformFreezeUITests.testPinchingWithAPendingShapeMovesTheCanvasAndLeavesTheShapeAlone`
+ * `ShapeRecoveryUITests.testDraggingALinesStartHandleMovesThatEndAndLeavesTheOther`
+
+**The second one had two innocent suspects, and it is worth recording that they were cleared.** It
+fails on a handle-drag assertion, so it reads like the new anchor maths or the enlarged hit target.
+Neither: a line's handles are `.start`/`.end`/`.rotation`, `ShapeOverlayView.anchor(for:)` returns nil
+for all three and `report` sends them straight to `onEndpointDragged`, so `ShapeGeometry.canvasAnchor`
+is not on that path at all. The anchor maths was separately checked headless (`swiftc`) across five
+rotations × both kinds × four corners × four edges, including drags that cross the anchor and flip:
+the anchor stays a corner (or axis node) of the result to 1e-4, the dragged handle lands on the touch,
+`rotation` is carried through unchanged, and an axis drag leaves the perpendicular extent alone. The
+hit target is not it either — `reach` is `22 / canvasScale`, which at the measured `canvasScale`
+0.4668 is 47 canvas units against the old fixed 28, and the test grabs the handle dead-on.
+
+The rest of `ShapeRecoveryUITests` still passes, but **not because the hold works**: every one of those
+assertions (ink is present, one stroke was recorded, two strokes were recorded) is equally satisfied by
+the freehand stroke `drawAndHoldShape` actually leaves. They are not evidence that a shape formed, and
+an earlier revision of this entry read them as exactly that.
 
 ## A stroke begun under a timeline popover stops being delivered, with no terminal callback (2026-08-16)
 

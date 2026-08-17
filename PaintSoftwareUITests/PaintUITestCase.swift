@@ -539,9 +539,29 @@ class PaintUITestCase: XCTestCase {
                    withVelocity: .slow, thenHoldForDuration: 0.6)
     }
 
-    /// Draws a stroke and keeps the finger down at the end of it, which is the smart-shape gesture:
-    /// the hold timer fires ~0.8s after the finger stops, the freehand stroke is replaced by the
-    /// detected shape, and lifting leaves it in the adjustable state.
+    /// Draws a stroke and keeps the finger down at the end of it, which is the smart-shape gesture.
+    ///
+    /// **This no longer produces a shape, and cannot be made to.** `ShapeHoldClock` decides the hold
+    /// from `UITouch.timestamp` — newest sample minus newest *moving* sample — so it needs a pen that
+    /// keeps reporting while stationary. A real pencil does (measured on the owner's iPad: ~59
+    /// events/second through a 4.4 s stationary hold). **XCUITest's synthetic touch does not, and the
+    /// `thenHoldForDuration` below contributes nothing whatsoever**: the same gesture with the hold
+    /// set to 0.0 s, 1.5 s and 3.0 s delivered 134 / 136 / 136 samples spanning 2.218 / 2.217 /
+    /// 2.217 s of pen time — identical, i.e. the drag and only the drag. A 3.0 s *leading* press is
+    /// event-free the same way. Across all of them the clock's greatest accumulated stillness was
+    /// 0.000 s.
+    ///
+    /// It is not a velocity or a threshold that can be tuned around, either. XCUITest emits a move
+    /// only when the interpolated position changes (~0.5 pt quantum), so within one gesture the
+    /// spacing between samples is uniform — there is no way to say "travel, *then* be still" in a
+    /// single touch, and the public API has no multi-segment single-touch gesture. A drag slow enough
+    /// to read as still reads as still from its first sample, and fires the hold on a two-point
+    /// stroke that detects as nothing.
+    ///
+    /// So callers get a freehand stroke, not a shape. Every test using this helper that still passes
+    /// passes because it asserts something a freehand stroke satisfies too (ink present, one stroke
+    /// recorded); the two that genuinely needed the pending shape are skipped and named in BUGS.md.
+    /// **Do not "fix" this by weakening the clock** — the device data says the clock is right.
     func drawAndHoldShape(on canvas: XCUIElement, from: CGVector, to: CGVector) {
         let start = canvas.coordinate(withNormalizedOffset: from)
         let end = canvas.coordinate(withNormalizedOffset: to)
