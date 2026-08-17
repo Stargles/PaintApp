@@ -62,6 +62,11 @@ struct AnimationTimeline: View {
     // button (the first tap enters the mode).
     @State private var showInterpolateOptions = false
 
+    // Onion skin's panel, opened by a second tap on the onion-skin button — the same two-stage
+    // behaviour as interpolate above, for the same reason: the button is the switch, so a panel that
+    // opened on the first tap would put a mode change behind an extra step.
+    @State private var showOnionSkinOptions = false
+
     /// A vector block dropped on a raster layer, waiting on the artist's answer. Non-nil raises the
     /// rasterize alert; the drop is only applied if they say yes. Held by identity (see
     /// `CanvasManager.CelDropRequest`) because the indices it came from can be renumbered while the
@@ -394,14 +399,38 @@ struct AnimationTimeline: View {
         }
     }
 
+    /// Two-stage, like `interpolateButton` and like the paint tools: the first tap turns onion skin
+    /// on, and a tap once it is already on opens `OnionSkinPanel`. That is why the panel carries no
+    /// on/off switch of its own — the button is the switch, and the panel is only reachable from the
+    /// on state.
+    ///
+    /// The panel is a popover here rather than an `ActivePanel` case in the top toolbar because
+    /// onion skin's subject is the timeline, which is the same argument `interpolateButton` records
+    /// from the owner (2026-08-01).
     private var onionSkinButton: some View {
-        Button(action: { canvasManager.isOnionSkinEnabled.toggle() }) {
+        Button(action: {
+            if canvasManager.isOnionSkinEnabled {
+                showOnionSkinOptions.toggle()
+            } else {
+                canvasManager.isOnionSkinEnabled = true
+            }
+        }) {
             Image(systemName: canvasManager.isOnionSkinEnabled
                   ? "square.stack.3d.forward.dottedline.fill"
                   : "square.stack.3d.forward.dottedline")
         }
         .foregroundColor(canvasManager.isOnionSkinEnabled ? .blue : .white)
         .accessibilityIdentifier("timeline.onionSkinToggle")
+        .popover(isPresented: $showOnionSkinOptions) {
+            OnionSkinPanel(canvasManager: canvasManager)
+                .frame(width: 340, height: 470)
+                .presentationCompactAdaptation(.popover)
+        }
+        // "Turn Off Onion Skin" lives inside the panel, so the panel has to close itself when it is
+        // used — otherwise it stays up describing something that is no longer drawing.
+        .onChange(of: canvasManager.isOnionSkinEnabled) { _, on in
+            if !on { showOnionSkinOptions = false }
+        }
     }
 
     private var loopButton: some View {

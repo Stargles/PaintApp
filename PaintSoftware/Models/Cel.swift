@@ -26,4 +26,26 @@ struct Cel: Identifiable {
     var thumbnail: UIImage? = nil
 
     var endFrame: Int { startFrame + frameCount }
+
+    /// **A one-way answer: true means there is certainly nothing to draw; false means "maybe".**
+    /// Model state only — no pixel scan, no rasterize — so it is free to ask about every cel in a
+    /// layer on every pass, which is what the onion skin does before deciding whether a slot is
+    /// worth a canvas-sized draw.
+    ///
+    /// Conservative in the direction that cannot produce a wrong picture. A cel erased back to
+    /// transparency still reports false, because `raster.version` has moved and this cannot tell an
+    /// erase from a stroke without looking at pixels — the cost of being sure is exactly the cost
+    /// this exists to avoid, and the consequence of being wrong that way is one wasted draw rather
+    /// than a missing skin.
+    ///
+    /// **An `interpolation` recipe is deliberately not consulted, and the reason is worth stating.**
+    /// A derived in-between's pixels are computed by `InterpolationEvaluator`, not stored here, so a
+    /// `.generate` cel reports blank — which is correct for every consumer that reads the *stored*
+    /// tiers, and those are the only consumers this has. Treating a recipe as content instead would
+    /// have the onion skin pay a canvas-sized draw to composite nothing.
+    var isCertainlyBlank: Bool {
+        fillImage == nil && bakedImage == nil
+            && raster.strokeCount == 0 && raster.version == 0
+            && (vector?.isEmpty ?? true)
+    }
 }

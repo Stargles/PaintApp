@@ -85,7 +85,12 @@ struct EraserSettingsPanel: View {
 
 /// Small grey/white checker backdrop the eraser preview punches a hole out of, standing in for
 /// canvas transparency.
-private struct CheckerboardPattern: View {
+///
+/// Not `private` any more: `OnionSkinPanel`'s tint bar needs exactly the same backdrop for exactly
+/// the same reason — a gradient whose *alpha* is the thing being read cannot be read over an opaque
+/// background. Shared rather than copied, since a second checker at a different square size would
+/// make the two panels quietly disagree about what transparency looks like.
+struct CheckerboardPattern: View {
     var body: some View {
         GeometryReader { geo in
             let squareSize: CGFloat = 10

@@ -487,7 +487,14 @@ final class CanvasManager: ObservableObject {
         }
     }
     @Published var isOnionSkinEnabled: Bool = true
-    @Published var onionSkinOpacity: Double = 0.3
+    /// Everything the onion-skin panel configures — how many skins, which side, how they are tinted
+    /// and how opaque each one is. See `OnionSkinSettings`.
+    ///
+    /// **One value, not a dozen `@Published` properties**, because the render path compares the
+    /// settings that produced the picture on screen against the settings now, and one `==` is what
+    /// makes that comparison possible to get right. `onionSkinOpacity` used to be the whole of this
+    /// and is gone: it is `onionSkin.linkedLevel`, which is the same number with a ramp behind it.
+    @Published var onionSkin = OnionSkinSettings()
     @Published var isLoopEnabled: Bool = true
     /// The frame range playback loops within, set via the ruler's frame-number tap menu. Nil means
     /// "the whole scene"; highlighted blue across its span once set, independent of `isLoopEnabled`.
