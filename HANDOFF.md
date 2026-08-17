@@ -38,37 +38,48 @@ on the device, 6 layers at 2048²:
 
 The simulator had said Metal was ~16–375× faster and led to "flip the default to Metal". The device
 says Metal is **half the per-layer cost but nearly double the fixed cost** — so it loses on simple
-documents and wins enormously on graded ones. The right shape is a predicate, not a default. That
-correction is in flight on `tmp/compperf`.
+documents and wins enormously on graded ones. The right shape is a predicate, not a default — that
+correction is merged as `CompositorBackend.automatic`.
 
 ## Branch state
 
-`main` is pushed and green (fast tier ~974 tests, 0 failures). Two branches are live and **not**
-merged; both were being actively worked when this was written, so re-read their tips:
+`main` is pushed and green: **991 tests, 0 failures, verified on the owner's iPad in 36 s** (147 s on
+the simulator). One branch is live and **not** merged:
 
-- **`tmp/compperf`** (8 commits ahead) — Metal compositing, device-aware memory budget, render-resolution
+- ~~`tmp/compperf`~~ — **merged.** Metal compositing, device-aware memory budget, render-resolution
   option. Fixed a real 4K crash: the owner's scene (4096², vector + bloom + blur) holds **six
   canvas-sized textures = 384 MiB**, of which only the 64 MiB upload cache had any budget. `CompositorBudget`
   now sizes composites to `physicalMemory/16` (192 MiB on the owner's iPad 9, capping 4096² to 2896²).
   Also found: `PixelOps`' flatten memo was capped at 24 *entries* — **1.61 GB at 4096²** — and its
   memory-warning observer did not exist despite the doc comment claiming it.
-  **Open before merge:** the Metal-vs-CoreGraphics predicate above, and the 17 fps question below.
+  The blanket Metal default was **withdrawn** on device evidence and replaced by
+  `CompositorBackend.automatic`: any grade anywhere → Metal (2.7 ms vs 203.3 ms isolated grade delta),
+  otherwise ≥ 4 leaves — set above the timing crossover deliberately, because 2 ms/composite at two
+  leaves does not buy 80 MB on a 3 GB device.
 - **`tmp/shapefix`** (7 commits ahead, tip `1a6e05f`) — shape gesture fixes. Handles now sized in screen points (they
   were in canvas points, drawing at 4.4 pt on a fitted canvas — that is the owner's "faint blue line,
   no nodes"). Oval handles rotate with the diametrically opposite node anchored, verified headless at
   1420 cases / 7020 assertions. Pinch-from-centre fixed. Smart-shape hold measured in `UITouch.timestamp`
   rather than wall clock. **Open before merge:** device confirmation of the snap fix, including a
   resting-palm test.
-- `tmp/devicebuild` is a throwaway integration branch for building onto the iPad. Its BUGS.md conflicts
-  were resolved by keeping both sides; **do not merge it anywhere**.
+
+To build onto the iPad, branch from `main`, merge `tmp/shapefix`, and install — the deploy steps are in
+CLAUDE.md, and `deploy/deploy.sh` must not be used because it pulls `main` and would never ship the
+branch.
 
 ## The two open bugs, with what is already known
 
-**17 fps drawing on a 4K canvas.** The owner tested render resolution at 50% and saw **no change**,
-which rules out the compositor — the option demonstrably works (52.7 → 12.0 ms for three composites).
-The device run points at `vector layer render | firstRender=70.0ms  cachedRender=0.0ms` at 2048²: the
-owner draws *on* a vector layer, so each update invalidates that render, and the resolution option
-scales the compositor but not the vector rasterization. Unconfirmed.
+Both are **diagnosed**; neither is fixed.
+
+**17 fps drawing on a 4K canvas — diagnosed, not fixed, and it was never the compositor.** One dab
+costs **53.8 ms on a vector layer at 4096²** against **4.0 ms on a raster layer**: a 19 fps ceiling
+against the owner's reported 17. `StrokeCanvasView.refreshDisplay`'s `.overlay` branch allocates a
+fresh canvas-sized bitmap per touch-move and blits the committed render plus the live scratch into it
+— four canvas-sized operations where raster does one. `renderResolution` is applied in
+`makeSandwichRequests` and never reaches that path, which is exactly why the owner's 50% test changed
+nothing. **Predates all of this work**; no composite runs during a dab at all. The fix is to give the
+scratch its own layer and let Core Animation composite the two. Its own branch — `vectorScratchRole`
+has three modes and it is the most gesture-sensitive code in the app. In BUGS.md with the numbers.
 
 **Snap does not engage** (pen down, shape formed, add a finger). Root cause found: every canvas view
 left `UIView.isMultipleTouchEnabled` at its `false` default — *"the view receives only the first touch
