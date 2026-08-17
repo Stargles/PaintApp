@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import SwiftUI
+import os
 
 private extension Color {
     var codable: CodableColor {
@@ -474,6 +475,48 @@ enum ProjectStore {
         }
     }
 
+    // MARK: - Loading
+
+    /// Where the load path says what it could not read.
+    ///
+    /// **A log line, not a banner, and that is a decision rather than an omission.** `CanvasNotice`
+    /// is the app's one notice mechanism and it is a 2.6-second self-dismissing strip whose own
+    /// documentation says it "does not take a tap to get rid of" — built to inform an artist about
+    /// something they just tried to do and can immediately retry. A cel that loaded short is neither:
+    /// it is not actionable at the moment it happens, and the artist cannot un-drop the element. The
+    /// *common* case is also the benign one — an unknown `kind` is a newer file in an older build, by
+    /// design — so raising a banner on it at every project open would be noise attached to a
+    /// non-event.
+    ///
+    /// What actually protects the artwork is already here: `ProjectBackupManager` stashes the pre-save
+    /// package on **every** save, so the intact original survives a load that dropped something and is
+    /// restorable. Whether a partial load should go further and *refuse to overwrite*, or prompt
+    /// before it does, is a decision about save semantics and belongs to the owner, not to this fix.
+    private static let log = Logger(subsystem: "Starg.PaintSoftware", category: "ProjectLoad")
+
+    /// Says what a per-element decode dropped, keeping the two kinds apart — an unknown discriminator
+    /// is an expected version gap and logs at `notice`; a malformed known element is a defect and logs
+    /// at `error`. Silent when nothing was dropped, which is every ordinary load.
+    private static func report(_ decodeReport: VectorCanvasData.DecodeReport, cel: UUID, file: String) {
+        guard !decodeReport.isClean else { return }
+        let cel = cel.uuidString
+        if !decodeReport.unknownKinds.isEmpty {
+            let kinds = Set(decodeReport.unknownKinds).sorted().joined(separator: ", ")
+            log.notice("""
+                Vector payload \(file, privacy: .public) for cel \(cel, privacy: .public) holds \
+                \(decodeReport.unknownKinds.count, privacy: .public) element(s) of unknown kind \
+                [\(kinds, privacy: .public)] — written by a newer build, skipped; the rest of the cel loaded
+                """)
+        }
+        if decodeReport.malformedCount > 0 {
+            log.error("""
+                Vector payload \(file, privacy: .public) for cel \(cel, privacy: .public) holds \
+                \(decodeReport.malformedCount, privacy: .public) malformed element(s) of a known kind — \
+                skipped; the rest of the cel loaded
+                """)
+        }
+    }
+
     @MainActor
     static func load(from url: URL) -> CanvasManager? {
         guard let manifest = loadManifest(at: url) else { return nil }
@@ -554,15 +597,41 @@ enum ProjectStore {
                 // strokes, fills, images and erase elements. A legacy payload that predates the display
                 // list has no order to restore, so `VectorCanvasData.init(from:)` reconstructs the one
                 // the old renderer used (fills, then images, then strokes) while decoding.
+                //
+                // **Three outcomes, kept apart deliberately**, because collapsing them into one `try?`
+                // chain is exactly what made this a silent data-loss path. No file (nothing was saved);
+                // a file that will not parse *as a payload* (unsalvageable, and loud); and a file that
+                // parses with some entries unreadable — which now costs those entries alone, because
+                // `VectorCanvasData` decodes element by element. An unrecognised `kind` written by a
+                // newer build therefore costs one element rather than every stroke, fill and image on
+                // the cel, which is the same reasoning the interpolation recipe below already applies.
                 var vector: VectorCanvas?
-                if let vectorFileName = celManifest.vectorFileName,
-                   let data = try? Data(contentsOf: imagesDir.appendingPathComponent(vectorFileName)),
-                   let payload = try? JSONDecoder().decode(VectorCanvasData.self, from: data) {
-                    let elements = payload.elements { ref in
-                        UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path)
+                if let vectorFileName = celManifest.vectorFileName {
+                    let vectorURL = imagesDir.appendingPathComponent(vectorFileName)
+                    if let data = try? Data(contentsOf: vectorURL) {
+                        do {
+                            let payload = try JSONDecoder().decode(VectorCanvasData.self, from: data)
+                            let elements = payload.elements { ref in
+                                UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path)
+                            }
+                            vector = VectorCanvas(size: canvasSize, elements: elements, transform: payload.affineTransform)
+                            report(payload.decodeReport, cel: celManifest.id, file: vectorFileName)
+                        } catch {
+                            log.error("""
+                                Vector payload \(vectorFileName, privacy: .public) for cel \
+                                \(celManifest.id.uuidString, privacy: .public) is not readable as a payload — \
+                                the cel loads empty: \(String(describing: error), privacy: .public)
+                                """)
+                        }
+                    } else {
+                        log.error("""
+                            Vector payload \(vectorFileName, privacy: .public) for cel \
+                            \(celManifest.id.uuidString, privacy: .public) is missing or unreadable on disk — \
+                            the cel loads empty
+                            """)
                     }
-                    vector = VectorCanvas(size: canvasSize, elements: elements, transform: payload.affineTransform)
-                } else if layerManifest.kind == .vector {
+                }
+                if vector == nil, layerManifest.kind == .vector {
                     vector = .empty(size: canvasSize)
                 }
 

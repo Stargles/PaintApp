@@ -1342,17 +1342,36 @@ struct VectorCanvasData: Codable {
 
     /// The persisted form of one `VectorElement`. Written with an explicit `kind` discriminator rather
     /// than Swift's synthesized enum encoding, so the on-disk shape is human-readable and extensible.
+    ///
+    /// **The discriminator is read in two steps — raw `String` first, then looked up — and that split
+    /// is the point.** A well-formed `kind` this build has no case for is a *newer file in an older
+    /// build*: expected, benign, and nothing is wrong with the document. A missing, non-string, or
+    /// structurally broken element is a defect. Decoding them both as an anonymous `DecodingError`
+    /// makes the two indistinguishable, so `Failure.unknownKind` carries the first out separately and
+    /// `VectorCanvasData.DecodeReport` counts them apart.
     enum ElementData: Codable {
         case stroke(VectorStroke)
         case fill(VectorFillElement)
         case image(ImageRef)
+
+        /// The one decode failure worth naming. Everything else stays a `DecodingError` and is
+        /// classified as malformed — see `VectorCanvasData.DecodeReport`.
+        enum Failure: Error, Equatable {
+            /// A `kind` string this build has no case for, e.g. an element written by a later version.
+            case unknownKind(String)
+        }
 
         private enum Kind: String, Codable { case stroke, fill, image }
         private enum CodingKeys: String, CodingKey { case kind, stroke, fill, image }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            switch try c.decode(Kind.self, forKey: .kind) {
+            // Decoded as `String`, not as `Kind`: `Kind`'s synthesized decoder answers the same
+            // `dataCorrupted` for "no such case" as for "not a string at all", and those are the two
+            // cases this whole design exists to tell apart.
+            let raw = try c.decode(String.self, forKey: .kind)
+            guard let kind = Kind(rawValue: raw) else { throw Failure.unknownKind(raw) }
+            switch kind {
             case .stroke: self = .stroke(try c.decode(VectorStroke.self, forKey: .stroke))
             case .fill: self = .fill(try c.decode(VectorFillElement.self, forKey: .fill))
             case .image: self = .image(try c.decode(ImageRef.self, forKey: .image))
@@ -1378,6 +1397,69 @@ struct VectorCanvasData: Codable {
     var elements: [ElementData]
     /// Overall transform as [a, b, c, d, tx, ty]; missing/short → identity.
     var transform: [Double]
+
+    /// What `init(from:)` had to skip, and why. Empty for a payload built in memory.
+    ///
+    /// Decoding this payload is **per element**: one unreadable entry costs that entry and nothing
+    /// else. It used to cost the cel — `ProjectStore`'s load wrapped the whole decode in `try?` and
+    /// fell back to `VectorCanvas.empty`, so a single field it could not read discarded every stroke,
+    /// fill, image and erase element the artist had drawn, silently, and the next save wrote the loss
+    /// to disk. That is the failure mode this type is now shaped to make impossible.
+    ///
+    /// Not `Codable` and deliberately absent from `CodingKeys`: it describes *this decode*, not the
+    /// document. Re-encoding a payload that dropped elements writes only the survivors, which is the
+    /// honest thing to write — the report exists so the load path can say out loud that it happened
+    /// before that point is reached.
+    struct DecodeReport: Equatable {
+        /// Discriminators this build has no case for, in file order. A project saved by a newer build
+        /// and opened by an older one lands here; it is the expected, benign case, and the element
+        /// belongs to a feature that does not exist in this binary.
+        var unknownKinds: [String] = []
+        /// Entries whose kind this build *does* know but whose payload would not decode — plus, on a
+        /// legacy payload, any entry at all that would not decode (those files predate the
+        /// discriminator, so "unknown kind" is not a thing they can express). A real defect: a bug or
+        /// a damaged file, not a version gap.
+        var malformedCount: Int = 0
+
+        var droppedCount: Int { unknownKinds.count + malformedCount }
+        var isClean: Bool { droppedCount == 0 }
+    }
+
+    var decodeReport = DecodeReport()
+
+    /// One slot of the persisted `elements` array, decoded so a failure is a *value* rather than a
+    /// thrown error.
+    ///
+    /// **`init(from:)` never throws, and that is the load-bearing part rather than a stylistic
+    /// choice.** `JSONDecoder`'s unkeyed container advances `currentIndex` only *after* a successful
+    /// `decode`, so the obvious hand-rolled `while !container.isAtEnd { do { … } catch { continue } }`
+    /// over `[ElementData]` re-reads the failing slot forever. Decoding `[LossySlot]` in one call
+    /// sidesteps it entirely: every slot succeeds, and the ones holding nothing say why.
+    private struct LossySlot: Decodable {
+        enum Outcome {
+            case decoded(ElementData)
+            case unknownKind(String)
+            case malformed
+        }
+        let outcome: Outcome
+
+        init(from decoder: Decoder) throws {
+            do {
+                outcome = .decoded(try ElementData(from: decoder))
+            } catch ElementData.Failure.unknownKind(let raw) {
+                outcome = .unknownKind(raw)
+            } catch {
+                outcome = .malformed
+            }
+        }
+    }
+
+    /// `LossySlot` for the legacy parallel arrays, which carry no discriminator at all — so every
+    /// failure there is malformed by definition and there is nothing to classify.
+    private struct LossyValue<Value: Decodable>: Decodable {
+        let value: Value?
+        init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
+    }
 
     /// Kind-filtered reads of the display list, mirroring `VectorCanvas`'s compatibility accessors.
     /// Read-only: a caller that needs the order should use `elements(resolvingImages:)`.
@@ -1419,19 +1501,49 @@ struct VectorCanvasData: Codable {
         transform = [Double(t.a), Double(t.b), Double(t.c), Double(t.d), Double(t.tx), Double(t.ty)]
     }
 
+    /// **The rule: a broken *element* costs that element; a broken *payload* still throws.**
+    ///
+    /// The two are different events and the load path needs them apart — "this file is not a vector
+    /// payload at all" is unsalvageable and worth shouting about, while "this file has an entry I
+    /// cannot read" costs one entry and the rest of the drawing is fine. So the container itself, and
+    /// the choice between the ordered and legacy shapes, are still `try`; only the entries inside are
+    /// tolerated.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        transform = try c.decode([Double].self, forKey: .transform)
-        if let ordered = try c.decodeIfPresent([ElementData].self, forKey: .elements) {
-            elements = ordered
+        // A missing or unreadable transform costs the transform, not the drawing. `affineTransform`
+        // below has always answered `.identity` for anything that is not six numbers and its comment
+        // has always said so; it was this line, requiring the key, that could still throw the cel away
+        // over it.
+        transform = (try? c.decode([Double].self, forKey: .transform)) ?? []
+
+        if let slots = try c.decodeIfPresent([LossySlot].self, forKey: .elements) {
+            var decoded: [ElementData] = []
+            decoded.reserveCapacity(slots.count)
+            var report = DecodeReport()
+            for slot in slots {
+                switch slot.outcome {
+                case .decoded(let element): decoded.append(element)
+                case .unknownKind(let raw): report.unknownKinds.append(raw)
+                case .malformed: report.malformedCount += 1
+                }
+            }
+            elements = decoded
+            decodeReport = report
             return
         }
         // Legacy payload: three parallel arrays and no z-order. Rebuild the old draw order — fills,
         // images, then strokes — so an existing project opens looking as it did.
-        let strokes = try c.decode([VectorStroke].self, forKey: .strokes)
-        let fills = try c.decode([VectorFillElement].self, forKey: .fills)
-        let images = try c.decode([ImageRef].self, forKey: .images)
-        elements = fills.map { .fill($0) } + images.map { .image($0) } + strokes.map { .stroke($0) }
+        //
+        // Per-element tolerance does not disturb that reconstruction: a dropped entry leaves a gap in
+        // its own bucket and the three buckets are still concatenated fills → images → strokes, so
+        // the surviving elements sit in exactly the relative order they would have had.
+        let strokes = try c.decode([LossyValue<VectorStroke>].self, forKey: .strokes)
+        let fills = try c.decode([LossyValue<VectorFillElement>].self, forKey: .fills)
+        let images = try c.decode([LossyValue<ImageRef>].self, forKey: .images)
+        elements = fills.compactMap { $0.value.map(ElementData.fill) }
+            + images.compactMap { $0.value.map(ElementData.image) }
+            + strokes.compactMap { $0.value.map(ElementData.stroke) }
+        decodeReport = DecodeReport(malformedCount: strokes.count + fills.count + images.count - elements.count)
     }
 
     /// Legacy arrays are deliberately *not* mirrored alongside the ordered form: an `.erase` stroke

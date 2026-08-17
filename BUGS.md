@@ -4,34 +4,6 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
-## One unreadable field in a vector cel silently discards the whole cel (2026-08-17)
-
-`ProjectStore.swift:558-566` decodes a cel's vector payload through `try?`:
-
-```swift
-if let vectorFileName = celManifest.vectorFileName,
-   let data = try? Data(contentsOf: imagesDir.appendingPathComponent(vectorFileName)),
-   let payload = try? JSONDecoder().decode(VectorCanvasData.self, from: data) {
-```
-
-Any decode error is swallowed, and the `else if layerManifest.kind == .vector` branch below hands back
-`.empty(size: canvasSize)`. So a single unrecognised or malformed field does not cost that one element —
-**it costs every stroke, fill, image and erase element on the cel**, and the next save writes the loss to
-disk permanently.
-
-Today this needs a corrupt file, which is why it has never been seen. It stops being theoretical the
-moment a *new element kind* ships: an older build opening a newer project hits it deliberately and by
-design, and the artist's drawing is gone with no error. [ADD_TEXT.md](ADD_TEXT.md) makes fixing it a
-stage of its own that must land before any text object reaches disk, but it is worth fixing on its own
-merits and is not really a text bug.
-
-The fix is to decode `VectorCanvasData.elements` one element at a time and skip only the ones that fail,
-so an unknown discriminator costs that element alone. Note the neighbouring interpolation-recipe load a
-few lines down already reasons this way and says so in its comment — *"a cel whose recipe file is
-missing or unreadable loads as an ordinary cel rather than failing the whole project"* — so this is an
-inconsistency within one function, not a missing idea.
-
-
 ## The palm baseline that shipped with the snap fix has never run (2026-08-17)
 
 The snap is fixed and confirmed on the owner's device — `requiresExclusiveTouchType` defaults to `YES`,
