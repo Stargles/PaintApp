@@ -302,6 +302,12 @@ nudges toward it; it resolves `graphify` from PATH and fails open if missing.
 
 ## Docs
 
+[TODO.md](TODO.md) is **the owner's asks, live** — record them there when they arrive and delete them
+when they are done and merged, not when a branch exists. It is the counterpart to [BUGS.md](BUGS.md),
+which is for what *we* find. **At most three items in flight at once**, unless the extras need no
+simulator; the cap is about the machine, not the plan (see `tools/simlock.sh` and what five concurrent
+runs did to this Mac).
+
 [README.md](README.md) is the app and its architecture. [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md)
 is the interpolation feature — settled decisions and the future-upgrade list. [BUGS.md](BUGS.md) is
 open issues only. [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) and
