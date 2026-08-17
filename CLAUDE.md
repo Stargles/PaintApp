@@ -193,6 +193,30 @@ simulators, zero uninterruptible processes, and 94.6% idle CPU. Read the real nu
 top -l 2 -n 0 -s 2 | grep "CPU usage" | tail -1
 ```
 
+### Two branches can mint the same pbxproj object id, and git will merge them happily
+
+The app target auto-includes sources via `PBXFileSystemSynchronizedRootGroup`, but **the UI-test
+target has an explicit `PBXSourcesBuildPhase`**, so a new *test* file must be added to
+`project.pbxproj` by hand. Two branches each adding one therefore each invent an object id — and on
+2026-08-16 two of them independently invented the *same* pair,
+`B2C3D4E5F6001122334455F1`/`F2`, one for `StrokeSampleGate.swift` and one for `ShapeHoldClock.swift`.
+
+Git merged that without a conflict, because the two definitions are on different lines. Xcode then
+resolves a duplicate id to whichever definition comes later, which **silently dropped
+`StrokeSampleGate.swift` from the test target**. The build failed with `cannot find
+'StrokeSampleGate' in scope` in a test file nobody on either branch had touched — an error pointing
+at neither change, on a merge git reported as clean.
+
+Before adding a pbxproj entry, check the id is not already taken, and prefer one derived from the
+file name over a hand-typed sequence:
+
+```bash
+grep -c "B2C3D4E5F6001122334455F1" PaintSoftware.xcodeproj/project.pbxproj   # must be 0
+```
+If a merge produces a "cannot find X in scope" for a symbol neither branch touched, suspect this
+before suspecting the code. It is the same family as the `@discardableResult` merge in
+[BUGS.md](BUGS.md): two changes to different lines that compose into a defect neither had alone.
+
 ## Deploy to iPad
 
 ```bash
