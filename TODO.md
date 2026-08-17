@@ -10,18 +10,6 @@ Prune it first, before adding the new asks.
 
 ## In flight
 
-- [ ] **Rectangle nodes misbehave once the rectangle is rotated.** Flat, dragging a node is correct.
-      Rotated, it produces unintended transforms. **The rule, in the owner's words: the node opposite
-      the one being dragged must not move.** Second half of the same ask: dragging a node *past* the
-      opposite edge should let the rectangle keep working, inverted into the other quadrants — today it
-      pushes the opposite edge instead. The rectangle twin of the oval fix on `tmp/shapedev` ("oval
-      handles rotate with the opposite node anchored"), so it is built on that branch and reuses its
-      headless harness. `tmp/rectnode`.
-- [ ] **The two lasso bugs**, taken together — a stroke leaving the selection and re-entering counts as
-      one and not two, and the lasso answers a finger while pencil-only mode is on. The second is
-      likely a third instance of the `fillPress`/`catchAll` hole: a recognizer whose action never sees
-      a `UITouch` and so cannot ask the touch type. `tmp/lasso`.
-
 ## Queued
 
 New this pass (owner, 2026-08-17):
@@ -97,3 +85,17 @@ Carried over:
   captured in `shouldReceive`, at the instant a touch lands, and an in-progress reorder drag is
   cancelled deterministically rather than on a timer. The decision logic lives in `PinchMergeGate` so
   it can be tested headlessly — XCUITest has no API for a vertical two-finger pinch on two given rows.
+- Rectangle smart-shape node dragging, rotated. Two defects: a corner drag pinned its anchor in the
+  shape's *local* frame while `rotationTransform` pivots about a centre that the drag itself moves, so
+  a rotated rectangle transformed wrongly; and dragging a node past the opposite corner re-derived the
+  anchor every frame, so once the drag crossed it, "the corner opposite the dragged one" started naming
+  the finger's own corner instead. Fix removes the default from `ShapeGeometry.draggingCorner`'s
+  `anchor` parameter, so every call site must state the latched point rather than silently re-deriving
+  it. Swept 23,144 checks of "the opposite node does not move" across 11 rotations and drags
+  overshooting the far edge; the same sweep fails 7,120 checks against the pre-fix code.
+- The two lasso bugs. Lasso answered a finger in pencil-only mode: `SelectionOverlayView` used stock
+  `UIPanGestureRecognizer`/`UITapGestureRecognizer`, whose `@objc` actions never see a `UITouch` — the
+  third instance of the `fillPress`/`catchAll` hole — now replaced with `TouchTypePanGestureRecognizer`/
+  `TouchTypeTapGestureRecognizer`. And a stroke that left the selection and re-entered counted as one
+  stroke instead of two: `endVectorStroke` filtered samples and then built a single `VectorStroke`;
+  `StrokeGeometry.splitRuns(_:inside:)` now yields one stroke per surviving run.

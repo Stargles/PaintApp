@@ -403,12 +403,6 @@ product call, not just a fix.
 
 ## Cleanup opportunities
 
-- **`InterpolationRenderLogicTests.testPreviewIsSubstantiallyCheaperThanFull` is a coin flip on a busy
-  machine.** It asserts `preview * 4 < full` on a ~2 ms quantity; measured 2026-08-17 across four
-  isolated runs of that one test it passed twice and failed twice, at ratios **3.05x** and **3.94x**
-  against the hard 4x. The *claim* (a preview is much cheaper) is worth keeping; the threshold is not
-  where the evidence puts it. Either lower it to a ratio the machine actually clears, or measure
-  something that is not a wall clock.
 - **Duplicated transform-overlay code** — `ObjectTransformOverlayView` and `FloatingPieceOverlayView`
   each define their own `HandleView` and near-identical project/rotate/resize logic.
 - **Duplicated canvas-flip geometry** — `CanvasManager.flippedImage` and `RasterLayerTexture.flipped`
