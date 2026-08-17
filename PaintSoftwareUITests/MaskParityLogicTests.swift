@@ -1025,7 +1025,7 @@ final class MaskParityLogicTests: XCTestCase {
         manager.toggleMaskSource(.layer(manager.layers[0].id))
         manager.beginStructureGesture()                     // the row's slider touching down
         manager.layers[1].opacity = 0.4
-        manager.commitStructureGesture(name: "Opacity")     // …and lifting, still mid-session
+        manager.commitStructureGesture(label: .opacity)     // …and lifting, still mid-session
         manager.endMaskEdit()
 
         XCTAssertEqual(manager.history.undoStack.count, stepsBefore + 1,

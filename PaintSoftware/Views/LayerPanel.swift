@@ -258,7 +258,7 @@ struct LayerOptionsPanel: View {
                         effect: effect,
                         onChange: { canvasManager.setLayerEffect(layerIndex: index, to: $0) },
                         onEditBegan: { canvasManager.beginStructureGesture() },
-                        onEditEnded: { canvasManager.commitStructureGesture(name: "Effect") },
+                        onEditEnded: { canvasManager.commitStructureGesture(label: .valueLayerEffect) },
                         onBack: { showingEffectSettings = false },
                         onClose: onClose)
                 } else {
@@ -503,7 +503,7 @@ struct LayerOptionsPanel: View {
                     if canvasManager.layers[index].fill == fillWhenPickerOpened {
                         canvasManager.cancelStructureGesture()
                     } else {
-                        canvasManager.commitStructureGesture(name: "Value")
+                        canvasManager.commitStructureGesture(label: .valueLayerColor)
                     }
                     fillWhenPickerOpened = nil
                 }
@@ -816,7 +816,7 @@ struct FolderOptionsPanel: View {
                     effect: effect,
                     onChange: { canvasManager.setNodeEffect(folderID, to: $0) },
                     onEditBegan: { canvasManager.beginStructureGesture() },
-                    onEditEnded: { canvasManager.commitStructureGesture(name: "Effect") },
+                    onEditEnded: { canvasManager.commitStructureGesture(label: .valueLayerEffect) },
                     onBack: { showingEffectSettings = false },
                     onClose: onClose)
             } else if let index = folderIndex, canvasManager.folders.indices.contains(index) {

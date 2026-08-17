@@ -166,7 +166,7 @@ struct LayerStackListView: UIViewRepresentable {
                     }
                     cell.onOpacityChangeBegan = { [weak self] in self?.canvasManager.beginStructureGesture() }
                     cell.onOpacityChangeEnded = { [weak self] in
-                        self?.canvasManager.commitStructureGesture(name: "Opacity")
+                        self?.canvasManager.commitStructureGesture(label: .opacity)
                     }
                 }
                 return cell

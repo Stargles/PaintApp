@@ -130,7 +130,7 @@ extension CanvasManager {
         let moved = permuted.remove(at: from)
         permuted.insert(moved, at: to)
 
-        withStructureUndo(name: "Shuffle Frame") {
+        withStructureUndo(label: .shuffleFrame) {
             var cursor = origin
             for (position, index) in permuted.enumerated() {
                 layers[layerIndex].cels[index].startFrame = cursor
@@ -174,7 +174,7 @@ extension CanvasManager {
         // instead, rather than moving it into a state nothing can edit.
         if case .needsRasterization = verdict, canvasSize == nil { return false }
 
-        withStructureUndo(name: "Move Frame to Layer") {
+        withStructureUndo(label: .moveFrameToLayer) {
             var cel = layers[sourceIndex].cels.remove(at: celIndex)
 
             if case .needsRasterization = verdict, let canvasSize {

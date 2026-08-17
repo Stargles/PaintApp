@@ -71,7 +71,7 @@ extension CanvasManager {
         guard layers.indices.contains(layerIndex) else { return false }
         guard activeCelIndex(inLayer: layerIndex, atFrame: startFrame) == nil else { return false }
         guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: startFrame, maxLength: frameCount) else { return false }
-        withStructureUndo(name: "Add Frame") {
+        withStructureUndo(label: .addFrame) {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
             // A new cel on a `.vector` layer needs its own `VectorCanvas`, exactly as the one
             // `addVectorLayer` creates does. Without it the cel has nowhere to put vector content, so
@@ -107,7 +107,7 @@ extension CanvasManager {
         let source = layers[layerIndex].cels[celIndex]
         let newStart = source.endFrame
         guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: newStart, maxLength: source.frameCount) else { return }
-        withStructureUndo(name: "Duplicate Frame") {
+        withStructureUndo(label: .duplicateFrame) {
             let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: source.raster.makeCopy(), fillImage: source.fillImage, bakedImage: source.bakedImage, vector: source.vector?.makeCopy())
             layers[layerIndex].cels.append(newCel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
@@ -141,7 +141,7 @@ extension CanvasManager {
         guard let copiedCel, layers.indices.contains(layerIndex) else { return false }
         guard activeCelIndex(inLayer: layerIndex, atFrame: startFrame) == nil else { return false }
         guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: startFrame, maxLength: copiedCel.frameCount) else { return false }
-        withStructureUndo(name: "Paste Frame") {
+        withStructureUndo(label: .pasteFrame) {
             let newCel = Cel(id: UUID(), startFrame: startFrame, frameCount: length,
                              raster: copiedCel.raster.makeCopy(), fillImage: copiedCel.fillImage,
                              bakedImage: copiedCel.bakedImage, vector: copiedCel.vector?.makeCopy())
@@ -163,7 +163,7 @@ extension CanvasManager {
     func deleteCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
               layers[layerIndex].cels.count > 1 else { return }
-        withStructureUndo(name: "Delete Frame") {
+        withStructureUndo(label: .deleteFrame) {
             layers[layerIndex].cels.remove(at: celIndex)
         }
     }
@@ -178,7 +178,7 @@ extension CanvasManager {
         // "fill the empty space after this," so it still needs its own stop, and this clamp is now
         // the only thing standing between it and pushing every block after it down the timeline.
         let stop = neighborBounds(layerIndex: layerIndex, celIndex: celIndex).upperBound
-        withStructureUndo(name: "Extend Frame") {
+        withStructureUndo(label: .extendFrame) {
             resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex,
                                newEndFrame: min(stop, max(sceneFrameCount, cel.endFrame)))
         }
@@ -186,7 +186,7 @@ extension CanvasManager {
 
     func clearCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        withStructureUndo(name: "Clear Frame") {
+        withStructureUndo(label: .clearFrame) {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
             layers[layerIndex].cels[celIndex].raster = .empty(size: size)
             layers[layerIndex].cels[celIndex].fillImage = nil
@@ -210,7 +210,7 @@ extension CanvasManager {
     /// Drag the block's left edge: keeps the right edge fixed, changes startFrame/frameCount.
     /// Deliberately NOT wrapped in `withStructureUndo` here — `TimelineTrackView`'s pan handler
     /// calls this on every `.changed` event of the drag, so it brackets the whole gesture itself
-    /// with `beginStructureGesture()`/`commitStructureGesture(name:)` instead of one step per call.
+    /// with `beginStructureGesture()`/`commitStructureGesture(label:)` instead of one step per call.
     ///
     /// **This replaces the old contract, on the owner's explicit instruction, not an oversight.**
     /// It used to stop the drag dead at `previous.startFrame + 1`, shrinking the previous block from
@@ -313,7 +313,7 @@ extension CanvasManager {
     /// **Every push below is computed from a baseline, never from the live model, and this is the
     /// point the whole rewrite hinges on.** `TimelineTrackView`'s pan handler calls this on every
     /// `.changed` event with the SAME already-open gesture — `beginStructureGesture()` at `.began`,
-    /// this on every touch-move, `commitStructureGesture(name:)` at `.ended`. A version that read the
+    /// this on every touch-move, `commitStructureGesture(label:)` at `.ended`. A version that read the
     /// neighbour's *current* (possibly already-pushed) position each time was tried first and drifts:
     /// call 1 pushes B forward, call 2 sees B already forward and, once the finger reverses, has no
     /// way to tell "B moved because of an earlier bigger push in this same drag" from "B was drawn
@@ -383,7 +383,7 @@ extension CanvasManager {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
         guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return }
-        withStructureUndo(name: "Split Frame") {
+        withStructureUndo(label: .splitFrame) {
             layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
             let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy())
             layers[layerIndex].cels.append(secondHalf)

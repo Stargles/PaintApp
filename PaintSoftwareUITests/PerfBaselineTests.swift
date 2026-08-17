@@ -412,7 +412,7 @@ final class PerfBaselineTests: XCTestCase {
 
         // Count the stroke steps specifically: `perfManager()`'s `addLayer` records an "Add Layer"
         // step of its own, which is real history but not what this test is measuring.
-        let strokeSteps = manager.history.undoStack.filter { $0.name == "Stroke" }
+        let strokeSteps = manager.history.undoStack.filter { $0.label == .brushStroke }
         let totalCost = strokeSteps.reduce(0) { $0 + $1.cost }
         let perStroke = totalCost / max(strokeSteps.count, 1)
         let wholeCanvasCost = 2 * Int(Self.canvasSize.width) * Int(Self.canvasSize.height) * 4
@@ -556,7 +556,7 @@ final class PerfBaselineTests: XCTestCase {
         let origin = rect.intersection(CGRect(origin: .zero, size: from.image.size)).origin
         let beforeCount = from.count, afterCount = to.count
         let cost = CanvasManager.approximateImageCost(beforePatch) + CanvasManager.approximateImageCost(afterPatch)
-        manager.recordUndo(name: "Stroke", cost: cost, undo: {
+        manager.recordUndo(label: .brushStroke, cost: cost, undo: {
             raster.restore(patch: beforePatch, at: origin)
             raster.setStrokeCount(beforeCount)
         }, redo: {

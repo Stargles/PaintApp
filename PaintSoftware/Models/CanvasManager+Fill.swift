@@ -226,7 +226,7 @@ extension CanvasManager {
             // overload maps it back through the layer's transform (see its doc comment).
             vectorCanvas.addFill(canvasSpacePath: path, color: fillColor)
             registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                   layerID: layerID, celID: celID, actionName: "Fill")
+                                   layerID: layerID, celID: celID, label: .fill)
         } else {
             let cel = layers[layerIndex].cels[celIndex]
             guard let preview = cel.fillImage else { return }
@@ -243,7 +243,7 @@ extension CanvasManager {
                                       oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,
                                       newRaster: bakedRasterTexture(image: finalImage, likeExisting: cel.raster),
                                       newBaked: nil, newFill: nil,
-                                      actionName: "Fill")
+                                      label: .fill)
         }
     }
 
@@ -253,9 +253,9 @@ extension CanvasManager {
     /// regen fires, since other structural edits may have shifted indices by then.
     func registerVectorFillUndo(vectorCanvas: VectorCanvas,
                                 oldFills: [VectorFillElement], newFills: [VectorFillElement],
-                                layerID: UUID, celID: UUID, actionName: String) {
+                                layerID: UUID, celID: UUID, label: HistoryActionLabel) {
         let cost = (oldFills.count + newFills.count) * 512
-        recordUndo(name: actionName, cost: cost, undo: { [weak self] in
+        recordUndo(label: label, cost: cost, undo: { [weak self] in
             vectorCanvas.fills = oldFills
             vectorCanvas.bumpVersion()
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)

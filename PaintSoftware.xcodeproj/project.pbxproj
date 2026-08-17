@@ -55,6 +55,7 @@
 		DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */; };
 		DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */; };
 		DEC0DECA0000000000000002 /* PaintSoftware/Models/CanvasNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DECA0000000000000001 /* PaintSoftware/Models/CanvasNotice.swift */; };
+		523C74C125B8B2A8EAC5EEA6 /* PaintSoftware/Models/HistoryActionLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7DE14C7938681941884757 /* PaintSoftware/Models/HistoryActionLabel.swift */; };
 		DEC0DEAC0000000000000002 /* PaintSoftware/Debug/ActionRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEAC0000000000000001 /* PaintSoftware/Debug/ActionRecorder.swift */; };
 		DEC0DEAC0000000000000004 /* PaintSoftware/Debug/WindowEventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEAC0000000000000003 /* PaintSoftware/Debug/WindowEventTap.swift */; };
 		DEC0DE00000000000000005D /* PaintSoftware/Models/CanvasManager+Fill.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000005C /* PaintSoftware/Models/CanvasManager+Fill.swift */; };
@@ -80,6 +81,8 @@
 		DEC0DE9F0000000000000008 /* EffectParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE9F0000000000000007 /* EffectParityLogicTests.swift */; };
 		DEC0DE9A0000000000000002 /* EffectLayerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE9A0000000000000001 /* EffectLayerLogicTests.swift */; };
 		DEC0DEA10000000000000002 /* ValueLayerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEA10000000000000001 /* ValueLayerLogicTests.swift */; };
+		682C690AE46D0ED090EF32DB /* HistoryNoticeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D47606013FCB687147EB8BB /* HistoryNoticeLogicTests.swift */; };
+		CDCD7796125446A338FA578F /* HistoryNoticeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBDDCDE31F5A215C7B45B9AE /* HistoryNoticeUITests.swift */; };
 		DEC0DEB10000000000000002 /* MaskGuardLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEB10000000000000001 /* MaskGuardLogicTests.swift */; };
 		DEC0DE9F000000000000000A /* EffectMultiPassLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE9F0000000000000009 /* EffectMultiPassLogicTests.swift */; };
 		DEC0DE6A0000000000000002 /* PaintSoftware/Models/AlphaMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE6A0000000000000001 /* PaintSoftware/Models/AlphaMask.swift */; };
@@ -191,6 +194,7 @@
 		DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VectorLayer.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasManager.swift; sourceTree = "<group>"; };
 		DEC0DECA0000000000000001 /* PaintSoftware/Models/CanvasNotice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasNotice.swift; sourceTree = "<group>"; };
+		EA7DE14C7938681941884757 /* PaintSoftware/Models/HistoryActionLabel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/HistoryActionLabel.swift; sourceTree = "<group>"; };
 		DEC0DEAC0000000000000001 /* PaintSoftware/Debug/ActionRecorder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/ActionRecorder.swift; sourceTree = "<group>"; };
 		DEC0DEAC0000000000000003 /* PaintSoftware/Debug/WindowEventTap.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/WindowEventTap.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000005C /* PaintSoftware/Models/CanvasManager+Fill.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Fill.swift"; sourceTree = "<group>"; };
@@ -216,6 +220,8 @@
 		DEC0DE9F0000000000000007 /* EffectParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EffectParityLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE9A0000000000000001 /* EffectLayerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EffectLayerLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DEA10000000000000001 /* ValueLayerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ValueLayerLogicTests.swift; sourceTree = "<group>"; };
+		3D47606013FCB687147EB8BB /* HistoryNoticeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HistoryNoticeLogicTests.swift; sourceTree = "<group>"; };
+		CBDDCDE31F5A215C7B45B9AE /* HistoryNoticeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HistoryNoticeUITests.swift; sourceTree = "<group>"; };
 		DEC0DEB10000000000000001 /* MaskGuardLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MaskGuardLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE9F0000000000000009 /* EffectMultiPassLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EffectMultiPassLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE6A0000000000000001 /* PaintSoftware/Models/AlphaMask.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/AlphaMask.swift"; sourceTree = "<group>"; };
@@ -374,6 +380,8 @@
 				DEC0DE9F0000000000000007 /* EffectParityLogicTests.swift */,
 				DEC0DE9A0000000000000001 /* EffectLayerLogicTests.swift */,
 				DEC0DEA10000000000000001 /* ValueLayerLogicTests.swift */,
+				3D47606013FCB687147EB8BB /* HistoryNoticeLogicTests.swift */,
+				CBDDCDE31F5A215C7B45B9AE /* HistoryNoticeUITests.swift */,
 				DEC0DEB10000000000000001 /* MaskGuardLogicTests.swift */,
 				DEC0DE9F0000000000000009 /* EffectMultiPassLogicTests.swift */,
 				DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */,
@@ -405,6 +413,7 @@
 				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
 				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
 				DEC0DECA0000000000000001 /* PaintSoftware/Models/CanvasNotice.swift */,
+				EA7DE14C7938681941884757 /* PaintSoftware/Models/HistoryActionLabel.swift */,
 				DEC0DEAC0000000000000001 /* PaintSoftware/Debug/ActionRecorder.swift */,
 				DEC0DEAC0000000000000003 /* PaintSoftware/Debug/WindowEventTap.swift */,
 				DEC0DE00000000000000005C /* PaintSoftware/Models/CanvasManager+Fill.swift */,
@@ -615,6 +624,7 @@
 				DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */,
 				DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */,
 				DEC0DECA0000000000000002 /* PaintSoftware/Models/CanvasNotice.swift in Sources */,
+				523C74C125B8B2A8EAC5EEA6 /* PaintSoftware/Models/HistoryActionLabel.swift in Sources */,
 				DEC0DEAC0000000000000002 /* PaintSoftware/Debug/ActionRecorder.swift in Sources */,
 				DEC0DEAC0000000000000004 /* PaintSoftware/Debug/WindowEventTap.swift in Sources */,
 				DEC0DE00000000000000005D /* PaintSoftware/Models/CanvasManager+Fill.swift in Sources */,
@@ -641,6 +651,8 @@
 				DEC0DE9F0000000000000008 /* EffectParityLogicTests.swift in Sources */,
 				DEC0DE9A0000000000000002 /* EffectLayerLogicTests.swift in Sources */,
 				DEC0DEA10000000000000002 /* ValueLayerLogicTests.swift in Sources */,
+				682C690AE46D0ED090EF32DB /* HistoryNoticeLogicTests.swift in Sources */,
+				CDCD7796125446A338FA578F /* HistoryNoticeUITests.swift in Sources */,
 				DEC0DEB10000000000000002 /* MaskGuardLogicTests.swift in Sources */,
 				DEC0DE9F000000000000000A /* EffectMultiPassLogicTests.swift in Sources */,
 				DEC0DE6A0000000000000002 /* PaintSoftware/Models/AlphaMask.swift in Sources */,

@@ -20,13 +20,23 @@ struct CanvasNotice: Identifiable, Equatable {
     /// (`message` below), so a UI test can assert on a code that survives a rewording, and so the
     /// optional action stays attached to the case that offers it rather than to a closure the model
     /// would have to store (closures are not `Equatable`, and this type has to be).
-    enum Kind: String, Equatable {
+    ///
+    /// **Not `String`-backed.** `historyUndo`/`historyRedo` carry a `HistoryActionLabel`, and Swift
+    /// won't synthesise a raw value for an enum with associated data — see `code` below for the
+    /// banner's `accessibilityValue` in its place.
+    enum Kind: Equatable {
         /// The artist tried to draw with no layers at all.
         case noLayers
         /// The active layer is hidden — by its own eye or by an enclosing group's (§4.1).
         case hiddenLayer
         /// The active layer holds no pixels: a value layer, in either of its two modes.
         case noDrawingSurface
+        /// An undo just reverted `HistoryActionLabel`. Raised only when one actually fired —
+        /// `CanvasManager.undo()` checks `UndoHistory.undo()`'s return before calling `raise`, so an
+        /// undo against an empty stack stays silent rather than announcing nothing happened.
+        case historyUndo(HistoryActionLabel)
+        /// The redo twin of `historyUndo`, same silence-on-empty-stack rule.
+        case historyRedo(HistoryActionLabel)
     }
 
     init(_ kind: Kind) {
@@ -39,6 +49,8 @@ struct CanvasNotice: Identifiable, Equatable {
         case .noLayers:         return "No layers — add one to start drawing."
         case .hiddenLayer:      return "This layer is hidden."
         case .noDrawingSurface: return "This layer has no drawing surface."
+        case .historyUndo(let label):  return "Undid \(label.phrase)."
+        case .historyRedo(let label):  return "Redid \(label.phrase)."
         }
     }
 
@@ -50,11 +62,30 @@ struct CanvasNotice: Identifiable, Equatable {
     /// switching layers is the only way forward and the artist can already see and do that behind the
     /// banner — which is now literally true rather than nearly true, since the banner does not dim
     /// the panel it is telling you to use.
+    ///
+    /// **The history notices have none either.** They report what already happened rather than
+    /// asking the artist to decide something — the undo/redo *is* the action, and there is nothing
+    /// left for a button to do once the banner is up.
     var actionTitle: String? {
         switch kind {
         case .noLayers:         return "Add Layer"
         case .hiddenLayer:      return "Show"
         case .noDrawingSurface: return nil
+        case .historyUndo, .historyRedo: return nil
+        }
+    }
+
+    /// The banner's `accessibilityValue` — what `CanvasNoticeBanner` puts on the identifier instead
+    /// of the sentence, so a test can assert on the case rather than the wording (see `Kind`'s doc).
+    /// Matches the three blocker cases' old `String`-enum `rawValue` verbatim, so the existing
+    /// `LayerUITests` assertion against `"noDrawingSurface"` still passes unchanged.
+    var code: String {
+        switch kind {
+        case .noLayers:         return "noLayers"
+        case .hiddenLayer:      return "hiddenLayer"
+        case .noDrawingSurface: return "noDrawingSurface"
+        case .historyUndo:      return "historyUndo"
+        case .historyRedo:      return "historyRedo"
         }
     }
 

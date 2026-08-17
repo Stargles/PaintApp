@@ -339,10 +339,10 @@ extension CanvasManager {
                                        oldRaster: targetCel.raster, oldBaked: targetCel.bakedImage, oldFill: targetCel.fillImage,
                                        newRaster: bakedRasterTexture(image: newImage, likeExisting: targetCel.raster),
                                        newBaked: nil, newFill: nil,
-                                       actionName: "Move")
+                                       label: .move)
         case .duplicate:
             let newImage = PixelOps.compositeOver(base: targetCel.bakedImage, overlay: rendered)
-            registerUndoableLayerInsertion(layerIndex: targetLayerIndex, finalImage: newImage, actionName: "Duplicate")
+            registerUndoableLayerInsertion(layerIndex: targetLayerIndex, finalImage: newImage, label: .duplicatePiece)
         }
         return true
     }
@@ -368,14 +368,14 @@ extension CanvasManager {
                                  color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
             registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                   layerID: layers[currentLayerIndex].id, celID: cel.id, actionName: "Fill")
+                                   layerID: layers[currentLayerIndex].id, celID: cel.id, label: .fill)
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.fill(base: base, path: selection.path, color: PixelOps.uiColor(from: brushColor))
             registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
                                        oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
                                        newRaster: bakedRasterTexture(image: newImage, likeExisting: cel.raster),
-                                       newBaked: nil, newFill: nil, actionName: "Fill")
+                                       newBaked: nil, newFill: nil, label: .fill)
         }
     }
 
@@ -403,14 +403,14 @@ extension CanvasManager {
             vectorCanvas.bumpVersion()
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
             registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                   layerID: layers[currentLayerIndex].id, celID: cel.id, actionName: "Clear")
+                                   layerID: layers[currentLayerIndex].id, celID: cel.id, label: .clearSelection)
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.clear(base: base, path: selection.path)
             registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
                                        oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
                                        newRaster: bakedRasterTexture(image: newImage, likeExisting: cel.raster),
-                                       newBaked: nil, newFill: nil, actionName: "Clear")
+                                       newBaked: nil, newFill: nil, label: .clearSelection)
         }
     }
 
@@ -447,12 +447,12 @@ extension CanvasManager {
     func registerUndoableCelChange(layerID: UUID, celID: UUID,
                                     oldRaster: RasterLayerTexture, oldBaked: UIImage?, oldFill: UIImage?,
                                     newRaster: RasterLayerTexture, newBaked: UIImage?, newFill: UIImage?,
-                                    actionName: String) {
+                                    label: HistoryActionLabel) {
         applyCelChange(layerID: layerID, celID: celID, raster: newRaster, baked: newBaked, fill: newFill)
         registerCelReversal(layerID: layerID, celID: celID,
                             undoRaster: oldRaster, undoBaked: oldBaked, undoFill: oldFill,
                             redoRaster: newRaster, redoBaked: newBaked, redoFill: newFill,
-                            actionName: actionName)
+                            label: label)
     }
 
     /// Registers one step on the global `history` that reverts to the `undo*` state, or (on redo)
@@ -461,10 +461,10 @@ extension CanvasManager {
     private func registerCelReversal(layerID: UUID, celID: UUID,
                                      undoRaster: RasterLayerTexture, undoBaked: UIImage?, undoFill: UIImage?,
                                      redoRaster: RasterLayerTexture, redoBaked: UIImage?, redoFill: UIImage?,
-                                     actionName: String) {
+                                     label: HistoryActionLabel) {
         let cost = Self.approximateImageCost(undoBaked) + Self.approximateImageCost(redoBaked)
                  + Self.approximateImageCost(undoFill) + Self.approximateImageCost(redoFill)
-        recordUndo(name: actionName, cost: cost, undo: { [weak self] in
+        recordUndo(label: label, cost: cost, undo: { [weak self] in
             self?.applyCelChange(layerID: layerID, celID: celID, raster: undoRaster, baked: undoBaked, fill: undoFill)
         }, redo: { [weak self] in
             self?.applyCelChange(layerID: layerID, celID: celID, raster: redoRaster, baked: redoBaked, fill: redoFill)
@@ -495,7 +495,7 @@ extension CanvasManager {
     /// if other layers have since shifted its index); the redo side re-inserts at the position it
     /// was originally created at, which is safe because `history`'s redo stack only ever holds this
     /// action while nothing else has been recorded in between (any new edit clears it).
-    private func registerUndoableLayerInsertion(layerIndex: Int, finalImage: UIImage, actionName: String) {
+    private func registerUndoableLayerInsertion(layerIndex: Int, finalImage: UIImage, label: HistoryActionLabel) {
         guard layers.indices.contains(layerIndex) else { return }
         // Same "raster tier only" rule as `registerUndoableCelChange` — the freshly-inserted cel
         // starts with an empty `raster` (see `beginDuplicate`), so without this the duplicated
@@ -505,7 +505,7 @@ extension CanvasManager {
         let insertedLayer = layers[layerIndex]
         let insertedLayerID = insertedLayer.id
 
-        recordUndo(name: actionName, cost: Self.approximateImageCost(finalImage), undo: { [weak self] in
+        recordUndo(label: label, cost: Self.approximateImageCost(finalImage), undo: { [weak self] in
             guard let self, let idx = self.layers.firstIndex(where: { $0.id == insertedLayerID }) else { return }
             self.layers.remove(at: idx)
             if self.currentLayerIndex >= self.layers.count {

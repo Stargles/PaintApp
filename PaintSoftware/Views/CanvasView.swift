@@ -195,7 +195,7 @@ struct CanvasView: UIViewRepresentable {
             coordinator?.canvasManager.beginStructureGesture()
         }
         transformOverlay.onGestureEnded = { [weak coordinator = context.coordinator] in
-            coordinator?.canvasManager.commitStructureGesture(name: "Transform")
+            coordinator?.canvasManager.commitStructureGesture(label: .transform)
         }
         selectionOverlay.onFinishPath = { [weak coordinator = context.coordinator] path in
             coordinator?.canvasManager.finishSelection(path: path)

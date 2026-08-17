@@ -344,7 +344,7 @@ extension CanvasManager {
     func restackLayer(_ layerID: UUID, above anchor: StackAnchor, parentFolderID: UUID?) {
         guard let from = layers.firstIndex(where: { $0.id == layerID }),
               canDrop(inContainer: parentFolderID, moving: layerID) else { return }
-        withStructureUndo(name: "Reorder Layer") {
+        withStructureUndo(label: .reorderLayer) {
             withPreservedActiveLayer {
                 var moved = layers.remove(at: from)
                 moved.parentFolderID = parentFolderID
@@ -371,7 +371,7 @@ extension CanvasManager {
             break
         }
 
-        withStructureUndo(name: "Reorder Folder") {
+        withStructureUndo(label: .reorderFolder) {
             withPreservedActiveLayer {
                 let indices = descendantLayerIndices(ofFolder: folderID)
                 let block = indices.map { layers[$0] }
@@ -405,7 +405,7 @@ extension CanvasManager {
         let folder = LayerFolder(id: UUID(), name: name ?? "Folder \(folders.count + 1)",
                                  parentFolderID: layers[targetIndex].parentFolderID)
         let draggedWasAbove = draggedIndex > targetIndex
-        withStructureUndo(name: "Group Layers") {
+        withStructureUndo(label: .groupLayers) {
             folders.append(folder)
             withPreservedActiveLayer {
                 let moved = layers.remove(at: draggedIndex)
@@ -461,7 +461,7 @@ extension CanvasManager {
               activeCelIndex(inLayer: topIndex, atFrame: currentFrame) != nil else { return false }
 
         let survivorID = layers[bottomIndex].id
-        withStructureUndo(name: "Merge Layers") {
+        withStructureUndo(label: .mergeLayers) {
             rasterizeLayer(layerIndex: bottomIndex)
             rasterizeLayer(layerIndex: topIndex)
             // Re-resolve the current-frame cels post-rasterize: rasterizeLayer doesn't reorder
@@ -526,7 +526,7 @@ extension CanvasManager {
                          blendMode: source.blendMode, alphaMask: source.alphaMask,
                          parentFolderID: source.parentFolderID, cels: cels)
         copy.thumbnail = source.thumbnail
-        withStructureUndo(name: "Duplicate Layer") {
+        withStructureUndo(label: .duplicateLayer) {
             layers.insert(copy, at: index + 1)
             currentLayerIndex = index + 1
         }

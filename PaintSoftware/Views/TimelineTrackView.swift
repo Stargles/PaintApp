@@ -449,7 +449,7 @@ struct TimelineTrackView: UIViewRepresentable {
             guard drag.targetStartFrame != drag.originStartFrame else { return }
             canvasManager.beginStructureGesture()
             canvasManager.moveCel(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: drag.targetStartFrame)
-            canvasManager.commitStructureGesture(name: "Move Frame")
+            canvasManager.commitStructureGesture(label: .moveFrame)
         }
 
         /// Which track row a y coordinate falls on, or nil above the first/below the last.
@@ -1015,7 +1015,7 @@ private final class TimelineRowView: UIView {
                 if gr.state == .failed {
                     coordinator.canvasManager.cancelStructureGesture()
                 } else {
-                    coordinator.canvasManager.commitStructureGesture(name: "Resize Frame")
+                    coordinator.canvasManager.commitStructureGesture(label: .resizeFrame)
                 }
             case .body, .gap, .none:
                 break

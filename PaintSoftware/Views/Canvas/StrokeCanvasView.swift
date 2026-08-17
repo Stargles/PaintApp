@@ -520,6 +520,11 @@ final class StrokeCanvasView: UIView {
     /// strokes total. The rect is outset by a pixel so fractional dab edges aren't lost. Patches
     /// replace pixels via `.copy` blend, not composite, since undo must be able to remove ink.
     /// Falls back to whole-image snapshots if the dirty rect is unavailable.
+    ///
+    /// Labelled `.erase` rather than `.brushStroke` when `isEraser`, matching the vector path's own
+    /// `registerVectorUndo` — both are the same drag gesture through `BrushStamper`, so the raster
+    /// side undoing an erase and reporting "brush stroke" would be exactly the label mismatch
+    /// `HistoryActionLabel`'s doc warns a `String` parameter can't catch.
     private func registerRasterUndo(raster: RasterLayerTexture, from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
         guard let beforeImage = from.image, let afterImage = to.image,
               let dirty = raster.strokeDirtyRect else {
@@ -536,7 +541,7 @@ final class StrokeCanvasView: UIView {
         let origin = rect.intersection(CGRect(origin: .zero, size: beforeImage.size)).origin
         let beforeCount = from.count, afterCount = to.count
         let cost = CanvasManager.approximateImageCost(beforePatch) + CanvasManager.approximateImageCost(afterPatch)
-        canvasManager?.recordUndo(name: "Stroke", cost: cost, undo: { [weak self] in
+        canvasManager?.recordUndo(label: isEraser ? .erase : .brushStroke, cost: cost, undo: { [weak self] in
             raster.restore(patch: beforePatch, at: origin)
             raster.setStrokeCount(beforeCount)
             self?.refreshDisplay()
@@ -552,7 +557,7 @@ final class StrokeCanvasView: UIView {
     /// The pre-5.5 behaviour, kept as the fallback for the cases above.
     private func registerWholeImageRasterUndo(raster: RasterLayerTexture, from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
         let cost = CanvasManager.approximateImageCost(from.image) + CanvasManager.approximateImageCost(to.image)
-        canvasManager?.recordUndo(name: "Stroke", cost: cost, undo: { [weak self] in
+        canvasManager?.recordUndo(label: isEraser ? .erase : .brushStroke, cost: cost, undo: { [weak self] in
             raster.reset(to: from.image, strokeCount: from.count)
             self?.refreshDisplay()
             self?.onStrokeEnded?()
@@ -804,9 +809,9 @@ final class StrokeCanvasView: UIView {
     }
 
     private func registerVectorUndo(canvas: VectorCanvas, from: [VectorElement], to: [VectorElement]) {
-        let actionName = isEraser ? "Erase" : "Stroke"
+        let label: HistoryActionLabel = isEraser ? .erase : .brushStroke
         let cost = (from.count + to.count) * 512
-        canvasManager?.recordUndo(name: actionName, cost: cost, undo: { [weak self] in
+        canvasManager?.recordUndo(label: label, cost: cost, undo: { [weak self] in
             canvas.elements = from
             canvas.bumpVersion()
             self?.refreshDisplay()

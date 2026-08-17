@@ -185,7 +185,7 @@ extension CanvasManager {
                 // Same undo/redo shape as an ordinary vector stroke (swap the whole strokes array).
                 registerVectorStrokeUndo(vectorCanvas: vectorCanvas, oldStrokes: strokesBefore,
                                          newStrokes: vectorCanvas.strokes, layerID: layerID, celID: celID,
-                                         actionName: "Shape")
+                                         label: .shape)
                 // Baking a shape never goes through `strokeEnded` (the stroke that produced it was
                 // reverted when detection fired), so the thumbnail has to be refreshed here or the
                 // layer panel keeps showing the cel as it was before the shape landed.
@@ -216,7 +216,7 @@ extension CanvasManager {
         // Undo/redo mutates the texture in place, which no live stroke is driving — so these have to
         // republish the host refresh for the same reason the commit itself does, or undoing a shape
         // leaves it on screen (and redoing leaves it off) until the next unrelated edit repaints.
-        recordUndo(name: "Shape", cost: cost, undo: { [weak self] in
+        recordUndo(label: .shape, cost: cost, undo: { [weak self] in
             raster.reset(to: before, strokeCount: strokeCountBefore)
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
@@ -228,9 +228,9 @@ extension CanvasManager {
     /// Registers one undo step that swaps a vector layer's `.strokes` between `oldStrokes`/`newStrokes`.
     private func registerVectorStrokeUndo(vectorCanvas: VectorCanvas,
                                            oldStrokes: [VectorStroke], newStrokes: [VectorStroke],
-                                           layerID: UUID, celID: UUID, actionName: String) {
+                                           layerID: UUID, celID: UUID, label: HistoryActionLabel) {
         let cost = (oldStrokes.count + newStrokes.count) * 2048
-        recordUndo(name: actionName, cost: cost, undo: { [weak self] in
+        recordUndo(label: label, cost: cost, undo: { [weak self] in
             vectorCanvas.strokes = oldStrokes
             vectorCanvas.bumpVersion()
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)

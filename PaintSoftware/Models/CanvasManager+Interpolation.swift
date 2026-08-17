@@ -15,7 +15,7 @@ extension CanvasManager {
     /// it copies `[Layer]`, but `Cel.vector` is a class reference and gets shared rather than
     /// copied, wrong for a retag since a stroke's motion-group tag lives on `VectorStroke`. Pass
     /// only the canvases actually affected. Defers to an enclosing scope like `withStructureUndo`.
-    func withInterpolationUndo(name: String, touching canvases: [VectorCanvas] = [],
+    func withInterpolationUndo(label: HistoryActionLabel, touching canvases: [VectorCanvas] = [],
                                _ body: () -> Void) {
         guard structureUndoDepth == 0, gestureSnapshot == nil else {
             body()
@@ -42,7 +42,7 @@ extension CanvasManager {
         let elementsAfter = canvases.map { $0.elements }
 
         let cost = 4096 + elementsBefore.reduce(0) { $0 + $1.count * 512 }
-        recordUndo(name: name, cost: cost, undo: { [weak self] in
+        recordUndo(label: label, cost: cost, undo: { [weak self] in
             self?.applyInterpolationState(groups: groupsBefore, guides: guidesBefore,
                                           layers: layersBefore, canvases: canvases,
                                           elements: elementsBefore)
@@ -76,7 +76,7 @@ extension CanvasManager {
     func addMotionGroup(name: String, tagColor: CodableColor,
                         mode: GroupInterpolation = .auto) -> MotionGroup {
         let group = MotionGroup(displayName: name, tagColor: tagColor, mode: mode)
-        withInterpolationUndo(name: "Add Motion Group") {
+        withInterpolationUndo(label: .addMotionGroup) {
             motionGroups.append(group)
         }
         return group
@@ -85,7 +85,7 @@ extension CanvasManager {
     func setMotionGroupMode(_ mode: GroupInterpolation, forGroup id: UUID) {
         guard let index = motionGroups.firstIndex(where: { $0.id == id }),
               motionGroups[index].mode != mode else { return }
-        withInterpolationUndo(name: "Change Group Mode") {
+        withInterpolationUndo(label: .changeGroupMode) {
             motionGroups[index].mode = mode
         }
     }
@@ -97,7 +97,7 @@ extension CanvasManager {
     func removeMotionGroup(_ id: UUID) {
         guard motionGroups.contains(where: { $0.id == id }) else { return }
         let tagged = celsContainingStrokes { $0.motionGroupID == id }.map(\.canvas)
-        withInterpolationUndo(name: "Delete Motion Group", touching: tagged) {
+        withInterpolationUndo(label: .deleteMotionGroup, touching: tagged) {
             motionGroups.removeAll { $0.id == id }
             retag(in: tagged, to: nil) { $0.motionGroupID == id }
             for layerIndex in layers.indices {
@@ -118,7 +118,7 @@ extension CanvasManager {
         let affected = celsContainingStrokes { strokeIDs.contains($0.id) }
         guard !affected.isEmpty else { return }
         let touched = Set(affected.map(\.ref))
-        withInterpolationUndo(name: groupID == nil ? "Clear Motion Group" : "Tag Motion Group",
+        withInterpolationUndo(label: groupID == nil ? .clearMotionGroupTag : .tagMotionGroup,
                               touching: canvasesReached(byRetagging: touched)) {
             retag(in: affected.map(\.canvas), to: groupID) { strokeIDs.contains($0.id) }
             reregisterInterpolations(reading: touched)
@@ -300,7 +300,7 @@ extension CanvasManager {
         }
 
         let touched = Set(resolved.map(\.ref))
-        withInterpolationUndo(name: "Tag by Stroke Colour",
+        withInterpolationUndo(label: .tagByStrokeColour,
                               touching: canvasesReached(byRetagging: touched)) {
             motionGroups.append(contentsOf: created)
             for (_, canvas) in resolved {
@@ -393,7 +393,7 @@ extension CanvasManager {
     /// never delete a drawing.
     func setInterpolation(_ recipe: InterpolationRecipe?, forCel celID: UUID, inLayer layerID: UUID) {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return }
-        withInterpolationUndo(name: recipe == nil ? "Remove Interpolation" : "Interpolate") {
+        withInterpolationUndo(label: recipe == nil ? .removeInterpolation : .interpolate) {
             layers[at.layer].cels[at.cel].interpolation = recipe
         }
     }
@@ -415,7 +415,7 @@ extension CanvasManager {
 
     func commitInterpolationDrag() {
         isScrubbingInterpolation = false
-        commitStructureGesture(name: "Adjust Timing")
+        commitStructureGesture(label: .adjustTiming)
     }
 
     // MARK: - Editing at an in-between
@@ -471,8 +471,8 @@ extension CanvasManager {
         stored.motionGroupID = nil
 
         let edit = LocalEdit(stroke: stored, groupID: plan.groupID)
-        withInterpolationUndo(name: stroke.composite == .erase ? "Erase at In-Between"
-                                                               : "Draw at In-Between") {
+        withInterpolationUndo(label: stroke.composite == .erase ? .eraseAtInBetween
+                                                               : .drawAtInBetween) {
             // Grown lattices go back by reference, never index: a ring shifts every index.
             if let grown = plan.grownLattices, let index = plan.bindingIndex {
                 layers[at.layer].cels[at.cel].interpolation?.groups[index].lattices = grown
@@ -716,7 +716,7 @@ extension CanvasManager {
             let recipe = InterpolationRecipe(references: keyframes, t: 0.5, mode: .reproject,
                                              groups: [binding])
             // The structural bracket suffices: reprojection writes a value type and touches no stroke.
-            withStructureUndo(name: "Reproject") {
+            withStructureUndo(label: .reproject) {
                 layers[layerIndex].cels[celIndex].interpolation = recipe
             }
             return nil
@@ -728,7 +728,7 @@ extension CanvasManager {
                                          groups: registration.bindings)
         // `withInterpolationUndo`: `StructureSnapshot` shares canvases rather than copying them, so
         // the structure bracket would restore the recipe but leave the tags on.
-        withInterpolationUndo(name: "Interpolate", touching: interpolationReferenceCanvases) {
+        withInterpolationUndo(label: .interpolate, touching: interpolationReferenceCanvases) {
             motionGroups.append(contentsOf: registration.invented)
             applyMotionGroupTags(registration.assignments, to: keyframes)
             layers[layerIndex].cels[celIndex].interpolation = recipe
@@ -792,7 +792,7 @@ extension CanvasManager {
         }
         let frame = currentFrame
         var result: InterpolationRefusal? = nil
-        withInterpolationUndo(name: "Interpolate", touching: interpolationReferenceCanvases) {
+        withInterpolationUndo(label: .interpolate, touching: interpolationReferenceCanvases) {
             guard addCel(layerIndex: layerIndex, startFrame: frame, frameCount: 1),
                   let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: frame) else {
                 result = .notAVectorLayer
@@ -827,7 +827,7 @@ extension CanvasManager {
 
         let baked = InterpolationEvaluator.flattened(evaluation)
         // `withInterpolationUndo`: the structure bracket would restore the recipe but none of the ink.
-        withInterpolationUndo(name: "Commit Interpolation", touching: [canvas]) {
+        withInterpolationUndo(label: .commitInterpolation, touching: [canvas]) {
             canvas.elements = baked
             canvas.bumpVersion()
             layers[layerIndex].cels[celIndex].interpolation = nil
@@ -864,7 +864,7 @@ extension CanvasManager {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               layers[layerIndex].cels[celIndex].interpolation != nil else { return }
-        withStructureUndo(name: "Remove Interpolation") {
+        withStructureUndo(label: .removeInterpolation) {
             layers[layerIndex].cels[celIndex].interpolation = nil
         }
     }
@@ -1287,7 +1287,7 @@ extension CanvasManager {
                                 boundGroups: [], role: .both)
         // One step covering both halves — an undo leaving the guide registered but unbound to
         // anything would be a leak the artist cannot see.
-        withInterpolationUndo(name: "Add Guide") {
+        withInterpolationUndo(label: .addGuide) {
             guideStrokes.append(guide)
             layers[at.layer].cels[at.cel].interpolation?.guideIDs.append(guide.id)
         }
@@ -1312,7 +1312,7 @@ extension CanvasManager {
 
     @discardableResult
     func addGuideStroke(_ guide: GuideStroke) -> GuideStroke {
-        withInterpolationUndo(name: "Add Guide") {
+        withInterpolationUndo(label: .addGuide) {
             guideStrokes.append(guide)
         }
         return guide
@@ -1322,7 +1322,7 @@ extension CanvasManager {
     /// referencing it ("link", as opposed to "duplicate").
     func updateGuideStroke(_ guide: GuideStroke) {
         guard let index = guideStrokes.firstIndex(where: { $0.id == guide.id }) else { return }
-        withInterpolationUndo(name: "Edit Guide") {
+        withInterpolationUndo(label: .editGuide) {
             guideStrokes[index] = guide
         }
     }
@@ -1365,7 +1365,7 @@ extension CanvasManager {
         guard let drag = guideHandleDrag else { return }
         guideHandleDrag = nil
         let moved = guideStrokes.first { $0.id == drag.guideID }?.samples != drag.samples
-        if moved { commitStructureGesture(name: "Edit Guide") } else { cancelStructureGesture() }
+        if moved { commitStructureGesture(label: .editGuide) } else { cancelStructureGesture() }
     }
 
     /// A second finger landing mid-drag. Puts the guide back exactly as it was and records nothing —
@@ -1431,7 +1431,7 @@ extension CanvasManager {
               guideStrokes.contains(where: { $0.id == id }) else { return .noInterpolationToGuide }
         guard !recipe.guideIDs.contains(id),
               !recipe.groups.contains(where: { $0.guideIDs.contains(id) }) else { return nil }
-        withInterpolationUndo(name: "Link Guide") {
+        withInterpolationUndo(label: .linkGuide) {
             layers[at.layer].cels[at.cel].interpolation?.guideIDs.append(id)
         }
         return nil
@@ -1455,7 +1455,7 @@ extension CanvasManager {
         let copy = GuideStroke(samples: source.samples,
                                interval: KeyframeInterval(start: first, end: last),
                                boundGroups: [], role: source.role)
-        withInterpolationUndo(name: "Duplicate Guide") {
+        withInterpolationUndo(label: .duplicateGuide) {
             guideStrokes.append(copy)
             layers[at.layer].cels[at.cel].interpolation?.guideIDs.append(copy.id)
         }
@@ -1528,7 +1528,7 @@ extension CanvasManager {
             wroteABinding = true
         }
         if !wroteABinding { recipe.spacing = curve }
-        withInterpolationUndo(name: "Adjust Spacing") {
+        withInterpolationUndo(label: .adjustSpacing) {
             layers[at.layer].cels[at.cel].interpolation = recipe
         }
     }
@@ -1557,7 +1557,7 @@ extension CanvasManager {
             current.spacing != drag.recipe.spacing
                 || current.groups.map(\.spacing) != drag.recipe.groups.map(\.spacing)
         } ?? false
-        if moved { commitStructureGesture(name: "Adjust Spacing") } else { cancelStructureGesture() }
+        if moved { commitStructureGesture(label: .adjustSpacing) } else { cancelStructureGesture() }
     }
 
     func cancelGuideSpacingDrag() {
@@ -1571,7 +1571,7 @@ extension CanvasManager {
 
     func removeGuideStroke(id: UUID) {
         guard guideStrokes.contains(where: { $0.id == id }) else { return }
-        withInterpolationUndo(name: "Delete Guide") {
+        withInterpolationUndo(label: .deleteGuide) {
             guideStrokes.removeAll { $0.id == id }
             for layerIndex in layers.indices {
                 for celIndex in layers[layerIndex].cels.indices {

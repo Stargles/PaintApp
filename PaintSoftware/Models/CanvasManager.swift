@@ -229,7 +229,7 @@ final class CanvasManager: ObservableObject {
         objectWillChange.send()
         let layerID = layers[currentLayerIndex].id
         let celID = layers[currentLayerIndex].cels[celIdx].id
-        recordUndo(name: "Insert Image", cost: Self.approximateImageCost(image), undo: { [weak self] in
+        recordUndo(label: .insertImage, cost: Self.approximateImageCost(image), undo: { [weak self] in
             vector.images = imagesBefore
             vector.bumpVersion()
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
@@ -279,7 +279,7 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .vector,
               let canvasSize else { return }
         if isVectorTransforming && currentLayerIndex == layerIndex { isVectorTransforming = false }
-        withStructureUndo(name: "Rasterize") {
+        withStructureUndo(label: .rasterize) {
             for celIndex in layers[layerIndex].cels.indices {
                 let cel = layers[layerIndex].cels[celIndex]
                 let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
@@ -484,8 +484,8 @@ final class CanvasManager: ObservableObject {
     /// Records one undoable action against the global `history` and refreshes `canUndo`/`canRedo`.
     /// The shared entry point every call site (content edits and structural edits alike) funnels
     /// through, so undo/redo bookkeeping lives in exactly one place.
-    func recordUndo(name: String, cost: Int = 0, undo: @escaping () -> Void, redo: @escaping () -> Void) {
-        history.record(.init(name: name, cost: cost, undo: undo, redo: redo))
+    func recordUndo(label: HistoryActionLabel, cost: Int = 0, undo: @escaping () -> Void, redo: @escaping () -> Void) {
+        history.record(.init(label: label, cost: cost, undo: undo, redo: redo))
         refreshUndoRedoState()
     }
 
@@ -739,7 +739,7 @@ final class CanvasManager: ObservableObject {
     }
 
     func addLayer(name: String? = nil) {
-        withStructureUndo(name: "Add Layer") {
+        withStructureUndo(label: .addLayer) {
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
             insertNewLayer { parent in
                 Layer(id: UUID(), name: name ?? "Layer \(layers.count + 1)", opacity: 1.0,
@@ -754,7 +754,7 @@ final class CanvasManager: ObservableObject {
     /// Its cel still keeps an (empty) `raster` so every cel-lifecycle path assuming a non-optional
     /// raster keeps working — live strokes just live in `vector` instead.
     func addVectorLayer(name: String? = nil) {
-        withStructureUndo(name: "Add Vector Layer") {
+        withStructureUndo(label: .addVectorLayer) {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: size), vector: .empty(size: size))
             insertNewLayer { parent in
@@ -792,7 +792,7 @@ final class CanvasManager: ObservableObject {
     /// by its grade before it would look for a source.
     func addValueLayer(color: PaletteColor = ValueFill.defaultColor, effect: Effect? = nil,
                        name: String? = nil) {
-        withStructureUndo(name: effect == nil ? "Add Value Layer" : "Add Effect Layer") {
+        withStructureUndo(label: effect == nil ? .addValueLayer : .addEffectLayer) {
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1),
                           raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
             insertNewLayer { parent in
@@ -861,7 +861,7 @@ final class CanvasManager: ObservableObject {
     func setLayerEffect(layerIndex: Int, to effect: Effect?) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .value,
               layers[layerIndex].effect != effect else { return }
-        withStructureUndo(name: effect == nil ? "Value" : "Effect") {
+        withStructureUndo(label: effect == nil ? .valueLayerColor : .valueLayerEffect) {
             layers[layerIndex].effect = effect
             if !layers[layerIndex].hasCustomName {
                 layers[layerIndex].name = Self.defaultValueLayerName(effect: effect, ordinal: layers.count)
@@ -876,7 +876,7 @@ final class CanvasManager: ObservableObject {
     /// mirrors `renameFolder`, including the undo step it always should have had.
     func renameLayer(at index: Int, to name: String) {
         guard layers.indices.contains(index) else { return }
-        withStructureUndo(name: "Rename Layer") {
+        withStructureUndo(label: .renameLayer) {
             layers[index].name = name
             layers[index].hasCustomName = true
         }
@@ -895,14 +895,14 @@ final class CanvasManager: ObservableObject {
     func setLayerFill(layerIndex: Int, to fill: ValueFill) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .value,
               layers[layerIndex].fill != fill else { return }
-        withStructureUndo(name: "Value") {
+        withStructureUndo(label: .valueLayerColor) {
             layers[layerIndex].fill = fill
         }
     }
 
     func deleteLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
-        withStructureUndo(name: "Delete Layer") {
+        withStructureUndo(label: .deleteLayer) {
             // If the deleted layer is the active one, currentLayerIndex's *numeric* value may end up
             // unchanged (a later layer slides into the same slot) — didSet won't fire, so
             // handleActiveContextChanged() must be called explicitly to invalidate any selection/
@@ -1206,7 +1206,7 @@ final class CanvasManager: ObservableObject {
     func setFillReference(layerIndex: Int, isReference: Bool) {
         guard layers.indices.contains(layerIndex) else { return }
         guard layers[layerIndex].fillReferenceOverride != isReference else { return }
-        withStructureUndo(name: "Fill Reference") {
+        withStructureUndo(label: .fillReference) {
             layers[layerIndex].fillReferenceOverride = isReference
         }
     }
@@ -1217,7 +1217,7 @@ final class CanvasManager: ObservableObject {
     /// When a view preset is active, the change is saved into that preset automatically.
     func toggleLayerVisibility(layerIndex: Int) {
         guard layers.indices.contains(layerIndex) else { return }
-        withStructureUndo(name: "Toggle Visibility") {
+        withStructureUndo(label: .toggleVisibility) {
             layers[layerIndex].isVisible.toggle()
             saveVisibilityToActiveView()
         }
@@ -1237,7 +1237,7 @@ final class CanvasManager: ObservableObject {
     /// there are no longer child changes to record.
     func toggleFolderVisibility(_ folderID: UUID) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
-        withStructureUndo(name: "Toggle Visibility") {
+        withStructureUndo(label: .toggleVisibility) {
             folders[idx].isVisible.toggle()
             saveVisibilityToActiveView()
         }
@@ -1259,7 +1259,7 @@ final class CanvasManager: ObservableObject {
     /// unlike the opacity slider above: it is a single press with no drag to bracket.
     func setFolderIsolated(_ folderID: UUID, isIsolated: Bool) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].isIsolated != isIsolated else { return }
-        withStructureUndo(name: isIsolated ? "Isolate Group" : "Pass Through") {
+        withStructureUndo(label: isIsolated ? .isolateGroup : .passThrough) {
             folders[idx].isIsolated = isIsolated
         }
     }
@@ -1282,7 +1282,7 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex) else { return }
         let clearsEffect = layers[layerIndex].kind == .value && layers[layerIndex].effect != nil
         guard layers[layerIndex].blendMode != mode || clearsEffect else { return }
-        withStructureUndo(name: "Blend Mode") {
+        withStructureUndo(label: .blendMode) {
             layers[layerIndex].blendMode = mode
             if clearsEffect {
                 layers[layerIndex].effect = nil
@@ -1297,7 +1297,7 @@ final class CanvasManager: ObservableObject {
     /// which is the same rule its opacity follows and the reason both need an intermediate buffer.
     func setFolderBlendMode(_ folderID: UUID, to mode: BlendMode) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].blendMode != mode else { return }
-        withStructureUndo(name: "Blend Mode") {
+        withStructureUndo(label: .blendMode) {
             folders[idx].blendMode = mode
         }
     }
@@ -1319,7 +1319,7 @@ final class CanvasManager: ObservableObject {
     func setMixBlendMode(_ folderID: UUID, to mode: BlendMode) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].isCompositorNode,
               folders[idx].compositorOp != .mix(mode) || folders[idx].effect != nil else { return }
-        withStructureUndo(name: "Mix Mode") {
+        withStructureUndo(label: .mixMode) {
             folders[idx].compositorRole = .node(op: .mix(mode))
             folders[idx].effect = nil
             // A node that was named for the grade it no longer has must stop claiming it — the same
@@ -1359,7 +1359,7 @@ final class CanvasManager: ObservableObject {
         let opNeedsReshaping = effect != nil && folders[idx].isCompositorNode
             && folders[idx].compositorOp != .stack
         guard folders[idx].effect != effect || opNeedsReshaping else { return }
-        withStructureUndo(name: effect == nil ? "Clear Effect" : "Effect") {
+        withStructureUndo(label: effect == nil ? .clearEffect : .valueLayerEffect) {
             folders[idx].effect = effect
             if opNeedsReshaping { folders[idx].compositorRole = .node(op: .stack) }
             renameFolderToFollowItsRole(idx)
@@ -1375,14 +1375,14 @@ final class CanvasManager: ObservableObject {
     /// beginning and an end, rather than being guessed at here.
     func setAlphaMask(_ mask: AlphaMask?, forLayer index: Int) {
         guard layers.indices.contains(index), layers[index].alphaMask != mask else { return }
-        withStructureUndo(name: "Mask") {
+        withStructureUndo(label: .mask) {
             layers[index].alphaMask = mask
         }
     }
 
     func setAlphaMask(_ mask: AlphaMask?, forFolder folderID: UUID) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].alphaMask != mask else { return }
-        withStructureUndo(name: "Mask") {
+        withStructureUndo(label: .mask) {
             folders[idx].alphaMask = mask
         }
     }
@@ -1429,7 +1429,7 @@ final class CanvasManager: ObservableObject {
         maskEditTarget = nil
         guard maskSessionIsRecording else { return }
         maskSessionIsRecording = false
-        commitStructureGesture(name: "Mask")
+        commitStructureGesture(label: .mask)
     }
 
     /// **One undo step per session (§6.6), not one per checkmark — opened on the first write rather
@@ -1573,7 +1573,7 @@ final class CanvasManager: ObservableObject {
                                  // `addValueLayer`'s rule: a supplied name is a chosen name.
                                  hasCustomName: name != nil,
                                  parentFolderID: parentFolderID)
-        withStructureUndo(name: "Add Folder") {
+        withStructureUndo(label: .addFolder) {
             folders.append(folder)
         }
         return folder.id
@@ -1599,7 +1599,7 @@ final class CanvasManager: ObservableObject {
         let node = LayerFolder(id: UUID(), name: name ?? defaultNodeName(for: op),
                                hasCustomName: name != nil,
                                parentFolderID: parentFolderID, compositorRole: .node(op: op))
-        withStructureUndo(name: "Add Node") {
+        withStructureUndo(label: .addNode) {
             folders.append(node)
         }
         return node.id
@@ -1660,7 +1660,7 @@ final class CanvasManager: ObservableObject {
     /// second behaviour: a node's children are ordinary layers and folders and belong in the stack.
     func deleteFolder(_ folderID: UUID) {
         guard folders.contains(where: { $0.id == folderID }) else { return }
-        withStructureUndo(name: "Delete Folder") {
+        withStructureUndo(label: .deleteFolder) {
             guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
             // Children move up into whatever contained this folder, not to the root, so deleting a
             // nested folder doesn't yank its contents out of the enclosing one.
@@ -1702,7 +1702,7 @@ final class CanvasManager: ObservableObject {
     /// `hasCustomName` is set — `renameLayer`'s twin.
     func renameFolder(_ folderID: UUID, to name: String) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
-        withStructureUndo(name: "Rename Folder") {
+        withStructureUndo(label: .renameFolder) {
             folders[idx].name = name
             folders[idx].hasCustomName = true
         }
@@ -1764,13 +1764,22 @@ final class CanvasManager: ObservableObject {
 
     func undo() {
         finalizePendingGesturesForHistoryAction()
-        history.undo()
+        // `history.undo()` returns nil (and does nothing) on an empty stack — that is the "silent
+        // when nothing happened" case `raise` must not be called for. `finalizePendingGesturesFor-
+        // HistoryAction` above may itself have just pushed a step (a lifted fill/shape gesture
+        // becoming a real undo entry), so the label reported is always whatever this call actually
+        // reverted, never stale.
+        if let label = history.undo() {
+            raise(.historyUndo(label))
+        }
         refreshUndoRedoState()
     }
 
     func redo() {
         finalizePendingGesturesForHistoryAction()
-        history.redo()
+        if let label = history.redo() {
+            raise(.historyRedo(label))
+        }
         refreshUndoRedoState()
     }
 
@@ -1812,7 +1821,7 @@ final class CanvasManager: ObservableObject {
     /// resize/move) — these call their `CanvasManager` mutator on every gesture-`.changed` event,
     /// so wrapping each individual call would flood the stack with one step per touch-move frame.
     /// Callers instead bracket the whole gesture: `beginStructureGesture()` at `.began`,
-    /// `commitStructureGesture(name:)` at `.ended`/`.cancelled`.
+    /// `commitStructureGesture(label:)` at `.ended`/`.cancelled`.
     var gestureSnapshot: StructureSnapshot?
 
     /// How many gesture brackets are open, so an inner one nests instead of clobbering the outer's

@@ -204,10 +204,10 @@ struct DrawingView: View {
             for folder in canvasManager.ancestorFolders(ofLayer: index) where !folder.isVisible {
                 canvasManager.toggleFolderVisibility(folder.id)
             }
-        case .noDrawingSurface:
-            // No action, and `CanvasNotice.actionTitle` returns nil for this case, so the banner
-            // never offers a button that would land here. The case is spelled out rather than
-            // defaulted so that adding a fourth kind is a compile error here, not a silent no-op.
+        case .noDrawingSurface, .historyUndo, .historyRedo:
+            // No action, and `CanvasNotice.actionTitle` returns nil for these cases, so the banner
+            // never offers a button that would land here. Every case is spelled out rather than
+            // defaulted so that adding a new kind is a compile error here, not a silent no-op.
             break
         }
         canvasManager.notice = nil

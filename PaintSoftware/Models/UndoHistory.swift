@@ -11,7 +11,7 @@ import Foundation
 /// count doesn't actually bound memory the way a byte budget does.
 final class UndoHistory {
     struct Action {
-        let name: String
+        let label: HistoryActionLabel
         let cost: Int
         let undo: () -> Void
         let redo: () -> Void
@@ -34,16 +34,24 @@ final class UndoHistory {
         trim()
     }
 
-    func undo() {
-        guard let action = undoStack.popLast() else { return }
+    /// Reverts the most recent action and returns its label, or nil (and does nothing) if the
+    /// stack is empty — the caller's signal for whether to raise an "Undid …" notice at all.
+    @discardableResult
+    func undo() -> HistoryActionLabel? {
+        guard let action = undoStack.popLast() else { return nil }
         action.undo()
         redoStack.append(action)
+        return action.label
     }
 
-    func redo() {
-        guard let action = redoStack.popLast() else { return }
+    /// Reapplies the most recently undone action and returns its label, or nil (and does nothing)
+    /// if there is nothing to redo.
+    @discardableResult
+    func redo() -> HistoryActionLabel? {
+        guard let action = redoStack.popLast() else { return nil }
         action.redo()
         undoStack.append(action)
+        return action.label
     }
 
     func removeAll() {

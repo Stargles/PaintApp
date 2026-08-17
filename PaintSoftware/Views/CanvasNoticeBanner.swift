@@ -33,7 +33,7 @@ struct CanvasNoticeBanner: View {
                 .accessibilityIdentifier("canvasNotice")
                 // The case code, not the wording: a test that reads the visible sentence breaks the
                 // day someone rephrases it, and the phrasing is the half most likely to be revised.
-                .accessibilityValue(notice.kind.rawValue)
+                .accessibilityValue(notice.code)
 
             if let title = notice.actionTitle, let onAction {
                 Button(title, action: onAction)
@@ -64,6 +64,8 @@ struct CanvasNoticeBanner: View {
         case .noLayers:         return "square.stack.3d.up.slash"
         case .hiddenLayer:      return "eye.slash"
         case .noDrawingSurface: return "nosign"
+        case .historyUndo:      return "arrow.uturn.backward"
+        case .historyRedo:      return "arrow.uturn.forward"
         }
     }
 }

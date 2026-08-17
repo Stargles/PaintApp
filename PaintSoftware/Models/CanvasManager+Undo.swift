@@ -64,15 +64,15 @@ extension CanvasManager {
 
     /// Registers one undo step for a discrete (non-gesture) structural edit — call after the
     /// mutation has already happened, passing a `before` snapshot taken right before it.
-    private func recordStructureChange(name: String, from: StructureSnapshot, to: StructureSnapshot) {
-        recordUndo(name: name, cost: 4096, undo: { [weak self] in
+    private func recordStructureChange(label: HistoryActionLabel, from: StructureSnapshot, to: StructureSnapshot) {
+        recordUndo(label: label, cost: 4096, undo: { [weak self] in
             self?.restoreStructure(from)
         }, redo: { [weak self] in
             self?.restoreStructure(to)
         })
     }
 
-    /// Snapshots structure, runs `body`, and records the difference as one undo step named `name`.
+    /// Snapshots structure, runs `body`, and records the difference as one undo step named `label`.
     /// This is the call shape for discrete edits; continuous drags use
     /// `beginStructureGesture`/`commitStructureGesture` instead.
     ///
@@ -81,7 +81,7 @@ extension CanvasManager {
     /// of them. Only the outermost scope captures and records, so one user action is always exactly
     /// one undo step — without this, merging would record a bare "Delete Layer" that reverses half
     /// the operation and leaves the survivor flattened.
-    func withStructureUndo(name: String, _ body: () -> Void) {
+    func withStructureUndo(label: HistoryActionLabel, _ body: () -> Void) {
         guard structureUndoDepth == 0, gestureSnapshot == nil else {
             body() // an enclosing scope is already recording this
             return
@@ -96,7 +96,7 @@ extension CanvasManager {
         structureUndoDepth += 1
         defer { structureUndoDepth -= 1 }
         body()
-        recordStructureChange(name: name, from: before, to: captureStructure())
+        recordStructureChange(label: label, from: before, to: captureStructure())
     }
 
     /// Opens a gesture bracket. **Nests**, for the same reason `withStructureUndo` does: only the
@@ -112,13 +112,13 @@ extension CanvasManager {
         gestureSnapshot = captureStructure()
     }
 
-    /// Closes a bracket, recording the step only when the outermost one closes. An inner `name` is
+    /// Closes a bracket, recording the step only when the outermost one closes. An inner `label` is
     /// discarded rather than winning: the step belongs to the action that spans the others.
-    func commitStructureGesture(name: String) {
+    func commitStructureGesture(label: HistoryActionLabel) {
         if structureGestureDepth > 0 { structureGestureDepth -= 1 }
         guard structureGestureDepth == 0, let before = gestureSnapshot else { return }
         gestureSnapshot = nil
-        recordStructureChange(name: name, from: before, to: captureStructure())
+        recordStructureChange(label: label, from: before, to: captureStructure())
     }
 
     /// Drops a gesture's snapshot without recording anything — for a drag that ended up changing

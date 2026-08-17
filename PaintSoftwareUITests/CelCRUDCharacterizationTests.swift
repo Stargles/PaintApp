@@ -485,7 +485,7 @@ final class CelCRUDCharacterizationTests: XCTestCase {
 
     /// The idempotence the correctness of the whole rewrite hinges on: `TimelineTrackView`'s pan
     /// handler calls `resizeCelRightEdge` on every `.changed` event of a *single* drag, bracketed by
-    /// `beginStructureGesture()`/`commitStructureGesture(name:)`. Dragging out and back within that
+    /// `beginStructureGesture()`/`commitStructureGesture(label:)`. Dragging out and back within that
     /// one bracket must restore every pushed block exactly, because every call reads its baseline
     /// from `gestureSnapshot` (frozen at `.began`) rather than from whatever the previous call left
     /// behind — contrast with the unbracketed version above, where restoration is explicitly *not*
@@ -498,7 +498,7 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 5)   // pushes the neighbour
         manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 8)   // pushes it further
         manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 3)   // back to where the drag started
-        manager.commitStructureGesture(name: "Resize Frame")
+        manager.commitStructureGesture(label: .resizeFrame)
 
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 3],
                        "Every intermediate push undone — this is the drift Change 1 exists to fix")
@@ -595,7 +595,7 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 5)   // pushes the previous block
         manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 0)   // pushes it into the floor
         manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: 7)   // back to where the drag started
-        manager.commitStructureGesture(name: "Resize Frame")
+        manager.commitStructureGesture(label: .resizeFrame)
 
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [2, 7])
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [5, 3])

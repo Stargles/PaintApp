@@ -11,7 +11,7 @@ extension CanvasManager {
 
     /// Adds a new view preset capturing the current visibility state of all layers and folders.
     func addViewPreset() {
-        withStructureUndo(name: "Add View") {
+        withStructureUndo(label: .addView) {
             var vis: [UUID: Bool] = [:]
             for layer in layers { vis[layer.id] = layer.isVisible }
             var folderVis: [UUID: Bool] = [:]
@@ -26,7 +26,7 @@ extension CanvasManager {
     /// Switches to the view preset at `index`, or back to "no view" (all layers visible) for any
     /// index outside `viewPresets`. Passing -1 is the canonical way to clear the active view.
     func selectViewPreset(at index: Int) {
-        withStructureUndo(name: "Switch View") {
+        withStructureUndo(label: .switchView) {
             if viewPresets.indices.contains(index) {
                 activeViewPresetIndex = index
                 applyViewPreset(viewPresets[index])
@@ -46,7 +46,7 @@ extension CanvasManager {
     /// (or dropping to "no view" when the active one is the one being deleted).
     func deleteViewPreset(at index: Int) {
         guard viewPresets.indices.contains(index) else { return }
-        withStructureUndo(name: "Delete View") {
+        withStructureUndo(label: .deleteView) {
             viewPresets.remove(at: index)
             if activeViewPresetIndex == index {
                 selectViewPreset(at: -1)
