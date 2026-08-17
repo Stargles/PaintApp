@@ -25,6 +25,8 @@ final class MetalFillEngine {
     private let psFloodVert: MTLComputePipelineState
     private let psEdgeDilate: MTLComputePipelineState
     private let psPaint: MTLComputePipelineState
+    private let psEdgeBridge: MTLComputePipelineState
+    private let psUnionMask: MTLComputePipelineState
 
     /// Mirror of the Metal `FillParams` struct (must match its field order/alignment exactly).
     struct FillParams {
@@ -42,8 +44,18 @@ final class MetalFillEngine {
 
     private init?() {
         guard let device = MTLCreateSystemDefaultDevice(),
-              let queue = device.makeCommandQueue(),
-              let library = device.makeDefaultLibrary() else { return nil }
+              let queue = device.makeCommandQueue() else { return nil }
+        // By `Bundle(for:)` and not `Bundle.main`, for the reason `CompositorMetalEngine` records at
+        // length: under XCUITest the main bundle is the *runner app*, while this class and its
+        // compiled `default.metallib` live in the `.xctest` plug-in. Asking by the bundle that owns
+        // this class resolves to the app bundle in the app and to the test bundle in the fast tier.
+        //
+        // That was half of why the fill's GPU path had never been exercisable headlessly; the other
+        // half was that `Fill.metal` was not a member of the test target's Sources phase. Both are
+        // now fixed, which is what `FillBoundaryLogicTests` runs on.
+        let library = (try? device.makeDefaultLibrary(bundle: Bundle(for: MetalFillEngine.self)))
+            ?? device.makeDefaultLibrary()
+        guard let library else { return nil }
         func pipeline(_ name: String) -> MTLComputePipelineState? {
             guard let fn = library.makeFunction(name: name) else { return nil }
             return try? device.makeComputePipelineState(function: fn)
@@ -56,7 +68,9 @@ final class MetalFillEngine {
               let floodHoriz = pipeline("floodHoriz"),
               let floodVert = pipeline("floodVert"),
               let edgeDilate = pipeline("edgeDilate"),
-              let paint = pipeline("paintRegion") else { return nil }
+              let paint = pipeline("paintRegion"),
+              let edgeBridge = pipeline("edgeBridge"),
+              let unionMask = pipeline("unionMask") else { return nil }
         self.device = device
         self.queue = queue
         self.psWalls = walls
@@ -68,6 +82,8 @@ final class MetalFillEngine {
         self.psFloodVert = floodVert
         self.psEdgeDilate = edgeDilate
         self.psPaint = paint
+        self.psEdgeBridge = edgeBridge
+        self.psUnionMask = unionMask
     }
 
     /// Uploads `referenceRGBA` (premultiplied-last, row-major, `width*height*4` bytes) into a session
@@ -106,12 +122,27 @@ final class MetalFillEngine {
 
     fileprivate func makeCommandBuffer() -> MTLCommandBuffer? { queue.makeCommandBuffer() }
 
+    /// Encodes `edgeBridge`, which needs a scalar radius alongside its two buffers.
+    fileprivate func encodeBridge(_ encoder: MTLComputeCommandEncoder, _ pipeline: MTLComputePipelineState,
+                                  width: Int, height: Int, coord: MTLBuffer, out: MTLBuffer,
+                                  params: MTLBuffer, radius: Float) {
+        var r = radius
+        encoder.setComputePipelineState(pipeline)
+        encoder.setBuffer(coord, offset: 0, index: 0)
+        encoder.setBuffer(out, offset: 0, index: 1)
+        encoder.setBuffer(params, offset: 0, index: 2)
+        encoder.setBytes(&r, length: MemoryLayout<Float>.size, index: 3)
+        dispatch2D(encoder, pipeline, width: width, height: height)
+    }
+
     fileprivate var pipelines: (walls: MTLComputePipelineState, jfaInit: MTLComputePipelineState,
                                 jfaStep: MTLComputePipelineState, threshold: MTLComputePipelineState,
                                 floodInit: MTLComputePipelineState, floodHoriz: MTLComputePipelineState,
                                 floodVert: MTLComputePipelineState, edgeDilate: MTLComputePipelineState,
-                                paint: MTLComputePipelineState) {
-        (psWalls, psJfaInit, psJfaStep, psThreshold, psFloodInit, psFloodHoriz, psFloodVert, psEdgeDilate, psPaint)
+                                paint: MTLComputePipelineState, edgeBridge: MTLComputePipelineState,
+                                unionMask: MTLComputePipelineState) {
+        (psWalls, psJfaInit, psJfaStep, psThreshold, psFloodInit, psFloodHoriz, psFloodVert, psEdgeDilate,
+         psPaint, psEdgeBridge, psUnionMask)
     }
 }
 
@@ -131,6 +162,9 @@ final class MetalFillSession {
     private let wallBuf: MTLBuffer
     private let dilatedBuf: MTLBuffer
     private let closedBuf: MTLBuffer
+    /// The canvas-edge bridge, computed while the wall distance field is still live and folded into
+    /// `closedBuf` after the erode has overwritten it. See `edgeBridge` in Fill.metal.
+    private let bridgeBuf: MTLBuffer
     private let regionBuf: MTLBuffer
     private let regionTmpBuf: MTLBuffer
     private let jfaA: MTLBuffer
@@ -146,6 +180,7 @@ final class MetalFillSession {
         func buffer(_ bytes: Int) -> MTLBuffer? { device.makeBuffer(length: max(bytes, 4), options: .storageModeShared) }
         guard let refBuf = referenceRGBA.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: count * 4, options: .storageModeShared) }),
               let wallBuf = buffer(count), let dilatedBuf = buffer(count), let closedBuf = buffer(count),
+              let bridgeBuf = buffer(count),
               let regionBuf = buffer(count), let regionTmpBuf = buffer(count),
               let jfaA = buffer(count * MemoryLayout<SIMD2<Float>>.stride),
               let jfaB = buffer(count * MemoryLayout<SIMD2<Float>>.stride),
@@ -160,6 +195,7 @@ final class MetalFillSession {
         self.wallBuf = wallBuf
         self.dilatedBuf = dilatedBuf
         self.closedBuf = closedBuf
+        self.bridgeBuf = bridgeBuf
         self.regionBuf = regionBuf
         self.regionTmpBuf = regionTmpBuf
         self.jfaA = jfaA
@@ -183,8 +219,16 @@ final class MetalFillSession {
 
     /// Runs the full GPU pipeline and returns the painted region as premultiplied RGBA (row-major,
     /// `width*height*4`), transparent where unfilled. `fillColor` is premultiplied 0..1.
+    ///
+    /// - Parameter canvasEdgeIsWall: let gap-closing bridge to the canvas edge, so a boundary that
+    ///   stops a few pixels short of the border seals against it instead of letting the fill run
+    ///   around its end. Additive — it can only turn background into wall — and inert at
+    ///   `gapRadius == 0`, since the flood is already clamped to this buffer and a zero-width wall
+    ///   one pixel outside it has nothing left to block. See `edgeBridge` in Fill.metal for what it
+    ///   does and, more usefully, for the simpler formulation that was tried first and is wrong.
     func fill(seedX: Int, seedY: Int, seedColor: SIMD4<Float>, threshold: Float,
-              gapRadius: Float, edgeOverlap: Float, fillColor: SIMD4<Float>) -> [UInt8]? {
+              gapRadius: Float, edgeOverlap: Float, canvasEdgeIsWall: Bool = false,
+              fillColor: SIMD4<Float>) -> [UInt8]? {
         guard isSeedInBounds(x: seedX, y: seedY) else { return nil }
         let p = engine.pipelines
 
@@ -205,11 +249,25 @@ final class MetalFillSession {
             // Dilate: distance to nearest wall <= r.
             let distWall = encodeJFA(enc1, mask: wallBuf, seedValue: 1)
             encodeThreshold(enc1, from: distWall, out: dilatedBuf, radius: gapRadius, keepInside: 1)
+            // The canvas-edge bridge is computed *here*, while `distWall` is still the wall distance
+            // field — the erode's own JFA below reuses the same two ping-pong buffers and destroys
+            // it. Folded into the closed mask afterwards rather than into `dilatedBuf`, because
+            // anything put in there is about to be eroded straight back off.
+            if canvasEdgeIsWall {
+                engine.encodeBridge(enc1, p.edgeBridge, width: width, height: height,
+                                    coord: distWall, out: bridgeBuf, params: paramsBuf, radius: gapRadius)
+            }
             // Erode the dilated mask: distance to nearest background (dilated == 0) > r.
             let distBg = encodeJFA(enc1, mask: dilatedBuf, seedValue: 0)
             encodeThreshold(enc1, from: distBg, out: closedBuf, radius: gapRadius, keepInside: 0)
+            if canvasEdgeIsWall {
+                engine.encode2D(enc1, p.unionMask, width: width, height: height,
+                                buffers: [(bridgeBuf, 0), (closedBuf, 1), (paramsBuf, 2)])
+            }
             closedSource = closedBuf
         } else {
+            // Nothing to do for the canvas edge at a zero radius: the flood is already confined to
+            // this buffer, so a zero-width wall one pixel outside it has nothing left to block.
             closedSource = wallBuf
         }
         engine.encode2D(enc1, p.floodInit, width: width, height: height, buffers: [(closedSource, 0), (regionBuf, 1), (paramsBuf, 2)])

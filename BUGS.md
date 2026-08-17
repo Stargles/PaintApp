@@ -439,14 +439,21 @@ as intentional — are a vector-interpolation product call, not a layer-composit
 
 ## Fill tool: the gap-closing UI test is still skipped (2026-07-21)
 
-`testFillToolBridgesOpenContourGapWhenGapClosingEnabled` is `XCTSkip`'d, and it is the single skip in
-every clean full run. Three separate causes were found and fixed along the way (an originally
-unbridgeable gap, `app.sliders.firstMatch` grabbing the wrong slider, and a synthetic drag too near
-the screen edge dropping the next stroke) and the final containment assertion still fails. Next
-steps: re-point the "outside" probe using `visibleCanvasBounds`/`safeOutsideCornerPoint`; if it still
-fails, call `FloodFillEngine.fill` directly on synthetic wall data to tell a real leak from a
-test-probe bug — the morphology math itself is verified correct in isolation. Re-enable by deleting
-the `throw XCTSkip(...)` at the top of the test body.
+`testFillToolBridgesOpenContourGapWhenGapClosingEnabled` is `XCTSkip`'d. Three separate causes were
+found and fixed along the way (an originally unbridgeable gap, `app.sliders.firstMatch` grabbing the
+wrong slider, and a synthetic drag too near the screen edge dropping the next stroke) and the final
+containment assertion still fails. Next step: re-point the "outside" probe using
+`visibleCanvasBounds`/`safeOutsideCornerPoint`. Re-enable by deleting the `throw XCTSkip(...)` at the
+top of the test body.
+
+**Its second suggested next step is now the cheap one and the tool for it exists** — this entry used
+to say "call `FloodFillEngine.fill` directly on synthetic wall data", which had not been possible for
+two reasons: `FloodFillEngine` no longer exists (the fill has been GPU-only since `MetalFillEngine`
+replaced it), and `MetalFillEngine.shared` was nil in the test process anyway. Both are fixed as of
+2026-08-17: `Fill.metal` is a member of the UI-test target's Sources phase and `MetalFillEngine` asks
+for its library by `Bundle(for:)`, so `FillBoundaryLogicTests` drives the real kernels headlessly in
+under a second. Telling a genuine leak from a test-probe bug is now a `MetalFillSession.fill` call on
+hand-built reference bytes, not a 26-minute run.
 
 ## Duplicate is a silent no-op against an adjacent neighbour (2026-07-28)
 

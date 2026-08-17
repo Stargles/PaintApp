@@ -12,7 +12,7 @@ struct FillParams {
     float threshold;    // 0..1 normalized colour distance above which a pixel is a wall
     float gapRadius;    // px, disk radius for the morphological close (gap bridging)
     float edgeOverlap;  // px, disk radius the filled region grows under the walls
-    float _pad0;
+    float _pad0;        // the canvas-edge option is gated Swift-side; `edgeBridge` simply isn't encoded
     float4 seedColor;   // straight RGBA 0..1 sampled at the seed
     float4 fillColor;   // premultiplied RGBA 0..1 painted into the region
 };
@@ -95,6 +95,59 @@ kernel void thresholdDistance(const device float2* coord      [[buffer(0)]],
     float d = distance(float2(gid), coord[i]);
     bool inside = d <= radius;
     out[i] = (keepInside ? inside : !inside) ? 1 : 0;
+}
+
+// MARK: - The canvas edge as a boundary
+
+// Distance from a pixel to the nearest pixel *outside* the canvas — to the imaginary ring one pixel
+// beyond each border. Column 0 is 1 away from the ring at x = -1, and so on.
+static inline float distanceToCanvasEdge(uint2 gid, constant FillParams& params) {
+    uint dx = min(gid.x + 1u, params.width  - gid.x);
+    uint dy = min(gid.y + 1u, params.height - gid.y);
+    return float(min(dx, dy));
+}
+
+// Wall in the sliver between artwork and the canvas edge, so a boundary stroke that stops just short
+// of the border seals against it instead of letting the fill run around its end.
+//
+// A pixel joins the wall when the nearest artwork *and* the canvas edge are together within the
+// gap-closing radius of it — `distanceToWall + distanceToCanvasEdge <= radius`. Walking the straight
+// line from the artwork's tip to the border, that sum is the width of the gap the whole way across,
+// so the test seals a gap of up to `radius - 1` px and nothing wider, and the sealed patch is a thin
+// lens spanning exactly that gap.
+//
+// **This is deliberately not the same thing as adding the outside of the canvas to the wall set and
+// closing that, which was the first implementation and is wrong for the product even though it is
+// right for the mathematics.** A true close of "everything outside is wall" rounds off the interior
+// corners of the canvas — a disk of radius r that has to stay inside the rectangle can never cover
+// the corner pixel — so every corner grows an unfillable notch r px deep *with no artwork present at
+// all*, scaling with the slider up to 40 px. Measured: 92 px of a blank 128x128 canvas became
+// unfillable, 23 per corner. Keying the bridge off the distance to real artwork removes that
+// entirely: with nothing drawn near a border, nothing is added.
+//
+// It is also purely **additive** — it only ever turns a background pixel into a wall, never the
+// reverse — so switching the option on cannot break a fill that already worked.
+kernel void edgeBridge(const device float2* wallCoord [[buffer(0)]],
+                       device uchar*         out       [[buffer(1)]],
+                       constant FillParams&  params    [[buffer(2)]],
+                       constant float&       radius    [[buffer(3)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= params.width || gid.y >= params.height) return;
+    uint i = pixelIndex(gid.x, gid.y, params.width);
+    // The JFA seeds unreached pixels with a 1e20 sentinel rather than an infinity, so a canvas with
+    // no walls at all gives a huge finite distance here and simply fails the test.
+    float toWall = distance(float2(gid), wallCoord[i]);
+    out[i] = (toWall + distanceToCanvasEdge(gid, params) <= radius) ? 1 : 0;
+}
+
+// `dst |= src`, for folding the edge bridge into the closed wall mask after the erode has run.
+kernel void unionMask(const device uchar* src   [[buffer(0)]],
+                      device uchar*        dst   [[buffer(1)]],
+                      constant FillParams& params [[buffer(2)]],
+                      uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= params.width || gid.y >= params.height) return;
+    uint i = pixelIndex(gid.x, gid.y, params.width);
+    if (src[i]) dst[i] = 1;
 }
 
 // MARK: - Flood fill (parallel scanline / span propagation)

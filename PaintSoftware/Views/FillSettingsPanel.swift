@@ -41,6 +41,25 @@ struct FillSettingsPanel: View {
                 }
                 .padding(.horizontal)
 
+                // Directly under Gap Closing rather than in a section of its own, because that is what
+                // it modifies: it adds the canvas rectangle to the set of things gap-closing may bridge
+                // to, and does nothing at all when the slider above reads 0.
+                VStack(alignment: .leading) {
+                    Toggle(isOn: Binding(
+                        get: { canvasManager.fillCanvasEdgeIsBoundary },
+                        set: { canvasManager.setFillCanvasEdgeIsBoundary($0) }
+                    )) {
+                        Text("Canvas Edge Is a Boundary")
+                            .foregroundColor(.white)
+                    }
+                    .tint(Self.selectedTint)
+                    .accessibilityIdentifier("fillPanel.canvasEdgeBoundaryToggle")
+                    Text("Treats the edge of the canvas like a drawn line, so a boundary that stops just short of it still seals.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                .padding(.horizontal)
+
                 VStack(alignment: .leading) {
                     Text("Threshold: \(Int(canvasManager.fillThreshold * 100))%")
                         .foregroundColor(.white)

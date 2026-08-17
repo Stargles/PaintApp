@@ -32,7 +32,7 @@ extension CanvasManager {
     ///
     /// Not `private`: `fillPending`/`fillRendered` in CanvasManager.swift are typed with it, and
     /// Swift scopes `private` to the file rather than the type.
-    struct FillKey: Equatable { var gap: Int; var threshold: Int; var edge: Int }
+    struct FillKey: Equatable { var gap: Int; var threshold: Int; var edge: Int; var edgeIsWall: Bool }
 
     /// Begins an interactive fill at `point` (canvas-pixel coords, top-left origin): composites every
     /// fill-reference layer into a reference image once, uploads it to a GPU `MetalFillSession`, samples
@@ -74,7 +74,7 @@ extension CanvasManager {
 
         fillLock.lock()
         fillPending = currentFillKey()
-        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min)
+        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false)
         fillWorkerScheduled = true // claimed here so early drag updates don't spawn a second worker
         fillLock.unlock()
 
@@ -92,7 +92,18 @@ extension CanvasManager {
     private func currentFillKey() -> FillKey {
         FillKey(gap: Int(fillGapClosingDistance.rounded()),
                 threshold: Int((fillThreshold * 1000).rounded()),
-                edge: Int(fillExpand.rounded()))
+                edge: Int(fillExpand.rounded()),
+                edgeIsWall: fillCanvasEdgeIsBoundary)
+    }
+
+    /// Toggles "the canvas edge bounds the fill" and, if a fill is currently adjustable, re-runs it so
+    /// the artist sees the difference without re-tapping — the same live-update contract
+    /// `setFillSetting` gives the three sliders. Not a `FillAxis`: the sideways drag adjusts a
+    /// continuous setting, and there is no useful way to sweep a boolean.
+    func setFillCanvasEdgeIsBoundary(_ enabled: Bool) {
+        guard fillCanvasEdgeIsBoundary != enabled else { return }
+        fillCanvasEdgeIsBoundary = enabled
+        if fillGestureActive { scheduleFillRender() }
     }
 
     /// The layers whose content bounds the fill, bottom-to-top: every layer marked `isFillReference`, at
@@ -314,6 +325,7 @@ extension CanvasManager {
                                      seedColor: fillSeedColor,
                                      threshold: Float(Double(key.threshold) / 1000.0),
                                      gapRadius: Float(key.gap), edgeOverlap: Float(key.edge),
+                                     canvasEdgeIsWall: key.edgeIsWall,
                                      fillColor: fillGestureColor)
             let image = bytes.flatMap { Self.imageFromRGBA($0, width: session.width, height: session.height) }
             let layerID = fillGestureLayerID, celID = fillGestureCelID

@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A5AE05B50FA1839D2B60FB53 /* FillBoundaryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F053BCE1D802A3641748281B /* FillBoundaryLogicTests.swift */; };
+		4643CE405936C50DE7251BEC /* PaintSoftware/Engine/Fill.metal in Sources */ = {isa = PBXBuildFile; fileRef = 5F7181DC0E7962BB4B2D95BB /* PaintSoftware/Engine/Fill.metal */; };
 		4E03FE4A7BAA4323E6837013 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F624FB57490A92DFBDB344A /* Foundation.framework */; };
 		043A4C1856CFB84247FD383E /* VectorCanvasDataLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40ED75E5C25426851A138A3D /* VectorCanvasDataLogicTests.swift */; };
 		A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */; };
@@ -148,6 +150,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		F053BCE1D802A3641748281B /* FillBoundaryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "FillBoundaryLogicTests.swift"; sourceTree = "<group>"; };
+		5F7181DC0E7962BB4B2D95BB /* PaintSoftware/Engine/Fill.metal */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.metal; path = "PaintSoftware/Engine/Fill.metal"; sourceTree = "<group>"; };
 		1F2F226A8353848514BB7213 /* PaintSoftwareUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PaintSoftwareUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3FC5E355300DBDA400401D35 /* PaintSoftware.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PaintSoftware.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7F624FB57490A92DFBDB344A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -348,6 +352,7 @@
 			children = (
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
 				40ED75E5C25426851A138A3D /* VectorCanvasDataLogicTests.swift */,
+				F053BCE1D802A3641748281B /* FillBoundaryLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
@@ -418,6 +423,7 @@
 				DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */,
 				DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */,
 				DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */,
+				5F7181DC0E7962BB4B2D95BB /* PaintSoftware/Engine/Fill.metal */,
 				DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */,
 				DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */,
 				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
@@ -591,6 +597,7 @@
 			files = (
 				A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */,
 				043A4C1856CFB84247FD383E /* VectorCanvasDataLogicTests.swift in Sources */,
+				A5AE05B50FA1839D2B60FB53 /* FillBoundaryLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */,
 				B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */,
@@ -672,6 +679,7 @@
 				DEC0DE6A0000000000000002 /* PaintSoftware/Models/AlphaMask.swift in Sources */,
 				DEC0DE6A0000000000000004 /* PaintSoftware/Engine/MaskResolver.swift in Sources */,
 				DEC0DE0000000000000000A3 /* PaintSoftware/Engine/Composite.metal in Sources */,
+				4643CE405936C50DE7251BEC /* PaintSoftware/Engine/Fill.metal in Sources */,
 				DEC0DE000000000000000031 /* PaintSoftware/Models/Tool.swift in Sources */,
 				DEC0DE000000000000000033 /* PaintSoftware/Models/LayerFolder.swift in Sources */,
 				DEC0DE000000000000000035 /* PaintSoftware/Models/ViewPreset.swift in Sources */,

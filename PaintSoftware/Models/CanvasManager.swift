@@ -456,6 +456,16 @@ final class CanvasManager: ObservableObject {
     /// spreads across bigger colour differences (fewer walls); lower = subtle borders stop it.
     @Published var fillThreshold: CGFloat = 0.15
     @Published var fillExpand: CGFloat = 2
+    /// Whether the canvas rectangle's edge bounds the fill the way a drawn line does. On by default,
+    /// at the owner's request.
+    ///
+    /// The flood is clamped to the canvas buffer whether this is on or off, so it is *not* what stops
+    /// a fill escaping — a region enclosed by artwork on three sides and the canvas edge on the fourth
+    /// has always filled and stopped. What the option adds is that gap-closing may bridge to the
+    /// border: a boundary stroke ending a few pixels short of the edge seals against it instead of
+    /// letting the fill run around its end and into the next compartment. It therefore does nothing
+    /// while `fillGapClosingDistance` is 0, which is the artist saying "bridge nothing".
+    @Published var fillCanvasEdgeIsBoundary: Bool = true
     @Published var isFilling: Bool = false
 
     @Published var canvasBackgroundColor: Color = .white
@@ -1168,8 +1178,8 @@ final class CanvasManager: ObservableObject {
     /// `drainFillWork` coalesce a burst of drag updates into a single render of the latest params.
     let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
     let fillLock = NSLock()
-    var fillPending = FillKey(gap: 0, threshold: 0, edge: 0)
-    var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min)
+    var fillPending = FillKey(gap: 0, threshold: 0, edge: 0, edgeIsWall: true)
+    var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false)
     var fillWorkerScheduled = false
 
     /// Gesture context. `fillSession`/`fillSeedColor` are only touched on `fillQueue`; the rest is set on
