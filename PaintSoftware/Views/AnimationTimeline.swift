@@ -443,8 +443,15 @@ struct AnimationTimeline: View {
         }
     }
 
+    /// The denominator widens to admit the playhead **for display only** — it is not written back to
+    /// `sceneFrameCount`, which is an input to cel creation and so may only be changed by an edit
+    /// (see `goToFrame`, where doing this in the model shipped a real bug). Parking out past the end
+    /// of the scene therefore reads "Frame 40/40" rather than the impossible "Frame 40/12"; the
+    /// counter stops describing the scene's length out there, which is honest, because out there the
+    /// playhead is not in the scene.
     private var frameLabel: some View {
-        Text("Frame \(canvasManager.currentFrame + 1)/\(canvasManager.sceneFrameCount)")
+        let shown = max(canvasManager.sceneFrameCount, canvasManager.currentFrame + 1)
+        return Text("Frame \(canvasManager.currentFrame + 1)/\(shown)")
             .font(.caption)
             .foregroundColor(.gray)
             .accessibilityIdentifier("timeline.frameLabel")

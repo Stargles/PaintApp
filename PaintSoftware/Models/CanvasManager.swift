@@ -910,17 +910,23 @@ final class CanvasManager: ObservableObject {
     /// stopped dead partway across a track that visibly continued. The owner's report: "im not sure
     /// why I cannot move the time selection in the timeline past a certian frame (default is 12)".
     ///
-    /// Raising `sceneFrameCount` rather than dropping the clamp outright is what keeps every
-    /// downstream reader honest without touching any of them: `effectiveLoopRange` clamps markers
-    /// into the scene, `stepFrame` walks to its end, and the frame label counts against it — all
-    /// three would have needed their own new ceiling otherwise. And it is what the field already is;
-    /// `contentEndFrame`'s doc is emphatic that `sceneFrameCount` is the laid-out length of the
-    /// *timeline*, not the length of the animation, and that it only ever ratchets upward. Playback
-    /// is unaffected for exactly that reason — it bounds itself with `contentEndFrame`, so parking
-    /// the playhead out in empty space does not add empty frames to the animation.
+    /// **Moving the playhead does not resize the scene.** An earlier version of this fix raised
+    /// `sceneFrameCount` to admit the frame, reasoning that the field is the laid-out length of the
+    /// timeline rather than the length of the animation and that playback bounds itself with
+    /// `contentEndFrame`. That reasoning audited three readers — `effectiveLoopRange`, `stepFrame`,
+    /// the frame label — and missed the four that matter most: **every cel constructor sizes a new
+    /// layer's first cel with `frameCount: max(sceneFrameCount, 1)`** (`addLayer`, `addVectorLayer`,
+    /// `addValueLayer`, and `SelectionModels`' duplicate). So a scrub out to frame 200 gave the next
+    /// layer a 200-frame cel, that cel *became* `contentEndFrame`, and playback ran two hundred
+    /// frames of empty track — the very bug `contentEndFrame` was introduced to fix, back at a
+    /// larger number, and persisted to the manifest by `ProjectStore`.
+    ///
+    /// The lesson worth keeping: `sceneFrameCount` is not display state. It is an input to cel
+    /// creation, so anything that writes it is authoring the document, and only an edit may do that.
+    /// Every other ratchet site raises it *because a cel now reaches that frame*; the playhead
+    /// reaching a frame is not a cel reaching it.
     func goToFrame(_ frame: Int) {
         currentFrame = max(0, frame)
-        sceneFrameCount = max(sceneFrameCount, currentFrame + 1)
     }
 
     /// `loopStartFrame`/`loopEndFrame` clamped into the current scene length and ordered — the scene

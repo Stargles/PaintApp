@@ -89,6 +89,32 @@ final class PlaybackBoundsCharacterizationTests: XCTestCase {
         XCTAssertEqual(manager.playbackEndFrame, 2, "Playback ends on the last drawn frame")
     }
 
+    /// **Scrubbing is not authoring.** The owner asked to be able to move the playhead anywhere in
+    /// the timeline, and the first fix let `goToFrame` raise `sceneFrameCount` to admit the frame.
+    /// That looked safe — the field is documented as the laid-out track, and playback keys off
+    /// `contentEndFrame`, which the test above pins. It was not safe, because `sceneFrameCount` is
+    /// also **an input to cel creation**: every constructor mints a new layer's first cel with
+    /// `frameCount: max(sceneFrameCount, 1)`. So the inflated track became a real 200-frame cel on
+    /// the next layer, that cel became `contentEndFrame`, and playback ran out over empty frames
+    /// again — the same bug at a bigger number, saved into the manifest.
+    ///
+    /// Both halves are asserted because either alone passes under the bug: the first would pass if
+    /// `goToFrame` refused the frame (the original complaint), the second if it ratcheted.
+    func testScrubbingPastTheSceneEndMovesThePlayheadWithoutLengtheningTheAnimation() {
+        let manager = self.manager(sceneFrameCount: 12)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+
+        manager.goToFrame(200)
+        XCTAssertEqual(manager.currentFrame, 200, "The playhead goes where it is sent…")
+        XCTAssertEqual(manager.sceneFrameCount, 12, "…without the track growing to meet it")
+
+        manager.addLayer()
+        XCTAssertEqual(manager.layers.last?.cels.first?.frameCount, 12,
+                       "A layer added out there is sized by the scene, not by where the playhead is parked")
+        XCTAssertEqual(manager.contentEndFrame, 12, "…so the animation is still as long as its content")
+        XCTAssertEqual(manager.playbackEndFrame, 11, "…and playback does not run out over empty track")
+    }
+
     func testTheContentEndIsTheFurthestBlockAcrossEveryLayer() {
         let manager = self.manager(sceneFrameCount: 12)
         manager.addLayer()
