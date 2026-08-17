@@ -1802,7 +1802,10 @@ struct CanvasView: UIViewRepresentable {
                 ? nil
                 : resolveLiveMask(forLayerAt: canvasManager.currentLayerIndex)
 
-            let size = OnionSkinBudget.compositeSize(for: canvasSize)
+            // The artist's resolution setting, applied here and carried into the cache key below —
+            // so changing it rebuilds rather than reusing a composite at the old resolution.
+            let size = OnionSkinBudget.compositeSize(for: canvasSize,
+                                                     resolution: canvasManager.onionSkin.resolution)
             let key = OnionSkinKey(frames: frames, size: size, placement: placement, mask: mask)
             if key != onionSkinKey {
                 onionSkinKey = key

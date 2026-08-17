@@ -101,6 +101,38 @@ struct OnionSkinSettings: Equatable {
         var title: String { self == .tinted ? "Tinted" : "Original Colors" }
     }
 
+    /// How sharp the skins are, as a fraction of the canvas — the owner's own vocabulary
+    /// (2026-08-17: "default half resolution, option to make it full or quarter").
+    ///
+    /// **A fraction alone would be wrong on a small canvas, and `OnionSkinBudget` is where that is
+    /// fixed** rather than here: the readability cliff measured at 512 px is an *absolute* size and
+    /// does not scale with the document, so Half on a 1024² canvas would land at 512² and hand the
+    /// artist a ghost they cannot read, at the default setting, with nothing to explain why. The
+    /// fraction is applied and then floored.
+    ///
+    /// **Eighth was considered and left out.** With the floor in place it collapses onto Quarter for
+    /// every canvas at or below 3072², and on a 4096² one it buys 768² against Quarter's 1024² —
+    /// 1.8x the speed for the edge of legibility. A fourth segment on an already-dense panel did not
+    /// look worth that; it is three lines to add if the owner wants it.
+    enum Resolution: String, CaseIterable, Identifiable {
+        case full, half, quarter
+        var id: String { rawValue }
+        var fraction: CGFloat {
+            switch self {
+            case .full:    return 1
+            case .half:    return 0.5
+            case .quarter: return 0.25
+            }
+        }
+        var title: String {
+            switch self {
+            case .full:    return "Full"
+            case .half:    return "Half"
+            case .quarter: return "Quarter"
+            }
+        }
+    }
+
     /// Which side of the playhead a slot is on.
     enum Side: String, CaseIterable, Identifiable {
         case previous, next
@@ -133,6 +165,9 @@ struct OnionSkinSettings: Equatable {
     /// against itself without copying the first drawings onto the end by hand.
     var loops: Bool = false
     var colouring: Colouring = .tinted
+    /// **Half by default**, the owner's call (2026-08-17). A quality/speed dial: see `OnionSkinBudget`
+    /// for what each option costs and for the floor that keeps the cheap ones readable.
+    var resolution: Resolution = .half
     /// Red for what came before, green for what comes after — the panel's gradient bar draws these
     /// two, and both are configurable.
     var previousTint = CodableColor(red: 0.95, green: 0.26, blue: 0.21, alpha: 1)
@@ -415,7 +450,8 @@ enum OnionSkinPlanner {
 ///
 /// So the fix is in two halves, and the second is the load-bearing one:
 ///
-///  1. The composite is capped at `maxCompositeEdge` on its longest side.
+///  1. The composite is capped by `compositeSize(for:resolution:)` — the artist's chosen
+///     fraction of the canvas, floored at a readable size.
 ///  2. **Its sources are reduced to that same size once per cel version** and held by
 ///     `OnionSkinRasterCache`, so a skin is drawn 1:1 instead of resampled from the full canvas on
 ///     every rebuild. Rebuilds after the first are the 92 ms column, not the 338 ms one.
@@ -448,49 +484,101 @@ enum OnionSkinPlanner {
 /// `PerfBaselineTests`.
 enum OnionSkinBudget {
 
-    /// The longest edge, in pixels, of the composite **and of the reduced sources drawn into it**.
-    static let maxCompositeEdge: CGFloat = 1024
-
-    /// How many reduced sources are held.
+    /// **The floor, and it is the load-bearing number in this type.** The readability cliff found by
+    /// the sweep is an *absolute* pixel size — 512 px is where hatching stopped being lines and
+    /// became a moiré wash — and it does not scale with the document. So a fraction of the canvas is
+    /// applied and then floored here: Half means "half, but never so small you cannot see the line".
     ///
-    /// **The window plus two, not the window exactly, and the two are the whole point.** The most
-    /// skins that can be on screen at once is `maxSkinsPerSide` a side; a cache of exactly that size
-    /// is full at all times, so stepping the playhead one frame brings one new cel in and evicts one
-    /// — every move pays a miss, forever, even after the artist has been all the way round the cycle.
-    /// Slack is what turns that into hits, and two is enough because a playhead moves one step at a
-    /// time.
-    static var sourceCacheLimit: Int { OnionSkinSettings.maxSkinsPerSide * 2 + 2 }
-
-    /// Everything the onion skin can hold at once, in bytes, at `maxCompositeEdge`: one composite
-    /// plus a full source cache.
+    /// 768 rather than 1024 because 768 is what the sweep actually showed still legible (hatching
+    /// survives, its ends begin to alias), and a floor should sit at the edge of acceptable rather
+    /// than at the edge of comfortable — it exists to prevent the unreadable case, not to overrule
+    /// an artist who asked for speed.
     ///
-    /// **This is a ceiling, not a cost.** The cache only ever fills to the number of skins actually
-    /// asked for, so the shipped default of one skin either side holds two sources and one composite
-    /// — about 12 MiB at 1024. The ~54 MiB ceiling is reachable only by dialling both sliders to
-    /// five, which is the artist buying ten ghosts and paying for them.
-    static var residentCeilingBytes: Int {
-        let one = Int(maxCompositeEdge * maxCompositeEdge) * 4
-        return one * (sourceCacheLimit + 1)
+    /// The floor never scales a skin *up*: on a canvas smaller than this the skin is the canvas.
+    static let readableFloorEdge: CGFloat = 768
+
+    /// The size the composite is rendered at, and the size its sources are reduced to.
+    ///
+    /// | canvas | Full | Half | Quarter |
+    /// |---|---|---|---|
+    /// | 4096² | 4096² | 2048² | 1024² |
+    /// | 2048² | 2048² | 1024² | 768² (floored) |
+    /// | 1024² | 1024² | 768² (floored) | 768² (floored) |
+    /// | 512² | 512² | 512² | 512² (never upscaled) |
+    static func compositeSize(for canvasSize: CGSize,
+                              resolution: OnionSkinSettings.Resolution) -> CGSize {
+        compositeSize(for: canvasSize, fraction: resolution.fraction, floorEdge: readableFloorEdge)
     }
 
-    /// The size the composite is rendered at. Returns `canvasSize` unchanged when it is already
-    /// within the cap, so this is inert on every canvas that never had a problem — and it never
-    /// scales *up*, because a skin larger than the drawing it ghosts is pure cost.
-    static func compositeSize(for canvasSize: CGSize) -> CGSize {
-        compositeSize(for: canvasSize, maxEdge: maxCompositeEdge)
-    }
-
-    /// The rule against a stated cap — the half a test pins, so the number in the table above is
+    /// The rule against a stated fraction and floor — the half a test pins, so the table above is
     /// checked rather than remembered.
-    static func compositeSize(for canvasSize: CGSize, maxEdge: CGFloat) -> CGSize {
+    static func compositeSize(for canvasSize: CGSize, fraction: CGFloat, floorEdge: CGFloat) -> CGSize {
         let longest = max(canvasSize.width, canvasSize.height)
-        guard maxEdge > 0, longest > maxEdge else { return canvasSize }
-        let scale = maxEdge / longest
+        guard longest > 0, fraction > 0 else { return canvasSize }
+        // Apply the fraction, raise it to the floor, then refuse to exceed the canvas. The last clamp
+        // is what stops the floor from magnifying a small document's skin above its own artwork,
+        // which would be pure cost for no pixels.
+        let wanted = min(longest, max(longest * fraction, floorEdge))
+        guard wanted < longest else { return canvasSize }
+        let scale = wanted / longest
         // Floored to whole pixels for `RenderResolution.renderSize`'s reason: the app's several
         // rounding sites do not agree, and a source one pixel wider than the buffer reading it is a
         // garbage edge rather than a soft one.
         return CGSize(width: max(1, (canvasSize.width * scale).rounded(.down)),
                       height: max(1, (canvasSize.height * scale).rounded(.down)))
+    }
+
+    /// **Bytes, not entries, and the resolution setting is what made that necessary.** At a fixed
+    /// 1024 skin an entry was 4 MiB and counting them was a fine proxy; with Full on a 4096² document
+    /// an entry is 64 MiB, and a count-based limit would happily hold 768 MiB on a 3 GB iPad. The
+    /// ceiling is now a number of bytes and the entry count falls out of the size the artist chose.
+    ///
+    /// **64 MiB is the whole subsystem, composite included**, not just the sources. Budgeting the
+    /// sources alone was the first version and it reported a *higher* ceiling at Half (80 MiB) than
+    /// at Full (64 MiB), which is nonsense on its face — the composite has to come out of the same
+    /// allowance as the things feeding it, or the total is whatever the arithmetic happens to give.
+    ///
+    /// 64 MiB is a third of the compositor's own budget on the owner's 3 GB iPad, and the onion skin
+    /// is a reference the artist looks *through* — it should not be able to outweigh a third of the
+    /// thing it is a reference to. Full resolution spends the whole of it on the composite and caches
+    /// nothing, which is correct rather than a shortfall: at Full there is no reduction, so
+    /// `OnionSkinRasterCache` hands back the compositor's own shared memo instead of a second copy.
+    static let residentBudgetBytes = 64 * 1024 * 1024
+
+    /// Never fewer than two sources, whatever the budget arithmetic says, so the shipped default of
+    /// one skin either side always caches. A cache that holds nothing is worse than no cache: it pays
+    /// the bookkeeping and delivers none of the hits.
+    static let minimumSourceCacheEntries = 2
+
+    /// How many reduced sources are held at `size`.
+    ///
+    /// **The window plus two, bounded by bytes.** The most skins that can be on screen at once is
+    /// `maxSkinsPerSide` a side; a cache of exactly that size is full at all times, so stepping the
+    /// playhead one frame brings one new cel in and evicts one — every move pays a miss, forever,
+    /// even after the artist has been all the way round the cycle. Slack is what turns that into
+    /// hits, and two is enough because a playhead moves one step at a time.
+    static func sourceCacheLimit(entryBytes: Int) -> Int {
+        let window = OnionSkinSettings.maxSkinsPerSide * 2 + 2
+        guard entryBytes > 0 else { return window }
+        // The composite is one entry's worth of the same budget, so it is subtracted before the
+        // sources get their share — see `residentBudgetBytes`.
+        let forSources = max(0, residentBudgetBytes - entryBytes)
+        return max(minimumSourceCacheEntries, min(window, forSources / entryBytes))
+    }
+
+    /// Everything the onion skin can hold at once, in bytes: one composite plus a source cache
+    /// bounded by `sourceCacheBudgetBytes`.
+    ///
+    /// **This is a ceiling, not a cost.** The cache only ever fills to the number of skins actually
+    /// asked for, so the shipped default of one skin either side holds two sources and one composite.
+    static func residentCeilingBytes(for canvasSize: CGSize,
+                                     resolution: OnionSkinSettings.Resolution) -> Int {
+        let size = compositeSize(for: canvasSize, resolution: resolution)
+        let entry = Int(size.width.rounded()) * Int(size.height.rounded()) * 4
+        // At Full there is no reduction, so nothing is cached here at all — the sources are the
+        // compositor's own entries and are already counted against its budget, not this one.
+        let cached = size == canvasSize ? 0 : entry * sourceCacheLimit(entryBytes: entry)
+        return entry + cached
     }
 }
 
@@ -570,7 +658,11 @@ enum OnionSkinRasterCache {
         lock.lock()
         installMemoryObserverIfNeeded()
         if entries.updateValue(reduced, forKey: key) == nil { order.append(key) }
-        while order.count > OnionSkinBudget.sourceCacheLimit, let evicted = order.first {
+        // The limit is derived from *this* entry's size rather than fixed, because the artist can now
+        // change the resolution and with it what one entry costs — see `OnionSkinBudget`. Entries at
+        // an older resolution are a different key and simply age out through the same eviction.
+        let limit = OnionSkinBudget.sourceCacheLimit(entryBytes: bytes(of: reduced))
+        while order.count > limit, let evicted = order.first {
             order.removeFirst()
             entries.removeValue(forKey: evicted)
         }
@@ -587,7 +679,11 @@ enum OnionSkinRasterCache {
     /// What this is holding, for `PerfBaselineTests`. Nothing in the render path reads it.
     static var residentBytes: Int {
         lock.lock(); defer { lock.unlock() }
-        return entries.values.reduce(0) { $0 + ($1.cgImage?.bytesPerRow ?? 0) * ($1.cgImage?.height ?? 0) }
+        return entries.values.reduce(0) { $0 + bytes(of: $1) }
+    }
+
+    private static func bytes(of image: UIImage) -> Int {
+        (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0)
     }
 
     /// Registered lazily rather than in a static initialiser so a process that never turns onion skin
@@ -625,7 +721,7 @@ struct OnionSkinSettingsSource: OnionSkinSource {
         // **Frames come out at onion-skin resolution, not canvas resolution**, so the composite draws
         // them 1:1 instead of resampling a 4096² image once per skin per rebuild. That resample was
         // 73% of the cost of a rebuild — see `OnionSkinBudget` for the measurement that found it.
-        let skinSize = OnionSkinBudget.compositeSize(for: canvasSize)
+        let skinSize = OnionSkinBudget.compositeSize(for: canvasSize, resolution: settings.resolution)
         let cels = manager.layers[manager.currentLayerIndex].cels
         guard !cels.isEmpty else { return [] }
         let spans = cels.map { CelSpan(start: $0.startFrame, length: $0.frameCount) }
@@ -721,7 +817,8 @@ struct InterpolationReferenceOnionSkinSource: OnionSkinSource {
             // references have no cel-version identity to memoize on the way the settings source does —
             // so it is the one path that pays a full render per pass, and rendering it at 4096² was
             // paying that at sixteen times the necessary size.
-            let skinSize = OnionSkinBudget.compositeSize(for: canvasSize)
+            let skinSize = OnionSkinBudget.compositeSize(for: canvasSize,
+                                                          resolution: manager.onionSkin.resolution)
             let bounds = CGRect(origin: .zero, size: skinSize)
             // One reference can span layers (requirement 5), so its cels flatten into one frame —
             // otherwise lineart and flats would tint as two separate onion skins.

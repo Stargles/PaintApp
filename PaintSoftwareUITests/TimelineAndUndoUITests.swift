@@ -43,6 +43,7 @@ final class TimelineGestureUITests: PaintUITestCase {
                            "onionPanel.loopToggle",
                            "onionPanel.nextCountSlider",
                            "onionPanel.colouringPicker",
+                           "onionPanel.resolutionPicker",
                            "onionPanel.tintBar",
                            "onionPanel.linkOpacityToggle",
                            "onionPanel.previous.opacity1",

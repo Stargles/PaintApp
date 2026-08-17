@@ -423,7 +423,7 @@ struct AnimationTimeline: View {
         .accessibilityIdentifier("timeline.onionSkinToggle")
         .popover(isPresented: $showOnionSkinOptions) {
             OnionSkinPanel(canvasManager: canvasManager)
-                .frame(width: 380, height: 590)
+                .frame(width: 380, height: 640)
                 .presentationCompactAdaptation(.popover)
                 // **A popover's default background is a light system material, and every label in
                 // this app's chrome is white.** Without this the panel renders white-on-white and is

@@ -34,6 +34,7 @@ struct OnionSkinPanel: View {
                 placementPicker
                 countRow
                 colouringPicker
+                resolutionPicker
                 tintBar
                 opacitySliders
 
@@ -149,6 +150,40 @@ struct OnionSkinPanel: View {
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("onionPanel.colouringPicker")
+    }
+
+    // MARK: - Resolution
+
+    /// How sharp the skins are, as a fraction of the canvas (owner, 2026-08-17). The caption states
+    /// what the setting *costs*, because that is the only reason to reach for it — and it names the
+    /// floor when the floor is what is actually in force, so a small document does not look like it
+    /// is ignoring the control.
+    private var resolutionPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("Resolution", selection: binding(\.resolution)) {
+                ForEach(OnionSkinSettings.Resolution.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("onionPanel.resolutionPicker")
+
+            Text(resolutionCaption)
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.55))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+
+    private var resolutionCaption: String {
+        guard let canvas = canvasManager.canvasSize else { return "Sharper skins cost more to draw" }
+        let size = OnionSkinBudget.compositeSize(for: canvas, resolution: settings.resolution)
+        let edge = Int(max(size.width, size.height).rounded())
+        let plain = max(canvas.width, canvas.height) * settings.resolution.fraction
+        // The floor only gets a mention when it is doing something; the rest of the time saying so
+        // would be noise about a rule that is not in force.
+        return edge > Int(plain.rounded()) && size != canvas
+            ? "\(edge) px — held up from \(Int(plain.rounded())) px so lines stay readable"
+            : "\(edge) px — sharper costs more to draw"
     }
 
     // MARK: - Tint bar

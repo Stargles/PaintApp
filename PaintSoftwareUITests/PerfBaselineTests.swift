@@ -2213,11 +2213,43 @@ final class PerfBaselineTests: XCTestCase {
     /// usual order-of-magnitude ceilings.
     ///
     /// **Tinted, because tinted is the default**, plus one untinted run for comparison — and that
-    /// comparison corrected an assumption worth recording. A tint opens a canvas-sized transparency
-    /// layer and fills it, so it looked like the expensive half; measured, ten tinted skins cost
-    /// 1178 ms against 951 ms untinted on this host, about a quarter more. **The cost is the
-    /// canvas-sized draw itself, not the tint**, which means "switch to Original Colors" is not an
-    /// escape hatch from a slow onion skin and the count is the only real lever.
+    /// comparison corrected an assumption worth recording. A tint opens a transparency layer and
+    /// fills it, so it looked like the expensive half; measured, ten tinted skins cost about a
+    /// quarter more than ten untinted ones. **The cost is the draw itself, not the tint**, which
+    /// means "switch to Original Colors" is not an escape hatch from a slow onion skin and the count
+    /// is the only real lever.
+    ///
+    /// ### Why this warms up, times without the memory sampler, and takes a minimum
+    ///
+    /// The first version of this took **one sample per figure, with the peak-memory sampler thread
+    /// running inside the timed region**, and on the owner's iPad 9 it reported `skins5 = 153.9 ms`
+    /// against `skins10 = 136.9 ms` — ten skins apparently cheaper than five, which cannot be true of
+    /// a loop that draws each skin once.
+    ///
+    /// It was not the source cache, and ruling that out is a matter of reading rather than measuring:
+    /// the three `skinsN` figures call `OnionSkinFrame.composite` directly on frames built from one
+    /// image made *before* the loop at skin size, and `composite` is a pure function that touches no
+    /// cache at all. `OnionSkinRasterCache` is not reached until `sourceMiss` further down.
+    ///
+    /// Two things could inflate a single early sample, and this now removes both:
+    ///
+    ///  * **A cold CPU.** `skins1` is ~12 ms, far too short a burst for iOS to raise the clock, so
+    ///    `skins5` was the first sustained work in the process and paid the ramp; by `skins10` the
+    ///    cores were up. A Mac under sustained load from several agents is already at a high clock,
+    ///    which is exactly why the simulator stayed monotonic and the device did not. `skins5Cold`
+    ///    below is reported precisely so the next device run can confirm or refute this: it is the
+    ///    very first composite in the process, and if it is far above the warmed `skins5` then this
+    ///    was the mechanism.
+    ///  * **The sampler thread.** `measuringPeakMemory` busy-polls `task_info` every 2 ms at
+    ///    `.userInitiated`, which on a 2+4-core A13 competes for a core with the thing it is timing.
+    ///    It cannot explain *this* inversion (its cost grows with duration, so it would inflate
+    ///    `skins10` more, not less) but it has no business inside a timing measurement, so memory is
+    ///    now sampled in its own pass.
+    ///
+    /// **The monotonicity assertion at the bottom is the point of the whole exercise.** A figure that
+    /// reads as a warm draw has to be one; if the ordering ever inverts again the test fails and says
+    /// so, rather than printing a number a later session would reasonably misread. That is the same
+    /// rule as "a green suite that ran nothing", applied to a benchmark.
     ///
     /// This is the number the device check hangs on. If ten skins cost more than a frame on the
     /// owner's hardware, `OnionSkinSettings.maxSkinsPerSide` is the lever, and it is one constant.
@@ -2225,7 +2257,7 @@ final class PerfBaselineTests: XCTestCase {
         let canvas = CGSize(width: 4096, height: 4096)
         // A 3 GB device's texture budget, stated rather than read, for
         // `CompositorBudget.textureBudgetBytes(physicalMemory:)`'s reason.
-        let size = OnionSkinBudget.compositeSize(for: canvas)
+        let size = OnionSkinBudget.compositeSize(for: canvas, resolution: .quarter)
 
         // **Sources at skin resolution, because that is what the app now hands the composite.**
         // `OnionSkinRasterCache` reduces each cel once per version and the composite draws it 1:1;
@@ -2240,18 +2272,52 @@ final class PerfBaselineTests: XCTestCase {
                                          tint: tinted ? .systemRed : nil) }
         }
 
-        var images: [Int: UIImage?] = [:]
         var timings: [(String, String)] = [("compositeSize", "\(Int(size.width))x\(Int(size.height))")]
+
+        // **First, before anything else in this process**: one cold sample of the five-skin case, the
+        // figure that inverted on the device. Reported beside the warmed one so the next device run
+        // settles what caused it rather than leaving it argued.
+        let coldStart = CFAbsoluteTimeGetCurrent()
+        autoreleasepool { _ = OnionSkinFrame.composite(skins(5, tinted: true), size: size) }
+        timings.append(("skins5Cold", milliseconds(CFAbsoluteTimeGetCurrent() - coldStart)))
+
+        // Warm: every count run once, untimed, so no reported figure pays a first-touch page fault or
+        // a clock ramp that belongs to the measurement before it.
+        for count in [1, 5, 10] {
+            autoreleasepool { _ = OnionSkinFrame.composite(skins(count, tinted: true), size: size) }
+        }
+
+        // Timed with no sampler thread in the way, minimum of five — contention and DVFS can only
+        // ever make a sample longer, so the minimum is the one least contaminated by either.
+        func timeMin(_ repeats: Int = 5, _ body: () -> Void) -> Double {
+            var best = Double.greatestFiniteMagnitude
+            for _ in 0..<repeats {
+                let start = CFAbsoluteTimeGetCurrent()
+                autoreleasepool { body() }
+                best = Swift.min(best, CFAbsoluteTimeGetCurrent() - start)
+            }
+            return best
+        }
+
+        var warm: [Int: Double] = [:]
+        for count in [1, 5, 10] {
+            warm[count] = timeMin { _ = OnionSkinFrame.composite(skins(count, tinted: true), size: size) }
+            timings.append(("skins\(count)", milliseconds(warm[count] ?? 0)))
+        }
+
+        // Memory in its own pass, where the sampler thread costs the timings nothing. Each result is
+        // held so the peak reflects a composite that actually exists — the claim under test is that
+        // this figure does not grow with the skin count.
+        var images: [Int: UIImage?] = [:]
         for count in [1, 5, 10] {
             let run = measuringPeakMemory { autoreleasepool { images[count] = OnionSkinFrame.composite(skins(count, tinted: true), size: size) } }
-            timings.append(("skins\(count)", milliseconds(run.seconds)))
             timings.append(("peak\(count)", megabytes(run.peakBytes)))
         }
+
         // The same ten skins untinted, so the two colouring modes are compared rather than guessed at.
         // See the doc comment: this pair is what showed the tint is a quarter of the cost and the
         // draw is the rest.
-        let plain = measuringPeakMemory { autoreleasepool { _ = OnionSkinFrame.composite(skins(10, tinted: false), size: size) } }
-        timings.append(("skins10Untinted", milliseconds(plain.seconds)))
+        timings.append(("skins10Untinted", milliseconds(timeMin { _ = OnionSkinFrame.composite(skins(10, tinted: false), size: size) })))
 
         // **What a cache miss costs, which is the other half of a rebuild.** A skin whose cel has not
         // been reduced to this size yet pays one downscale from the canvas-sized rasterize; after
@@ -2260,13 +2326,20 @@ final class PerfBaselineTests: XCTestCase {
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
         cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: canvas.width * 0.6,
                                                                      height: canvas.height * 0.6), size: canvas)
-        OnionSkinRasterCache.removeAll()
-        let miss = measuringPeakMemory { autoreleasepool { _ = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: size) } }
-        let hit = measuringPeakMemory { autoreleasepool { _ = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: size) } }
-        timings.append(("sourceMiss", milliseconds(miss.seconds)))
-        timings.append(("sourceHit", milliseconds(hit.seconds)))
+        // A miss is *inherently* cold, so it cannot be warmed — but it can still be repeated, with the
+        // cache cleared before each attempt, and the minimum taken. Without that this figure swung
+        // from 119 ms to 256 ms between two runs on the same code purely with machine load.
+        var bestMiss = Double.greatestFiniteMagnitude
+        for _ in 0..<4 {
+            OnionSkinRasterCache.removeAll()
+            let start = CFAbsoluteTimeGetCurrent()
+            autoreleasepool { _ = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: size) }
+            bestMiss = Swift.min(bestMiss, CFAbsoluteTimeGetCurrent() - start)
+        }
+        timings.append(("sourceMiss", milliseconds(bestMiss)))
+        timings.append(("sourceHit", milliseconds(timeMin { _ = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: size) })))
         timings.append(("cacheResident", megabytes(UInt64(OnionSkinRasterCache.residentBytes))))
-        timings.append(("residentCeiling", megabytes(UInt64(OnionSkinBudget.residentCeilingBytes))))
+        timings.append(("residentCeiling", megabytes(UInt64(OnionSkinBudget.residentCeilingBytes(for: canvas, resolution: .quarter)))))
         report("onion skin composite, 4096x4096 canvas on a 3 GB device", timings)
         OnionSkinRasterCache.removeAll()
 
@@ -2276,8 +2349,24 @@ final class PerfBaselineTests: XCTestCase {
             // image, the same size as one skin's.
             XCTAssertEqual(image.size, size, "\(count) skins must flatten into exactly one image of the budgeted size")
         }
-        XCTAssertEqual(max(size.width, size.height), OnionSkinBudget.maxCompositeEdge,
-                       "a 4096 canvas must composite at the cap — otherwise the resolution rule is not doing anything")
+        XCTAssertLessThan(size.width, canvas.width,
+                          "a 4096 canvas at Quarter must composite below native — otherwise the resolution rule is inert")
+
+        // **The ordering, asserted rather than printed.** `composite` draws each skin once, so more
+        // skins must cost more; a figure that says otherwise is measuring something other than the
+        // warm draw its name claims, and a later session would read it as gospel. The multipliers are
+        // deliberately far below the real ratios (about 6x and 2x on every host measured) so this
+        // fails on an inversion and not on a noisy machine — the device figure that prompted it had
+        // ten skins at 0.89x five, which this catches with room to spare.
+        guard let one = warm[1], let five = warm[5], let ten = warm[10] else {
+            return XCTFail("every count must have been timed")
+        }
+        XCTAssertGreaterThan(five, one * 1.5,
+                             "five skins must cost meaningfully more than one — got \(milliseconds(five)) against \(milliseconds(one))")
+        XCTAssertGreaterThan(ten, five * 1.2,
+                             "ten skins must cost more than five — got \(milliseconds(ten)) against \(milliseconds(five)). "
+                             + "If this fails on the device with skins5Cold near the old 153.9 ms, the cold-clock reading was right; "
+                             + "if it fails with skins5Cold close to skins5, it is something else and worth finding.")
     }
 
     /// **Is an onion composite bound by the pixels it writes, or by the pixels it reads?** The whole
@@ -2353,5 +2442,59 @@ final class PerfBaselineTests: XCTestCase {
         // premise: both paths really did produce a composite of the size asked for.
         XCTAssertEqual(OnionSkinFrame.composite(skins(10, from: big), size: target)?.size, target)
         XCTAssertEqual(OnionSkinFrame.composite(skins(10, from: small), size: target)?.size, target)
+    }
+
+    /// **What each resolution option costs, so "Full" is a fact rather than a surprise.**
+    ///
+    /// The artist picks a fraction of canvas resolution in the onion-skin panel (owner, 2026-08-17)
+    /// and the panel cannot say what that costs — this can. Two skin counts are reported per option:
+    /// the shipped default of one either side, which is what most artists will ever pay, and ten,
+    /// which is the ceiling they can dial in.
+    ///
+    /// Sources are pre-reduced and the cache pre-warmed, because that is the steady state the app
+    /// runs in: a rebuild happens when the playhead changes drawing, and by then the drawings in the
+    /// window have been reduced once each. `sourceMiss` in the test above is the other half.
+    func testOnionSkinCostOfEachResolutionOption() {
+        let canvas = CGSize(width: 4096, height: 4096)
+        func timeMin(_ repeats: Int = 4, _ body: () -> Void) -> Double {
+            var best = Double.greatestFiniteMagnitude
+            for _ in 0..<repeats {
+                let start = CFAbsoluteTimeGetCurrent()
+                autoreleasepool { body() }
+                best = Swift.min(best, CFAbsoluteTimeGetCurrent() - start)
+            }
+            return best
+        }
+
+        var rows: [(String, String)] = []
+        for resolution in OnionSkinSettings.Resolution.allCases {
+            let size = OnionSkinBudget.compositeSize(for: canvas, resolution: resolution)
+            let source = CanvasFixture.solidImage(.red,
+                                                  rect: CGRect(x: 0, y: 0, width: size.width * 0.6,
+                                                               height: size.height * 0.6),
+                                                  size: size)
+            func skins(_ n: Int) -> [OnionSkinFrame] {
+                (0..<n).map { OnionSkinFrame(image: source, opacity: CGFloat(n - $0) / CGFloat(n),
+                                             tint: .systemRed) }
+            }
+            // Warm, for `testOnionSkinCompositeCostScalesWithSkinCountAndNotWithMemory`'s reason: a
+            // cold clock inverted two of its figures on the device.
+            autoreleasepool { _ = OnionSkinFrame.composite(skins(10), size: size) }
+
+            let name = resolution.title
+            rows.append(("\(name)Size", "\(Int(size.width))x\(Int(size.height))"))
+            rows.append(("\(name)Default2", milliseconds(timeMin { _ = OnionSkinFrame.composite(skins(2), size: size) })))
+            rows.append(("\(name)Max10", milliseconds(timeMin { _ = OnionSkinFrame.composite(skins(10), size: size) })))
+            rows.append(("\(name)Ceiling", megabytes(UInt64(OnionSkinBudget.residentCeilingBytes(for: canvas, resolution: resolution)))))
+        }
+        report("onion skin cost per resolution option, 4096x4096 canvas", rows)
+
+        // Structural, not a timing threshold: the options have to actually differ, or the control the
+        // owner asked for is decoration.
+        let sizes = OnionSkinSettings.Resolution.allCases.map {
+            OnionSkinBudget.compositeSize(for: canvas, resolution: $0)
+        }
+        XCTAssertEqual(Set(sizes.map(\.width)).count, sizes.count,
+                       "every resolution option must produce a different size on a 4096 canvas")
     }
 }

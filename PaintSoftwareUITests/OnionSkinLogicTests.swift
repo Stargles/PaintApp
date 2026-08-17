@@ -495,43 +495,102 @@ final class OnionSkinLogicTests: XCTestCase {
 
     // MARK: - Resolution and memory ceiling
 
-    /// The resolution rule, pinned against a stated cap rather than the shipped constant, so moving
-    /// the constant is a product decision and not a test failure.
-    func testTheCompositeIsCappedOnItsLongestEdgeAndNeverScaledUp() {
-        let cap: CGFloat = 1024
+    /// The resolution rule: the artist's fraction, floored at a readable size, never scaled up.
+    /// Pinned against a stated fraction and floor rather than the shipped constants, so moving either
+    /// is a product decision and not a test failure.
+    func testResolutionAppliesTheFractionThenTheReadableFloorAndNeverScalesUp() {
+        let floor: CGFloat = 768
+        func size(_ canvas: CGFloat, _ fraction: CGFloat) -> CGSize {
+            OnionSkinBudget.compositeSize(for: CGSize(width: canvas, height: canvas),
+                                          fraction: fraction, floorEdge: floor)
+        }
 
-        XCTAssertEqual(OnionSkinBudget.compositeSize(for: CGSize(width: 800, height: 600), maxEdge: cap),
-                       CGSize(width: 800, height: 600),
-                       "inert below the cap — and never scaled *up*, which would be pure cost")
+        // A big canvas: the fraction is what is in force and the floor never binds.
+        XCTAssertEqual(size(4096, 1.0), CGSize(width: 4096, height: 4096))
+        XCTAssertEqual(size(4096, 0.5), CGSize(width: 2048, height: 2048))
+        XCTAssertEqual(size(4096, 0.25), CGSize(width: 1024, height: 1024))
 
-        let square = OnionSkinBudget.compositeSize(for: CGSize(width: 4096, height: 4096), maxEdge: cap)
-        XCTAssertEqual(square, CGSize(width: 1024, height: 1024))
+        // **A small canvas is where a pure fraction would be wrong.** Half of 1024 is 512, which the
+        // resolution sweep showed collapsing hatching into moiré — so the floor raises it.
+        XCTAssertEqual(size(1024, 0.5), CGSize(width: floor, height: floor))
+        XCTAssertEqual(size(1024, 0.25), CGSize(width: floor, height: floor))
+        XCTAssertEqual(size(2048, 0.25), CGSize(width: floor, height: floor))
 
-        // Aspect is preserved and it is the *longest* edge that is capped, so a wide canvas is not
-        // squared off and does not sneak past the cap on its long side.
-        let wide = OnionSkinBudget.compositeSize(for: CGSize(width: 4096, height: 2048), maxEdge: cap)
-        XCTAssertEqual(wide, CGSize(width: 1024, height: 512))
-        let tall = OnionSkinBudget.compositeSize(for: CGSize(width: 2048, height: 4096), maxEdge: cap)
-        XCTAssertEqual(tall, CGSize(width: 512, height: 1024))
+        // And the floor must never magnify a skin above the artwork it ghosts.
+        XCTAssertEqual(size(512, 0.25), CGSize(width: 512, height: 512),
+                       "the floor may raise a skin toward the canvas, never past it")
+        XCTAssertEqual(size(700, 0.5), CGSize(width: 700, height: 700))
+
+        // Aspect is preserved and it is the *longest* edge the rule acts on, so a wide canvas is not
+        // squared off and does not sneak past on its long side.
+        XCTAssertEqual(OnionSkinBudget.compositeSize(for: CGSize(width: 4096, height: 2048),
+                                                     fraction: 0.25, floorEdge: floor),
+                       CGSize(width: 1024, height: 512))
     }
 
-    /// **The whole memory claim, as arithmetic rather than as prose.** Everything the onion skin
-    /// holds is one composite plus a full source cache, all at the cap — so the ceiling is a fact
-    /// about two constants and cannot drift with the canvas, the skin count, or the device.
-    func testTheResidentCeilingIsOneCompositePlusAFullSourceCache() {
-        let one = Int(OnionSkinBudget.maxCompositeEdge * OnionSkinBudget.maxCompositeEdge) * 4
-        XCTAssertEqual(OnionSkinBudget.residentCeilingBytes,
-                       one * (OnionSkinBudget.sourceCacheLimit + 1))
-        XCTAssertGreaterThan(OnionSkinBudget.sourceCacheLimit, OnionSkinSettings.maxSkinsPerSide * 2,
-                             "the cache must be strictly larger than the window it caches, or every "
-                             + "playhead step evicts the cel it is about to need again")
+    /// The shipped options, as the owner named them, and the default they asked for.
+    func testTheShippedResolutionsAreFullHalfQuarterAndDefaultToHalf() {
+        XCTAssertEqual(OnionSkinSettings().resolution, .half, "the owner's call: default half resolution")
+        XCTAssertEqual(OnionSkinSettings.Resolution.allCases.map(\.fraction), [1, 0.5, 0.25])
+        let canvas = CGSize(width: 4096, height: 4096)
+        XCTAssertEqual(OnionSkinBudget.compositeSize(for: canvas, resolution: .full), canvas,
+                       "Full must mean full — no reduction, and so nothing for the source cache to hold")
+        XCTAssertEqual(OnionSkinBudget.compositeSize(for: canvas, resolution: .half),
+                       CGSize(width: 2048, height: 2048))
+    }
 
-        // A number worth failing on rather than merely reporting: even at its ceiling — ten skins, the
-        // most the artist can ask for — a ghost may not cost more than a third of the compositor's own
-        // budget on the owner's 3 GB iPad. The *default* is two sources and a composite, about a
-        // quarter of that ceiling.
+    /// **The whole memory claim, as arithmetic rather than as prose**, now that the artist can choose
+    /// how big an entry is. The cache is bounded in *bytes*, so a resolution that makes entries four
+    /// times larger holds four times fewer of them rather than four times the memory.
+    func testTheSourceCacheIsBoundedInBytesAtEveryResolution() {
+        let canvas = CGSize(width: 4096, height: 4096)
+        for resolution in OnionSkinSettings.Resolution.allCases {
+            let ceiling = OnionSkinBudget.residentCeilingBytes(for: canvas, resolution: resolution)
+            XCTAssertLessThanOrEqual(ceiling, OnionSkinBudget.residentBudgetBytes,
+                                     "\(resolution.rawValue): the budget covers the composite too, or the "
+                                     + "total is whatever the arithmetic happens to give — which is how Half "
+                                     + "once reported a higher ceiling than Full")
+        }
+        // And a third of the compositor's own budget on the owner's 3 GB iPad: a reference the artist
+        // looks *through* may not outweigh a third of the thing it references.
         let compositorBudget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024)
-        XCTAssertLessThan(OnionSkinBudget.residentCeilingBytes, compositorBudget / 3)
+        XCTAssertLessThanOrEqual(OnionSkinBudget.residentBudgetBytes, compositorBudget / 3)
+
+        // A quarter-resolution entry is a sixteenth of a full-resolution one, so the cache holds many
+        // more of them — the count falls out of the size rather than being fixed.
+        let quarterEntry = 1024 * 1024 * 4
+        let halfEntry = 2048 * 2048 * 4
+        XCTAssertGreaterThan(OnionSkinBudget.sourceCacheLimit(entryBytes: quarterEntry),
+                             OnionSkinBudget.sourceCacheLimit(entryBytes: halfEntry))
+        XCTAssertGreaterThanOrEqual(OnionSkinBudget.sourceCacheLimit(entryBytes: 512 * 1024 * 1024),
+                                    OnionSkinBudget.minimumSourceCacheEntries,
+                                    "even an absurd entry size must leave room for the default two skins")
+        XCTAssertGreaterThan(OnionSkinBudget.sourceCacheLimit(entryBytes: quarterEntry),
+                             OnionSkinSettings.maxSkinsPerSide * 2,
+                             "at the cheap end the cache must still be larger than the window it caches")
+    }
+
+    /// **Changing the resolution must not serve skins at the old one.** Both caches key on the size,
+    /// and this is the assertion that says so rather than the comment that hopes so.
+    func testChangingResolutionMintsFreshSourcesRatherThanReusingTheOldOnes() {
+        let canvas = CGSize(width: 4096, height: 4096)
+        var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
+        cel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 2000, height: 2000),
+                                                  size: canvas)
+        OnionSkinRasterCache.removeAll()
+
+        let quarter = OnionSkinBudget.compositeSize(for: canvas, resolution: .quarter)
+        let half = OnionSkinBudget.compositeSize(for: canvas, resolution: .half)
+        XCTAssertNotEqual(quarter, half, "premise: the two settings really do differ on this canvas")
+
+        let atQuarter = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: quarter)
+        let atHalf = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: half)
+        XCTAssertEqual(atQuarter.size, quarter)
+        XCTAssertEqual(atHalf.size, half)
+        XCTAssertFalse(atQuarter === atHalf, "a resolution change must not hand back the old size")
+        // And going back is still a hit, so flipping between two settings does not re-render both.
+        XCTAssertTrue(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: quarter) === atQuarter)
+        OnionSkinRasterCache.removeAll()
     }
 
     /// A reduced source is built once per cel version and then handed back by identity — the property
@@ -539,7 +598,7 @@ final class OnionSkinLogicTests: XCTestCase {
     /// rebuilt every call would pass a content comparison and would have fixed nothing.
     func testAReducedSourceIsBuiltOncePerCelVersionAndSkippedEntirelyWhenNoReductionIsNeeded() {
         let canvas = CGSize(width: 2048, height: 2048)
-        let small = OnionSkinBudget.compositeSize(for: canvas)
+        let small = OnionSkinBudget.compositeSize(for: canvas, resolution: .quarter)
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
         cel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 900, height: 900),
                                                   size: canvas)
@@ -563,7 +622,7 @@ final class OnionSkinLogicTests: XCTestCase {
         var smallCel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: tiny))
         smallCel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 20, height: 20))
         let passthrough = OnionSkinRasterCache.image(for: smallCel, canvasSize: tiny,
-                                                     at: OnionSkinBudget.compositeSize(for: tiny))
+                                                     at: OnionSkinBudget.compositeSize(for: tiny, resolution: .quarter))
         XCTAssertTrue(passthrough === PixelOps.rasterize(cel: smallCel, canvasSize: tiny))
         XCTAssertEqual(OnionSkinRasterCache.residentBytes, 0,
                        "a document under the cap must not fill an onion cache it has no use for")
@@ -571,18 +630,18 @@ final class OnionSkinLogicTests: XCTestCase {
 
     func testTheSourceCacheEvictsRatherThanGrowing() {
         let canvas = CGSize(width: 2048, height: 2048)
-        let small = OnionSkinBudget.compositeSize(for: canvas)
+        let small = OnionSkinBudget.compositeSize(for: canvas, resolution: .quarter)
+        let perEntry = Int(small.width.rounded()) * Int(small.height.rounded()) * 4
+        let limit = OnionSkinBudget.sourceCacheLimit(entryBytes: perEntry)
         OnionSkinRasterCache.removeAll()
-        for index in 0..<(OnionSkinBudget.sourceCacheLimit + 4) {
+        for index in 0..<(limit + 4) {
             var cel = Cel(id: UUID(), startFrame: index, frameCount: 1, raster: .empty(size: canvas))
             cel.bakedImage = CanvasFixture.solidImage(.red,
                                                       rect: CGRect(x: index, y: 0, width: 40, height: 40),
                                                       size: canvas)
             _ = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small)
         }
-        let perEntry = Int(small.width.rounded()) * Int(small.height.rounded()) * 4
-        XCTAssertLessThanOrEqual(OnionSkinRasterCache.residentBytes,
-                                 perEntry * OnionSkinBudget.sourceCacheLimit,
+        XCTAssertLessThanOrEqual(OnionSkinRasterCache.residentBytes, perEntry * limit,
                                  "more cels than the limit must evict, not accumulate")
         OnionSkinRasterCache.removeAll()
         XCTAssertEqual(OnionSkinRasterCache.residentBytes, 0)
