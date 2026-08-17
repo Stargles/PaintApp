@@ -14,9 +14,6 @@ Prune it first, before adding the new asks.
 
 New this pass (owner, 2026-08-17):
 
-- [ ] **The `try?` in `ProjectStore` that discards a whole cel — do this next** (owner's call,
-      2026-08-17). Full entry in [BUGS.md](BUGS.md); it is a permanent-data-loss path, it is small and
-      self-contained, and it has to land before any text object reaches disk regardless.
 - [ ] **One colour picker, not two.** The canvas colour changer differs from the brush's; they should be
       the same control. If a second implementation exists, delete it rather than leaving it unreferenced.
 - [ ] **An eyedropper on the left sidebar, below the opacity slider.** Confirmed with the owner
@@ -69,6 +66,23 @@ Carried over:
 
 ## Done this pass
 
+- The `try?` in `ProjectStore` that discarded a whole vector cel on one unreadable field. It wrapped
+  the entire decode and fell back to `VectorCanvas.empty`, so a single field it could not read threw
+  away every stroke, fill, image and erase mark on the cel — silently, and the next save wrote the loss
+  to disk for good. `VectorCanvasData` now decodes its display list one element at a time through a
+  `LossySlot` wrapper whose `init(from:)` never throws: `JSONDecoder`'s unkeyed container only advances
+  past a slot once it decodes successfully, so the obvious try/catch/continue loop would have re-read
+  the failing slot forever. An unknown `kind` (a newer file opened by an older build) and a malformed
+  known `kind` (an actual defect) are told apart at the discriminator and logged at different
+  severities rather than collapsed into one silent failure; the counts land in a `DecodeReport` and a
+  log line, not a banner, because `ProjectBackupManager` already stashes the pre-save package on every
+  save, so the intact original survives a load that dropped something. Whether a partial load should
+  also refuse to overwrite is a save-semantics call left to the owner. 12 new
+  `VectorCanvasDataLogicTests`, on counts and identities rather than "did not throw" — the exact signal
+  the old code gave while it destroyed the drawing. Closes the BUGS.md entry and leaves four collateral
+  findings behind it: `validateProject` cannot see this class of damage either, the manifest's
+  layer/cel arrays decode the same all-or-nothing way one level up, a corrupt raster PNG loses its cel
+  with no log at all, and one bad swatch drops an artist's entire palette library.
 - Smart-shape snap, and with it the whole shape-gesture branch that had been stuck behind it (handles
   sized in screen points, the oval and rectangle anchoring their opposite node, pinch-from-centre, the
   hold measured on the pen's own clock). The cause was `UIGestureRecognizer.requiresExclusiveTouchType`,
