@@ -6,20 +6,29 @@ branch exists. **Three in flight at once**, unless the extras need no simulator 
 
 ## In flight
 
-- [ ] **17 fps drawing on a 4K canvas.** Render resolution at 50% changes nothing, which rules out the
-      compositor. Device run points at `vector layer render | firstRender=70.0ms` at 2048² — the layer
-      being drawn on invalidates its own cache, and the resolution option scales the compositor but not
-      the vector rasterization. `tmp/compperf`.
-- [ ] **Snap does not engage** — pen down, shape formed, add a finger, nothing. Cause: every canvas view
-      left `isMultipleTouchEnabled` at its `false` default, so a touch arriving in a *later* event is
-      dropped before any recognizer sees it. Fixed on `tmp/shapefix`; **needs device confirmation, and
-      testing with a resting palm** — a palm used to be harmless only because UIKit discarded it.
-- [ ] **Returning from another app freezes for a few seconds**, with no memory warning fired.
+- [ ] **Snap does not engage** — pen down, shape formed, add a finger, nothing. The
+      `isMultipleTouchEnabled` fix (`tmp/shapefix`, rebased as `tmp/shapedev`) was **built to the iPad
+      2026-08-17 and did not fix it** — necessary but not sufficient, so the branch stays unmerged. A
+      recording taken on that build says why: the finger now lands on the same view as the pen
+      (`hitClass StrokeCanvasView`) but is bound to only 6 recognizers against the pen's 15, and
+      **neither snap source — `stroke.*` nor `canvas.touchCounter` — is among them.** Never bound, so
+      it is a delivery problem, not a delegate one. `tmp/snapbind`.
+- [ ] **Pinch to merge two layers does not work.** Owner, 2026-08-17 — was listed done, was never true
+      at the gesture level. The model layer (`mergeLayers`, `mergeLossKind`, the confirmation alert) is
+      sound and covered; **nothing tests the pinch itself**, which is how it shipped. `tmp/pinchmerge`.
+- [ ] **The two lasso bugs**, taken together — a stroke leaving the selection and re-entering counts as
+      one and not two, and the lasso answers a finger while pencil-only mode is on. The second is
+      likely a third instance of the `fillPress`/`catchAll` hole: a recognizer whose action never sees
+      a `UITouch` and so cannot ask the touch type. `tmp/lasso`.
 
 ## Queued
 
-- [ ] **Lasso bridges the gap** — a stroke leaving the selection and re-entering counts as one, not two.
-- [ ] **Lasso responds to a finger in pencil-only mode.** Likely related to the snap finding.
+- [ ] **17 fps drawing on a 4K canvas.** Diagnosed and **not** the compositor: one dab costs 53.8 ms on
+      a vector layer at 4096² against 4.0 ms on raster, because `StrokeCanvasView.refreshDisplay`'s
+      `.overlay` branch allocates a fresh canvas-sized bitmap per touch-move. `renderResolution` never
+      reaches that path, which is why the owner's 50% test changed nothing. Fix is to give the scratch
+      its own layer; wants its own branch. Numbers in BUGS.md.
+- [ ] **Returning from another app freezes for a few seconds**, with no memory warning fired.
 - [ ] **Leaving to the gallery takes ~3 s.** The thumbnail composites the full 4K canvas for a 320×320
       tile; already in BUGS.md.
 
@@ -31,7 +40,6 @@ branch exists. **Three in flight at once**, unless the extras need no simulator 
 - Block resize pushes neighbours instead of shrinking them, with shuffle UI
 - Add-drawing menu gated; three timeline popovers collapsed into one
 - Layer drag un-nesting
-- Pinch-to-merge
 - Stroke cost follows a stroke's length, not its duration
 - Oval handles rotate with the opposite node anchored; handles sized in screen points
 - Compositor moved onto the GPU with a device-aware memory budget (merge gated on the 17 fps question)
