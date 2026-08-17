@@ -24,6 +24,58 @@ This is the shape the entry below (`StrokeGestureRecognizer.failTrackedStroke`) 
 that fails an already-begun stroke which nothing in the suite reaches. Next step is a capture — the
 action recorder (see CLAUDE.md) on the owner's iPad, reproducing a stroke started under an open
 timeline popover, read for where in the touch sequence delivery actually stops.
+## Drawing on a compositor document runs at ~17 fps on a 4K canvas, and the cap only dents it (2026-08-16)
+
+The owner reports 60 → 17 fps while drawing on a 4096² canvas with a bloom and a blur layer over a
+vector layer, on an iPad 9. The crash beside it is fixed (`CompositorBudget`); **this is a second,
+mostly independent cause and it is not the Metal flip.**
+
+§5.2's sandwich shows *one* canvas-sized layer at rest and *three* mid-stroke — `below`, the active
+layer's own host, `above` — and Core Animation minifies each of them from 4096² down to about 1300²
+device pixels with no mipmaps, so the texture-cache behaviour is close to worst case. One layer to
+three is a 3x rise in per-frame sampling against a 3.5x fall in frame rate, which is a tight enough
+fit to be the mechanism. It predates the backend flip: the sandwich engages on any document with an
+effect, whichever backend composites it.
+
+What landed helps and does not finish it. `CompositorBudget` caps the composite to 2896² on a 3 GB
+device, so two of the three layers shrink by half in area, and removing the memory pressure removes
+the compression/paging that was compounding it. The lever the artist has today is
+**Actions → render resolution → 50%**, which is exactly what that control is for.
+
+What would actually fix it: stop handing Core Animation a canvas-sized image to minify. Either render
+the sandwich halves at the *view's* size rather than the canvas's, or present the composite through a
+`CAMetalLayer` instead of reading it back into a `CGImage` at all — the readback is already measured
+as ~11.4 ms of a ~16 ms frame, so the two are the same piece of work.
+
+## The project thumbnail composites the whole canvas to make a 320x320 tile (2026-08-16)
+
+`ProjectStore.SaveSnapshot` builds a full `makeRenderRequest` at native canvas size, composites it,
+and hands the result to `ThumbnailRenderer.render(…, thumbnailSize: 320x320)`. On a 4096² document
+that is 16.8M pixels rendered to fill 102k — and on a 3 GB device the GPU path declines it
+(`CompositorBudget`, which sizes only the *live canvas* down), so it lands on the CoreGraphics
+reference. With a bloom and a blur in the stack that is minutes of background CPU per save.
+
+**Not a regression from the Metal flip** — with the old `.coreGraphics` default the thumbnail took
+exactly the same path — and on a device with room it is now much faster than it was. Left alone here
+because fixing it properly means deciding what size a thumbnail composite should be and checking that
+against `ProjectSaveLogicTests`, which is a save-path change and not a crash fix. The shape of the
+fix: give `makeRenderRequest` an optional render size the way `makeSandwichRequests` has one, and
+have `ProjectStore` ask for something near the tile's own size.
+
+## The Metal composite hands Core Animation a non-native pixel format (2026-08-16)
+
+`CompositorMetalEngine.readBack` builds its `CGImage` as `premultipliedLast` RGBA in device RGB;
+Core Animation's native layout on iOS is BGRA premultiplied-*first*. So assigning one to
+`UIImageView.image` costs a full-canvas convert-and-copy inside the CA commit, on the main thread —
+three of them per sandwich rebuild, 64 MiB each at 4096². The CoreGraphics backend never paid it: a
+`UIGraphicsImageRenderer` image is already in CA's format, so this arrived with the backend flip and
+is invisible to every headless benchmark, which stops at the `CGImage`.
+
+**Unmeasured on device** — it is a hitch per stroke-lift rather than a sustained cost, so it is not
+the 17 fps above. Worth fixing next: `bgra8Unorm` for the two accumulator textures would produce
+byte-identical pixel *values* (Metal presents both formats to a shader as RGBA) with a CA-native
+byte order, at the cost of one runtime capability check. Verify with `CompositorParityLogicTests`,
+which compares values rather than layouts and so would not itself notice the change.
 
 ## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15)
 

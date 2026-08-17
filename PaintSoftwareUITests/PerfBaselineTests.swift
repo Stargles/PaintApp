@@ -1786,4 +1786,199 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertLessThan(warm.seconds, 30.0,
                           "A cached mask should cost a per-node multiply on top of the composite, not a new order of magnitude")
     }
+
+    // MARK: - The device memory budget (the iPad 9 crash)
+
+    /// The scene the owner crashed the app with, counted texture by texture.
+    ///
+    /// **4096², one vector layer, two value layers carrying bloom and blur, on an iPad 9th generation
+    /// (`iPad12,1`, A13, 3 GB shared between CPU and GPU).** Every measurement the Metal flip rested
+    /// on was taken on this Mac, where the simulator borrows desktop memory and a desktop GPU, and
+    /// this is the arithmetic that hides there and does not hide on a device.
+    ///
+    /// The count is asserted rather than merely reported because it is the input to
+    /// `CompositorBudget.affordableSize`, and a walk that starts holding one more texture than this
+    /// says would size every composite too generously — silently, since the only symptom is a crash on
+    /// hardware nobody runs the tests on.
+    ///
+    /// **The upload cache was the obvious suspect and is not the cause**, which is the finding worth
+    /// leaving behind: two of the three layers are grading layers, and `renderSources` elides those
+    /// (they hold no pixels), so the cache holds exactly one entry and hits on every composite of the
+    /// three a sandwich rebuild runs. The 192 MB cap it used to carry never bound. What had no budget
+    /// at all was the other 335 MB — the scratch pool and the effect intermediates.
+    @MainActor
+    func testTheOwnersCrashSceneCostsMoreTextureThanA3GBDeviceCanHold() {
+        let scene = compositorManager(layerCount: 1)
+        scene.addValueLayer(effect: .bloom(Effect.Bloom(threshold: 0.6, radius: 12, intensity: 1)))
+        scene.addValueLayer(effect: .blur(Effect.Blur(radius: 8)))
+        let tree = scene.renderTree
+
+        let canvas = CGSize(width: 4096, height: 4096)
+        let perTexture = CompositorBudget.textureBytes(for: canvas)
+        let walk = tree.peakCompositeTextures
+        let uploads = tree.uploadableLeafCount
+        let iPad9 = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024)
+
+        report("owner's crash scene — 4096x4096, vector + bloom + blur", [
+            ("perTextureMB", megabytes(UInt64(perTexture))),
+            ("walkTextures", "\(walk)"),
+            ("uploadableLeaves", "\(uploads)"),
+            ("walkBytes", megabytes(UInt64(walk * perTexture))),
+            ("totalBytes", megabytes(UInt64((walk + uploads) * perTexture))),
+            ("budget3GB", megabytes(UInt64(iPad9))),
+            ("cappedTo", "\(CompositorBudget.affordableSize(for: canvas, textures: walk + uploads, budgetBytes: iPad9))"),
+        ])
+
+        // Two accumulators, one grade scratch, two bloom intermediates. The blur adds nothing: it
+        // wants one intermediate and the bloom already forced two, and `EffectPipelines` keeps them.
+        XCTAssertEqual(walk, 5, "The walk holds front, back, one grade scratch and two bloom intermediates")
+        XCTAssertEqual(uploads, 1, "Only the vector layer has pixels — a grading layer is elided from sources")
+        XCTAssertGreaterThan((walk + uploads) * perTexture, iPad9,
+                             "This scene must not fit a 3 GB device's budget, or the fix is measuring nothing")
+    }
+
+    /// **The budget is a fraction of the device, not a constant tuned on a Mac** — the sentence the
+    /// 192 MB upload cap could not say.
+    ///
+    /// Pinned at four points rather than asserted as a formula, so that changing the divisor is a
+    /// deliberate edit to four numbers with a device name beside each rather than a silent retune.
+    func testTheTextureBudgetIsAFractionOfTheDeviceItRunsOn() {
+        func budget(gigabytes: UInt64) -> Int {
+            CompositorBudget.textureBudgetBytes(physicalMemory: gigabytes * 1024 * 1024 * 1024)
+        }
+        report("compositor texture budget by device memory", [
+            ("iPad9_3GB", megabytes(UInt64(budget(gigabytes: 3)))),
+            ("iPadAir_8GB", megabytes(UInt64(budget(gigabytes: 8)))),
+            ("iPadPro_16GB", megabytes(UInt64(budget(gigabytes: 16)))),
+            ("thisHost", megabytes(UInt64(CompositorBudget.textureBudgetBytes))),
+        ])
+
+        XCTAssertEqual(budget(gigabytes: 3), 192 * 1024 * 1024, "iPad 9: one sixteenth of 3 GB")
+        XCTAssertEqual(budget(gigabytes: 8), 512 * 1024 * 1024, "8 GB iPad: one sixteenth")
+        // The cap, not the sixteenth — 16 GB / 16 is a gigabyte, which is not a reasonable thing for a
+        // paint program to hold while the artist is in another app.
+        XCTAssertEqual(budget(gigabytes: 16), 768 * 1024 * 1024, "Capped rather than one sixteenth")
+        // The floor, for a device that reports something implausible: the GPU path must not switch
+        // itself off, because the CPU reference is 375x slower on any document with an effect on it.
+        XCTAssertEqual(CompositorBudget.textureBudgetBytes(physicalMemory: 512 * 1024 * 1024),
+                       64 * 1024 * 1024, "Floored rather than one sixteenth")
+    }
+
+    /// **What the cap does and, as importantly, where it does nothing.**
+    ///
+    /// A canvas that already fits comes back unchanged — byte for byte the same `CGSize` — which is
+    /// what makes this safe to put on the sandwich's path: every document the branch was measured on
+    /// composites at exactly the size it did before.
+    func testTheBudgetShrinksOnlyTheCanvasesThatDoNotFit() {
+        let iPad9 = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024)
+        let textures = 6  // the owner's scene: five for the walk, one uploadable leaf
+
+        let ordinary = CGSize(width: 2048, height: 2048)
+        XCTAssertEqual(CompositorBudget.affordableSize(for: ordinary, textures: textures, budgetBytes: iPad9),
+                       ordinary, "A 2048² canvas fits six textures in 192 MB and must not be touched")
+
+        let big = CGSize(width: 4096, height: 4096)
+        let capped = CompositorBudget.affordableSize(for: big, textures: textures, budgetBytes: iPad9)
+        XCTAssertLessThan(capped.width, big.width, "A 4096² canvas does not fit and must be reduced")
+        XCTAssertLessThanOrEqual(CompositorBudget.textureBytes(for: capped) * textures, iPad9,
+                                 "The reduced size is only useful if it actually fits the budget")
+        // Aspect ratio preserved, or the composite would not line up with the canvas it is stretched
+        // back over. Whole pixels, for `RenderResolution.renderSize`'s reason.
+        XCTAssertEqual(capped.width, capped.height, "A square canvas must stay square")
+        XCTAssertEqual(capped.width, capped.width.rounded(.down), "Whole pixels only")
+
+        report("budget cap at 3 GB, six canvas-sized textures", [
+            ("canvas", "\(Int(big.width))x\(Int(big.height))"),
+            ("capped", "\(Int(capped.width))x\(Int(capped.height))"),
+            ("scale", String(format: "%.3f", capped.width / big.width)),
+            ("footprintMB", megabytes(UInt64(CompositorBudget.textureBytes(for: capped) * textures))),
+        ])
+    }
+
+    /// **The flatten memo is bounded in bytes, not only in entries** — the other 4K hole this fix
+    /// closed, and the one that had nothing to do with which backend composites.
+    ///
+    /// `PixelOps.rasterizeCache` held 24 canvas-sized `UIImage`s, which is 1.61 GB at 4096² — more
+    /// than the whole process limit on the device that crashed. And it fills on its own: the key
+    /// carries `rasterVersion`, so each finished stroke mints an entry and the one it replaces stays
+    /// for another twenty-three. The budget stands in for a small device here for
+    /// `CompositorBudget.budgetOverrideBytes`' usual reason.
+    @MainActor
+    func testTheFlattenMemoIsBoundedInBytesAndNotOnlyInEntries() {
+        let manager = perfManager()
+        let cel = manager.layers[0].cels[0]
+        let oneImage = CompositorBudget.textureBytes(for: Self.canvasSize)
+        defer { CompositorBudget.budgetOverrideBytes = nil }
+        // Room for two flattens and no more, so the third store has to evict.
+        CompositorBudget.budgetOverrideBytes = oneImage * 2
+
+        PixelOps.clearRasterizeCache()
+        for _ in 0..<6 {
+            autoreleasepool {
+                _ = PixelOps.rasterize(cel: cel, canvasSize: Self.canvasSize)
+                // A stroke is what moves `rasterVersion`, which is what makes a fresh key — the same
+                // thing the artist does that filled this cache in the first place.
+                stamp(syntheticStroke(sampleCount: 8), into: manager)
+            }
+        }
+        let resident = PixelOps.rasterizeCacheBytes
+        PixelOps.clearRasterizeCache()
+
+        report("flatten memo under a two-image budget at 2048x2048", [
+            ("perImage", megabytes(UInt64(oneImage))),
+            ("budget", megabytes(UInt64(oneImage * 2))),
+            ("resident", megabytes(UInt64(resident))),
+        ])
+
+        XCTAssertLessThanOrEqual(resident, oneImage * 2,
+                                 "Six distinct flattens must not all stay resident under a two-image budget")
+        XCTAssertGreaterThan(resident, 0, "Evicting down to nothing would stop this being a memo at all")
+    }
+
+    /// **The refusal is wired, and refusing still produces a frame.**
+    ///
+    /// The three cases above are arithmetic; this one runs it. `budgetOverrideBytes` stands in for a
+    /// device too small to hold the composite — the seam exists because no test host is that device,
+    /// which is the whole reason this shipped — and the two things worth asserting are that the engine
+    /// says so rather than allocating anyway, and that `Compositor.composite` still hands back the
+    /// picture. A budget that turned a large canvas into a black frame would be a worse bug than the
+    /// one it fixes.
+    @MainActor
+    func testAnOverBudgetCompositeIsDeclinedByTheGPUAndStillRendersOnTheCPU() throws {
+        let engine = try XCTUnwrap(CompositorMetalEngine.shared,
+                                   "This case is about the GPU engine's admission decision")
+        let manager = compositorManager(layerCount: 2)
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else {
+            return XCTFail("The perf manager must produce a request")
+        }
+
+        Compositor.backend = .coreGraphics
+        let reference = Compositor.composite(request)
+
+        Compositor.backend = .metal
+        defer {
+            CompositorBudget.budgetOverrideBytes = nil
+            Compositor.backend = Compositor.defaultBackend
+        }
+        // One byte under what two accumulators alone would cost, so the walk cannot be admitted at any
+        // layer count — the same shape as a 4096² canvas against 192 MB, at a size a test can afford.
+        CompositorBudget.budgetOverrideBytes = CompositorBudget.textureBytes(for: Self.canvasSize) * 2 - 1
+        let declined = Compositor.composite(request)
+
+        XCTAssertEqual(engine.lastAdmission,
+                       .overBudget(wantedBytes: request.tree.peakCompositeTextures
+                                       * CompositorBudget.textureBytes(for: Self.canvasSize),
+                                   budgetBytes: CompositorBudget.budgetOverrideBytes ?? 0),
+                       "The engine must refuse before it allocates, and say why")
+        XCTAssertNotNil(declined, "A declined GPU composite falls back to the reference, not to nothing")
+        XCTAssertEqual(declined?.width, reference?.width)
+        XCTAssertEqual(declined?.height, reference?.height)
+
+        // And the budget being restored puts the GPU back on the path — a one-way valve would be a
+        // performance regression that no other case here would catch.
+        CompositorBudget.budgetOverrideBytes = nil
+        _ = Compositor.composite(request)
+        XCTAssertEqual(engine.lastAdmission, .admitted,
+                       "With the device's own budget back, the same request is admitted")
+    }
 }

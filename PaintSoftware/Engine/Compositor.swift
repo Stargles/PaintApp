@@ -1,4 +1,5 @@
 import UIKit
+import os
 
 // MARK: - The compositor
 //
@@ -48,6 +49,18 @@ import UIKit
 /// The simulator's GPU is not an iPad's and does not model its bandwidth, so treat every ratio above
 /// as directional. The *sign* is what the flip rests on, and it is the same sign in all three rows.
 ///
+/// **What the simulator hid, and what the flip now depends on.** The paragraph above was written
+/// about *time* and is still right about time; it says nothing about memory, and memory is where the
+/// simulator's borrowed desktop RAM flattered this. On an iPad 9 (3 GB shared between CPU and GPU) a
+/// 4096² canvas with a bloom and a blur on it wants 384 MiB of texture resident before the readback
+/// allocates a byte, and the app is killed rather than told no. So the default stays `.metal`, but
+/// **only because `CompositorBudget` now sizes the composite to the device**: the honest reading of
+/// the table above is that a GPU frame at a size that fits beats a CPU frame at any size by two
+/// orders of magnitude on an effect document, while an *unbounded* GPU frame beats nothing at all
+/// because the process is gone. Reverting the default would trade a crash for a repaint that is
+/// seven seconds at 2048² with a *single-pass* grade and far worse than that at 4K with a bloom,
+/// which is not a fix.
+///
 /// **The fast tier can select either, which is new.** The `PaintSoftwareUITests` target opts out of
 /// the app's `PBXFileSystemSynchronizedRootGroup` and hand-lists its sources, so it had no shader of
 /// any kind and `device.makeDefaultLibrary()` returned nil there — the reason `MetalFillEngine` has
@@ -58,6 +71,169 @@ import UIKit
 enum CompositorBackend {
     case coreGraphics
     case metal
+}
+
+// MARK: - What the GPU path may spend
+
+/// **How much canvas-sized texture the GPU compositor is allowed to hold, on the device it is
+/// actually running on.**
+///
+/// ### Why this exists: every number the backend flip rests on was measured on a Mac
+///
+/// The simulator borrows a desktop's memory and a desktop's GPU, so a working set that disappears
+/// there is the whole budget on an iPad. The owner's report is the measurement that was missing —
+/// a 4096² canvas, one vector layer, two value layers carrying bloom and blur, on an **iPad 9th
+/// generation (`iPad12,1`, A13, 3 GB shared between CPU and GPU)** — and the arithmetic for that
+/// exact scene is:
+///
+/// | | textures | each | total |
+/// |---|---|---|---|
+/// | root accumulator pair (`front`/`back`) | 2 | 64 MiB | 128 MiB |
+/// | effect scratch for a grading leaf | 1 | 64 MiB | 64 MiB |
+/// | `EffectPipelines` intermediates (bloom is four passes) | 2 | 64 MiB | 128 MiB |
+/// | upload cache, the one leaf that has pixels | 1 | 64 MiB | 64 MiB |
+/// | **held simultaneously** | **6** | | **384 MiB** |
+///
+/// — and that is only the textures. The same rebuild also holds three readback `CGImage`s (192 MiB,
+/// one per sandwich half), the two Core Animation surfaces the sandwich views convert them into
+/// (128 MiB), and a canvas-sized staging buffer per upload. Roughly 700 MiB of live allocation for
+/// one repaint, on a device where the whole app has perhaps 1.4 GB before jetsam and the document's
+/// own raster tiers already want several hundred. `Metal.makeTexture` is not the thing that fails
+/// there — jetsam kills the process before it returns nil, which is why a nil check at the
+/// allocation site was never going to catch this.
+///
+/// `PerfBaselineTests.testTheOwnersCrashSceneCostsMoreTextureThanA3GBDeviceCanHold` is that table,
+/// asserted rather than recited.
+///
+/// **The upload cache's 192 MB cap was not the problem, and that is worth stating because it was the
+/// obvious suspect.** Two of the three layers in that scene are grading layers, which hold no pixels
+/// at all (`renderSources` elides them), so the cache holds exactly one entry and hits every time.
+/// The 320 MiB that is *not* the cache — the pool and the effect intermediates — had no budget of any
+/// kind. That is what this type gives it.
+///
+/// ### The rule, and why it is this rule
+///
+/// Two questions, deliberately answered by two different mechanisms:
+///
+/// - **`textureBudgetBytes` is static for the process and derived from the device's total memory.**
+///   It has to be static because two callers must agree about it: `makeSandwichRequests` picks a
+///   composite size on the main thread and `CompositorMetalEngine` decides whether to accept that
+///   size on a background queue a moment later. A budget derived from free memory would let the
+///   second answer differ from the first, and the sandwich would ask for a size the engine then
+///   refuses — a silent whole-frame drop to a CPU path that at 4K with a bloom on it is not a frame
+///   at all (see `affordableSize` for the arithmetic).
+/// - **`hasHeadroom(for:)` is dynamic and reads `os_proc_available_memory()`.** That is the number
+///   jetsam actually acts on, and it moves for reasons this app does not control: another app coming
+///   to the foreground takes memory away without the canvas changing at all. So it is a *valve*, not
+///   a budget — it can decline a composite the budget has already sized, and that decline is the one
+///   `Compositor.composite` answers with nil rather than with the CPU reference, because the
+///   reference would allocate *more* at the moment there is none. The canvas keeps the picture it
+///   has, which is at most one edit stale, and the next rebuild retries.
+///
+/// `physicalMemory / 16` is 192 MiB on that 3 GB iPad and 512 MiB on an 8 GB iPad Pro. The divisor is
+/// chosen from the ratio above rather than picked: the textures are roughly half of what a repaint
+/// holds at its peak (six textures against three readback images, two CA surfaces and a staging
+/// buffer), so a texture budget of one sixteenth of the device is a compositor peak of about one
+/// eighth of it — which leaves the artist's document, the undo history and UIKit the other seven
+/// eighths. A fraction of *free* memory would have been the tempting alternative and is wrong for
+/// the reason above, plus one more: the pool and the cache are held between frames, so sizing them
+/// by what happens to be free at the moment they are first filled writes a high-water mark that
+/// nothing later lowers.
+enum CompositorBudget {
+
+    /// One canvas-sized `rgba8Unorm` texture at `size`, in bytes. Four bytes per pixel is the app's
+    /// pixel contract everywhere (`PixelOps`), not a property of any one buffer.
+    static func textureBytes(for size: CGSize) -> Int {
+        let width = max(0, Int(size.width.rounded())), height = max(0, Int(size.height.rounded()))
+        return width * height * 4
+    }
+
+    /// The ceiling on everything `CompositorMetalEngine` holds at once — the scratch pool, the
+    /// multi-pass effect intermediates, and the upload cache together.
+    static var textureBudgetBytes: Int {
+        budgetOverrideBytes ?? textureBudgetBytes(physicalMemory: ProcessInfo.processInfo.physicalMemory)
+    }
+
+    /// The rule itself, given the memory a device reports — **a function of its argument so a test can
+    /// ask what an iPad 9 would do while running on a Mac**, which is exactly the gap that let this
+    /// ship. `textureBudgetBytes` is the same rule applied to the machine it is running on.
+    ///
+    /// Clamped at both ends. The 64 MiB floor keeps a device that reports an implausibly small
+    /// `physicalMemory` from disabling the GPU path outright; the 768 MiB cap keeps a 16 GB iPad Pro
+    /// from deciding that a gigabyte of resident texture is a reasonable thing for a paint program to
+    /// sit on while the artist is in another app.
+    static func textureBudgetBytes(physicalMemory: UInt64) -> Int {
+        let physical = Int(clamping: physicalMemory)
+        return min(max(physical / 16, 64 * 1024 * 1024), 768 * 1024 * 1024)
+    }
+
+    /// A budget imposed by a test, or nil for the device's own.
+    ///
+    /// **A development seam of exactly the kind `Compositor.backend` is**, and here for the same
+    /// reason: the thing under test is a decision about a device that no test host is. Without it the
+    /// only way to exercise the refusal is to run on the iPad that crashes, which is the loop this
+    /// whole fix exists to get out of. Tests restore it to nil in `tearDown`.
+    static var budgetOverrideBytes: Int?
+
+    /// Whether the process can afford `bytes` of new allocation *right now*.
+    ///
+    /// `os_proc_available_memory()` is how many bytes remain before this process hits the limit
+    /// jetsam kills it at. It returns 0 where the concept does not apply — the simulator, and any
+    /// non-app process, which includes the fast test tier — and 0 is read as "no information" rather
+    /// than as "no memory", so this is inert everywhere it cannot be trusted. That is deliberate: a
+    /// valve that closed on the simulator would make every logic-tier composite take the CPU path and
+    /// the parity tests would stop testing the GPU.
+    ///
+    /// **Twice `bytes`, because the textures are not the whole cost of the frame they belong to.**
+    /// A composite that allocates `bytes` of texture then reads a canvas-sized image back out of it,
+    /// hands that to the view layer, and Core Animation copies it again — none of which is freed
+    /// before the next composite starts. Asking for exactly what the textures cost would let a frame
+    /// begin that cannot finish.
+    static func hasHeadroom(for bytes: Int) -> Bool {
+        let available = os_proc_available_memory()
+        guard available > 0 else { return true }
+        return available > bytes * 2
+    }
+
+    /// The largest size no bigger than `size`, in the same aspect ratio, at which `textures`
+    /// canvas-sized textures fit `textureBudgetBytes`.
+    ///
+    /// **This is the lever that keeps the GPU path on a device that cannot hold a 4K composite**, and
+    /// it is a better trade than the two alternatives.
+    ///
+    /// Falling back to CoreGraphics is not "slower", it is a different order of thing. The measured
+    /// point is a *single-pass* grade over 4.2M pixels: 7047 ms on the CPU reference against Metal's
+    /// 18.8 ms (`PerfBaselineTests.testEffectCompositeCostOnBothBackends`, Debug). The owner's scene
+    /// is 4x the pixels and, at radius 12, roughly fifty times the per-pixel work — bloom is four
+    /// passes and two of them gather 25 samples each. Release is faster than Debug by a factor
+    /// nobody here has measured for this path, and it does not need measuring: two orders of
+    /// magnitude above seven seconds is not a frame, whatever the constant is.
+    ///
+    /// Refusing to composite at all loses the picture. Compositing fewer pixels loses *sharpness*, on
+    /// an image the artist is already told is a preview (`RenderResolution`), and it is the only one
+    /// of the three the artist can look at.
+    ///
+    /// Returns `size` unchanged when it already fits, which is every canvas the branch was measured
+    /// on and every canvas on a device with room — so this is inert exactly where there was no
+    /// problem.
+    static func affordableSize(for size: CGSize, textures: Int) -> CGSize {
+        affordableSize(for: size, textures: textures, budgetBytes: textureBudgetBytes)
+    }
+
+    /// `affordableSize(for:textures:)` against a stated budget rather than the running device's — the
+    /// half a test can pin, for `textureBudgetBytes(physicalMemory:)`'s reason.
+    static func affordableSize(for size: CGSize, textures: Int, budgetBytes budget: Int) -> CGSize {
+        guard textures > 0, size.width > 0, size.height > 0 else { return size }
+        let wanted = textureBytes(for: size) * textures
+        guard wanted > budget else { return size }
+        // Area scales as the square, so the linear scale is the square root of the byte ratio. Floored
+        // to whole pixels for `RenderResolution.renderSize`'s reason — the backends and
+        // `PixelOps.rasterize` do not round in the same place, and a source one pixel wider than the
+        // composite reading it is a garbage frame on the GPU rather than a soft one.
+        let scale = (Double(budget) / Double(wanted)).squareRoot()
+        return CGSize(width: max(1, (size.width * scale).rounded(.down)),
+                      height: max(1, (size.height * scale).rounded(.down)))
+    }
 }
 
 enum Compositor {
@@ -88,18 +264,41 @@ enum Compositor {
     /// from any thread — which is the whole point of §9.1 point 3 and what makes §9.2's background
     /// renderer a thread rather than a rewrite.
     ///
-    /// Returns nil only for a degenerate canvas size.
+    /// Returns nil for a degenerate canvas size, **and now for one more case**: a GPU composite
+    /// declined because the process is out of memory right now. See below.
     static func composite(_ request: RenderRequest) -> CGImage? {
         switch backend {
         case .coreGraphics:
             return CoreGraphicsCompositor.composite(request)
         case .metal:
+            switch MetalCompositor.attempt(request) {
+            case .image(let image):
+                return image
             // Falling back rather than failing: a device with no GPU, or the fast test tier with no
             // metallib, should render a correct frame slowly rather than no frame at all. The two
             // backends agree exactly for source-over and to within a channel step for the blend
             // modes (`CompositorParityLogicTests` measures every one), so this is a performance
             // fallback and never a visual one.
-            return MetalCompositor.composite(request) ?? CoreGraphicsCompositor.composite(request)
+            case .unavailable:
+                return CoreGraphicsCompositor.composite(request)
+            // **The one decline that must not escalate, and the reason this stopped being one
+            // branch.** The fallback above is whole-frame — a single failed encode drops the entire
+            // composite to the CPU — which is the right trade when the GPU is *absent*. It is exactly
+            // the wrong one when the GPU declined for lack of memory: `CoreGraphicsCompositor.grade`
+            // reads the canvas back, allocates a second canvas-sized buffer for the graded copy and a
+            // third for the result, and gathers a whole blur kernel per pixel in scalar Swift. So the
+            // response to "there is no memory" would be to allocate more of it, far more slowly, at
+            // the moment jetsam is deciding whether to kill the process.
+            //
+            // Nil is a better answer here than either backend, because the caller already has one.
+            // `CanvasView.finishSandwichRebuild` takes all three composites or none and otherwise
+            // keeps showing what it has, which is at most one edit stale and is a coherent picture;
+            // the next rebuild retries, by which time the purge this decline triggered has given the
+            // memory back. `ProjectStore` writes no thumbnail for that save, which is a tile the next
+            // save replaces.
+            case .underPressure:
+                return nil
+            }
         }
     }
 }

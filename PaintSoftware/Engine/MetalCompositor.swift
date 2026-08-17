@@ -26,17 +26,40 @@ import simd
 
 enum MetalCompositor {
 
-    /// Composites `request` on the GPU, or returns nil if it cannot. `Compositor.composite` treats
-    /// nil as "use the CPU reference", so every nil here is a slower frame rather than a missing one.
+    /// Composites `request` on the GPU, or returns nil if it cannot — **the shape callers that only
+    /// want a picture keep**, and now a projection of `attempt` rather than the whole story.
+    /// `Compositor.composite` uses `attempt` directly, because which kind of "no" it got decides
+    /// whether the CPU reference should render the frame or nothing should.
     ///
-    /// Returns nil when there is no GPU, no shader library, a degenerate canvas size, or an
-    /// allocation this device would not make. **It no longer declines a group that needs its own
-    /// buffer**, which is phase 5's change to this file: buffers were only reachable through a faded
-    /// group in phase 4, and blend modes are §5.1's entire argument for the GPU — a document that
-    /// blends falling back to the CPU would mean the GPU never runs the case it exists for. See
-    /// `CompositorMetalEngine.encode`.
+    /// Returns nil when there is no GPU, no shader library, a degenerate canvas size, an allocation
+    /// this device would not make, or a working set that does not fit the device's memory budget.
+    /// **It no longer declines a group that needs its own buffer**, which is phase 5's change to this
+    /// file: buffers were only reachable through a faded group in phase 4, and blend modes are §5.1's
+    /// entire argument for the GPU — a document that blends falling back to the CPU would mean the
+    /// GPU never runs the case it exists for. See `CompositorMetalEngine.encode`.
     static func composite(_ request: RenderRequest) -> CGImage? {
-        CompositorMetalEngine.shared?.composite(request)
+        guard case .image(let image) = attempt(request) else { return nil }
+        return image
+    }
+
+    /// What one attempt at a GPU composite produced — **the frame, or which kind of "no" it was.**
+    ///
+    /// The two kinds are not interchangeable and `Compositor.composite` has to tell them apart: one
+    /// means "this device cannot run the GPU path" and wants the CPU reference, the other means "this
+    /// process has no memory right now" and wants nobody to allocate anything. See the switch there,
+    /// which carries the argument.
+    enum Attempt {
+        case image(CGImage)
+        /// No GPU, no shader library, an encode that declined, or a walk that does not fit the
+        /// device's static texture budget at this canvas size. The CPU reference renders it.
+        case unavailable
+        /// `os_proc_available_memory()` says the allocation would not survive. Nothing renders it.
+        case underPressure
+    }
+
+    static func attempt(_ request: RenderRequest) -> Attempt {
+        guard let engine = CompositorMetalEngine.shared else { return .unavailable }
+        return engine.attempt(request)
     }
 }
 
@@ -187,16 +210,21 @@ private final class ScratchTexturePool {
 /// ### Why a byte budget rather than an entry count
 ///
 /// A canvas-sized texture is 16.8 MB at 2048² and 64 MB at 4000² (§5.3), so an entry count means
-/// something four times different at the two sizes and would be right at neither. The budget below
-/// holds eleven layers at 2048² and three at 4000², chosen so an ordinary document caches whole and
-/// a large one degrades toward today's behaviour rather than toward an eviction of the app.
+/// something four times different at the two sizes and would be right at neither.
+///
+/// **The number itself used to be a constant — 192 MB — and that constant was tuned on a Mac.** It
+/// is now whatever `CompositorBudget` leaves over after the walk's own textures are accounted for,
+/// which on the 3 GB iPad the owner reported from is a very different figure from the 8 GB machine
+/// the branch was measured on. See `budgetBytes`, which the engine sets per composite.
 ///
 /// **The degradation is not graceful and that is worth stating plainly rather than discovering.** A
 /// composite walks its leaves in a fixed bottom-to-top order, so a document whose leaves do not all
 /// fit is the textbook LRU thrash: every leaf is evicted exactly before it is next wanted, and the
 /// hit rate is 0 rather than "reduced". That is *no worse* than the uncached path this replaces —
 /// the same uploads happen, plus a dictionary probe — but it is a cliff and not a slope, and
-/// anybody raising the budget should know they are moving a cliff.
+/// anybody raising the budget should know they are moving a cliff. It is also why the cache is the
+/// part of the working set that is allowed to lose: everything else in the engine is something the
+/// walk cannot proceed without, and this is the only piece whose absence costs nothing but time.
 ///
 /// Not thread-safe: `CompositorMetalEngine` holds one lock across the whole of `composite` and this
 /// is only ever touched from inside it.
@@ -209,9 +237,13 @@ private final class UploadCache {
         let height: Int
     }
 
-    /// 192 MB. See the type's note for how this converts into layers at each canvas size, and for
-    /// what going one layer over it costs.
-    private static let budgetBytes = 192 * 1024 * 1024
+    /// What is left of `CompositorBudget.textureBudgetBytes` once the walk's own textures are
+    /// subtracted — written by the engine at the top of every composite, because the subtrahend is a
+    /// property of the tree being composited and changes with it.
+    ///
+    /// Starts at zero rather than at some optimistic default: an unconfigured cache that holds
+    /// nothing is the uncached path, and the uncached path is correct.
+    var budgetBytes = 0
 
     private struct Entry {
         let texture: MTLTexture
@@ -259,16 +291,19 @@ private final class UploadCache {
     /// also free, because the overshoot it permits is bounded by one snapshot's worth of leaves,
     /// which is precisely the set the composite needed resident regardless.
     func trimToBudget() {
-        guard residentBytes > Self.budgetBytes else { return }
+        guard residentBytes > budgetBytes else { return }
         for key in entries.sorted(by: { $0.value.lastUsed < $1.value.lastUsed }).map(\.key) {
-            guard residentBytes > Self.budgetBytes else { return }
+            guard residentBytes > budgetBytes else { return }
             if let removed = entries.removeValue(forKey: key) { residentBytes -= removed.bytes }
         }
     }
 
-    /// Drops everything. The canvas resizing is what calls this — every key is stale at that point
-    /// (the dimensions are in it), so the entries could only sit there holding memory until the LRU
-    /// noticed, and the LRU would notice by evicting *live* entries first.
+    /// Drops everything. **`purgeLocked` is the only caller now**, which is a change: a canvas resize
+    /// used to call it too, on the reasoning that every key was stale at that point. That reasoning
+    /// was right about staleness and wrong about what to do with it — two consumers composite the
+    /// same document at two sizes (see the pool's size check), so "the size changed" is not "the
+    /// other entries are dead", and `trimToBudget` reclaims them in use order without throwing away
+    /// the set the next composite is about to want back.
     func removeAll() {
         entries.removeAll(keepingCapacity: true)
         residentBytes = 0
@@ -360,8 +395,41 @@ final class CompositorMetalEngine {
     func purge() {
         lock.lock()
         defer { lock.unlock() }
+        purgeLocked()
+    }
+
+    /// `purge`'s body, for the caller that is already inside the lock — `attempt`, when the dynamic
+    /// headroom valve closes on it. Giving the caches back is the whole of the response there:
+    /// nothing else in the process is going to free 300 MB on this frame's behalf, the frame is not
+    /// being rendered by anybody (a pressure decline is the one `Compositor.composite` answers with
+    /// nil), and every byte held here is re-derivable by the rebuild that retries.
+    private func purgeLocked() {
         uploads.removeAll()
         pool = nil
+        walkHighWaterBytes = 0
+        // The intermediates go too, which they did not before `releaseIntermediates` existed — see
+        // that method. They are the largest single thing this engine held that a purge could not
+        // reach: 128 MiB at 4096², against a memory warning the purge exists to answer.
+        effects?.releaseIntermediates()
+    }
+
+    /// The last composite's admission decision, for `PerfBaselineTests`. Nil until one has been made.
+    ///
+    /// Reported rather than logged because the whole failure this closes was invisible: a frame that
+    /// declines looks exactly like a frame that succeeded slowly, since `Compositor.composite` hands
+    /// back a correct picture either way. A test that cannot see which of the two happened cannot pin
+    /// the budget rule.
+    private(set) var lastAdmission: Admission?
+
+    /// Why a composite was or was not run on the GPU.
+    enum Admission: Equatable {
+        case admitted
+        /// The walk's own textures do not fit `CompositorBudget.textureBudgetBytes` at this canvas
+        /// size on this device. Static, so the same tree at the same size always answers the same.
+        case overBudget(wantedBytes: Int, budgetBytes: Int)
+        /// The budget would have allowed it, but `os_proc_available_memory()` says the process cannot
+        /// afford the allocation right now. Dynamic, and the reason `purgeLocked` runs with it.
+        case noHeadroom(wantedBytes: Int)
     }
 
     /// How many scratch textures the last composite allocated. Reported by `PerfBaselineTests`;
@@ -393,13 +461,71 @@ final class CompositorMetalEngine {
     private var pool: ScratchTexturePool?
     private let uploads = UploadCache()
 
-    func composite(_ request: RenderRequest) -> CGImage? {
+    /// The largest walk this pool has served — what the upload cache's budget is subtracted from.
+    /// Lives and dies with the pool, because the textures it accounts for do.
+    private var walkHighWaterBytes = 0
+
+    func attempt(_ request: RenderRequest) -> MetalCompositor.Attempt {
         let width = Int(request.canvasSize.width.rounded())
         let height = Int(request.canvasSize.height.rounded())
-        guard width > 0, height > 0 else { return nil }
+        guard width > 0, height > 0 else { return .unavailable }
 
         lock.lock()
         defer { lock.unlock() }
+
+        // MARK: Admission — decided before anything is allocated
+        //
+        // **The branch that flipped this backend on had no such check, and that is the crash.** It
+        // measured a 4096² canvas nowhere: on the simulator the working set below disappears into a
+        // Mac's memory, and on an iPad 9 (3 GB shared between CPU and GPU) the same tree wants
+        // 384 MiB of texture before the readback has allocated a byte. `Metal.makeTexture` does not
+        // politely return nil under that pressure — jetsam kills the process first, so a nil check
+        // at the allocation site is a guard that never fires.
+        //
+        // Refusing *here* is what makes the refusal cheap. Everything past this point allocates, and
+        // a composite that discovers halfway down that it cannot finish has already spent the memory
+        // it was trying not to spend.
+        let canvasBytes = width * height * 4
+        let walkTextures = request.tree.peakCompositeTextures
+        let wanted = walkTextures * canvasBytes
+        let budget = CompositorBudget.textureBudgetBytes
+        guard wanted <= budget else {
+            lastAdmission = .overBudget(wantedBytes: wanted, budgetBytes: budget)
+            // `.unavailable`, not `.underPressure`: this is a *static* verdict about the device and
+            // the canvas size, and the CPU reference is the only thing that can render this frame at
+            // all. On the live canvas it should never fire, because `makeSandwichRequests` has
+            // already sized the request against the same budget — it is the offline consumers
+            // (`ProjectStore`'s thumbnail) that composite at native size and can reach it.
+            return .unavailable
+        }
+        // Cold means the pool has to be built from nothing, so the whole working set is a new
+        // allocation; warm means the pool and the intermediates are already resident and the only
+        // new canvas-sized thing this frame will ask for is the image `readBack` hands out.
+        let isCold = !(self.pool.map { $0.width == width && $0.height == height } ?? false)
+        guard CompositorBudget.hasHeadroom(for: isCold ? wanted + canvasBytes : canvasBytes) else {
+            lastAdmission = .noHeadroom(wantedBytes: wanted)
+            // Give back what is held before declining. The CPU reference is about to composite this
+            // same frame and will want a canvas-sized buffer or three of its own, and everything this
+            // engine is sitting on is re-derivable — so holding it through a fallback is holding it
+            // at exactly the moment it is pure cost.
+            purgeLocked()
+            return .underPressure
+        }
+        lastAdmission = .admitted
+        // The cache gets what the walk does not need. It is the only part of the working set whose
+        // absence costs nothing but time (see `UploadCache`), so it is the part that absorbs a tight
+        // budget — at zero it simply stops hitting and every upload happens the way it did before the
+        // cache existed.
+        //
+        // **Against the high-water mark rather than against this request, and a sandwich rebuild is
+        // exactly why.** Three composites share one engine: `full` holds five textures at 4K with a
+        // bloom in it, and `below` — everything under the active layer, which can be nothing at all —
+        // holds two. Sizing the cache from `below`'s own need would hand it the three textures the
+        // pool and the intermediates are *still* sitting on, because neither is freed between the
+        // three. The mark resets with the pool, which is the only point at which those textures
+        // genuinely go away.
+        walkHighWaterBytes = max(walkHighWaterBytes, wanted)
+        uploads.budgetBytes = max(0, budget - walkHighWaterBytes)
 
         // Ping-pong rather than one read_write accumulator: `access::read_write` on `rgba8Unorm`
         // needs the GPU family's read-write texture support, and two scratch textures cost 33.6 MB at
@@ -407,16 +533,23 @@ final class CompositorMetalEngine {
         //
         // Kept between composites now, and discarded outright when the canvas size changes rather
         // than kept per size: a canvas has one size at a time, so a second pool could only ever be
-        // dead weight — `EffectPipelines.intermediates` makes the same call for the same reason. The
-        // upload cache goes with it, because its keys carry the dimensions and so every entry in it
-        // is unreachable from this moment on.
+        // dead weight — `EffectPipelines.intermediates` makes the same call for the same reason.
+        //
+        // **The upload cache used to be dropped with it, on the grounds that "a canvas has one size
+        // at a time". That stopped being true when `RenderResolution` shipped**, and the correction
+        // matters more than it looks: the live canvas composites at the artist's chosen scale while
+        // `ProjectStore`'s thumbnail composites at the native canvas size, so a save landing during a
+        // drawing session alternates the two sizes and the old line wiped every entry each way. The
+        // keys carry the dimensions, so the other size's entries are merely unreachable rather than
+        // wrong — which is precisely what an LRU with a byte budget is for. `trimToBudget` in the
+        // `defer` below is what reclaims them, in the order they stopped being used.
         let pool: ScratchTexturePool
         if let existing = self.pool, existing.width == width, existing.height == height {
             pool = existing
         } else {
             pool = ScratchTexturePool(device: device, width: width, height: height)
             self.pool = pool
-            uploads.removeAll()
+            walkHighWaterBytes = 0
         }
         pool.beginComposite()
         defer {
@@ -426,7 +559,7 @@ final class CompositorMetalEngine {
 
         guard var front = pool.acquire(), var back = pool.acquire(),
               let commands = queue.makeCommandBuffer(),
-              let encoder = commands.makeComputeCommandEncoder() else { return nil }
+              let encoder = commands.makeComputeCommandEncoder() else { return .unavailable }
         // The accumulator pair goes back on every exit, including the failure ones — otherwise a
         // frame that declines (a missing effect pipeline, a command-buffer error) would leave two
         // canvas-sized textures stranded and the next frame would allocate two more. `front` and
@@ -455,12 +588,13 @@ final class CompositorMetalEngine {
                              encoder: encoder, pool: pool, masks: &maskTextures,
                              width: width, height: height)
         encoder.endEncoding()
-        guard encoded else { return nil }
+        guard encoded else { return .unavailable }
 
         commands.commit()
         commands.waitUntilCompleted()
-        guard commands.error == nil else { return nil }
-        return readBack(front, width: width, height: height)
+        guard commands.error == nil else { return .unavailable }
+        guard let image = readBack(front, width: width, height: height) else { return .unavailable }
+        return .image(image)
     }
 
     /// Encodes one bottom-to-top stack, accumulating into `front` and ping-ponging through `back`.

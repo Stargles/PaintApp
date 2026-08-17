@@ -402,7 +402,38 @@ extension CanvasManager {
         // snapshots, which costs more than the reduced composites save. So a reduced setting is soft
         // at rest as well as mid-stroke, and making it otherwise is a change to how snapshots are
         // taken rather than a change to this line.
-        let renderSize = renderResolution.renderSize(for: canvasSize)
+        //
+        // **And then capped by what this device can actually hold, which is the other half.** The
+        // artist's setting is a preference; `CompositorBudget.affordableSize` is a limit, and the two
+        // compose in the only order that is safe — a preference may ask for less than the device
+        // allows and never for more. The cap is inert on every canvas that already fits (see the
+        // budget type), so this line changes nothing for the documents the sandwich was measured on.
+        //
+        // **It is applied here rather than left to the engine to refuse, and that is the whole point
+        // of doing it on this side.** `CompositorMetalEngine` declines a request it cannot afford,
+        // and `Compositor.composite` answers a decline by rendering the whole frame through the
+        // CoreGraphics reference — which for the scene that prompted this (4096², bloom and blur) is
+        // four passes gathering a blur kernel per pixel over 16.8M pixels in scalar Swift. A correct
+        // frame rendered slowly beats no frame, but a *smaller* frame on the GPU beats both, and
+        // the artist is already looking at a preview here: the sandwich views stretch this back over
+        // the canvas and `updateSandwich` picks linear filtering the moment it is not full size.
+        //
+        // The count comes from the tree rather than from a constant because it is the tree that
+        // decides it: two grading layers cost three more textures than two ordinary ones, and a
+        // document with no effects at all pays nothing.
+        //
+        // **`uploadableLeafCount` is in the count, capped at four, and both halves of that are a
+        // judgement.** In it, because a cache that cannot hold one composite's leaves does not
+        // "degrade" — it thrashes to a zero hit rate (see `UploadCache`), and at 4096² that is 64 MiB
+        // of staging buffer and upload per leaf, three times per rebuild. Buying the walk room by
+        // starving the thing that makes the walk fast is not a saving. Capped, because past a few
+        // layers no size makes them all fit and shrinking further would trade real sharpness for a
+        // cache that was going to thrash anyway; four is where that knee sits on the 3 GB device this
+        // was sized against. Nothing here is reached by a document Core Animation can still draw
+        // flat — `isSandwichEngaged` means a blend, a mask, an effect or a node is already present.
+        let wanted = renderResolution.renderSize(for: canvasSize)
+        let textures = tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
+        let renderSize = CompositorBudget.affordableSize(for: wanted, textures: textures)
 
         // From the *whole* tree, not from either half — see `RenderRequest.maskStacks`.
         let maskStacks = maskSourceStacks(of: tree)

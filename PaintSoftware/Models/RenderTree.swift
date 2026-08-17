@@ -414,6 +414,98 @@ extension Array where Element == RenderNode {
         }
     }
 
+    // MARK: - What one composite of this tree costs in memory
+
+    /// **The most canvas-sized textures one `Compositor.composite` of this tree holds at once** —
+    /// the number `CompositorBudget` sizes a composite against, and the reason a 4096² canvas with a
+    /// bloom on it crashed a 3 GB iPad while every simulator measurement said the branch was fine.
+    ///
+    /// **Derived here rather than in `MetalCompositor` because it is a property of the tree**, the
+    /// same argument `needsOwnBuffer` makes: the main thread has to know what a composite will cost
+    /// *before* it asks for one (`makeSandwichRequests` sizes the request by it), and the engine has
+    /// to know the same number when it decides whether to accept that request. Two spellings of it
+    /// would be two things to keep in step with `CompositorMetalEngine.encode`, which is the walk
+    /// this counts.
+    ///
+    /// **An upper bound, and deliberately so.** Where the walk's exact peak is hard to state — a
+    /// `.mix` slot pair overlapping a node's own grade scratch, say — this counts both. Over-counting
+    /// composites a slightly smaller picture; under-counting is the crash. The flat stacks that
+    /// matter in practice are counted exactly.
+    ///
+    /// **Visibility is not consulted, here or in `uploadableLeafCount`, for the reason
+    /// `needsCompositorOnCanvas` gives for the same choice.** A hidden layer costs the walk nothing,
+    /// so honouring the flag would be more accurate — and would make toggling an eye change the
+    /// sharpness of the whole canvas, because the size this feeds is `makeSandwichRequests`'s. A
+    /// number that only moves when the document's *structure* does is worth more than a number that
+    /// is exactly right, and the inaccuracy is in the safe direction.
+    ///
+    /// Excludes the upload cache, which is bounded separately: uploads are a pure memoization that
+    /// degrades to today's uncached behaviour when it has no room, where the textures below are what
+    /// the walk cannot proceed without. `uploadableLeafCount` is the other half.
+    var peakCompositeTextures: Int {
+        // The root accumulator pair `composite` acquires before the walk begins, plus whatever the
+        // deepest point of the walk holds on top of it, plus the intermediates a multi-pass effect
+        // ping-pongs through — which live at `EffectPipelines`' lifetime rather than the walk's, so
+        // they are additive to every level rather than part of any one of them.
+        2 + nestedCompositeTextures + effectIntermediateTextures
+    }
+
+    /// Textures held *below* the caller's own accumulator pair, at the deepest point of the walk.
+    private var nestedCompositeTextures: Int {
+        map { node -> Int in
+            switch node.content {
+            case .leaf:
+                // A grading leaf takes one scratch for the graded copy; a masked leaf takes one for
+                // the clipped copy. They are the two arms of the same `if`, never both.
+                if node.effect != nil { return 1 }
+                return node.masks.isEmpty ? 0 : 1
+            case .node(let op, let inputs):
+                let deepest = inputs.map(\.nestedCompositeTextures).max() ?? 0
+                guard node.needsOwnBuffer else { return deepest }
+                // `groupFront`/`groupBack`, plus a `.mix` slot's own pair (`fold` composites every
+                // slot after the first on its own before folding it in), plus the grade scratch if
+                // this node carries one.
+                let slotPair = op.needsOwnBuffer ? 2 : 0
+                return 2 + slotPair + deepest + (node.effect != nil ? 1 : 0)
+            }
+        }.max() ?? 0
+    }
+
+    /// The intermediates `EffectPipelines` allocates for the most demanding effect anywhere in this
+    /// tree — **at most two, whatever the pass count**, because pass *n* reads pass *n−1*'s output and
+    /// the outputs alternate between exactly two textures. Zero when nothing here grades, which is why
+    /// a document with no effect layers pays nothing for this.
+    ///
+    /// The maximum rather than the sum: one `EffectPipelines` serves the whole walk and keeps its
+    /// scratch between effects, so a bloom (four passes, two intermediates) and a Gaussian blur (two
+    /// passes, one) in the same stack cost two textures together, not three.
+    private var effectIntermediateTextures: Int {
+        map { node -> Int in
+            let own = node.effect.map { Swift.min(Swift.max($0.passes.count - 1, 0), 2) } ?? 0
+            guard case .node(_, let inputs) = node.content else { return own }
+            return Swift.max(own, inputs.map(\.effectIntermediateTextures).max() ?? 0)
+        }.max() ?? 0
+    }
+
+    /// How many leaves of this tree would put a texture in the upload cache — the leaves that hold
+    /// pixels, which is every leaf that is not grading (`renderSources` elides those, so they have no
+    /// source to upload). Visibility is not consulted; see `peakCompositeTextures`.
+    ///
+    /// Used to size a composite so an ordinary document's cache still fits alongside the walk. Capped
+    /// by the caller rather than here: past a handful of layers the right answer is to let the cache
+    /// thrash — which the type documents as no worse than the uncached path — instead of shrinking the
+    /// picture further.
+    var uploadableLeafCount: Int {
+        reduce(0) { total, node in
+            switch node.content {
+            case .leaf:
+                return total + (node.effect == nil ? 1 : 0)
+            case .node(_, let inputs):
+                return total + inputs.reduce(0) { $0 + $1.uploadableLeafCount }
+            }
+        }
+    }
+
     /// The tree pruned to everything strictly below, and strictly above, one leaf in evaluation
     /// order. Nil when `layerIndex` is not a leaf anywhere in this tree.
     ///

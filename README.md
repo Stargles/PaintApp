@@ -27,8 +27,10 @@ toolset, and a frame-by-frame animation timeline.
   alike, including "clip to below"); and compositor **nodes** — a node's direct children are its
   inputs, bottom child first, and its dropdown picks either a blend op (two inputs) or one of the
   effects (one input). Runs on the GPU (Metal), with the Core Graphics implementation kept as the
-  byte-for-byte reference it is measured against and as the fallback where there is no GPU. See
-  [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md)
+  byte-for-byte reference it is measured against and as the fallback where there is no GPU. The GPU
+  path is sized to the device it runs on (`CompositorBudget`): a canvas whose working set would not
+  fit is composited smaller rather than crashing, which is what a 4K canvas with two effect layers
+  does on a 3 GB iPad. See [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md)
 - **Effects**: 13, all configurable from the layer panel — levels, curves, brightness/contrast, HSV
   shift, gradient map, chromatic aberration, posterize, noise, gaussian/directional blur, bloom,
   sobel, sharpen and outline — with a curve editor and a gradient-stop editor for the two that need

@@ -116,38 +116,86 @@ enum PixelOps {
     /// (§5.3), so this holds a working set — the layers of the current frame, plus the neighbours a
     /// scrub touches — and not a history. Evicts in insertion order, which for a cache read in
     /// bottom-to-top stack order is near enough to LRU to not be worth the bookkeeping.
+    ///
+    /// **The entry count alone was not a bound, and on a 4K canvas it was not close to one.** Twenty
+    /// four entries is 403 MB at 2048² and **1.61 GB at 4096²** — more than a 3 GB iPad's whole
+    /// process limit, from a cache whose stated job is to hold "a working set". Nor is it hard to
+    /// fill: the key carries `rasterVersion`, so every stroke the artist finishes mints a fresh entry
+    /// and the one it supersedes stays until twenty-three more have been drawn. The byte budget below
+    /// is what actually bounds it; the entry count is kept as a second ceiling for small canvases,
+    /// where 24 canvas-sized images is a sane working set and the bytes would never bind.
+    ///
+    /// **It borrows `CompositorBudget.textureBudgetBytes` rather than inventing a second number**, and
+    /// that is the right relationship rather than a shortcut: this is the CPU-side twin of the GPU's
+    /// upload cache — the same canvas-sized flattens, one memo away from being uploaded — so the two
+    /// should scale with the device on the same rule. It does mean the pair can hold twice the budget
+    /// between them, which is accounted for: the budget is one sixteenth of the device precisely so
+    /// that the whole compositing subsystem is about one eighth of it.
     private static let rasterizeCache = RasterizeCache(limit: 24)
 
     private final class RasterizeCache {
         private let limit: Int
-        private var entries: [RasterizeKey: UIImage] = [:]
+        private var entries: [RasterizeKey: (image: UIImage, bytes: Int)] = [:]
         private var order: [RasterizeKey] = []
+        private var residentBytes = 0
         private let lock = NSLock()
 
-        init(limit: Int) { self.limit = limit }
+        init(limit: Int) {
+            self.limit = limit
+            // **Nothing dropped these before.** `clearRasterizeCache` existed for tests and its doc
+            // comment said "and for a memory warning" — but no code anywhere subscribed, so the
+            // largest CPU-side cache in the app was the one thing a memory warning could not reach.
+            // Registered here rather than in a view or the app delegate because this is what knows it
+            // is a cache: the observer's lifetime is the cache's, and both are the process's.
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
+            ) { [weak self] _ in
+                self?.removeAll()
+            }
+        }
 
         func value(for key: RasterizeKey) -> UIImage? {
             lock.lock(); defer { lock.unlock() }
-            return entries[key]
+            return entries[key]?.image
         }
 
         func store(_ image: UIImage, for key: RasterizeKey) {
             lock.lock(); defer { lock.unlock() }
-            if entries.updateValue(image, forKey: key) == nil { order.append(key) }
-            while order.count > limit {
-                entries.removeValue(forKey: order.removeFirst())
+            let bytes = (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0)
+            if let replaced = entries.updateValue((image, bytes), forKey: key) {
+                residentBytes -= replaced.bytes
+            } else {
+                order.append(key)
+            }
+            residentBytes += bytes
+            // The byte budget first, then the count. Never evicts the entry just stored, however far
+            // over budget one image on its own puts this: the caller is about to return it either
+            // way, and a cache that refuses to hold a single canvas is a cache that has stopped
+            // memoizing the thing it exists for.
+            let budget = CompositorBudget.textureBudgetBytes
+            while order.count > 1, order.count > limit || residentBytes > budget {
+                let evicted = order.removeFirst()
+                if let removed = entries.removeValue(forKey: evicted) { residentBytes -= removed.bytes }
             }
         }
 
         func removeAll() {
             lock.lock(); defer { lock.unlock() }
-            entries.removeAll(); order.removeAll()
+            entries.removeAll(); order.removeAll(); residentBytes = 0
+        }
+
+        var bytesResident: Int {
+            lock.lock(); defer { lock.unlock() }
+            return residentBytes
         }
     }
 
     /// Drops every memoized flatten. For tests that need to measure the uncached cost, and for a
-    /// memory warning — nothing here is state, so throwing it away only costs time.
+    /// memory warning — which now actually calls it; see `RasterizeCache.init`.
     static func clearRasterizeCache() { rasterizeCache.removeAll() }
+
+    /// What the flatten memo is holding, for `PerfBaselineTests`. Nothing in the render path reads it.
+    static var rasterizeCacheBytes: Int { rasterizeCache.bytesResident }
 
     private static func rasterizeUncached(cel: Cel, canvasSize: CGSize, quality: RenderQuality) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)

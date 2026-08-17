@@ -911,8 +911,18 @@ struct CanvasView: UIViewRepresentable {
             // the view, so *something* has to interpolate, and nearest turns one composite pixel into
             // a hard 2x2 block. That reads as a broken renderer rather than as a soft preview, which
             // is the difference between an artist using this setting and reporting it as a bug.
-            let filter: CALayerContentsFilter =
-                canvasManager.renderResolution == .full ? .nearest : .linear
+            //
+            // **Asked of the image rather than of the setting, which is a correction.** The artist's
+            // `renderResolution` is no longer the only thing that decides the composite's size —
+            // `CompositorBudget` caps it to what the device can hold, so a canvas can be composited
+            // reduced while the picker still reads "Full". Reading the picker would then choose
+            // nearest for an image that genuinely needs interpolating, and the blocky result would
+            // look like the bug the comment above exists to prevent, on the device least able to
+            // afford being reported as broken.
+            let composited = sandwichImages?.full.size ?? .zero
+            let isReduced = composited != .zero
+                && composited != (canvasManager.canvasSize ?? composited)
+            let filter: CALayerContentsFilter = isReduced ? .linear : .nearest
             if belowView.layer.magnificationFilter != filter {
                 belowView.layer.magnificationFilter = filter
                 aboveView.layer.magnificationFilter = filter

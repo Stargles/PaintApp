@@ -117,6 +117,19 @@ final class EffectPipelines {
         return true
     }
 
+    /// Gives the intermediates back.
+    ///
+    /// **The memory-warning valve could not reach these until this existed, and that was a hole in
+    /// it.** `CompositorMetalEngine.purge` drops its pool and its upload cache and called itself
+    /// correctness-neutral — which it is — but the two textures below are the same kind of pure
+    /// memoization and were not in it, so a purge on a 4096² canvas gave back the pool's 192 MiB and
+    /// went on holding 128 MiB of intermediates for an effect nobody was looking at. The next
+    /// `encode` reallocates them, exactly as it does after a canvas resize.
+    func releaseIntermediates() {
+        scratch.removeAll(keepingCapacity: true)
+        scratchSize = (0, 0)
+    }
+
     /// Makes sure `count` intermediates exist at this size, allocating only what is missing.
     ///
     /// **A single-pass effect asks for zero and this returns immediately** — no allocation, no
