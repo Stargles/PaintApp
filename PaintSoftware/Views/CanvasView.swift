@@ -1695,9 +1695,15 @@ struct CanvasView: UIViewRepresentable {
         /// **Keyed on the identity of the source images, not on their content.** `PixelOps.rasterize`
         /// is memoized per cel version, so it hands back *the same object* for the same drawing and a
         /// new one for an edited drawing; `===` is therefore an exact answer to "is this the same
-        /// drawing", at no cost. The same argument (and the same ABA caveat) as `liveMaskCache` above:
-        /// the key retains the images it keys on, so an old object cannot be freed and a new one land
-        /// at its address while the entry is live.
+        /// drawing", at no cost.
+        ///
+        /// **An `ObjectIdentifier` is an address, and it does not retain.** That makes identity a
+        /// sound key only while the object it names cannot be deallocated and a different one land at
+        /// the same address — the ABA hazard `LayerContentVersion` and `liveMaskCache` both document,
+        /// and a live one here rather than a theoretical one: `PixelOps.rasterizeCache` evicts on a
+        /// byte budget, so a scrub across a long animation genuinely frees these images. Closed the
+        /// same way `liveMaskCache` closes it — `onionSkinKeyImages`/`onionSkinKeyMask` hold a
+        /// reference to everything the key names, for exactly as long as the key is live.
         ///
         /// Interpolate mode's source mints a fresh image every call, so it never hits — unchanged
         /// from before this cache existed, and its frames are two rather than ten.
@@ -1723,6 +1729,10 @@ struct CanvasView: UIViewRepresentable {
         }
 
         private var onionSkinKey: OnionSkinKey?
+        /// Held only so `OnionSkinKey`'s addresses cannot alias — never read. See the key's doc
+        /// comment. Cleared whenever the key is, so nothing outlives the entry it protects.
+        private var onionSkinKeyImages: [UIImage] = []
+        private var onionSkinKeyMask: CGImage?
         /// The clip installed on whichever onion view is showing, so the same mask is not re-assigned
         /// to Core Animation on every SwiftUI pass. Same reasoning as `LayerHostView.contentMaskImage`.
         private var onionSkinMaskImage: CGImage?
@@ -1740,19 +1750,26 @@ struct CanvasView: UIViewRepresentable {
             let shown = placement == .behind ? behind : front
             let hidden = placement == .behind ? front : behind
 
-            // The unused view holds nothing: a canvas-sized image left on a hidden `UIImageView` is
-            // still resident, and on a 4K document that is the whole onion-skin budget parked where
-            // nobody can see it.
-            hidden.isHidden = true
-            hidden.image = nil
-            hidden.layer.mask = nil
+            // Every write below is guarded by a read, because this runs on every SwiftUI pass and
+            // almost all of them change nothing — the same discipline `reconcileLayers` and
+            // `LayerHostView.setContentMask` already keep, so an idle pass costs comparisons rather
+            // than Core Animation traffic.
+            func clear(_ view: UIImageView) {
+                // The unused view holds nothing: a canvas-sized image left on a hidden `UIImageView`
+                // is still resident, and on a 4K document that is the whole onion-skin budget parked
+                // where nobody can see it.
+                if !view.isHidden { view.isHidden = true }
+                if view.image != nil { view.image = nil }
+                if view.layer.mask != nil { view.layer.mask = nil }
+            }
+            clear(hidden)
 
             func blank() {
-                shown.isHidden = true
-                shown.image = nil
-                shown.layer.mask = nil
+                clear(shown)
                 onionSkinMaskImage = nil
                 onionSkinKey = nil
+                onionSkinKeyImages = []
+                onionSkinKeyMask = nil
             }
 
             guard canvasManager.isOnionSkinEnabled else { return blank() }
@@ -1769,8 +1786,14 @@ struct CanvasView: UIViewRepresentable {
             // correctly and the unmasked skin underneath it did not, so ink appeared outside the mask
             // at low alpha. `resolveLiveMask` is reused rather than a second resolution path written,
             // exactly as that entry asks — it returns the *same* `CGImage` the compositor's own mask
-            // cache holds, so this costs a dictionary lookup on a document with a mask and a nil
-            // check on every document without one.
+            // cache holds, so this costs a dictionary lookup on a document with a mask and a
+            // `renderTree` walk on every document without one. That walk is the third per pass
+            // (`reconcileLayers` and `updateSandwich` each build one already) and is O(layers ×
+            // folders) of array work with no pixels in it. A cheaper "does this document have any
+            // masks at all" pre-check was considered and rejected: masks come from `alphaMask` *and*
+            // from clip-to-below, on layers *and* on folders, so a hand-rolled version of that
+            // question would be four places to keep in sync with `RenderTree`, and getting it wrong
+            // silently un-fixes the bug this line exists for.
             //
             // The whole skin takes the current layer's mask because every skin comes from the current
             // layer. Interpolate mode's references can span layers, so it is left unclipped — a
@@ -1783,6 +1806,8 @@ struct CanvasView: UIViewRepresentable {
             let key = OnionSkinKey(frames: frames, size: size, placement: placement, mask: mask)
             if key != onionSkinKey {
                 onionSkinKey = key
+                onionSkinKeyImages = frames.map(\.image)
+                onionSkinKeyMask = mask
                 shown.image = OnionSkinFrame.composite(frames, size: size)
             }
             guard shown.image != nil else { return blank() }
@@ -1791,9 +1816,9 @@ struct CanvasView: UIViewRepresentable {
             // own opacity, and the line here previously multiplied a single frame's opacity in a
             // second time — so the shipped one-skin default rendered at 0.3 × 0.3 = 0.09 while the
             // comment above it said the opposite was happening.
-            shown.alpha = 1
-            applyOnionSkinMask(mask, to: shown)
-            shown.isHidden = false
+            if shown.alpha != 1 { shown.alpha = 1 }
+            applyOnionSkinMask(mask, to: shown, canvasSize: canvasSize)
+            if shown.isHidden { shown.isHidden = false }
 
             // "In Front" has to out-rank `sandwichAbove`, which `reconcileLayers` fronts whenever the
             // stack changes. Done here every pass — `bringSubviewToFront` on a view already at the
@@ -1802,9 +1827,27 @@ struct CanvasView: UIViewRepresentable {
             if placement == .inFront { shown.superview?.bringSubviewToFront(shown) }
         }
 
-        private func applyOnionSkinMask(_ image: CGImage?, to view: UIImageView) {
-            guard onionSkinMaskImage !== image || (image != nil && view.layer.mask !== onionSkinMaskLayer) else {
-                if image != nil { onionSkinMaskLayer.frame = view.bounds }
+        /// Installs (or removes) the clip on whichever onion view is showing.
+        ///
+        /// **The frame is `canvasSize`, not `view.bounds`, and that is not a shortcut.** A mask
+        /// layer's frame is in its owner's coordinate space, the onion views are pinned to a
+        /// container whose bounds `hostBoundsDidChange` sets to exactly `canvasSize`, and this runs
+        /// from `updateUIView` — which on the very first pass is *before* autolayout has sized
+        /// anything. Reading `view.bounds` there gives `.zero`, and a zero-frame mask hides the layer
+        /// completely rather than visibly wrongly. The canvas size is known here and is fixed for a
+        /// document's life, so it is both the correct answer and the one available early.
+        ///
+        /// Implicit animation is off for `LayerHostView.setContentMask`'s reason: Core Animation's
+        /// default would fade a clip in over a quarter second, on a change the artist did not make.
+        private func applyOnionSkinMask(_ image: CGImage?, to view: UIImageView, canvasSize: CGSize) {
+            // Three things have to agree, and the third is what a plain "has the image changed"
+            // check misses: one `CALayer` can be the mask of only one layer at a time, so switching
+            // placement has to re-install a mask image that has not itself changed.
+            let installedHere = view.layer.mask === onionSkinMaskLayer
+            let wanted = image != nil
+            let frame = CGRect(origin: .zero, size: canvasSize)
+            if onionSkinMaskImage === image, installedHere == wanted {
+                if wanted, onionSkinMaskLayer.frame != frame { onionSkinMaskLayer.frame = frame }
                 return
             }
             onionSkinMaskImage = image
@@ -1812,10 +1855,10 @@ struct CanvasView: UIViewRepresentable {
             CATransaction.setDisableActions(true)
             if let image {
                 onionSkinMaskLayer.contents = image
-                onionSkinMaskLayer.frame = view.bounds
+                onionSkinMaskLayer.frame = frame
                 view.layer.mask = onionSkinMaskLayer
             } else {
-                if view.layer.mask === onionSkinMaskLayer { view.layer.mask = nil }
+                if installedHere { view.layer.mask = nil }
                 onionSkinMaskLayer.contents = nil
             }
             CATransaction.commit()

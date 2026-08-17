@@ -455,27 +455,26 @@ in the transition line settles the question on the spot. (A finger during a *pen
 reach it — it is refused by type as palm rejection, deliberately.) The suite still cannot reach it,
 so the "what would settle it" paragraph above stands for XCUITest.
 
-## The onion skin renders unmasked (2026-08-15)
+## Interpolate mode's onion skin is still unmasked (2026-08-17)
 
-`PreviousCelOnionSkinSource` rasterizes the previous cel with `PixelOps.rasterize(cel:)` and applies
-no mask, and `onionSkinView` sits below `sandwichBelowView` and is never blanked
-(`CanvasView.swift:46` vs `:54`, shown at `:1416-1419`). So a masked layer's onion skin draws ink
-outside the layer's own mask, at `onionSkinOpacity`.
+The ordinary onion skin's version of this is **fixed**: `Coordinator.updateOnionSkin` now resolves
+the current layer's clip through `resolveLiveMask(forLayerAt:)` — the same `CGImage` the compositor's
+own mask cache holds, not a second resolution path — and installs it on the onion view's own
+`CALayer.mask`, which nothing else owns, so §6.4's slot-collision warning does not apply. Every skin
+comes from the current layer, so one mask covers all of them.
 
-**Half of this shipped as a fix and half is deliberately deferred.** The half that shipped: the
-source asked for the cel at `currentFrame - 1`, but `addVectorLayer` mints ONE cel spanning the whole
-scene, so from any frame but the first that lookup returned *the cel being drawn on* and the onion
-skin ghosted the live artwork onto itself. Invisible normally — the layer's own pixels cover it — but
-a mask uncovers it, which is how the product owner found it: a red layer masked by a black one showed
-translucent red outside the mask on every frame of a block except frame 0. Fixed by stepping back
-from the current *cel's* `startFrame`, which is what the doc comment always promised.
+`InterpolationReferenceOnionSkinSource` is deliberately left unclipped, and the reason is that there
+is no obviously right answer rather than that it was missed. A reference **can span layers**
+(VECTOR_INTERPOLATION requirement 5), so the two ghosts it draws are not the current layer's content
+and clipping them by the current layer's mask would be wrong for exactly the documents that use the
+feature properly. The honest fix is per-reference: resolve each contributing cel's own layer mask and
+clip its contribution, which means `InterpolationReferenceOnionSkinSource` growing from "flatten the
+reference's cels" into "flatten each cel under its own clip". Small, but it is a change to the
+interpolation preview path and not to onion skin.
 
-The residue: with two genuine cels, the previous cel's ghost is still unmasked, so the same leak
-returns. Not fixed here because the owner is overhauling onion skin into a proper customizable menu
-and this would be rewritten. When it is rewritten, reuse `resolveLiveMask(forLayerAt:)` /
-`RenderNode.masksClipping(leafAt:in:)` rather than writing a second mask-resolution path, and mind
-§6.4's warning that a `CALayer.mask` slot collision fails silently in whichever direction install
-order decides.
+Severity is genuinely lower than the entry it replaces: this only shows up in interpolate mode, which
+is a deliberate mode the artist has entered, on a masked layer, and it is two ghosts rather than up
+to ten.
 
 ## The multi-pass effect decline path is reasoned-correct and uncovered (2026-08-15)
 
