@@ -464,6 +464,83 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
                       "…which here is the brush, the tool that was active when the eyedropper was armed")
     }
 
+    /// **The owner's bug, both halves** (2026-08-17): *"Using the eyedropper initiates a brush
+    /// stroke. The intended behaviour is that it doesnt, and the brush stroke only is initiated the
+    /// next time the pencil taps."*
+    ///
+    /// The colour side of the eyedropper was never wrong — the owner confirmed the pick was correct
+    /// even on a rotated canvas — so this asserts nothing about colour. It asserts the two things
+    /// they actually reported: the picking touch paints nothing, and the touch after it paints.
+    ///
+    /// **`sideToolbar.undoButton.isEnabled` is the signal, not a pixel.** A committed stroke pushes
+    /// an undo entry (`HistoryActionLabel.brushStroke`), so the button flipping from disabled to
+    /// enabled *is* "a stroke was committed", read without opening a panel over the canvas and
+    /// without depending on where the paper sits inside its host or what colour anything is. Which
+    /// matters here: a pick on bare paper leaves the brush white, so the stroke in the second half is
+    /// white on white and no pixel check could see it at all.
+    ///
+    /// **The picking gesture is a press-and-drag, not a tap**, because a drag is what a stroke
+    /// unambiguously is: it crosses `StrokeSampleGate`'s travel threshold and it holds the touch down
+    /// across the pick's off-main-thread composite, which is the window in which the revert used to
+    /// land. A tap would exercise a narrower version of the same path. XCUITest cannot synthesise a
+    /// pencil, so this is a finger — the same path, with pencil-only drawing off (the default).
+    func testTheEyedroppersOwnTouchPaintsNothingAndTheNextTouchPaints() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertFalse(undo.isEnabled,
+                       "Baseline: a freshly created canvas has nothing to undo")
+
+        let eyedropper = app.buttons["sideToolbar.eyedropperButton"]
+        XCTAssertTrue(eyedropper.waitForExistence(timeout: 5))
+        XCTAssertEqual(eyedropper.value as? String, "000000",
+                       "Sanity: the brush starts black, and the paper is white, so a pick is visible")
+        eyedropper.tap()
+        XCTAssertTrue(eyedropper.isSelected)
+
+        // Down on the paper, dragged across it, lifted. Both ends well inside the drawable band the
+        // rest of this suite draws in.
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.5))
+        start.press(forDuration: 0.15, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
+
+        // The pick resolved — the composite is off the main thread, so it lands a beat after the
+        // touch — and with it the tool handed itself back.
+        expectation(for: NSPredicate(format: "value != %@", "000000"), evaluatedWith: eyedropper)
+        waitForExpectations(timeout: 10)
+        guard let hex = eyedropper.value as? String, hex.count >= 6,
+              let r = Int(hex.prefix(2), radix: 16) else {
+            return XCTFail("Expected a hex colour on the eyedropper button, got \(String(describing: eyedropper.value))")
+        }
+        XCTAssertGreaterThan(r, 200, "The pick took the white paper's colour, got #\(hex)")
+        XCTAssertFalse(eyedropper.isSelected,
+                       "A completed pick reverts to the previous tool (Tool.eyedropper)")
+
+        // The assertion this test exists for.
+        XCTAssertFalse(undo.isEnabled, """
+            The eyedropper's own touch committed a stroke. That is the owner's report of 2026-08-17: \
+            `CanvasView`'s `shouldInteract` left the active layer's host interactive because its tool \
+            clause was a hand-maintained exclusion list that never grew to include the eyedropper, so \
+            the picking touch reached the layer's StrokeGestureRecognizer as well as the eyedropper's \
+            own. See `Tool.paintsOnCanvas` and `ToolLogicTests`.
+            """)
+
+        // …and the next touch does paint, which is the half of the report that is a requirement
+        // rather than a bug: the tool is back, the host is live again, and this stroke lands.
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.42), to: CGVector(dx: 0.65, dy: 0.42))
+        let undoBecameAvailable = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isEnabled == true"), object: undo)
+        XCTAssertEqual(XCTWaiter().wait(for: [undoBecameAvailable], timeout: 5), .completed, """
+            The touch after the pick must draw. If this fails while the assertion above passes, the \
+            revert never happened and the artist is stranded in the eyedropper.
+            """)
+    }
+
     /// Task: the eraser gets its own settings dropdown (shape/size/opacity/dynamics), functioning like
     /// the brush tool but erasing instead of painting. Also exercises the drawing-dismisses-menu fix
     /// for the eraser specifically: opening its menu then dragging over existing ink should both close

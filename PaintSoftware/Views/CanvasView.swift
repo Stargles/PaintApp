@@ -306,6 +306,13 @@ struct CanvasView: UIViewRepresentable {
         /// second one's result — taken from the same picture — arrives after the tool has already
         /// reverted. Read and written on the main actor only.
         var eyedropperPickInFlight = false
+        /// True from the moment the eyedropper's recognizer begins until it ends or is cancelled —
+        /// "a touch that came in through the eyedropper is still on the glass". Half of the join in
+        /// `finishEyedropperIfSettled`; see `handleEyedropperPress` for what the join is for.
+        var eyedropperTouchIsDown = false
+        /// A resolved pick that still owes the tool revert. Set when the colour is applied, cleared
+        /// when the revert actually happens. The other half of the join.
+        var eyedropperRevertPending = false
         /// Counts live canvas touches — engages the shape constraint snap whenever a second is down.
         weak var touchCountRecognizer: TouchCountRecognizer?
         /// Fingers reported by the *active stroke's own* recognizer as accompanying the pen, the
@@ -712,8 +719,15 @@ struct CanvasView: UIViewRepresentable {
                 // in (`addEffectLayer`'s and `addValueLayer`'s docs), so their hosts decline
                 // interaction the same way a vector layer mid-transform does, and the catch-all below
                 // takes the touch instead.
+                //
+                // **The tool clause asks the tool rather than listing tools.** It read
+                // `selectedTool != .fill`, and that hand-maintained exclusion is exactly what the
+                // eyedropper fell through: the tool shipped, the list did not grow, so the host
+                // stayed interactive with the eyedropper selected and the picking touch started a
+                // brush stroke alongside the pick (owner, 2026-08-17). `Tool.paintsOnCanvas` is an
+                // exhaustive switch with no `default:`, so the next tool added has to answer.
                 let shouldInteract = (index == canvasManager.currentLayerIndex)
-                    && canvasManager.selectedTool != .fill
+                    && canvasManager.selectedTool.paintsOnCanvas
                     && activePanel != .select && canvasManager.floatingPiece == nil
                     && !(canvasManager.isVectorTransforming && layer.kind == .vector)
                     && !layer.hasNoDrawingSurface
@@ -2349,7 +2363,12 @@ struct CanvasView: UIViewRepresentable {
             guard recognizer.state == .began else { return }
             // Before every other guard, including the tool check: any touch, any tool, any touch type.
             canvasManager.interactionBegan.send()
-            guard canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil || canvasManager.selectedTool == .eraser else { return }
+            // `Tool.paintsOnCanvas`, not a second spelling of the same three cases: this path exists
+            // to explain why a touch that *would have drawn* did not, so it is asking `shouldInteract`'s
+            // tool clause over again and must give the same answer. The fill and the eyedropper have
+            // their own recognizers on this same view and are not owed an explanation — the
+            // eyedropper in particular still picks with no layers at all, off the paper.
+            guard canvasManager.selectedTool.paintsOnCanvas else { return }
             // The same test `StrokeGestureRecognizer.touchesBegan` applies, read straight off the
             // source flag that `reconcileLayers` mirrors down to `StrokeCanvasView.pencilOnlyDrawing`
             // — not off a third copy of the preference, so the two paths cannot drift apart.
@@ -2465,10 +2484,43 @@ struct CanvasView: UIViewRepresentable {
         /// pure and states it is safe from any thread (the same contract `Compositor.composite`
         /// makes), and `applyEyedropperResult` comes back to the main actor to write the colour.
         ///
-        /// `.began` only, and `minimumPressDuration = 0`, so the pick lands on touch-down like the
-        /// fill's. There is no drag axis to keep the sequence open for.
+        /// **The pick lands on touch-down; the *revert* waits for touch-up, and the gap between them
+        /// is deliberate.** `minimumPressDuration = 0` means `.began` is touch-down, which is where
+        /// the colour should be read from — it is the pixel the artist aimed at. But the revert puts
+        /// a *painting* tool back, and `reconcileLayers` makes the active layer's host interactive
+        /// again on the next SwiftUI pass the moment it sees one (`Tool.paintsOnCanvas`). Doing that
+        /// under a touch that is still on the glass re-opens the owner's bug from the other side: the
+        /// picking touch itself is safe, since UIKit bound it to the container at hit-test time and
+        /// never re-routes a live touch, but any *new* contact is hit-tested when it arrives — a
+        /// palm, a steadying finger, the artist starting their next stroke a frame early — and that
+        /// one would land in a stroke view that had no business being live yet. Holding the revert
+        /// until the recognizer says the touch is gone means the tool the artist put their pen down
+        /// with is the tool it is lifted from, and the next touch is the first that can paint. That
+        /// is the behaviour the owner specified, in their words on 2026-08-17: *"the brush stroke
+        /// only is initiated the next time the pencil taps."*
+        ///
+        /// The two facts are joined in `finishEyedropperIfSettled` rather than sequenced, because
+        /// neither reliably comes second: on a flick the touch is gone long before an 84 ms composite
+        /// returns, and on a deliberate press the composite returns first. Whichever arrives last
+        /// performs the revert.
+        ///
+        /// `guard` order below is load-bearing: `eyedropperTouchIsDown` is set for *every* `.began`,
+        /// before the pencil-only gate and before the in-flight gate, so a touch that is declined or
+        /// swallowed still holds the revert off while it is down. The state is cleared unconditionally
+        /// on `.ended`/`.cancelled`, so no path can strand the artist in the eyedropper.
         @objc func handleEyedropperPress(_ recognizer: TouchTypePressRecognizer) {
-            guard recognizer.state == .began, let container = containerView else { return }
+            switch recognizer.state {
+            case .began:
+                break
+            case .ended, .cancelled, .failed:
+                eyedropperTouchIsDown = false
+                finishEyedropperIfSettled()
+                return
+            default:
+                return
+            }
+            eyedropperTouchIsDown = true
+            guard let container = containerView else { return }
             // Before the gate, as every canvas touch is: a declined finger still closes an open
             // top-bar dropdown, because closing a menu by tapping away from it is not drawing.
             canvasManager.interactionBegan.send()
@@ -2481,7 +2533,9 @@ struct CanvasView: UIViewRepresentable {
             // uses. See `Eyedropper`'s note on why the feature contains no transform arithmetic.
             let canvasPoint = recognizer.location(in: container)
             guard let request = canvasManager.eyedropperRequest() else {
-                canvasManager.applyEyedropperResult(nil)
+                canvasManager.applyEyedropperResult(nil, revertTool: false)
+                eyedropperRevertPending = true
+                finishEyedropperIfSettled()
                 return
             }
 
@@ -2498,9 +2552,20 @@ struct CanvasView: UIViewRepresentable {
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.eyedropperPickInFlight = false
-                    self.canvasManager.applyEyedropperResult(picked)
+                    self.canvasManager.applyEyedropperResult(picked, revertTool: false)
+                    self.eyedropperRevertPending = true
+                    self.finishEyedropperIfSettled()
                 }
             }
+        }
+
+        /// Leaves the eyedropper once a pick has resolved *and* the touch that made it is off the
+        /// glass — the join `handleEyedropperPress` describes. Idempotent and cheap, so both sides
+        /// call it unconditionally rather than deciding which of them is last.
+        private func finishEyedropperIfSettled() {
+            guard eyedropperRevertPending, !eyedropperTouchIsDown, !eyedropperPickInFlight else { return }
+            eyedropperRevertPending = false
+            canvasManager.leaveEyedropper()
         }
 
     }

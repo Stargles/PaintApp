@@ -279,4 +279,61 @@ final class EyedropperLogicTests: XCTestCase {
         manager.leaveEyedropper()
         XCTAssertEqual(manager.selectedTool, .fill)
     }
+
+    // MARK: - Holding the revert back until the picking touch is gone
+
+    /// **The colour and the tool move at different moments, and `revertTool: false` is what buys the
+    /// gap.** The owner reported on 2026-08-17 that a pick also painted a stroke; the outer half of
+    /// that was `shouldInteract` (see `ToolLogicTests`), and this is the inner half. The composite
+    /// runs off the main thread, so a pick very often resolves while the picking touch is *still
+    /// down* — and reverting there hands a painting tool back under a finger already on the glass,
+    /// which `CanvasView.reconcileLayers` then makes the layer host interactive for on its next
+    /// pass. `CanvasView.handleEyedropperPress` therefore takes the colour immediately (the rail's
+    /// swatch is the artist's confirmation the pick worked) and holds the revert until the
+    /// recognizer reports the touch gone.
+    func testApplyingAPickWithoutTheRevertTakesTheColourAndStaysArmed() {
+        let manager = CanvasFixture.manager()
+        manager.selectedTool = .pen
+        manager.brushColor = .black
+        manager.selectEyedropper()
+
+        let red = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
+        XCTAssertTrue(manager.applyEyedropperResult(red, revertTool: false))
+        XCTAssertEqual(manager.brushColor.hexString, red.hexString,
+                       "The colour lands at once — that is what tells the artist the pick worked")
+        XCTAssertEqual(manager.selectedTool, .eyedropper,
+                       "…and the tool does not, until the caller says the touch is over")
+
+        // Which is what the gesture does on lift.
+        manager.leaveEyedropper()
+        XCTAssertEqual(manager.selectedTool, .pen)
+    }
+
+    /// A miss is held back the same way. The notice is raised immediately — it explains a tap that
+    /// has already happened — but the tool the artist is holding does not change under their finger.
+    func testAMissWithoutTheRevertStillSaysSoAndStaysArmed() {
+        let manager = CanvasFixture.manager()
+        manager.selectedTool = .eraser
+        manager.notice = nil
+        manager.selectEyedropper()
+
+        XCTAssertFalse(manager.applyEyedropperResult(nil, revertTool: false))
+        XCTAssertEqual(manager.notice?.kind, .nothingToPick)
+        XCTAssertEqual(manager.selectedTool, .eyedropper)
+
+        manager.leaveEyedropper()
+        XCTAssertEqual(manager.selectedTool, .eraser)
+    }
+
+    /// The default is unchanged, so every caller that is *not* a live gesture — `pickColor`, and the
+    /// tests above it — keeps the one-call behaviour. Asserted directly rather than only through
+    /// `pickColor`, since the default is what makes the parameter safe to have added.
+    func testTheRevertIsStillTheDefault() {
+        let manager = CanvasFixture.manager()
+        manager.selectedTool = .pencil
+        manager.selectEyedropper()
+
+        manager.applyEyedropperResult(Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 1))
+        XCTAssertEqual(manager.selectedTool, .pencil)
+    }
 }

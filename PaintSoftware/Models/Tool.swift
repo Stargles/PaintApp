@@ -1,6 +1,9 @@
 import Foundation
 
-enum Tool: Hashable {
+/// `CaseIterable` exists for `ToolLogicTests`, which walks every case and asserts its
+/// `paintsOnCanvas` answer is *stated* rather than inherited. See that property for why the
+/// enumeration is the point.
+enum Tool: Hashable, CaseIterable {
     case pen
     case pencil
     case eraser
@@ -15,6 +18,39 @@ enum Tool: Hashable {
     /// selected, the next canvas touch would re-pick instead of paint, which is never what the tap
     /// was for.
     case eyedropper
+}
+
+extension Tool {
+    /// Whether a canvas touch made with this tool selected belongs to the active layer's own
+    /// drawing surface. `CanvasView.reconcileLayers`' `shouldInteract` is the caller of record: it
+    /// is what decides whether that layer's host view — and the `StrokeGestureRecognizer` inside it
+    /// — accepts touches at all, and `false` here is what lets the touch fall through to the
+    /// container, where the tool's own recognizer is waiting. `handleCatchAllTap` asks the same
+    /// question for the other half of that arrangement.
+    ///
+    /// **`false` does not mean "does nothing on the canvas".** Both false cases act on a canvas
+    /// touch; they act on it through a `TouchTypePressRecognizer` mounted on the *container*
+    /// (`fillTapRecognizer`, `eyedropperTapRecognizer`), and the active layer declining the touch is
+    /// a precondition for theirs ever seeing it — the host fully covers the container, so an
+    /// interactive one swallows the touch via `UIView`'s default hit-test. The question is "whose
+    /// recognizer is this touch for", not "does anything happen".
+    ///
+    /// **Exhaustive, with no `default:`, and that is the whole reason it is a property rather than a
+    /// list of exclusions written into the predicate.** It was a list, spelled `selectedTool !=
+    /// .fill`, and adding `.eyedropper` to the enum did not add it to the list: the owner reported
+    /// on 2026-08-17 that the eyedropper picked the colour *and* painted a stroke with the same tap,
+    /// because the host stayed interactive and the touch reached both recognizers. A tool added
+    /// after this cannot repeat that — it will not compile until it says which side it is on.
+    var paintsOnCanvas: Bool {
+        switch self {
+        case .pen, .pencil, .eraser:
+            // The eraser included: it is a stroke like any other, `.destinationOut` on a raster
+            // layer and a real gesture on a vector one, and it goes through the same recognizer.
+            return true
+        case .fill, .eyedropper:
+            return false
+        }
+    }
 }
 
 /// How the eraser behaves on a `.vector` layer. Modelled on Clip Studio Paint's three vector-eraser

@@ -98,10 +98,21 @@ extension CanvasManager {
     /// still the artist having taken their one shot at picking; leaving them in the eyedropper so the
     /// *next* tap can also do nothing is not a kindness, and the notice already explains what
     /// happened. Returns whether a colour was taken, so callers (and tests) can tell the two apart.
+    ///
+    /// **`revertTool: false` hands the revert to the caller, and the live gesture is the one caller
+    /// that needs it.** The colour and the tool change at different moments for a reason: the
+    /// composite runs off the main thread, so the pick lands *while the picking touch is very often
+    /// still down*, and reverting there puts a painting tool back under a finger that is already on
+    /// the glass. `reconcileLayers` re-enables the active layer's host on the very next SwiftUI pass
+    /// (`Tool.paintsOnCanvas`), so a second contact — a palm, a steadying finger — would hit-test
+    /// into a live stroke view mid-pick and paint. That is the owner's bug arriving through a second
+    /// door, and `CanvasView.handleEyedropperPress` closes it by holding the revert until the
+    /// recognizer reports the touch gone. The colour is applied immediately either way: the rail's
+    /// swatch updating the instant the pick resolves is the feedback that it worked.
     @MainActor
     @discardableResult
-    func applyEyedropperResult(_ picked: Color?) -> Bool {
-        defer { leaveEyedropper() }
+    func applyEyedropperResult(_ picked: Color?, revertTool: Bool = true) -> Bool {
+        defer { if revertTool { leaveEyedropper() } }
         guard let picked else {
             raise(.nothingToPick)
             return false

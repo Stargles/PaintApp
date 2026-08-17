@@ -28,6 +28,7 @@
 		9A7B5C3D1E2F000000000D02 /* PaintSoftware/Engine/VectorEraser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */; };
 		9A7B5C3D1E2F000000000C02 /* StrokeGeometryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */; };
 		C44F78B352EE5FCF8D33DAE6 /* EyedropperLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */; };
+		C60715591E6F9256B720B7F3 /* ToolLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A266D16C60715591E6F9256 /* ToolLogicTests.swift */; };
 		9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */; };
 		B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */; };
 		8B61CD83DA977B72607F6E62 /* SelectionOverlayLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */; };
@@ -170,6 +171,7 @@
 		9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VectorEraser.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeGeometryLogicTests.swift; sourceTree = "<group>"; };
 		8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EyedropperLogicTests.swift; sourceTree = "<group>"; };
+		0A266D16C60715591E6F9256 /* ToolLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolLogicTests.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeSampleGateLogicTests.swift; sourceTree = "<group>"; };
 		5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PinchMergeGateLogicTests.swift; sourceTree = "<group>"; };
 		710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionOverlayLogicTests.swift; sourceTree = "<group>"; };
@@ -352,6 +354,7 @@
 				B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
 				8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */,
+				0A266D16C60715591E6F9256 /* ToolLogicTests.swift */,
 				9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */,
 				5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */,
 				710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */,
@@ -606,6 +609,7 @@
 				9A7B5C3D1E2F000000000D02 /* PaintSoftware/Engine/VectorEraser.swift in Sources */,
 				9A7B5C3D1E2F000000000C02 /* StrokeGeometryLogicTests.swift in Sources */,
 				C44F78B352EE5FCF8D33DAE6 /* EyedropperLogicTests.swift in Sources */,
+				C60715591E6F9256B720B7F3 /* ToolLogicTests.swift in Sources */,
 				9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */,
 				B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */,
 				8B61CD83DA977B72607F6E62 /* SelectionOverlayLogicTests.swift in Sources */,
