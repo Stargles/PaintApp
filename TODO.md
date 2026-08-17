@@ -44,6 +44,19 @@ New this pass (owner, 2026-08-17):
       of the lasso**, so if the lassoed region spans two compartments separated by a line, *the line is
       filled too* rather than acting as a wall.
 - [ ] **Fill tool option: treat the canvas edge as a line boundary. Default on.**
+- [ ] **Smart shapes should recognise an arc.** The owner: *"say the user draws an arc, like an oval
+      except only partially, like half of it. After 0.8 seconds, the stroke should still collapse into
+      an oval, although half done as the stroke is projected onto it. Same thing (user is able to edit,
+      turn into circle, etc.)"*
+      So the hold fires as it does today, but a stroke covering only part of an ellipse resolves to that
+      **partial** ellipse rather than being closed into a whole one or falling through to a line. "The
+      stroke is projected onto it" is the specification: fit the ellipse the stroke lies on, then keep
+      the angular span the stroke actually covered. It carries the same affordances as a full oval —
+      handles, editing, and the two-finger snap.
+      The hard part is not the fit, it is the **decision boundary**: how much angular coverage makes a
+      sloppy full oval rather than a deliberate arc, and where an arc stops being an arc and becomes a
+      line. Both are places a wrong threshold is felt constantly. Wants the headless sweep harness
+      `ShapeDetectorLogicTests` already has.
 
 Carried over:
 
