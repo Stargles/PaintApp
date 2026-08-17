@@ -221,6 +221,81 @@ stops a two-finger pan begun mid-stroke from leaving a permanent, un-undoable ma
 caused by *the app's own popover* should also throw the artist's ink away is the owner's decision, and
 committing it instead would reopen the pan case. Not changed unilaterally.
 
+## XCUITests cannot launch into the editor on the iPad 9 (2026-08-16)
+
+The logic tier runs on the owner's device beautifully — 991 tests in 36 s, Release, against 3 min on
+the simulator — but **every XCUITest fails in `launchIntoEditor`**, before it has touched anything it
+is about to test. 18 of 18 in `SandwichCompositingUITests` + `BlendModesAndCompositorUITests`, all at
+the same line.
+
+The trace says why: `Tap "sizePicker.createButton"` → `Computed hit point {-1, -1} after scrolling to
+visible`, so the tap never lands and `timeline.frameLabel` never appears. That is the size picker
+laying out differently on a 10.2" 4:3 screen (2160x1620) than on the iPad Pro 13" every UI suite was
+written against — a test-fixture problem on the device, not a product bug, and nothing to do with the
+compositor.
+
+Worth fixing because device runs are 5x faster than the simulator and are the only place the memory
+behaviour is real. Likely fix: make `launchIntoEditor` scroll the size picker or dismiss it by
+keyboard rather than tapping a button that can land off-screen. Until then, **device testing means
+the logic tier only**, and the UI suites stay on the simulator.
+
+## Drawing on a vector layer at 4K is capped at ~19 fps by the live stroke preview (2026-08-16)
+
+**Measured on the owner's iPad 9, Release** (`PerfBaselineTests.testTheLiveStrokePreviewCostsFourTimesMoreOnAVectorLayerThanARaster`):
+one dab costs **53.8 ms on a vector layer at 4096²** against 4.0 ms on a raster layer — a ceiling of
+**19 fps** before anything else in the frame, against 250 fps for raster. At 2048² it is 16.4 ms
+against 3.0 ms. The owner reports 17 fps.
+
+`StrokeCanvasView.refreshDisplay`'s `.overlay` branch runs once per touch-move and does four
+canvas-sized things where the raster path does one: it allocates a **fresh** canvas-sized
+`UIGraphicsImageRenderer` bitmap, draws the committed vector render into it, renders the live scratch,
+and draws that over the top. At 4096² the allocation alone is 64 MiB, per dab.
+
+**This is not the compositor and it is not this branch.** No composite runs during a dab —
+`makeSandwichKey` freezes the active layer's content version for the duration of a stroke precisely so
+the compositor stays off the drawing path — and `refreshDisplay` predates the Metal work. The owner's
+own experiment proves it from the other side: halving `renderResolution` cuts a sandwich rebuild from
+40.6 ms to 13.1 ms on that device and **changed the frame rate not at all**, because
+`RenderResolution` is applied in `makeSandwichRequests` and reaches nothing on this path.
+
+**The fix, and it belongs in its own branch.** Stop compositing the two into one bitmap: give the
+scratch its own `UIImageView`/`CALayer` over the committed one and let Core Animation composite them,
+which it is doing anyway. That deletes the per-dab allocation and both blits, leaving only
+`scratch.renderToUIImage()` — the raster path's cost. It is a change to the most gesture-sensitive
+code in the app (`vectorScratchRole` has three modes and `.replacement` and `.none` behave
+differently), so it wants its own branch and its own pass through the vector-eraser UI suites, not a
+rider on a compositor-memory fix.
+
+## The project thumbnail composites the whole canvas to make a 320x320 tile (2026-08-16)
+
+`ProjectStore.SaveSnapshot` builds a full `makeRenderRequest` at native canvas size, composites it,
+and hands the result to `ThumbnailRenderer.render(…, thumbnailSize: 320x320)`. On a 4096² document
+that is 16.8M pixels rendered to fill 102k — and on a 3 GB device the GPU path declines it
+(`CompositorBudget`, which sizes only the *live canvas* down), so it lands on the CoreGraphics
+reference. With a bloom and a blur in the stack that is minutes of background CPU per save.
+
+**Not a regression from the Metal flip** — with the old `.coreGraphics` default the thumbnail took
+exactly the same path — and on a device with room it is now much faster than it was. Left alone here
+because fixing it properly means deciding what size a thumbnail composite should be and checking that
+against `ProjectSaveLogicTests`, which is a save-path change and not a crash fix. The shape of the
+fix: give `makeRenderRequest` an optional render size the way `makeSandwichRequests` has one, and
+have `ProjectStore` ask for something near the tile's own size.
+
+## The Metal composite hands Core Animation a non-native pixel format (2026-08-16)
+
+`CompositorMetalEngine.readBack` builds its `CGImage` as `premultipliedLast` RGBA in device RGB;
+Core Animation's native layout on iOS is BGRA premultiplied-*first*. So assigning one to
+`UIImageView.image` costs a full-canvas convert-and-copy inside the CA commit, on the main thread —
+three of them per sandwich rebuild, 64 MiB each at 4096². The CoreGraphics backend never paid it: a
+`UIGraphicsImageRenderer` image is already in CA's format, so this arrived with the backend flip and
+is invisible to every headless benchmark, which stops at the `CGImage`.
+
+**Unmeasured on device** — it is a hitch per stroke-lift rather than a sustained cost, so it is not
+the 17 fps above. Worth fixing next: `bgra8Unorm` for the two accumulator textures would produce
+byte-identical pixel *values* (Metal presents both formats to a shader as RGBA) with a CA-native
+byte order, at the cost of one runtime capability check. Verify with `CompositorParityLogicTests`,
+which compares values rather than layouts and so would not itself notice the change.
+
 ## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15)
 
 The product owner reports it from their iPad: pick Fill and the canvas will not pan, pinch or rotate;
