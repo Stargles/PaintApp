@@ -47,6 +47,26 @@ New this pass (owner, 2026-08-17):
       Owner's decisions, 2026-08-17: **iOS system fonts to begin with, behind a provider seam** so
       open-source font packs can be added later without touching call sites; and **delivered in stages,
       each one usable**, rather than as one branch that lands whole.
+- [ ] **Onion skin gets a real panel, modelled on ToonSquid's.** The owner supplied a screenshot and
+      [the reference](https://toonsquid.com/handbook/layers/onion_skin/). Controls, top to bottom:
+      **Drawings | Frames** (neighbouring drawings, vs neighbouring frames inside one drawing);
+      **Behind | In Front** (default Behind); a **Previous** and a **Next** count slider with a **loop**
+      toggle between them that wraps the skins around the first and last frame for cycle work;
+      **Tinted | Original Colors**; a tint gradient bar, red for previous and green for next, drawn over
+      a checkerboard so the alpha reads; **per-slot opacity sliders**, one per skin either side; and a
+      row of dots beneath them.
+      **Linked opacity is on by default** — the owner's emphasis: with it on the sliders move together,
+      linearly with each other, so dragging one drags the rest. Unlinking frees them individually.
+      The dots are ToonSquid's **out-of-pegs**: each temporarily offsets that skin via transform
+      handles, the centre one toggles them all, and the onion button turns red while any offset is
+      active because the skins are no longer in true position. **Confirm with the owner whether
+      out-of-pegs is in scope** — it is a transform surface of its own and the screenshot does not say.
+- [ ] **Lasso flood fill**, as a *type* option under the existing flood fill tool, behaving like Clip
+      Studio Paint's. Two distinct requirements, and the second is the one that makes it different from
+      an ordinary fill: it **bridges gaps smartly**; and **the only boundary is the outer encirclement
+      of the lasso**, so if the lassoed region spans two compartments separated by a line, *the line is
+      filled too* rather than acting as a wall.
+- [ ] **Fill tool option: treat the canvas edge as a line boundary. Default on.**
 - [ ] **Say what an undo or redo just undid.** A brief notice naming the action, using the same
       transient notice mechanism already used elsewhere in the app (the owner does not recall where —
       find it and reuse it rather than adding a second kind). Must not block or freeze the screen.
