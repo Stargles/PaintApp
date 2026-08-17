@@ -48,7 +48,11 @@ toolset, and a frame-by-frame animation timeline.
   become derived (lattice + ARAP warp), with motion groups, guide strokes, editing at an in-between
   and Commit — see [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md)
 - **Color**: a Procreate-style HSB picker (SV square, hue bar, hex field) plus a custom palette
-  builder (named palettes, swatch grid, persisted across launches)
+  builder (named palettes, swatch grid, persisted across launches). **One picker for the whole app** —
+  brush, canvas background, value layer, effect colour and gradient stop all open the same panel, and
+  the only thing that varies between them is whether opacity is offered. Plus an **eyedropper** on the
+  side rail: select it, tap the canvas, and the colour under the tap becomes the brush colour. It
+  samples the composite (what is on screen, paper included) and reverts to the previous tool
 - **Gallery**: a project browser with thumbnails, backed by on-disk project packages
 - **Gestures**: two-finger zoom, rotate, and pan
 
@@ -66,6 +70,7 @@ PaintSoftware/
 │   ├── StrokeInput.swift / StrokeStabilizer.swift
 │   ├── StrokeSampleGate.swift   #   which input samples become stored geometry (distance, not time)
 │   ├── StrokeGeometry.swift / VectorEraser.swift  # vector eraser geometry + the three modes
+│   ├── Eyedropper.swift         #   which pixel a canvas point names, and its colour (pure)
 │   ├── InterpolationEvaluator.swift / GuidePath.swift
 │   ├── Deform/                  #   lattice + ARAP deformation (app-type-free)
 │   ├── Fill.metal / MetalFillEngine.swift  # GPU flood-fill
@@ -137,11 +142,17 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 1. Pick Pen/Pencil, Eraser, Fill, or Select/Move from the top toolbar.
 2. Adjust size/opacity (or a tool-specific setting) from the side rail sliders, or open the tool's
    panel for its full settings (shape, stabilization, grain, etc.).
-3. Pick a color from the color picker, or a saved palette swatch.
-4. Draw with your finger or Apple Pencil (toggle "Apple Pencil only" in the side rail if you want to
+3. Pick a color from the color picker, or a saved palette swatch. **There is one picker**: the same
+   panel drives the brush, the canvas background, a value layer's colour, an effect's colour and a
+   gradient stop, differing only in whether it offers opacity.
+4. Or take a colour off the artwork: tap the eyedropper below the side rail's opacity slider, then
+   tap the canvas. It samples the **composite** — what you can actually see, paper included — and
+   hands the canvas back to the tool you were using.
+5. Draw with your finger or Apple Pencil (toggle "Apple Pencil only" in the side rail if you want to
    ignore accidental finger/palm touches while drawing with a Pencil). The toggle gates **strokes and
-   the fill tool alike**; two-finger pan/zoom/rotate stays on a finger either way.
-5. If a touch cannot draw — no layers, the active layer hidden, or a layer with no drawing surface —
+   the fill tool alike**, and the lasso and the eyedropper with them; two-finger pan/zoom/rotate
+   stays on a finger either way.
+6. If a touch cannot draw — no layers, the active layer hidden, or a layer with no drawing surface —
    a banner appears under the top toolbar saying which, with the fix as a button. It dismisses itself
    and never interrupts the stroke.
 

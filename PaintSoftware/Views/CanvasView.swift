@@ -298,6 +298,14 @@ struct CanvasView: UIViewRepresentable {
         /// Enabled when there are no layers or the active layer is hidden, so a drawing-tool touch
         /// raises a user-facing notice instead of being silently swallowed.
         weak var catchAllTapRecognizer: TouchTypePressRecognizer?
+        /// The eyedropper's tap. A third `TouchTypePressRecognizer` rather than a third mechanism —
+        /// see `setUpGestures`.
+        weak var eyedropperTapRecognizer: TouchTypePressRecognizer?
+        /// Guards against a second pick being scheduled while the first is still compositing off the
+        /// main thread. Without it, a double-tap on a 4K canvas queues two full composites and the
+        /// second one's result — taken from the same picture — arrives after the tool has already
+        /// reverted. Read and written on the main actor only.
+        var eyedropperPickInFlight = false
         /// Counts live canvas touches — engages the shape constraint snap whenever a second is down.
         weak var touchCountRecognizer: TouchCountRecognizer?
         /// Fingers reported by the *active stroke's own* recognizer as accompanying the pen, the
@@ -1424,6 +1432,14 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func updateActiveLayerAndTool() {
+            // **Above the active-layer guard, unlike the fill's twin below it.** The eyedropper reads
+            // the composite rather than writing a layer, and with no layers at all the composite is
+            // still a picture — the paper — so a pick there is meaningful where a fill would have
+            // nowhere to land. Suspended while Select is engaged or a piece is floating for the
+            // fill's reason: those overlays own the canvas's single-touch gestures while they are up.
+            eyedropperTapRecognizer?.isEnabled = (canvasManager.selectedTool == .eyedropper)
+                && activePanel != .select && canvasManager.floatingPiece == nil
+
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
             guard let host = layerHosts[layer.id] else { return }
@@ -1873,6 +1889,14 @@ struct CanvasView: UIViewRepresentable {
         ///    completed flood. This was the second hole in pencil-only mode, reported by the owner.
         ///  * `catchAll` — **half gated,** in `handleCatchAllTap`: the notice it raises is gated, the
         ///    menu dismissal is not. See that handler for why those two split.
+        ///  * `eyedropperPress` — **gated,** in `handleEyedropperPress`, and it is the one entry here
+        ///    whose gating is not about protecting pixels. A pick edits nothing and pushes no undo
+        ///    entry, so "would this input have drawn?" answers no. It is gated anyway because of what
+        ///    a pick *leads to*: it replaces the brush colour and reverts the tool, so a resting palm
+        ///    would leave the artist holding a different colour and a different tool than the one
+        ///    they put down — a state they then paint with. Pencil-only mode is a promise that a hand
+        ///    on the glass changes nothing about drawing, and the colour about to be drawn with is
+        ///    part of that.
         ///
         /// The per-layer stroke recognizer is not created here — `StrokeCanvasView` owns it and
         /// `reconcileLayers` mirrors the preference down to it. That was the *only* consumer of
@@ -1975,10 +1999,31 @@ struct CanvasView: UIViewRepresentable {
             catchAll.name = "canvas.catchAll"
             view.addGestureRecognizer(catchAll)
             catchAllTapRecognizer = catchAll
+
+            // The eyedropper's tap. Disabled except while the eyedropper is selected, exactly as the
+            // fill's press is — `reconcileLayers` flips both from `selectedTool`.
+            //
+            // **A third `TouchTypePressRecognizer`, not a third mechanism.** This is a canvas-touch
+            // tool and so needs the same touch-type gate the fill and the lasso have, and the app now
+            // has exactly two spellings of that gate: this subclass, and
+            // `SelectionOverlayView`'s `TouchTypePan`/`TouchTypeTapGestureRecognizer` pair (both over
+            // `resolvedLastTouchType`). A fourth would be a fourth place for the pencil test to drift.
+            // This one is the right of the two here: the recognizer lives on the canvas host rather
+            // than the selection overlay, and the shape wanted is the fill's — one touch, zero press
+            // duration, a location read off the container.
+            let eyedropperPress = TouchTypePressRecognizer(target: self, action: #selector(handleEyedropperPress(_:)))
+            eyedropperPress.minimumPressDuration = 0
+            eyedropperPress.numberOfTouchesRequired = 1
+            eyedropperPress.delegate = self
+            eyedropperPress.cancelsTouchesInView = false
+            eyedropperPress.isEnabled = false
+            eyedropperPress.name = "canvas.eyedropperPress"
+            view.addGestureRecognizer(eyedropperPress)
+            eyedropperTapRecognizer = eyedropperPress
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer]
+            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer, eyedropperTapRecognizer]
             if alwaysConcurrent.contains(where: { $0 === gestureRecognizer }) || alwaysConcurrent.contains(where: { $0 === otherGestureRecognizer }) {
                 return true
             }
@@ -2401,6 +2446,60 @@ struct CanvasView: UIViewRepresentable {
                 fillDragStartHost = nil
             default:
                 break
+            }
+        }
+
+        /// The eyedropper's tap: take the colour under it as the brush colour, then go back to the
+        /// tool that was selected before (`Tool.eyedropper`).
+        ///
+        /// **Gated on pencil-only drawing**, like `handleFillPress` and for the reason spelled out in
+        /// `setUpGestures` — a pick edits nothing, but it changes the colour and the tool the artist's
+        /// *next* stroke will use, and a resting palm must not do that.
+        ///
+        /// **The composite runs off the main thread.** `CanvasManager.pickColor` does all three steps
+        /// in a row and is deliberately not what this calls: the middle step is a full-stack
+        /// composite, which §11 measured at 84 ms against a 276 ms source snapshot on six layers at
+        /// 2048², and doing that inline would freeze the canvas for the length of a tap on a large
+        /// document. The split is the one `CanvasManager+Eyedropper.swift` is written around —
+        /// `eyedropperRequest` on the main actor captures the document as a value, `sampledColor` is
+        /// pure and states it is safe from any thread (the same contract `Compositor.composite`
+        /// makes), and `applyEyedropperResult` comes back to the main actor to write the colour.
+        ///
+        /// `.began` only, and `minimumPressDuration = 0`, so the pick lands on touch-down like the
+        /// fill's. There is no drag axis to keep the sequence open for.
+        @objc func handleEyedropperPress(_ recognizer: TouchTypePressRecognizer) {
+            guard recognizer.state == .began, let container = containerView else { return }
+            // Before the gate, as every canvas touch is: a declined finger still closes an open
+            // top-bar dropdown, because closing a menu by tapping away from it is not drawing.
+            canvasManager.interactionBegan.send()
+            guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+            guard !eyedropperPickInFlight else { return }
+
+            // container's bounds are set to canvasSize (`applyTransform`) and it carries the
+            // zoom/rotation as its own `transform`, so this single call *is* the view→canvas mapping
+            // at any zoom and any rotation — UIKit inverts the transform. Same line `handleFillPress`
+            // uses. See `Eyedropper`'s note on why the feature contains no transform arithmetic.
+            let canvasPoint = recognizer.location(in: container)
+            guard let request = canvasManager.eyedropperRequest() else {
+                canvasManager.applyEyedropperResult(nil)
+                return
+            }
+
+            eyedropperPickInFlight = true
+            // **`sandwichQueue`, not a global queue.** That queue is serial and its stated job is to
+            // serialise "the composite half of every rebuild off the main thread" — a pick is one
+            // more of those. On a global queue a pick landing just after an edit would composite the
+            // whole stack *concurrently* with the sandwich rebuild doing the same, holding two
+            // canvas-sized results at once on a canvas where `CompositorBudget` already has to shrink
+            // one composite to fit. The cost of sharing it is that a pick can wait a rebuild out,
+            // which is tens of milliseconds on a deliberate tap.
+            Self.sandwichQueue.async { [weak self] in
+                let picked = CanvasManager.sampledColor(from: request, atCanvasPoint: canvasPoint)
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.eyedropperPickInFlight = false
+                    self.canvasManager.applyEyedropperResult(picked)
+                }
             }
         }
 

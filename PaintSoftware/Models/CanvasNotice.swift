@@ -37,6 +37,11 @@ struct CanvasNotice: Identifiable, Equatable {
         case historyUndo(HistoryActionLabel)
         /// The redo twin of `historyUndo`, same silence-on-empty-stack rule.
         case historyRedo(HistoryActionLabel)
+        /// The eyedropper was tapped somewhere with no colour: off the paper's edge, or on a fully
+        /// transparent pixel with the canvas background hidden. Raised rather than left silent
+        /// because the tool reverts on a miss as well as a hit (`applyEyedropperResult`), so without
+        /// a word the artist sees only their tool changing under them for no stated reason.
+        case nothingToPick
     }
 
     init(_ kind: Kind) {
@@ -51,6 +56,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .noDrawingSurface: return "This layer has no drawing surface."
         case .historyUndo(let label):  return "Undid \(label.phrase)."
         case .historyRedo(let label):  return "Redid \(label.phrase)."
+        case .nothingToPick:    return "Nothing to pick up there."
         }
     }
 
@@ -72,6 +78,9 @@ struct CanvasNotice: Identifiable, Equatable {
         case .hiddenLayer:      return "Show"
         case .noDrawingSurface: return nil
         case .historyUndo, .historyRedo: return nil
+        // Nor this one, for the same reason: the fix is to tap somewhere with paint on it, which the
+        // artist can already see and do behind the banner.
+        case .nothingToPick:    return nil
         }
     }
 
@@ -86,6 +95,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .noDrawingSurface: return "noDrawingSurface"
         case .historyUndo:      return "historyUndo"
         case .historyRedo:      return "historyRedo"
+        case .nothingToPick:    return "nothingToPick"
         }
     }
 

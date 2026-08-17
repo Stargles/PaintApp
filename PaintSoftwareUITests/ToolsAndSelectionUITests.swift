@@ -375,6 +375,95 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         XCTAssertLessThan(pixel.b, 80, "Stroke drawn after setting hex to 00FF00 should have low blue, got \(pixel)")
     }
 
+    /// **The eyedropper's wiring** (owner, 2026-08-17: a tool you select and then tap the canvas with).
+    ///
+    /// Deliberately the *only* XCUITest for this feature: everything about the pick that can be
+    /// numerically wrong — which pixel a point names, un-premultiplying, the composite-vs-layer
+    /// choice, the revert — is swept exactly in `EyedropperLogicTests`, headlessly, in two seconds.
+    /// What that cannot reach is whether the button is on the rail, whether selecting it arms the
+    /// gesture, and whether a real touch on the real canvas reaches `handleEyedropperPress` at all.
+    /// That is what this covers, and it covers it end to end: paint a known colour, change the brush
+    /// to a different one, pick the painted colour back.
+    ///
+    /// The button's `accessibilityValue` is `brushColor`'s hex, so the pick is read off the rail
+    /// without reopening the colour panel — the panel would cover the canvas this test just sampled.
+    func testTheSidebarEyedropperPicksTheColourUnderTheTapAndRevertsTheTool() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
+
+        /// Closes the colour panel and waits until it is really gone. **Not optional**: the panel is
+        /// a dropdown over the right of the canvas, and the stroke this test draws runs straight
+        /// under it — an unconfirmed close meant the drag landed on the hue bar instead of the
+        /// canvas and repainted the brush a colour nothing had asked for.
+        func closeColorPanel() {
+            colorButton.tap()
+            XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
+                          "The colour panel must be closed before the canvas is touched")
+        }
+
+        // Paint a red stroke across the middle of the canvas…
+        colorButton.tap()
+        let hexField = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hexField.waitForExistence(timeout: 5))
+        setHexField(app, hexField, to: "FF0000")
+        closeColorPanel()
+
+        let eyedropper = app.buttons["sideToolbar.eyedropperButton"]
+        XCTAssertTrue(eyedropper.waitForExistence(timeout: 5),
+                      "The eyedropper sits on the left rail, below the opacity slider")
+        XCTAssertEqual(eyedropper.value as? String, "FF0000", "Sanity: the hex reached brushColor")
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+
+        // …then move the brush to a colour nothing on the canvas is, so a pick that silently did
+        // nothing is distinguishable from one that worked. Through the SV square rather than the hex
+        // field: the field needs the keyboard, and a second visit to it mid-test is a focus race the
+        // pick has nothing to do with. Bottom-left of the square is saturation 0, brightness 0 —
+        // black, whatever the hue happens to be.
+        colorButton.tap()
+        let svSquare = app.otherElements["colorPanel.svSquare"]
+        XCTAssertTrue(svSquare.waitForExistence(timeout: 5))
+        dragWithinElement(svSquare, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.0, dy: 1.0))
+        closeColorPanel()
+
+        XCTAssertEqual(eyedropper.value as? String, "000000", "Sanity: the brush is black before the pick")
+        XCTAssertFalse(eyedropper.isSelected, "…and the tool is not armed yet")
+
+        eyedropper.tap()
+        XCTAssertTrue(eyedropper.isSelected, "Tapping it selects the tool rather than opening a picker")
+
+        // The tap that does the picking, right on the stroke.
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+
+        // The composite runs off the main thread, so the colour lands a beat after the tap.
+        expectation(for: NSPredicate(format: "value != %@", "000000"), evaluatedWith: eyedropper)
+        waitForExpectations(timeout: 10)
+
+        // Channel thresholds rather than an exact hex, matching how
+        // `testColorPanelControlsChangeBrushColorAndPaintedStroke` reads a drawn stroke back: the
+        // sampled pixel is a composited brush dab, so it is red without being bit-identical to the
+        // red that was typed.
+        guard let hex = eyedropper.value as? String, hex.count >= 6,
+              let r = Int(hex.prefix(2), radix: 16),
+              let g = Int(hex.dropFirst(2).prefix(2), radix: 16),
+              let b = Int(hex.dropFirst(4).prefix(2), radix: 16) else {
+            return XCTFail("Expected a hex colour on the eyedropper button, got \(String(describing: eyedropper.value))")
+        }
+        XCTAssertGreaterThan(r, 200, "The pick took the red stroke's colour, got #\(hex)")
+        XCTAssertLessThan(g, 80, "…got #\(hex)")
+        XCTAssertLessThan(b, 80, "…got #\(hex)")
+
+        XCTAssertFalse(eyedropper.isSelected,
+                       "A completed pick hands the canvas back to the previous tool (Tool.eyedropper)")
+        XCTAssertTrue(app.buttons["toolbar.brushButton"].isSelected,
+                      "…which here is the brush, the tool that was active when the eyedropper was armed")
+    }
+
     /// Task: the eraser gets its own settings dropdown (shape/size/opacity/dynamics), functioning like
     /// the brush tool but erasing instead of painting. Also exercises the drawing-dismisses-menu fix
     /// for the eraser specifically: opening its menu then dragging over existing ink should both close

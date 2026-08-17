@@ -66,6 +66,7 @@ struct CanvasNoticeBanner: View {
         case .noDrawingSurface: return "nosign"
         case .historyUndo:      return "arrow.uturn.backward"
         case .historyRedo:      return "arrow.uturn.forward"
+        case .nothingToPick:    return "eyedropper"
         }
     }
 }

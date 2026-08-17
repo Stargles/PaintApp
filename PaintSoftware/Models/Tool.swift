@@ -5,6 +5,16 @@ enum Tool: Hashable {
     case pencil
     case eraser
     case fill
+    /// Tap the canvas to take the colour under the tap as the brush colour. A *tool* rather than a
+    /// swatch that opens a picker — the owner's wording, 2026-08-17.
+    ///
+    /// **It is momentary: picking reverts to whichever tool was selected before it.** See
+    /// `CanvasManager.selectEyedropper`. Unlike every other case here, the artist reaches for this one
+    /// in the middle of doing something else — they want a colour *so that* they can carry on
+    /// painting with it, and the pick is complete in a single tap with nothing left to adjust. Left
+    /// selected, the next canvas touch would re-pick instead of paint, which is never what the tap
+    /// was for.
+    case eyedropper
 }
 
 /// How the eraser behaves on a `.vector` layer. Modelled on Clip Studio Paint's three vector-eraser

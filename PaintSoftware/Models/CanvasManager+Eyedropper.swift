@@ -1,0 +1,127 @@
+import SwiftUI
+import UIKit
+
+// MARK: - Eyedropper (tap the canvas, take the colour under the tap)
+//
+// The tool the owner asked for on 2026-08-17: not a swatch that opens a picker, but a tool you
+// select and then tap the canvas with. Its pure halves — which pixel a point names, and what colour
+// a byte buffer holds there — live in `Engine/Eyedropper.swift`; this file is the three steps that
+// need the document, split at the two thread boundaries the work actually has.
+
+extension CanvasManager {
+
+    /// Selects the eyedropper, remembering what to come back to.
+    ///
+    /// **Not `.eyedropper` itself**, if that is somehow already current: the memory has to survive a
+    /// second tap on the sidebar button, or a double-tap would strand the artist in the tool with
+    /// "previous" pointing at the tool they are already in.
+    func selectEyedropper() {
+        if selectedTool != .eyedropper { toolBeforeEyedropper = selectedTool }
+        selectedTool = .eyedropper
+    }
+
+    /// Leaves the eyedropper for whatever was selected before it, defaulting to the pen if nothing
+    /// was recorded. See `Tool.eyedropper` for why picking reverts at all.
+    func leaveEyedropper() {
+        selectedTool = toolBeforeEyedropper ?? .pen
+        toolBeforeEyedropper = nil
+    }
+
+    // MARK: - The three steps
+
+    /// Step 1, on the main actor: the composite the artist is looking at, captured as a value.
+    ///
+    /// **`includeBackground: true` is the whole "what does the artist see" decision in one argument.**
+    /// The canvas paints its paper as a real `UIView` behind the layer stack (`CanvasView`'s
+    /// `paperView`), so the paper is part of the picture but not part of any layer. Sampling without
+    /// it would make a tap on an unpainted patch of a white canvas return "nothing here" — the artist
+    /// can plainly see white, and the tool would be telling them there is no colour there. Gated on
+    /// `isCanvasBackgroundVisible` inside `makeRenderRequest`, so hiding the paper does make those
+    /// pixels genuinely empty, which is correct: that is what the artist sees then too.
+    ///
+    /// `quality: .full`, and `makeRenderRequest` is also the request builder that does *not* apply
+    /// `renderResolution` (that is `makeSandwichRequests`, by design — see `RenderRequest.swift`). So
+    /// an artist running a reduced live preview still samples the true colour rather than a
+    /// downscaled approximation of it.
+    @MainActor
+    func eyedropperRequest() -> RenderRequest? {
+        makeRenderRequest(atFrame: currentFrame, quality: .full, includeBackground: true)
+    }
+
+    /// Step 2, pure and safe from any thread — the same contract `Compositor.composite` states, and
+    /// the reason the gesture can do this off the main thread while the test does it inline.
+    ///
+    /// `point` is canvas space, top-left origin, which is what `location(in: container)` returns
+    /// (see `Eyedropper`'s note on why there is no zoom arithmetic anywhere in this feature).
+    ///
+    /// **The point is mapped into the composited image's own grid rather than assumed equal to it.**
+    /// Today they are equal — `makeRenderRequest` never scales — so the two lines are a no-op. They
+    /// are here because the failure they prevent is silent: were a scale ever applied upstream, an
+    /// unmapped point would sample a real pixel at the wrong place, and a wrong colour looks exactly
+    /// like a right one.
+    ///
+    /// Nil means "nothing to pick": off the canvas, or a fully transparent pixel. `Eyedropper` decides
+    /// which; this only carries the answer.
+    static func sampledColor(from request: RenderRequest, atCanvasPoint point: CGPoint) -> Color? {
+        let canvasSize = request.canvasSize
+        guard canvasSize.width > 0, canvasSize.height > 0,
+              let image = Compositor.composite(request),
+              image.width > 0, image.height > 0,
+              // `CoreGraphicsCompositor`'s, even when the image came back from the Metal backend:
+              // this is the app's one spelling of "redraw into device RGB, premultiplied last, row 0
+              // at the top", already shared with `MaskResolver` for that reason. Redrawing rather
+              // than reading the `CGImage`'s own backing store is what makes the byte layout knowable
+              // — a `UIGraphicsImageRenderer` image may arrive in a different component order, depth
+              // or range, and `Eyedropper.color` would read it as a different colour.
+              let bytes = CoreGraphicsCompositor.premultipliedBytes(image, width: image.width, height: image.height)
+        else { return nil }
+
+        let imageSize = CGSize(width: image.width, height: image.height)
+        let mapped = CGPoint(x: point.x * imageSize.width / canvasSize.width,
+                             y: point.y * imageSize.height / canvasSize.height)
+
+        guard let sample = Eyedropper.sample(at: mapped, canvasSize: imageSize,
+                                             premultipliedRGBA: bytes) else { return nil }
+
+        // **Opaque, and the sampled alpha is deliberately dropped.** The rail this tool sits on
+        // already carries an Opacity slider, and `Color.resolvedUIColor(opacity:)` multiplies
+        // `brushColor`'s own alpha by `brushOpacity` on every stroke — so carrying the sample's alpha
+        // into the colour would give the artist two opacities in series and a brush that paints
+        // fainter than the pixel it was taken from. The colour is the colour; how much of it to lay
+        // down stays the slider's business.
+        return Color(.sRGB, red: sample.r, green: sample.g, blue: sample.b, opacity: 1)
+    }
+
+    /// Step 3, on the main actor: apply the pick, or report that there was nothing to pick.
+    ///
+    /// **Reverts to the previous tool either way**, including on a miss. A tap that found nothing is
+    /// still the artist having taken their one shot at picking; leaving them in the eyedropper so the
+    /// *next* tap can also do nothing is not a kindness, and the notice already explains what
+    /// happened. Returns whether a colour was taken, so callers (and tests) can tell the two apart.
+    @MainActor
+    @discardableResult
+    func applyEyedropperResult(_ picked: Color?) -> Bool {
+        defer { leaveEyedropper() }
+        guard let picked else {
+            raise(.nothingToPick)
+            return false
+        }
+        brushColor = picked
+        ActionRecorder.ifRecording { $0.model("brushColor", picked.hexString) }
+        return true
+    }
+
+    /// The three steps in a row, synchronously. **The gesture does not call this** — see
+    /// `CanvasView.handleEyedropperPress`, which splits it across a queue hop so a 4K canvas does not
+    /// composite the whole stack on the main thread mid-tap. This exists so a headless test can drive
+    /// exactly the same three functions in one line without an expectation.
+    @MainActor
+    @discardableResult
+    func pickColor(atCanvasPoint point: CGPoint) -> Bool {
+        guard let request = eyedropperRequest() else {
+            leaveEyedropper()
+            return false
+        }
+        return applyEyedropperResult(Self.sampledColor(from: request, atCanvasPoint: point))
+    }
+}

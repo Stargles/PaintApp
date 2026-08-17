@@ -87,6 +87,15 @@ struct SideToolbar: View {
                 // The Apple Pencil / finger-drawing gate used to live here. It moved to the Actions
                 // menu: it's a set-once preference about the user's hardware, not a per-stroke dial
                 // like the sliders it was sitting among.
+
+                // The eyedropper, below the opacity slider — the owner's placement, 2026-08-17.
+                //
+                // Outside the three `if` branches above deliberately: those swap the rail's *sliders*
+                // between the brush, the eraser and the fill, and this is not one of the current
+                // tool's dials. It is the one control here that changes which tool is selected, so it
+                // is the same button whichever of the three the rail is showing — and it is below the
+                // sliders in every one of them, which is what the owner asked for.
+                eyedropperButton
             }
 
             Spacer()
@@ -110,6 +119,53 @@ struct SideToolbar: View {
         }
         .frame(maxHeight: .infinity)
         .background(Color.black.opacity(0.85))
+    }
+
+    /// Select the eyedropper, then tap the canvas to take the colour under the tap.
+    ///
+    /// **A toggle, not a one-way switch**: tapping it while it is already armed puts the artist back
+    /// where they were, so a mis-tap costs one tap rather than forcing a pick they did not want. That
+    /// is `leaveEyedropper`, the same exit the pick itself takes.
+    ///
+    /// The swatch is `brushColor` because that is what the tool writes — it shows the colour the next
+    /// pick will replace, which is also what makes a successful pick visible on the rail without
+    /// opening the colour panel.
+    private var eyedropperButton: some View {
+        Button {
+            if canvasManager.selectedTool == .eyedropper {
+                canvasManager.leaveEyedropper()
+            } else {
+                // Any in-progress move/shape/fill bakes first, exactly as switching tools from the
+                // top toolbar does — the eyedropper samples the composite, and a still-adjustable
+                // fill sitting in its own transient tier is content the artist can see and would
+                // reasonably expect to be able to pick from.
+                canvasManager.commitAllInteractiveState()
+                canvasManager.selectEyedropper()
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "eyedropper")
+                    .font(.footnote)
+                    .foregroundColor(.white)
+                    .frame(width: 30, height: 30)
+                    .background(canvasManager.selectedTool == .eyedropper
+                                ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
+                    .cornerRadius(6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.white.opacity(canvasManager.selectedTool == .eyedropper ? 0.9 : 0),
+                                    lineWidth: 1)
+                    )
+                Text("Pick")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+        }
+        .accessibilityIdentifier("sideToolbar.eyedropperButton")
+        // The hex of the colour the tool writes, so a test can read a completed pick off the rail
+        // without opening the colour panel — `blendModeRow`'s convention.
+        .accessibilityValue(canvasManager.brushColor.hexString)
+        .accessibilityAddTraits(canvasManager.selectedTool == .eyedropper ? [.isSelected] : [])
     }
 
     /// A vertical slider with a small caption beneath it. The caption is what makes the rail readable

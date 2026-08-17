@@ -27,11 +27,14 @@
 		9A7B5C3D1E2F000000000E02 /* VectorEraserLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000E01 /* VectorEraserLogicTests.swift */; };
 		9A7B5C3D1E2F000000000D02 /* PaintSoftware/Engine/VectorEraser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */; };
 		9A7B5C3D1E2F000000000C02 /* StrokeGeometryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */; };
+		C44F78B352EE5FCF8D33DAE6 /* EyedropperLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */; };
 		9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */; };
 		B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */; };
 		8B61CD83DA977B72607F6E62 /* SelectionOverlayLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */; };
 		907157FC16C95E9DDF3A5477 /* SelectionPencilOnlyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74933FE4665FDD0508E879CE /* SelectionPencilOnlyUITests.swift */; };
 		A6AF64FEBB766643C446D78B /* PaintSoftware/Utilities/TouchTypeResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6821B3D844A703EA08DC6D76 /* PaintSoftware/Utilities/TouchTypeResolution.swift */; };
+		6F838734B0EDB31E7FA46F61 /* PaintSoftware/Engine/Eyedropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C93E8FC56941726182476A82 /* PaintSoftware/Engine/Eyedropper.swift */; };
+		A7365B48F299C4A32B5EF8F9 /* PaintSoftware/Models/CanvasManager+Eyedropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 059ACFD110877300327B5153 /* PaintSoftware/Models/CanvasManager+Eyedropper.swift */; };
 		7C4A9E1B0D5F000000000102 /* RasterVectorParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */; };
 		7C4A9E1B0D5F000000000202 /* VectorEraserHybridLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */; };
 		7C4A9E1B0D5F000000000302 /* VectorEraserUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */; };
@@ -166,11 +169,14 @@
 		9A7B5C3D1E2F000000000E01 /* VectorEraserLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserLogicTests.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VectorEraser.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeGeometryLogicTests.swift; sourceTree = "<group>"; };
+		8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EyedropperLogicTests.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeSampleGateLogicTests.swift; sourceTree = "<group>"; };
 		5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PinchMergeGateLogicTests.swift; sourceTree = "<group>"; };
 		710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionOverlayLogicTests.swift; sourceTree = "<group>"; };
 		74933FE4665FDD0508E879CE /* SelectionPencilOnlyUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionPencilOnlyUITests.swift; sourceTree = "<group>"; };
 		6821B3D844A703EA08DC6D76 /* PaintSoftware/Utilities/TouchTypeResolution.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/TouchTypeResolution.swift; sourceTree = "<group>"; };
+		C93E8FC56941726182476A82 /* PaintSoftware/Engine/Eyedropper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Eyedropper.swift; sourceTree = "<group>"; };
+		059ACFD110877300327B5153 /* PaintSoftware/Models/CanvasManager+Eyedropper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Eyedropper.swift"; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RasterVectorParityLogicTests.swift; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserHybridLogicTests.swift; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserUITests.swift; sourceTree = "<group>"; };
@@ -345,6 +351,7 @@
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
 				B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
+				8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */,
 				9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */,
 				5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */,
 				710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */,
@@ -455,6 +462,8 @@
 				DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */,
 				DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */,
 				6821B3D844A703EA08DC6D76 /* PaintSoftware/Utilities/TouchTypeResolution.swift */,
+				C93E8FC56941726182476A82 /* PaintSoftware/Engine/Eyedropper.swift */,
+				059ACFD110877300327B5153 /* PaintSoftware/Models/CanvasManager+Eyedropper.swift */,
 				DEC0DE000000000000000043 /* PaintSoftware/Views/OnionSkinSource.swift */,
 				DEC0DE000000000000000047 /* PaintSoftware/Engine/Deform/Lattice.swift */,
 				DEC0DEDF0000000000000004 /* PaintSoftware/Engine/Deform/MotionGrouping.swift */,
@@ -596,6 +605,7 @@
 				7C4A9E1B0D5F000000000302 /* VectorEraserUITests.swift in Sources */,
 				9A7B5C3D1E2F000000000D02 /* PaintSoftware/Engine/VectorEraser.swift in Sources */,
 				9A7B5C3D1E2F000000000C02 /* StrokeGeometryLogicTests.swift in Sources */,
+				C44F78B352EE5FCF8D33DAE6 /* EyedropperLogicTests.swift in Sources */,
 				9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */,
 				B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */,
 				8B61CD83DA977B72607F6E62 /* SelectionOverlayLogicTests.swift in Sources */,
@@ -678,6 +688,8 @@
 				DEC0DE000000000000000028 /* PaintSoftware/Utilities/ColorMath.swift in Sources */,
 				DEC0DE00000000000000002A /* PaintSoftware/Utilities/ThumbnailRenderer.swift in Sources */,
 				A6AF64FEBB766643C446D78B /* PaintSoftware/Utilities/TouchTypeResolution.swift in Sources */,
+				6F838734B0EDB31E7FA46F61 /* PaintSoftware/Engine/Eyedropper.swift in Sources */,
+				A7365B48F299C4A32B5EF8F9 /* PaintSoftware/Models/CanvasManager+Eyedropper.swift in Sources */,
 				DEC0DE000000000000000044 /* PaintSoftware/Views/OnionSkinSource.swift in Sources */,
 				DEC0DE000000000000000046 /* OnionSkinLogicTests.swift in Sources */,
 				DEC0DE0000000000000000A1 /* InterpolationEngineDiagnosticsLogicTests.swift in Sources */,

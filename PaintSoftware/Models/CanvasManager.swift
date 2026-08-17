@@ -324,6 +324,10 @@ final class CanvasManager: ObservableObject {
             ActionRecorder.ifRecording { $0.model("selectedTool", String(describing: selectedTool)) }
         }
     }
+    /// The tool to return to when the eyedropper finishes its one tap — see `Tool.eyedropper` and
+    /// `CanvasManager+Eyedropper.swift`. Not `@Published`: nothing renders it, and republishing on a
+    /// field the artist cannot see would invalidate every observer of this object for nothing.
+    var toolBeforeEyedropper: Tool?
     /// Defaults key for `pencilOnlyDrawing`. About the user's *hardware*, not any one drawing, so it
     /// belongs to the app rather than a project's manifest.
     static let pencilOnlyDefaultsKey = "paintapp.pencilOnlyDrawing"
