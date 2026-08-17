@@ -24,7 +24,6 @@ This is the shape the entry below (`StrokeGestureRecognizer.failTrackedStroke`) 
 that fails an already-begun stroke which nothing in the suite reaches. Next step is a capture — the
 action recorder (see CLAUDE.md) on the owner's iPad, reproducing a stroke started under an open
 timeline popover, read for where in the touch sequence delivery actually stops.
-## Drawing on a compositor document runs at ~17 fps on a 4K canvas, and the cap only dents it (2026-08-16)
 ## XCUITests cannot launch into the editor on the iPad 9 (2026-08-16)
 
 The logic tier runs on the owner's device beautifully — 991 tests in 36 s, Release, against 3 min on
