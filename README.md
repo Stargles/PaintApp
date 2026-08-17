@@ -168,11 +168,14 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
    guide shows where it will land and at what indent.
 
 ### Value layers and effects
-1. Add a value layer from the "+" menu. Out of the box it is a flat colour — pick it from the row's
-   colour swatch.
-2. Set **Mode** in its options menu to any of the 13 effects and it becomes an adjustment layer,
-   grading everything beneath it inside its own container. In effect mode the colour swatch and the
-   blend-mode row are hidden: an effect layer's output always lands Normal.
+1. Add a value layer from the "+" menu. Out of the box it is a flat colour, Normal blend — pick the
+   colour from the row's colour swatch.
+2. Its options menu opens on **Blend Mode**, one merged menu listing every blend mode plus the 13
+   effects below them. Pick a blend mode and the layer is a flat colour composited that way; pick an
+   effect and it becomes an adjustment layer instead, grading everything beneath it inside its own
+   container. The two are answers to the same question, so picking one always clears the other. The
+   row itself is never hidden — it shows the effect's name in place of the blend mode's while one is
+   set, and the colour swatch below it is replaced by **Effect Settings ▸** for the same reason.
 3. **Effect Settings ▸** opens the knobs for whichever effect is set, including a curve editor
    (Curves) and a gradient-stop editor (Gradient Map).
 4. A compositor node's operation dropdown offers the same effects beneath the blend ops. A blend op
@@ -209,7 +212,7 @@ iPad simulator destination.
 See [BUGS.md](BUGS.md) for the tracked list. Notable ones: **two-finger pan/pinch/rotate is reported
 dead on device while the Fill tool is selected**, unexplained and unreproduced on the simulator;
 square/custom brush stamps are approximated as tiled round dabs (not true shaped stamps yet);
-Distort/Warp transform modes render identically to Uniform; the Adjust panel and Cut/Copy/Paste are
+Distort/Warp transform modes render identically to Uniform; Cut/Copy/Paste and Drawing Guide are
 still "Coming soon" stubs.
 
 ## License

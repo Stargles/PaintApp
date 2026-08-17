@@ -427,7 +427,7 @@ final class LayerStackCell: UITableViewCell {
     }
 
     /// §4.4's grade as `effectMenuSlug` — the same stable spelling the picker's menu items carry, so
-    /// a test that taps `layerOptions.valueMode.gaussianblur` reads `gaussianblur` back off the row
+    /// a test that taps `layerOptions.blendMode.gaussianblur` reads `gaussianblur` back off the row
     /// rather than matching against a `displayName` that a wording change would move.
     ///
     /// Cleared, identifier and all, on a row with no grade: `configure` runs on recycled cells, and a

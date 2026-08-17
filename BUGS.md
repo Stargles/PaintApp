@@ -3,6 +3,28 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## An interrupted stroke stubs, and no terminal callback runs (2026-08-16)
+
+A stroke begun while a timeline popover is open stops being processed a few samples in. Touch
+delivery to the recognizer stops and **no terminal callback fires — crucially not cancel** — which is
+why the stub survives the pen lift and dies only when the next stroke rebuilds `vectorScratch`
+(`StrokeCanvasView.swift`).
+
+With the pen this reads as "the stroke turns into a line after a lag spike": the smart-shape hold
+timer has nothing left to reset it, so it completes 0.8 s later and replaces the ink with a detected
+line. The perceived lag spike is exactly that hold constant elapsing, not a stall — the popover
+teardown itself was **measured at 0.43 ms**. With the eraser the same stub appears without the line,
+because shape detection is gated to pen/pencil.
+
+**Two candidates that reading could not separate**: a mid-sequence `isUserInteractionEnabled`/removal
+flip (`CanvasView.reconcileLayers` writes both, `CanvasView.swift:388`), or UIKit dropping the touch
+sequence via the popover's presentation overlay. Nothing here picks between them yet.
+
+This is the shape the entry below (`StrokeGestureRecognizer.failTrackedStroke`) already names: a path
+that fails an already-begun stroke which nothing in the suite reaches. Next step is a capture — the
+action recorder (see CLAUDE.md) on the owner's iPad, reproducing a stroke started under an open
+timeline popover, read for where in the touch sequence delivery actually stops.
+
 ## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15)
 
 The product owner reports it from their iPad: pick Fill and the canvas will not pan, pinch or rotate;
@@ -140,8 +162,8 @@ product call, not just a fix.
 
 - Distort/Warp transform modes render and gesture identically to Uniform but still appear in the Move
   bottom-bar picker.
-- Adjust panel and ActionsMenu's Cut/Copy/Paste/Drawing Guide are "Coming soon"; the timeline block
-  menu's "Select Multiple" is permanently disabled.
+- ActionsMenu's Cut/Copy/Paste/Drawing Guide are "Coming soon"; the timeline block menu's
+  "Select Multiple" is permanently disabled.
 - No UI to change `fps` (fixed at 24) or edit scene length directly.
 - Square/custom brushes are tiled round dabs, not true shaped stamps (scalloped edges, seam
   build-up); per-stamp `.normal` compositing builds opacity up where a stroke crosses itself, which

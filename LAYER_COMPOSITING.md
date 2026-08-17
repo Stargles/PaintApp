@@ -1,8 +1,8 @@
 # Layer Compositing
 
 Plan for tree-ordered groups, **compositor nodes**, alpha masks, and blend / effect layers — which
-are all one project, because they all need the same missing thing. **Phases 0–5b, 6a and 7 of §11 are
-built and green; 6b is not.** §3 is the decisions; §10 is what is still open; §11 is what remains.
+were all one project, because they all needed the same missing thing. **The build (§11) is closed.**
+§3 is the decisions; §10 is what is still open.
 
 ## 1. Why these are one project
 
@@ -271,10 +271,11 @@ Container scoping is what keeps the layer form predictable: an effect layer insi
 reach outside it. That is also what makes an isolated group (§4.2) the right default — the grade
 stops at the parenthesis.
 
-**The layer form has no blend mode of its own**, matching §4.3's rule for nodes. The renderer already
-pinned an effect-carrying leaf to `.normal`, so the row's blend dropdown was setting a value nothing
-read; it is now hidden in effect mode rather than left to lie. Wrap the layer in a folder to blend a
-grade's result.
+**The layer form has no blend mode of its own**, matching §4.3's rule for nodes. The renderer pins an
+effect-carrying leaf to `.normal`, so a blend dropdown that stayed live in effect mode would be setting
+a value nothing read. §4.5 is where that landed: rather than hiding a separate blend row in effect mode,
+the row *is* the effect picker (`valueBlendModeRow`), so there is only ever one control and it can never
+disagree with the renderer. Wrap the layer in a folder to blend a grade's result.
 
 **The retired `compositing` kind — read this before touching `LayerKind`'s decoder.** The effect
 layer was its own `LayerKind` for one phase, written to disk as the literal string `"compositing"`.
@@ -311,8 +312,12 @@ The two never coexist on one layer — an adjustment layer that is also a flat c
 anyone can describe — so a kind apiece made the mutually-exclusive pair expressible twice, once as
 `kind` and once as which payload happened to be set, with nothing keeping them honest. It also made
 "change this layer from a grade to a colour" a kind rewrite, which every `kind ==` test in the app has
-an opinion about, instead of the one-field edit it now is. The panel follows: **one Mode menu** listing
-Flat Colour and the thirteen effects, not a segmented control plus a separate picker.
+an opinion about, instead of the one-field edit it now is. The panel follows: **one Blend Mode menu**
+listing every blend mode and the thirteen effects together (`LayerPanel.valueBlendModeRow`), not a
+segmented control plus a separate picker. There is no "Flat Colour" entry — every blend mode in the
+list already clears the effect, so leaving effect mode is picking the mode you want to land in rather
+than picking "flat" and then a mode, and Normal sits first where "Flat Colour" used to. The row itself
+is never hidden: it shows the effect's name in place of the blend mode's while a grade is set.
 
 **Why the flat colour earns its keep.** `Mix(A, B, mode)` where A and B are single layers is identical
 to stacking B over A with that mode (§4.3 says so, and that redundancy is deliberate). A value layer is
@@ -726,36 +731,19 @@ whose label becomes "Add Vector Layer". The explicit raster/vector choices in th
 
 XCUITests that add a layer and assume raster will need auditing.
 
-### 8.1 Prerequisite: an empty vector layer must be free
+### 8.1 Prerequisite: an empty vector layer was made free
 
-**An empty vector layer's storage is already free**, and an earlier draft of this document was wrong
-to say otherwise. `Cel.fillImage`, `bakedImage`, and `vector` are nil-by-default optionals
-([Cel.swift:12](PaintSoftware/Models/Cel.swift:12)); `RasterLayerTexture.empty` allocates no bitmap
-and documents it ("a blank cel holds no bitmap … blank cels are free"); `VectorCanvas.empty` is an
-empty array. Creation costs a few hundred bytes. BUGS.md's tier-divorce item is about vector cels
-*acquiring* raster tiers when raster features touch them — a real cleanup, but not a per-layer tax,
-and not a blocker here.
-
-**The actual tax is the render cache, and it is per empty layer.** `VectorCanvas.render()` has no
-empty early-out ([VectorLayer.swift:1070](PaintSoftware/Engine/VectorLayer.swift:1070)): with zero
-elements it still runs a full canvas-sized `UIGraphicsImageRenderer` and retains the result in
-`cachedImage`. It is reached eagerly — `StrokeCanvasView.vectorCanvas` has `didSet { refreshDisplay() }`,
-and `refreshDisplay()` calls `render()` — so the moment an empty vector layer is reconciled into the
-view tree it holds **16.8 MB of transparent pixels at 2048², 64 MB at 4000²**. That is true today;
-making vector the default multiplies it by every layer in every new project.
-
-Fix, and it is small:
-
-- Early-out in `render()`/`renderLocalContent()` when the display list is empty *and* the transform
-  is identity.
-- Add `renderIfNonEmpty() -> UIImage?` for the display path, so `StrokeCanvasView.refreshDisplay`
-  sets `imageView.image = nil` — cheaper for Core Animation than a transparent bitmap.
-- Keep `render() -> UIImage` non-optional for its ~10 existing callers by returning a shared 1×1
-  transparent image; drawn stretched into the canvas rect it is visually identical and costs nothing.
-- Pin it: a test asserting an empty `VectorCanvas` retains no canvas-sized allocation after a
-  display refresh. `PerfBaselineTests` already measures retained bytes this way.
-
-**Do this before flipping the default**, not after.
+**An empty vector layer's storage was already free** — `Cel.fillImage`/`bakedImage`/`vector` are
+nil-by-default optionals ([Cel.swift:12](PaintSoftware/Models/Cel.swift:12)) and creation costs a few
+hundred bytes; an earlier draft of this document was wrong to say otherwise. **The actual tax was the
+render cache**: `VectorCanvas.render()` had no empty early-out, so an empty layer held 16.8 MB of
+transparent pixels at 2048² (64 MB at 4000²) the instant `StrokeCanvasView.vectorCanvas`'s `didSet`
+rendered it — and vector-as-default would have multiplied that by every layer in every new project.
+Fixed with an early-out in `render()` on an empty display list (deliberately not conditioned on the
+transform too — an affine of nothing is still nothing) and `renderIfNonEmpty() -> UIImage?` so the
+display path leaves the image view holding `nil` instead of a transparent bitmap.
+`PerfBaselineTests` pins that an empty `VectorCanvas` retains no canvas-sized allocation after a
+display refresh.
 
 ## 9. Background rendering
 
@@ -823,28 +811,15 @@ later and rewriting for one.
 
 ## 11. Build order
 
-Foundation first — nothing user-visible until the compositor is proven, so that every feature after
-it is small and none of them fight a moving substrate.
-
-| # | work | done when |
-|---|---|---|
-| ~~**0**~~ | ~~Empty-vector render early-out (§8.1), then vector-as-default (§8)~~ | **done** |
-| ~~**1**~~ | ~~`RenderNode` derivation + characterization tests~~ | **done** |
-| ~~**2**~~ | ~~Metal compositor behind a flag; snapshot-driven entry point (§9.1)~~ | **done** — CoreGraphics and Metal agree exactly on the walk and on `.normal` (delta 0); blend modes hold to a measured ≤1 channel step, masks to exactly 0 |
-| ~~**3**~~ | ~~Delete `PixelOps.compositeCanvas`~~ | **done** — thumbnail on one path, `PerfBaselineTests` green |
-| ~~**4**~~ | ~~Group properties: isolated/pass-through, opacity, visibility migration (§4.1–4.2)~~ | **done** — groups composite as parentheses, both backends on one buffer rule |
-| ~~**5a**~~ | ~~Tier 1 blend modes on layers and groups (§7)~~ | **done** — fourteen modes, both backends, picker and row badge |
-| ~~**5b**~~ | ~~§5.2's sandwich, so the live canvas shows a blended layer~~ | **done** — exact at rest, snaps on lift |
-| ~~**6**~~ | ~~Alpha masks (§6), incl. `MaskParityLogicTests`~~ | **done** — engine resolves masks in both backends at delta 0, raster and vector pixel-identically; the rows pick sources through the same cycle rule; the live stroke is clipped by the same `ResolvedMask` object the compositor applies |
-| ~~**7**~~ | ~~Tier 2 blend modes~~ | **done** — eleven modes, both backends, measured against the spec |
-| ~~**8**~~ | ~~Compositor nodes: node-as-folder storage, panel chrome (§4.3)~~ | **done** — a 2-input Mix renders, and `Mix(A,B,mode)` measures equal to stacking B over A with that mode at delta 0 across all 25 modes and both backends. Input slot folders were the original storage and were **deleted**: a node's children are its inputs, index is position, and old documents migrate at decode |
-| ~~**9**~~ | ~~Tier 3 effects, as layer *and* node (§4.4, §7)~~ | **done** — thirteen effects in both wrappers and both backends. The layer wrapper is a mode of `.value` rather than a kind of its own; the node wrapper is an op in the node's own dropdown, stored as `.stack` + `LayerFolder.effect`, so neither backend nor `Composite.metal` changed for it |
-| ~~**10**~~ | ~~Make it usable: configure every effect, and fix the layer panel's structural gestures (§4.3–4.5)~~ | **done** — `EffectSection.swift` is `setLayerEffect`'s first UI caller (curve and gradient-stop editors included); "+" opens on tap and inserts above the active layer in that layer's own container; drop-onto-layer reorders instead of auto-grouping; the three modal alerts became one self-dismissing banner |
-
-**The build list is closed.** What remains is in §10 and [BUGS.md](BUGS.md), not in this table.
-
-Phases 0–3 are the risky ones; 4 onward are additive. §9.2's background renderer stays deferred
-until the sequencer exists — only §9.1's substrate is in scope here, and it landed inside phase 2.
+Foundation first — nothing user-visible until the compositor was proven, so that every feature after
+it stayed small and none of them fought a moving substrate. All ten phases shipped, in order: the
+render tree, the Metal backend behind a flag, deleting `PixelOps.compositeCanvas`, group properties,
+Tier 1 blend modes, §5.2's sandwich, alpha masks, Tier 2 blend modes, compositor nodes, and Tier 3
+effects as both a layer and a node — each additive on what came before, which is why phases 4 onward
+carried none of 0–3's risk. `CompositorParityLogicTests`, `MaskParityLogicTests`, `SandwichLogicTests`
+and `LayerUITests` are what still pin the guarantees this table used to narrate phase by phase. §9.2's
+background renderer stays deferred until the sequencer exists — only §9.1's substrate shipped, inside
+phase 2. What remains is in §10 and [BUGS.md](BUGS.md).
 
 **One correction to §5.1 that phase 5 measured, and phase 7 tested again rather than assuming it would
 repeat.** "The CoreGraphics one is the reference … the byte-for-byte definition of correct" holds for

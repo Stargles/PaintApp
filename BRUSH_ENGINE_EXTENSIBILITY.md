@@ -52,7 +52,7 @@ kind that renders differently in the two tiers fails a test that is already writ
 
 `DabRNG` is seeded from the stroke id, `DabLattice` carries a parent's seed to its pieces, and
 `DiscardedDabTarget` exists so that dabs *outside* a piece's visible range are still **computed and
-then dropped** rather than skipped ([BrushStamper.swift:274](PaintSoftware/Engine/BrushStamper.swift:274)).
+then dropped** rather than skipped ([BrushStamper.swift:303](PaintSoftware/Engine/BrushStamper.swift:303)).
 
 This is a real constraint on every dynamic an importer might add, and it is currently implicit. State
 it as a rule:
@@ -120,7 +120,7 @@ the two can disagree (`.custom` with a nil name, or `.hardRound` with a name set
 
 > **`customTextureFileName` is written by the UI and copied by the project store, but the renderer
 > never reads it.** `stampDab` routes `.custom` to `stampApproximateSquare`
-> ([BrushStamper.swift:229](PaintSoftware/Engine/BrushStamper.swift:229)).
+> ([BrushStamper.swift:256](PaintSoftware/Engine/BrushStamper.swift:256)).
 
 So the custom-stamp feature is plumbing and persistence with no pixel path behind it. That is not a
 bug to fix in isolation — it is the ABR work, arriving early and half-built. When the image primitive

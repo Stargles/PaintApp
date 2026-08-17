@@ -111,7 +111,7 @@ struct LayerPanel: View {
                 //
                 // **There is no "Effect Layer" entry any more, and nothing was lost.** §4.4's
                 // wrapper stopped being a kind of its own and became a *mode* of this one, chosen by
-                // the value layer's own Mode row (`LayerOptionsPanel.valueModeRow`). A second entry
+                // the value layer's own Blend Mode row (`LayerPanel.valueBlendModeRow`). A second entry
                 // here would be a second way to create the same kind, differing only in which mode
                 // it arrived in — and the artist who wanted the other mode would have to delete the
                 // layer and add it again rather than flipping the picker that is already there.
