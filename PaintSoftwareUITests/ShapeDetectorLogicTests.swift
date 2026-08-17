@@ -449,7 +449,7 @@ final class ShapeDetectorLogicTests: XCTestCase {
     func testDraggingACornerAnchorsTheOppositeCorner() {
         let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 10, y: 20),
                                   endPoint: CGPoint(x: 110, y: 120))
-        let dragged = shape.draggingCorner(.bottomRight, to: CGPoint(x: 160, y: 170))
+        let dragged = shape.draggingCorner(.bottomRight, to: CGPoint(x: 160, y: 170), anchor: nil)
         // The top-left corner is the anchor and must not have moved.
         XCTAssertEqual(dragged.boundingRect.minX, 10, accuracy: 0.001)
         XCTAssertEqual(dragged.boundingRect.minY, 20, accuracy: 0.001)
@@ -462,7 +462,7 @@ final class ShapeDetectorLogicTests: XCTestCase {
         let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 0, y: 0),
                                   endPoint: CGPoint(x: 100, y: 100))
         // Drag the bottom-right corner up past the anchored top-left one.
-        let dragged = shape.draggingCorner(.bottomRight, to: CGPoint(x: -40, y: -30))
+        let dragged = shape.draggingCorner(.bottomRight, to: CGPoint(x: -40, y: -30), anchor: nil)
         XCTAssertEqual(dragged.boundingRect.minX, -40, accuracy: 0.001)
         XCTAssertEqual(dragged.boundingRect.minY, -30, accuracy: 0.001)
         XCTAssertEqual(dragged.boundingRect.maxX, 0, accuracy: 0.001)
@@ -479,7 +479,7 @@ final class ShapeDetectorLogicTests: XCTestCase {
         // A touch on the *rotated* position of the shape's own bottom-right corner should leave the
         // geometry where it is — the point maps back onto exactly that corner in local space.
         let rotatedCorner = CGPoint(x: 100, y: 100).applying(shape.rotationTransform)
-        let dragged = shape.draggingCorner(.bottomRight, to: rotatedCorner)
+        let dragged = shape.draggingCorner(.bottomRight, to: rotatedCorner, anchor: nil)
         XCTAssertEqual(dragged.boundingRect.minX, 0, accuracy: 0.001)
         XCTAssertEqual(dragged.boundingRect.minY, 0, accuracy: 0.001)
         XCTAssertEqual(dragged.boundingRect.maxX, 100, accuracy: 0.001)
@@ -746,6 +746,232 @@ final class ShapeDetectorLogicTests: XCTestCase {
         XCTAssertEqual(dragged.boundingRect.minX, 0, accuracy: 0.001, "the touch's x is irrelevant to a top-edge drag")
         XCTAssertEqual(dragged.boundingRect.maxX, 100, accuracy: 0.001)
         XCTAssertEqual(dragged.rotation, 0, accuracy: 0.001)
+    }
+
+    // MARK: - The rectangle node rule, swept
+    //
+    // The owner, 2026-08-17, on the rectangle's corner handles: *"Basically, the rule is that the
+    // opposite node to the one selected shouldn't move."* Everything below is that one sentence,
+    // stated four ways — every rotation, every corner, every bearing, and drags taken clean through
+    // the anchor and far out the other side.
+    //
+    // The five tests above this block reach one corner at one or two rotations each, which is how
+    // `.topLeft`, `.topRight` and `.bottomLeft` went unswept and how the two failures the owner
+    // reported survived a green suite. The sweep is cheap — pure `CGFloat` math, no simulator, no
+    // allocation — so there is no reason for it to be narrow.
+    //
+    // The checks accumulate into a list rather than firing an `XCTAssert` each, because ~20k
+    // individual assertions cost more to record than to compute; the count is asserted at the end so
+    // a sweep that quietly stops sweeping fails instead of printing green (CLAUDE.md's rule, applied
+    // to assertions rather than to test cases).
+
+    /// The four corners of `shape` in **canvas** space — where the artist sees them, which is the
+    /// frame the owner's rule is stated in. Order is TL, TR, BR, BL, i.e. walking the outline.
+    private func canvasCorners(of shape: ShapeGeometry) -> [CGPoint] {
+        let r = shape.boundingRect, t = shape.rotationTransform
+        return [CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY),
+                CGPoint(x: r.maxX, y: r.maxY), CGPoint(x: r.minX, y: r.maxY)].map { $0.applying(t) }
+    }
+
+    /// How far `point` is from the nearest corner of `shape`, in canvas space.
+    ///
+    /// Deliberately *not* `canvasAnchor(opposite:)`: once a drag crosses over, the corner labels
+    /// rotate around the rectangle, so asking for a named corner asks the wrong question. "Is the
+    /// anchored node still a corner of this shape, where it was?" is the question the owner's rule
+    /// actually poses, and it is label-free.
+    private func distanceToNearestCorner(of shape: ShapeGeometry, from point: CGPoint) -> CGFloat {
+        canvasCorners(of: shape).map { hypot($0.x - point.x, $0.y - point.y) }.min() ?? .infinity
+    }
+
+    /// Rotations the sweeps run at: flat, barely-off-flat (where the old local-frame math first goes
+    /// wrong), the diagonal, both right angles, a straight half turn, and negatives — the owner asked
+    /// for a rotatable rectangle, so there is no privileged angle.
+    private static let sweptRotations: [CGFloat] =
+        [0, 0.01, 0.3, .pi / 4, .pi / 2, 3 * .pi / 4, .pi, -0.4, -.pi / 3, -2.0, 5.9]
+
+    private static let allCorners: [ShapeGeometry.Corner] = [.topLeft, .topRight, .bottomLeft, .bottomRight]
+
+    /// The rule itself: for every rotation, every corner, every bearing and every distance — including
+    /// ones that overshoot the far edge by six diagonals — the diametrically opposite node is exactly
+    /// where it was, and the dragged node is exactly under the finger.
+    ///
+    /// Also asserts the result is still a *rectangle*: opposite sides equal and parallel as vectors,
+    /// adjacent sides perpendicular. A drag that satisfied the anchor rule by shearing the shape would
+    /// pass every other assertion here.
+    func testEveryRectangleCornerHoldsItsOppositeNodeAtEveryRotation() {
+        var failures: [String] = []
+        var checks = 0
+        for rotation in Self.sweptRotations {
+            for corner in Self.allCorners {
+                let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 20, y: 35),
+                                          endPoint: CGPoint(x: 140, y: 115), rotation: rotation)
+                let anchor = shape.canvasAnchor(opposite: corner)
+                let diagonal = hypot(shape.boundingRect.width, shape.boundingRect.height)
+                for step in 0..<16 {
+                    let bearing = CGFloat(step) * .pi / 8 + 0.07
+                    for distance in [CGFloat(5), 60, diagonal, diagonal * 6] {
+                        let touch = CGPoint(x: anchor.x + cos(bearing) * distance,
+                                            y: anchor.y + sin(bearing) * distance)
+                        let dragged = shape.draggingCorner(corner, to: touch, anchor: anchor)
+                        let where_ = "rot \(rotation) \(corner) bearing \(step) dist \(distance)"
+
+                        checks += 1
+                        let anchorTravel = distanceToNearestCorner(of: dragged, from: anchor)
+                        if anchorTravel > 0.001 { failures.append("anchor moved \(anchorTravel) pt — \(where_)") }
+
+                        checks += 1
+                        let fingerGap = distanceToNearestCorner(of: dragged, from: touch)
+                        if fingerGap > 0.001 { failures.append("node left the finger by \(fingerGap) pt — \(where_)") }
+
+                        checks += 1
+                        if abs(dragged.rotation - rotation) > 0.001 {
+                            failures.append("a corner drag turned the shape — \(where_)")
+                        }
+
+                        // Still a rectangle.
+                        let c = canvasCorners(of: dragged)
+                        let top = CGPoint(x: c[1].x - c[0].x, y: c[1].y - c[0].y)
+                        let bottom = CGPoint(x: c[2].x - c[3].x, y: c[2].y - c[3].y)
+                        let left = CGPoint(x: c[3].x - c[0].x, y: c[3].y - c[0].y)
+                        let right = CGPoint(x: c[2].x - c[1].x, y: c[2].y - c[1].y)
+                        checks += 1
+                        if abs(top.x - bottom.x) > 0.001 || abs(top.y - bottom.y) > 0.001 {
+                            failures.append("top and bottom are no longer equal and parallel — \(where_)")
+                        }
+                        checks += 1
+                        if abs(left.x - right.x) > 0.001 || abs(left.y - right.y) > 0.001 {
+                            failures.append("left and right are no longer equal and parallel — \(where_)")
+                        }
+                        checks += 1
+                        // Scale-relative, so a 6-diagonal drag isn't judged on an absolute dot product.
+                        let scale = max(1, hypot(top.x, top.y) * hypot(left.x, left.y))
+                        if abs(top.x * left.x + top.y * left.y) / scale > 0.001 {
+                            failures.append("corner is no longer square — \(where_)")
+                        }
+
+                        // The anchor→touch segment is the rectangle's own diagonal, which is what
+                        // "these two are the opposite ends of it" means numerically.
+                        checks += 1
+                        let segment = hypot(touch.x - anchor.x, touch.y - anchor.y)
+                        let ownDiagonal = hypot(dragged.boundingRect.width, dragged.boundingRect.height)
+                        if abs(segment - ownDiagonal) > 0.001 {
+                            failures.append("diagonal \(ownDiagonal) is not the anchor-to-touch \(segment) — \(where_)")
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(failures.count, 0, "\(failures.count) of \(checks): \(failures.prefix(5).joined(separator: " | "))")
+        XCTAssertEqual(checks, 11 * 4 * 16 * 4 * 7, "the sweep stopped sweeping")
+    }
+
+    /// The owner's second sentence: *"when I move the node past the other edge of the rectangle, the
+    /// intended behaviour is the rectangle still works, just in the other quadrants."* Walked frame by
+    /// frame from the dragged corner, straight through the anchor, to three times past it — the anchor
+    /// holds on every frame, including the one where the rectangle is exactly zero-sized.
+    func testDraggingARectangleCornerCleanThroughItsAnchorHoldsTheOppositeNode() {
+        var failures: [String] = []
+        var checks = 0
+        for rotation in Self.sweptRotations {
+            for corner in Self.allCorners {
+                let shape = ShapeGeometry(kind: .rectangle, startPoint: .zero,
+                                          endPoint: CGPoint(x: 120, y: 70), rotation: rotation)
+                let anchor = shape.canvasAnchor(opposite: corner)
+                // The dragged corner is the one furthest from the anchor — its diagonal opposite.
+                let start = canvasCorners(of: shape).max(by: {
+                    hypot($0.x - anchor.x, $0.y - anchor.y) < hypot($1.x - anchor.x, $1.y - anchor.y) })!
+                for step in 0...24 {
+                    let t = CGFloat(step) / 6      // crosses the anchor at t = 1, ends three times past
+                    let touch = CGPoint(x: start.x + (anchor.x - start.x) * t,
+                                        y: start.y + (anchor.y - start.y) * t)
+                    let dragged = shape.draggingCorner(corner, to: touch, anchor: anchor)
+                    let where_ = "rot \(rotation) \(corner) t=\(t)"
+
+                    checks += 1
+                    let travel = distanceToNearestCorner(of: dragged, from: anchor)
+                    if travel > 0.001 { failures.append("anchor moved \(travel) pt crossing — \(where_)") }
+
+                    checks += 1
+                    if distanceToNearestCorner(of: dragged, from: touch) > 0.001 {
+                        failures.append("node left the finger crossing — \(where_)")
+                    }
+
+                    checks += 1
+                    if dragged.boundingRect.width < 0 || dragged.boundingRect.height < 0 {
+                        failures.append("rect inverted rather than flipping — \(where_)")
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(failures.count, 0, "\(failures.count) of \(checks): \(failures.prefix(5).joined(separator: " | "))")
+        XCTAssertEqual(checks, 11 * 4 * 25 * 3, "the sweep stopped sweeping")
+    }
+
+    /// Sixty frames of a curved drag fed back in the way a live one is. One frame of drift is
+    /// invisible and sixty is a rectangle sliding out from under the finger — this is the shape of
+    /// failure the owner actually feels, and the flat case cannot show it at all.
+    func testSixtyFrameRectangleCornerDragsDoNotDriftAtAnyRotation() {
+        var failures: [String] = []
+        var checks = 0
+        for rotation in Self.sweptRotations {
+            for corner in Self.allCorners {
+                var shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 10, y: 10),
+                                          endPoint: CGPoint(x: 110, y: 90), rotation: rotation)
+                let anchor = shape.canvasAnchor(opposite: corner)
+                var touch = CGPoint.zero
+                for frame in 1...60 {
+                    let bearing = CGFloat(frame) * 0.11    // sweeps right around, so it crosses over
+                    touch = CGPoint(x: anchor.x + cos(bearing) * (20 + CGFloat(frame) * 2.5),
+                                    y: anchor.y + sin(bearing) * (20 + CGFloat(frame) * 2.5))
+                    shape = shape.draggingCorner(corner, to: touch, anchor: anchor)
+                }
+                let where_ = "rot \(rotation) \(corner)"
+                checks += 1
+                let travel = distanceToNearestCorner(of: shape, from: anchor)
+                if travel > 0.001 { failures.append("60 frames drifted the anchor \(travel) pt — \(where_)") }
+                checks += 1
+                if distanceToNearestCorner(of: shape, from: touch) > 0.001 {
+                    failures.append("60 frames lost the finger — \(where_)")
+                }
+                checks += 1
+                if abs(shape.rotation - rotation) > 0.001 { failures.append("60 frames turned it — \(where_)") }
+            }
+        }
+        XCTAssertEqual(failures.count, 0, "\(failures.count) of \(checks): \(failures.prefix(5).joined(separator: " | "))")
+        XCTAssertEqual(checks, 11 * 4 * 3, "the sweep stopped sweeping")
+    }
+
+    /// The failure the missing latch produces, pinned as a *characterisation* rather than a wish — it
+    /// is why `draggingCorner`'s `anchor` lost its default value.
+    ///
+    /// This is the owner's "right now it pushes the opposite edge", reproduced exactly: past the
+    /// crossing, re-deriving the anchor each frame returns the corner under the finger instead of the
+    /// pinned one, so the rectangle freezes at one frame's width and marches along behind the touch.
+    /// Flat and un-crossed it is indistinguishable from the correct path, which is precisely why the
+    /// bug reads as "works fine when the rectangle is flat".
+    func testACornerDragWithoutALatchedAnchorWalksTheOppositeEdge() {
+        func run(latched: Bool) -> (travel: CGFloat, width: CGFloat) {
+            var shape = ShapeGeometry(kind: .rectangle, startPoint: .zero,
+                                      endPoint: CGPoint(x: 100, y: 100))
+            let anchor = shape.canvasAnchor(opposite: .bottomRight)
+            for frame in 1...20 {
+                // Straight left along y = 100, from 100 pt right of the anchor to 140 pt past it.
+                let touch = CGPoint(x: anchor.x + 100 - CGFloat(frame) * 12, y: anchor.y + 100)
+                shape = shape.draggingCorner(.bottomRight, to: touch, anchor: latched ? anchor : nil)
+            }
+            return (distanceToNearestCorner(of: shape, from: anchor), shape.boundingRect.width)
+        }
+
+        let good = run(latched: true)
+        XCTAssertEqual(good.travel, 0, accuracy: 0.001, "the latched anchor is the whole fix")
+        XCTAssertEqual(good.width, 140, accuracy: 0.001,
+                       "past the crossing the rectangle keeps growing into the other quadrant")
+
+        let bad = run(latched: false)
+        XCTAssertEqual(bad.travel, 128, accuracy: 0.001,
+                       "unlatched, the node that must not move ends up 128 pt away")
+        XCTAssertEqual(bad.width, 12, accuracy: 0.001,
+                       "and the rectangle is frozen at one frame's width, marching after the finger")
     }
 
     // MARK: - Follow-the-finger math

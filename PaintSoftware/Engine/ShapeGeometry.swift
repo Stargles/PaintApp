@@ -242,7 +242,19 @@ struct ShapeGeometry: Equatable {
     /// the crossing the anchor stops being the *opposite* corner and becomes the dragged one's near
     /// neighbour, which is why callers latch `anchor` at touch-down: recomputing it per frame would
     /// jump to a different point the moment the drag crossed over.
-    func draggingCorner(_ corner: Corner, to point: CGPoint, anchor: CGPoint? = nil) -> ShapeGeometry {
+    ///
+    /// **`anchor` has no default, and that is the whole point.** Passing `nil` re-derives it from the
+    /// shape *this* frame, which is correct for a single call and wrong for every frame after the
+    /// first once a drag crosses over: `corner` then names a handle that is no longer the one under
+    /// the finger, so `canvasAnchor(opposite:)` returns the finger's own corner and the rectangle
+    /// walks along behind it — the owner's "it pushes the opposite edge", measured at 128 pt of travel
+    /// over twenty frames and a rect frozen at 12 pt wide
+    /// (`testACornerDragWithoutALatchedAnchorWalksTheOppositeEdge`). There is no way to recover the
+    /// latched point from `(self, corner, point)` alone — a touch far outside the rect is nearer some
+    /// corner other than the dragged one, so "opposite the nearest corner" disagrees with the label —
+    /// so the only fix is that every call site states which it means. A silent default is what let
+    /// this ship.
+    func draggingCorner(_ corner: Corner, to point: CGPoint, anchor: CGPoint?) -> ShapeGeometry {
         let a = anchor ?? canvasAnchor(opposite: corner)
         let d = CGPoint(x: point.x - a.x, y: point.y - a.y)
         let ci = cos(-rotation), si = sin(-rotation)
@@ -294,6 +306,13 @@ struct ShapeGeometry: Equatable {
     /// Every other kind moves just that one edge of the bounding box, in the shape's local frame, and
     /// leaves `rotation` alone. That branch is currently unreachable from the UI — `ShapeOverlayView`
     /// gives rectangles four corner handles and no mid-edge ones.
+    ///
+    /// `anchor` keeps its default here where `draggingCorner`'s is gone, and the asymmetry is
+    /// measured rather than stylistic: an axis drag *rewrites* `rotation` to the anchor→touch bearing,
+    /// so the anchor lands back on the same local node every frame and re-deriving it per frame is a
+    /// fixed point — sixty unlatched frames at four rotations move it 0.0000 pt. A corner drag carries
+    /// `rotation` through unchanged and relabels which corner is which when it flips, so the same
+    /// re-derivation walks the shape across the canvas. Latching is still what the UI does for both.
     func draggingEdge(_ edge: Edge, to point: CGPoint, anchor: CGPoint? = nil) -> ShapeGeometry {
         let r = boundingRect
         var result = self
