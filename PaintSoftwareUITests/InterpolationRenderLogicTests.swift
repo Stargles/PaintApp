@@ -394,19 +394,32 @@ final class InterpolationRenderLogicTests: XCTestCase {
                           "Preview should read as the same drawing: \(report.diagnostic)")
     }
 
-    /// The number that justifies the tier existing at all. A wide margin rather than a tight one:
-    /// this is a simulator, and the claim being tested is "an order of magnitude", not a benchmark.
+    /// The claim that justifies the tier existing at all: preview does *categorically* less work than
+    /// full, not just faster work. Originally this asserted `previewSeconds * 4 < fullSeconds`, timed
+    /// on a simulator; measured 2026-08-17 across four isolated runs, that ratio came out 3.05x and
+    /// 3.94x as often as it cleared 4x — machine contention decides a wall-clock comparison this close
+    /// (~1.4-2.0ms vs ~5.7-6.2ms), which is exactly the ambiguity CLAUDE.md warns a red result can be
+    /// evidence about the machine rather than the code.
+    ///
+    /// Asserting on `lastRenderDabCount` instead states the real invariant and is immune to
+    /// contention: `.full` stamps one dab per `stampSpacing` interval via `BrushStamper`
+    /// (`VectorCanvas.stamp`), while `.preview` strokes one `CGPath` per stroke and never touches
+    /// `DabTarget` at all (`VectorCanvas.strokePolyline`) — see `draw(stroke:into:target:isEraser:
+    /// quality:)`. So preview's dab count is always exactly zero and full's is in the thousands for
+    /// `manyStrokes()`'s 24 strokes (24 strokes × ~136pt / 1pt spacing ≈ 3264); the `1000` floor below
+    /// leaves wide headroom under that without hard-coding the exact figure.
     func testPreviewIsSubstantiallyCheaperThanFull() {
         let elements = Self.manyStrokes()
-        // Warm both paths first. The dab gradient cache and Core Graphics' own first-use costs land
-        // on whichever tier runs first, and they are big enough to swamp the comparison.
-        _ = VectorCanvas(size: Self.canvasSize, elements: elements).render(quality: .full)
-        _ = VectorCanvas(size: Self.canvasSize, elements: elements).render(quality: .preview)
-        // Fresh canvases: `render` memoizes per quality, so a second call would time the cache.
-        let fullSeconds = Self.seconds { _ = VectorCanvas(size: Self.canvasSize, elements: elements).render(quality: .full) }
-        let previewSeconds = Self.seconds { _ = VectorCanvas(size: Self.canvasSize, elements: elements).render(quality: .preview) }
-        XCTAssertLessThan(previewSeconds * 4, fullSeconds,
-                          "preview \(previewSeconds)s vs full \(fullSeconds)s")
+
+        let full = VectorCanvas(size: Self.canvasSize, elements: elements)
+        _ = full.render(quality: .full)
+        let preview = VectorCanvas(size: Self.canvasSize, elements: elements)
+        _ = preview.render(quality: .preview)
+
+        XCTAssertEqual(preview.lastRenderDabCount, 0,
+                       "preview must never stamp a dab — that would make it full cost with extra steps")
+        XCTAssertGreaterThan(full.lastRenderDabCount, 1000,
+                             "sanity check that full is doing substantial per-dab work to be cheaper than")
     }
 
     /// The two caches are independent, which is what stops a slider release from throwing away the
@@ -457,11 +470,5 @@ final class InterpolationRenderLogicTests: XCTestCase {
         return UIGraphicsImageRenderer(size: size, format: format).image { _ in
             image.draw(in: CGRect(origin: .zero, size: size))
         }
-    }
-
-    private static func seconds(_ body: () -> Void) -> Double {
-        let start = DispatchTime.now().uptimeNanoseconds
-        body()
-        return Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
     }
 }

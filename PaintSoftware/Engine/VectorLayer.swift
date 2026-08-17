@@ -288,6 +288,15 @@ final class VectorCanvas {
     /// `.full` and must not discard `.preview`, and starting a drag must not discard `.full`.
     private var cachedPreviewImage: UIImage?
 
+    /// Dabs stamped by the most recent `render(quality:)` call that actually rasterized (i.e. missed
+    /// both caches) — 0 whenever that call resolved from `cachedImage`/`cachedPreviewImage`. `.full`
+    /// stamps one dab per `stampSpacing` interval via `BrushStamper`; `.preview` never touches
+    /// `DabTarget` at all, since `strokePolyline` draws one stroked `CGPath` per stroke instead — see
+    /// `draw(stroke:into:target:isEraser:quality:)`. Test seam for
+    /// `testPreviewIsSubstantiallyCheaperThanFull`, which asserts on this countable difference instead
+    /// of wall-clock time.
+    private(set) var lastRenderDabCount: Int = 0
+
     /// Broad phase for every geometric query against this canvas's strokes, rebuilt lazily — see
     /// `strokeIndex()`. Version-keyed rather than cleared by `invalidate()`, since `version` only
     /// increases, so a stale index can never be mistaken for current.
@@ -1160,11 +1169,14 @@ final class VectorCanvas {
         let format = PixelOps.transparentFormat()
         format.preferredRange = .standard
         let elements = _elements
-        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+        // Hoisted so `lastRenderDabCount` can be read off it once the (synchronous) renderer closure
+        // below has finished drawing.
+        var target: CGContextDabTarget!
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             let cg = ctx.cgContext
             // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
             // throw away the cache's hit rate at every fill or eraser.
-            let target = CGContextDabTarget(cg)
+            target = CGContextDabTarget(cg)
             var index = 0
             while index < elements.count {
                 switch elements[index] {
@@ -1197,6 +1209,8 @@ final class VectorCanvas {
                 }
             }
         }
+        lastRenderDabCount = target.dabCount
+        return image
     }
 
     // The per-kind drawing helpers are `static`, taking only their inputs, so they cannot re-enter

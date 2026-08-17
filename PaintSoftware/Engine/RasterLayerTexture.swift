@@ -122,6 +122,11 @@ final class CGContextDabTarget: DabTarget {
     private let ctx: CGContext
     private let gradients = DabGradientCache()
 
+    /// Dabs actually rasterized (i.e. that passed the guard below) — read by `VectorCanvas` after a
+    /// render to populate `lastRenderDabCount`. A skipped stamp does no gradient work, so it is
+    /// correctly excluded: this counts cost, not calls.
+    private(set) var dabCount = 0
+
     init(_ ctx: CGContext) { self.ctx = ctx }
 
     func beginStroke() {}
@@ -130,6 +135,7 @@ final class CGContextDabTarget: DabTarget {
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                      alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
         guard radius > 0, alpha > 0 else { return }
+        dabCount += 1
         gradients.stamp(into: ctx, at: point, radius: radius, color: color,
                         alpha: alpha, hardness: hardness, blendMode: blendMode)
     }
