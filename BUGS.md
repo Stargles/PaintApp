@@ -25,27 +25,50 @@ that fails an already-begun stroke which nothing in the suite reaches. Next step
 action recorder (see CLAUDE.md) on the owner's iPad, reproducing a stroke started under an open
 timeline popover, read for where in the touch sequence delivery actually stops.
 ## Drawing on a compositor document runs at ~17 fps on a 4K canvas, and the cap only dents it (2026-08-16)
+## XCUITests cannot launch into the editor on the iPad 9 (2026-08-16)
 
-The owner reports 60 → 17 fps while drawing on a 4096² canvas with a bloom and a blur layer over a
-vector layer, on an iPad 9. The crash beside it is fixed (`CompositorBudget`); **this is a second,
-mostly independent cause and it is not the Metal flip.**
+The logic tier runs on the owner's device beautifully — 991 tests in 36 s, Release, against 3 min on
+the simulator — but **every XCUITest fails in `launchIntoEditor`**, before it has touched anything it
+is about to test. 18 of 18 in `SandwichCompositingUITests` + `BlendModesAndCompositorUITests`, all at
+the same line.
 
-§5.2's sandwich shows *one* canvas-sized layer at rest and *three* mid-stroke — `below`, the active
-layer's own host, `above` — and Core Animation minifies each of them from 4096² down to about 1300²
-device pixels with no mipmaps, so the texture-cache behaviour is close to worst case. One layer to
-three is a 3x rise in per-frame sampling against a 3.5x fall in frame rate, which is a tight enough
-fit to be the mechanism. It predates the backend flip: the sandwich engages on any document with an
-effect, whichever backend composites it.
+The trace says why: `Tap "sizePicker.createButton"` → `Computed hit point {-1, -1} after scrolling to
+visible`, so the tap never lands and `timeline.frameLabel` never appears. That is the size picker
+laying out differently on a 10.2" 4:3 screen (2160x1620) than on the iPad Pro 13" every UI suite was
+written against — a test-fixture problem on the device, not a product bug, and nothing to do with the
+compositor.
 
-What landed helps and does not finish it. `CompositorBudget` caps the composite to 2896² on a 3 GB
-device, so two of the three layers shrink by half in area, and removing the memory pressure removes
-the compression/paging that was compounding it. The lever the artist has today is
-**Actions → render resolution → 50%**, which is exactly what that control is for.
+Worth fixing because device runs are 5x faster than the simulator and are the only place the memory
+behaviour is real. Likely fix: make `launchIntoEditor` scroll the size picker or dismiss it by
+keyboard rather than tapping a button that can land off-screen. Until then, **device testing means
+the logic tier only**, and the UI suites stay on the simulator.
 
-What would actually fix it: stop handing Core Animation a canvas-sized image to minify. Either render
-the sandwich halves at the *view's* size rather than the canvas's, or present the composite through a
-`CAMetalLayer` instead of reading it back into a `CGImage` at all — the readback is already measured
-as ~11.4 ms of a ~16 ms frame, so the two are the same piece of work.
+## Drawing on a vector layer at 4K is capped at ~19 fps by the live stroke preview (2026-08-16)
+
+**Measured on the owner's iPad 9, Release** (`PerfBaselineTests.testTheLiveStrokePreviewCostsFourTimesMoreOnAVectorLayerThanARaster`):
+one dab costs **53.8 ms on a vector layer at 4096²** against 4.0 ms on a raster layer — a ceiling of
+**19 fps** before anything else in the frame, against 250 fps for raster. At 2048² it is 16.4 ms
+against 3.0 ms. The owner reports 17 fps.
+
+`StrokeCanvasView.refreshDisplay`'s `.overlay` branch runs once per touch-move and does four
+canvas-sized things where the raster path does one: it allocates a **fresh** canvas-sized
+`UIGraphicsImageRenderer` bitmap, draws the committed vector render into it, renders the live scratch,
+and draws that over the top. At 4096² the allocation alone is 64 MiB, per dab.
+
+**This is not the compositor and it is not this branch.** No composite runs during a dab —
+`makeSandwichKey` freezes the active layer's content version for the duration of a stroke precisely so
+the compositor stays off the drawing path — and `refreshDisplay` predates the Metal work. The owner's
+own experiment proves it from the other side: halving `renderResolution` cuts a sandwich rebuild from
+40.6 ms to 13.1 ms on that device and **changed the frame rate not at all**, because
+`RenderResolution` is applied in `makeSandwichRequests` and reaches nothing on this path.
+
+**The fix, and it belongs in its own branch.** Stop compositing the two into one bitmap: give the
+scratch its own `UIImageView`/`CALayer` over the committed one and let Core Animation composite them,
+which it is doing anyway. That deletes the per-dab allocation and both blits, leaving only
+`scratch.renderToUIImage()` — the raster path's cost. It is a change to the most gesture-sensitive
+code in the app (`vectorScratchRole` has three modes and `.replacement` and `.none` behave
+differently), so it wants its own branch and its own pass through the vector-eraser UI suites, not a
+rider on a compositor-memory fix.
 
 ## The project thumbnail composites the whole canvas to make a 320x320 tile (2026-08-16)
 

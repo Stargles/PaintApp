@@ -1352,12 +1352,22 @@ final class PerfBaselineTests: XCTestCase {
         let cpu = rebuild()
         warmTheGPU()
         Compositor.backend = .metal
+        // **Counted as a delta, because the counters are process-lifetime and the process is shared.**
+        // A device run reported `uploadHits=76 uploadMisses=47` here and it reads like a 38% miss rate
+        // on a fixture that cannot miss — it is not. `CompositorMetalEngine.shared` is one singleton
+        // for the whole test process, every case in this file that composites contributes to those
+        // totals, and each *distinct canvas size* is a distinct set of keys: `warmTheGPU` composites
+        // at 64², `testRenderResolutionScalesRebuildCost` at three more sizes, and the budget cases at
+        // others again. The lifetime total therefore says nothing about this rebuild. The delta below
+        // does, and it is the number to read.
         // Twice: the first pass fills whatever the engine caches between composites and the second is
         // the steady state, which is the state a stroke-lift rebuild is actually in — every layer but
         // the one just drawn on is unchanged. Both are reported because the gap between them *is* the
         // cache's value, and a cold number alone would understate a warm path or flatter a broken one.
         let gpuCold = rebuild()
+        let before = CompositorMetalEngine.shared?.uploadCacheCounts ?? (hits: 0, misses: 0)
         let gpuWarm = rebuild()
+        let after = CompositorMetalEngine.shared?.uploadCacheCounts ?? (hits: 0, misses: 0)
         Compositor.backend = .coreGraphics
 
         report("sandwich rebuild, 6 layers at 2048x2048 (3 composites)", [
@@ -1366,9 +1376,18 @@ final class PerfBaselineTests: XCTestCase {
             ("gpuWarm", milliseconds(gpuWarm)),
             ("gpuAvailable", "\(CompositorMetalEngine.shared != nil)"),
             ("scratchAllocated", "\(CompositorMetalEngine.shared?.lastScratchAllocated ?? -1)"),
-            ("uploadHits", "\(CompositorMetalEngine.shared?.uploadCacheCounts.hits ?? -1)"),
-            ("uploadMisses", "\(CompositorMetalEngine.shared?.uploadCacheCounts.misses ?? -1)"),
+            ("warmHits", "\(after.hits - before.hits)"),
+            ("warmMisses", "\(after.misses - before.misses)"),
+            ("lifetimeHits", "\(after.hits)"),
+            ("lifetimeMisses", "\(after.misses)"),
         ])
+
+        // **The claim the cache exists to make**: a rebuild whose leaves are already resident misses
+        // nothing. Asserted on the delta, which is the only figure that is about this rebuild.
+        XCTAssertEqual(after.misses - before.misses, 0,
+                       "A warm sandwich rebuild re-uploads nothing — every leaf keys the same as the last one")
+        XCTAssertGreaterThan(after.hits - before.hits, 0,
+                             "…and it must be hitting rather than bypassing the cache entirely")
 
         // Ceiling only, in this file's house style — read the reported numbers, do not tighten this.
         XCTAssertLessThan(cpu, 30.0, "Three CPU composites of a flat 6-layer stack taking half a minute is structural")
@@ -1787,6 +1806,168 @@ final class PerfBaselineTests: XCTestCase {
                           "A cached mask should cost a per-node multiply on top of the composite, not a new order of magnitude")
     }
 
+    // MARK: - What actually costs the frame rate while drawing
+
+    /// **The per-dab cost of drawing on a vector layer against drawing on a raster one** — the
+    /// measurement that decides where the owner's 60 → 17 fps went, and the one that says it is not
+    /// the compositor.
+    ///
+    /// The owner halved `renderResolution`, which cuts a sandwich rebuild from 52.7 ms to 12.0 ms on
+    /// their iPad, and **reported no change in frame rate at all**. That single observation rules the
+    /// composite out of the critical path, and with it the theory that Core Animation minifying three
+    /// canvas-sized layers was the cost. Whatever is spending the frame is something
+    /// `renderResolution` does not reach — and `RenderResolution`'s own doc comment says exactly which
+    /// things those are: it is applied in `makeSandwichRequests` and nowhere else, so the *snapshot*
+    /// and the live stroke preview are both outside it.
+    ///
+    /// So this measures the live stroke preview directly, in the two shapes `StrokeCanvasView`
+    /// actually has:
+    ///
+    /// - **Raster**, `refreshDisplay`'s last line: `imageView.image = raster?.renderToUIImage()`.
+    ///   One canvas-sized render, memoized on `version` — and a dab bumps the version, so it is paid
+    ///   per dab.
+    /// - **Vector**, `refreshDisplay`'s `.overlay` branch: a *fresh* canvas-sized
+    ///   `UIGraphicsImageRenderer` bitmap per dab, the committed render drawn into it, then the live
+    ///   scratch rendered and drawn over that. Four canvas-sized operations where raster has one, and
+    ///   one of them is an allocation rather than a blit.
+    ///
+    /// Measured at both canvas sizes because the ratio between them is the other half of the claim:
+    /// the owner's canvas is 4096², which is 4x the pixels of the 2048² this file's other cases use.
+    @MainActor
+    func testTheLiveStrokePreviewCostsFourTimesMoreOnAVectorLayerThanARaster() {
+        func costs(at size: CGSize) -> (raster: Double, vector: Double) {
+            let raster = RasterLayerTexture.empty(size: size)
+            BrushStamper.stampStroke(into: raster, samples: syntheticStroke(sampleCount: 60),
+                                     brush: Brush(name: "Perf", shape: .softRound, size: 24),
+                                     color: .black, brushSize: 24, brushOpacity: 1)
+            let scratch = RasterLayerTexture.empty(size: size)
+            BrushStamper.stampStroke(into: scratch, samples: syntheticStroke(sampleCount: 12),
+                                     brush: Brush(name: "Perf", shape: .softRound, size: 24),
+                                     color: .black, brushSize: 24, brushOpacity: 1)
+            let committed = VectorCanvas(size: size, strokes: [Self.previewStroke(in: size)])
+            _ = committed.render()  // the committed render is cached across a stroke; only the rest is per dab
+
+            let bounds = CGRect(origin: .zero, size: size)
+            let brush = Brush(name: "Perf", shape: .softRound, size: 24)
+            // **One dab is stamped inside each measured frame, and it has to be.** Both render paths
+            // are memoized on the texture's `version`, so a loop that only read them would measure the
+            // memo rather than a stroke — and the dab is what moves the version in the app too. It is
+            // the same dab on both sides, so it cancels out of the ratio.
+            func dab(into texture: RasterLayerTexture) {
+                BrushStamper.stampStroke(into: texture, samples: syntheticStroke(sampleCount: 2),
+                                         brush: brush, color: .black, brushSize: 24, brushOpacity: 1)
+            }
+            func rasterFrame() {
+                autoreleasepool {
+                    dab(into: raster)
+                    _ = raster.renderToUIImage()
+                }
+            }
+            // Verbatim `StrokeCanvasView.refreshDisplay`'s `.overlay` branch.
+            func vectorFrame() {
+                autoreleasepool {
+                    dab(into: scratch)
+                    let base = committed.renderIfNonEmpty()
+                    _ = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
+                        base?.draw(in: bounds)
+                        scratch.renderToUIImage().draw(in: bounds)
+                    }
+                }
+            }
+            rasterFrame(); vectorFrame()  // discard the first of each: one-time faulting, not a dab
+            let runs = 5
+            let rasterTime = measuringPeakMemory { for _ in 0..<runs { rasterFrame() } }.seconds / Double(runs)
+            let vectorTime = measuringPeakMemory { for _ in 0..<runs { vectorFrame() } }.seconds / Double(runs)
+            return (rasterTime, vectorTime)
+        }
+
+        let small = costs(at: Self.canvasSize)
+        let large = costs(at: CGSize(width: 4096, height: 4096))
+
+        report("live stroke preview, one dab", [
+            ("raster2048", milliseconds(small.raster)),
+            ("vector2048", milliseconds(small.vector)),
+            ("raster4096", milliseconds(large.raster)),
+            ("vector4096", milliseconds(large.vector)),
+            ("vectorOverRaster2048", String(format: "%.1fx", small.raster > 0 ? small.vector / small.raster : 0)),
+            ("vectorOverRaster4096", String(format: "%.1fx", large.raster > 0 ? large.vector / large.raster : 0)),
+            ("fpsCeilingVector4096", String(format: "%.0f", large.vector > 0 ? 1 / large.vector : 0)),
+            ("fpsCeilingRaster4096", String(format: "%.0f", large.raster > 0 ? 1 / large.raster : 0)),
+        ])
+
+        // Ceilings only, in this file's house style — the reported numbers are the output. The claim
+        // being pinned is the *direction*: the vector preview does strictly more work per dab than the
+        // raster one, at both sizes, and it is not close.
+        XCTAssertGreaterThan(small.vector, small.raster,
+                             "The overlay composite is a fresh bitmap plus two blits; raster is one render")
+        XCTAssertGreaterThan(large.vector, large.raster,
+                             "…and the gap must not close at the canvas size the owner actually draws on")
+    }
+
+    /// **Where the two backends actually cross over on this device** — the measurement the
+    /// `.automatic` default is chosen from, rather than the blanket "Metal is faster" the simulator
+    /// suggested.
+    ///
+    /// The two have opposite shapes: Metal has roughly half the per-layer slope and roughly twice the
+    /// fixed intercept (`testWhereAWarmCompositeSpendsItself` reports both), so there is a layer count
+    /// below which CoreGraphics wins and above which it does not. On top of that, Metal holds a
+    /// canvas-sized texture pool the CPU path does not — so the crossover that matters is not where
+    /// the times are equal but where Metal's win is worth its residency.
+    ///
+    /// Both warm, because warm is the state the live canvas is in: a rebuild follows an edit to one
+    /// layer, and every other leaf keys the same as last time.
+    @MainActor
+    func testWhereTheTwoBackendsCrossOverOnThisDevice() {
+        warmTheGPU()
+
+        func cost(layerCount: Int, effect: Effect?, on backend: CompositorBackend) -> Double {
+            Compositor.backend = backend
+            let manager = effect.map { gradedCompositorManager(layerCount: layerCount, effect: $0) }
+                ?? compositorManager(layerCount: layerCount)
+            guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else { return 0 }
+            func once() { autoreleasepool { _ = Compositor.composite(request) } }
+            once()  // warm this fixture's leaves into the upload cache
+            let runs = 5
+            return measuringPeakMemory { for _ in 0..<runs { once() } }.seconds / Double(runs)
+        }
+
+        var pairs: [(String, String)] = []
+        for layers in [1, 2, 4, 6] {
+            let cpu = cost(layerCount: layers, effect: nil, on: .coreGraphics)
+            let gpu = cost(layerCount: layers, effect: nil, on: .metal)
+            pairs.append(("plain\(layers)cpu", milliseconds(cpu)))
+            pairs.append(("plain\(layers)gpu", milliseconds(gpu)))
+        }
+        let grade = Effect.brightnessContrast(Effect.BrightnessContrast(brightness: 1.2, contrast: 1.5))
+        let gradedCPU = cost(layerCount: 2, effect: grade, on: .coreGraphics)
+        let gradedGPU = cost(layerCount: 2, effect: grade, on: .metal)
+        pairs.append(("graded2cpu", milliseconds(gradedCPU)))
+        pairs.append(("graded2gpu", milliseconds(gradedGPU)))
+        Compositor.backend = Compositor.defaultBackend
+
+        report("backend crossover at 2048x2048, warm", pairs)
+
+        // **The one direction the predicate must not get wrong.** A grading document on the CPU
+        // reference snapshots the canvas and grades every pixel in Swift; on the GPU it is one more
+        // dispatch over a resident texture. Two layers is the smallest stack that can carry a grade,
+        // so if Metal does not win *here* the `.automatic` rule's effect clause is measuring nothing.
+        XCTAssertLessThan(gradedGPU, gradedCPU,
+                          "A graded composite must be cheaper on the GPU, or the effect clause is wrong")
+    }
+
+    /// One long diagonal stroke as `VectorStroke`, for the committed half of the preview above.
+    private static func previewStroke(in size: CGSize) -> VectorStroke {
+        let samples = (0..<60).map { step -> VectorSample in
+            let t = CGFloat(step) / 59
+            return VectorSample(x: 128 + t * (size.width - 256),
+                                y: 128 + t * (size.height - 256),
+                                pressure: 0.2 + 0.8 * sin(t * .pi))
+        }
+        return VectorStroke(brush: Brush(name: "Perf", shape: .softRound, size: 24),
+                            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                            size: 24, opacity: 1, samples: samples)
+    }
+
     // MARK: - The device memory budget (the iPad 9 crash)
 
     /// The scene the owner crashed the app with, counted texture by texture.
@@ -1933,6 +2114,48 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertLessThanOrEqual(resident, oneImage * 2,
                                  "Six distinct flattens must not all stay resident under a two-image budget")
         XCTAssertGreaterThan(resident, 0, "Evicting down to nothing would stop this being a memo at all")
+    }
+
+    /// **The `.automatic` default, pinned as a rule rather than as a benchmark.**
+    ///
+    /// The device timings that justify the rule live in `testWhereTheTwoBackendsCrossOverOnThisDevice`
+    /// and in `[RenderNode].prefersGPUCompositing`'s doc comment; this pins the *decisions* so that a
+    /// later session changing the threshold has to change a stated number and a named case, not
+    /// discover a silent behaviour shift on hardware nobody runs the tests on.
+    @MainActor
+    func testTheAutomaticBackendPrefersTheGPUOnlyWhereTheDeviceSaysItWins() {
+        func tree(layers: Int, effect: Effect? = nil) -> [RenderNode] {
+            let manager = compositorManager(layerCount: layers)
+            if let effect { manager.addValueLayer(effect: effect) }
+            return manager.renderTree
+        }
+
+        // A grade sends any stack to the GPU, at the smallest layer count that can carry one — the
+        // 203.3 ms against 2.7 ms row. This is the clause that does the real work.
+        XCTAssertTrue(tree(layers: 1, effect: .brightnessContrast(Effect.BrightnessContrast())).prefersGPUCompositing,
+                      "One grade is 75x on this device; layer count must not be able to veto it")
+        XCTAssertTrue(tree(layers: 1, effect: .bloom(Effect.Bloom())).prefersGPUCompositing,
+                      "A multi-pass grade even more so")
+
+        // Below the threshold and ungraded, the CPU keeps it: Metal would buy about a millisecond a
+        // composite and cost ~80 MB of resident texture on a 3 GB device.
+        XCTAssertFalse(tree(layers: 1).prefersGPUCompositing)
+        XCTAssertFalse(tree(layers: 3).prefersGPUCompositing)
+        // At and above it the slope difference has paid for the residency.
+        XCTAssertTrue(tree(layers: 4).prefersGPUCompositing)
+        XCTAssertTrue(tree(layers: 8).prefersGPUCompositing)
+
+        XCTAssertEqual(Array<RenderNode>.gpuLeafThreshold, 4,
+                       "Moving the threshold is a device-measurement decision; see prefersGPUCompositing")
+        XCTAssertEqual(Compositor.defaultBackend, .automatic,
+                       "The shipped default is the predicate, not either backend")
+
+        report("automatic backend predicate", [
+            ("threshold", "\(Array<RenderNode>.gpuLeafThreshold)"),
+            ("oneLayerPlain", "\(tree(layers: 1).prefersGPUCompositing)"),
+            ("fourLayersPlain", "\(tree(layers: 4).prefersGPUCompositing)"),
+            ("oneLayerGraded", "\(tree(layers: 1, effect: .bloom(Effect.Bloom())).prefersGPUCompositing)"),
+        ])
     }
 
     /// **The refusal is wired, and refusing still produces a frame.**

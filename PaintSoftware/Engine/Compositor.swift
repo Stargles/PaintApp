@@ -15,51 +15,49 @@ import os
 
 /// Which implementation `Compositor.composite` uses.
 ///
-/// **Defaults to `.metal`, and the sentence that used to be here is what changed.** It read: "what
-/// has not arrived is a consumer that needs it at interactive rates … §5.2's sandwich is the consumer
-/// that flips this, because it keeps its textures between frames and stops paying the upload every
-/// time." The sandwich arrived, and then the second half of that prediction turned out to be the work
-/// rather than the consequence — the sandwich cached *composites* and the GPU went on re-uploading
-/// every leaf underneath them, three times per repaint, so the flag stayed off because turning it on
-/// would have been slower. `MetalCompositor`'s upload cache is what closed that, and the flip follows
-/// the measurement rather than the plan.
+/// **Defaults to `.automatic`, and the two sentences that used to be here are both withdrawn.** The
+/// first said the flag would flip when a consumer needed the GPU at interactive rates; the second,
+/// written when it did flip, said "the *sign* is what the flip rests on, and it is the same sign in
+/// all three rows". Both were argued from simulator numbers, and **the sign is not the same on the
+/// device.** A blanket `.metal` is the wrong shape of answer: which backend wins is a property of
+/// the document, so the default is now a predicate over the tree
+/// (`[RenderNode].prefersGPUCompositing`, which carries the rule and the numbers behind it).
 ///
-/// **The measurement, Debug on the simulator, 6 layers at 2048², both backends warm**
-/// (`PerfBaselineTests.testSandwichRebuildCostOnBothBackends` and
-/// `testEffectCompositeCostOnBothBackends`):
+/// **Measured on the owner's iPad 9 (`iPad12,1`, A13, 3 GB), Release, 2048², both backends warm.**
+/// These supersede the simulator table that stood here; the simulator's figures are not quoted any
+/// more because two of the three ratios it reported do not survive contact with the hardware.
 ///
 /// | | CoreGraphics | Metal |
 /// |---|---|---|
-/// | one repaint — three composites | 74.6 ms | **31.3 ms** |
-/// | flat 6-layer composite | 43.9 ms | **21.0 ms** |
-/// | the same, with one adjustment layer | 7047.5 ms | **18.8 ms** |
+/// | per-layer slope (`testWhereAWarmCompositeSpendsItself`) | 4.3 ms | **2.4 ms** |
+/// | fixed intercept, per composite | **4.2 ms** | 7.0 ms |
+/// | one-pass grade, added cost (`testEffectCompositeCostOnBothBackends`) | 203.3 ms | **2.7 ms** |
+/// | peak footprint, 6 plain layers | **381.3 MB** | 461.7 MB |
+/// | sandwich rebuild, 6 layers, warm | 64.7 ms | **54.8 ms** |
+/// | the same, cold | **64.7 ms** | 108.1 ms |
 ///
-/// The third row is the one that decides it. An effect on the CPU snapshots the canvas, grades 4.2M
-/// pixels in Swift and writes a third buffer (`CoreGraphicsCompositor.grade`, slow on purpose because
-/// it is the oracle); on the GPU it is one more dispatch over a texture that is already resident and
-/// disappears into the noise. Seven seconds against nineteen milliseconds is not a tuning difference,
-/// and it is the shape every §4.4 document has.
+/// **Metal is half the document and twice the frame**, so the two lines cross at about one and a half
+/// leaves — and a naive reading of that alone is exactly how the blanket default got written. The
+/// footprint row is why that reading is wrong: the GPU path holds a canvas-sized pool and upload
+/// cache the CPU path never allocates, +80 MB here, on the device whose scarcity of that resource is
+/// what crashed the app in the first place. At two leaves Metal is buying about a millisecond with
+/// it. So the threshold sits deliberately above the timing crossover.
 ///
-/// **What is still true of the old default: the first composite at a given canvas size loses.** Cold,
-/// the GPU pays every upload with nothing cached — 258.6 ms against the CPU's 74.6 — so the win is
-/// "every frame after the first", not "every frame". The offline consumer this used to be argued
-/// against is the project thumbnail (`ProjectStore`), which composites once and is exactly that cold
-/// case; it is now marginally worse off and is not on any interactive path.
+/// **The grade row is the one that is not close and never was.** 203.3 ms against 2.7 ms, on the
+/// smallest stack that can carry an effect: `CoreGraphicsCompositor.grade` snapshots the canvas,
+/// grades 4.2M pixels in Swift and writes a third buffer (slow on purpose — it is the oracle), while
+/// the GPU adds one dispatch over a texture that is already resident. Seventy-five to one is not a
+/// tuning difference, and it is the shape every §4.4 document has. That is the clause doing the real
+/// work in the predicate.
 ///
-/// The simulator's GPU is not an iPad's and does not model its bandwidth, so treat every ratio above
-/// as directional. The *sign* is what the flip rests on, and it is the same sign in all three rows.
+/// **The cold row is still true and still matters for one consumer.** With nothing cached the GPU
+/// pays every upload — 108.1 ms against 64.7 — so its win is "every frame after the first". The
+/// offline consumer that is always cold is the project thumbnail (`ProjectStore`), which composites
+/// once per save and is not on any interactive path.
 ///
-/// **What the simulator hid, and what the flip now depends on.** The paragraph above was written
-/// about *time* and is still right about time; it says nothing about memory, and memory is where the
-/// simulator's borrowed desktop RAM flattered this. On an iPad 9 (3 GB shared between CPU and GPU) a
-/// 4096² canvas with a bloom and a blur on it wants 384 MiB of texture resident before the readback
-/// allocates a byte, and the app is killed rather than told no. So the default stays `.metal`, but
-/// **only because `CompositorBudget` now sizes the composite to the device**: the honest reading of
-/// the table above is that a GPU frame at a size that fits beats a CPU frame at any size by two
-/// orders of magnitude on an effect document, while an *unbounded* GPU frame beats nothing at all
-/// because the process is gone. Reverting the default would trade a crash for a repaint that is
-/// seven seconds at 2048² with a *single-pass* grade and far worse than that at 4K with a bloom,
-/// which is not a fix.
+/// **None of this is what makes a 4K canvas safe on 3 GB — `CompositorBudget` is.** The predicate
+/// picks a backend; the budget decides whether the picked one can afford the frame, and sizes the
+/// live canvas so it can. They are separate questions and the code keeps them separate.
 ///
 /// **The fast tier can select either, which is new.** The `PaintSoftwareUITests` target opts out of
 /// the app's `PBXFileSystemSynchronizedRootGroup` and hand-lists its sources, so it had no shader of
@@ -71,6 +69,10 @@ import os
 enum CompositorBackend {
     case coreGraphics
     case metal
+    /// **Decided per composite from the tree** — `[RenderNode].prefersGPUCompositing`, which carries
+    /// the device measurements it is chosen from. The shipped default, and the correction to a
+    /// blanket `.metal` that the iPad's own numbers forced.
+    case automatic
 }
 
 // MARK: - What the GPU path may spend
@@ -258,7 +260,13 @@ enum Compositor {
     /// one suite to switch every suite that runs after it in the same process off the shipped backend
     /// — silently, since the tests would go on passing against the slower path they were not written
     /// to be measuring. Restoring *this* is what cannot rot.
-    static let defaultBackend: CompositorBackend = .metal
+    ///
+    /// **`.automatic` rather than `.metal`, and the two forced cases stay for the tests and the
+    /// measurements.** A parity sweep has to name the backend it is comparing — it cannot be handed
+    /// a document-dependent answer — and every case in `PerfBaselineTests` that reports a
+    /// CPU-versus-GPU pair has to force both sides. So the enum keeps three cases where the app only
+    /// ever ships one: two of them exist so the third can be measured.
+    static let defaultBackend: CompositorBackend = .automatic
 
     /// Composites one frame. Pure: every input is a value the caller owns, so this is safe to call
     /// from any thread — which is the whole point of §9.1 point 3 and what makes §9.2's background
@@ -270,35 +278,52 @@ enum Compositor {
         switch backend {
         case .coreGraphics:
             return CoreGraphicsCompositor.composite(request)
-        case .metal:
-            switch MetalCompositor.attempt(request) {
-            case .image(let image):
-                return image
-            // Falling back rather than failing: a device with no GPU, or the fast test tier with no
-            // metallib, should render a correct frame slowly rather than no frame at all. The two
-            // backends agree exactly for source-over and to within a channel step for the blend
-            // modes (`CompositorParityLogicTests` measures every one), so this is a performance
-            // fallback and never a visual one.
-            case .unavailable:
+        // **The shipped path, and it asks the tree rather than a constant.** See
+        // `[RenderNode].prefersGPUCompositing` for the iPad 9 measurements that decide it — the short
+        // version is that Metal is half the per-layer cost and twice the per-frame cost, so which one
+        // wins is a property of the document, and a grade anywhere makes it Metal by seventy-five to
+        // one whatever else is in the stack.
+        case .automatic:
+            guard request.tree.prefersGPUCompositing else {
                 return CoreGraphicsCompositor.composite(request)
-            // **The one decline that must not escalate, and the reason this stopped being one
-            // branch.** The fallback above is whole-frame — a single failed encode drops the entire
-            // composite to the CPU — which is the right trade when the GPU is *absent*. It is exactly
-            // the wrong one when the GPU declined for lack of memory: `CoreGraphicsCompositor.grade`
-            // reads the canvas back, allocates a second canvas-sized buffer for the graded copy and a
-            // third for the result, and gathers a whole blur kernel per pixel in scalar Swift. So the
-            // response to "there is no memory" would be to allocate more of it, far more slowly, at
-            // the moment jetsam is deciding whether to kill the process.
-            //
-            // Nil is a better answer here than either backend, because the caller already has one.
-            // `CanvasView.finishSandwichRebuild` takes all three composites or none and otherwise
-            // keeps showing what it has, which is at most one edit stale and is a coherent picture;
-            // the next rebuild retries, by which time the purge this decline triggered has given the
-            // memory back. `ProjectStore` writes no thumbnail for that save, which is a tile the next
-            // save replaces.
-            case .underPressure:
-                return nil
             }
+            return compositeThroughMetal(request)
+        case .metal:
+            return compositeThroughMetal(request)
+        }
+    }
+
+    /// The GPU attempt and the two shapes of "no" it can come back with — factored out because both
+    /// `.metal` and `.automatic` reach it, and the fallback rule is the interesting part rather than
+    /// the dispatch.
+    private static func compositeThroughMetal(_ request: RenderRequest) -> CGImage? {
+        switch MetalCompositor.attempt(request) {
+        case .image(let image):
+            return image
+        // Falling back rather than failing: a device with no GPU, or the fast test tier with no
+        // metallib, should render a correct frame slowly rather than no frame at all. The two
+        // backends agree exactly for source-over and to within a channel step for the blend
+        // modes (`CompositorParityLogicTests` measures every one), so this is a performance
+        // fallback and never a visual one.
+        case .unavailable:
+            return CoreGraphicsCompositor.composite(request)
+        // **The one decline that must not escalate, and the reason this stopped being one
+        // branch.** The fallback above is whole-frame — a single failed encode drops the entire
+        // composite to the CPU — which is the right trade when the GPU is *absent*. It is exactly
+        // the wrong one when the GPU declined for lack of memory: `CoreGraphicsCompositor.grade`
+        // reads the canvas back, allocates a second canvas-sized buffer for the graded copy and a
+        // third for the result, and gathers a whole blur kernel per pixel in scalar Swift. So the
+        // response to "there is no memory" would be to allocate more of it, far more slowly, at
+        // the moment jetsam is deciding whether to kill the process.
+        //
+        // Nil is a better answer here than either backend, because the caller already has one.
+        // `CanvasView.finishSandwichRebuild` takes all three composites or none and otherwise
+        // keeps showing what it has, which is at most one edit stale and is a coherent picture;
+        // the next rebuild retries, by which time the purge this decline triggered has given the
+        // memory back. `ProjectStore` writes no thumbnail for that save, which is a tile the next
+        // save replaces.
+        case .underPressure:
+            return nil
         }
     }
 }

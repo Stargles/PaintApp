@@ -414,6 +414,84 @@ extension Array where Element == RenderNode {
         }
     }
 
+    // MARK: - Which backend this tree wants
+
+    /// **Whether the GPU is the right backend for this tree**, asked per composite — the body of
+    /// `CompositorBackend.automatic`.
+    ///
+    /// ### Measured on the owner's iPad 9 (A13, 3 GB), Release, not on a simulator
+    ///
+    /// The two backends have opposite cost shapes, and a warm decomposition on that device
+    /// (`testWhereAWarmCompositeSpendsItself`) puts numbers on it:
+    ///
+    /// | | CoreGraphics | Metal |
+    /// |---|---|---|
+    /// | per-layer slope | 4.4 ms | 2.2 ms |
+    /// | fixed intercept | 3.9 ms | 7.3 ms |
+    /// | one-pass grade delta | 199.0 ms | 5.6 ms |
+    ///
+    /// So Metal is half the *document* and twice the *frame*. Measured head to head warm at 2048²
+    /// (`testWhereTheTwoBackendsCrossOverOnThisDevice`), the two lines cross between one leaf and two:
+    ///
+    /// | leaves | CoreGraphics | Metal | Metal's margin |
+    /// |---|---|---|---|
+    /// | 1 | **8.6 ms** | 9.4 ms | −0.8 ms |
+    /// | 2 | 13.2 ms | **11.1 ms** | +2.1 ms |
+    /// | 4 | 21.9 ms | **17.4 ms** | +4.5 ms |
+    /// | 6 | 32.0 ms | **20.5 ms** | +11.5 ms |
+    /// | 2, one grade | 183.2 ms | **18.7 ms** | +164.5 ms |
+    ///
+    /// Read on its own, that table says "use Metal from two leaves up" — which is very nearly the
+    /// blanket default, and is how the blanket default got written.
+    ///
+    /// **The measurement that says otherwise is memory, not time.** A composite of six plain layers
+    /// peaked at 461.7 MB through Metal against 381.3 MB through CoreGraphics: the GPU path holds a
+    /// canvas-sized pool and upload cache the CPU path never allocates. On a 3 GB device that is the
+    /// scarce resource — it is the same working set that crashed the app (`CompositorBudget`) — and
+    /// at two leaves Metal is buying 2.1 ms a composite, 6 ms of a three-composite rebuild, with
+    /// +80 MB. That is a bad trade on this device and a fine one on an 8 GB iPad, which is an argument
+    /// for scaling the threshold with memory later and not for pretending the trade is free now.
+    ///
+    /// So the threshold sits deliberately above the timing crossover: **four leaves**, where the
+    /// margin is 4.5 ms a composite and 13.5 ms a rebuild, and the residency has started to pay.
+    ///
+    /// **The effect clause is the one that actually matters and it has no threshold.** The last row
+    /// above is a two-leaf stack — the smallest that can carry a grade — at 183.2 ms against 18.7 ms,
+    /// and the isolated grade delta on a six-layer stack is 203.3 ms against 2.7 ms. That is because
+    /// `CoreGraphicsCompositor.grade` snapshots the canvas, grades 4.2M pixels in Swift and writes a
+    /// third buffer, where the GPU adds one dispatch over a texture that is already resident. Any
+    /// grade anywhere in the tree sends the whole composite to Metal, whatever the layer count; no
+    /// plausible layer threshold could outweigh a factor of seventy-five.
+    ///
+    /// **What this does not decide is whether the composite fits.** `CompositorMetalEngine` still
+    /// refuses a working set over `CompositorBudget.textureBudgetBytes` and falls back; this predicate
+    /// only says which backend to *prefer*. The two are separate questions and answering them in one
+    /// place would make "too big" and "not worth it" indistinguishable in the code.
+    ///
+    /// **One consequence worth stating: a document can change backends as the artist adds a layer.**
+    /// The two agree exactly for source-over and to within one channel step for the blend modes
+    /// (`CompositorParityLogicTests` sweeps every one), so crossing the threshold can shift a pixel by
+    /// a step. That is already true of every fallback this file has ever had, and it is invisible
+    /// beside the alternative of picking the wrong backend for the whole session.
+    var prefersGPUCompositing: Bool {
+        if containsAGrade { return true }
+        return uploadableLeafCount >= Self.gpuLeafThreshold
+    }
+
+    /// See `prefersGPUCompositing` for where four comes from — it is a memory decision as much as a
+    /// timing one, and named here so a later session moving it has to move a documented number rather
+    /// than a literal.
+    static var gpuLeafThreshold: Int { 4 }
+
+    /// Whether anything in this tree grades — a leaf wrapper or a node one (§4.4's two forms).
+    private var containsAGrade: Bool {
+        contains { node in
+            if node.effect != nil { return true }
+            guard case .node(_, let inputs) = node.content else { return false }
+            return inputs.contains { $0.containsAGrade }
+        }
+    }
+
     // MARK: - What one composite of this tree costs in memory
 
     /// **The most canvas-sized textures one `Compositor.composite` of this tree holds at once** —
