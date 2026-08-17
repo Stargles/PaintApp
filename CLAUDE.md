@@ -210,8 +210,17 @@ at neither change, on a merge git reported as clean.
 Before adding a pbxproj entry, check the id is not already taken, and prefer one derived from the
 file name over a hand-typed sequence:
 
+**Do not take the next sequential id off a neighbouring entry** — that is what makes two branches
+collide, since both are counting from the same base. After any rebase that touches `project.pbxproj`,
+check for duplicates:
+
 ```bash
-grep -c "B2C3D4E5F6001122334455F1" PaintSoftware.xcodeproj/project.pbxproj   # must be 0
+python3 -c "
+import re,collections
+src=open('PaintSoftware.xcodeproj/project.pbxproj').read()
+defs=re.findall(r'^\t\t([0-9A-F]{24}) /\* (.*?) \*/ = \{isa = (\w+)', src, re.M)
+c=collections.Counter(d[0] for d in defs)
+print([k for k,v in c.items() if v>1])"      # must print []
 ```
 If a merge produces a "cannot find X in scope" for a symbol neither branch touched, suspect this
 before suspecting the code. It is the same family as the `@discardableResult` merge in
