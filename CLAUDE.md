@@ -117,8 +117,22 @@ suite is 18.8 min *because of* that setting.
 If a run is killed mid-flight, sweep for strays before blaming the next failure on your change:
 
 ```bash
-xcrun simctl list devices | grep -i clone     # then: xcrun simctl delete <udid>
+xcrun simctl --set ~/Library/Developer/XCTestDevices list devices          # clones live HERE
+xcrun simctl --set ~/Library/Developer/XCTestDevices delete <udid>
 ```
+
+**`xcrun simctl list devices | grep -i clone` finds nothing, ever** — the advice this file gave until
+2026-08-16, and it cannot work: `xcodebuild` creates clones in its own device set at
+`~/Library/Developer/XCTestDevices`, not the default one. The failure is silent and reads as success.
+The owner was looking at eight iPad windows while three separate `simctl` sweeps and an agent's own
+cleanup check all reported zero clones; the five it could not see were a live full-suite run, and the
+sixth was a shutdown `Clone 3 of eraser-mutex-test` left by a killed run some time earlier. `--set` is
+the whole fix, and it is needed on `delete` as well as `list`.
+
+**A duplicated clone number is the tell for debris.** One healthy run numbers its clones 1..N once, so
+two rows both named `Clone 1 of <device>` means one belongs to a run that died. If a run is live,
+leave them alone — you cannot tell from the name which of the two is which, and deleting the wrong
+one kills a suite mid-flight. Sweep after runs finish, not during.
 A run that finishes normally tears its own clones down — both runs above left zero behind — so
 anything this finds is debris from a run that did not.
 
