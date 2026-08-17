@@ -64,7 +64,18 @@ enum PixelOps {
     /// hitting. The key here comes from the model instead, exactly as that post-mortem prescribed:
     /// cel id, both tier versions, both image identities, size and quality. It adds no new trust —
     /// those versions are already what the two caches below it rely on.
-    static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full) -> UIImage {
+    /// `memoize: false` renders without reading or writing the shared cache, for a caller that keeps
+    /// its own — `OnionSkinRasterCache`, which asks for a cel at a *reduced* size.
+    ///
+    /// **It exists because this cache evicts FIFO under a shared byte budget**, and its entries are
+    /// canvas-sized: 64 MiB each at 4096². Ten small onion-skin entries pushed through it would walk
+    /// ten of the compositor's out in insertion order, trading a stall on the ghost for a stall on
+    /// the artwork. The alternative — a second copy of `rasterizeUncached`'s draw order living in the
+    /// onion skin — is the "two compositing implementations drift" mistake this file's own header
+    /// warns about, one tier down. One flag is cheaper than either.
+    static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
+                          memoize: Bool = true) -> UIImage {
+        guard memoize else { return rasterizeUncached(cel: cel, canvasSize: canvasSize, quality: quality) }
         let key = RasterizeKey(cel: cel, canvasSize: canvasSize, quality: quality)
         if let hit = rasterizeCache.value(for: key) { return hit }
         let image = rasterizeUncached(cel: cel, canvasSize: canvasSize, quality: quality)

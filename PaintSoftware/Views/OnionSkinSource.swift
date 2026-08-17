@@ -109,11 +109,19 @@ struct OnionSkinSettings: Equatable {
         var step: Int { self == .previous ? -1 : 1 }
     }
 
-    /// **The cap, and it is a performance decision rather than a taste one.** Each skin is one more
-    /// canvas-sized draw into the composite, and BUGS.md already records a 4K vector canvas costing
-    /// 53.8 ms *per dab* on the owner's iPad 9. Ten is the most that can be asked for; whether ten is
-    /// usable on a given document is what the panel lets the artist find out. See `OnionSkinBudget`
-    /// for the memory half, which is bounded independently of this number.
+    /// **The cap, and it stayed at five on the strength of a measurement rather than by default.**
+    ///
+    /// Each skin is one more draw into the composite, so this is what the cost is linear in. At the
+    /// resolution `OnionSkinBudget` now sets, and with its sources cached, ten skins rebuild in about
+    /// 100 ms and the shipped default of one a side in under 10 — against 1302 ms and 190 ms
+    /// respectively on the owner's iPad 9 before that work. A rebuild happens when the playhead moves
+    /// to a different drawing, not while the artist is drawing (see `Coordinator.OnionSkinKey`), so
+    /// ten skins is a visible hitch on a playhead move and nothing at all on a stroke.
+    ///
+    /// That is a cost worth *offering*: it is opt-in, it is the setting the reference app offers, and
+    /// the artist who dials it to five is buying ten ghosts knowingly. Lowering this would take the
+    /// feature away to fix a cost that is now proportionate. If the owner disagrees after feeling it
+    /// on the device, this is the one constant to move.
     static let maxSkinsPerSide = 5
 
     var neighbourhood: Neighbourhood = .drawings
@@ -378,40 +386,217 @@ enum OnionSkinPlanner {
     }
 }
 
-// MARK: - Memory
+// MARK: - Resolution and memory
 
-/// How large the flattened onion-skin image is allowed to be.
+/// **How big an onion skin is allowed to be, and it is a picture-quality decision rather than a
+/// memory one.** That is why this is its own number and no longer a fraction of
+/// `CompositorBudget.textureBudgetBytes`: how soft a ghost may be does not depend on how much RAM
+/// the device has, and deriving it from the compositor's budget made it depend on exactly that.
 ///
-/// **This is the answer to "ten canvas-sized renders on a 3 GB iPad".** They are not ten renders:
-/// `OnionSkinFrame.composite` flattens every skin into *one* image, so what N changes is how many
-/// draws happen while that image is built, never how many are held. What is held is this one image,
-/// and this is its ceiling.
+/// ### What the measurements said, because the first design was wrong about it
 ///
-/// `CompositorBudget.textureBudgetBytes / 8` is 24 MiB on the owner's 3 GB iPad 9 and 64 MiB on an
-/// 8 GB iPad Pro. Derived from the compositor's budget rather than picked, for the same reason
-/// `PixelOps.rasterizeCache` borrows it: this is another canvas-sized buffer in the same subsystem,
-/// and two independent constants would drift. An eighth because the onion skin is a reference the
-/// artist is looking *through*, not the artwork — it can afford to be the smallest thing in the
-/// subsystem.
+/// The composite was sized to 2508² on a 4096² canvas, and on the owner's iPad 9 in Release ten
+/// tinted skins cost **1302 ms**, one skin 190 ms. The obvious lever was to shrink the composite.
+/// It is not enough, and `PerfBaselineTests.testOnionSkinCompositeCostIsBoundByDestinationOrBySourcePixels`
+/// is what says so — ten skins, one 4096² source, four destinations:
 ///
-/// In practice that is **native resolution up to about 2500² and a downscale above it**: a 4096²
-/// canvas composites at 2508², five ninths of the pixels and five ninths of the per-skin draw cost,
-/// shown through a bilinear-filtered image view at 35% opacity where the difference is not
-/// available to the eye.
+/// | destination | cost | share of cost | share of pixels |
+/// |---|---|---|---|
+/// | 2508² | 1159 ms | 1.00 | 1.00 |
+/// | 1254² | 494 ms | 0.43 | 0.25 |
+/// | 1024² | 409 ms | 0.35 | 0.17 |
+/// | 627² | 236 ms | 0.20 | 0.06 |
+///
+/// Cost falls far more slowly than pixels: at 627² the composite writes 6% of the pixels and still
+/// pays 20% of the cost. **`CGContext.draw(in:)` samples the whole source however small the
+/// destination is**, so shrinking the composite alone runs into a floor made of source reads. The
+/// second half of that test isolates it — the same 1024² destination costs 338 ms from a 4096²
+/// source and **92 ms from a 1024² one, 3.7x**.
+///
+/// So the fix is in two halves, and the second is the load-bearing one:
+///
+///  1. The composite is capped at `maxCompositeEdge` on its longest side.
+///  2. **Its sources are reduced to that same size once per cel version** and held by
+///     `OnionSkinRasterCache`, so a skin is drawn 1:1 instead of resampled from the full canvas on
+///     every rebuild. Rebuilds after the first are the 92 ms column, not the 338 ms one.
+///
+/// ### Why 1024, in terms the owner can rule on
+///
+/// A skin is a *registration reference* — "where did the line go" — drawn under the artist's own
+/// work at a third of full opacity, and it is the one thing in this app that does not have to be
+/// sharp. 1024 is chosen against what the screen can show rather than against a byte count: a 4096²
+/// canvas fitted to the iPad 9's 2160x1620 display is already resampled to about 1500 px by the
+/// display itself, so a 1024 skin is upscaled 1.5x at fit zoom — softer than the artwork, in the
+/// same ballpark. Zoomed to 1:1 it is 4x soft, which reads as a blurred band a few pixels wide
+/// rather than a line: still enough to place the previous drawing, not enough to trace.
+///
+/// **The trade-off, stated plainly, and it was looked at rather than argued.** Lineart at 4096²
+/// (strokes of 2 to 12 px, plus hatching at a 16 px pitch) was skinned at 4096, 2048, 1024, 768 and
+/// 512 and the results compared:
+///
+///  * **1024 — chosen.** Every stroke width still reads, the hatching resolves into separate lines,
+///    the curve is clean. Barely distinguishable from native at fit zoom.
+///  * **768 — the edge.** Still legible; the hatching survives but its ends begin to alias.
+///  * **512 — fails, visibly.** The hatching stops being lines at all and collapses into a stippled
+///    moiré wash, and the 2 px stroke nearly vanishes. This is exactly "a skin so soft the artist
+///    cannot see where the previous drawing's line went".
+///
+/// So 1024 sits one full step above the cliff rather than on it. Going lower buys draw time at the
+/// rate of the square and spends the margin that keeps hatching and thin lineart readable; going
+/// back up toward 2048 costs 4x the draw time for detail the display cannot show at fit zoom. It is
+/// one constant, and the comparison above is reproducible by re-running the resolution sweep in
+/// `PerfBaselineTests`.
 enum OnionSkinBudget {
 
-    static var compositeBudgetBytes: Int { CompositorBudget.textureBudgetBytes / 8 }
+    /// The longest edge, in pixels, of the composite **and of the reduced sources drawn into it**.
+    static let maxCompositeEdge: CGFloat = 1024
 
-    /// The size the composite is rendered at, given the canvas size. Returns `canvasSize` unchanged
-    /// whenever it already fits, so this is inert on every canvas that never had a problem.
-    static func compositeSize(for canvasSize: CGSize) -> CGSize {
-        compositeSize(for: canvasSize, budgetBytes: compositeBudgetBytes)
+    /// How many reduced sources are held.
+    ///
+    /// **The window plus two, not the window exactly, and the two are the whole point.** The most
+    /// skins that can be on screen at once is `maxSkinsPerSide` a side; a cache of exactly that size
+    /// is full at all times, so stepping the playhead one frame brings one new cel in and evicts one
+    /// — every move pays a miss, forever, even after the artist has been all the way round the cycle.
+    /// Slack is what turns that into hits, and two is enough because a playhead moves one step at a
+    /// time.
+    static var sourceCacheLimit: Int { OnionSkinSettings.maxSkinsPerSide * 2 + 2 }
+
+    /// Everything the onion skin can hold at once, in bytes, at `maxCompositeEdge`: one composite
+    /// plus a full source cache.
+    ///
+    /// **This is a ceiling, not a cost.** The cache only ever fills to the number of skins actually
+    /// asked for, so the shipped default of one skin either side holds two sources and one composite
+    /// — about 12 MiB at 1024. The ~54 MiB ceiling is reachable only by dialling both sliders to
+    /// five, which is the artist buying ten ghosts and paying for them.
+    static var residentCeilingBytes: Int {
+        let one = Int(maxCompositeEdge * maxCompositeEdge) * 4
+        return one * (sourceCacheLimit + 1)
     }
 
-    /// The rule against a stated budget — the half a test can pin without being on the device, the
-    /// seam `CompositorBudget.textureBudgetBytes(physicalMemory:)` exists for.
-    static func compositeSize(for canvasSize: CGSize, budgetBytes: Int) -> CGSize {
-        CompositorBudget.affordableSize(for: canvasSize, textures: 1, budgetBytes: budgetBytes)
+    /// The size the composite is rendered at. Returns `canvasSize` unchanged when it is already
+    /// within the cap, so this is inert on every canvas that never had a problem — and it never
+    /// scales *up*, because a skin larger than the drawing it ghosts is pure cost.
+    static func compositeSize(for canvasSize: CGSize) -> CGSize {
+        compositeSize(for: canvasSize, maxEdge: maxCompositeEdge)
+    }
+
+    /// The rule against a stated cap — the half a test pins, so the number in the table above is
+    /// checked rather than remembered.
+    static func compositeSize(for canvasSize: CGSize, maxEdge: CGFloat) -> CGSize {
+        let longest = max(canvasSize.width, canvasSize.height)
+        guard maxEdge > 0, longest > maxEdge else { return canvasSize }
+        let scale = maxEdge / longest
+        // Floored to whole pixels for `RenderResolution.renderSize`'s reason: the app's several
+        // rounding sites do not agree, and a source one pixel wider than the buffer reading it is a
+        // garbage edge rather than a soft one.
+        return CGSize(width: max(1, (canvasSize.width * scale).rounded(.down)),
+                      height: max(1, (canvasSize.height * scale).rounded(.down)))
+    }
+}
+
+/// One cel's pixels at onion-skin resolution, memoized per cel version.
+///
+/// **This exists because of the source-read floor documented on `OnionSkinBudget`**, and it is the
+/// half of that fix that actually moves the number: without it every rebuild resamples a 4096²
+/// image per skin, and with it that resample is paid once per cel version and then reused by every
+/// rebuild the cel appears in — which, with a playhead moving through a cycle, is most of them.
+///
+/// **Deliberately not `PixelOps.rasterizeCache`, and the reason is that cache's eviction policy.**
+/// It evicts in insertion order under a shared byte budget, and its other entries are *canvas-sized*
+/// — 64 MiB each at 4096². Pushing ten small onion entries through it would walk the compositor's
+/// current-frame working set out of it in FIFO order, trading a stall on the onion skin for a stall
+/// on the artwork. A separate, smaller store cannot do that.
+///
+/// **A miss renders the cel straight into the small buffer rather than through a canvas-sized
+/// intermediate**, and that is measured rather than assumed. Reading through
+/// `PixelOps.rasterize(cel:canvasSize:)` was the first version of this and cost 175 ms a cel at
+/// 4096², because a cel the onion skin wants sits at *another* frame and so is precisely the cel the
+/// compositor has not just rasterized — every miss allocated a 64 MiB canvas-sized context and
+/// filled it only to shrink it away. `memoize: false` skips both that intermediate and the shared
+/// cache, and reuses `PixelOps`' own draw order rather than copying it.
+enum OnionSkinRasterCache {
+
+    private struct Key: Hashable {
+        let celID: UUID
+        let raster: ObjectIdentifier
+        let rasterVersion: Int
+        let vector: ObjectIdentifier?
+        let vectorVersion: Int
+        let fillImage: ObjectIdentifier?
+        let bakedImage: ObjectIdentifier?
+        let width: Int
+        let height: Int
+
+        init(cel: Cel, size: CGSize) {
+            // Identity *and* version for both tiers, exactly as `PixelOps.RasterizeKey` argues: a
+            // version alone is monotonic only within one object's lifetime, and reopening a project
+            // rebuilds every texture with its counter back at 0 under the same cel id.
+            celID = cel.id
+            raster = ObjectIdentifier(cel.raster)
+            rasterVersion = cel.raster.version
+            vector = cel.vector.map(ObjectIdentifier.init)
+            vectorVersion = cel.vector?.version ?? -1
+            fillImage = cel.fillImage.map(ObjectIdentifier.init)
+            bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+            width = Int(size.width.rounded())
+            height = Int(size.height.rounded())
+        }
+    }
+
+    private static let lock = NSLock()
+    private static var entries: [Key: UIImage] = [:]
+    private static var order: [Key] = []
+    private static var memoryObserver: NSObjectProtocol?
+
+    /// `cel`'s content at `size`, from the cache when it can be.
+    ///
+    /// Returns the canvas-size image untouched when no reduction is called for, so a small document
+    /// pays nothing at all for this — no extra entry, no extra copy, the same object the compositor
+    /// is already holding.
+    static func image(for cel: Cel, canvasSize: CGSize, at size: CGSize) -> UIImage {
+        guard size.width < canvasSize.width || size.height < canvasSize.height else {
+            // No reduction called for, so there is nothing for this cache to add: hand back the
+            // shared memo the compositor is already holding rather than a second copy of it.
+            return PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        }
+
+        let key = Key(cel: cel, size: size)
+        lock.lock()
+        if let hit = entries[key] { lock.unlock(); return hit }
+        lock.unlock()
+
+        let reduced = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false)
+
+        lock.lock()
+        installMemoryObserverIfNeeded()
+        if entries.updateValue(reduced, forKey: key) == nil { order.append(key) }
+        while order.count > OnionSkinBudget.sourceCacheLimit, let evicted = order.first {
+            order.removeFirst()
+            entries.removeValue(forKey: evicted)
+        }
+        lock.unlock()
+        return reduced
+    }
+
+    /// Called on a memory warning and by tests that need to measure an uncached cost.
+    static func removeAll() {
+        lock.lock(); defer { lock.unlock() }
+        entries.removeAll(); order.removeAll()
+    }
+
+    /// What this is holding, for `PerfBaselineTests`. Nothing in the render path reads it.
+    static var residentBytes: Int {
+        lock.lock(); defer { lock.unlock() }
+        return entries.values.reduce(0) { $0 + ($1.cgImage?.bytesPerRow ?? 0) * ($1.cgImage?.height ?? 0) }
+    }
+
+    /// Registered lazily rather than in a static initialiser so a process that never turns onion skin
+    /// on never registers at all. Called under `lock`.
+    private static func installMemoryObserverIfNeeded() {
+        guard memoryObserver == nil else { return }
+        memoryObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
+        ) { _ in removeAll() }
     }
 }
 
@@ -437,6 +622,10 @@ struct OnionSkinSettingsSource: OnionSkinSource {
         guard let canvasSize = manager.canvasSize,
               manager.layers.indices.contains(manager.currentLayerIndex) else { return [] }
         let settings = manager.onionSkin
+        // **Frames come out at onion-skin resolution, not canvas resolution**, so the composite draws
+        // them 1:1 instead of resampling a 4096² image once per skin per rebuild. That resample was
+        // 73% of the cost of a rebuild — see `OnionSkinBudget` for the measurement that found it.
+        let skinSize = OnionSkinBudget.compositeSize(for: canvasSize)
         let cels = manager.layers[manager.currentLayerIndex].cels
         guard !cels.isEmpty else { return [] }
         let spans = cels.map { CelSpan(start: $0.startFrame, length: $0.frameCount) }
@@ -469,9 +658,10 @@ struct OnionSkinSettingsSource: OnionSkinSource {
                 // canvas-sized draw. Held and blank frames are ordinary in animation, and with ten
                 // slots open they are the common case rather than the corner.
                 guard !cels[celIndex].isCertainlyBlank else { continue }
+                let image = OnionSkinRasterCache.image(for: cels[celIndex],
+                                                       canvasSize: canvasSize, at: skinSize)
                 gathered.append((distance: slot + 1,
-                                 frame: OnionSkinFrame(image: PixelOps.rasterize(cel: cels[celIndex],
-                                                                                 canvasSize: canvasSize),
+                                 frame: OnionSkinFrame(image: image,
                                                        opacity: CGFloat(opacity),
                                                        tint: tint)))
             }
@@ -527,10 +717,15 @@ struct InterpolationReferenceOnionSkinSource: OnionSkinSource {
                 return manager.layers[at.layer].cels[at.cel]
             }
             guard let startFrame = cels.map(\.startFrame).min() else { return nil }
-            let bounds = CGRect(origin: .zero, size: canvasSize)
+            // Onion-skin resolution here too. This source mints a fresh image every call — its
+            // references have no cel-version identity to memoize on the way the settings source does —
+            // so it is the one path that pays a full render per pass, and rendering it at 4096² was
+            // paying that at sixteen times the necessary size.
+            let skinSize = OnionSkinBudget.compositeSize(for: canvasSize)
+            let bounds = CGRect(origin: .zero, size: skinSize)
             // One reference can span layers (requirement 5), so its cels flatten into one frame —
             // otherwise lineart and flats would tint as two separate onion skins.
-            let image = UIGraphicsImageRenderer(size: canvasSize, format: PixelOps.transparentFormat()).image { _ in
+            let image = UIGraphicsImageRenderer(size: skinSize, format: PixelOps.transparentFormat()).image { _ in
                 for cel in cels {
                     PixelOps.rasterize(cel: cel, canvasSize: canvasSize).draw(in: bounds)
                 }

@@ -2225,16 +2225,16 @@ final class PerfBaselineTests: XCTestCase {
         let canvas = CGSize(width: 4096, height: 4096)
         // A 3 GB device's texture budget, stated rather than read, for
         // `CompositorBudget.textureBudgetBytes(physicalMemory:)`'s reason.
-        let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) / 8
-        let size = OnionSkinBudget.compositeSize(for: canvas, budgetBytes: budget)
+        let size = OnionSkinBudget.compositeSize(for: canvas)
 
-        // One source image, reused by every slot: `PixelOps.rasterize` is memoized per cel version, so
-        // in the app the repeated slots of a looping cycle genuinely are the same object. What varies
-        // here is only how many times it is drawn.
+        // **Sources at skin resolution, because that is what the app now hands the composite.**
+        // `OnionSkinRasterCache` reduces each cel once per version and the composite draws it 1:1;
+        // measuring from a canvas-sized source would measure the code as it was before that fix and
+        // report a number the app no longer pays. The reduction itself is measured separately, below.
         let source = CanvasFixture.solidImage(.red,
-                                              rect: CGRect(x: 0, y: 0, width: canvas.width * 0.6,
-                                                           height: canvas.height * 0.6),
-                                              size: canvas)
+                                              rect: CGRect(x: 0, y: 0, width: size.width * 0.6,
+                                                           height: size.height * 0.6),
+                                              size: size)
         func skins(_ n: Int, tinted: Bool) -> [OnionSkinFrame] {
             (0..<n).map { OnionSkinFrame(image: source, opacity: CGFloat(n - $0) / CGFloat(n),
                                          tint: tinted ? .systemRed : nil) }
@@ -2252,7 +2252,23 @@ final class PerfBaselineTests: XCTestCase {
         // draw is the rest.
         let plain = measuringPeakMemory { autoreleasepool { _ = OnionSkinFrame.composite(skins(10, tinted: false), size: size) } }
         timings.append(("skins10Untinted", milliseconds(plain.seconds)))
+
+        // **What a cache miss costs, which is the other half of a rebuild.** A skin whose cel has not
+        // been reduced to this size yet pays one downscale from the canvas-sized rasterize; after
+        // that every rebuild the cel appears in is a hit. Measured on a real `Cel` rather than a bare
+        // image, so the `PixelOps.rasterize` the reduction reads through is in the number.
+        var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
+        cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: canvas.width * 0.6,
+                                                                     height: canvas.height * 0.6), size: canvas)
+        OnionSkinRasterCache.removeAll()
+        let miss = measuringPeakMemory { autoreleasepool { _ = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: size) } }
+        let hit = measuringPeakMemory { autoreleasepool { _ = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: size) } }
+        timings.append(("sourceMiss", milliseconds(miss.seconds)))
+        timings.append(("sourceHit", milliseconds(hit.seconds)))
+        timings.append(("cacheResident", megabytes(UInt64(OnionSkinRasterCache.residentBytes))))
+        timings.append(("residentCeiling", megabytes(UInt64(OnionSkinBudget.residentCeilingBytes))))
         report("onion skin composite, 4096x4096 canvas on a 3 GB device", timings)
+        OnionSkinRasterCache.removeAll()
 
         for count in [1, 5, 10] {
             guard let image = images[count] ?? nil else { return XCTFail("\(count) skins must composite") }
@@ -2260,9 +2276,82 @@ final class PerfBaselineTests: XCTestCase {
             // image, the same size as one skin's.
             XCTAssertEqual(image.size, size, "\(count) skins must flatten into exactly one image of the budgeted size")
         }
-        XCTAssertLessThanOrEqual(CompositorBudget.textureBytes(for: size), budget,
-                                 "the composite must fit the onion budget on a 3 GB device")
-        XCTAssertLessThan(size.width, canvas.width,
-                          "a 4096 canvas must composite below native resolution — otherwise the budget is not doing anything")
+        XCTAssertEqual(max(size.width, size.height), OnionSkinBudget.maxCompositeEdge,
+                       "a 4096 canvas must composite at the cap — otherwise the resolution rule is not doing anything")
+    }
+
+    /// **Is an onion composite bound by the pixels it writes, or by the pixels it reads?** The whole
+    /// resolution decision turns on this and it cannot be reasoned out: `CGContext.draw(in:)` with a
+    /// smaller destination still *samples* the whole source, so shrinking the composite might buy
+    /// nothing at all.
+    ///
+    /// Two sweeps, both ten tinted skins, run back to back in one process so the ratios survive a
+    /// loaded machine even where the absolute numbers do not (CLAUDE.md: five concurrent runs make
+    /// this Mac return wrong answers, and a ratio between two adjacent measurements is the part that
+    /// still holds).
+    ///
+    ///  1. **Destination sweep** — one 4096² source, four destination sizes. Falling with destination
+    ///     area means the write dominates and shrinking the composite is the whole fix.
+    ///  2. **Source isolation** — the same 1024² destination, from a 4096² source and from a 1024²
+    ///     one. A large gap means the *read* dominates, and the fix is to rasterize the cels smaller
+    ///     rather than to shrink the composite.
+    func testOnionSkinCompositeCostIsBoundByDestinationOrBySourcePixels() {
+        let canvas = CGSize(width: 4096, height: 4096)
+        func source(_ size: CGSize) -> UIImage {
+            CanvasFixture.solidImage(.red,
+                                     rect: CGRect(x: 0, y: 0, width: size.width * 0.6, height: size.height * 0.6),
+                                     size: size)
+        }
+        func skins(_ n: Int, from image: UIImage) -> [OnionSkinFrame] {
+            (0..<n).map { OnionSkinFrame(image: image, opacity: CGFloat(n - $0) / CGFloat(n), tint: .systemRed) }
+        }
+        // **The minimum of several runs, not one run, and not the mean.** The first version of this
+        // test took a single sample and reported `dest2508 = 10244 ms` for work measured at 1178 ms
+        // half an hour earlier — the machine was at 1.3% idle, which CLAUDE.md records as the state
+        // where a suite "does not merely run slowly, it returns wrong answers". Contention can only
+        // ever make a measurement *longer*, so the minimum is the sample least contaminated by it,
+        // and taking it is what lets this run at all on a Mac with four other agents on it.
+        func time(_ repeats: Int = 4, _ body: () -> Void) -> Double {
+            var best = Double.greatestFiniteMagnitude
+            for _ in 0..<repeats {
+                let start = CFAbsoluteTimeGetCurrent()
+                autoreleasepool { body() }
+                best = Swift.min(best, CFAbsoluteTimeGetCurrent() - start)
+            }
+            return best
+        }
+
+        let big = source(canvas)
+        var destination: [(String, String)] = []
+        var baseline: Double = 0
+        for edge in [2508.0, 1254.0, 1024.0, 627.0] {
+            let size = CGSize(width: edge, height: edge)
+            let seconds = time { _ = OnionSkinFrame.composite(skins(10, from: big), size: size) }
+            if edge == 2508 { baseline = seconds }
+            // The share of the 2508² cost this size still pays, beside the share of the pixels it
+            // writes. Equal shares mean write-bound; a cost share far above the pixel share means the
+            // source read is being paid whatever the destination is.
+            destination.append(("dest\(Int(edge))", String(format: "%@ (cost %.2f, pixels %.2f)",
+                                                           milliseconds(seconds),
+                                                           baseline > 0 ? seconds / baseline : 1,
+                                                           (edge * edge) / (2508.0 * 2508.0))))
+        }
+        report("onion composite, destination sweep from a 4096² source, 10 tinted skins", destination)
+
+        let target = CGSize(width: 1024, height: 1024)
+        let fromBig = time { _ = OnionSkinFrame.composite(skins(10, from: big), size: target) }
+        let small = source(target)
+        let fromSmall = time { _ = OnionSkinFrame.composite(skins(10, from: small), size: target) }
+        report("onion composite, source isolation at a 1024² destination, 10 tinted skins", [
+            ("from4096Source", milliseconds(fromBig)),
+            ("from1024Source", milliseconds(fromSmall)),
+            ("speedup", String(format: "%.2fx", fromSmall > 0 ? fromBig / fromSmall : 0)),
+        ])
+
+        // No timing assertion — this test exists to print two ratios, and this file's header is
+        // explicit that simulator timings are not assertable. The only thing worth failing on is the
+        // premise: both paths really did produce a composite of the size asked for.
+        XCTAssertEqual(OnionSkinFrame.composite(skins(10, from: big), size: target)?.size, target)
+        XCTAssertEqual(OnionSkinFrame.composite(skins(10, from: small), size: target)?.size, target)
     }
 }
