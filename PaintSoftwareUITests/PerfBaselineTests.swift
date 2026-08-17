@@ -2201,4 +2201,68 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertEqual(engine.lastAdmission, .admitted,
                        "With the device's own budget back, the same request is admitted")
     }
+
+    // MARK: - Onion skin
+
+    /// **What ten onion skins actually cost, on whatever machine this runs on.**
+    ///
+    /// The design claim is that N skins flatten into *one* image, so N buys draw time and not
+    /// memory. This measures both halves at the size a 4096² document would actually composite at
+    /// (`OnionSkinBudget`, against a stated 3 GB-device budget so the number describes the owner's
+    /// iPad 9 rather than the host). Read the `PERF BASELINE` line; the assertions are this file's
+    /// usual order-of-magnitude ceilings.
+    ///
+    /// **Tinted, because tinted is the default**, plus one untinted run for comparison — and that
+    /// comparison corrected an assumption worth recording. A tint opens a canvas-sized transparency
+    /// layer and fills it, so it looked like the expensive half; measured, ten tinted skins cost
+    /// 1178 ms against 951 ms untinted on this host, about a quarter more. **The cost is the
+    /// canvas-sized draw itself, not the tint**, which means "switch to Original Colors" is not an
+    /// escape hatch from a slow onion skin and the count is the only real lever.
+    ///
+    /// This is the number the device check hangs on. If ten skins cost more than a frame on the
+    /// owner's hardware, `OnionSkinSettings.maxSkinsPerSide` is the lever, and it is one constant.
+    func testOnionSkinCompositeCostScalesWithSkinCountAndNotWithMemory() {
+        let canvas = CGSize(width: 4096, height: 4096)
+        // A 3 GB device's texture budget, stated rather than read, for
+        // `CompositorBudget.textureBudgetBytes(physicalMemory:)`'s reason.
+        let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) / 8
+        let size = OnionSkinBudget.compositeSize(for: canvas, budgetBytes: budget)
+
+        // One source image, reused by every slot: `PixelOps.rasterize` is memoized per cel version, so
+        // in the app the repeated slots of a looping cycle genuinely are the same object. What varies
+        // here is only how many times it is drawn.
+        let source = CanvasFixture.solidImage(.red,
+                                              rect: CGRect(x: 0, y: 0, width: canvas.width * 0.6,
+                                                           height: canvas.height * 0.6),
+                                              size: canvas)
+        func skins(_ n: Int, tinted: Bool) -> [OnionSkinFrame] {
+            (0..<n).map { OnionSkinFrame(image: source, opacity: CGFloat(n - $0) / CGFloat(n),
+                                         tint: tinted ? .systemRed : nil) }
+        }
+
+        var images: [Int: UIImage?] = [:]
+        var timings: [(String, String)] = [("compositeSize", "\(Int(size.width))x\(Int(size.height))")]
+        for count in [1, 5, 10] {
+            let run = measuringPeakMemory { autoreleasepool { images[count] = OnionSkinFrame.composite(skins(count, tinted: true), size: size) } }
+            timings.append(("skins\(count)", milliseconds(run.seconds)))
+            timings.append(("peak\(count)", megabytes(run.peakBytes)))
+        }
+        // The same ten skins untinted, so the two colouring modes are compared rather than guessed at.
+        // See the doc comment: this pair is what showed the tint is a quarter of the cost and the
+        // draw is the rest.
+        let plain = measuringPeakMemory { autoreleasepool { _ = OnionSkinFrame.composite(skins(10, tinted: false), size: size) } }
+        timings.append(("skins10Untinted", milliseconds(plain.seconds)))
+        report("onion skin composite, 4096x4096 canvas on a 3 GB device", timings)
+
+        for count in [1, 5, 10] {
+            guard let image = images[count] ?? nil else { return XCTFail("\(count) skins must composite") }
+            // The whole memory argument, asserted rather than asserted-about: ten skins produce one
+            // image, the same size as one skin's.
+            XCTAssertEqual(image.size, size, "\(count) skins must flatten into exactly one image of the budgeted size")
+        }
+        XCTAssertLessThanOrEqual(CompositorBudget.textureBytes(for: size), budget,
+                                 "the composite must fit the onion budget on a 3 GB device")
+        XCTAssertLessThan(size.width, canvas.width,
+                          "a 4096 canvas must composite below native resolution — otherwise the budget is not doing anything")
+    }
 }
