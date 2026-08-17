@@ -4,6 +4,114 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## `validateProject` cannot see a file that is intact but unreadable (2026-08-17)
+
+**This is about the safety net, not a call site, which is what makes it the most valuable of the four
+entries below it.** `ProjectBackupManager.validateProject` (`ProjectBackupManager.swift:451`) is what
+decides whether a package is damaged — it gates auto-repair at launch (`:137-138`), the gallery's
+`isCorrupted` flag (`ProjectStore.swift:44`/`:54`), and the atomic save's refusal to swap a bad stage
+over a good package (`ProjectStore.swift:336`). It checks that the manifest decodes and that every
+file the manifest names **exists**, plus, for PNGs only, that the first 8 bytes are the PNG signature.
+
+The vector JSON is checked for existence alone: `:476` passes `isPNG: false`, and `:463` returns
+`true` immediately for anything that is not a PNG. So a vector payload that is present, complete and
+syntactically valid JSON — but holds one element this build cannot read — **is "intact" by every test
+the safety net applies.** Auto-repair never fires, the gallery shows the project as healthy, and the
+save path will happily swap a package built from the degraded load over the good one.
+
+That is exactly how the cel-discarding `try?` fixed on 2026-08-17 stayed invisible: the layer that
+exists to catch data damage was structurally incapable of seeing it. The per-element decode now keeps
+the loss to one element and `ProjectStore`'s `ProjectLoad` log line says it happened, but nothing
+*validates* semantic readability, and the same blind spot covers `manifest.json`'s content (a manifest
+that decodes into a nonsense document validates fine) and any future sidecar that is not a PNG.
+
+The shape of a fix, if one is wanted: give `validateProject` a content probe per file type rather than
+a magic-number check — decode the vector JSON and the interpolation recipe rather than stat them. That
+costs a full parse of every payload in every project at launch, which is why it is written down here
+rather than done: it is a real cost/benefit call against a rare failure, not an oversight.
+
+**The product call this leaves open, which is the owner's and not an engineering one.** A load that
+dropped something now continues and saves normally, so the next save writes the degraded document over
+the good one. `ProjectBackupManager` stashes the pre-save package on **every** save
+(`ProjectStore.writeAtomically` → `stashLiveProjectForSave`), so the intact original does survive and
+is restorable — the loss is recoverable, not final. The question is whether that is enough, or whether
+a partial load should refuse to overwrite, save under a new name, or prompt before the first save.
+Each of those changes save semantics for every project, not just damaged ones, which is why the fix
+deliberately stopped at recording the counts (`VectorCanvasData.DecodeReport`) and logging them.
+
+
+## One malformed layer or cel entry fails the whole project open (2026-08-17)
+
+The same shape as the cel-discarding `try?` fixed on 2026-08-17, one level up and **larger in blast
+radius**: `ProjectManifest.init(from:)` reads its layers with `try container.decode([LayerManifest]
+.self, forKey: .layers)` (`ProjectManifest.swift:77`), and `LayerManifest.init(from:)` reads its cels
+the same way (`:323`). Neither is per-element. One malformed entry anywhere in the tree throws, which
+takes `loadManifest` (`ProjectStore.swift:78-82`, itself a `try?`) to nil and `load(from:)` to nil —
+**every layer, cel, folder and view preset in the project, not just the damaged one.**
+
+Per-*field* tolerance is already thorough here — most keys are `decodeIfPresent` with defaults, and
+`ProjectManifest.swift:319-322` / `LayerKind.swift:69` show the team has met this exact failure before
+and point-fixed one instance of it: `decodeMigratingEffectLayers` exists because the retired
+`"compositing"` kind string would otherwise throw and, in that comment's own words, take the whole
+project down with it. What is missing is per-*element* tolerance across the two arrays.
+
+**It is nonetheless less severe than the cel bug was, and the reason is worth recording.** It is not
+silent and it is not permanent: `validateProject` fails the package, launch auto-repair restores the
+newest intact backup and sends the damaged one to Trash (`ProjectBackupManager.swift:137-138`), the
+gallery surfaces it as `isCorrupted` with a recovery affordance rather than hiding it, and `load`
+returning nil means there is no `CanvasManager` and therefore nothing that can save over the file. The
+artist is told and the data is recoverable. The cel bug had none of those properties.
+
+The fix is the one just applied a level down: decode `[LayerManifest]` and `[CelManifest]` through a
+lossy wrapper whose `init(from:)` never throws, so a damaged layer costs that layer. Note the trap
+recorded in `VectorCanvasData`: `JSONDecoder`'s unkeyed container advances `currentIndex` only after a
+*successful* decode, so a hand-rolled try/catch/continue loop re-reads the failing slot forever — the
+wrapper is what makes it terminate. Small and self-contained; deliberately not done in that branch,
+which was scoped to the silent path.
+
+
+## A corrupt raster PNG silently yields a blank cel (2026-08-17)
+
+`ProjectStore.swift:581-582` loads a cel's raster as
+`UIImage(contentsOfFile: rasterURL.path).map { RasterLayerTexture.load(...) } ?? .empty(size:)`. A
+file that is missing, or present but not decodable as an image, gives a blank raster for that cel with
+no signal of any kind, and the next save writes the blank over it.
+
+**Two honest qualifications, because they bound how much of this is actually fixable.** First, it is
+not fixable per-element the way the vector payload was: a PNG is atomic, so there is no smaller unit
+than the whole cel's raster to fall back to. Second, the most likely cause is already covered —
+`validateProject`'s PNG-signature check (`ProjectBackupManager.swift:473`, `isPNG: true`) catches a
+crash-truncated write and routes the package to auto-repair.
+
+The real gap is narrower than "the raster can vanish": it is that **this path is not even logged.**
+The vector payload beside it now reports a missing or unparseable file through
+`ProjectStore`'s `ProjectLoad` logger; the raster, whose loss is larger and more visible to the
+artist, says nothing at all. A log line here costs nothing and is the whole of the sensible fix.
+
+
+## One bad swatch loses the artist's entire palette library (2026-08-17)
+
+`Palette.swift:95-101` reads the persisted palettes as
+`try? JSONDecoder().decode([Palette].self, from: data)` and falls back to `Self.defaultPresets` when
+that returns nil. The array is decoded whole, so **one unreadable palette — or one unreadable swatch
+inside one palette — discards every custom palette the artist has built**, silently, replaced by the
+seeded presets as though this were a first launch. `save()` then writes the defaults back over the
+store at `:204`, and the loss is final.
+
+**This is the same bug that was just fixed for vector cels, in a different file**: an all-or-nothing
+decode of an array whose elements are independent, a silent fallback to empty-equivalent, and a
+write-back that makes it permanent. Lower stakes than artwork — palettes are cheap to rebuild and this
+is not a drawing — but it is still the user's own data, it is still silent, and unlike the project
+package there is **no backup layer here at all**: this lives in `UserDefaults` under
+`paletteStore.palettes.v1`, which `ProjectBackupManager` does not cover.
+
+The fix is the same one element at a time pattern, and it is smaller here because there is no legacy
+shape and no discriminator: decode `[Palette]` through a wrapper whose `init(from:)` cannot throw,
+keep the palettes that read, and seed the presets only when *nothing* did. The distinction worth
+keeping is between "the store is absent" (a genuine first launch — seed) and "the store is present but
+would not decode" (damage — keep what survives and say so).
+
+
 ## The palm baseline that shipped with the snap fix has never run (2026-08-17)
 
 The snap is fixed and confirmed on the owner's device — `requiresExclusiveTouchType` defaults to `YES`,
