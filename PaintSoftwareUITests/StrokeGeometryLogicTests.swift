@@ -540,6 +540,81 @@ final class StrokeGeometryLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - splitRuns (selection clip)
+
+    /// Regression coverage for the lasso-selection "bridges the gap" bug: a stroke that leaves a
+    /// selection and re-enters it must become two separate runs, not one array of the surviving
+    /// samples stitched back together (which still renders as a single line straight across the
+    /// gap). `StrokeCanvasView.endVectorStroke` feeds each returned run to its own `VectorStroke`.
+
+    func testSplitRunsWithNothingOutsideReturnsOneRunUnchanged() {
+        let runs = StrokeGeometry.splitRuns(ramp) { _ in true }
+        XCTAssertEqual(runs.count, 1)
+        XCTAssertEqual(runs[0], ramp)
+    }
+
+    func testSplitRunsWithEverythingOutsideReturnsNoRuns() {
+        XCTAssertTrue(StrokeGeometry.splitRuns(ramp) { _ in false }.isEmpty)
+    }
+
+    func testSplitRunsOnAGapInTheMiddleYieldsTwoDisconnectedRuns() {
+        // Samples at x = 0,10,20,30,40; "inside" is x < 12 or x > 28 — a gap straddling the middle
+        // sample. The bug this guards: filtering to [0,10,30,40] alone would still connect x=10 to
+        // x=30 with a straight line, exactly the bridge the fix must not draw.
+        let runs = StrokeGeometry.splitRuns(ramp) { $0.x < 12 || $0.x > 28 }
+        XCTAssertEqual(runs.count, 2, "one run before the gap, one after — never bridged into one")
+        XCTAssertEqual(runs[0][0].x, 0, accuracy: 1e-9)
+        XCTAssertEqual(runs[0][1].x, 10, accuracy: 1e-9)
+        XCTAssertLessThanOrEqual(runs[0].last?.x ?? .infinity, 12 + 1e-6, "run ends at (or before) the boundary, never past it")
+        XCTAssertGreaterThanOrEqual(runs[1].first?.x ?? -.infinity, 28 - 1e-6, "run starts at (or after) the boundary, never before it")
+        XCTAssertEqual(runs[1][runs[1].count - 2].x, 30, accuracy: 1e-9)
+        XCTAssertEqual(runs[1].last?.x ?? -1, 40, accuracy: 1e-9)
+    }
+
+    func testSplitRunsLandsTheBoundaryNearTheCrossingNotAtTheSample() {
+        // "Inside" flips at x = 15, between samples at x=10 and x=20 — neither sample sits on the
+        // boundary, so a correct split has to interpolate a new one there instead of keeping/
+        // dropping whichever original sample is closer.
+        let runs = StrokeGeometry.splitRuns(ramp) { $0.x < 15 }
+        XCTAssertEqual(runs.count, 1)
+        XCTAssertEqual(runs[0].count, 3)
+        XCTAssertEqual(runs[0][0].x, 0, accuracy: 1e-9)
+        XCTAssertEqual(runs[0][1].x, 10, accuracy: 1e-9)
+        XCTAssertEqual(runs[0][2].x, 15, accuracy: 1e-6, "boundary bisected to the crossing, not sample-snapped")
+        XCTAssertEqual(runs[0][2].pressure, 0.375, accuracy: 1e-6, "interpolated, same as splitStroke's boundaries")
+    }
+
+    func testSplitRunsWithMultipleGapsYieldsARunPerSurvivingSpan() {
+        let runs = StrokeGeometry.splitRuns(ramp) { $0.x < 5 || (15 < $0.x && $0.x < 25) || $0.x > 35 }
+        XCTAssertEqual(runs.count, 3)
+        XCTAssertEqual(runs[0].last?.x ?? -1, 5, accuracy: 1e-6)
+        XCTAssertEqual(runs[1].first?.x ?? -1, 15, accuracy: 1e-6)
+        XCTAssertEqual(runs[1].last?.x ?? -1, 25, accuracy: 1e-6)
+        XCTAssertEqual(runs[2].first?.x ?? -1, 35, accuracy: 1e-6)
+    }
+
+    func testSplitRunsOfASingleSampleIsAllOrNothing() {
+        let lone = samples([(5, 5)], pressures: [0.7])
+        XCTAssertEqual(StrokeGeometry.splitRuns(lone) { _ in true }, [lone])
+        XCTAssertTrue(StrokeGeometry.splitRuns(lone) { _ in false }.isEmpty)
+        XCTAssertTrue(StrokeGeometry.splitRuns([]) { _ in true }.isEmpty)
+    }
+
+    /// Selection-clipped runs are what `endVectorStroke` hands to `VectorCanvas.addStroke` one at a
+    /// time — this exercises that exact shape: a lasso selection whose interior excludes a middle
+    /// band, and a straight stroke crossing it, must produce two pieces on either side.
+    func testSplitRunsWithARealPathExcludingAMiddleBand() {
+        // A tall rectangle covering x in [-100, 8] ∪ nothing else — i.e. the selection is only the
+        // left band; use two rectangles (even-odd union) to make a "hole" in the middle explicit.
+        let selection = CGMutablePath()
+        selection.addRect(CGRect(x: -100, y: -100, width: 108, height: 200)) // x <= 8
+        selection.addRect(CGRect(x: 32, y: -100, width: 100, height: 200))   // x >= 32
+        let runs = StrokeGeometry.splitRuns(ramp) { selection.contains($0) }
+        XCTAssertEqual(runs.count, 2, "the band 8...32 is excluded, splitting the stroke in two")
+        XCTAssertLessThanOrEqual(runs[0].last?.x ?? .infinity, 8 + 1e-6)
+        XCTAssertGreaterThanOrEqual(runs[1].first?.x ?? -.infinity, 32 - 1e-6)
+    }
+
     // MARK: - StrokeSpatialIndex
 
     func testSpatialIndexIsASupersetOfBruteForce() {

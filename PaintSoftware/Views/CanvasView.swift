@@ -1327,6 +1327,10 @@ struct CanvasView: UIViewRepresentable {
         func updateSelectionOverlay() {
             guard let overlay = selectionOverlay, let container = containerView else { return }
             overlay.mode = canvasManager.selectionMode
+            // Mirrored down every pass, same as `reconcileLayers` mirrors it to
+            // `StrokeCanvasView.pencilOnlyDrawing` — see `SelectionOverlayView.pencilOnlyDrawing`'s
+            // doc comment for why a selection drag needs this too.
+            overlay.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
             overlay.isCapturingGestures = (activePanel == .select) && (canvasManager.floatingPiece == nil)
             overlay.updateSelection(canvasManager.selection, allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection)
             // Layer hosts are added after this overlay, so without this the marching ants/hatch

@@ -16,6 +16,14 @@ final class SelectionOverlayView: UIView {
         didSet { isUserInteractionEnabled = isCapturingGestures }
     }
 
+    /// Mirrors `CanvasManager.pencilOnlyDrawing`, pushed down every `updateSelectionOverlay()` call
+    /// the same way `reconcileLayers` mirrors it to `StrokeCanvasView.pencilOnlyDrawing`. Selection
+    /// is a drawing-type edit under the "would this input have drawn" test in `CanvasView`'s gesture
+    /// doc comment — it replaces what a later fill/paint sees as paintable — so a finger must be
+    /// rejected here exactly as it is for a stroke, but `handlePan`/`handleTap` are stock recognizer
+    /// actions that never see a `UITouch` to ask; see `TouchTypePanGestureRecognizer` below.
+    var pencilOnlyDrawing: Bool = false
+
     /// A solid blue shadow directly under `antsLayer`'s white dashes: the blue shows through the gaps,
     /// giving a white & blue dotted line readable against both light and dark canvas content.
     private let antsShadowLayer = CAShapeLayer()
@@ -70,11 +78,11 @@ final class SelectionOverlayView: UIView {
         liveLayer.lineDashPattern = [6, 4]
         layer.addSublayer(liveLayer)
 
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        let pan = TouchTypePanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         addGestureRecognizer(pan)
 
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        let tap = TouchTypeTapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         addGestureRecognizer(tap)
 
         let animation = CABasicAnimation(keyPath: "lineDashPhase")
@@ -136,8 +144,9 @@ final class SelectionOverlayView: UIView {
         return UIColor(patternImage: image)
     }
 
-    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+    @objc private func handlePan(_ recognizer: TouchTypePanGestureRecognizer) {
         guard isCapturingGestures else { return }
+        guard !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
         switch mode {
         case .lasso: handleLassoPan(recognizer)
         case .rectangle: handleRectanglePan(recognizer)
@@ -198,8 +207,44 @@ final class SelectionOverlayView: UIView {
         CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
     }
 
-    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+    @objc private func handleTap(_ recognizer: TouchTypeTapGestureRecognizer) {
         guard isCapturingGestures, mode == .automatic else { return }
+        guard !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
         onAutomaticTap?(recognizer.location(in: self))
+    }
+}
+
+/// A pan recognizer that remembers what kind of touch started it.
+///
+/// Same shape and same reason as `CanvasView.TouchTypePressRecognizer` — see that type's doc
+/// comment for the full argument, including why `UIGestureRecognizerDelegate.shouldReceive` (which
+/// *does* get the `UITouch`) was rejected in favor of a subclass. Not literally reused because it
+/// subclasses `UILongPressGestureRecognizer`, and the lasso/rectangle drag needs a real
+/// `UIPanGestureRecognizer` for its `.began`/`.changed`/`.ended` states and `location(in:)` — there
+/// is no common ancestor below `UIGestureRecognizer` to hang one shared implementation on, so the
+/// `touchesBegan` override is duplicated rather than abstracted; only the tie-break
+/// (`resolvedLastTouchType`) is shared.
+final class TouchTypePanGestureRecognizer: UIPanGestureRecognizer {
+    /// The touch type of the most recent touch to land on this recognizer. `.direct` (finger) is the
+    /// conservative initial value, same reasoning as `TouchTypePressRecognizer.lastTouchType`.
+    private(set) var lastTouchType: UITouch.TouchType = .direct
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let type = resolvedLastTouchType(from: touches.map(\.type)) {
+            lastTouchType = type
+        }
+        super.touchesBegan(touches, with: event)
+    }
+}
+
+/// Same idea as `TouchTypePanGestureRecognizer`, for the automatic-selection tap.
+final class TouchTypeTapGestureRecognizer: UITapGestureRecognizer {
+    private(set) var lastTouchType: UITouch.TouchType = .direct
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let type = resolvedLastTouchType(from: touches.map(\.type)) {
+            lastTouchType = type
+        }
+        super.touchesBegan(touches, with: event)
     }
 }

@@ -807,6 +807,73 @@ enum StrokeGeometry {
         if !run.isEmpty { runs.append((run, parameters)) }
     }
 
+    /// Splits `samples` into the maximal runs where `inside` holds — used to stop a selection clip
+    /// from **bridging** a stroke that exits the selection and re-enters it. Filtering to a single
+    /// array of the surviving samples (the naive fix) still draws one continuous line through them,
+    /// because nothing in a `VectorStroke` records that two consecutive stored samples used to have
+    /// excluded ones between them — the renderer just connects whatever is there. Splitting into
+    /// separate runs, one stroke per run, is what actually produces two disconnected pieces.
+    ///
+    /// Each crossing is landed with one bisection rather than at sample granularity, so the cut sits
+    /// close to the selection edge instead of jumping to the nearest stored sample. This is cheaper
+    /// than `VectorEraser`'s probe-and-bisect walk (`coveredSpans`): a selection membership test is
+    /// one boolean per point, not a footprint that needs stepped sampling to catch every entry/exit
+    /// along a segment, so a single bisection per sign change is exact as long as a segment crosses
+    /// the boundary once — true in the common case, since samples are already spaced at
+    /// `BrushStamper`'s recording spacing. A segment that clips a thin sliver of a concave selection
+    /// twice between two samples is not caught; that is the trade-off against the raster path's
+    /// pixel-exact `PixelOps.maskedComposite`, accepted because vector geometry has no per-pixel mask
+    /// to composite against.
+    ///
+    /// Runs of a single sample are kept, same as `splitStroke`: a lone dab inside the selection is
+    /// legitimate ink. An empty `samples` returns `[]`.
+    static func splitRuns(_ samples: [VectorSample], inside: (CGPoint) -> Bool) -> [[VectorSample]] {
+        guard !samples.isEmpty else { return [] }
+        guard samples.count > 1 else {
+            return inside(samples[0].point) ? [samples] : []
+        }
+        var runs: [[VectorSample]] = []
+        var current: [VectorSample] = []
+        var previousInside = inside(samples[0].point)
+        if previousInside { current.append(samples[0]) }
+        for i in 1..<samples.count {
+            let a = samples[i - 1], b = samples[i]
+            let bInside = inside(b.point)
+            if bInside != previousInside {
+                let boundary = bisectCrossing(from: a, aInside: previousInside, to: b, inside: inside)
+                if previousInside {
+                    current.append(boundary)
+                    runs.append(current)
+                    current = []
+                } else {
+                    current = [boundary]
+                }
+            }
+            if bInside { current.append(b) }
+            previousInside = bInside
+        }
+        if !current.isEmpty { runs.append(current) }
+        return runs
+    }
+
+    /// Binary-searches the segment `from`→`to` for the parametric `t` where `inside` flips, assuming
+    /// (as `splitRuns` does) that it flips exactly once. 40 iterations halves the segment down to a
+    /// fraction of ~9e-13 of its length — with 20 (the first cut of this) a 10pt segment measured
+    /// `testSplitRunsWithMultipleGapsYieldsARunPerSurvivingSpan` off by ~5e-6, comfortably past a
+    /// canvas pixel and well past `assertXs`'s tolerance; 40 iterations costs nothing extra worth
+    /// naming (it's a fixed unrolled loop, no allocation) and leaves headroom `CGFloat` itself can't
+    /// resolve.
+    private static func bisectCrossing(from: VectorSample, aInside: Bool, to: VectorSample,
+                                       inside: (CGPoint) -> Bool) -> VectorSample {
+        var low: CGFloat = 0, high: CGFloat = 1
+        for _ in 0..<40 {
+            let mid = (low + high) / 2
+            let point = lerp(from, to, mid).point
+            if inside(point) == aInside { low = mid } else { high = mid }
+        }
+        return lerp(from, to, (low + high) / 2)
+    }
+
     /// `cuts` clamped to `domain`, sorted, and merged where they overlap or abut — so the split walk
     /// below can assume a disjoint ascending list.
     static func mergedCuts(_ cuts: [ClosedRange<CGFloat>],

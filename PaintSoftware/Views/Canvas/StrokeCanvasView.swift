@@ -670,37 +670,50 @@ final class StrokeCanvasView: UIView {
         recordVectorSample(at: input.position, pressure: input.pressure, force: true)
         let before = vectorElementsBeforeSnapshot ?? vectorCanvas.elements
 
-        // Best-effort selection clip: drop samples outside the selection. Unlike the raster path
-        // this can't crisply clip a stroke that dips outside and back in, but covers the common
-        // case of a stroke drawn entirely inside or outside.
+        // Selection clip: a stroke that exits the selection and re-enters must become two pieces,
+        // not one bridged across the excluded gap — filtering to a single surviving array (the old
+        // behaviour) still connects the samples on either side with a straight line, because nothing
+        // downstream knows a gap was there. `StrokeGeometry.splitRuns` produces the separate inside
+        // runs instead, each committed as its own stroke/erase/local-edit below. See its doc comment
+        // for the sample-granularity-vs-pixel-exact trade-off against the raster path's
+        // `PixelOps.maskedComposite`.
+        let sampleRuns: [[VectorSample]]
         if let clipPath = selectionClipPath {
-            currentVectorSamples = currentVectorSamples.filter { clipPath.contains($0.point) }
+            sampleRuns = StrokeGeometry.splitRuns(currentVectorSamples) { clipPath.contains($0) }
+        } else {
+            sampleRuns = [currentVectorSamples]
         }
 
         if let celID = inBetweenCelID {
-            recordLocalEdit(forCel: celID)
+            for run in sampleRuns where !run.isEmpty {
+                recordLocalEdit(forCel: celID, samples: run)
+            }
         } else if isEraser {
             // Mode 3 already committed incrementally during the drag (see `resolveIntersectionCut`);
             // re-running here would cut a second time against the post-cut geometry.
             if vectorEraserMode != .cutToIntersection {
-                // Samples and brush, not bare points/radius: the eraser's footprint is the same
-                // pressure-driven capsule chain `BrushStamper` would stamp.
-                if vectorCanvas.erase(alongPath: currentVectorSamples, brush: brush, size: brushSize,
-                                      opacity: brushOpacity, mode: vectorEraserMode) {
-                    vectorContentChanged = true
+                for run in sampleRuns where !run.isEmpty {
+                    // Samples and brush, not bare points/radius: the eraser's footprint is the same
+                    // pressure-driven capsule chain `BrushStamper` would stamp.
+                    if vectorCanvas.erase(alongPath: run, brush: brush, size: brushSize,
+                                          opacity: brushOpacity, mode: vectorEraserMode) {
+                        vectorContentChanged = true
+                    }
                 }
             }
-        } else if !currentVectorSamples.isEmpty {
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-            // `brushColor` is always an already-resolved (non-dynamic) color by the time it reaches
-            // `getRed`, so this can't silently fail — see Utilities/ColorConversion.swift.
-            brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
-            let stroke = VectorStroke(brush: brush, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
-                                      size: brushSize, opacity: brushOpacity, samples: currentVectorSamples)
-            // Samples are in canvas space; this overload maps them into layer-local space so a
-            // stroke on an already-moved layer lands under the finger.
-            vectorCanvas.addStroke(canvasSpaceStroke: stroke)
-            vectorContentChanged = true
+        } else {
+            for run in sampleRuns where !run.isEmpty {
+                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+                // `brushColor` is always an already-resolved (non-dynamic) color by the time it reaches
+                // `getRed`, so this can't silently fail — see Utilities/ColorConversion.swift.
+                brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+                let stroke = VectorStroke(brush: brush, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
+                                          size: brushSize, opacity: brushOpacity, samples: run)
+                // Samples are in canvas space; this overload maps them into layer-local space so a
+                // stroke on an already-moved layer lands under the finger.
+                vectorCanvas.addStroke(canvasSpaceStroke: stroke)
+                vectorContentChanged = true
+            }
         }
 
         // Recorded before `endVectorScratch` resets the role and before `refreshDisplay` runs.
@@ -728,8 +741,11 @@ final class StrokeCanvasView: UIView {
     ///
     /// Nothing is committed when the recipe declines (can't evaluate, or empty stroke) — dropping
     /// the gesture beats putting ink into a display list nothing renders.
-    private func recordLocalEdit(forCel celID: UUID) {
-        guard let canvasManager, let layerID, !currentVectorSamples.isEmpty else { return }
+    ///
+    /// Takes `samples` explicitly (rather than reading `currentVectorSamples`) so `endVectorStroke`
+    /// can call this once per selection-clipped run — see `StrokeGeometry.splitRuns`.
+    private func recordLocalEdit(forCel celID: UUID, samples: [VectorSample]) {
+        guard let canvasManager, let layerID, !samples.isEmpty else { return }
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
         // An eraser's colour is arbitrary (`.destinationOut` reads only alpha coverage) but still
@@ -738,7 +754,7 @@ final class StrokeCanvasView: UIView {
             brush: brush,
             color: isEraser ? CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
                             : CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
-            size: brushSize, opacity: brushOpacity, samples: currentVectorSamples,
+            size: brushSize, opacity: brushOpacity, samples: samples,
             composite: isEraser ? .erase : .paint)
         canvasManager.recordLocalEdit(canvasSpaceStroke: stroke, forCel: celID, inLayer: layerID)
     }
