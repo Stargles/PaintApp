@@ -32,134 +32,35 @@ missing or unreadable loads as an ordinary cel rather than failing the whole pro
 inconsistency within one function, not a missing idea.
 
 
-## The snap's finger was filtered out by touch type, one recognizer at a time (2026-08-17)
+## The palm baseline that shipped with the snap fix has never run (2026-08-17)
 
-**The mechanism is settled by the owner's capture; what is open is device confirmation of the fix.**
-Three sessions aimed at this and the first two named real facts that were not the cause. Both are kept
-below, because each was the honest reading of the evidence available at the time.
+The snap is fixed and confirmed on the owner's device — `requiresExclusiveTouchType` defaults to `YES`,
+which closed both snap recognizers to a finger the moment they took the pencil. The mechanism, the
+capture that proves it, and the two earlier diagnoses that were wrong are all in commit `7a850c1`;
+this entry keeps only the part that is still open.
 
-The gesture: keep the pen down on a smart shape, add a finger, the shape snaps to a circle/square.
-It has never worked.
+Turning that flag off means the container's `TouchCountRecognizer` now sees **every** non-pencil
+contact during a pencil stroke, a resting hand included. So a palm already on the glass when the shape
+formed would snap it unasked. `Coordinator.currentAccompanyingFingers()` guards against that by
+subtracting the finger count captured at `beginInteractiveShape` — "how many joined since" rather than
+an absolute count — and ratcheting the baseline down so a palm that lifts does not permanently disarm
+the snap.
 
-### The cause: `UIGestureRecognizer.requiresExclusiveTouchType`, which defaults to `YES`
+**That guard has never executed.** In the owner's palm-on capture (2026-08-17, build `13:19:37Z`) the
+resting hand never arrived as a `UITouch` at all: `base:0` and `counter:1/0` for the whole stroke,
+while the deliberate finger at t=5.92 bound correctly and read `stroke:1 joined:1 following:true`. iOS
+rejected the palm below our layer, so the behaviour is right for a reason we did not build. The
+baseline is insurance whose correctness is argued, not observed.
 
-The SDK header states it without ambiguity:
+It matters because the argument has a real edge case in it — the ratchet. A palm that lands *after* the
+shape starts following raises the count without raising the baseline, which is indistinguishable from
+the deliberate finger. `StrokeGestureRecognizer`'s own count is the source that actually carries the
+owner's gesture and needs no baseline, so the failure would be a spurious snap from the container
+source, not a missed one.
 
-> *"Indicates whether the gesture recognizer will consider touches of different touch types
-> simultaneously. … If YES, once it receives a touch of a certain type, it will ignore new touches of
-> other types, until it is reset to `UIGestureRecognizerStatePossible`."* — `UIGestureRecognizer.h`,
-> `requiresExclusiveTouchType`, **defaults to YES**
-
-It is set nowhere in this repo, so every recognizer in the app has been type-exclusive by default.
-`StrokeGestureRecognizer` takes the **pencil** at touch-down and holds it for the whole stroke;
-`TouchCountRecognizer` takes it too and never leaves `.possible`, so it is never reset while the pen
-is down. From that instant both are closed to `.direct` touches — and the snapping finger is a
-`.direct` touch. The filtering happens **at binding**, which is why nothing in the app could see it:
-the recognizer is not offered the touch and `ignore(_:for:)` — the only subclass hook for a refusal,
-instrumented on both classes — is never called.
-
-**The capture that proves it** (2026-08-17, build stamp `12:38:14Z`, 111 events). One pencil stroke
-held into an oval, one finger added 0.48 s later:
-
-```
-t=1.30  touch began  pencil  touch=1  hitClass=StrokeCanvasView  gr:15
-        grNames = stroke.39AA4E60, canvas.pan, canvas.pinch, canvas.rotation, canvas.twoFingerTap,
-                  canvas.touchCounter, canvas.threeFingerTap, PKTextInputDrawingGestureRecognizer,
-                  2x _UISystemGestureGate, 5x _UIFlexInteraction.Pan
-t=3.11  note   shapeHold fired after 724.0pt, 432 samples, 0.86s on the pen's clock -> oval
-t=3.12  model  shape.touches = counter:1/0 stroke:0 following:true
-t=3.60  touch began  direct  touch=2  hitClass=StrokeCanvasView  touchView=StrokeCanvasView  gr:6
-        grNames = canvas.twoFingerTap, canvas.threeFingerTap,
-                  2x _UISystemGestureGate, 2x _UIFlexInteraction.Pan
-        (no shape.touches line, no ignore note, from either recognizer)
-t=4.59  touch ended  pencil   ->  shape.touches = counter:0/0
-```
-
-Three things in that make the answer unique:
-
- * **`gr:6`, not `gr:0`.** The previous entry set out `gr:0` vs a full list as the discriminator
-   between "never entered the gesture pipeline" and "offered and declined". The answer is neither: the
-   touch entered the pipeline and was bound to a *subset*. `isMultipleTouchEnabled` was necessary —
-   it is what got the touch this far — and could never have been sufficient, because exclusivity is
-   decided per **recognizer**, not per view.
- * **The subset partitions the pencil's fifteen exactly by "was this recognizer holding the pencil".**
-   Excluded: `stroke` (`.changed`, tracking the pen), `canvas.touchCounter` (holding it, `.possible`),
-   pan/pinch/rotation (holding it, `.failed`), `PKTextInputDrawingGestureRecognizer`, and three of the
-   five system flex pans. Included: `canvas.twoFingerTap` and `canvas.threeFingerTap` — two- and
-   three-touch taps that had long since given the lone moving pencil up and been reset, so they were
-   holding nothing and had no exclusive type. Touch **type** is the only axis that draws that line;
-   recognizer *state* cannot, because `touchCounter` (`.possible`, no transition anywhere in the file)
-   is excluded while `twoFingerTap` (`.possible`) is included.
- * **`counter:0/0` when the *pencil* lifts at t=4.59, while the finger is still down until 4.62.** A
-   recognizer whose entire job is counting touches was counting one of two, and said so.
-
-The delegate theory this replaces is also disproved by the file: `shouldRequireFailureOf` is logged on
-every call, and at t=3.60 there are **no** such lines. The bound set is computed first and only its
-members are consulted, so no delegate answer can be what excluded a recognizer from it.
-
-### The fix
-
-`requiresExclusiveTouchType = false` on exactly the two recognizers that carry the snap —
-`StrokeGestureRecognizer.init` and `TouchCountRecognizer.init`. Deliberately **not** on
-pan/pinch/rotation (pen + one finger would become a two-touch canvas transform), nor on the
-undo/redo taps (pen + finger would become an undo), nor on the single-touch fill/catch-all presses.
-
-One behaviour had to move with it. The container counter now sees fingers during a pencil stroke —
-*all* of them, a resting hand included — so a palm already on the glass when the shape formed would
-snap it unasked. `Coordinator.currentAccompanyingFingers()` subtracts the finger count captured at
-`beginInteractiveShape`, turning an absolute count into "how many joined since the shape started
-following", and ratchets that baseline down so a palm that lifts does not permanently disarm the snap.
-`StrokeGestureRecognizer`'s count needs no correction — it only admits fingers that arrive *while* a
-shape is following — and it is that source, not the counter, that carries the owner's gesture. Both
-predicates (engage, and the deferred release) now read the one function, which the release path's own
-doc comment has always required.
-
-### What is verified, and what cannot be
-
-Verified: it compiles, and the fast tier is **1003 passed / 0 failed / 3 skipped over 1006 tests** on a
-private simulator (`snapbind`, no clones). An earlier run of the same tier on the same code showed two
-failures while another session was building on this Mac; both are timing-ratio tests unrelated to
-touch handling and both pass on an uncontended machine — one of them,
-`InterpolationRenderLogicTests.testPreviewIsSubstantiallyCheaperThanFull`, is brittle enough to be
-worth fixing and is listed under *Cleanup opportunities*. That is the contention trap CLAUDE.md
-already documents, seen once more.
-
-**Not verifiable here, at all.** The gesture is a pencil holding a stroke while a finger joins it in a
-later event. XCUITest can synthesise neither half — not a pencil, and not a second touch in its own
-event — so no green suite in this repo is evidence about this fix, in either direction. A logic test
-over the flag would only restate the assignment.
-
-**The next capture settles it in one line.** Same recording, same gesture. On the finger's `began`
-line, `grNames` must now contain `stroke.<id>` and `canvas.touchCounter`; a `shape.touches` line must
-appear at that instant reading `stroke:1`. The line now also carries `base:` and `joined:`, so a snap
-that fails to engage says immediately whether the baseline ate it. Worth recording twice: once with
-the drawing hand off the glass, once with it resting, which is the only test of the palm baseline.
-
-### The two earlier diagnoses, and why each was wrong
-
-**Round one** blamed the predicate: `canvasTouchesChanged` gated on an undifferentiated `count >= 2`,
-so the count was split by `UITouch.type` on the hypothesis that the pencil never reached a
-container-level recognizer. The owner's hold capture falsified that outright — with the pen the only
-contact, `canvas.pan`, `canvas.pinch` and `canvas.rotation` are each asked `shouldRequireFailureOf`
-and each go `possible -> failed`, which they cannot do without having received that touch.
-
-**Round two** blamed `UIView.isMultipleTouchEnabled`, which really did default to `false` on every
-canvas view and really does drop a second touch arriving in a later event. It was necessary, it is
-kept, and it changed nothing the owner could see, because the next filter down the pipeline was
-rejecting the same touch on a different axis. It also predicted a reconciliation that has now been
-observed from the other side: a deliberate two-finger gesture lands inside one event and is
-finger-plus-finger, so neither filter ever touched it — which is why two-finger pan has always worked
-while this gesture never has.
-
-Both rounds share one shape worth naming: each explained the silence with the last mechanism it had
-found, and neither had a capture that could distinguish *not delivered* from *delivered to fewer*.
-`gr`/`grNames` is the field that finally could, and it was added at the end of round two.
-
-One nearby behaviour is deliberately unchanged: a finger landing **before** the hold completes does
-not snap, because `shouldIgnoreAdditionalTouches` only answers true once a shape is following (it is
-now ignored as a palm rather than failing the stroke). "Finger down during the hold" and "finger down
-after the shape appears" are different gestures and only the second can ever snap.
-
+To close this, a capture is needed in which a palm genuinely reaches the app: a different grip, a
+different iPad, or Apple Pencil hover disabled. A capture showing any nonzero `base:` is the first
+evidence this code has ever run.
 
 ## XCUITest cannot drive the smart-shape hold, so two shape tests are skipped (2026-08-16)
 

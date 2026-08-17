@@ -10,13 +10,6 @@ Prune it first, before adding the new asks.
 
 ## In flight
 
-- [ ] **Snap does not engage** — pen down, shape formed, add a finger, nothing. The
-      `isMultipleTouchEnabled` fix (`tmp/shapefix`, rebased as `tmp/shapedev`) was **built to the iPad
-      2026-08-17 and did not fix it** — necessary but not sufficient, so the branch stays unmerged. A
-      recording taken on that build says why: the finger now lands on the same view as the pen
-      (`hitClass StrokeCanvasView`) but is bound to only 6 recognizers against the pen's 15, and
-      **neither snap source — `stroke.*` nor `canvas.touchCounter` — is among them.** Never bound, so
-      it is a delivery problem, not a delegate one. `tmp/snapbind`.
 - [ ] **Rectangle nodes misbehave once the rectangle is rotated.** Flat, dragging a node is correct.
       Rotated, it produces unintended transforms. **The rule, in the owner's words: the node opposite
       the one being dragged must not move.** Second half of the same ask: dragging a node *past* the
@@ -88,6 +81,15 @@ Carried over:
 
 ## Done this pass
 
+- Smart-shape snap, and with it the whole shape-gesture branch that had been stuck behind it (handles
+  sized in screen points, the oval and rectangle anchoring their opposite node, pinch-from-centre, the
+  hold measured on the pen's own clock). The cause was `UIGestureRecognizer.requiresExclusiveTouchType`,
+  which **defaults to `YES`** and was set nowhere in the app: a recognizer that takes the pencil at
+  touch-down is closed to finger touches until it resets, and the filtering happens *at binding*, so
+  the recognizer is never offered the touch and its `ignore` hook never runs. The previous
+  `isMultipleTouchEnabled` fix was necessary but could never have been sufficient — that flag is per
+  *view*, exclusivity is per *recognizer*. Confirmed on the owner's iPad. The palm baseline that
+  shipped alongside it is **not** proven and is recorded in BUGS.md as open.
 - Pinch to merge two layers. Two independent faults: the row pair was latched in `.began`, which fires
   only after the fingers have already moved, so a finger near a boundary had drifted into the next row
   by the time it was read; and the long-press reorder drag was taking the gesture outright, a race its
