@@ -61,6 +61,7 @@ extension CanvasManager {
 
         fillGestureActive = true
         fillFingerDown = true
+        fillGestureIsLasso = false
         fillLastRegionRGBA = nil
         fillGestureSeed = (seedX, seedY)
         fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: brushOpacity))
@@ -203,6 +204,8 @@ extension CanvasManager {
         guard fillGestureActive else { return }
         fillGestureActive = false
         fillFingerDown = false
+        let label: HistoryActionLabel = fillGestureIsLasso ? .lassoFill : .fill
+        fillGestureIsLasso = false
         // Capture the mask bytes before clearing — needed for the vector-path extraction below.
         let regionBytes = fillLastRegionRGBA
         let regionW = fillLastRegionW, regionH = fillLastRegionH
@@ -237,7 +240,7 @@ extension CanvasManager {
             // overload maps it back through the layer's transform (see its doc comment).
             vectorCanvas.addFill(canvasSpacePath: path, color: fillColor)
             registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                   layerID: layerID, celID: celID, label: .fill)
+                                   layerID: layerID, celID: celID, label: label)
         } else {
             let cel = layers[layerIndex].cels[celIndex]
             guard let preview = cel.fillImage else { return }
@@ -254,9 +257,91 @@ extension CanvasManager {
                                       oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,
                                       newRaster: bakedRasterTexture(image: finalImage, likeExisting: cel.raster),
                                       newBaked: nil, newFill: nil,
-                                      label: .fill)
+                                      label: label)
         }
     }
+
+    // MARK: - Lasso fill
+
+    /// Begins a lasso fill from the loop the artist just drew — the fill tool's `.lasso` type.
+    ///
+    /// **It is the same fill, with the seed replaced.** An ordinary bucket fill seeds the flood at
+    /// one tapped pixel; this seeds it at every open pixel the loop encircles, and then unions the
+    /// loop back over the result. Everything else — the reference composite, the wall threshold, gap
+    /// closing, the canvas-edge boundary, edge overlap, the live re-run when a slider moves, the
+    /// vector-versus-raster commit and the selection clip — is the machinery already there, which is
+    /// why this is a type option under the fill tool rather than a tool of its own.
+    ///
+    /// The owner's two sentences map onto the two halves exactly:
+    ///
+    ///  * *"it bridges gaps only on the outermost encirclement"* — the flood grows outward from the
+    ///    loop until artwork stops it, so the region's outer edge is a composition of the loop and
+    ///    whatever artwork it runs into, and gap closing acts there and only there. A break in the
+    ///    line art narrower than the gap radius does not let the region escape past it.
+    ///  * *"all inner lines are filled over"* — the union with the loop mask (see
+    ///    `MetalFillSession.fill`) paints every pixel inside the loop regardless of what is drawn
+    ///    there, so a line dividing two encircled compartments is filled rather than dividing them.
+    ///
+    /// **Where it can surprise, and it is worth knowing before drawing a loose loop.** Because the
+    /// flood carries on past the loop to the artwork, a loop that pokes out of the shape the artist
+    /// meant floods whatever open region it pokes into, in full. Lasso inside the region, not around
+    /// it. The narrower behaviour — "fill the loop and no further" — is a change to `floodInitFromLasso`
+    /// alone if it is ever wanted.
+    ///
+    /// Left *adjustable* on purpose, exactly as a tap is: the caller follows with
+    /// `endInteractiveFill()`, the preview stays live, and moving a slider re-runs this same loop.
+    func beginInteractiveLassoFill(path: CGPath) {
+        guard !fillFingerDown else { return }
+        beginCanvasEdit()
+        guard let canvasSize else { return }
+        guard layers.indices.contains(currentLayerIndex) else { return }
+        let box = path.boundingBox
+        // A loop enclosing nothing is a tap, not an edit. `SelectionOverlayView` already refuses a
+        // path of fewer than three points; this is the area half of the same guard, and without it a
+        // stray twitch would leave an undo step that reverts nothing visible.
+        guard box.width >= Self.lassoFillMinimumExtent || box.height >= Self.lassoFillMinimumExtent else { return }
+        let layerIndex = currentLayerIndex
+        guard let celIndex = ensureCelAtCurrentFrame(layerIndex: layerIndex) else { return }
+
+        let width = Int(canvasSize.width.rounded())
+        let height = Int(canvasSize.height.rounded())
+        guard let lassoMask = LassoFillMask.rasterize(path: path, width: width, height: height) else { return }
+        let references = fillReferenceSources()
+
+        fillGestureActive = true
+        fillFingerDown = true
+        fillGestureIsLasso = true
+        fillLastRegionRGBA = nil
+        fillGestureSeed = (0, 0)   // unused: a lasso session seeds from its mask
+        fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: brushOpacity))
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+        brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
+        fillGestureFillColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
+        fillGestureLayerID = layers[layerIndex].id
+        fillGestureCelID = layers[layerIndex].cels[celIndex].id
+        fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
+        refreshUndoRedoState()
+
+        fillLock.lock()
+        fillPending = currentFillKey()
+        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false)
+        fillWorkerScheduled = true
+        fillLock.unlock()
+
+        fillQueue.async { [weak self] in
+            guard let self else { return }
+            if let refBytes = Self.compositeReferenceRGBA(references: references, width: width, height: height) {
+                self.fillSession = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
+                                                                      height: height, lassoMask: lassoMask)
+                self.fillSeedColor = LassoFillMask.dominantColour(referenceRGBA: refBytes, mask: lassoMask,
+                                                                  width: width, height: height)
+            }
+            self.drainFillWork()
+        }
+    }
+
+    /// The smallest bounding-box side, in canvas pixels, a lasso must span before it counts as an edit.
+    static let lassoFillMinimumExtent: CGFloat = 2
 
     /// Registers one undo step that swaps a vector layer's `.fills` between `oldFills`/`newFills` —
     /// used by an adjustable-fill commit and by Fill/Clear-on-selection for vector layers (see
@@ -283,6 +368,7 @@ extension CanvasManager {
         guard fillGestureActive else { return }
         fillGestureActive = false // stops any in-flight render from applying (its main hop checks this)
         fillFingerDown = false
+        fillGestureIsLasso = false
         fillLastRegionRGBA = nil
         if let layerID = fillGestureLayerID, let celID = fillGestureCelID,
            let layerIndex = layers.firstIndex(where: { $0.id == layerID }),

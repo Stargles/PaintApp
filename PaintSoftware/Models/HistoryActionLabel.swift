@@ -30,6 +30,10 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case erase
     case shape
     case fill
+    /// The fill tool's lasso mode. Named apart from `.fill` for the same reason `.erase` is named
+    /// apart from `.brushStroke`: the two are a tap and a drawn loop, and an artist who wants the
+    /// loop back reads "undo fill" as the wrong thing having gone.
+    case lassoFill
     case clearSelection
     /// Baking a floating Move piece into its target cel.
     case move
@@ -127,6 +131,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .erase: return "erase"
         case .shape: return "shape"
         case .fill: return "fill"
+        case .lassoFill: return "lasso fill"
         case .clearSelection: return "clear selection"
         case .move: return "move"
         case .duplicatePiece: return "duplicate"

@@ -437,6 +437,27 @@ the recipe as it does today but say so in the UI, or copy verbatim and accept th
 as intentional — are a vector-interpolation product call, not a layer-compositing one. See
 [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md).
 
+## A lasso fill does not paint over line art on a *vector* layer (2026-08-17)
+
+The lasso fill type's defining behaviour is the owner's own: "all inner lines are filled over". On a
+raster layer it does — the fill flattens into `Cel.raster`, so a line inside the loop is covered.
+**On a vector layer it cannot, and the reason is the element ordering, not the fill.**
+`VectorCanvas.Kind` is `fill = 0, image = 1, stroke = 2` (`VectorLayer.swift:349`) and
+`insertionIndex(forKind:)` keeps the array in that order, so every fill renders *beneath* every
+stroke. A lasso fill on a vector layer therefore lands correctly, is the right shape, and the line
+art draws straight back over it. The artist sees the compartments filled and the dividing line still
+there — the one thing the tool exists to avoid.
+
+**Read from the code, not measured** — the ordering is explicit enough that a test would only confirm
+it, but no test in the suite asserts it either way, so treat it as unverified until one does.
+
+Not fixed here because the fix is a change to `VectorCanvas`'s ordering contract, not to the fill:
+either a per-fill "draws above strokes" flag (which makes `Kind` no longer a total order and touches
+`splicing`, the codable shape and every render path), or an explicit z-order per element. Both are
+vector-layer architecture decisions. The narrower alternative — have a vector-layer lasso fill also
+*cut* the strokes it covers, the way the vector eraser does — is destructive in a tier whose whole
+point is that it is not, and would need the owner's say-so.
+
 ## Fill tool: the gap-closing UI test is still skipped (2026-07-21)
 
 `testFillToolBridgesOpenContourGapWhenGapClosingEnabled` is `XCTSkip`'d. Three separate causes were

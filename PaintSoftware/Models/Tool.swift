@@ -53,6 +53,42 @@ extension Tool {
     }
 }
 
+/// The two ways the fill tool can decide *what* to fill. A type option under the one tool, the way
+/// `VectorEraserMode` is under the eraser, rather than a second entry in the toolbar.
+///
+/// Lives here rather than in `Engine/` for the same reason `VectorEraserMode` does: it is a tool
+/// setting owned by `CanvasManager` and pushed down to the views, not an engine concept.
+enum FillMode: String, Codable, CaseIterable, Identifiable {
+    /// Tap a point; the region around it floods outward and stops at every boundary it meets.
+    /// `MetalFillEngine` and the Gap Closing / Threshold / Edge Overlap settings are all this mode's.
+    case flood
+
+    /// Draw a loop; **everything it encircles is filled, including straight over any line art inside
+    /// it**, and the region carries on outward to the artwork's own silhouette. Modelled on Clip
+    /// Studio Paint's lasso fill; the owner's sentence is the specification — *"it bridges gaps only
+    /// on the outermost encirclement of the fill tool, all inner lines are filled over."*
+    ///
+    /// That is what makes it a different tool rather than a shortcut for the flood: an ordinary fill
+    /// stops at every line it meets, and this one stops only where the region's *outer* edge runs
+    /// into artwork. Filling a dozen small compartments separated by hatching is one gesture instead
+    /// of a dozen taps.
+    ///
+    /// **It is the same flood underneath, so every fill setting still applies to it** — gap closing
+    /// acts at that outer edge, which is the "smartly bridges gaps" half of the ask. See
+    /// `CanvasManager.beginInteractiveLassoFill` for the mechanism and for where it can surprise.
+    case lasso
+
+    var id: String { rawValue }
+
+    /// Label for the segmented control at the top of `FillSettingsPanel`.
+    var displayName: String {
+        switch self {
+        case .flood: return "Flood"
+        case .lasso: return "Lasso"
+        }
+    }
+}
+
 /// How the eraser behaves on a `.vector` layer. Modelled on Clip Studio Paint's three vector-eraser
 /// modes. Raster layers ignore this entirely — there the eraser stays a `.destinationOut` brush.
 ///

@@ -451,6 +451,11 @@ final class CanvasManager: ObservableObject {
     enum FillAxis { case gapClosing, threshold, edgeOverlap }
     @Published var fillSelectedAxis: FillAxis = .gapClosing
 
+    /// Which kind of fill the fill tool performs — a type option under the one tool, not a second
+    /// tool. `.lasso` takes its gesture from `SelectionOverlayView` instead of the fill press
+    /// recognizer; see `CanvasView.Coordinator.updateSelectionOverlay`.
+    @Published var fillMode: FillMode = .flood
+
     @Published var fillGapClosingDistance: CGFloat = 8
     /// Colour-distance threshold (0..1) above which a boundary counts as a wall. Higher = the fill
     /// spreads across bigger colour differences (fewer walls); lower = subtle borders stop it.
@@ -1192,6 +1197,9 @@ final class CanvasManager: ObservableObject {
     var fillGestureActive = false
     /// True only while a finger is actively pressing/dragging the fill; false in the adjustable state.
     var fillFingerDown = false         // main-thread only
+    /// Whether the live fill came from a drawn loop rather than a tap. Decides the undo label alone —
+    /// everything else about the two is the same pipeline (see `beginInteractiveLassoFill`).
+    var fillGestureIsLasso = false     // main-thread only
     /// True when a fill exists and the finger is NOT pressing (adjustable state). The coordinator checks
     /// this in the fill-press handler so that a two-finger pan's first touch doesn't commit the fill.
     var isFillInAdjustableState: Bool { fillGestureActive && !fillFingerDown }

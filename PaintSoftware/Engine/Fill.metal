@@ -162,6 +162,30 @@ kernel void floodInit(const device uchar* wall   [[buffer(0)]],
     region[i] = (isSeed && wall[i] == 0) ? 1 : 0;
 }
 
+// The lasso fill's seed: **every** open pixel the drawn loop encircles, instead of the one pixel a
+// tap lands on. That single substitution is the whole of the lasso mode's flood.
+//
+// Two consequences, and they are the owner's two sentences about the tool. Seeding the loop's whole
+// interior means a loop spanning several compartments seeds each of them, so they all flood at once
+// — "the flood lasso fills two compartments". And because the flood grows outward from those seeds
+// through open pixels, its edge lands on the artwork's own silhouette wherever the artwork is what
+// stops it, so gap closing does its usual work exactly there and nowhere else — "it bridges gaps
+// only on the outermost encirclement".
+//
+// Walls are still walls to the *flood*; what makes the interior lines vanish is the union with the
+// loop mask after the flood converges (see `MetalFillSession.fill`), which paints every pixel inside
+// the loop, artwork included. So a line between two encircled compartments is filled, while the same
+// line outside the loop still bounds the region.
+kernel void floodInitFromLasso(const device uchar* wall   [[buffer(0)]],
+                               device uchar*        region [[buffer(1)]],
+                               constant FillParams& params [[buffer(2)]],
+                               const device uchar*  lasso  [[buffer(3)]],
+                               uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= params.width || gid.y >= params.height) return;
+    uint i = pixelIndex(gid.x, gid.y, params.width);
+    region[i] = (lasso[i] != 0 && wall[i] == 0) ? 1 : 0;
+}
+
 // One thread per row: fill every open pixel in the row that is horizontally connected (through
 // non-wall pixels) to an already-filled pixel, sweeping both directions. Whole horizontal spans
 // fill in a single pass; the vertical pass then seeds new rows.

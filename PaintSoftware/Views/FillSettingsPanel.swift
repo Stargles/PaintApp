@@ -15,13 +15,37 @@ struct FillSettingsPanel: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Fill")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding([.horizontal, .top])
+            VStack(alignment: .leading, spacing: 16) {
+                // **The type option shares the title's row, and that is a height decision rather than
+                // a taste one.** This panel is 300x420 and already holds 717 pt of content — the
+                // scroll bar reads "2 pages" — so the settings below sit close to the fold. Measured
+                // 2026-08-17: putting the picker on a row of its own costs 51 pt and pushes
+                // `fillPanel.thresholdSlider` from y=445 to y=496, past the scroll view's visible
+                // bottom at 480, which stops it being adjustable at all. Three `FillLiveAdjustUITests`
+                // caught it. Beside the title it costs nothing.
+                //
+                // The flood settings below stay put and stay live for both types, which is honest as
+                // well as convenient: a lasso fill is a flood whose seed is the whole loop instead of
+                // one pixel, so gap closing, threshold and edge overlap all still act on it.
+                HStack {
+                    Text("Fill")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Spacer(minLength: 12)
+                    Picker("Fill Type", selection: $canvasManager.fillMode) {
+                        ForEach(FillMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
+                    .accessibilityIdentifier("fillPanel.modePicker")
+                }
+                .padding([.horizontal, .top])
 
-                Text("The highlighted slider is the one the fill tool's sideways drag adjusts. Move any slider to switch the drag to it.")
+                Text(canvasManager.fillMode == .lasso
+                     ? "Draw a loop on the canvas. Everything it encircles is filled, including straight over any lines inside it — the loop's own outline, carried on to the artwork it meets, is the only boundary."
+                     : "The highlighted slider is the one the fill tool's sideways drag adjusts. Move any slider to switch the drag to it.")
                     .font(.caption)
                     .foregroundColor(.gray)
                     .padding(.horizontal)
@@ -36,25 +60,6 @@ struct FillSettingsPanel: View {
                         .tint(tint(.gapClosing))
                         .accessibilityIdentifier("fillPanel.gapClosingSlider")
                     Text("Bridges small breaks in a boundary so the fill doesn't leak out.")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                }
-                .padding(.horizontal)
-
-                // Directly under Gap Closing rather than in a section of its own, because that is what
-                // it modifies: it adds the canvas rectangle to the set of things gap-closing may bridge
-                // to, and does nothing at all when the slider above reads 0.
-                VStack(alignment: .leading) {
-                    Toggle(isOn: Binding(
-                        get: { canvasManager.fillCanvasEdgeIsBoundary },
-                        set: { canvasManager.setFillCanvasEdgeIsBoundary($0) }
-                    )) {
-                        Text("Canvas Edge Is a Boundary")
-                            .foregroundColor(.white)
-                    }
-                    .tint(Self.selectedTint)
-                    .accessibilityIdentifier("fillPanel.canvasEdgeBoundaryToggle")
-                    Text("Treats the edge of the canvas like a drawn line, so a boundary that stops just short of it still seals.")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
@@ -85,6 +90,29 @@ struct FillSettingsPanel: View {
                         .tint(tint(.edgeOverlap))
                         .accessibilityIdentifier("fillPanel.edgeOverlapSlider")
                     Text("Extends the fill slightly under the boundary to remove antialiasing gaps.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                .padding(.horizontal)
+
+                // **Below the three sliders, not beside Gap Closing, and the reason is the panel's
+                // height rather than its logic.** It belongs with Gap Closing — it adds the canvas
+                // rectangle to the set of things gap-closing may bridge to, and does nothing while
+                // that slider reads 0 — but it is 110 pt tall, and put there it pushes Edge Overlap
+                // out of a 420 pt scroll view that already holds more than it can show. Measured
+                // 2026-08-17 against `testRaisingEdgeOverlapAfterFillGrowsFillUnderSoftEdge`, which
+                // could no longer move that slider to 0.
+                VStack(alignment: .leading) {
+                    Toggle(isOn: Binding(
+                        get: { canvasManager.fillCanvasEdgeIsBoundary },
+                        set: { canvasManager.setFillCanvasEdgeIsBoundary($0) }
+                    )) {
+                        Text("Canvas Edge Is a Boundary")
+                            .foregroundColor(.white)
+                    }
+                    .tint(Self.selectedTint)
+                    .accessibilityIdentifier("fillPanel.canvasEdgeBoundaryToggle")
+                    Text("Gap Closing may also bridge to the canvas edge, so a boundary stopping just short of it still seals.")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }

@@ -27,6 +27,7 @@ final class MetalFillEngine {
     private let psPaint: MTLComputePipelineState
     private let psEdgeBridge: MTLComputePipelineState
     private let psUnionMask: MTLComputePipelineState
+    private let psFloodInitFromLasso: MTLComputePipelineState
 
     /// Mirror of the Metal `FillParams` struct (must match its field order/alignment exactly).
     struct FillParams {
@@ -70,7 +71,8 @@ final class MetalFillEngine {
               let edgeDilate = pipeline("edgeDilate"),
               let paint = pipeline("paintRegion"),
               let edgeBridge = pipeline("edgeBridge"),
-              let unionMask = pipeline("unionMask") else { return nil }
+              let unionMask = pipeline("unionMask"),
+              let floodInitFromLasso = pipeline("floodInitFromLasso") else { return nil }
         self.device = device
         self.queue = queue
         self.psWalls = walls
@@ -84,12 +86,19 @@ final class MetalFillEngine {
         self.psPaint = paint
         self.psEdgeBridge = edgeBridge
         self.psUnionMask = unionMask
+        self.psFloodInitFromLasso = floodInitFromLasso
     }
 
     /// Uploads `referenceRGBA` (premultiplied-last, row-major, `width*height*4` bytes) into a session
     /// whose buffers are reused across every fill of the same gesture. Returns nil if allocation fails.
-    func makeSession(referenceRGBA: [UInt8], width: Int, height: Int) -> MetalFillSession? {
-        MetalFillSession(engine: self, referenceRGBA: referenceRGBA, width: width, height: height)
+    ///
+    /// - Parameter lassoMask: one byte per pixel, non-zero inside the loop the artist drew, for the
+    ///   lasso fill type. Its presence is what switches the session from a one-pixel seed to a
+    ///   whole-region one; `nil` is the ordinary bucket fill. Built by `LassoFillMask.rasterize`.
+    func makeSession(referenceRGBA: [UInt8], width: Int, height: Int,
+                     lassoMask: [UInt8]? = nil) -> MetalFillSession? {
+        MetalFillSession(engine: self, referenceRGBA: referenceRGBA, width: width, height: height,
+                         lassoMask: lassoMask)
     }
 
     // MARK: - Encoding helpers (used by MetalFillSession)
@@ -140,9 +149,10 @@ final class MetalFillEngine {
                                 floodInit: MTLComputePipelineState, floodHoriz: MTLComputePipelineState,
                                 floodVert: MTLComputePipelineState, edgeDilate: MTLComputePipelineState,
                                 paint: MTLComputePipelineState, edgeBridge: MTLComputePipelineState,
-                                unionMask: MTLComputePipelineState) {
+                                unionMask: MTLComputePipelineState,
+                                floodInitFromLasso: MTLComputePipelineState) {
         (psWalls, psJfaInit, psJfaStep, psThreshold, psFloodInit, psFloodHoriz, psFloodVert, psEdgeDilate,
-         psPaint, psEdgeBridge, psUnionMask)
+         psPaint, psEdgeBridge, psUnionMask, psFloodInitFromLasso)
     }
 }
 
@@ -170,11 +180,16 @@ final class MetalFillSession {
     private let jfaA: MTLBuffer
     private let jfaB: MTLBuffer
     private let outBuf: MTLBuffer
+    /// The lasso fill's seed region — one byte per pixel, non-zero inside the loop. Nil for an
+    /// ordinary bucket fill, and its nil-ness is the switch between the two seeding strategies.
+    private let lassoBuf: MTLBuffer?
     private let changedBuf: MTLBuffer
     private let paramsBuf: MTLBuffer
 
-    fileprivate init?(engine: MetalFillEngine, referenceRGBA: [UInt8], width: Int, height: Int) {
+    fileprivate init?(engine: MetalFillEngine, referenceRGBA: [UInt8], width: Int, height: Int,
+                      lassoMask: [UInt8]? = nil) {
         guard width > 0, height > 0, referenceRGBA.count >= width * height * 4 else { return nil }
+        if let lassoMask, lassoMask.count < width * height { return nil }
         let count = width * height
         let device = engine.device
         func buffer(_ bytes: Int) -> MTLBuffer? { device.makeBuffer(length: max(bytes, 4), options: .storageModeShared) }
@@ -190,6 +205,14 @@ final class MetalFillSession {
         self.width = width
         self.height = height
         self.count = count
+        if let lassoMask {
+            guard let buf = lassoMask.withUnsafeBytes({
+                device.makeBuffer(bytes: $0.baseAddress!, length: count, options: .storageModeShared)
+            }) else { return nil }
+            self.lassoBuf = buf
+        } else {
+            self.lassoBuf = nil
+        }
         self.referenceRGBA = referenceRGBA
         self.refBuf = refBuf
         self.wallBuf = wallBuf
@@ -229,7 +252,8 @@ final class MetalFillSession {
     func fill(seedX: Int, seedY: Int, seedColor: SIMD4<Float>, threshold: Float,
               gapRadius: Float, edgeOverlap: Float, canvasEdgeIsWall: Bool = false,
               fillColor: SIMD4<Float>) -> [UInt8]? {
-        guard isSeedInBounds(x: seedX, y: seedY) else { return nil }
+        // A lasso session seeds from its whole mask, so there is no tapped pixel to be in bounds.
+        guard lassoBuf != nil || isSeedInBounds(x: seedX, y: seedY) else { return nil }
         let p = engine.pipelines
 
         var params = MetalFillEngine.FillParams()
@@ -270,7 +294,12 @@ final class MetalFillSession {
             // this buffer, so a zero-width wall one pixel outside it has nothing left to block.
             closedSource = wallBuf
         }
-        engine.encode2D(enc1, p.floodInit, width: width, height: height, buffers: [(closedSource, 0), (regionBuf, 1), (paramsBuf, 2)])
+        if let lassoBuf {
+            engine.encode2D(enc1, p.floodInitFromLasso, width: width, height: height,
+                            buffers: [(closedSource, 0), (regionBuf, 1), (paramsBuf, 2), (lassoBuf, 3)])
+        } else {
+            engine.encode2D(enc1, p.floodInit, width: width, height: height, buffers: [(closedSource, 0), (regionBuf, 1), (paramsBuf, 2)])
+        }
         enc1.endEncoding()
         cb1.commit()
 
@@ -297,6 +326,16 @@ final class MetalFillSession {
 
         // Stage 3: edge overlap dilate + paint, then read back.
         guard let cb3 = engine.makeCommandBuffer(), let enc3 = cb3.makeComputeCommandEncoder() else { return nil }
+        // **The lasso mode's second half, and the half that makes interior lines vanish.** The flood
+        // above only travels through open pixels, so every line the loop encircles is still a hole in
+        // the region. Unioning the loop mask back in closes all of them at once — "the line should be
+        // filled too, as its boundaries are only the outside encirclement". Done here rather than at
+        // seeding time so the walls stay walls *while* the flood runs and the region's outer edge
+        // still lands on the artwork.
+        if let lassoBuf {
+            engine.encode2D(enc3, p.unionMask, width: width, height: height,
+                            buffers: [(lassoBuf, 0), (regionBuf, 1), (paramsBuf, 2)])
+        }
         let painted: MTLBuffer
         if Int(edgeOverlap.rounded()) >= 1 {
             engine.encode2D(enc3, p.edgeDilate, width: width, height: height, buffers: [(regionBuf, 0), (regionTmpBuf, 1), (paramsBuf, 2)])

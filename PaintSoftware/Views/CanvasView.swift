@@ -197,8 +197,21 @@ struct CanvasView: UIViewRepresentable {
         transformOverlay.onGestureEnded = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.commitStructureGesture(label: .transform)
         }
+        // One lasso gesture, two destinations. `SelectionOverlayView` already captures a lasso with
+        // the right touch-type gating, the right coordinate space and a live preview, so the fill
+        // tool's lasso mode borrows it whole rather than growing a fourth lasso implementation —
+        // see `updateSelectionOverlay`, which is what decides which of the two is armed.
         selectionOverlay.onFinishPath = { [weak coordinator = context.coordinator] path in
-            coordinator?.canvasManager.finishSelection(path: path)
+            guard let coordinator else { return }
+            if coordinator.isLassoFilling {
+                // Begin-then-end, the same pair a one-shot tap makes: the fill stays *adjustable*
+                // afterwards, so the Fill panel's sliders re-run this loop live exactly as they
+                // re-run a bucket fill, and the next canvas edit bakes it.
+                coordinator.canvasManager.beginInteractiveLassoFill(path: path)
+                coordinator.canvasManager.endInteractiveFill()
+            } else {
+                coordinator.canvasManager.finishSelection(path: path)
+            }
         }
         selectionOverlay.onAutomaticTap = { [weak coordinator = context.coordinator] point in
             coordinator?.canvasManager.finishAutomaticSelection(at: point)
@@ -1346,14 +1359,28 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: - Select & Move overlays
 
+        /// Whether the fill tool's lasso mode currently owns the selection overlay's lasso gesture.
+        ///
+        /// The Select panel wins the tie: it is the overlay's own tool, and a selection drag begun
+        /// there must not turn into a fill because the fill tool happens to be the last one picked in
+        /// the toolbar. A floating piece takes priority over both, exactly as it does for the plain
+        /// selection — the same guard `fillTapRecognizer` uses.
+        var isLassoFilling: Bool {
+            canvasManager.selectedTool == .fill && canvasManager.fillMode == .lasso
+                && activePanel != .select && canvasManager.floatingPiece == nil
+        }
+
         func updateSelectionOverlay() {
             guard let overlay = selectionOverlay, let container = containerView else { return }
-            overlay.mode = canvasManager.selectionMode
+            let lassoFilling = isLassoFilling
+            overlay.mode = lassoFilling ? .lasso : canvasManager.selectionMode
             // Mirrored down every pass, same as `reconcileLayers` mirrors it to
             // `StrokeCanvasView.pencilOnlyDrawing` — see `SelectionOverlayView.pencilOnlyDrawing`'s
-            // doc comment for why a selection drag needs this too.
+            // doc comment for why a selection drag needs this too. A lasso fill is a drawing edit by
+            // the same test, so borrowing this recognizer also inherits the fix for free.
             overlay.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
-            overlay.isCapturingGestures = (activePanel == .select) && (canvasManager.floatingPiece == nil)
+            overlay.isCapturingGestures = lassoFilling
+                || ((activePanel == .select) && (canvasManager.floatingPiece == nil))
             overlay.updateSelection(canvasManager.selection, allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection)
             // Layer hosts are added after this overlay, so without this the marching ants/hatch
             // render underneath layer content — bring it back to front when it has something to show.
@@ -1460,8 +1487,11 @@ struct CanvasView: UIViewRepresentable {
 
             // Not per-layer, so it lives outside the AppliedTool caching guard below and stays in
             // sync every call. Suspended while Select is engaged or a piece is floating, so the fill
-            // tool's press can't race the Selection/Move overlays' own gestures.
+            // tool's press can't race the Selection/Move overlays' own gestures — and suspended in
+            // lasso mode too, where the selection overlay's pan is the gesture that matters and this
+            // recognizer would otherwise apply a flood fill at the point the loop started.
             fillTapRecognizer?.isEnabled = (canvasManager.selectedTool == .fill)
+                && canvasManager.fillMode == .flood
                 && activePanel != .select && canvasManager.floatingPiece == nil
 
             // Also outside the AppliedTool guard: toggling "paint outside selection" doesn't touch

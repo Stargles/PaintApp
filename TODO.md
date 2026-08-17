@@ -53,6 +53,11 @@ New this pass (owner, 2026-08-17):
       an ordinary fill: it **bridges gaps smartly**; and **the only boundary is the outer encirclement
       of the lasso**, so if the lassoed region spans two compartments separated by a line, *the line is
       filled too* rather than acting as a wall.
+      **Owner's resolution of how those two compose, 2026-08-17**: "it bridges gaps only on the
+      outermost encirclement of the fill tool, all inner lines are filled over." So the region grows
+      from the loop out to the artwork's own silhouette and gap closing acts *there* and nowhere else,
+      while every line the loop encircles is painted over rather than dividing the region. Do not add
+      an option for interior lines acting as boundaries.
 - [ ] **Fill tool option: treat the canvas edge as a line boundary. Default on.**
 - [ ] **An oval and a partial oval are one feature, with no modes.** The owner, asked whether a
       nearly-closed stroke should be snapped shut, answered by collapsing the whole design:

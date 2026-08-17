@@ -20,6 +20,13 @@ import simd
 ///
 /// Deliberately **not** guarded with `XCTSkipIf(MetalFillEngine.shared == nil)`. A skip here would
 /// quietly restore the state this file exists to end — green, and testing nothing.
+///
+/// **There is a third way for that unwrap to fail, and it is environmental rather than yours.** A
+/// simulator that has shut down and been brought back by `xcodebuild` can come up without a working
+/// Metal device, and then every test here fails on the engine while the compositor's own suites
+/// quietly *skip* — six extra skips in the run summary is the tell, since those tests do guard.
+/// Seen 2026-08-17 with two other sessions on the machine. `xcrun simctl boot <udid>` and re-run
+/// before reading a wall of these as a real failure.
 final class FillBoundaryLogicTests: XCTestCase {
 
     // MARK: - Fixtures
