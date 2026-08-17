@@ -423,8 +423,15 @@ struct AnimationTimeline: View {
         .accessibilityIdentifier("timeline.onionSkinToggle")
         .popover(isPresented: $showOnionSkinOptions) {
             OnionSkinPanel(canvasManager: canvasManager)
-                .frame(width: 340, height: 470)
+                .frame(width: 380, height: 590)
                 .presentationCompactAdaptation(.popover)
+                // **A popover's default background is a light system material, and every label in
+                // this app's chrome is white.** Without this the panel renders white-on-white and is
+                // legible only where a control paints its own background — which a screenshot of the
+                // first build showed exactly. Stated here rather than inside the panel because the
+                // material is the *presentation's*, not the content's: a `.background` on the content
+                // leaves the arrow and the inset light.
+                .presentationBackground(Color.black.opacity(0.96))
         }
         // "Turn Off Onion Skin" lives inside the panel, so the panel has to close itself when it is
         // used — otherwise it stays up describing something that is no longer drawing.

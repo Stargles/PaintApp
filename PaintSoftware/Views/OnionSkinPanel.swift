@@ -25,9 +25,9 @@ struct OnionSkinPanel: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Onion Skin")
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
 
                 neighbourhoodPicker
@@ -47,10 +47,12 @@ struct OnionSkinPanel: View {
                 }
                 .font(.caption)
                 .accessibilityIdentifier("onionPanel.turnOff")
-
-                Spacer(minLength: 4)
             }
             .padding(14)
+            // The bottom inset is the off switch's, not decoration: at five skins a side the panel is
+            // taller than the popover and this is what keeps the last row clear of the rounded corner
+            // it would otherwise sit under. Screenshotted at both counts.
+            .padding(.bottom, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -69,10 +71,12 @@ struct OnionSkinPanel: View {
             .accessibilityIdentifier("onionPanel.neighbourhoodPicker")
 
             Text(settings.neighbourhood == .drawings
-                 ? "Neighbouring drawings, however long each is held."
-                 : "Neighbouring frames, so a held drawing counts once per frame.")
+                 ? "Neighbouring drawings, however long each is held"
+                 : "Neighbouring frames, so a held drawing fills several")
                 .font(.caption2)
-                .foregroundColor(.white.opacity(0.6))
+                .foregroundColor(.white.opacity(0.55))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
     }
 
@@ -91,39 +95,49 @@ struct OnionSkinPanel: View {
     /// The two count sliders with the loop toggle between them, which is where ToonSquid puts it and
     /// where it belongs: looping is the thing that joins the two sides into one cycle.
     private var countRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             countSlider(title: "Previous", value: binding(\.previousCount), id: "previousCount")
 
             HStack(spacing: 8) {
                 Button {
                     canvasManager.onionSkin.loops.toggle()
                 } label: {
-                    Image(systemName: settings.loops ? "repeat.circle.fill" : "repeat.circle")
-                        .font(.title3)
+                    Label(settings.loops ? "Loop on" : "Loop off",
+                          systemImage: settings.loops ? "repeat.circle.fill" : "repeat.circle")
+                        .font(.caption2)
                         .foregroundColor(settings.loops ? .blue : .white.opacity(0.6))
                 }
                 .accessibilityIdentifier("onionPanel.loopToggle")
                 .accessibilityValue(settings.loops ? "on" : "off")
 
-                Text("Loop — wrap the skins around the first and last drawing")
+                Text("wraps around the first and last drawing")
                     .font(.caption2)
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(.white.opacity(0.45))
             }
+            .frame(maxWidth: .infinity, alignment: .center)
 
             countSlider(title: "Next", value: binding(\.nextCount), id: "nextCount")
         }
     }
 
+    /// Label and value on the same line as the slider rather than above it — three stacked rows of
+    /// label-over-slider is what pushed the opacity sliders, which are the panel's whole point, below
+    /// the fold in the first build.
     private func countSlider(title: String, value: Binding<Int>, id: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(title): \(value.wrappedValue)")
+        HStack(spacing: 8) {
+            Text(title)
                 .font(.caption)
                 .foregroundColor(.white)
+                .frame(width: 62, alignment: .leading)
             Slider(value: Binding(get: { Double(value.wrappedValue) },
                                   set: { value.wrappedValue = Int($0.rounded()) }),
                    in: 0...Double(OnionSkinSettings.maxSkinsPerSide),
                    step: 1)
                 .accessibilityIdentifier("onionPanel.\(id)Slider")
+            Text("\(value.wrappedValue)")
+                .font(.caption.monospacedDigit())
+                .foregroundColor(.white.opacity(0.7))
+                .frame(width: 12, alignment: .trailing)
         }
     }
 
@@ -250,7 +264,7 @@ struct OnionSkinPanel: View {
                 .accessibilityValue(settings.isOpacityLinked ? "on" : "off")
             }
 
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
                 slotColumn(side: .previous)
                 Divider().frame(height: 110).overlay(Color.white.opacity(0.15))
                 slotColumn(side: .next)
@@ -278,7 +292,7 @@ struct OnionSkinPanel: View {
                 // Previous reads right-to-left so the nearest skin of each side sits closest to the
                 // divider — the divider being where the current drawing is.
                 let order = side == .previous ? Array((1...count).reversed()) : Array(1...count)
-                HStack(alignment: .bottom, spacing: 6) {
+                HStack(alignment: .bottom, spacing: 4) {
                     ForEach(order, id: \.self) { slot in slotSlider(side: side, slot: slot) }
                 }
             }
@@ -299,7 +313,7 @@ struct OnionSkinPanel: View {
                    in: 0...1)
                 .frame(width: 96)
                 .rotationEffect(.degrees(-90))
-                .frame(width: 30, height: 96)
+                .frame(width: 26, height: 96)
                 .accessibilityIdentifier("onionPanel.\(side.rawValue).opacity\(slot)")
 
             Text("\(Int((value * 100).rounded()))")
