@@ -48,17 +48,6 @@ New this pass (owner, 2026-08-17):
       active. **Out of scope for now** (owner, 2026-08-17): build the panel without them. It is a
       per-skin transform surface with its own handles and undo behaviour, and leaving it out roughly
       halves this feature. Do not design the panel in a way that forecloses adding the row later.
-- [ ] **Lasso flood fill**, as a *type* option under the existing flood fill tool, behaving like Clip
-      Studio Paint's. Two distinct requirements, and the second is the one that makes it different from
-      an ordinary fill: it **bridges gaps smartly**; and **the only boundary is the outer encirclement
-      of the lasso**, so if the lassoed region spans two compartments separated by a line, *the line is
-      filled too* rather than acting as a wall.
-      **Owner's resolution of how those two compose, 2026-08-17**: "it bridges gaps only on the
-      outermost encirclement of the fill tool, all inner lines are filled over." So the region grows
-      from the loop out to the artwork's own silhouette and gap closing acts *there* and nowhere else,
-      while every line the loop encircles is painted over rather than dividing the region. Do not add
-      an option for interior lines acting as boundaries.
-- [ ] **Fill tool option: treat the canvas edge as a line boundary. Default on.**
 - [ ] **An oval and a partial oval are one feature, with no modes.** The owner, asked whether a
       nearly-closed stroke should be snapped shut, answered by collapsing the whole design:
       *"The oval and arc feature should be the same feature with no modes. Whatever the user draws that
@@ -90,6 +79,58 @@ Carried over:
 
 ## Done this pass
 
+- **Lasso flood fill**, as a *type* option under the existing fill tool (`.flood` still the default),
+  drawn with the loop gesture `SelectionOverlayView` already has. Owner's resolution of how the two
+  requirements compose: *"it bridges gaps only on the outermost encirclement of the fill tool, all
+  inner lines are filled over."* `floodInitFromLasso` seeds the flood at every open pixel the loop
+  encircles instead of the one pixel a tap lands on, then unions the loop mask back over the region —
+  the seed gives the outer-boundary behaviour (a loop spanning several compartments seeds all of them,
+  the region grows out to the artwork's own silhouette, and gap closing acts only at that outer edge),
+  and the union is what paints every line the loop encircles instead of treating it as a wall. The mask
+  is non-zero winding (an artist overshooting their own start point is normal; even-odd would bite a
+  hole out of the fill exactly there) and the seed colour is the loop's most common colour rather than
+  its centre pixel, since centring on a line would invert the tool into filling *along* the artwork.
+  **The outer half is verified working** — `LassoFillLogicTests` pins it as measurements (a 3-row
+  break in a 3px wall bridges at the default 8px radius, a 7-row one does not; a loop that pokes out of
+  the intended shape floods whatever it pokes into, in full) — but **the inner-line half does not
+  reliably paint over pre-existing artwork on either layer kind, for content on the *same* layer as the
+  fill**, and that is a real gap in the feature as shipped, not a hedge:
+  - **Vector**: `VectorCanvas.Kind` orders elements `fill = 0, image = 1, stroke = 2`
+    (`VectorLayer.swift:349`), so every fill renders beneath every stroke regardless of paint order —
+    a lasso fill lands correctly and the line art draws straight back over it. Read from the code, not
+    measured; no test asserts it either way. BUGS.md.
+  - **Raster**: found while closing out this branch, and it narrows what the branch's own commit
+    message claimed about itself. `Cel.fillImage` is documented as composited *underneath*
+    `bakedImage` and `raster`'s live strokes (`Cel.swift:10-11`), and both `PixelOps.rasterizeUncached`
+    (`PixelOps.swift:209-211`) and `commitInteractiveFill`'s raster branch
+    (`CanvasManager+Fill.swift:254-255`) draw `cel.raster`'s strokes last, on top, when flattening —
+    so a line drawn in an earlier gesture on the *same* raster layer stays exactly where it was,
+    unpainted-over, both live and after commit. `LassoFillLogicTests` doesn't catch this because it
+    asserts only on the flood session's own region bytes, before they're composited with anything else.
+    The common coloring-book workflow (line art on a reference layer, colour filled on a separate layer
+    beneath it) never exercises this, since the tier order that defeats it is a same-*cel* thing — that
+    workflow's "line" lives on a different cel entirely. Verified by reproducing the two draw calls in
+    isolation (not by running the full gesture through `CanvasManager` — Core Graphics draw order is
+    unambiguous and doesn't need the simulator to confirm, but the exact pixel boundary is unconfirmed
+    against the real app). BUGS.md, new entry.
+  Fixing either is a real design decision (a per-fill z-order flag for vector; painting fill pixels
+  directly into `cel.raster` rather than staying in the bottom tier for raster — and the two fixes are
+  unrelated), not something to patch quietly alongside a doc pass.
+- **Fill tool option: treat the canvas edge as a line boundary. Default on.** The fill was never able
+  to escape the canvas — the flood runs over a buffer that *is* the canvas — the real defect was the
+  flood running around the *end* of a boundary stroke that stops short of the border, through the open
+  paper above its tip and into the next compartment. `fillCanvasEdgeIsBoundary` (default true, a
+  toggle under Gap Closing) puts the canvas edge in the wall set: a pixel joins the wall when the
+  nearest artwork and the edge are together within the gap-closing radius, so a gap up to r-1 px seals
+  and nothing wider does. Additive only (background to wall), so it can't break a fill that already
+  worked, and inert at a zero radius. The obvious formulation — add the canvas exterior to the wall set
+  and close it — was tried first and rejected: a true close rounds off the canvas's own interior
+  corners (92 px of a blank 128×128 canvas unfillable, scaling to 40 px with the slider), which keying
+  the bridge off distance-to-real-artwork avoids entirely. Also the first time the fill's GPU pipeline
+  is reachable from the fast tier: `Fill.metal` is now a member of the UI-test target's Sources phase
+  and `MetalFillEngine` resolves its library via `Bundle(for:)` rather than `Bundle.main`, so
+  `FillBoundaryLogicTests` drives the real kernels headlessly in under a second, where `FillUITests` —
+  26 minutes away — used to be the only place the fill ran at all.
 - **One colour picker, not two.** The canvas background swatch, a value layer's flat colour, an
   effect's colour and a gradient stop each opened SwiftUI's stock `ColorPicker` — a second
   implementation from the brush's `ColorPickerPanel` (SV square, hue bar, opacity, hex field,

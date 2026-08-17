@@ -437,6 +437,43 @@ the recipe as it does today but say so in the UI, or copy verbatim and accept th
 as intentional — are a vector-interpolation product call, not a layer-compositing one. See
 [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md).
 
+## A lasso fill does not paint over line art on a *raster* layer either, for the same-layer case (2026-08-17)
+
+Found while closing out this branch, and it narrows the claim `b100cd2`'s successor commit makes
+about itself ("on a raster layer it does — the fill flattens into `Cel.raster`, so a line inside the
+loop is covered"). That is true of the *flood region* — `LassoFillLogicTests` genuinely proves the
+mask covers a line's pixels — but the region becoming `fillImage` is not the same as the artist
+seeing the line disappear, and for content already on the *same* cel, it does not.
+
+`Cel.raster` is documented as "Live brush strokes" (`Cel.swift:9`) and `fillImage` as "composited
+**underneath** `bakedImage` and `raster`'s strokes" (`Cel.swift:10-11`) — `fillImage` is the bottom
+tier, always. `PixelOps.rasterizeUncached` draws it first and `cel.raster`'s strokes last
+(`PixelOps.swift:209-211`), and `commitInteractiveFill`'s raster branch reproduces the identical
+order when it flattens: `compositeOver(base: fillGestureBaseBaked, overlay: preview)` then
+`compositeOver(base: belowStrokes, overlay: cel.raster.renderToUIImage())`
+(`CanvasManager+Fill.swift:254-255`) — the pre-existing strokes are the last thing drawn, both for
+the live preview and for the flattened result the commit writes back as the new `raster`. Later
+draws sit on top in Core Graphics; nothing between `beginInteractiveLassoFill` and
+`commitInteractiveFill` erases or clips `cel.raster` in the loop's interior. So a line drawn in an
+earlier gesture on the *same* raster layer stays exactly where it was, painted over nothing, on top
+of the new fill — same visible outcome as the vector entry below, different mechanism.
+
+**Verified by reproducing the two draw calls above in isolation** (a minimal CoreGraphics
+"draw black square, then draw red square on top, sample the center pixel" script matching
+`commitInteractiveFill`'s exact sequence) rather than by running the full gesture through
+`CanvasManager` — the result is unambiguous (the square drawn last wins every pixel it covers) and
+this is standard Core Graphics compositing, not something that needs the simulator to confirm. **Not
+run through the actual app** on a real stroke + lasso fill, so treat the general shape as solid and
+the exact pixel boundary as unconfirmed.
+
+This is likely why the shipped suite doesn't catch it: `LassoFillLogicTests` asserts only on the
+flood session's own `region` bytes (i.e. `fillImage`'s content before it's composited with anything
+else), and no XCUITest draws a stroke and then lasso-fills over it on the same layer. The common
+coloring-book workflow — line art on a reference layer above a separate colour layer — never hits
+this: the "line" being painted around lives on a different cel entirely, so the same-layer tier order
+is irrelevant to what the artist sees there. It is specifically same-cel content — the case this
+entry's title names — that the tier order defeats.
+
 ## A lasso fill does not paint over line art on a *vector* layer (2026-08-17)
 
 The lasso fill type's defining behaviour is the owner's own: "all inner lines are filled over". On a
