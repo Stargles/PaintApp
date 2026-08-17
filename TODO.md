@@ -14,11 +14,6 @@ Prune it first, before adding the new asks.
 
 New this pass (owner, 2026-08-17):
 
-- [ ] **One colour picker, not two.** The canvas colour changer differs from the brush's; they should be
-      the same control. If a second implementation exists, delete it rather than leaving it unreferenced.
-- [ ] **An eyedropper on the left sidebar, below the opacity slider.** Confirmed with the owner
-      2026-08-17: a *tool* you select and then tap the canvas with to pick up the colour under it, not
-      a swatch that opens a picker.
 - [ ] **Add Text, in the Actions menu.** Fonts from a large selection, plus colour, size, spacing and
       the rest of what a text tool carries. Move, rotate, and **distort by dragging each of the four
       corners independently, giving a 3D-perspective warp** (a projective/homography transform, not an
@@ -63,6 +58,30 @@ Carried over:
 
 ## Done this pass
 
+- **One colour picker, not two.** The canvas background swatch, a value layer's flat colour, an
+  effect's colour and a gradient stop each opened SwiftUI's stock `ColorPicker` — a second
+  implementation from the brush's `ColorPickerPanel` (SV square, hue bar, opacity, hex field,
+  palette library). `ColorPickerPanel` used to write `canvasManager.brushColor` by name, which is
+  exactly what `LayerOptionsPanel.valueColorRow` had recorded as its objection to reusing the panel
+  elsewhere; it now takes a `Binding<Color>` instead, and all five call sites build the same panel.
+  No stock `ColorPicker` is left in the app (`grep -rn "ColorPicker(" PaintSoftware/` returns
+  nothing). **`supportsOpacity` is the one capability a bare swap would have dropped**: the gradient
+  stop passed `supportsOpacity: false`, since `Effect.gradientTable` maps luminance to an opaque
+  colour, and the panel now carries the same flag — the opacity row isn't built, and alpha is pinned
+  at 1 in `applyHSBA`, the single funnel every inbound colour passes through, so an 8-digit hex or a
+  swatch saved with alpha can't smuggle transparency past a control that shows no slider for it. A
+  later change to `applyHSBA` should keep that pin; it's the only thing standing between a gradient
+  stop and a colour it isn't allowed to have.
+- **An eyedropper on the left sidebar**, below the opacity slider — a tool you select and then tap
+  the canvas with, not a swatch that opens a picker. Samples the full composite, paper background
+  included, via `makeRenderRequest(...includeBackground: true)`, built fresh on the main actor from
+  live model state (no cache) so a still-adjustable preview picks up exactly what's shown; that
+  builder deliberately skips `renderResolution`, so a reduced live preview still yields the true
+  colour. Pencil-only mode goes through the existing `TouchTypePressRecognizer` (a third instance of
+  the mechanism `fillPress`/`catchAll` already use, not a fourth gate). Reverts to the previously
+  selected tool after a pick, on a miss as well as a hit. The composite runs on the existing serial
+  `sandwichQueue` rather than a separate one, so a pick can't race a sandwich rebuild. 18 new
+  `EyedropperLogicTests` plus one XCUITest.
 - **Say what an undo or redo just undid.** Reuses the existing `CanvasNotice` banner rather than adding
   a second mechanism, but the real substance was upstream: `UndoHistory.Action.name` was a plain
   `String`, hand-typed at each of ~70 registration sites with nothing stopping a typo or a missed site
