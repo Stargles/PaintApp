@@ -44,19 +44,23 @@ New this pass (owner, 2026-08-17):
       of the lasso**, so if the lassoed region spans two compartments separated by a line, *the line is
       filled too* rather than acting as a wall.
 - [ ] **Fill tool option: treat the canvas edge as a line boundary. Default on.**
-- [ ] **Smart shapes should recognise an arc.** The owner: *"say the user draws an arc, like an oval
-      except only partially, like half of it. After 0.8 seconds, the stroke should still collapse into
-      an oval, although half done as the stroke is projected onto it. Same thing (user is able to edit,
-      turn into circle, etc.)"*
-      So the hold fires as it does today, but a stroke covering only part of an ellipse resolves to that
-      **partial** ellipse rather than being closed into a whole one or falling through to a line. "The
-      stroke is projected onto it" is the specification: fit the ellipse the stroke lies on, then keep
-      the angular span the stroke actually covered. It carries the same affordances as a full oval —
-      handles, editing, and the two-finger snap.
-      The hard part is not the fit, it is the **decision boundary**: how much angular coverage makes a
-      sloppy full oval rather than a deliberate arc, and where an arc stops being an arc and becomes a
-      line. Both are places a wrong threshold is felt constantly. Wants the headless sweep harness
-      `ShapeDetectorLogicTests` already has.
+- [ ] **An oval and a partial oval are one feature, with no modes.** The owner, asked whether a
+      nearly-closed stroke should be snapped shut, answered by collapsing the whole design:
+      *"The oval and arc feature should be the same feature with no modes. Whatever the user draws that
+      follows an oval path whether partial or full spawns in that oval, and the stroke is then projected
+      onto that oval. It may not be a full oval, in which case the stroke would only be projected to a
+      portion of the oval. Finger snapping it will basically then turn that oval into a circle and the
+      partial projection remains."*
+      So the model is **an ellipse plus the angular span the stroke covered**. The hold fits the full
+      ellipse the stroke lies on — always the whole ellipse, that is the geometry — and what gets drawn
+      is the stroke *projected* onto it, which is the whole ellipse when the stroke closed and a portion
+      of it when the stroke did not. Handles and editing operate on the ellipse; the two-finger snap
+      makes it a circle and **the span is preserved across the snap**.
+      **There is deliberately no arc-vs-oval decision to make**, and that is the point of the answer: no
+      coverage threshold, no "was this sloppy or intentional", no second shape kind. A full stroke
+      projects to a full oval and a half stroke to half, by the same rule. Anything that reintroduces a
+      mode here is a misreading. Wants the headless sweep harness `ShapeDetectorLogicTests` already has,
+      including spans either side of a closed loop and the span surviving a snap.
 
 Carried over:
 
