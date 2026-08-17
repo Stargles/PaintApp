@@ -531,6 +531,47 @@ final class LayerPanelUITests: PaintUITestCase {
         XCTAssertFalse(app.buttons["layerOptions.valueColorButton"].exists,
                        "…and only a value layer's: setLayerFill refuses every other kind anyway")
     }
+
+    /// **One colour picker, not two** (owner, 2026-08-17: "the canvas color changer … is different
+    /// than the color changer for the brush. They should be the same").
+    ///
+    /// The canvas background used to open SwiftUI's stock `ColorPicker` — a grid/spectrum/sliders
+    /// sheet with none of the brush panel's hex field or palette library. This asserts by *identity*
+    /// rather than by appearance: `colorPanel.svSquare` and `colorPanel.hexField` are
+    /// `ColorPickerPanel`'s own identifiers, so their presence inside the Canvas row's popover is
+    /// proof that the control behind it is the same object the brush uses, not a lookalike.
+    ///
+    /// The hex round-trip is the second half and the one that would catch a picker wired to the wrong
+    /// binding: typing into the brush's picker must not move the paper, so the value read back is the
+    /// canvas swatch's own.
+    func testTheCanvasColourRowOpensTheSamePickerTheBrushUses() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let canvasSwatch = app.buttons["layerPanel.canvasColorButton"]
+        XCTAssertTrue(canvasSwatch.waitForExistence(timeout: 5),
+                      "The layer panel's Canvas row carries the background-colour swatch")
+        XCTAssertEqual(canvasSwatch.value as? String, "FFFFFF", "A new project's paper is white")
+
+        canvasSwatch.tap()
+
+        // ColorPickerPanel's own identifiers. The stock ColorPicker has neither.
+        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForExistence(timeout: 5),
+                      "The canvas colour opens ColorPickerPanel, not a second colour UI")
+        XCTAssertTrue(app.buttons["colorPanel.tab.palettes"].exists,
+                      "…including its palette library, which the stock picker never had")
+
+        let hexField = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hexField.exists, "…and its hex field")
+        setHexField(app, hexField, to: "336699")
+
+        // Dismiss the popover by tapping the panel behind it, then read the swatch back.
+        app.staticTexts["Layers"].tap()
+        XCTAssertTrue(canvasSwatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(canvasSwatch.value as? String, "336699",
+                       "The pick reached canvasBackgroundColor — the row's own binding, not the brush's")
+    }
 }
 
 final class BlendModesAndCompositorUITests: PaintUITestCase {

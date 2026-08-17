@@ -192,11 +192,15 @@ struct LayerPanel: View {
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.2), lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("layerPanel.canvasColorButton")
+            .accessibilityValue(canvasManager.canvasBackgroundColor.hexString)
+            // The brush's picker, not a second one — this row is the owner's report ("the canvas
+            // color changer is different than the color changer for the brush"). See
+            // `ColorPickerPanel`, which grew a `Binding<Color>` for exactly this.
             .popover(isPresented: $showBackgroundColorPicker) {
-                ColorPicker("Canvas Color", selection: $canvasManager.canvasBackgroundColor)
-                    .labelsHidden()
-                    .padding()
-                    .frame(width: 220, height: 100)
+                ColorPickerPanel(color: $canvasManager.canvasBackgroundColor)
+                    .frame(width: ColorPickerPanel.popoverSize.width,
+                           height: ColorPickerPanel.popoverSize.height)
             }
 
             Text("Canvas")
@@ -458,10 +462,15 @@ struct LayerOptionsPanel: View {
     }
 
     /// §4.5's colour, on the layer that *is* one: a swatch that opens a picker — the same shape the
-    /// layer panel's own Canvas row already uses for the background colour — rather than a second
-    /// colour UI. `ColorPickerPanel` is the *brush's* picker: it writes `canvasManager.brushColor`
-    /// from `@State` HSBA it owns and has no selection to point elsewhere, so reusing it here would
-    /// mean parameterising the whole panel (tabs, palette library, hex field) for a swatch.
+    /// layer panel's own Canvas row already uses for the background colour.
+    ///
+    /// **The picker behind it is `ColorPickerPanel`, the app's only one.** This comment used to argue
+    /// the other way — that the panel "writes `canvasManager.brushColor` … and has no selection to
+    /// point elsewhere, so reusing it here would mean parameterising the whole panel". The owner
+    /// reported the resulting two-pickers-for-one-job as a bug, and parameterising it turned out to be
+    /// one `Binding<Color>`: the tabs, the palette library and the hex field all came along for free,
+    /// so a value layer's colour can now be typed as a hex or pulled off a saved palette exactly as
+    /// the brush's can.
     ///
     /// The hex round-trips through `PaletteColor`, which is what `ValueFill` stores and what every
     /// other swatch in the app speaks, so the alpha survives (the 8-digit `RRGGBBAA` form).
@@ -483,10 +492,9 @@ struct LayerOptionsPanel: View {
             // it back after the panel closes and reopens and know the pick reached the model.
             .accessibilityValue(canvasManager.layers[index].valueFill?.color.hex ?? "")
             .popover(isPresented: $showingValueColorPicker) {
-                ColorPicker("Layer Color", selection: valueColorBinding(index: index), supportsOpacity: true)
-                    .labelsHidden()
-                    .padding()
-                    .frame(width: 220, height: 100)
+                ColorPickerPanel(color: valueColorBinding(index: index))
+                    .frame(width: ColorPickerPanel.popoverSize.width,
+                           height: ColorPickerPanel.popoverSize.height)
                     .accessibilityIdentifier("layerOptions.valueColorPicker")
             }
             // One undo step for the whole picking session, not one per tick of the picker's own

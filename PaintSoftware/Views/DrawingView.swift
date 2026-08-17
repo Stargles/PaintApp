@@ -298,7 +298,7 @@ struct DrawingView: View {
         case .eraser:
             EraserSettingsPanel(canvasManager: canvasManager)
         case .color:
-            ColorPickerPanel(canvasManager: canvasManager)
+            ColorPickerPanel(color: $canvasManager.brushColor)
         case .fill:
             FillSettingsPanel(canvasManager: canvasManager)
         // Interpolate has no case here: its options are a popover on the timeline's own interpolate

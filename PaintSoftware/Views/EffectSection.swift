@@ -409,12 +409,14 @@ struct EffectSettingsMenu: View {
     /// already speaks, so nothing here needs a new representation.
     ///
     /// **The bracket is the popover's lifetime, not the write's**, which is `EffectSettingsMenu`'s
-    /// whole undo rule applied to the one control that has no `onEditingChanged`. A `ColorPicker` on
-    /// a `Binding` writes on every tick of its own sliders, so wrapping each write in
+    /// whole undo rule applied to the one control that has no `onEditingChanged`. A picker on a
+    /// `Binding` writes on every tick of its own sliders, so wrapping each write in
     /// `onEditBegan`/`onEditEnded` would record an undo step per tick — the exact failure the
     /// `Slider` rows above avoid. `LayerOptionsPanel.valueColorRow` solved this first, the same way:
     /// a swatch that opens the picker, and `showingColorPicker`'s transitions standing in for the
-    /// drag's beginning and end.
+    /// drag's beginning and end. That reasoning is unchanged by the picker behind the swatch becoming
+    /// `ColorPickerPanel` — it writes through its binding on every drag tick exactly as the stock
+    /// control did.
     private func colorRow(_ label: String, color: CodableColor, identifier: String,
                           onChange change: @escaping (CodableColor) -> Void) -> some View {
         HStack(spacing: 10) {
@@ -434,12 +436,9 @@ struct EffectSettingsMenu: View {
             // panel closing and reopening, so a test can confirm the pick reached the model.
             .accessibilityValue(color.color.hexString)
             .popover(isPresented: $showingColorPicker) {
-                ColorPicker("Effect Colour",
-                            selection: Binding(get: { color.color }, set: { change($0.effectColor) }),
-                            supportsOpacity: true)
-                    .labelsHidden()
-                    .padding()
-                    .frame(width: 220, height: 100)
+                ColorPickerPanel(color: Binding(get: { color.color }, set: { change($0.effectColor) }))
+                    .frame(width: ColorPickerPanel.popoverSize.width,
+                           height: ColorPickerPanel.popoverSize.height)
                     .accessibilityIdentifier("effectSettings.\(identifier)Picker")
             }
             .onChange(of: showingColorPicker) { _, showing in
@@ -833,7 +832,11 @@ struct GradientStopsEditor: View {
             .accessibilityValue(stops[index].color.color.hexString)
             .popover(isPresented: Binding(get: { colorPickerIndex == index },
                                           set: { if !$0 { colorPickerIndex = nil } })) {
-                ColorPicker("Stop Colour", selection: Binding(
+                // `supportsOpacity: false` — a stop's alpha is not the artist's to set, since
+                // `Effect.gradientTable` maps luminance to an opaque colour. This is the one
+                // capability the stock `ColorPicker` had that unifying on `ColorPickerPanel` would
+                // have dropped, so the panel grew the same flag rather than the flag being lost.
+                ColorPickerPanel(color: Binding(
                     get: { stops[index].color.color },
                     set: { picked in
                         guard stops.indices.contains(index) else { return }
@@ -842,9 +845,9 @@ struct GradientStopsEditor: View {
                         onChange(updated)
                     }
                 ), supportsOpacity: false)
-                .labelsHidden()
-                .padding()
-                .frame(width: 220, height: 100)
+                .frame(width: ColorPickerPanel.popoverSize.width,
+                       height: ColorPickerPanel.popoverSize.height)
+                .accessibilityIdentifier("effectSettings.gradientStop.\(index).picker")
             }
 
             Slider(value: Binding(

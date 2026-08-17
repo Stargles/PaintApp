@@ -1,10 +1,27 @@
 import SwiftUI
 
 /// Procreate-style color picker: a saturation/brightness square, a hue bar, an opacity slider, an
-/// editable hex field, and a full custom palette builder (see Palette.swift / PaletteStore) — all
-/// driving `canvasManager.brushColor` directly. The palette section lets the artist switch between
-/// named palettes, create/rename/duplicate/delete them, tap a swatch to load it, add the current
-/// color, and delete swatches via long-press; the whole library is app-wide and persisted.
+/// editable hex field, and a full custom palette builder (see Palette.swift / PaletteStore). The
+/// palette section lets the artist switch between named palettes, create/rename/duplicate/delete
+/// them, tap a swatch to load it, add the current color, and delete swatches via long-press; the
+/// whole library is app-wide and persisted.
+///
+/// **This is the app's only colour picker.** It used to be one of two: this panel for the brush, and
+/// SwiftUI's stock `ColorPicker` for the canvas background, the value layer's flat colour, an
+/// effect's colour and a gradient stop. The owner reported the pair as a bug ("the canvas color
+/// changer is different than the color changer for the brush… they should be the same"), so the
+/// stock one is gone and this took over its four call sites. What made that possible is the
+/// `Binding<Color>` below: the panel used to write `canvasManager.brushColor` by name, which is
+/// exactly the objection `LayerOptionsPanel.valueColorRow` recorded against reusing it, and a
+/// binding is all that objection actually needed.
+///
+/// **`supportsOpacity` is the one capability the stock control had that a bare swap would have
+/// dropped.** A gradient stop passed `supportsOpacity: false` — a stop's alpha is not a thing the
+/// artist may set, since `Effect.gradientTable` maps luminance to opaque colour — so this panel has
+/// to be able to say the same. When it is false the opacity row is not built, alpha is pinned at 1,
+/// and every other route into the colour (a hex string with 8 digits, a palette swatch saved with
+/// alpha) is flattened to opaque on the way in rather than silently carrying transparency the
+/// control does not show.
 ///
 /// Internally this works in HSBA (hue/saturation/brightness/alpha), the natural space for the square
 /// and hue bar, and derives `Color`/hex from that on every change via `ColorConversion.swift`'s
@@ -12,10 +29,22 @@ import SwiftUI
 /// — unlike the old picker's underlying conversion — tapping a swatch like `.black`/`.white` or
 /// typing a gray hex value can't silently come out wrong depending on light/dark appearance.
 struct ColorPickerPanel: View {
-    @ObservedObject var canvasManager: CanvasManager
+    /// The colour this panel edits. Every write goes through here, so the panel has no idea whether
+    /// it is driving the brush, the paper, a value layer or a gradient stop.
+    @Binding var color: Color
+
+    /// Whether the alpha channel is the artist's to set. See the type's note — false hides the
+    /// opacity row *and* forces every inbound colour opaque.
+    var supportsOpacity: Bool = true
+
     /// The app-wide palette library (see Palette.swift). Shared so edits persist across the panel
     /// being rebuilt each time it's reopened.
     @ObservedObject var paletteStore: PaletteStore = .shared
+
+    /// The frame the four popover call sites give this panel. The dropdown under the top toolbar
+    /// sizes itself (`DrawingView` gives every panel 300 × ≤420); a popover has no such container, and
+    /// four hand-typed frames would be four chances to disagree.
+    static let popoverSize = CGSize(width: 300, height: 420)
 
     @State private var hue: Double = 0
     @State private var saturation: Double = 0
@@ -57,8 +86,21 @@ struct ColorPickerPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black.opacity(0.9))
         .onAppear {
-            applyHSBA(canvasManager.brushColor.hsbaComponents)
-            hexText = canvasManager.brushColor.hexString
+            applyHSBA(color.hsbaComponents)
+            hexText = currentColor.hexString
+        }
+        // Follows the binding when something *else* moves it — the eyedropper picking off the canvas
+        // while the brush panel is open is the case this exists for.
+        //
+        // **The guard is against `currentColor`, not a flag**, and it is exact rather than
+        // approximate: `commitColor` assigns `currentColor` itself, so a write this panel caused
+        // compares equal and returns here. Without it every drag tick would round-trip its own value
+        // through `hsbaComponents` and back, and the RGB leg of that trip is lossy — a hue drag would
+        // fight itself, and a fully desaturated colour would lose the hue `applyHSBA` exists to keep.
+        .onChange(of: color) { _, newValue in
+            guard newValue != currentColor else { return }
+            applyHSBA(newValue.hsbaComponents)
+            if !hexFieldFocused { hexText = currentColor.hexString }
         }
         .alert("Rename Palette", isPresented: renameAlertBinding) {
             TextField("Palette name", text: $renameText)
@@ -132,14 +174,16 @@ struct ColorPickerPanel: View {
                 .frame(height: 24)
                 .padding(.horizontal)
 
-            VStack(alignment: .leading) {
-                Text("Opacity: \(Int(alpha * 100))%")
-                    .foregroundColor(.white)
-                Slider(value: $alpha, in: 0...1)
-                    .accessibilityIdentifier("colorPanel.opacitySlider")
-                    .onChange(of: alpha) { _, _ in commitColor() }
+            if supportsOpacity {
+                VStack(alignment: .leading) {
+                    Text("Opacity: \(Int(alpha * 100))%")
+                        .foregroundColor(.white)
+                    Slider(value: $alpha, in: 0...1)
+                        .accessibilityIdentifier("colorPanel.opacitySlider")
+                        .onChange(of: alpha) { _, _ in commitColor() }
+                }
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
 
             hexRow
                 .padding(.horizontal)
@@ -266,13 +310,18 @@ struct ColorPickerPanel: View {
     /// color since hue is genuinely undefined there; without this, raising saturation/brightness
     /// right after picking a gray swatch would jump to red instead of returning to whatever hue was
     /// active before.
+    ///
+    /// Alpha is forced to 1 when `supportsOpacity` is false — see the type's note. That is done here
+    /// rather than at each caller because this is the single funnel every inbound colour passes
+    /// through (`onAppear`, `onChange`, a hex string, a palette swatch), so an 8-digit hex or a
+    /// swatch saved with alpha cannot smuggle transparency past a control that shows no slider for it.
     private func applyHSBA(_ hsba: (h: Double, s: Double, b: Double, a: Double)) {
         if hsba.s > 0.0001 {
             hue = hsba.h
         }
         saturation = hsba.s
         brightness = hsba.b
-        alpha = hsba.a
+        alpha = supportsOpacity ? hsba.a : 1
     }
 
     /// Parses `hexText` and, if valid, updates the HSBA state (and brushColor) from it. On invalid
@@ -284,8 +333,10 @@ struct ColorPickerPanel: View {
             return
         }
         applyHSBA(parsed.hsbaComponents)
-        hexText = parsed.hexString
-        canvasManager.brushColor = parsed
+        // `currentColor`, not `parsed`: `applyHSBA` may have dropped an alpha this panel does not
+        // offer, and echoing `parsed` back would leave the field showing a colour that was never set.
+        hexText = currentColor.hexString
+        color = currentColor
     }
 
     // MARK: - Palettes
@@ -407,16 +458,19 @@ struct ColorPickerPanel: View {
         renameTarget = palette
     }
 
-    private func selectSwatch(_ color: Color) {
-        applyHSBA(color.hsbaComponents)
-        hexText = color.hexString
-        canvasManager.brushColor = color
+    /// Loads a palette swatch. Goes through `applyHSBA`/`currentColor` rather than assigning the
+    /// swatch straight through, for `applyHexText`'s reason: a swatch saved with alpha must arrive
+    /// opaque in a panel with no opacity row.
+    private func selectSwatch(_ swatch: Color) {
+        applyHSBA(swatch.hsbaComponents)
+        hexText = currentColor.hexString
+        color = currentColor
     }
 
-    /// Pushes the current HSBA state to `canvasManager.brushColor` and, unless the hex field is
-    /// mid-edit, refreshes its displayed text to match.
+    /// Pushes the current HSBA state to the bound colour and, unless the hex field is mid-edit,
+    /// refreshes its displayed text to match.
     private func commitColor() {
-        canvasManager.brushColor = currentColor
+        color = currentColor
         if !hexFieldFocused {
             hexText = currentColor.hexString
         }
