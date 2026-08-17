@@ -10,6 +10,16 @@ Prune it first, before adding the new asks.
 
 ## In flight
 
+## The canvas size that actually matters
+
+**The owner works at 2048×1024, or 1080p — "likely the former" (2026-08-17).** Not 4096².
+
+Every performance number this project has collected was measured at 4096², which is **eight times the
+pixels** of 2048×1024. Any cost that scales with area is therefore overstated by roughly 8× against the
+document the owner actually animates on, and a conclusion drawn at 4K may be about a canvas nobody uses.
+Benchmark at 2048×1024 first and treat 4096² as the stress case, not the baseline. This applies to the
+17 fps entry below, the gallery thumbnail, and the onion skin composite alike.
+
 ## Queued
 
 New this pass (owner, 2026-08-17):
