@@ -469,44 +469,63 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
     /// next time the pencil taps."*
     ///
     /// The colour side of the eyedropper was never wrong — the owner confirmed the pick was correct
-    /// even on a rotated canvas — so this asserts nothing about colour. It asserts the two things
-    /// they actually reported: the picking touch paints nothing, and the touch after it paints.
+    /// even on a rotated canvas — so this asserts almost nothing about colour. It asserts the two
+    /// things they actually reported: the picking touch commits no stroke, and the touch after it
+    /// does.
     ///
-    /// **`sideToolbar.undoButton.isEnabled` is the signal, not a pixel.** A committed stroke pushes
-    /// an undo entry (`HistoryActionLabel.brushStroke`), so the button flipping from disabled to
-    /// enabled *is* "a stroke was committed", read without opening a panel over the canvas and
-    /// without depending on where the paper sits inside its host or what colour anything is. Which
-    /// matters here: a pick on bare paper leaves the brush white, so the stroke in the second half is
-    /// white on white and no pixel check could see it at all.
+    /// **The layer's committed vector-stroke count is the signal, and the obvious alternatives are
+    /// traps.** The default layer kind is vector, so a committed stroke is one entry in the cel's
+    /// display list and `readVectorMarker(...)?.strokes` is an exact count that cannot be argued
+    /// with. (`readLayerStrokeCount` is the raster tier's twin and reads 0 forever on a vector layer
+    /// — it fails this test's own sanity assertion, which is how it was caught.)
+    ///
+    ///  * *The undo button* cannot show a delta: creating a canvas already leaves `canUndo` true, so
+    ///    there is no disabled baseline to grow from (measured on this simulator, 2026-08-17).
+    ///  * *A pixel* looks decisive and is not, and this is worth stating because the first version of
+    ///    this test used one and **passed against the unfixed app**. The colour lands while the
+    ///    picking touch is still down — that is the whole reason `handleEyedropperPress` has to hold
+    ///    the tool revert back — so a stray stroke is painted in the colour that was *just picked*.
+    ///    Pick white off bare paper and the bug paints a white stroke on white paper: invisible,
+    ///    green, wrong. The count does not care what colour anything is.
     ///
     /// **The picking gesture is a press-and-drag, not a tap**, because a drag is what a stroke
-    /// unambiguously is: it crosses `StrokeSampleGate`'s travel threshold and it holds the touch down
-    /// across the pick's off-main-thread composite, which is the window in which the revert used to
-    /// land. A tap would exercise a narrower version of the same path. XCUITest cannot synthesise a
-    /// pencil, so this is a finger — the same path, with pencil-only drawing off (the default).
-    func testTheEyedroppersOwnTouchPaintsNothingAndTheNextTouchPaints() throws {
+    /// unambiguously is: it crosses `StrokeSampleGate`'s travel threshold, and it holds the touch
+    /// down across the pick's off-main-thread composite — the window in which the revert used to
+    /// land, which is the second door `handleEyedropperPress` closes. XCUITest cannot synthesise a
+    /// pencil, so this is a finger: the same path, with pencil-only drawing off (the default).
+    func testTheEyedroppersOwnTouchCommitsNoStrokeAndTheNextTouchDoes() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let layersButton = app.buttons["toolbar.layersButton"]
+        XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
 
-        let undo = app.buttons["sideToolbar.undoButton"]
-        XCTAssertTrue(undo.waitForExistence(timeout: 5))
-        XCTAssertFalse(undo.isEnabled,
-                       "Baseline: a freshly created canvas has nothing to undo")
+        /// Opens the layer panel, reads the active layer's committed-stroke count, closes it again.
+        /// The panel covers the canvas, so it is never left open across a gesture.
+        func committedStrokes() -> Int? {
+            layersButton.tap()
+            defer { layersButton.tap() }
+            return readVectorMarker(app, layerIndex: 0)?.strokes
+        }
+
+        // One ordinary stroke first: it fixes the baseline at a number rather than at "empty", and it
+        // proves in the same breath that a finger drag on this canvas does commit a stroke — without
+        // which every later assertion of "no stroke" would be worth nothing.
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.42), to: CGVector(dx: 0.65, dy: 0.42))
+        XCTAssertEqual(committedStrokes(), 1, "Sanity: a plain drag commits exactly one stroke")
 
         let eyedropper = app.buttons["sideToolbar.eyedropperButton"]
         XCTAssertTrue(eyedropper.waitForExistence(timeout: 5))
         XCTAssertEqual(eyedropper.value as? String, "000000",
-                       "Sanity: the brush starts black, and the paper is white, so a pick is visible")
+                       "Sanity: the brush starts black, and the paper it is about to pick is white")
         eyedropper.tap()
         XCTAssertTrue(eyedropper.isSelected)
 
-        // Down on the paper, dragged across it, lifted. Both ends well inside the drawable band the
-        // rest of this suite draws in.
-        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
-        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.5))
+        // Down on bare paper clear of that stroke, dragged across it, lifted.
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.60))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.60))
         start.press(forDuration: 0.15, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
 
         // The pick resolved — the composite is off the main thread, so it lands a beat after the
@@ -522,7 +541,7 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
                        "A completed pick reverts to the previous tool (Tool.eyedropper)")
 
         // The assertion this test exists for.
-        XCTAssertFalse(undo.isEnabled, """
+        XCTAssertEqual(committedStrokes(), 1, """
             The eyedropper's own touch committed a stroke. That is the owner's report of 2026-08-17: \
             `CanvasView`'s `shouldInteract` left the active layer's host interactive because its tool \
             clause was a hand-maintained exclusion list that never grew to include the eyedropper, so \
@@ -530,12 +549,11 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
             own. See `Tool.paintsOnCanvas` and `ToolLogicTests`.
             """)
 
-        // …and the next touch does paint, which is the half of the report that is a requirement
-        // rather than a bug: the tool is back, the host is live again, and this stroke lands.
-        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.42), to: CGVector(dx: 0.65, dy: 0.42))
-        let undoBecameAvailable = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "isEnabled == true"), object: undo)
-        XCTAssertEqual(XCTWaiter().wait(for: [undoBecameAvailable], timeout: 5), .completed, """
+        // …and the touch after it does paint — the half of the report that is a requirement rather
+        // than a bug, and the proof that the count above was held down by the fix rather than by the
+        // canvas having stopped accepting strokes altogether.
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.48), to: CGVector(dx: 0.65, dy: 0.48))
+        XCTAssertEqual(committedStrokes(), 2, """
             The touch after the pick must draw. If this fails while the assertion above passes, the \
             revert never happened and the artist is stranded in the eyedropper.
             """)
