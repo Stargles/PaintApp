@@ -33,6 +33,9 @@ Prune it first, before adding the new asks.
 
 New this pass (owner, 2026-08-17):
 
+- [ ] **The `try?` in `ProjectStore` that discards a whole cel — do this next** (owner's call,
+      2026-08-17). Full entry in [BUGS.md](BUGS.md); it is a permanent-data-loss path, it is small and
+      self-contained, and it has to land before any text object reaches disk regardless.
 - [ ] **One colour picker, not two.** The canvas colour changer differs from the brush's; they should be
       the same control. If a second implementation exists, delete it rather than leaving it unreferenced.
 - [ ] **An eyedropper on the left sidebar, below the opacity slider.** Confirmed with the owner
@@ -57,10 +60,11 @@ New this pass (owner, 2026-08-17):
       row of dots beneath them.
       **Linked opacity is on by default** — the owner's emphasis: with it on the sliders move together,
       linearly with each other, so dragging one drags the rest. Unlinking frees them individually.
-      The dots are ToonSquid's **out-of-pegs**: each temporarily offsets that skin via transform
+      The dots are ToonSquid's **out-of-pegs** — each temporarily offsets that skin via transform
       handles, the centre one toggles them all, and the onion button turns red while any offset is
-      active because the skins are no longer in true position. **Confirm with the owner whether
-      out-of-pegs is in scope** — it is a transform surface of its own and the screenshot does not say.
+      active. **Out of scope for now** (owner, 2026-08-17): build the panel without them. It is a
+      per-skin transform surface with its own handles and undo behaviour, and leaving it out roughly
+      halves this feature. Do not design the panel in a way that forecloses adding the row later.
 - [ ] **Lasso flood fill**, as a *type* option under the existing flood fill tool, behaving like Clip
       Studio Paint's. Two distinct requirements, and the second is the one that makes it different from
       an ordinary fill: it **bridges gaps smartly**; and **the only boundary is the outer encirclement
