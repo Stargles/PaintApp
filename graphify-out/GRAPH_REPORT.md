@@ -1,7 +1,7 @@
 # Graph Report - PaintApp-compperf  (2026-08-16)
 
 ## Corpus Check
-- 180 files · ~510,012 words
+- 180 files · ~510,247 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f1578b90`
+- Built from commit: `d1d67cdb`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -71,7 +71,7 @@
 - CanvasManager
 - BackupManagerLogicTests
 - CanvasNotice
-- CodingKeys
+- command
 - InterpolationModelLogicTests
 - PlaybackBoundsCharacterizationTests
 - CutOutcome
@@ -286,8 +286,8 @@ Cohesion: 0.14
 Nodes (8): PerfBaselineTests, Bool, CanvasManager, Double, Int, String, UInt64, VectorStroke
 
 ### Community 13 - "VectorEraserHybridLogicTests"
-Cohesion: 0.14
-Nodes (13): Gesture, diagonalCut, edgeShave, .label, .samples, squareCut, Bool, Double (+5 more)
+Cohesion: 0.13
+Nodes (14): VectorStroke, Gesture, diagonalCut, edgeShave, .label, .samples, squareCut, Bool (+6 more)
 
 ### Community 14 - "AnimationTimeline"
 Cohesion: 0.05
@@ -338,8 +338,8 @@ Cohesion: 0.08
 Nodes (11): AlphaMask, .isActive, Bool, Int, MaskParityLogicTests, .side, Bool, CanvasManager (+3 more)
 
 ### Community 26 - "PaintUITestCase"
-Cohesion: 0.10
-Nodes (11): PaintUITestCase, Bool, CGVector, Int, String, XCUIApplication, XCUIElement, InterpolationWorkflowUITests (+3 more)
+Cohesion: 0.11
+Nodes (10): PaintUITestCase, Bool, Int, String, XCUIApplication, InterpolationWorkflowUITests, TimelineGestureUITests, UndoAndLayerHistoryUITests (+2 more)
 
 ### Community 27 - "StrokeCanvasView"
 Cohesion: 0.09
@@ -355,14 +355,14 @@ Nodes (6): EffectMultiPassLogicTests, Double, Int, SIMD4, String, UInt8
 
 ### Community 30 - ".drawLine"
 Cohesion: 0.12
-Nodes (9): FillContainmentUITests, FillLiveAdjustUITests, FillUndoRedoUITests, Double, TimeInterval, UInt8, EraserAndPersistenceUITests, ShapeRecoveryUITests (+1 more)
+Nodes (11): FillContainmentUITests, FillLiveAdjustUITests, FillUndoRedoUITests, CGVector, Double, TimeInterval, UInt8, XCUIElement (+3 more)
 
 ### Community 31 - "UIKit"
 Cohesion: 0.06
 Nodes (10): CoreGraphics, Darwin, Foundation, Notification.Name, AppVersion, .versionString, String, ThumbnailRenderer (+2 more)
 
 ### Community 32 - "VectorEraserLogicTests"
-Cohesion: 0.08
+Cohesion: 0.09
 Nodes (9): StaticString, String, UInt, ClosedRange, StaticString, UInt, VectorStroke, VectorEraserLogicTests (+1 more)
 
 ### Community 33 - "CompositorMetalEngine"
@@ -398,8 +398,8 @@ Cohesion: 0.16
 Nodes (10): ProjectSaveLogicTests, Bool, CanvasManager, Cel, Set, StaticString, String, UInt (+2 more)
 
 ### Community 41 - ".launchIntoEditor"
-Cohesion: 0.17
-Nodes (4): BlendModesAndCompositorUITests, LayerPanelUITests, XCUIApplication, UndoAndLayerHistoryUITests
+Cohesion: 0.18
+Nodes (3): BlendModesAndCompositorUITests, LayerPanelUITests, XCUIApplication
 
 ### Community 42 - "ActionRecorder"
 Cohesion: 0.16
@@ -410,8 +410,8 @@ Cohesion: 0.07
 Nodes (18): bendRatio(), cellSize(), coverage(), cShape(), polyline(), Int, CGPoint, .length (+10 more)
 
 ### Community 44 - "ARAPLogicTests"
-Cohesion: 0.08
-Nodes (16): ARAPInterpolation, Interpolator, Options, Bool, Group, MotionGrouping, Options, Int (+8 more)
+Cohesion: 0.07
+Nodes (23): ARAPInterpolation, Interpolator, Options, Bool, Group, MotionGrouping, Options, Int (+15 more)
 
 ### Community 45 - "XCTestCase"
 Cohesion: 0.10
@@ -435,7 +435,7 @@ Nodes (6): .interpolationTarget, LayerTransform, UIImage, CanvasManager, Bool, I
 
 ### Community 50 - ".report"
 Cohesion: 0.09
-Nodes (34): CustomStringConvertible, UUID, Backdrop, fill, image, none, Gesture, diagonalCut (+26 more)
+Nodes (33): CustomStringConvertible, UUID, Backdrop, fill, image, none, Gesture, diagonalCut (+25 more)
 
 ### Community 51 - "SaveSnapshot"
 Cohesion: 0.15
@@ -457,9 +457,9 @@ Nodes (7): UUID, BackupManagerLogicTests, Int, String, UInt8, URL, UUID
 Cohesion: 0.06
 Nodes (26): Alignment, Kind, CanvasNotice, .actionTitle, .duration, .message, Kind, hiddenLayer (+18 more)
 
-### Community 56 - "CodingKeys"
+### Community 56 - "command"
 Cohesion: 0.29
-Nodes (7): CodingKeys, guideIDs, localEdits, mode, references, spacing, t
+Nodes (7): command, deploy, resign, description, template, description, template
 
 ### Community 57 - "InterpolationModelLogicTests"
 Cohesion: 0.09
@@ -554,16 +554,16 @@ Cohesion: 0.16
 Nodes (12): .panelView, CheckerboardPattern, .body, EraserSettingsPanel, .body, .preview, .vectorModePicker, CanvasManager (+4 more)
 
 ### Community 80 - "agent"
-Cohesion: 0.07
-Nodes (28): agent, orchestrator, worker-integration, worker-test, worker-ui, command, deploy, resign (+20 more)
+Cohesion: 0.08
+Nodes (25): agent, orchestrator, worker-integration, worker-research, worker-test, worker-ui, model, description (+17 more)
 
 ### Community 81 - "PaletteColor"
 Cohesion: 0.16
 Nodes (16): Palette, PaletteColor, .color, PaletteStore, .palettes, .selectedIndex, .selectedPalette, .selectedPaletteID (+8 more)
 
 ### Community 82 - "bash"
-Cohesion: 0.13
-Nodes (28): worker-bugfix, worker-feature, worker-research, gh *, git *, xcodebuild *, permission, bash (+20 more)
+Cohesion: 0.16
+Nodes (24): worker-bugfix, worker-feature, gh *, git *, xcodebuild *, permission, bash, edit (+16 more)
 
 ### Community 83 - "TimedSample"
 Cohesion: 0.18
@@ -582,7 +582,7 @@ Cohesion: 0.15
 Nodes (19): Accessory, KeyPath, StrokeSettingsPanel, .body, .brush, .grainDepthBinding, .opacityBinding, .presetPicker (+11 more)
 
 ### Community 88 - "GuidePath"
-Cohesion: 0.23
+Cohesion: 0.21
 Nodes (5): GuidePath, .end, .start, CGVector, TimeInterval
 
 ### Community 89 - "FloatingPieceOverlayView"
@@ -654,7 +654,7 @@ Cohesion: 0.16
 Nodes (21): os, BlendMode, .coreGraphicsBlendMode, .isNonSeparable, clipColor(), colorBurnChannel(), colorDodgeChannel(), Compositor (+13 more)
 
 ### Community 106 - "SandwichCompositingUITests"
-Cohesion: 0.25
+Cohesion: 0.26
 Nodes (9): SandwichCompositingUITests, .crossing, Bool, CGVector, Int, String, TimeInterval, UInt8 (+1 more)
 
 ### Community 107 - "PerfMonitor"
@@ -786,7 +786,7 @@ Cohesion: 0.23
 Nodes (12): CoreGraphicsCompositor, CGImage, CGRect, Double, UIImage, UInt8, Attempt, image (+4 more)
 
 ### Community 141 - "SpacingChart"
-Cohesion: 0.19
+Cohesion: 0.21
 Nodes (3): SpacingChart, .curve, .draggable
 
 ### Community 142 - "TransformOverlaySupport.swift"

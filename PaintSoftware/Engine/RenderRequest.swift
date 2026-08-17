@@ -431,6 +431,14 @@ extension CanvasManager {
         // cache that was going to thrash anyway; four is where that knee sits on the 3 GB device this
         // was sized against. Nothing here is reached by a document Core Animation can still draw
         // flat — `isSandwichEngaged` means a blend, a mask, an effect or a node is already present.
+        //
+        // **Applied whichever backend the tree prefers, and that is deliberate rather than an
+        // oversight.** The count above is GPU textures, but the CPU reference is not cheap at this
+        // size either: six layers at 2048² peaked at 381.3 MB through CoreGraphics on the owner's iPad
+        // (`testCompositeCostAndMemoryAtCanvasResolution`), and it is per-layer-linear in time — 32.0
+        // ms a composite there, so roughly 128 ms at 4096², times three for a rebuild. Gating the cap
+        // on `prefersGPUCompositing` would leave the CPU path uncapped at exactly the canvas size
+        // where it is most expensive, to preserve sharpness on the frames least able to afford it.
         let wanted = renderResolution.renderSize(for: canvasSize)
         let textures = tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
         let renderSize = CompositorBudget.affordableSize(for: wanted, textures: textures)

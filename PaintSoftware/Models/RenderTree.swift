@@ -463,6 +463,15 @@ extension Array where Element == RenderNode {
     /// grade anywhere in the tree sends the whole composite to Metal, whatever the layer count; no
     /// plausible layer threshold could outweigh a factor of seventy-five.
     ///
+    /// **The one case this rule knowingly gets wrong, written down rather than left to be
+    /// rediscovered: a cold composite of four-or-more plain layers.** Every number above is warm,
+    /// because warm is what the live canvas is. `ProjectStore`'s thumbnail is the opposite — it
+    /// composites once per save with nothing cached, and cold Metal loses (108.0 ms against
+    /// CoreGraphics' 64.7 ms for the six-layer rebuild) because it pays every upload. Teaching this
+    /// predicate about warmth would make it depend on engine state a tree cannot see, and would flip
+    /// a document's backend mid-session as a cache filled; one slower composite per save, off the
+    /// main thread, is the cheaper mistake. A grading thumbnail still wins hugely either way.
+    ///
     /// **What this does not decide is whether the composite fits.** `CompositorMetalEngine` still
     /// refuses a working set over `CompositorBudget.textureBudgetBytes` and falls back; this predicate
     /// only says which backend to *prefer*. The two are separate questions and answering them in one
