@@ -46,6 +46,37 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
 
     private var trackedTouch: UITouch?
 
+    /// **`requiresExclusiveTouchType = false` is what makes the pen-plus-finger snap reachable at
+    /// all, and it is the whole of the fix.** UIKit's default is `YES`, and the SDK header states
+    /// the consequence outright: *"once it receives a touch of a certain type, it will ignore new
+    /// touches of other types, until it is reset to `UIGestureRecognizerStatePossible`."*
+    ///
+    /// This recognizer takes the pencil at touch-down and holds it for the length of the stroke, so
+    /// with the default every `.direct` touch that lands afterwards — the snapping finger, and a
+    /// palm alike — is filtered out **before binding**, not declined afterwards. That distinction is
+    /// exactly what the owner's 2026-08-17 capture shows and what three sessions of reading could
+    /// not: the finger's `began` line carries `gr: 6` naming only `canvas.twoFingerTap`,
+    /// `canvas.threeFingerTap` and system recognizers, while the pencil's carries `gr: 15`; and
+    /// `ignore(_:for:)` above — which logs every refusal — is silent for that finger. Never bound,
+    /// never refused. The recognizers that *did* get it are precisely the ones holding no pencil
+    /// touch at the time; every one that was holding the pencil (this one, `canvas.touchCounter`,
+    /// pan/pinch/rotation, and Apple's own `PKTextInputDrawingGestureRecognizer`) was excluded.
+    /// Touch **type** is the only axis that partitions those 15 that way.
+    ///
+    /// `UIView.isMultipleTouchEnabled` (set in `StrokeCanvasView.init`) was a real and necessary
+    /// prerequisite — without it the second touch is not delivered to the view at all — but it is
+    /// upstream of this and could not have been sufficient, because type exclusivity is decided per
+    /// *recognizer*, not per view. That is why the fix shipped before this one changed nothing on
+    /// device.
+    ///
+    /// Turning it off does not widen what this class accepts: `touchesBegan` still refuses a finger
+    /// that would interrupt a pencil stroke, by type, and only counts one while a shape is
+    /// following. It widens what this class is *offered*, which is the prerequisite for either.
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        requiresExclusiveTouchType = false
+    }
+
     /// Non-pencil touches that joined this sequence after `trackedTouch` and are being ignored rather
     /// than failing the stroke. Held so their *lift* is reported too — `touchesEnded` below returns
     /// early for any touch that is not the tracked one, so without this set a finger going down would

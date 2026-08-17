@@ -304,6 +304,10 @@ struct CanvasView: UIViewRepresentable {
         /// second source `refreshShapeConstraint` folds in. See
         /// `StrokeGestureRecognizer.onAccompanyingFingersChanged` for why there are two.
         private var strokeAccompanyingFingers = 0
+        /// Fingers already on the glass at the moment a shape started following the pen — subtracted
+        /// from the container counter so a *resting hand* cannot snap a shape nobody asked to snap.
+        /// See `currentAccompanyingFingers()`.
+        private var shapeFingerBaseline = 0
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
@@ -1752,11 +1756,12 @@ struct CanvasView: UIViewRepresentable {
 
             canvasManager.beginInteractiveShape(shape, samples: samples)
             updateShapeOverlay()
-            // A snapping finger may already have been down before the timer fired, so re-read both
-            // sources. Only the container's counter can be carrying one: this line is the moment
-            // `shouldIgnoreAdditionalTouches` *starts* answering true, and a finger that arrived
-            // before it did took the other branch and failed the stroke outright, so the stroke
-            // recognizer's own count is necessarily zero here.
+            // Whatever is on the glass *now* is the hand that drew the shape, not a request to snap
+            // it. This is the moment `shouldIgnoreAdditionalTouches` starts answering true, so it is
+            // also the only moment at which "already resting" and "joined afterwards" are
+            // distinguishable — see `currentAccompanyingFingers()`. Seeded before the refresh below,
+            // which would otherwise engage the snap on a palm the instant the shape appeared.
+            shapeFingerBaseline = touchCountRecognizer?.fingerCount ?? 0
             refreshShapeConstraint()
         }
 
@@ -2144,6 +2149,30 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: - Two-finger snap constraint
 
+        /// The one expression both the engage and the release predicates read, so they cannot drift
+        /// apart — `releaseShapeConstraintAfterCurrentEvent` needs the exact negation of the engage
+        /// test and used to restate it by hand.
+        ///
+        /// **Why the container's count is baselined and the stroke recognizer's is not.** Now that
+        /// `TouchCountRecognizer.requiresExclusiveTouchType` is off, the counter finally sees fingers
+        /// during a pencil stroke — *all* of them, including a hand that was already resting when the
+        /// shape formed. That hand is not the gesture; the gesture is "add a finger". Subtracting the
+        /// count captured at `beginInteractiveShape` turns an absolute count into "how many joined
+        /// since", which is what the owner actually describes. `StrokeGestureRecognizer`'s count needs
+        /// no such correction: it only admits fingers that arrive *while* a shape is following (see
+        /// `shouldIgnoreAdditionalTouches`), so a resting palm is already excluded there by
+        /// construction, and it is that source — not this one — that carries the owner's gesture.
+        ///
+        /// The baseline ratchets **down** and never up. Without that, a palm that lifts mid-gesture
+        /// would leave a permanent 1 subtracted and the real finger would never reach the threshold —
+        /// a snap that silently stops working for the rest of the shape.
+        private func currentAccompanyingFingers() -> Int {
+            let counterFingers = touchCountRecognizer?.fingerCount ?? 0
+            if counterFingers < shapeFingerBaseline { shapeFingerBaseline = counterFingers }
+            let joined = max(0, counterFingers - shapeFingerBaseline)
+            return max(joined, strokeAccompanyingFingers)
+        }
+
         /// A finger joining a shape the **pen is still drawing** means the snap constraint: rectangle
         /// to square, oval to circle, line to nearest 15°.
         ///
@@ -2175,16 +2204,25 @@ struct CanvasView: UIViewRepresentable {
         /// that cannot be starved while the pen is drawing, because it is the thing the pen is
         /// driving. The snap engages if either sees a finger. Which of them did is recorded, so one
         /// capture from the owner settles the open question instead of another round of reasoning.
+        ///
+        /// **That capture came back, and neither source had seen the finger — because neither had
+        /// been offered it.** `UIGestureRecognizer.requiresExclusiveTouchType` defaults to `true`, so
+        /// a recognizer holding the pencil is closed to `.direct` touches until it resets; both of
+        /// these were holding the pencil. It is turned off in both recognizers' initialisers now, and
+        /// that — not the predicate, and not `isMultipleTouchEnabled` alone — is what makes either
+        /// source able to see the finger at all. Keeping two sources is still right: they fail in
+        /// different ways, and the recorded line says which one fired.
         private func refreshShapeConstraint() {
             let counterTotal = touchCountRecognizer?.activeCount ?? 0
             let counterFingers = touchCountRecognizer?.fingerCount ?? 0
-            let fingers = max(counterFingers, strokeAccompanyingFingers)
+            let fingers = currentAccompanyingFingers()
             // Not debug cruft; it costs one static `Bool` load when off. Both sources are named
             // separately on purpose — `counter:2/1 stroke:0` and `counter:1/0 stroke:1` are the two
             // answers to "is the container recognizer being starved", and they differ in one line.
             ActionRecorder.ifRecording {
                 $0.model("shape.touches",
-                         "counter:\(counterTotal)/\(counterFingers) stroke:\(strokeAccompanyingFingers) "
+                         "counter:\(counterTotal)/\(counterFingers) base:\(shapeFingerBaseline) "
+                         + "stroke:\(strokeAccompanyingFingers) joined:\(fingers) "
                          + "following:\(canvasManager.isShapeFollowingFinger)")
             }
             guard canvasManager.isShapeFollowingFinger, fingers >= 1 else {
@@ -2220,8 +2258,7 @@ struct CanvasView: UIViewRepresentable {
             guard isShapeConstraintEngaged else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                let fingers = max(self.touchCountRecognizer?.fingerCount ?? 0,
-                                  self.strokeAccompanyingFingers)
+                let fingers = self.currentAccompanyingFingers()
                 let stillSnapping = self.canvasManager.isShapeFollowingFinger && fingers >= 1
                 guard !stillSnapping else { return }
                 self.setShapeConstraint(false)

@@ -104,7 +104,12 @@ final class StrokeCanvasView: UIView {
         shapeFollowingTouch = true
     }
 
-    let strokeRecognizer = StrokeGestureRecognizer()
+    /// Constructed through `init(target:action:)` rather than the bare `init()` so the subclass's
+    /// own initialiser — which is where `requiresExclusiveTouchType` is turned off, and that flag is
+    /// the pen-plus-finger snap's entire fix — provably runs. Swift only inherits a superclass
+    /// initialiser under conditions this class's override changes; passing the arguments removes the
+    /// question. The recognizer reports through closures, so both arguments are nil by design.
+    let strokeRecognizer = StrokeGestureRecognizer(target: nil, action: nil)
     private let imageView = UIImageView()
     private var strokeBeforeSnapshot: (image: UIImage?, count: Int)?
     /// The last position actually stamped, so `stampPath(to:)` lays down evenly-spaced stamps

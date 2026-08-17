@@ -35,6 +35,26 @@ final class TouchCountRecognizer: UIGestureRecognizer {
         cancelsTouchesInView = false
         delaysTouchesBegan = false
         delaysTouchesEnded = false
+        // **Without this the count is a lie the moment a pencil is involved.** UIKit defaults
+        // `requiresExclusiveTouchType` to `YES`, and the SDK header says what that costs: *"once it
+        // receives a touch of a certain type, it will ignore new touches of other types, until it is
+        // reset."* This recognizer takes the pencil at touch-down and then never leaves `.possible`
+        // — so it is never reset while the pen is down, and every finger that joins the sequence is
+        // filtered out before it is ever offered here.
+        //
+        // The owner's 2026-08-17 capture is unambiguous: `counter:1/0` while the pen draws,
+        // `counter:1/0` still when the shape starts following, no `shape.touches` line at all when
+        // the finger lands 0.48 s later, and `counter:0/0` when the *pencil* lifts while the finger
+        // is still on the glass. A recognizer whose only job is counting touches was counting one of
+        // two. `ignore(_:for:)` above is silent throughout, because this filtering happens at
+        // binding, not at refusal — see `StrokeGestureRecognizer`'s own initialiser for the full
+        // reading of that capture.
+        //
+        // Counting a resting palm is the price, and it is paid in `Coordinator
+        // .currentAccompanyingFingers()`, which subtracts the fingers already down when the shape
+        // began following rather than narrowing anything here. This recognizer must keep reporting
+        // the truth; deciding which fingers *mean* something is not its job.
+        requiresExclusiveTouchType = false
     }
 
     /// Instrumentation only — behaviour is `super`'s, unchanged. See the twin in
