@@ -86,9 +86,8 @@ XCUITest**: the rewritten `touchesBegan` branch only runs when a second touch ar
 event, and every synthetic two-finger gesture in this repo has been measured arriving in a single one.
 So the suite could not have caught a regression here either — its value is the surrounding surface,
 which is clean. The two failures (`ModePickerUITests` menu tap, and the 189 s
-`testInterpolateModeEndToEndFromGestureToScrub`) are both contention-shaped and the latter already
-failed-then-passed-in-isolation earlier this session; **re-run them isolated on a quiet machine before
-believing either.**
+`testInterpolateModeEndToEndFromGestureToScrub`) were re-run isolated on an erased device: **both
+passed, 0 failures.** Environmental. **The device is the only real test of this fix.**
 
 ## Process, learned expensively here
 
@@ -99,7 +98,11 @@ believing either.**
 - **Three items in flight at most** (TODO.md). The lock bounds the machine; nothing bounds the plan but
   this rule.
 - **Agents park waiting on test runs without committing.** Read their worktree directly — `git log`,
-  `git status`, the log file — instead of waiting for a resume round-trip.
+  `git status`, the log file — instead of waiting for a resume round-trip. **Read, do not write.**
+  Committing into a live agent's worktree races with its own commit; it happened here (`1a6e05f`), the
+  agent correctly refused to assume the unexplained commit was benign and spent a cycle verifying its
+  diff and parent. Nothing was lost, but the next one might be. If work must be secured, message the
+  agent to commit it.
 - **Agents do not delete their simulators even when told to.** Sweep both device sets yourself;
   clones live in `~/Library/Developer/XCTestDevices` and `xcrun simctl list devices | grep -i clone`
   **cannot see them** (fixed in CLAUDE.md this session).
