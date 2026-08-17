@@ -61,22 +61,45 @@ reads. The fix was `OnionSkinRasterCache` — reduce each cel once per version, 
 | 10 skins | 1302.2 ms | **136.9 ms** |
 | peak memory | ~170 MB | **27 MB** |
 
-**Two things are open on it:**
+**The branch is complete and green at `f09f1bc`** — 1123 / 1120 passed / 0 failed / 3 skipped, working
+tree clean. Nothing is half-built. Four things to know:
 
-1. **`skins5` (153.9 ms) measured LARGER than `skins10` (136.9 ms) on device.** Non-monotonic, so it
-   cannot be the warm draw — the simulator measured it cleanly linear. `sourceMiss` is 154.5 ms,
-   suspiciously close to the `skins5` figure, so the likely cause is cache-miss ordering contaminating
-   one measurement. **This blocks merge**: not because the headline numbers are wrong, but because the
-   test would report something other than what its name claims, and the next session would read those as
-   warm draws. Same family as a green suite that ran nothing.
-2. **The owner has since asked for resolution to be a *setting*** — "default half resolution, option to
-   make it full or quarter, etc on the onion skin menu" — replacing the fixed 1024 px cap. The wrinkle,
-   already passed to the agent: the readability cliff is **absolute** (512 px fails visibly, 768 is the
-   edge, 1024 is one clear step above), so a pure fraction-of-canvas setting gives unreadable skins on a
-   small document at the default. **Floor the fraction** at the readable size.
+**1. Resolution is now a setting, and Full is a trap.** Full/Half/Quarter, default Half, wired through
+the panel to both cache keys. The fraction is applied and then raised to a `readableFloorEdge = 768`, so
+Half of a 1024² canvas gives 768² rather than the 512² that failed the readability sweep. Measured on
+the simulator at 4096²:
 
-Check that worktree for uncommitted work before anything else; it was asked to commit as this session
-ended, and it has 8 commits plus possible WIP.
+| | size | 2 skins (default) | 10 skins |
+|---|---|---|---|
+| Full | 4096² | 262 ms | **1495 ms** |
+| **Half** | 2048² | **61 ms** | 380 ms |
+| Quarter | 1024² | 15 ms | 93 ms |
+
+**Full at ten skins is worse than the original broken implementation was.** Whether that needs a warning
+in the UI is the owner's call and is unanswered. Note also the default costs 61 ms, not single digits —
+Quarter is the cheap one. At 2048×1024 divide by roughly eight.
+
+**2. The `skins5 > skins10` non-monotonicity is explained, and it was not what I guessed.** Not
+cache-miss ordering — that is ruled out by reading: the three `skinsN` figures call
+`OnionSkinFrame.composite` directly on frames built from one image made before the loop, `composite` is
+pure and touches no cache, and `OnionSkinRasterCache` is not reached until `sourceMiss`. The reading is
+a **cold CPU**: `skins1` is ~5 ms, far too short a burst for iOS to raise the clock, so `skins5` was the
+first sustained work and paid the ramp. The harness now warms up, times without the sampler thread,
+takes the minimum of five, and reports `skins5Cold`. **If the device does not confirm it, the new
+monotonicity assertion fails the test rather than printing a misleading number** — which is the right
+outcome either way.
+
+**3. Not written down anywhere else: the device/simulator ratio for this workload is ~1.1×.** That is
+how to project every number above onto the owner's iPad.
+
+**4. Also undocumented: Half + 10 skins + 4K thrashes.** Only ~3 cached sources fit against a 10-skin
+window, so every rebuild pays ~7 misses. Quarter is the setting for that combination.
+
+**Left to do**, in order: device re-run of both perf tests · the owner's ruling on whether Full needs a
+warning · rebase onto `00ae6fb` or later · merge. The agent's `CanvasView.swift` conflict surface is
+exactly two places — `updateUIView`'s call order (it moved `updateOnionSkin()` up deliberately, so
+"In Front" out-ranks `sandwichAbove` but sits below the chrome overlays) and `makeUIView`'s subview
+construction. A trial rebase was clean.
 
 **Drawings vs Frames is settled** — the owner confirmed the semantics (Drawings steps by drawing
 ignoring hold length; Frames steps by timeline frame, so several slots can resolve to the same drawing).
