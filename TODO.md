@@ -20,12 +20,7 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- [ ] **The app-switch triple save** — `tmp/appswitch`. `ContentView`'s scene-phase guard never looks
-      at where the transition came *from*, so SwiftUI passing `.inactive` on both legs fires
-      `saveIfNeeded()` three times per app switch, one of them on the return leg while the artist is
-      watching. Fixed by a pure `ScenePhaseSaveGate.shouldSave(from:to:)` phrased as "leaving
-      `.active`" rather than an allow-list, so an unrecognised phase still saves — missing a save
-      loses work, an extra one only costs a stall. Green, +5 tests over the full transition matrix.
+_Nothing parked._
 
 ## Queued
 
@@ -87,6 +82,21 @@ Carried over:
       tile; already in BUGS.md.
 
 ## Done this pass
+
+- **The app-switch triple save.** The owner's *"returning from another app freezes for a few seconds"*,
+  and their own answer is what found it: asked whether the app comes back where they left it or on the
+  Gallery, they said *"exactly where I left off"*, which rules out a jetsam kill because nothing in this
+  app restores state — a real relaunch provably lands on the Gallery. So it was never iOS; it was
+  `ContentView`'s scene-phase guard never looking at where the transition came *from*. SwiftUI passes
+  `.inactive` on both legs, so one round trip fired `saveIfNeeded()` three times, the last of them on
+  the way back in while the artist watched. `ScenePhaseSaveGate.shouldSave(from:to:)` is phrased as
+  "leaving `.active`" rather than an allow-list of the two known departures, deliberately: missing a
+  save loses work where an extra one only costs a stall, so an unrecognised phase still saves.
+  Two things found on the way that make the size of it clear. **`saveIfNeeded` has no dirty check at
+  all** — the "IfNeeded" is a guard on the *screen*, and `writePackage` stages a fresh directory so it
+  cannot reuse a prior file even in principle. All three saves did the full job. And every save mints a
+  rotating `auto-` backup slot, five deep, so **one app switch was consuming three of the artist's five
+  restore points, two of them byte-identical.**
 
 - **The performance investigation, and [PERFORMANCE.md](PERFORMANCE.md).** Ten read-only agents over
   the drawing hot path, compositing, memory, the app-switch freeze, timeline/playback and
