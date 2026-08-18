@@ -73,19 +73,30 @@ final class LassoFillLogicTests: XCTestCase {
     /// Runs a lasso fill exactly as `beginInteractiveLassoFill` does: rasterize the loop, pick the
     /// seed colour from what the loop encircles, and hand both to the session.
     private func lassoFill(_ reference: [UInt8], loop: CGPath,
-                           gapRadius: Float = 8, threshold: Float = 0.15) throws -> [UInt8] {
+                           gapRadius: Float = 8, threshold: Float = 0.15,
+                           canvasEdgeIsWall: Bool = true) throws -> [UInt8] {
         let mask = try XCTUnwrap(LassoFillMask.rasterize(path: loop, width: Self.w, height: Self.h))
         let engine = try XCTUnwrap(MetalFillEngine.shared)
         let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: Self.w, height: Self.h,
                                                        lassoMask: mask))
         let seed = LassoFillMask.dominantColour(referenceRGBA: reference, mask: mask, width: Self.w, height: Self.h)
         return try XCTUnwrap(session.fill(seedX: 0, seedY: 0, seedColor: seed, threshold: threshold,
-                                          gapRadius: gapRadius, edgeOverlap: 0, canvasEdgeIsWall: true,
+                                          gapRadius: gapRadius, edgeOverlap: 0,
+                                          canvasEdgeIsWall: canvasEdgeIsWall,
                                           fillColor: SIMD4<Float>(1, 0, 0, 1)))
     }
 
     private func isFilled(_ region: [UInt8], _ x: Int, _ y: Int) -> Bool {
         region[(y * Self.w + x) * 4 + 3] > 0
+    }
+
+    /// The fraction of the canvas the artist would actually see painted, 0…1. Every assertion above
+    /// samples individual pixels, which is why "the entire canvas gets filled" could ship: no test
+    /// asked *how much*.
+    private func filledFraction(_ region: [UInt8]) -> Double {
+        var painted = 0
+        for i in 0..<(Self.w * Self.h) where region[i * 4 + 3] > 0 { painted += 1 }
+        return Double(painted) / Double(Self.w * Self.h)
     }
 
     // MARK: - "all inner lines are filled over"
@@ -155,6 +166,11 @@ final class LassoFillLogicTests: XCTestCase {
     /// into — the consequence of the outer edge being the artwork rather than the loop, and the one
     /// place the tool can surprise. Pinned so the behaviour is a decision on record rather than a
     /// discovery, and named for what the artist should do instead.
+    ///
+    /// **Superseded 2026-08-18 and kept only until the fix lands.** The owner, on being shown it:
+    /// *"It is a wall, but ideally the fill shouldnt even touch the loop at all, because it should be
+    /// bounded by whatever shape is inside the fill."* The loop is a hard wall, so this test asserts
+    /// the wrong thing and goes with the behaviour change — it is here now so that change is a diff.
     func testALoopThatPokesOutsideTheShapeFloodsWhatItPokesInto() throws {
         // Two thirds inside the box, one third out through the top wall.
         let region = try lassoFill(box(breakInRightWall: 0), loop: rectangleLoop(CGRect(x: 55, y: 10, width: 12, height: 30)))
@@ -224,6 +240,114 @@ final class LassoFillLogicTests: XCTestCase {
                                                 mask: [UInt8](repeating: 0, count: Self.w * Self.h),
                                                 width: Self.w, height: Self.h)
         XCTAssertEqual(seed, .zero)
+    }
+
+    // MARK: - "When i circle something the entire canvas gets filled" (owner, 2026-08-18)
+
+    /// **The reported bug, characterized.** Everything above samples single pixels; nothing measured
+    /// *how much* of the canvas ends up painted, which is exactly why this shipped.
+    ///
+    /// The artwork here is a **perfectly closed box** — the region is enclosed, so "the paper has no
+    /// outside" cannot be the explanation. The only difference from
+    /// `testTheRegionGrowsFromTheLoopOutToTheArtworksOwnEdge` is which side of the outline the artist
+    /// drew their loop on, and it takes the fill from a third of the canvas to all of it.
+    ///
+    /// This is the whole finding: *"circle something"* means drawing **around** it, and a loop drawn
+    /// around a shape necessarily encircles some of the paper outside that shape. `floodInitFromLasso`
+    /// seeds every open pixel under the loop, so that outside paper is a seed, and the flood runs from
+    /// it across the entire page. The gesture the tool is named for is the gesture that breaks it.
+    func testCirclingAClosedShapeFromOutsideItFillsTheEntireCanvas() throws {
+        let region = try lassoFill(box(breakInRightWall: 0),
+                                   loop: rectangleLoop(CGRect(x: 8, y: 8, width: 112, height: 112)))
+
+        // Characterization: current behaviour, so the fix shows up as a diff here.
+        XCTAssertGreaterThan(filledFraction(region), 0.99,
+                             "Today the whole page is painted — the reported bug")
+        XCTAssertTrue(isFilled(region, 61, 61), "Inside the box")
+        XCTAssertTrue(isFilled(region, 4, 4), "…and the far corner, outside both the box and the loop")
+    }
+
+    /// The same closed box, the same tool, the loop moved *inside* the outline: a third of the canvas.
+    /// Asserting the pair side by side is what makes the mechanism unmistakable — the artwork did not
+    /// change, the flood's escape route did.
+    func testTheSameClosedShapeLassoedFromInsideFillsOnlyTheShape() throws {
+        let region = try lassoFill(box(breakInRightWall: 0),
+                                   loop: rectangleLoop(CGRect(x: 55, y: 55, width: 12, height: 12)))
+
+        let fraction = filledFraction(region)
+        XCTAssertGreaterThan(fraction, 0.20, "The box's interior is filled")
+        XCTAssertLessThan(fraction, 0.50, "…and nothing beyond it")
+        XCTAssertFalse(isFilled(region, 4, 4), "The page outside the box is untouched")
+    }
+
+    /// A stroke that encloses nothing — line art mid-drawing, which is most of the time an artist is
+    /// drawing. There is no silhouette for the region to grow out to, so "grow to the artwork's own
+    /// edge" and "fill the canvas" are the same instruction. Lassoing *inside* cannot help here: there
+    /// is no inside.
+    func testCirclingArtworkThatEnclosesNothingFillsTheEntireCanvas() throws {
+        var reference = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
+        for y in 30..<34 {
+            for x in 20..<80 { reference[(y * Self.w + x) * 4 + 3] = 255 }
+        }
+        let region = try lassoFill(reference, loop: rectangleLoop(CGRect(x: 30, y: 20, width: 40, height: 30)))
+
+        XCTAssertGreaterThan(filledFraction(region), 0.99, "Nothing bounds it, so everything fills")
+    }
+
+    /// **Neither knob the artist can reach is a way out of this**, which is what makes it a design
+    /// question rather than a tuning one. Gap closing at the top of its slider (`fillGapRange` is
+    /// 0...40) only ever *adds* wall — a morphological close is extensive, so it cannot open a path —
+    /// and `fillCanvasEdgeIsBoundary` only seals artwork to the border. The escape is through open
+    /// paper in the middle of the page, where neither applies.
+    /// Measured 2026-08-18, same box, same loop, sweeping the only two settings that could plausibly
+    /// contain the flood. Gap closing is `fillGapRange` 0...40, default 8:
+    ///
+    /// | gap | 0 | 4 | 8 | 16 | 24 | 32 | 40 |
+    /// |---|---|---|---|---|---|---|---|
+    /// | edge is wall | 1.000 | 1.000 | **1.000** | 1.000 | 0.902 | 0.775 | 0.766 |
+    /// | edge is not | 1.000 | 1.000 | 1.000 | 1.000 | 0.940 | 0.861 | 0.766 |
+    ///
+    /// Across the whole usable half of the slider the answer is the entire canvas, and the
+    /// canvas-edge option never moves it. Gap closing only bites past 16 because a disk that big
+    /// closes the box's 75 px interior into solid wall — it is destroying the *intended* fill, not
+    /// containing the escape, and at 40 the result is exactly 112x112/128x128 = 0.7656: the loop's
+    /// own interior, with the flood contributing nothing anywhere. There is no setting at which this
+    /// tool fills what the artist circled.
+    func testNoGapOrEdgeSettingContainsTheEscapeFromCirclingAShape() throws {
+        let loop = rectangleLoop(CGRect(x: 8, y: 8, width: 112, height: 112))
+
+        for gap in [Float(0), 4, 8, 16] {
+            for edgeIsWall in [true, false] {
+                let f = filledFraction(try lassoFill(box(breakInRightWall: 0), loop: loop,
+                                                     gapRadius: gap, canvasEdgeIsWall: edgeIsWall))
+                XCTAssertEqual(f, 1.0, accuracy: 0.001,
+                               "gap \(gap), canvas edge \(edgeIsWall): still the whole page")
+            }
+        }
+        // The far end of the slider, where the close has swallowed the artwork: the region collapses
+        // onto the loop mask's union and nothing else.
+        let maxed = try lassoFill(box(breakInRightWall: 0), loop: loop, gapRadius: 40)
+        XCTAssertEqual(filledFraction(maxed), 112.0 * 112.0 / (128.0 * 128.0), accuracy: 0.001,
+                       "At maximum gap closing the flood contributes nothing — only the union remains")
+    }
+
+    /// The seed colour was the other candidate for a defect, and it is **not** the one: a loop that
+    /// encircles mostly ink does pick ink, and the tool then runs along the line art — a real
+    /// surprise, but a *smaller* fill, not a full-canvas one. Recorded so the next reader does not
+    /// re-open it.
+    func testALoopFilledMostlyWithInkSeedsOnInkAndFillsLessNotMore() throws {
+        var reference = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
+        for y in 40..<90 {
+            for x in 40..<90 { reference[(y * Self.w + x) * 4 + 3] = 255 }
+        }
+        let loop = rectangleLoop(CGRect(x: 45, y: 45, width: 40, height: 40))
+        let mask = try XCTUnwrap(LassoFillMask.rasterize(path: loop, width: Self.w, height: Self.h))
+        let seed = LassoFillMask.dominantColour(referenceRGBA: reference, mask: mask, width: Self.w, height: Self.h)
+        XCTAssertGreaterThan(seed.w, 0.9, "The dominant colour under this loop really is the ink")
+
+        let region = try lassoFill(reference, loop: loop)
+        XCTAssertLessThan(filledFraction(region), 0.30, "It floods the blob, not the page")
+        XCTAssertFalse(isFilled(region, 4, 4), "The paper is a wall now, so nothing escapes onto it")
     }
 
     // MARK: - The tool option
