@@ -83,6 +83,22 @@ Carried over:
 
 ## Done this pass
 
+- **Add Text, the first stage of it: a mode you can enter.** The menu row, `Tool.text`,
+  `ActivePanel.text`, and the `activePanel` binding threaded into `ActionsMenu` — landing alone,
+  because `ActionsMenu` is shared by every panel and [ADD_TEXT.md](ADD_TEXT.md) says to bisect there.
+  Nothing text-visible yet: no font seam, no overlay, no bake. The row is disabled on a vector layer
+  with a reason, so this stage ships nothing it has to un-ship.
+  The question it had to answer was `Tool.paintsOnCanvas`, whose exhaustive switch refuses to compile
+  until a new case states its answer. Text is **false**: a text tap places a box for an overlay above
+  the layers, so the layer host must decline the touch — otherwise one tap paints a stroke *and* opens
+  a text box, which is the eyedropper bug of 2026-08-17 with a different tool's name on it. The smart
+  shapes are what make that non-obvious and they resolve it: a shape is not a `Tool` case at all, it
+  falls out of holding a stroke still, so its touch genuinely is a stroke and must reach the host.
+  **Also found: ADD_TEXT.md's Stage 2 was already built** — the per-element vector decode is the same
+  work as yesterday's `try?` data-loss fix, and `LossySlot`/`DecodeReport`/13 tests are on main. A
+  session following the plan literally would have rebuilt it. Marked done, number kept so references
+  to Stages 3-6 still resolve. Ten of the plan's line citations had drifted, one naming the wrong file.
+
 - **The app-switch triple save.** The owner's *"returning from another app freezes for a few seconds"*,
   and their own answer is what found it: asked whether the app comes back where they left it or on the
   Gallery, they said *"exactly where I left off"*, which rules out a jetsam kill because nothing in this
