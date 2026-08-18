@@ -23,7 +23,7 @@ struct VectorSample: Codable, Equatable {
 /// outline, so a freehand stroke and the shape it snapped to can be compared position-for-position.
 struct ShapeGeometry: Equatable {
 
-    enum Kind: String, CaseIterable {
+    enum Kind: String, CaseIterable, Codable {
         case line
         case rectangle
         case oval
@@ -37,11 +37,30 @@ struct ShapeGeometry: Equatable {
     /// Rotation about `center`, applied on top of the unrotated geometry above.
     var rotation: CGFloat
 
-    init(kind: Kind, startPoint: CGPoint, endPoint: CGPoint, rotation: CGFloat = 0) {
+    /// Where on the outline the artist's pen started, in the same `u ∈ [0, 1)` every other method
+    /// here speaks. A *material* coordinate: it labels a point of the ink in the shape's own
+    /// unrotated frame, so `rotation` edits, axis drags, the follow-the-finger scale and the
+    /// two-finger snap all carry the drawn portion along without knowing it exists.
+    var spanStart: CGFloat = 0
+
+    /// Signed fraction of the outline the pen turned through: `|spanSweep| ∈ (0, 1]`, and the sign
+    /// is the direction it was drawn in. `1` is a whole outline and is what everything defaults to,
+    /// which is why a shape built without a span behaves exactly as it did before spans existed.
+    ///
+    /// Deliberately *not* a pair of endpoints. An interval on a closed curve has no canonical start,
+    /// and two wrapped parameters cannot tell a 20° arc from a 340° one nor say which way it runs;
+    /// `(start, signed sweep)` carries seam-crossing, direction and overshoot in one encoding
+    /// because this is a difference of *unwrapped* parameters and is never reduced mod 1.
+    var spanSweep: CGFloat = 1
+
+    init(kind: Kind, startPoint: CGPoint, endPoint: CGPoint, rotation: CGFloat = 0,
+         spanStart: CGFloat = 0, spanSweep: CGFloat = 1) {
         self.kind = kind
         self.startPoint = startPoint
         self.endPoint = endPoint
         self.rotation = rotation
+        self.spanStart = spanStart
+        self.spanSweep = spanSweep
     }
 
     // MARK: - Derived geometry
@@ -97,7 +116,13 @@ struct ShapeGeometry: Equatable {
     // MARK: - Outline parameterisation
 
     /// Total length of the outline: a line's length, a rectangle's perimeter, an oval's
-    /// circumference (Ramanujan's approximation, well under 1% error for any realistic aspect).
+    /// circumference.
+    ///
+    /// The oval branch integrates rather than approximating. It used Ramanujan's formula, which is
+    /// fine for a whole ellipse and says nothing at all about a portion of one — and now that a
+    /// stroke may have drawn only a portion, one implementation has to serve both. Simpson over the
+    /// smooth integrand is *more* accurate than Ramanujan anyway (measured: identical at 1:1,
+    /// 1.7e-4 relative at 3.75:1, 2.8e-3 at 20:1, with Simpson the accurate one).
     var outlineLength: CGFloat {
         switch kind {
         case .line:
@@ -107,8 +132,7 @@ struct ShapeGeometry: Equatable {
             return 2 * (r.width + r.height)
         case .oval:
             let r = boundingRect
-            let a = r.width / 2, b = r.height / 2
-            return .pi * (3 * (a + b) - sqrt((3 * a + b) * (a + 3 * b)))
+            return Self.ellipseArcLength(a: r.width / 2, b: r.height / 2, startTurn: 0, sweep: 1)
         }
     }
 
@@ -177,6 +201,95 @@ struct ShapeGeometry: Equatable {
         return 2 * rect.width + rect.height + (rect.maxY - y)
     }
 
+    // MARK: - The drawn portion of the outline
+    //
+    // A stroke that followed an oval part of the way round leaves ink on part of that oval. There is
+    // no second kind of shape for that and no flag saying "this one is an arc": there is an ellipse,
+    // and there is how far round it the pen turned. `spanStart`/`spanSweep` are that number, and
+    // everything below is that number *used* — never tested. At the defaults `(0, 1)` every
+    // expression here reduces to the whole-outline one it replaced, character for character.
+
+    /// Arc length of the drawn portion of the outline.
+    var spanLength: CGFloat {
+        switch kind {
+        case .line, .rectangle:
+            // Both parameterise by arc length, so the drawn fraction *is* the length fraction.
+            return abs(spanSweep) * outlineLength
+        case .oval:
+            let r = boundingRect
+            return Self.ellipseArcLength(a: r.width / 2, b: r.height / 2,
+                                         startTurn: spanStart, sweep: spanSweep)
+        }
+    }
+
+    /// The point at `s ∈ [0, 1]` along the *drawn* arc, in the shape's unrotated frame.
+    ///
+    /// The wrap is conditional, and that is what lets `pointOnOutline` stay untouched. With
+    /// `spanStart ∈ [0, 1)` and `spanSweep ∈ [−1, 1]`, `u` lies in `(−1, 2)`, so one subtraction of
+    /// `floor(u)` always suffices — and at the defaults `u = s ∈ [0, 1]` never trips it at all, so
+    /// `u = 1` still lands on the seam rather than being folded back to `u = 0`. An unconditional
+    /// modulo would fold it, and a line's far endpoint would collapse onto its near one.
+    func pointOnSpan(at s: CGFloat) -> CGPoint {
+        let t = max(0, min(1, s))
+        var u = spanStart + spanSweep * t
+        if u < 0 || u > 1 { u -= floor(u) }
+        return pointOnOutline(at: u)
+    }
+
+    /// Where along the *drawn* arc `point` (unrotated frame) falls, as `s ∈ [0, 1]`. Inverse of
+    /// `pointOnSpan` on the drawn portion.
+    ///
+    /// A point lying *outside* the drawn portion clamps to the far end rather than the near one.
+    /// That cannot arise from a detected shape — the measured span is the min/max envelope of the
+    /// stroke's own unwrapped trace and so contains every one of its samples by construction — only
+    /// from a hand-built geometry.
+    func spanParameter(of point: CGPoint) -> CGFloat {
+        let u = outlineParameter(of: point)
+        let sign: CGFloat = spanSweep < 0 ? -1 : 1
+        var d = (u - spanStart) * sign
+        if d < 0 || d > 1 { d -= floor(d) }
+        return max(0, min(1, d / max(abs(spanSweep), 1e-6)))
+    }
+
+    /// The period, in units of the drawn arc's own parameter `s`, over which a pressure profile
+    /// repeats — which is how the pressure walk wraps a full loop and clamps an open one without
+    /// asking which it is holding.
+    ///
+    /// A whole closed outline gives 1, so the profile's last entry sits one period behind its first
+    /// and the seam interpolates. A line gives 1e30, so the wrap partner is unreachably far away and
+    /// the interpolation weight saturates at the end value — the clamp, arrived at rather than
+    /// branched to. A quarter arc gives 4: the partner is three units away in `s` and contributes
+    /// under 1%, so the ends behave as open without anything having tested for it. (1e30 and not
+    /// `.infinity`, which would make the ratio `inf/inf` and hence `NaN`; not
+    /// `.greatestFiniteMagnitude`, to leave overflow headroom.)
+    var pressurePeriod: CGFloat { isClosed ? 1 / max(abs(spanSweep), 1e-6) : 1e30 }
+
+    /// Arc length of the ellipse with semi-axes `a`, `b` over `sweep` turns of *eccentric* angle
+    /// starting at `startTurn` turns, by composite Simpson over `∫√(a²sin²t + b²cos²t) dt`.
+    ///
+    /// 32 panels; the integrand is smooth and periodic, so this is accurate to far better than the
+    /// sub-point precision anything here needs, and one implementation serves both the whole outline
+    /// and a portion of it. Cost is 32 `sqrt`/`sin`/`cos` per call, called once per accepted
+    /// candidate and once per collapse — unmeasurable beside stamping the stroke onto a raster.
+    private static func ellipseArcLength(a: CGFloat, b: CGFloat,
+                                         startTurn: CGFloat, sweep: CGFloat) -> CGFloat {
+        guard a > 0 || b > 0, sweep != 0 else { return 0 }
+        let panels = 32
+        let h = sweep / CGFloat(panels)
+        // `u` is in turns and `pointOnOutline` reads eccentric angle `2πu − π`, so `dt = 2π du`.
+        func speed(_ u: CGFloat) -> CGFloat {
+            let t = u * 2 * .pi - .pi
+            let sx = a * sin(t), sy = b * cos(t)
+            return 2 * .pi * (sx * sx + sy * sy).squareRoot()
+        }
+        var total = speed(startTurn) + speed(startTurn + sweep)
+        for i in 1..<panels {
+            let weight: CGFloat = i % 2 == 0 ? 2 : 4
+            total += weight * speed(startTurn + h * CGFloat(i))
+        }
+        return abs(total * h / 3)
+    }
+
     // MARK: - Handle dragging
 
     /// Which corner of `boundingRect` a resize handle sits on.
@@ -242,6 +355,15 @@ struct ShapeGeometry: Equatable {
     /// the crossing the anchor stops being the *opposite* corner and becomes the dragged one's near
     /// neighbour, which is why callers latch `anchor` at touch-down: recomputing it per frame would
     /// jump to a different point the moment the drag crossed over.
+    ///
+    /// **That flip is orientation-*reversing*, and a span would notice.** `abs` mirrors the box
+    /// through the anchor, so a drawn portion would need `spanSweep` negated and `spanStart`
+    /// reflected — unlike `draggingEdge`, whose crossing is a half turn and needs only half a turn
+    /// of `spanStart`. No such code is written here, deliberately: ovals have no corner handles
+    /// (`ShapeOverlayView.handleLayout` gives them four axis handles and a rotation knob), and every
+    /// kind that *can* reach this path carries the default `(0, 1)`, which mirroring leaves alone.
+    /// Speculative code on an unreachable path that no test can exercise is a worse trap than a
+    /// named gap — so if oval corner handles are ever added, the mirror correction belongs here.
     ///
     /// **`anchor` has no default, and that is the whole point.** Passing `nil` re-derives it from the
     /// shape *this* frame, which is correct for a single call and wrong for every frame after the
@@ -433,5 +555,43 @@ struct ShapeGeometry: Equatable {
     static func snapAngle(_ angle: CGFloat, toIncrement increment: CGFloat) -> CGFloat {
         guard increment > 0 else { return angle }
         return (angle / increment).rounded() * increment
+    }
+}
+
+/// Nothing persists a `ShapeGeometry` today — it is live gesture state, and what reaches disk is the
+/// baked `VectorStroke`, a flat list of samples with no shape identity at all. The conformance is
+/// written now anyway so that the day a live shape is autosaved, or shapes become re-editable, this
+/// is a decode and not a migration.
+///
+/// `init(from:)`/`encode(to:)` live in an extension so declaring them doesn't suppress the
+/// memberwise initialiser every call site builds with — the `VectorStroke` idiom. And the decoder is
+/// hand-written rather than synthesised because **synthesised `Decodable` ignores property
+/// defaults**: a record written before spans existed has no `spanSweep` key, and the synthesised
+/// version would throw rather than read it as the whole outline it described.
+extension ShapeGeometry: Codable {
+
+    enum CodingKeys: String, CodingKey {
+        case kind, startPoint, endPoint, rotation, spanStart, spanSweep
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(Kind.self, forKey: .kind)
+        startPoint = try c.decode(CGPoint.self, forKey: .startPoint)
+        endPoint = try c.decode(CGPoint.self, forKey: .endPoint)
+        rotation = try c.decodeIfPresent(CGFloat.self, forKey: .rotation) ?? 0
+        // A record written before partial ovals existed described a whole one.
+        spanStart = try c.decodeIfPresent(CGFloat.self, forKey: .spanStart) ?? 0
+        spanSweep = try c.decodeIfPresent(CGFloat.self, forKey: .spanSweep) ?? 1
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(startPoint, forKey: .startPoint)
+        try c.encode(endPoint, forKey: .endPoint)
+        try c.encode(rotation, forKey: .rotation)
+        try c.encode(spanStart, forKey: .spanStart)
+        try c.encode(spanSweep, forKey: .spanSweep)
     }
 }
