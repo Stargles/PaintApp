@@ -350,6 +350,153 @@ final class LassoFillLogicTests: XCTestCase {
         XCTAssertFalse(isFilled(region, 4, 4), "The paper is a wall now, so nothing escapes onto it")
     }
 
+    // MARK: - PROTOTYPE (not a behaviour change): the owner's invert formulation
+
+    /// Runs the owner's proposed algorithm using **only pieces the engine already has**, so it can be
+    /// measured before anyone writes a kernel: hand the session the *complement* of the loop mask, so
+    /// `floodInitFromLasso` seeds every open pixel OUTSIDE the loop, let it flood, then keep the
+    /// loop's interior minus everything that flood reached.
+    ///
+    /// The union the session performs at the end is harmless here — it unions the complement, which is
+    /// disjoint from the loop's interior, so the final intersection removes it.
+    private func invertedLassoFill(_ reference: [UInt8], loop: CGPath,
+                                   gapRadius: Float = 8, threshold: Float = 0.15) throws -> [UInt8] {
+        let loopMask = try XCTUnwrap(LassoFillMask.rasterize(path: loop, width: Self.w, height: Self.h))
+        let outside = loopMask.map { $0 == 0 ? UInt8(255) : UInt8(0) }
+        let engine = try XCTUnwrap(MetalFillEngine.shared)
+        let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: Self.w, height: Self.h,
+                                                       lassoMask: outside))
+        let seed = LassoFillMask.dominantColour(referenceRGBA: reference, mask: loopMask,
+                                                width: Self.w, height: Self.h)
+        let reached = try XCTUnwrap(session.fill(seedX: 0, seedY: 0, seedColor: seed, threshold: threshold,
+                                                 gapRadius: gapRadius, edgeOverlap: 0, canvasEdgeIsWall: true,
+                                                 fillColor: SIMD4<Float>(1, 0, 0, 1)))
+        var out = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
+        for i in 0..<(Self.w * Self.h) where loopMask[i] != 0 && reached[i * 4 + 3] == 0 {
+            out[i * 4] = 255; out[i * 4 + 3] = 255
+        }
+        return out
+    }
+
+    /// **The formulation does what the owner asked, and this is the evidence.** The rule it implements
+    /// is exactly *"a pixel fills iff every path from it to outside the loop crosses artwork"* — the
+    /// loop contributes no edge of its own, it only selects.
+    func testPrototypeInvertFillsTheShapeAndLeavesTheRingBlank() throws {
+        let around = rectangleLoop(CGRect(x: 8, y: 8, width: 112, height: 112))
+        let region = try invertedLassoFill(box(breakInRightWall: 0), loop: around)
+
+        // 81x81 box footprint / 128x128 canvas = 0.4004 — the shape and nothing else.
+        XCTAssertEqual(filledFraction(region), 0.4004, accuracy: 0.002)
+        XCTAssertTrue(isFilled(region, 61, 61), "The shape's interior fills")
+        XCTAssertTrue(isFilled(region, 21, 60), "…and its line art is painted over")
+        XCTAssertFalse(isFilled(region, 14, 64), "…the ring between loop and shape stays blank")
+        XCTAssertFalse(isFilled(region, 4, 4), "…and nothing escapes the loop")
+    }
+
+    /// A gappy outline is sealed by the existing gap-closing radius and therefore still counts as
+    /// enclosed — the whole reason the tool exists, and it survives the change untouched.
+    func testPrototypeInvertStillSealsAGappyOutline() throws {
+        let around = rectangleLoop(CGRect(x: 8, y: 8, width: 112, height: 112))
+        let sealed = try invertedLassoFill(box(breakInRightWall: 3), loop: around, gapRadius: 8)
+        XCTAssertEqual(filledFraction(sealed), 0.4003, accuracy: 0.002, "Bridged, so the shape fills")
+
+        let open = try invertedLassoFill(box(breakInRightWall: 3), loop: around, gapRadius: 0)
+        XCTAssertFalse(isFilled(open, 61, 61), "With no bridging the outside pours in and the interior is lost")
+    }
+
+    /// **The costs, measured.** All three of these fill *nothing*, and the owner should see them as a
+    /// set rather than only the blank-paper one: the rule is not "circling blank paper fills nothing"
+    /// but "any loop that does not wholly contain an artwork-enclosed region fills nothing".
+    func testPrototypeInvertFillsNothingUnlessTheLoopWhollyContainsAnEnclosedRegion() throws {
+        let blank = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
+        let around = rectangleLoop(CGRect(x: 8, y: 8, width: 112, height: 112))
+
+        XCTAssertEqual(filledFraction(try invertedLassoFill(blank, loop: around)), 0,
+                       "Blank paper — the case the owner accepted")
+        XCTAssertEqual(filledFraction(try invertedLassoFill(box(breakInRightWall: 0),
+                                                            loop: rectangleLoop(CGRect(x: 55, y: 55, width: 12, height: 12)))), 0,
+                       "A loop *inside* the shape: today this fills the whole shape, after the change nothing")
+        XCTAssertLessThan(filledFraction(try invertedLassoFill(box(breakInRightWall: 0),
+                                                               loop: rectangleLoop(CGRect(x: 55, y: 10, width: 12, height: 30)))), 0.01,
+                          "A loop that crosses the outline: the shape is no longer wholly contained")
+    }
+
+    /// **The wart, and it needs a decision before this ships.** Artwork inside the loop is never
+    /// reached by the outside flood, so it is always painted — *even when nothing around it is*. On
+    /// the two-compartment band scene the result is the band's own 408 pixels floating on blank paper
+    /// and neither compartment: the line is painted and the regions are not, which is the inverse of
+    /// what the artist asked for.
+    ///
+    /// The fix is a component filter — drop any connected component of the result that contains no
+    /// non-wall pixel — and it also cleans up the gap-closing-off case above, which today leaves a
+    /// bare outline. Recorded here rather than fixed because the algorithm is still under research.
+    func testPrototypeInvertPaintsIsolatedLineArtWithNoRegionAroundIt() throws {
+        let region = try invertedLassoFill(bandAcrossTheMiddle(),
+                                           loop: rectangleLoop(CGRect(x: 30, y: 30, width: 68, height: 68)))
+        XCTAssertEqual(filledFraction(region), 408.0 / (128.0 * 128.0), accuracy: 0.002,
+                       "Exactly the band's pixels inside the loop — the line, without either compartment")
+        XCTAssertTrue(isFilled(region, 64, 63), "The line is painted…")
+        XCTAssertFalse(isFilled(region, 64, 40), "…and the compartment above it is not")
+    }
+
+    /// Two boundary cases for the seeding. The loop drawn *on top of* the line art is fine — there is
+    /// no seed ring to land in the wall set, the seed is the whole open outside. A loop that covers the
+    /// canvas has no outside at all, so nothing is reachable and everything fills; that is the one
+    /// scene where the invert still paints the whole page, and it is arguably correct.
+    func testPrototypeInvertSeedingBoundaryCases() throws {
+        let onTheLine = try invertedLassoFill(box(breakInRightWall: 0),
+                                              loop: rectangleLoop(CGRect(x: 21, y: 21, width: 79, height: 79)))
+        XCTAssertEqual(filledFraction(onTheLine), 0.3809, accuracy: 0.002)
+        XCTAssertTrue(isFilled(onTheLine, 61, 61), "Drawing the loop along the artwork still works")
+
+        let wholeCanvas = try invertedLassoFill(box(breakInRightWall: 0),
+                                                loop: rectangleLoop(CGRect(x: -5, y: -5, width: 138, height: 138)))
+        XCTAssertEqual(filledFraction(wholeCanvas), 1.0, accuracy: 0.001,
+                       "No outside to seed from, so everything fills")
+    }
+
+    /// Antialiased line art: a box whose walls ramp from paper to solid over 2 px on each side.
+    /// The question is which side of that ramp the unfilled error lands on.
+    func testPrototypeAntialiasedEdgeCoverage() throws {
+        var reference = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
+        func ink(_ x: Int, _ y: Int, _ a: UInt8) {
+            guard x >= 0, x < Self.w, y >= 0, y < Self.h else { return }
+            let o = (y * Self.w + x) * 4
+            if reference[o + 3] < a { reference[o + 3] = a }
+        }
+        // A box wall 3 px solid with a 2 px alpha ramp on either side.
+        let ramp: [UInt8] = [64, 160]
+        for x in 18...102 {
+            for t in 0..<3 { ink(x, 20 + t, 255); ink(x, 100 - t, 255) }
+            for (k, a) in ramp.enumerated() {
+                ink(x, 20 - 2 + k, a); ink(x, 100 + 2 - k, a)
+                ink(x, 23 + (1 - k), a); ink(x, 97 - (1 - k), a)
+            }
+        }
+        for y in 18...102 {
+            for t in 0..<3 { ink(20 + t, y, 255); ink(100 - t, y, 255) }
+            for (k, a) in ramp.enumerated() {
+                ink(20 - 2 + k, y, a); ink(100 + 2 - k, y, a)
+                ink(23 + (1 - k), y, a); ink(97 - (1 - k), y, a)
+            }
+        }
+        // Count, along one scanline through the middle, how far the fill reaches toward the wall.
+        func reach(_ r: [UInt8]) -> Int {
+            var x = 60
+            while x > 0 && isFilled(r, x, 60) { x -= 1 }
+            return x   // first unfilled column walking left from the interior
+        }
+        // Solid wall at x = 20…22; inner ramp at 23 (a=160) and 24 (a=64); outer ramp at 19 (a=160)
+        // and 18 (a=64). At the default 0.15 threshold, a=160 is a wall and a=64 is not.
+        let currentAA = try lassoFill(reference, loop: rectangleLoop(CGRect(x: 55, y: 55, width: 12, height: 12)))
+        XCTAssertEqual(reach(currentAA), 23,
+                       "Today the fill stops at the innermost wall pixel, leaving the a=160 ramp as a halo")
+
+        let inverted = try invertedLassoFill(reference, loop: rectangleLoop(CGRect(x: 8, y: 8, width: 112, height: 112)))
+        XCTAssertEqual(reach(inverted), 18,
+                       "Inverted, the fill covers the line and its ramp and stops on the far side")
+    }
+
     // MARK: - The tool option
 
     /// A *type option under the fill tool*, not a second tool: the toolbar's tool stays `.fill` either
