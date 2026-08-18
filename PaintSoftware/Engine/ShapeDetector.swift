@@ -115,7 +115,7 @@ enum ShapeDetector {
         // A line is tested first and on its own terms: its gate (below) is one no closed shape can
         // pass, so there is nothing for the closed fits to steal and no scores to reconcile.
         if let line = lineCandidate(points: points, arcLength: arcLength) { return line }
-        return closedCandidate(points: points, arcLength: arcLength)
+        return closedCandidate(points: points, raw: raw, arcLength: arcLength)
     }
 
     // MARK: - Line
@@ -170,7 +170,8 @@ enum ShapeDetector {
     /// neither. If the better fit fails the outline-coverage gate the runner-up still gets its
     /// chance, so e.g. a squarish oval isn't lost just because the rectangle scored marginally
     /// better before coverage was considered.
-    private static func closedCandidate(points: [CGPoint], arcLength: CGFloat) -> ShapeGeometry? {
+    private static func closedCandidate(points: [CGPoint], raw: [CGPoint],
+                                        arcLength: CGFloat) -> ShapeGeometry? {
         let pivot = centroid(points)
         let offsets = points.map { CGPoint(x: $0.x - pivot.x, y: $0.y - pivot.y) }
 
@@ -185,12 +186,111 @@ enum ShapeDetector {
             let snapped = abs(candidate.rotation) < axisSnapTolerance
                 ? (fit(candidate.kind, angle: 0, offsets: offsets) ?? candidate)
                 : candidate
-            let shape = geometry(for: snapped, pivot: pivot)
-            guard arcLength <= shape.outlineLength * closedLengthRatioMax else { continue }
-            guard hasOutlineCoverage(snapped, offsets: offsets) else { continue }
+            var shape = geometry(for: snapped, pivot: pivot)
+            if shape.kind == .oval {
+                let span = measuredSpan(of: raw, on: shape)
+                shape.spanStart = span.start
+                shape.spanSweep = span.sweep
+            }
+            // The same "is this a trace or a scribble" test it has always been, finally measured
+            // against what was actually traced rather than against the whole figure. A correct fit
+            // has `arcLength ≈ spanLength` by construction, so a bad one shows up in either
+            // direction — and the lower bound is not new policy, it is what `hasOutlineCoverage`
+            // used to supply for free.
+            let ratio = arcLength / max(shape.spanLength, 1)
+            guard ratio <= closedLengthRatioMax, ratio >= 1 / closedLengthRatioMax else { continue }
+            // **Rectangles keep coverage; ovals get a span, and that asymmetry is the owner's ask
+            // stated precisely.** Coverage was one gate serving both kinds, and for an oval it is
+            // the thing being deleted — "was this complete enough to count". For a rectangle it is
+            // not: its own doc comment names "a rectangle missing its last corner" as something it
+            // rejects, and dropping it there would make a three-sided box detect as a closed
+            // rectangle with a phantom fourth side. The owner asked to change ovals.
+            if shape.kind == .rectangle {
+                guard hasOutlineCoverage(snapped, offsets: offsets) else { continue }
+            }
             return shape
         }
         return nil
+    }
+
+    /// The portion of `shape`'s outline the raw stroke actually turned through, as a start and a
+    /// **signed** sweep in the shape's own body frame.
+    ///
+    /// The trace is unwrapped rather than compared: each step adds the *shortest* change in `u`, so
+    /// the running total is a continuous turn count that never consults the seam. Four properties
+    /// fall out of that, and not one of them is a case:
+    ///
+    ///   - **Seam.** There is no interval with two endpoints to order; there is an origin and a
+    ///     signed turn. An arc running from eccentric 120° to 300° crosses `u = 0/1` at 180° and
+    ///     simply accumulates 0.833 → 1.333.
+    ///   - **Overshoot.** `min(hi − lo, 1)` is monotone in coverage and saturates, so a stroke that
+    ///     carries past its own start gives a whole oval and no more, with no oscillation possible.
+    ///   - **Direction.** The sign is the direction drawn, and `start` is the artist's own first
+    ///     sample — what `testDetectedLineKeepsTheDirectionItWasDrawn` already demands of lines.
+    ///   - **Retrace.** `hi − lo` is the extent *visited*, so tracing 90°, backing off and going
+    ///     forward again still gives 90° — not less (which would erase ink they laid) and not more
+    ///     (which would count travel twice).
+    ///
+    /// **Raw samples, not the 64-point resample.** The sum telescopes, so sample density cannot
+    /// change the answer, while arc-length-uniform resampling would risk aliasing: at a 20:1 aspect
+    /// the `u`-step near the major-axis end reaches 0.4 turns. The parked hold at the end of the
+    /// gesture contributes ≈ 0 net turn and is harmless.
+    static func measuredSpan(of raw: [CGPoint], on shape: ShapeGeometry) -> (start: CGFloat, sweep: CGFloat) {
+        guard raw.count >= 2 else { return (0, 1) }
+        let inverse = shape.rotationTransform.inverted()
+        let box = shape.boundingRect
+        let rx = max(box.width / 2, 0.0001), ry = max(box.height / 2, 0.0001)
+
+        /// `nil` for a sample projecting essentially onto the centre, which has no meaningful angle.
+        func localU(_ p: CGPoint) -> CGFloat? {
+            let q = p.applying(inverse)
+            let nx = (q.x - box.midX) / rx, ny = (q.y - box.midY) / ry
+            guard hypot(nx, ny) > 1e-3 else { return nil }
+            return shape.outlineParameter(of: q)
+        }
+        func wrapHalf(_ x: CGFloat) -> CGFloat { x - x.rounded() }
+
+        var index = 0
+        var seed: CGFloat?
+        while seed == nil && index < raw.count { seed = localU(raw[index]); index += 1 }
+        guard let firstU = seed else { return (0, 1) }
+
+        var unwrapped = firstU, lo = firstU, hi = firstU
+        var currentU = firstU
+        var currentPoint = raw[index - 1]
+
+        /// One step of the walk. A jump of more than a quarter turn between consecutive samples
+        /// could be a real fast stroke or an aliased one, and the two are indistinguishable from the
+        /// endpoints alone — so split the canvas-space segment and look. At 120 Hz this fires on
+        /// essentially nothing, but `minimumClosedDimension` permits a semi-axis of 2.5, where a
+        /// fast stroke genuinely could alias, and this makes the unwrap unconditionally correct.
+        func advance(to b: CGPoint, depth: Int) {
+            guard let uB = localU(b) else { return }
+            let delta = wrapHalf(uB - currentU)
+            if abs(delta) > 0.25, depth < 6 {
+                let mid = CGPoint(x: (currentPoint.x + b.x) / 2, y: (currentPoint.y + b.y) / 2)
+                if localU(mid) != nil {
+                    advance(to: mid, depth: depth + 1)
+                    advance(to: b, depth: depth + 1)
+                    return
+                }
+            }
+            unwrapped += delta
+            if unwrapped < lo { lo = unwrapped }
+            if unwrapped > hi { hi = unwrapped }
+            currentU = uB
+            currentPoint = b
+        }
+
+        while index < raw.count {
+            advance(to: raw[index], depth: 0)
+            index += 1
+        }
+
+        let forward = unwrapped >= firstU
+        let magnitude = min(hi - lo, 1)
+        let origin = forward ? lo : hi
+        return (origin - origin.rounded(.down), magnitude * (forward ? 1 : -1))
     }
 
     /// The lowest-error fit of `kind` over the rotation sweep: a coarse pass across the full 90°

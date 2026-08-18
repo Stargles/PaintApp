@@ -18,12 +18,41 @@ final class ShapeDetectorLogicTests: XCTestCase {
     }
 
     /// A freehand-ish circle traced `coverage` of the way around.
+    ///
+    /// The last point lands exactly at the end of the sweep, so `coverage: 1.0` closes the loop
+    /// rather than stopping one step short. The old divisor was `count`, which traced 47/48 of the
+    /// way round for a "full" circle — invisible while nothing measured how much of a shape was
+    /// drawn, and the difference between a circle and a circle with an 11.8 pt gap now that
+    /// something does. Measured: the old helper reports |spanSweep| 0.9792 at `coverage: 1.0`, this
+    /// one reports 1.0000.
     private func circlePoints(center: CGPoint, radius: CGFloat, count: Int = 48,
                              coverage: CGFloat = 1.0) -> [CGPoint] {
         (0..<count).map { i in
-            let angle = coverage * 2 * .pi * CGFloat(i) / CGFloat(count)
+            let angle = coverage * 2 * .pi * CGFloat(i) / CGFloat(count - 1)
             return CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
         }
+    }
+
+    /// An arc of an ellipse traced through `sweep` turns of *eccentric* angle starting at
+    /// `startTurn` turns — the same `u` the geometry speaks, so a test can ask for exactly the arc
+    /// it means. A negative `sweep` draws it backwards. `circlePoints` can express none of the
+    /// three: no start phase, no direction, no aspect ratio.
+    ///
+    /// Written as an explicit loop with annotated types, per the Swift 6.3 solver note on
+    /// `largestGap` above.
+    private func ellipseArcPoints(center: CGPoint, a: CGFloat, b: CGFloat, rotation: CGFloat = 0,
+                                  startTurn: CGFloat = 0, sweep: CGFloat = 1,
+                                  count: Int = 48) -> [CGPoint] {
+        var result: [CGPoint] = []
+        result.reserveCapacity(count)
+        for i in 0..<count {
+            let u: CGFloat = startTurn + sweep * CGFloat(i) / CGFloat(count - 1)
+            let t: CGFloat = u * 2 * .pi - .pi
+            let localX: CGFloat = a * cos(t), localY: CGFloat = b * sin(t)
+            result.append(CGPoint(x: center.x + localX * cos(rotation) - localY * sin(rotation),
+                                  y: center.y + localX * sin(rotation) + localY * cos(rotation)))
+        }
+        return result
     }
 
     private func rectPoints(_ rect: CGRect, perSide: Int = 12) -> [CGPoint] {
@@ -88,11 +117,12 @@ final class ShapeDetectorLogicTests: XCTestCase {
         XCTAssertNil(ShapeDetector.detect(from: points))
     }
 
-    func testRejectsPartialArc() {
-        // A 90° arc has uniform radii but nowhere near the outline coverage an oval needs.
-        let points = circlePoints(center: CGPoint(x: 200, y: 200), radius: 90, coverage: 0.25)
-        XCTAssertNotEqual(ShapeDetector.detect(from: points)?.kind, .oval)
-    }
+    // `testRejectsPartialArc` used to sit here, asserting that a 90° arc is not an oval because it
+    // "has nowhere near the outline coverage an oval needs". The owner reversed exactly that:
+    // "Whatever the user draws that follows an oval path whether partial or full spawns in that
+    // oval, and the stroke is then projected onto that oval." A quarter arc is now a quarter of an
+    // oval, and `testQuarterOvalDetectsAsAnOvalWithAQuarterSpan` below is the same input with the
+    // opposite expectation.
 
     /// The reported bug: "rectangle detection does not work at all, everything becomes an ellipse."
     ///
@@ -173,6 +203,13 @@ final class ShapeDetectorLogicTests: XCTestCase {
         XCTAssertNil(ShapeDetector.detect(from: points))
     }
 
+    /// **This one's margin moved, and it is the number to watch.** Against the old bounding-box oval
+    /// fit the scribble scored ~0.21 — over `closedFitErrorMax` 0.16, so the fit-error gate rejected
+    /// it outright. The conic fit scores it **0.1399**, which is *inside* that gate, so it now
+    /// survives to the length gate and is rejected there instead: arc length 11957 against a span
+    /// length of 383, a ratio of 31.2 where 1.75 is the ceiling. Two independent rejections became
+    /// one. If that 0.1399 ever creeps over 0.16 the fix is to tighten the *length* gate, not the
+    /// error gate — the error gate's calibration is what keeps rectangles working.
     func testRejectsRandomScribble() {
         // A deterministic, non-repeating wander that stays inside one region.
         let points = (0..<80).map { i -> CGPoint in

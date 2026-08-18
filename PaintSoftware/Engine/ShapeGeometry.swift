@@ -462,6 +462,21 @@ struct ShapeGeometry: Equatable {
             result.startPoint = CGPoint(x: nc.x - hw, y: nc.y - hh)
             result.endPoint = CGPoint(x: nc.x + hw, y: nc.y + hh)
             result.rotation = theta
+            // A drag taken through its own anchor flips `theta` by exactly π, because `d` reverses
+            // while staying on the same line. The paragraph above says that costs nothing — "the π
+            // difference between a handle and its opposite is a difference in `rotation`'s value
+            // only, never in the shape drawn" — and that sentence stops being true the moment a
+            // span exists. Half a turn of the frame sends a fixed local `u` to the antipodal point:
+            //     centre + R(θ+π)·P(u) = centre − R(θ)·P(u) = centre + R(θ)·P(u + ½)
+            // so the ink would teleport across the ellipse mid-gesture — measured at 157 to 240 pt
+            // on a 120 × 70. Half a turn of `spanStart` is the exact inverse, not an approximation,
+            // so this is a change of chart and the geometry drawn stays continuous through the
+            // crossing. It relies on frame-to-frame continuity of the drag, which the latched-anchor
+            // design already relies on.
+            if cos(rotation) * cos(theta) + sin(rotation) * sin(theta) < 0 {
+                let halfTurned = result.spanStart + 0.5
+                result.spanStart = halfTurned - halfTurned.rounded(.down)
+            }
             return result
         }
         let localPoint = point.applying(rotationTransform.inverted())
