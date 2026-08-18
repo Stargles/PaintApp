@@ -1247,9 +1247,16 @@ final class CanvasManager: ObservableObject {
     var fillGestureActive = false
     /// True only while a finger is actively pressing/dragging the fill; false in the adjustable state.
     var fillFingerDown = false         // main-thread only
-    /// Whether the live fill came from a drawn loop rather than a tap. Decides the undo label alone —
-    /// everything else about the two is the same pipeline (see `beginInteractiveLassoFill`).
+    /// Whether the live fill came from a drawn loop rather than a tap.
+    ///
+    /// **No longer just the undo label.** It also clamps Edge Overlap to 0 (`currentFillKey`), and
+    /// downstream of it the session runs an entirely different algorithm — ring seed, loop-confined
+    /// flood, invert, empty check (see `beginInteractiveLassoFill` and LASSO_FILL.md §6).
     var fillGestureIsLasso = false     // main-thread only
+    /// Whether the artist has already been told this lasso gesture encloses nothing. Latches the §7
+    /// notice to once per empty *streak*, so dragging a slider through a run of empty results does
+    /// not flicker the banner; cleared as soon as a fill lands, or when a new gesture starts.
+    var lassoFillReportedEmpty = false  // main-thread only
     /// True when a fill exists and the finger is NOT pressing (adjustable state). The coordinator checks
     /// this in the fill-press handler so that a two-finger pan's first touch doesn't commit the fill.
     var isFillInAdjustableState: Bool { fillGestureActive && !fillFingerDown }

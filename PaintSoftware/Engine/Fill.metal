@@ -35,6 +35,13 @@ static inline float colourDistance(float4 a, float4 b) {
 // A pixel is a wall when its colour differs from the seed colour by more than `threshold`. This is
 // what makes the fill stop at colour borders (and recolour a flat-filled region: its interior is
 // uniform → not walls → floods, while its border differs → walls).
+//
+// **One reference colour per dispatch, deliberately, even though the lasso fill has up to two.**
+// LASSO_FILL.md §6 step 3 defines the reached set as the union over `c ∈ C` of *per-colour*
+// reachability — a path may not switch reference colours halfway — so the lasso runs this kernel
+// (and the close, and the flood) once per reference against its own buffers, rather than widening
+// the test here to "passable under any `c`". Merging them into one passability field would let a
+// collar walk paper → flat → paper and hold out an interior pocket the spec says to fill.
 kernel void computeWalls(const device uchar4* reference [[buffer(0)]],
                          device uchar*        wall      [[buffer(1)]],
                          constant FillParams& params    [[buffer(2)]],
@@ -215,28 +222,53 @@ kernel void floodInit(const device uchar* wall   [[buffer(0)]],
     region[i] = (isSeed && wall[i] == 0) ? 1 : 0;
 }
 
-// The lasso fill's seed: **every** open pixel the drawn loop encircles, instead of the one pixel a
-// tap lands on. That single substitution is the whole of the lasso mode's flood.
+// The lasso fill's seed: the passable pixels of the loop's **ring** — the one-pixel collar just
+// inside the fence the artist drew — and nothing else. See LASSO_FILL.md §6 step 3.
 //
-// Two consequences, and they are the owner's two sentences about the tool. Seeding the loop's whole
-// interior means a loop spanning several compartments seeds each of them, so they all flood at once
-// — "the flood lasso fills two compartments". And because the flood grows outward from those seeds
-// through open pixels, its edge lands on the artwork's own silhouette wherever the artwork is what
-// stops it, so gap closing does its usual work exactly there and nowhere else — "it bridges gaps
-// only on the outermost encirclement".
+// **This is the reported bug's fix, and it is one line.** The kernel this replaced seeded *every*
+// open pixel inside the loop, so a loop drawn *around* a shape (which is what "circle something"
+// means) seeded the paper between the fence and the drawing, and the flood ran from there across the
+// whole page — the shipped defect, characterized in `LassoFillLogicTests`. Seeding only the ring, and
+// confining the flood to the loop (see `lassoBarrier`), makes the flood's extent depend on the loop
+// the artist controls rather than on canvas connectivity they do not.
 //
-// Walls are still walls to the *flood*; what makes the interior lines vanish is the union with the
-// loop mask after the flood converges (see `MetalFillSession.fill`), which paints every pixel inside
-// the loop, artwork included. So a line between two encircled compartments is filled, while the same
-// line outside the loop still bounds the region.
-kernel void floodInitFromLasso(const device uchar* wall   [[buffer(0)]],
-                               device uchar*        region [[buffer(1)]],
-                               constant FillParams& params [[buffer(2)]],
-                               const device uchar*  lasso  [[buffer(3)]],
-                               uint2 gid [[thread_position_in_grid]]) {
+// **A stretch of ring lying on ink contributes no seed, and that is not an error condition**
+// (LASSO_FILL.md §4 case 1) — it just means the collar has zero width there, which is exactly right:
+// the artist drew their fence through the drawing.
+//
+// The seeds are what the flood grows *from*, and the flood marks what must **not** be filled: the
+// paper the fence can walk to. `lassoInvert` then keeps the loop minus everything the flood reached.
+// So the loop is emphatically **not** added to the wall set — the flood has to be able to enter the
+// ring in order to exclude it — and anyone "simplifying" this by making the loop a wall breaks the
+// tool completely: the ring would be unreachable, nothing would be reached, and every loop would
+// paint a solid slab of its own shape over the artwork.
+kernel void floodInitFromRing(const device uchar* wall   [[buffer(0)]],
+                              device uchar*        region [[buffer(1)]],
+                              constant FillParams& params [[buffer(2)]],
+                              const device uchar*  ring   [[buffer(3)]],
+                              uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
-    region[i] = (lasso[i] != 0 && wall[i] == 0) ? 1 : 0;
+    region[i] = (ring[i] != 0 && wall[i] == 0) ? 1 : 0;
+}
+
+// The wall set the collar flood actually runs against: the artwork's walls, **plus everything
+// outside the loop**. LASSO_FILL.md §6 step 3: *"the flood must never leave `loopMask` — that single
+// constraint is the whole leak fix."*
+//
+// A separate buffer rather than a union into the wall set, and the distinction is the one a later
+// reader is most likely to collapse. The loop is *not* a wall: its ring pixels are inside `lasso`,
+// so they stay floodable and the flood enters them. What the barrier blocks is the pixel *beyond*
+// the fence. "The loop is a wall" is a property of the finished result — it comes out of the final
+// intersect in `lassoInvert`, not out of the passability field.
+kernel void lassoBarrier(const device uchar* closed [[buffer(0)]],
+                         const device uchar*  lasso  [[buffer(1)]],
+                         constant FillParams& params [[buffer(2)]],
+                         device uchar*        out    [[buffer(3)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= params.width || gid.y >= params.height) return;
+    uint i = pixelIndex(gid.x, gid.y, params.width);
+    out[i] = (closed[i] != 0 || lasso[i] == 0) ? 1 : 0;
 }
 
 // One contiguous run of the sweep: forward then backward over `k` in `[k0, k1)`, filling every open
@@ -359,4 +391,79 @@ kernel void paintRegion(const device uchar* region [[buffer(0)]],
     } else {
         out[i] = uchar4(0);
     }
+}
+
+// MARK: - The lasso's invert, coverage and empty check (LASSO_FILL.md §6 steps 4–6)
+
+// **`fill = loopMask ∧ ¬reached`, and this single expression is where three separate promises of the
+// tool come from.** Read it three times:
+//
+//  * *"the fill shouldn't even touch the loop"* — nothing outside `lasso` is ever written, so the
+//    fence bounds the result absolutely. That is the wall property, and it lives **here**, in the
+//    intersect, not in the passability field. Making the loop a wall instead would leave the ring
+//    unreachable and paint a slab (see `floodInitFromRing`).
+//  * *"all inner lines are filled over"* — the complement includes ink, because ink is not
+//    *reached*: the collar flood cannot walk through it. §6 step 4 says so in one line.
+//  * *a face's eyes fill with the face* (§4 case 5) — the eyes' interiors are walled off by their own
+//    outlines, so the collar never reaches them either. **This is the same line of code**, which is
+//    why the spec forbids a connected-component filter on the result: dropping components with no
+//    passable pixel would un-fill the eyes and contradict the owner's ruling. An earlier proposal to
+//    add one was withdrawn for exactly that reason.
+//
+// Coverage (§6 step 6) is the second half. A pixel the collar *did* reach is not simply blank: it
+// carries `k = clamp((d_min − sT) / (T − sT), 0, 1)`, which is 0 on clean paper and rises to 1 at
+// the wall threshold. So the filled silhouette inherits the artwork's own antialiasing — the outer
+// fringe of a soft line fades from fill colour to paper exactly as the line faded to paper — instead
+// of ending on a hard polygon edge. `spread` is Krita's *Spread*; it is 0 today, which gives the
+// plain ramp, and it is an argument rather than a constant so the knob exists if the owner asks for it.
+//
+// `filled` counts only the unreached pixels — the artist-visible fill — and is the empty check of
+// §6 step 5. Counting the coverage ramp too would make a leaked fill (which is *all* collar) look
+// non-empty and defeat the whole §7 signal.
+kernel void lassoInvert(const device uchar4* reference  [[buffer(0)]],
+                        const device uchar*   lasso      [[buffer(1)]],
+                        constant FillParams&  params     [[buffer(2)]],
+                        const device uchar*   reachedA   [[buffer(3)]],
+                        const device uchar*   reachedB   [[buffer(4)]],
+                        device uchar*         alphaOut   [[buffer(5)]],
+                        device atomic_uint*   filled     [[buffer(6)]],
+                        constant float4&      reference2 [[buffer(7)]],
+                        constant uint&        refCount   [[buffer(8)]],
+                        constant float&       spread     [[buffer(9)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= params.width || gid.y >= params.height) return;
+    uint i = pixelIndex(gid.x, gid.y, params.width);
+    if (lasso[i] == 0) { alphaOut[i] = 0; return; }
+
+    bool reached = (reachedA[i] != 0) || (refCount > 1u && reachedB[i] != 0);
+    if (!reached) {
+        alphaOut[i] = 255;
+        atomic_fetch_add_explicit(filled, 1u, memory_order_relaxed);
+        return;
+    }
+
+    float4 c = float4(reference[i]) / 255.0;
+    float d = colourDistance(c, params.seedColor);
+    if (refCount > 1u) d = min(d, colourDistance(c, reference2));
+    float t  = params.threshold;
+    float lo = spread * t;
+    // A zero-width ramp (threshold 0, or spread 1) degenerates to a step, which is what the limit of
+    // the expression is; dividing by it would give a NaN and paint garbage.
+    float k = (t > lo) ? clamp((d - lo) / (t - lo), 0.0, 1.0) : (d > lo ? 1.0 : 0.0);
+    alphaOut[i] = uchar(clamp(k * 255.0 + 0.5, 0.0, 255.0));
+}
+
+// `paintRegion`'s coverage-aware twin: the fill colour scaled by the 8-bit coverage `lassoInvert`
+// wrote. `fillColor` is premultiplied, so scaling all four channels by the same `k` keeps it
+// premultiplied and the result composites correctly without a second pass.
+kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],
+                             device uchar4*       out    [[buffer(1)]],
+                             constant FillParams& params [[buffer(2)]],
+                             uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= params.width || gid.y >= params.height) return;
+    uint i = pixelIndex(gid.x, gid.y, params.width);
+    uchar a = alpha[i];
+    if (a == 0) { out[i] = uchar4(0); return; }
+    float k = float(a) / 255.0;
+    out[i] = uchar4(clamp(params.fillColor * k * 255.0 + 0.5, 0.0, 255.0));
 }

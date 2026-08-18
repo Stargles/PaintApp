@@ -24,9 +24,12 @@ struct FillSettingsPanel: View {
                 // bottom at 480, which stops it being adjustable at all. Three `FillLiveAdjustUITests`
                 // caught it. Beside the title it costs nothing.
                 //
-                // The flood settings below stay put and stay live for both types, which is honest as
-                // well as convenient: a lasso fill is a flood whose seed is the whole loop instead of
-                // one pixel, so gap closing, threshold and edge overlap all still act on it.
+                // Gap Closing and Threshold below stay put and stay live for both types: they
+                // decide the passability field, which the lasso's collar flood reads exactly as the
+                // bucket fill's does. **Edge Overlap does not** — it is hidden in lasso mode and
+                // clamped to 0 in `CanvasManager.currentFillKey()`, because a fill that covers the
+                // line has no antialiasing seam to hide and a positive value would only push colour
+                // past the artwork onto clean paper (LASSO_FILL.md §6 step 7).
                 HStack {
                     Text("Fill")
                         .font(.headline)
@@ -44,7 +47,7 @@ struct FillSettingsPanel: View {
                 .padding([.horizontal, .top])
 
                 Text(canvasManager.fillMode == .lasso
-                     ? "Draw a loop on the canvas. Everything it encircles is filled, including straight over any lines inside it — the loop's own outline, carried on to the artwork it meets, is the only boundary."
+                     ? "Draw a loop. It works like a fence, and your lines are walls: anything inside the fence that the fence can walk to — the paper around your drawing, and anywhere it can slip through a gap — is left alone. Everything else inside is filled solid, lines and all. Nothing lands on the fence itself."
                      : "The highlighted slider is the one the fill tool's sideways drag adjusts. Move any slider to switch the drag to it.")
                     .font(.caption)
                     .foregroundColor(.gray)
@@ -80,20 +83,27 @@ struct FillSettingsPanel: View {
                 }
                 .padding(.horizontal)
 
-                VStack(alignment: .leading) {
-                    Text("Edge Overlap: \(Int(canvasManager.fillExpand)) px")
-                        .foregroundColor(.white)
-                    Slider(value: Binding(
-                        get: { canvasManager.fillExpand },
-                        set: { canvasManager.setFillSetting(.edgeOverlap, $0) }
-                    ), in: CanvasManager.fillExpandRange)
-                        .tint(tint(.edgeOverlap))
-                        .accessibilityIdentifier("fillPanel.edgeOverlapSlider")
-                    Text("Extends the fill slightly under the boundary to remove antialiasing gaps.")
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                // **Hidden rather than disabled in lasso mode.** A greyed slider invites the artist
+                // to wonder what it would do, and the honest answer is "nothing you want" — the
+                // lasso's fill already covers the line it would have grown under. Hiding it also
+                // buys back 51 pt of this panel's height, which the comment above the picker
+                // explains is a scarce resource here.
+                if canvasManager.fillMode != .lasso {
+                    VStack(alignment: .leading) {
+                        Text("Edge Overlap: \(Int(canvasManager.fillExpand)) px")
+                            .foregroundColor(.white)
+                        Slider(value: Binding(
+                            get: { canvasManager.fillExpand },
+                            set: { canvasManager.setFillSetting(.edgeOverlap, $0) }
+                        ), in: CanvasManager.fillExpandRange)
+                            .tint(tint(.edgeOverlap))
+                            .accessibilityIdentifier("fillPanel.edgeOverlapSlider")
+                        Text("Extends the fill slightly under the boundary to remove antialiasing gaps.")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.horizontal)
                 }
-                .padding(.horizontal)
 
                 // **Below the three sliders, not beside Gap Closing, and the reason is the panel's
                 // height rather than its logic.** It reads as a Gap Closing modifier — it also adds

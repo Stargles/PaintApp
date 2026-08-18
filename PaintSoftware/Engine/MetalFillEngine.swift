@@ -8,6 +8,13 @@ import simd
 /// detection, a jump-flooding disk close for gap bridging, a parallel scanline flood, a disk edge
 /// dilate, and the final paint — so it stays real-time regardless of build configuration.
 ///
+/// **Two fills share those stages, and they are not the same algorithm.** The bucket fill seeds one
+/// tapped pixel and grows. The lasso fill (a session made with a `lassoMask`) runs LASSO_FILL.md §6:
+/// seed the loop's one-pixel ring, flood *inside the loop only*, and paint the loop minus everything
+/// that flood could reach. The two halves that make that work are `lassoBarrier` (the flood may not
+/// leave the loop) and `lassoInvert` (the intersect that makes the loop a wall, paints over interior
+/// line art, and counts the result for the empty check) — both in Fill.metal.
+///
 /// Coordinate convention matches the rest of the app: index 0 is the top-left pixel, y increases
 /// downward, 1 unit = 1 pixel. Buffers are laid out as row-major `y * width + x`.
 final class MetalFillEngine {
@@ -27,7 +34,10 @@ final class MetalFillEngine {
     private let psPaint: MTLComputePipelineState
     private let psEdgeBridge: MTLComputePipelineState
     private let psUnionMask: MTLComputePipelineState
-    private let psFloodInitFromLasso: MTLComputePipelineState
+    private let psFloodInitFromRing: MTLComputePipelineState
+    private let psLassoBarrier: MTLComputePipelineState
+    private let psLassoInvert: MTLComputePipelineState
+    private let psPaintAlpha: MTLComputePipelineState
 
     /// Mirror of the Metal `FillParams` struct (must match its field order/alignment exactly).
     struct FillParams {
@@ -74,7 +84,10 @@ final class MetalFillEngine {
               let paint = pipeline("paintRegion"),
               let edgeBridge = pipeline("edgeBridge"),
               let unionMask = pipeline("unionMask"),
-              let floodInitFromLasso = pipeline("floodInitFromLasso") else { return nil }
+              let floodInitFromRing = pipeline("floodInitFromRing"),
+              let lassoBarrier = pipeline("lassoBarrier"),
+              let lassoInvert = pipeline("lassoInvert"),
+              let paintAlpha = pipeline("paintRegionAlpha") else { return nil }
         self.device = device
         self.queue = queue
         self.psWalls = walls
@@ -88,15 +101,23 @@ final class MetalFillEngine {
         self.psPaint = paint
         self.psEdgeBridge = edgeBridge
         self.psUnionMask = unionMask
-        self.psFloodInitFromLasso = floodInitFromLasso
+        self.psFloodInitFromRing = floodInitFromRing
+        self.psLassoBarrier = lassoBarrier
+        self.psLassoInvert = lassoInvert
+        self.psPaintAlpha = paintAlpha
     }
 
     /// Uploads `referenceRGBA` (premultiplied-last, row-major, `width*height*4` bytes) into a session
     /// whose buffers are reused across every fill of the same gesture. Returns nil if allocation fails.
     ///
     /// - Parameter lassoMask: one byte per pixel, non-zero inside the loop the artist drew, for the
-    ///   lasso fill type. Its presence is what switches the session from a one-pixel seed to a
-    ///   whole-region one; `nil` is the ordinary bucket fill. Built by `LassoFillMask.rasterize`.
+    ///   lasso fill type; `nil` is the ordinary bucket fill. Built by `LassoFillMask.rasterize`.
+    ///
+    ///   **Its presence switches the session to a different algorithm, not merely a different seed**
+    ///   (LASSO_FILL.md §6): the mask is the *stencil* the whole operation runs inside, the flood is
+    ///   seeded from its one-pixel ring, and the result is the mask minus everything that flood
+    ///   reached. The session derives the ring and the reference colours from it here, once, because
+    ///   neither can change while the artist drags a slider.
     func makeSession(referenceRGBA: [UInt8], width: Int, height: Int,
                      lassoMask: [UInt8]? = nil) -> MetalFillSession? {
         MetalFillSession(engine: self, referenceRGBA: referenceRGBA, width: width, height: height,
@@ -152,9 +173,12 @@ final class MetalFillEngine {
                                 floodVert: MTLComputePipelineState, edgeDilate: MTLComputePipelineState,
                                 paint: MTLComputePipelineState, edgeBridge: MTLComputePipelineState,
                                 unionMask: MTLComputePipelineState,
-                                floodInitFromLasso: MTLComputePipelineState) {
+                                floodInitFromRing: MTLComputePipelineState,
+                                lassoBarrier: MTLComputePipelineState,
+                                lassoInvert: MTLComputePipelineState,
+                                paintAlpha: MTLComputePipelineState) {
         (psWalls, psJfaInit, psJfaStep, psThreshold, psFloodInit, psFloodHoriz, psFloodVert, psEdgeDilate,
-         psPaint, psEdgeBridge, psUnionMask, psFloodInitFromLasso)
+         psPaint, psEdgeBridge, psUnionMask, psFloodInitFromRing, psLassoBarrier, psLassoInvert, psPaintAlpha)
     }
 }
 
@@ -182,11 +206,49 @@ final class MetalFillSession {
     private let jfaA: MTLBuffer
     private let jfaB: MTLBuffer
     private let outBuf: MTLBuffer
-    /// The lasso fill's seed region — one byte per pixel, non-zero inside the loop. Nil for an
-    /// ordinary bucket fill, and its nil-ness is the switch between the two seeding strategies.
+    /// The lasso fill's **stencil** — one byte per pixel, non-zero inside the loop. Nil for an
+    /// ordinary bucket fill, and its nil-ness is the switch between the two algorithms.
+    ///
+    /// Not a seed: `ringBuf` is the seed, this is the region the flood may not leave and the left
+    /// operand of the final intersect. See `lassoBarrier` and `lassoInvert` in Fill.metal.
     private let lassoBuf: MTLBuffer?
+    /// The loop's one-pixel inner collar, from `LassoFillMask.ringMask` — the collar flood's seeds.
+    private let ringBuf: MTLBuffer?
+    /// `closed ∨ ¬lasso`: the wall set the collar flood actually runs against, so it can enter the
+    /// ring but never leave the loop. One per reference colour, because each has its own walls.
+    private let barrierBuf: MTLBuffer?
+    /// Second reference colour's walls / closed walls / barrier / reached set, allocated only when
+    /// the ring's modal colour is not paper (LASSO_FILL.md §6 2a caps `|C|` at 2).
+    private let wall2Buf: MTLBuffer?
+    private let closed2Buf: MTLBuffer?
+    private let barrier2Buf: MTLBuffer?
+    private let region2Buf: MTLBuffer?
+    /// 8-bit coverage out of `lassoInvert` — 255 in the fill, the §6 step 6 ramp in the collar.
+    private let alphaBuf: MTLBuffer?
+    /// Atomic count of the fill's pixels, for the §6 step 5 empty check.
+    private let filledBuf: MTLBuffer?
+    /// A second `FillParams` differing only in `seedColor`, for the second reference's wall pass.
+    private let params2Buf: MTLBuffer?
     private let changedBuf: MTLBuffer
     private let paramsBuf: MTLBuffer
+
+    /// Whether this session runs the lasso algorithm. Immutable, so `drainFillWork` can ask a session
+    /// what it is from the fill queue without touching main-thread gesture state.
+    let isLasso: Bool
+
+    /// The colours the collar flood may walk through — LASSO_FILL.md §6 2a's `C`, computed once from
+    /// the ring. Empty for a bucket fill.
+    private(set) var referenceColours: (SIMD4<Float>, SIMD4<Float>?) = (.zero, nil)
+
+    /// Pixels the **last** `fill(...)` painted at full coverage — the artist-visible fill, excluding
+    /// the coverage ramp in the collar. Zero means the loop enclosed nothing the artwork held out:
+    /// either the collar leaked through a gap or there was no shape inside the loop, which
+    /// LASSO_FILL.md §4 case 11 rules are the same outcome. `CanvasManager` commits nothing and
+    /// raises a notice on it (§7.1).
+    ///
+    /// Meaningful only for a lasso session, and only after `fill(...)` returns. Written and read on
+    /// `fillQueue`, which is serial and the only place `fill(...)` is called from in the app.
+    private(set) var lastFilledPixelCount: Int = 0
 
     fileprivate init?(engine: MetalFillEngine, referenceRGBA: [UInt8], width: Int, height: Int,
                       lassoMask: [UInt8]? = nil) {
@@ -207,13 +269,43 @@ final class MetalFillSession {
         self.width = width
         self.height = height
         self.count = count
+        self.isLasso = lassoMask != nil
         if let lassoMask {
-            guard let buf = lassoMask.withUnsafeBytes({
-                device.makeBuffer(bytes: $0.baseAddress!, length: count, options: .storageModeShared)
-            }) else { return nil }
-            self.lassoBuf = buf
+            // The ring and the reference colours are per-*gesture*, not per-render: the loop does not
+            // move while the artist drags Threshold or Gap Closing, so deriving them here means a
+            // slider sweep re-runs only the GPU stages. It also means production and
+            // `LassoFillLogicTests` cannot drift apart on how the ring is defined, because neither
+            // computes it — the session does.
+            let ring = LassoFillMask.ringMask(lassoMask, width: width, height: height)
+            let colours = LassoFillMask.referenceColours(referenceRGBA: referenceRGBA, ring: ring,
+                                                         width: width, height: height)
+            guard let lasso = lassoMask.withUnsafeBytes({
+                      device.makeBuffer(bytes: $0.baseAddress!, length: count, options: .storageModeShared)
+                  }),
+                  let ringB = ring.withUnsafeBytes({
+                      device.makeBuffer(bytes: $0.baseAddress!, length: count, options: .storageModeShared)
+                  }),
+                  let barrier = buffer(count), let alpha = buffer(count),
+                  let filled = buffer(MemoryLayout<UInt32>.stride),
+                  let params2 = buffer(MemoryLayout<MetalFillEngine.FillParams>.stride) else { return nil }
+            self.lassoBuf = lasso
+            self.ringBuf = ringB
+            self.barrierBuf = barrier
+            self.alphaBuf = alpha
+            self.filledBuf = filled
+            self.params2Buf = params2
+            self.referenceColours = colours
+            if colours.1 != nil {
+                guard let w2 = buffer(count), let c2 = buffer(count),
+                      let b2 = buffer(count), let r2 = buffer(count) else { return nil }
+                self.wall2Buf = w2; self.closed2Buf = c2; self.barrier2Buf = b2; self.region2Buf = r2
+            } else {
+                self.wall2Buf = nil; self.closed2Buf = nil; self.barrier2Buf = nil; self.region2Buf = nil
+            }
         } else {
-            self.lassoBuf = nil
+            self.lassoBuf = nil; self.ringBuf = nil; self.barrierBuf = nil; self.alphaBuf = nil
+            self.filledBuf = nil; self.params2Buf = nil
+            self.wall2Buf = nil; self.closed2Buf = nil; self.barrier2Buf = nil; self.region2Buf = nil
         }
         self.referenceRGBA = referenceRGBA
         self.refBuf = refBuf
@@ -245,11 +337,25 @@ final class MetalFillSession {
     /// Runs the full GPU pipeline and returns the painted region as premultiplied RGBA (row-major,
     /// `width*height*4`), transparent where unfilled. `fillColor` is premultiplied 0..1.
     ///
+    /// **Two algorithms, chosen by whether the session has a lasso mask** (see `makeSession`). The
+    /// bucket fill seeds one tapped pixel and grows until walls stop it. The lasso runs
+    /// LASSO_FILL.md §6: seed the loop's ring, flood *inside the loop only*, and keep the loop minus
+    /// everything that flood reached.
+    ///
+    /// - Parameter seedColor: the colour the flood treats as the region. **Ignored by a lasso
+    ///   session**, which derives its own reference set from the ring at construction — see
+    ///   `referenceColours`, and §6 2a for why the loop's whole interior is the wrong input.
+    /// - Parameter edgeOverlap: **also ignored by a lasso session**, and forced to 0 by
+    ///   `CanvasManager.currentFillKey()` besides. §6 step 7: because the lasso fill covers the line
+    ///   rather than stopping at it there is no antialiasing seam to hide, so growing the result only
+    ///   makes the shape fatter than the artist drew it — and it would push colour past the
+    ///   silhouette onto clean paper, which is the one thing the tool promises not to do.
     /// - Parameter canvasEdgeIsWall: make the canvas edge bound the fill. Two mechanisms, both
     ///   described at length above `edgeBridge` in Fill.metal: the artwork rect's boundary becomes a
     ///   **barrier** the flood cannot travel across (unconditional — it does not consult
     ///   `gapRadius`), and gap-closing may additionally **bridge** to that edge so a stroke stopping
-    ///   a few px short of it still seals.
+    ///   a few px short of it still seals. A lasso session honours both: the artwork rect is a wall
+    ///   like any other, and §4 case 10 already treats the canvas edge as part of the fence.
     /// - Parameter edgeInset: px the artwork rect is inset from this buffer on all four sides, i.e.
     ///   `CanvasManager.canvasPadding`. 0 — the default, and what every caller with no padding
     ///   passes — makes the artwork rect the buffer itself, at which point both mechanisms reduce to
@@ -258,15 +364,18 @@ final class MetalFillSession {
     func fill(seedX: Int, seedY: Int, seedColor: SIMD4<Float>, threshold: Float,
               gapRadius: Float, edgeOverlap: Float, canvasEdgeIsWall: Bool = false,
               edgeInset: Float = 0, fillColor: SIMD4<Float>) -> [UInt8]? {
-        // A lasso session seeds from its whole mask, so there is no tapped pixel to be in bounds.
-        guard lassoBuf != nil || isSeedInBounds(x: seedX, y: seedY) else { return nil }
+        // A lasso session works from its mask, so there is no tapped pixel to be in bounds.
+        guard isLasso || isSeedInBounds(x: seedX, y: seedY) else { return nil }
         let p = engine.pipelines
 
+        // Reference 0 is the tapped colour for a bucket fill and *paper* for a lasso; reference 1
+        // exists only when the lasso's ring sits on something that is not paper.
+        let primary = isLasso ? referenceColours.0 : seedColor
         var params = MetalFillEngine.FillParams()
         params.width = UInt32(width); params.height = UInt32(height)
         params.seedX = UInt32(seedX); params.seedY = UInt32(seedY)
         params.threshold = threshold; params.gapRadius = gapRadius; params.edgeOverlap = edgeOverlap
-        params.seedColor = seedColor; params.fillColor = fillColor
+        params.seedColor = primary; params.fillColor = fillColor
         // **One place decides what the option means**, so "off" is provably the pre-padding binary:
         // with `canvasEdgeIsWall` false the shader sees inset 0 and every edge rule collapses to the
         // buffer rim. A degenerate inset (negative, or wide enough to leave no artwork rect at all —
@@ -275,50 +384,49 @@ final class MetalFillSession {
         let inset = edgeInset.rounded()
         params.edgeInset = (canvasEdgeIsWall && inset > 0 && 2 * inset < Float(min(width, height))) ? inset : 0
         memcpy(paramsBuf.contents(), &params, MemoryLayout<MetalFillEngine.FillParams>.size)
+        if let params2Buf, let second = referenceColours.1 {
+            var params2 = params
+            params2.seedColor = second
+            memcpy(params2Buf.contents(), &params2, MemoryLayout<MetalFillEngine.FillParams>.size)
+        }
 
         // Stage 1: walls, gap-closing disk close, flood init.
         guard let cb1 = engine.makeCommandBuffer(), let enc1 = cb1.makeComputeCommandEncoder() else { return nil }
-        engine.encode2D(enc1, p.walls, width: width, height: height, buffers: [(refBuf, 0), (wallBuf, 1), (paramsBuf, 2)])
-
-        let gap = Int(gapRadius.rounded())
-        let closedSource: MTLBuffer
-        if gap >= 1 {
-            // Dilate: distance to nearest wall <= r.
-            let distWall = encodeJFA(enc1, mask: wallBuf, seedValue: 1)
-            encodeThreshold(enc1, from: distWall, out: dilatedBuf, radius: gapRadius, keepInside: 1)
-            // The canvas-edge bridge is computed *here*, while `distWall` is still the wall distance
-            // field — the erode's own JFA below reuses the same two ping-pong buffers and destroys
-            // it. Folded into the closed mask afterwards rather than into `dilatedBuf`, because
-            // anything put in there is about to be eroded straight back off.
-            if canvasEdgeIsWall {
-                engine.encodeBridge(enc1, p.edgeBridge, width: width, height: height,
-                                    coord: distWall, out: bridgeBuf, params: paramsBuf, radius: gapRadius)
+        let closedSource = encodeWallsAndClose(enc1, params: paramsBuf, wall: wallBuf, closed: closedBuf,
+                                               gapRadius: gapRadius, canvasEdgeIsWall: canvasEdgeIsWall)
+        // The two flood targets. A bucket fill has one; a lasso has one per reference colour, because
+        // §6 step 3 defines the reached set as the union of *per-colour* reachability rather than
+        // reachability through one merged passable set — a collar may not walk paper → flat → paper.
+        var floodPasses: [(region: MTLBuffer, walls: MTLBuffer)] = []
+        if let lassoBuf, let ringBuf, let barrierBuf {
+            engine.encode2D(enc1, p.lassoBarrier, width: width, height: height,
+                            buffers: [(closedSource, 0), (lassoBuf, 1), (paramsBuf, 2), (barrierBuf, 3)])
+            engine.encode2D(enc1, p.floodInitFromRing, width: width, height: height,
+                            buffers: [(barrierBuf, 0), (regionBuf, 1), (paramsBuf, 2), (ringBuf, 3)])
+            floodPasses.append((regionBuf, barrierBuf))
+            if let params2Buf, let wall2Buf, let closed2Buf, let barrier2Buf, let region2Buf {
+                // Safe to reuse `dilatedBuf`, `bridgeBuf` and the JFA ping-pong here: a compute
+                // encoder made by `makeComputeCommandEncoder()` dispatches serially with barriers, so
+                // the first pass has finished with all three before this one touches them.
+                let closed2 = encodeWallsAndClose(enc1, params: params2Buf, wall: wall2Buf, closed: closed2Buf,
+                                                  gapRadius: gapRadius, canvasEdgeIsWall: canvasEdgeIsWall)
+                engine.encode2D(enc1, p.lassoBarrier, width: width, height: height,
+                                buffers: [(closed2, 0), (lassoBuf, 1), (paramsBuf, 2), (barrier2Buf, 3)])
+                engine.encode2D(enc1, p.floodInitFromRing, width: width, height: height,
+                                buffers: [(barrier2Buf, 0), (region2Buf, 1), (paramsBuf, 2), (ringBuf, 3)])
+                floodPasses.append((region2Buf, barrier2Buf))
             }
-            // Erode the dilated mask: distance to nearest background (dilated == 0) > r.
-            let distBg = encodeJFA(enc1, mask: dilatedBuf, seedValue: 0)
-            encodeThreshold(enc1, from: distBg, out: closedBuf, radius: gapRadius, keepInside: 0)
-            if canvasEdgeIsWall {
-                engine.encode2D(enc1, p.unionMask, width: width, height: height,
-                                buffers: [(bridgeBuf, 0), (closedBuf, 1), (paramsBuf, 2)])
-            }
-            closedSource = closedBuf
-        } else {
-            // No *bridge* at a zero radius — the artist has said "bridge nothing" — but the barrier
-            // still applies: it lives inside `floodHoriz`/`floodVert`, which always run, and it is
-            // not a gap-closing behaviour. That is the one place the option's old contract ("inert
-            // at gapRadius 0") deliberately narrows to "inert at gapRadius 0 *and* no padding".
-            closedSource = wallBuf
-        }
-        if let lassoBuf {
-            engine.encode2D(enc1, p.floodInitFromLasso, width: width, height: height,
-                            buffers: [(closedSource, 0), (regionBuf, 1), (paramsBuf, 2), (lassoBuf, 3)])
         } else {
             engine.encode2D(enc1, p.floodInit, width: width, height: height, buffers: [(closedSource, 0), (regionBuf, 1), (paramsBuf, 2)])
+            floodPasses.append((regionBuf, closedSource))
         }
         enc1.endEncoding()
         cb1.commit()
 
-        // Stage 2: parallel scanline flood, in chunks with an early-out convergence check.
+        // Stage 2: parallel scanline flood, in chunks with an early-out convergence check. Both lasso
+        // passes share the one `changed` atomic and therefore the one convergence test — they run to
+        // the same fixed point either way, and a shared flag just means neither stops early while the
+        // other is still moving.
         let changedPtr = changedBuf.contents().bindMemory(to: UInt32.self, capacity: 1)
         let maxChunks = 16
         let pairsPerChunk = 4
@@ -330,8 +438,10 @@ final class MetalFillSession {
             }
             guard let enc = cb.makeComputeCommandEncoder() else { return nil }
             for _ in 0..<pairsPerChunk {
-                engine.encode1D(enc, p.floodHoriz, count: height, buffers: [(regionBuf, 0), (closedSource, 1), (paramsBuf, 2), (changedBuf, 3)])
-                engine.encode1D(enc, p.floodVert, count: width, buffers: [(regionBuf, 0), (closedSource, 1), (paramsBuf, 2), (changedBuf, 3)])
+                for pass in floodPasses {
+                    engine.encode1D(enc, p.floodHoriz, count: height, buffers: [(pass.region, 0), (pass.walls, 1), (paramsBuf, 2), (changedBuf, 3)])
+                    engine.encode1D(enc, p.floodVert, count: width, buffers: [(pass.region, 0), (pass.walls, 1), (paramsBuf, 2), (changedBuf, 3)])
+                }
             }
             enc.endEncoding()
             cb.commit()
@@ -339,33 +449,100 @@ final class MetalFillSession {
             if changedPtr.pointee == 0 { break }
         }
 
-        // Stage 3: edge overlap dilate + paint, then read back.
-        guard let cb3 = engine.makeCommandBuffer(), let enc3 = cb3.makeComputeCommandEncoder() else { return nil }
-        // **The lasso mode's second half, and the half that makes interior lines vanish.** The flood
-        // above only travels through open pixels, so every line the loop encircles is still a hole in
-        // the region. Unioning the loop mask back in closes all of them at once — "the line should be
-        // filled too, as its boundaries are only the outside encirclement". Done here rather than at
-        // seeding time so the walls stay walls *while* the flood runs and the region's outer edge
-        // still lands on the artwork.
-        if let lassoBuf {
-            engine.encode2D(enc3, p.unionMask, width: width, height: height,
-                            buffers: [(lassoBuf, 0), (regionBuf, 1), (paramsBuf, 2)])
+        // Stage 3: invert (lasso) or edge-overlap dilate (bucket), paint, then read back.
+        guard let cb3 = engine.makeCommandBuffer() else { return nil }
+        if let filledBuf, let blit = cb3.makeBlitCommandEncoder() {
+            blit.fill(buffer: filledBuf, range: 0..<MemoryLayout<UInt32>.stride, value: 0)
+            blit.endEncoding()
         }
-        let painted: MTLBuffer
-        if Int(edgeOverlap.rounded()) >= 1 {
-            engine.encode2D(enc3, p.edgeDilate, width: width, height: height, buffers: [(regionBuf, 0), (regionTmpBuf, 1), (paramsBuf, 2)])
-            painted = regionTmpBuf
+        guard let enc3 = cb3.makeComputeCommandEncoder() else { return nil }
+        if let lassoBuf, let alphaBuf, let filledBuf {
+            // **`fill = loopMask ∧ ¬reached`, and it replaced a union of the loop back over the
+            // flood.** The old line painted everything the loop enclosed and let the flood carry on
+            // outward past it; this one paints what the collar could *not* reach, so the loop bounds
+            // the result absolutely and the artwork inside it decides the shape. That swap is the
+            // whole of the reported bug's fix, and `lassoInvert`'s own comment explains why the loop
+            // must not become a wall to get there.
+            var second = referenceColours.1 ?? SIMD4<Float>.zero
+            var refCount = UInt32(referenceColours.1 == nil ? 1 : 2)
+            // Krita's *Spread*, and 0 is the plain ramp §6 step 6 describes: full opacity only on
+            // colour exactly equal to a reference, fading to the fill colour at the threshold. There
+            // is no Spread control in this app; the argument is here so adding one is a UI change.
+            var spread = Float(0)
+            enc3.setComputePipelineState(p.lassoInvert)
+            enc3.setBuffer(refBuf, offset: 0, index: 0)
+            enc3.setBuffer(lassoBuf, offset: 0, index: 1)
+            enc3.setBuffer(paramsBuf, offset: 0, index: 2)
+            enc3.setBuffer(regionBuf, offset: 0, index: 3)
+            enc3.setBuffer(region2Buf ?? regionBuf, offset: 0, index: 4)
+            enc3.setBuffer(alphaBuf, offset: 0, index: 5)
+            enc3.setBuffer(filledBuf, offset: 0, index: 6)
+            enc3.setBytes(&second, length: MemoryLayout<SIMD4<Float>>.size, index: 7)
+            enc3.setBytes(&refCount, length: MemoryLayout<UInt32>.size, index: 8)
+            enc3.setBytes(&spread, length: MemoryLayout<Float>.size, index: 9)
+            engine.dispatch2D(enc3, p.lassoInvert, width: width, height: height)
+            engine.encode2D(enc3, p.paintAlpha, width: width, height: height,
+                            buffers: [(alphaBuf, 0), (outBuf, 1), (paramsBuf, 2)])
         } else {
-            painted = regionBuf
+            let painted: MTLBuffer
+            if Int(edgeOverlap.rounded()) >= 1 {
+                engine.encode2D(enc3, p.edgeDilate, width: width, height: height, buffers: [(regionBuf, 0), (regionTmpBuf, 1), (paramsBuf, 2)])
+                painted = regionTmpBuf
+            } else {
+                painted = regionBuf
+            }
+            engine.encode2D(enc3, p.paint, width: width, height: height, buffers: [(painted, 0), (outBuf, 1), (paramsBuf, 2)])
         }
-        engine.encode2D(enc3, p.paint, width: width, height: height, buffers: [(painted, 0), (outBuf, 1), (paramsBuf, 2)])
         enc3.endEncoding()
         cb3.commit()
         cb3.waitUntilCompleted()
 
+        if let filledBuf {
+            lastFilledPixelCount = Int(filledBuf.contents().bindMemory(to: UInt32.self, capacity: 1).pointee)
+        }
         var result = [UInt8](repeating: 0, count: count * 4)
         result.withUnsafeMutableBytes { memcpy($0.baseAddress!, outBuf.contents(), count * 4) }
         return result
+    }
+
+    /// Encodes `computeWalls` for whichever reference `params` carries, then the gap-closing
+    /// morphological close, and returns the buffer the flood should treat as wall.
+    ///
+    /// Factored out because the lasso runs it **once per reference colour** — see `computeWalls`'s
+    /// own comment for why the two are not merged into one passability test. `params` is the only
+    /// argument that differs between the calls; the JFA helpers keep reading `paramsBuf` because all
+    /// they need from it is the canvas dimensions, which are the same either way.
+    private func encodeWallsAndClose(_ enc: MTLComputeCommandEncoder, params: MTLBuffer,
+                                     wall: MTLBuffer, closed: MTLBuffer,
+                                     gapRadius: Float, canvasEdgeIsWall: Bool) -> MTLBuffer {
+        let p = engine.pipelines
+        engine.encode2D(enc, p.walls, width: width, height: height, buffers: [(refBuf, 0), (wall, 1), (params, 2)])
+        guard Int(gapRadius.rounded()) >= 1 else {
+            // No *bridge* at a zero radius — the artist has said "bridge nothing" — but the barrier
+            // still applies: it lives inside `floodHoriz`/`floodVert`, which always run, and it is
+            // not a gap-closing behaviour. That is the one place the option's old contract ("inert
+            // at gapRadius 0") deliberately narrows to "inert at gapRadius 0 *and* no padding".
+            return wall
+        }
+        // Dilate: distance to nearest wall <= r.
+        let distWall = encodeJFA(enc, mask: wall, seedValue: 1)
+        encodeThreshold(enc, from: distWall, out: dilatedBuf, radius: gapRadius, keepInside: 1)
+        // The canvas-edge bridge is computed *here*, while `distWall` is still the wall distance
+        // field — the erode's own JFA below reuses the same two ping-pong buffers and destroys it.
+        // Folded into the closed mask afterwards rather than into `dilatedBuf`, because anything put
+        // in there is about to be eroded straight back off.
+        if canvasEdgeIsWall {
+            engine.encodeBridge(enc, p.edgeBridge, width: width, height: height,
+                                coord: distWall, out: bridgeBuf, params: paramsBuf, radius: gapRadius)
+        }
+        // Erode the dilated mask: distance to nearest background (dilated == 0) > r.
+        let distBg = encodeJFA(enc, mask: dilatedBuf, seedValue: 0)
+        encodeThreshold(enc, from: distBg, out: closed, radius: gapRadius, keepInside: 0)
+        if canvasEdgeIsWall {
+            engine.encode2D(enc, p.unionMask, width: width, height: height,
+                            buffers: [(bridgeBuf, 0), (closed, 1), (paramsBuf, 2)])
+        }
+        return closed
     }
 
     // MARK: - JFA helper

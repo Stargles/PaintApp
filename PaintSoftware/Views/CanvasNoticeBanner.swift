@@ -67,6 +67,9 @@ struct CanvasNoticeBanner: View {
         case .historyUndo:      return "arrow.uturn.backward"
         case .historyRedo:      return "arrow.uturn.forward"
         case .nothingToPick:    return "eyedropper"
+        // The lasso's own glyph rather than a warning triangle: the artist's loop is the thing the
+        // message is about, and nothing has gone wrong with the app.
+        case .nothingEnclosed:  return "lasso"
         }
     }
 }

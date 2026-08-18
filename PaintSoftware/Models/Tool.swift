@@ -116,19 +116,23 @@ enum FillMode: String, Codable, CaseIterable, Identifiable {
     /// `MetalFillEngine` and the Gap Closing / Threshold / Edge Overlap settings are all this mode's.
     case flood
 
-    /// Draw a loop; **everything it encircles is filled, including straight over any line art inside
-    /// it**, and the region carries on outward to the artwork's own silhouette. Modelled on Clip
-    /// Studio Paint's lasso fill; the owner's sentence is the specification — *"it bridges gaps only
-    /// on the outermost encirclement of the fill tool, all inner lines are filled over."*
+    /// Draw a loop. **The loop is a fence and ink is a wall: whatever inside the fence the fence
+    /// cannot walk to is filled solid, lines and all — and nothing else is touched.** So the colour
+    /// lands inside the shapes the loop contains, not on the paper between the loop and the drawing,
+    /// and never on the loop itself. Modelled on Krita's *Enclose and Fill* and Clip Studio Paint's
+    /// closed-area fill; LASSO_FILL.md is the specification, §3 the rule in one paragraph.
     ///
     /// That is what makes it a different tool rather than a shortcut for the flood: an ordinary fill
-    /// stops at every line it meets, and this one stops only where the region's *outer* edge runs
-    /// into artwork. Filling a dozen small compartments separated by hatching is one gesture instead
-    /// of a dozen taps.
+    /// stops at every line it meets, and this one paints over every line *inside* the loop while
+    /// treating the loop as an absolute boundary. Filling a dozen small compartments separated by
+    /// hatching is one gesture instead of a dozen taps, and a face's eyes fill with the face.
     ///
-    /// **It is the same flood underneath, so every fill setting still applies to it** — gap closing
-    /// acts at that outer edge, which is the "smartly bridges gaps" half of the ask. See
-    /// `CanvasManager.beginInteractiveLassoFill` for the mechanism and for where it can surprise.
+    /// **It is not the flood with a bigger seed, and the settings do not all carry over.** Gap
+    /// closing and Threshold act on the collar that decides what is *held out*; Edge Overlap is
+    /// forced to 0, because a fill that covers the line has no antialiasing seam to hide and growing
+    /// it would only push colour past the artwork onto clean paper. See
+    /// `CanvasManager.beginInteractiveLassoFill` for the mechanism, and for the cases — blank paper,
+    /// a gap wider than Gap Closing — where it deliberately fills nothing and says so.
     case lasso
 
     var id: String { rawValue }

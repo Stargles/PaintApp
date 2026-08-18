@@ -593,6 +593,15 @@ this is standard Core Graphics compositing, not something that needs the simulat
 run through the actual app** on a real stroke + lasso fill, so treat the general shape as solid and
 the exact pixel boundary as unconfirmed.
 
+**Re-checked 2026-08-18, when the lasso fill was rebuilt to LASSO_FILL.md §6, and it matters more
+now than it did.** The paint-over is no longer one of the tool's behaviours; it is the tool's
+*defining* behaviour — the fill is the loop minus what a collar could reach, so it necessarily
+includes the ink it encloses, and that is the same line of code that makes a face's eyes fill.
+LASSO_FILL.md §8 asks the owner to judge on the device whether painting over the outline is right on
+a single-layer sketch, and **on this path they will see nothing to judge**: the fill lands in
+`fillImage`, the strokes redraw on top, and the outline survives. Worth saying before the device
+pass, or the ruling gets made against the wrong evidence.
+
 This is likely why the shipped suite doesn't catch it: `LassoFillLogicTests` asserts only on the
 flood session's own `region` bytes (i.e. `fillImage`'s content before it's composited with anything
 else), and no XCUITest draws a stroke and then lasso-fills over it on the same layer. The common
@@ -614,6 +623,13 @@ there — the one thing the tool exists to avoid.
 
 **Read from the code, not measured** — the ordering is explicit enough that a test would only confirm
 it, but no test in the suite asserts it either way, so treat it as unverified until one does.
+
+**Re-checked 2026-08-18 against the rebuilt lasso fill (LASSO_FILL.md §6): unchanged, and now the
+tool's defining behaviour rather than one of its behaviours.** The rebuild also gave the vector path a
+second, smaller problem of its own: the fill now carries a coverage ramp along the artwork's
+antialiased fringe (§6 step 6), which a path cannot represent, so `commitInteractiveFill` traces the
+contour at half the gesture's opacity to put it where the raster tier's ramp crosses 50%. The two
+tiers therefore agree on the fill's *shape*; they still disagree on whether the artist can see it.
 
 Not fixed here because the fix is a change to `VectorCanvas`'s ordering contract, not to the fill:
 either a per-fill "draws above strokes" flag (which makes `Kind` no longer a total order and touches

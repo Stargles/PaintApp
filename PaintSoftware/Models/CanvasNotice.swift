@@ -42,6 +42,18 @@ struct CanvasNotice: Identifiable, Equatable {
         /// because the tool reverts on a miss as well as a hit (`applyEyedropperResult`), so without
         /// a word the artist sees only their tool changing under them for no stated reason.
         case nothingToPick
+        /// A lasso fill's loop held nothing out: either the collar leaked through a gap in the line
+        /// art, or there was no enclosed shape inside the loop at all.
+        ///
+        /// **Both causes, in one message, because the algorithm genuinely cannot tell them apart**
+        /// (LASSO_FILL.md §4 case 11): each is "the collar reached everything inside the fence". Made
+        /// the tool guess between them and the blank-paper branch would have to paint the loop's own
+        /// shape — which on the leak case means a slab of colour dumped over the artist's drawing.
+        ///
+        /// Raised rather than left silent for the reason §7 opens with: Krita ships this same
+        /// algorithm with no diagnostic, and its users report only that "it just won't fill
+        /// anything". A tool that does nothing and says nothing reads as broken.
+        case nothingEnclosed
     }
 
     init(_ kind: Kind) {
@@ -57,6 +69,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .historyUndo(let label):  return "Undid \(label.phrase)."
         case .historyRedo(let label):  return "Redid \(label.phrase)."
         case .nothingToPick:    return "Nothing to pick up there."
+        case .nothingEnclosed:  return "Nothing enclosed — the fill leaked through a gap in the line, or there was no shape inside the loop."
         }
     }
 
@@ -81,6 +94,10 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor this one, for the same reason: the fix is to tap somewhere with paint on it, which the
         // artist can already see and do behind the banner.
         case .nothingToPick:    return nil
+        // Nor this one, and here the reason is that the fix is a *choice* the artist has to make with
+        // the canvas in front of them — patch the gap, redraw the loop, or raise Gap Closing on the
+        // slider that is already on screen. None of the three is a button this banner could press.
+        case .nothingEnclosed:  return nil
         }
     }
 
@@ -96,6 +113,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .historyUndo:      return "historyUndo"
         case .historyRedo:      return "historyRedo"
         case .nothingToPick:    return "nothingToPick"
+        case .nothingEnclosed:  return "nothingEnclosed"
         }
     }
 

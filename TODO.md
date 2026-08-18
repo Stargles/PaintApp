@@ -21,29 +21,21 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 ## In flight
 
 - [ ] **The lasso fill fills the whole canvas** — owner, on device, 2026-08-18: *"Lasso tool is not
-      working as intended. When i circle something the entire canvas gets filled."* Diagnosed, ruled on,
-      specified, **not built**. Branch `tmp/lasso` (worktree `../PaintApp-lasso`) carries two test-only
-      commits: a characterization pinning today's behaviour, and a test-side proof that the replacement
-      works with no production change.
-      **It is the design, not a defect, and the design misses the gesture.** Every open pixel under the
-      loop is a seed and nothing bounds the flood, so *because circling something means drawing around
-      it*, the loop necessarily encircles paper outside the shape and that paper seeds the whole canvas.
-      Measured on a **perfectly closed** box, same tool and artwork, differing only in which side of the
-      outline the loop was drawn on: **1.000** of the canvas filled from outside, 0.338 from inside. No
-      setting recovers it. It shipped because every prior assertion sampled individual pixels and none
-      asked *how much*.
-      **The fix is specified in [LASSO_FILL.md](LASSO_FILL.md)** and the owner's own proposal — flood the
-      outside from the loop, then invert — turns out to be, word for word, steps 1-2 of Krita's shipped
-      *Enclose and Fill*, which was itself derived from studying Clip Studio Paint. Its formal name is
-      morphological hole filling. In this codebase it is roughly a one-character change to `Fill.metal`
-      plus swapping a union for an intersect; the multi-pixel seeding, the winding mask and the
-      gap-closing order are all already right.
-      **Three things the owner should see before it lands**: the real cost is not "circling blank paper
-      fills nothing" but *any loop not wholly containing an enclosed region fills nothing* — a loop drawn
-      inside a shape fills 0, one crossing the outline fills 0.0022; `fillExpand` (default 2) must be 0
-      in this mode or the fill runs 2 px past the artwork; and "the loop is a wall" must **not** be
-      implemented literally — the flood has to enter the ring in order to exclude it, and the wall
-      property comes from the final intersect.
+      working as intended. When i circle something the entire canvas gets filled."*
+      **Built on `tmp/lasso` (worktree `../PaintApp-lasso`), green on the fast tier, not yet merged and
+      not yet seen on the device.** [LASSO_FILL.md](LASSO_FILL.md) §6 implemented as specified: the
+      collar floods from the loop's one-pixel ring, is confined to the loop, and the fill is the loop
+      minus everything it reached. Circling a closed box now paints exactly the box (0.4004 of the
+      canvas) where it used to paint 1.000; a loop inside the shape, around blank paper, or crossing the
+      outline all fill nothing.
+      **What still needs the owner, on the iPad, not a test** (LASSO_FILL.md §8): whether the
+      paint-over destroys the outline on a single-layer sketch — and note that on two of the three
+      commit paths they will *not* see it happen, because [BUGS.md](BUGS.md)'s two "does not paint over
+      line art" entries mean same-cel raster strokes and every vector stroke redraw over the new fill.
+      Also whether the tool feels right on a textured pencil rather than a hard round brush.
+      **Not built: the §7.2 collar tint.** The empty result commits nothing, pushes no undo entry and
+      raises a banner; the translucent overlay showing *where it leaked* is the piece left, and it is
+      the one thing that turns "it just won't fill anything" into a diagnosis.
 
 - [ ] **The "To Cross" eraser leaves stubs, and its size does nothing** — owner, on device, 2026-08-18:
       *"The cross eraser behaviour is a bit weird. I want it to erase the lines right at the point that

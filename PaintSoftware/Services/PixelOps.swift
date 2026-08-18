@@ -532,9 +532,17 @@ enum PixelOps {
     /// Converts a premultiplied-last RGBA byte buffer (e.g. the output of `MetalFillSession.fill`)
     /// into a closed `CGPath` by thresholding the alpha channel to produce a boolean mask and then
     /// tracing its contour. Used to create `VectorFillElement` geometry from the GPU flood fill.
-    static func pathFromAlphaMask(bytes: [UInt8], width: Int, height: Int) -> CGPath? {
+    ///
+    /// - Parameter minimumAlpha: the alpha at which a pixel counts as inside. 1 — any alpha at all —
+    ///   is right for the bucket fill, whose output is a hard-edged region painted at one uniform
+    ///   opacity. It is *wrong* for the lasso fill, which carries a coverage ramp along the artwork's
+    ///   antialiased fringe (LASSO_FILL.md §6 step 6): tracing at `> 0` there would push the contour
+    ///   out to the full threshold band. `CanvasManager.commitInteractiveFill` passes half the
+    ///   gesture's opacity, which is the fringe's midpoint.
+    static func pathFromAlphaMask(bytes: [UInt8], width: Int, height: Int,
+                                  minimumAlpha: UInt8 = 1) -> CGPath? {
         guard width > 0, height > 0, bytes.count >= width * height * 4 else { return nil }
-        let mask = (0..<(width * height)).map { bytes[$0 * 4 + 3] > 0 }
+        let mask = (0..<(width * height)).map { bytes[$0 * 4 + 3] >= minimumAlpha }
         return contourPath(selected: mask, width: width, height: height)
     }
 }
