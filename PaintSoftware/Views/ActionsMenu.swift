@@ -3,6 +3,13 @@ import PhotosUI
 
 struct ActionsMenu: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// **The one panel that can open another panel.** Every other row here is a direct action, a
+    /// `PhotosPicker` or an inert stub, so this view needed nothing but the manager until "Add Text"
+    /// arrived — text is a *mode*, and entering it means swapping this menu for the text tool's own
+    /// settings panel. `ADD_TEXT.md` §1 calls threading this binding through the change that "lands
+    /// first and alone", because `ActionsMenu` is shared by every panel in the app and a change here
+    /// wants to be bisectable on its own.
+    @Binding var activePanel: ActivePanel
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var notice: String?
     /// Live slider position for the padding control. The (buffer-resizing) commit happens only on
@@ -36,6 +43,8 @@ struct ActionsMenu: View {
             .onChange(of: photoPickerItem) { _, newItem in
                 Task { await insertPhoto(newItem) }
             }
+
+            addTextRow
 
             Button {
                 canvasManager.flipCanvas(horizontal: true)
@@ -96,6 +105,53 @@ struct ActionsMenu: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Enters the text tool and swaps this menu for the text tool's settings panel — the only way
+    /// into `Tool.text`, since the top toolbar has no text icon.
+    ///
+    /// **Disabled rather than hidden where text cannot go, with the reason underneath it.** The row
+    /// is the feature's only signpost: hidden, "can this app do text" has no answer on the layer the
+    /// artist happens to be standing on, and they conclude it cannot. `ADD_TEXT.md` ships stage 1
+    /// raster-only and says it "ships nothing it has to un-ship", so a row that half-worked on a
+    /// vector layer — baking pixels onto a layer whose whole point is that its content stays
+    /// editable geometry — is the thing being avoided, and saying so plainly is the honest version.
+    ///
+    /// `Tool.textUnavailableReason` is where the answer lives, keyed off the layer's *kind*: the
+    /// caption and the disabled state read one value, so they cannot disagree about whether the row
+    /// works, and a fourth `LayerKind` cannot quietly inherit "text is fine here".
+    private var addTextRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                // No `commitAllInteractiveState()`, and its absence is the point — see
+                // `CanvasManager.enterTextMode`, and `Binding.toggleSettingsPanel` for the rule it
+                // is following. Both statements are that rule: enter the mode, open its panel, bake
+                // nothing on the way.
+                canvasManager.enterTextMode()
+                $activePanel.toggleSettingsPanel(.text)
+            } label: {
+                row(icon: "textformat", title: "Add Text", enabled: textUnavailableReason == nil)
+            }
+            .disabled(textUnavailableReason != nil)
+            .accessibilityIdentifier("actions.addTextRow")
+
+            if let textUnavailableReason {
+                Text(textUnavailableReason)
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal)
+                    .padding(.leading, 24)   // clears the row's icon column, so it reads as the row's own note
+                    .padding(.bottom, 6)
+            }
+        }
+    }
+
+    /// Nil when "Add Text" is usable on the layer the artist is standing on. Recomputed per render
+    /// off `activeLayerKind`, so selecting another layer enables or disables the row with no state
+    /// of its own to keep in step.
+    private var textUnavailableReason: String? {
+        Tool.textUnavailableReason(onLayerOfKind: canvasManager.activeLayerKind)
     }
 
     /// Whether a finger may draw, or only an Apple Pencil. Phrased as "fingers can paint" — the
@@ -182,13 +238,16 @@ struct ActionsMenu: View {
         .onAppear { paddingDraft = Double(canvasManager.canvasPadding) }
     }
 
-    private func row(icon: String, title: String) -> some View {
+    /// `enabled` greys the row itself rather than leaning on `.disabled`'s own dimming, which this
+    /// row never gets: the explicit `.foregroundColor(.white)` below wins over it, so a disabled row
+    /// left to SwiftUI would look exactly like a working one and simply ignore taps.
+    private func row(icon: String, title: String, enabled: Bool = true) -> some View {
         HStack {
             Image(systemName: icon).frame(width: 24)
             Text(title)
             Spacer()
         }
-        .foregroundColor(.white)
+        .foregroundColor(enabled ? .white : Color.white.opacity(0.35))
         .padding(.horizontal)
         .padding(.vertical, 8)
         .contentShape(Rectangle())

@@ -273,7 +273,11 @@ struct DrawingView: View {
     /// gallery/actions icons are leading; brush/fill/layers/color are trailing.
     private var panelAlignment: Alignment {
         switch activePanel {
-        case .actions:
+        // Text is a *tool* settings panel and every other one of those is trailing, but it is the
+        // only panel with no icon on either side of the toolbar: its entry point is the Actions
+        // menu's "Add Text" row. Leading keeps it where the row the artist just tapped was, instead
+        // of the panel flying across the screen at the moment of entering the mode.
+        case .actions, .text:
             return .topLeading
         default:
             return .topTrailing
@@ -286,7 +290,7 @@ struct DrawingView: View {
         case .none:
             EmptyView()
         case .actions:
-            ActionsMenu(canvasManager: canvasManager)
+            ActionsMenu(canvasManager: canvasManager, activePanel: $activePanel)
         case .select:
             EmptyView() // Select's UI is the bottom bar, shown whenever the tool is engaged — see above.
         case .move:
@@ -301,6 +305,8 @@ struct DrawingView: View {
             ColorPickerPanel(color: $canvasManager.brushColor)
         case .fill:
             FillSettingsPanel(canvasManager: canvasManager)
+        case .text:
+            TextSettingsPanel(canvasManager: canvasManager)
         // Interpolate has no case here: its options are a popover on the timeline's own interpolate
         // button (`AnimationTimeline.interpolateButton`), not a top-toolbar dropdown.
         }

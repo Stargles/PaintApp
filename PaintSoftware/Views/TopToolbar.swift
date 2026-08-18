@@ -7,6 +7,30 @@ import SwiftUI
 /// icon at the top can be removed, its what the layer edit does."
 enum ActivePanel: Equatable {
     case none, actions, select, move, layers, brush, color, fill, eraser
+    /// The text tool's settings panel. **Not opened from the toolbar** — there is no text icon
+    /// there; the way in is the Actions menu's "Add Text" row, which is why `ActionsMenu` is the one
+    /// panel that had to grow an `activePanel` binding. See `Tool.text`.
+    case text
+}
+
+extension Binding where Value == ActivePanel {
+    /// Opens (or closes) the settings panel of the tool that's *already* active. Unlike
+    /// `TopToolbar.toggle`, this deliberately bakes nothing: showing a tool's own sliders changes
+    /// nothing about the canvas, so by the "does the canvas look different" rule it isn't a canvas
+    /// edit.
+    ///
+    /// For the fill tool it must not bake, because those sliders exist precisely to re-run a
+    /// still-adjustable fill (see `CanvasManager.setFillSetting`) — committing on the way in freezes
+    /// the fill and turns every slider in the panel into a no-op. Text has the same shape and a
+    /// larger stake (`CanvasManager.enterTextMode`), which is what made this worth having one
+    /// spelling of: it is now reached from two views, and a second hand-written copy of a rule is
+    /// how the copies come to disagree.
+    ///
+    /// On the binding rather than on a view because `TopToolbar` and `ActionsMenu` share nothing
+    /// else, and `activePanel` is the only thing either of them needs to hold to do this.
+    func toggleSettingsPanel(_ panel: ActivePanel) {
+        wrappedValue = (wrappedValue == panel) ? .none : panel
+    }
 }
 
 struct TopToolbar: View {
@@ -84,17 +108,6 @@ struct TopToolbar: View {
         activePanel = (activePanel == panel) ? .none : panel
     }
 
-    /// Opens (or closes) the settings panel of the tool that's *already* active. Unlike `toggle`,
-    /// this deliberately bakes nothing: showing a tool's own sliders changes nothing about the
-    /// canvas, so by the "does the canvas look different" rule it isn't a canvas edit.
-    ///
-    /// For the fill tool it must not bake, because those sliders exist precisely to re-run a
-    /// still-adjustable fill (see `CanvasManager.setFillSetting`) — committing on the way in freezes
-    /// the fill and turns every slider in the panel into a no-op.
-    private func toggleSettingsPanel(_ panel: ActivePanel) {
-        activePanel = (activePanel == panel) ? .none : panel
-    }
-
     /// Tapping Move toggles between lifting the current selection (or, if there is none, the whole
     /// current layer) into a floating piece, and committing whatever's currently floating.
     private func toggleMove() {
@@ -135,7 +148,7 @@ struct TopToolbar: View {
     private func selectBrushToolAndTogglePanel() {
         let brushActive = !isToolHighlightSuppressed && (canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil)
         if brushActive {
-            toggleSettingsPanel(.brush)
+            $activePanel.toggleSettingsPanel(.brush)
         } else {
             canvasManager.commitAllInteractiveState()
             canvasManager.selectedTool = .pen
@@ -146,7 +159,7 @@ struct TopToolbar: View {
     private func selectEraserToolAndTogglePanel() {
         let eraserActive = !isToolHighlightSuppressed && canvasManager.selectedTool == .eraser
         if eraserActive {
-            toggleSettingsPanel(.eraser)
+            $activePanel.toggleSettingsPanel(.eraser)
         } else {
             canvasManager.commitAllInteractiveState()
             canvasManager.selectedTool = .eraser
@@ -157,7 +170,7 @@ struct TopToolbar: View {
     private func selectFillToolAndTogglePanel() {
         let fillActive = !isToolHighlightSuppressed && canvasManager.selectedTool == .fill
         if fillActive {
-            toggleSettingsPanel(.fill)
+            $activePanel.toggleSettingsPanel(.fill)
         } else {
             canvasManager.commitAllInteractiveState()
             canvasManager.selectedTool = .fill

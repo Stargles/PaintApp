@@ -18,6 +18,16 @@ enum Tool: Hashable, CaseIterable {
     /// selected, the next canvas touch would re-pick instead of paint, which is never what the tap
     /// was for.
     case eyedropper
+
+    /// Place and edit a live text object on the canvas. Entered from the Actions menu's "Add Text"
+    /// row rather than from a toolbar icon — see `ActionsMenu` — because the toolbar's seven slots
+    /// are spoken for and text is reached once per drawing, not once per stroke.
+    ///
+    /// **Inert as of this commit**: the mode can be entered and left, and nothing yet happens on a
+    /// canvas touch. `ADD_TEXT.md` stage 1 is what fills it in; this case exists first and alone so
+    /// the shared plumbing it needs (`ActivePanel.text`, the `activePanel` binding into
+    /// `ActionsMenu`) lands where it can be bisected to.
+    case text
 }
 
 extension Tool {
@@ -47,8 +57,51 @@ extension Tool {
             // The eraser included: it is a stroke like any other, `.destinationOut` on a raster
             // layer and a real gesture on a vector one, and it goes through the same recognizer.
             return true
-        case .fill, .eyedropper:
+        case .fill, .eyedropper, .text:
+            // Text sits with the fill, not with the brushes, and the smart shapes are the reason
+            // the answer is not obvious. A shape *is* a brush stroke — it comes out of holding a
+            // pen/pencil stroke still (`CanvasView.startShapeDetection`, gated on `.pen`/`.pencil`),
+            // so its touch has to reach the layer host or there is no stroke to snap. Text's touch
+            // never becomes a stroke: it places a box for an overlay that lives above the layers
+            // (`ADD_TEXT.md` §1, "the overlay is the editor"), so the host must decline it exactly
+            // as it declines the fill's, or the same touch would paint a stroke *and* start a text
+            // box — the eyedropper's bug with a different tool's name on it.
+            //
+            // The other half of `false` follows and is wanted: `handleCatchAllTap` returns early
+            // for a tool that does not paint, so a text-mode tap raises no "why did my finger not
+            // draw" banner. It is not owed one; nothing about the tap was a drawing attempt.
             return false
+        }
+    }
+}
+
+extension Tool {
+    /// Why the text tool cannot be used on the active layer, or nil when it can.
+    ///
+    /// **Driven by the layer's kind, not by a list of layers text is banned from.** Same defect
+    /// shape as the exclusion `paintsOnCanvas` above replaced: a hand-maintained list is a list that
+    /// a later `LayerKind` does not get added to. The `switch` has no `default:`, so a fourth kind
+    /// has to state whether text may land on it before this compiles.
+    ///
+    /// Phrased as a *reason* rather than a `Bool` because the row it drives is disabled rather than
+    /// hidden, and a control that is visibly there and will not respond has to say why. `ADD_TEXT.md`
+    /// stage 1 ships raster-only and "ships nothing it has to un-ship" — the vector arm is stage 3's
+    /// to delete, at which point text stays a real, re-editable element instead of baking.
+    static func textUnavailableReason(onLayerOfKind kind: LayerKind?) -> String? {
+        switch kind {
+        case .raster:
+            return nil
+        case .vector:
+            return "Text isn't available on a vector layer yet. Add it on a raster layer for now."
+        case .value:
+            // Neither mode of `.value` — the grade wrapper nor the flat colour — has a drawing
+            // surface for the bake to land in (`LayerKind`, `Layer.hasNoDrawingSurface`). This is
+            // not a "yet": text on a layer that holds no pixels has nothing to mean.
+            return "A value layer holds no pixels for text to land in. Add it on a raster layer."
+        case nil:
+            // `activeLayerKind` is legitimately nil mid-edit — `deleteLayer` parks the index at -1
+            // while it removes the active layer — as well as on a document with no layers at all.
+            return "Select a layer to add text to."
         }
     }
 }

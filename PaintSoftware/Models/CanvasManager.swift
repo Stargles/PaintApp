@@ -569,6 +569,36 @@ final class CanvasManager: ObservableObject {
         commitFloatingPieceIfNeeded()
     }
 
+    /// Enters the text tool — the Actions menu's "Add Text" row, and the only way in.
+    ///
+    /// **The missing `commitAllInteractiveState()` above is the entire method**, which is why it is a
+    /// method at all rather than `selectedTool = .text` written into a SwiftUI button. `Tool.text`'s
+    /// panel is a settings panel: it routes through `TopToolbar`'s `toggleSettingsPanel` rule, which
+    /// deliberately bakes nothing, because a panel whose sliders exist to re-run the still-adjustable
+    /// thing in front of you turns into a panel of no-ops the moment opening it freezes that thing
+    /// (that comment is written out at `Binding<ActivePanel>.toggleSettingsPanel`, and the fill is
+    /// where it was learned). Text inherits the rule with its own version of the stake: from
+    /// `ADD_TEXT.md` stage 1 onward there is a live text session behind this panel, and committing on
+    /// the way in bakes the very text the artist opened the panel to restyle.
+    ///
+    /// Stating it here rather than at the call site is the `Tool.paintsOnCanvas` move: the answer
+    /// belongs somewhere a headless test can reach it, because "somebody added a bake" is a silent
+    /// change that no view-layer test in this project can see.
+    ///
+    /// Nothing pending is stranded by the omission. A transient fill or smart shape stays in its own
+    /// tier and is baked by `beginCanvasEdit()` at the next real canvas edit, exactly as it is while
+    /// any other settings panel is open — and `beginCanvasEdit()` is where `ADD_TEXT.md` puts
+    /// `commitInteractiveText()`, so the text session joins the same chokepoint rather than getting
+    /// one of its own.
+    ///
+    /// A floating Move/Duplicate piece does survive into text mode, and that is the one case worth
+    /// naming: `beginCanvasEdit()` deliberately does not settle a piece, so once text starts placing
+    /// pixels the stage that does needs to decide whether Move commits first. Today text places
+    /// nothing, so there is nothing to decide yet.
+    func enterTextMode() {
+        selectedTool = .text
+    }
+
     /// The banner currently across the top of the canvas, or nil for none — the owner's replacement
     /// for the three modal alerts that used to interrupt drawing (`CanvasNotice` carries why).
     ///
