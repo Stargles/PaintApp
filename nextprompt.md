@@ -1,64 +1,53 @@
 # Prompt for the next session
 
-Paste the block below. Everything after it is context for whoever is writing the next prompt, not for
-the agent.
+Paste the block below.
 
 ---
 
-Read HANDOFF.md, then CLAUDE.md and TODO.md. Continue the UX pass.
+Read HANDOFF.md, then CLAUDE.md and TODO.md. Four branches were stopped mid-flight at a usage limit and
+every one of them is committed and pushed — nothing needs recovering, but three carry a `WIP` commit that
+is **unreviewed and untested**, so read the diff before trusting any of it.
 
-You are the orchestrator: delegate to agents, don't do worker-level tracing yourself. Workflows and
-subagents are pre-authorized here.
+**Two work streams at a time, maximum.** The owner set that cap explicitly after a four-workflow pass
+burned 40% of a five-hour window in fifteen minutes. TODO.md's "three in flight" line is about the Mac's
+cores and is superseded. Prefer one scoped agent, or doing it inline; say what a fan-out will cost before
+you start it.
 
-Start with the lasso fill. It is a live bug I reported on device — circling something fills the whole
-canvas — and it is the only thing in flight. It is fully diagnosed and fully specified and **not
-built**:
+Take them in this order, two at a time:
 
-1. `tmp/lasso` (worktree `../PaintApp-lasso`) has two test-only commits: a characterization pinning
-   today's wrong behaviour, and a test-side proof that the replacement works with no production change.
-   It is based on an older `main` and needs a rebase.
-2. LASSO_FILL.md is the specification — the algorithm, its name in the literature, every edge case
-   decided, the pixel-level sequence, and where it deliberately diverges from other apps. Do not
-   re-derive it and do not re-open the design; it came out of research I asked for and I have ruled on
-   the semantics.
-3. Three things in it that a careless implementation will get wrong, all recorded there: "the loop is a
-   wall" must **not** be implemented literally (the flood has to enter the ring in order to exclude it —
-   the wall property comes from the final intersect); `fillExpand` defaults to 2 and must be 0 in this
-   mode or the fill runs past the artwork; and **no connected-component filter** — a face's eyes are
-   meant to fill with the face.
-4. When it's built, deploy it to my iPad and I'll try it. The thing I'll check first is a shape with a
-   gap in its outline, and a loop drawn well outside the shape.
+1. **`tmp/fillborder`** — the only clean branch, one commit, test status unknown. Verify the commit
+   actually addresses the cause before running anything: the suspicion is *two* stacked bugs, an inset
+   artwork rectangle nothing knew about plus an edge rule that was only conditional. Finish and merge.
+2. **`tmp/lasso`** — the specified algorithm is in, the WIP on top looks like the failure-signal UI being
+   wired. LASSO_FILL.md is the spec, the owner has ruled, do not re-open the design. When it lands,
+   deploy to the owner's iPad — they will check a shape with a gap in its outline and a loop drawn well
+   outside the shape.
+3. **`tmp/menuinterrupt`** — read MENU_PRESENTATION_CENSUS.md first; it is the pass's biggest finding and
+   it answers the owner's real question. The WIP carries three new files that are the mechanism half-built
+   and never reviewed. The owner does not want a third opt-in: the target is a compile-time guarantee like
+   `Tool.paintsOnCanvas`, and the close-out must say plainly whether that was achieved or came out weaker.
+4. **`tmp/crosseraser`** — WIP only, no reported design. Re-derive it from the diff.
 
-Then, in order: Add Text stage 1b (the rest of stage 1 — ADD_TEXT.md, and note Stage 2 is already on
-main and must not be rebuilt), and the perf programme's Tier A in PERFORMANCE.md.
+Then Add Text stage 1b (ADD_TEXT.md; **Stage 2 is already on main and must not be rebuilt**) and the perf
+programme's Tier A in PERFORMANCE.md.
 
-Two things I still owe you an answer on — ask me when they block work:
-  - Save semantics when a project loaded with something unreadable: may saving overwrite the good
-    original, refuse, or prompt?
-  - Which faces belong in the font picker's favourites strip.
+**Ask the owner for the third Action Recorder capture early** — a blend-mode `Menu` on the layer rail with
+a stroke drawn straight through it. It decides whether the census's 12 unknowns are broken, i.e. whether
+the count is 19 or 7, and nothing in the source can settle it. The other two captures (timeline menu,
+onion panel) are still worth having.
 
-Two things you owe me a ruling on, from work that merged today. Ask when you get to them, not now:
-  - A double-traced ellipse (going round twice) detects as a rectangle. Pre-existing, not a regression.
-  - The smart oval has no arc-end handles, so "I drew 100° and wanted 180°" means drawing it again.
+Four things the owner owes an answer on are listed at the end of HANDOFF.md. Ask when they block work.
 
 ---
 
 ## Notes for whoever writes the next prompt
 
-**Why the lasso is first and phrased that way.** The owner ruled on the semantics across two answers and
-then asked for research rather than accepting a design argument — the research agreed with them and
-named the algorithm. Re-opening that design would waste the ruling. The three "careless implementation"
-traps are all things a session working from the owner's words alone would get wrong, which is why they
-are in the prompt rather than only in the doc.
+**Why fillborder is first and lasso second**, despite lasso being the older ask: fillborder is clean and
+small, both touch the fill engine, and whichever lands second pays the rebase. Cheapest order.
 
-**What not to put in the prompt.** Don't ask the owner to re-check the lasso on the current build; it is
-known broken and they already reported it. Don't ask for the canvas-size recalibration again — it is
-settled and at the top of TODO.md.
+**Do not re-run the four stopped workflows.** Their journals hold what each agent returned, including
+diagnosis phases whose conclusions never reached a report — paths are in HANDOFF.md, and reading them is
+far cheaper than re-deriving. They are session-scoped; read before they are pruned.
 
-**Machine state.** No stray simulator clones, one worktree (`../PaintApp-lasso`), one branch
-(`tmp/lasso`). The owner's iPad has `main` installed as of this session's end.
-
-**A process trap that cost this session three silent no-ops**: `git merge --ff-only` run from inside a
-branch's own worktree prints "Already up to date" and merges nothing. Run merges from the main worktree
-as their own command. Also: the agent scratchpad is shared between sessions despite being documented as
-isolated — prefix per-agent filenames.
+**Do not ask the owner to re-check the lasso, the cross eraser or the menu bugs on the current build.**
+All four are known broken and they reported every one of them.
