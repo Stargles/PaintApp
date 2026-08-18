@@ -123,6 +123,13 @@ enum PixelOps {
         }
     }
 
+    /// The entry ceiling on `rasterizeCache` below, a named constant because something outside this
+    /// file has to be able to ask **how many canvas-sized flattens that cache can actually hold** —
+    /// see `OnionSkinBudget.cachedSourceCount(for:resolution:sharedBudgetBytes:)`, which needs it to
+    /// answer whether an onion-skin window at Full fits, since at Full the onion skin caches through
+    /// here rather than through its own store. Read-only; the cache is still the only writer.
+    static let sharedRasterizeEntryLimit = 24
+
     /// Small and bounded on purpose: one canvas-sized image is 16.8 MB at 2048² and 64 MB at 4000²
     /// (§5.3), so this holds a working set — the layers of the current frame, plus the neighbours a
     /// scrub touches — and not a history. Evicts in insertion order, which for a cache read in
@@ -142,7 +149,7 @@ enum PixelOps {
     /// should scale with the device on the same rule. It does mean the pair can hold twice the budget
     /// between them, which is accounted for: the budget is one sixteenth of the device precisely so
     /// that the whole compositing subsystem is about one eighth of it.
-    private static let rasterizeCache = RasterizeCache(limit: 24)
+    private static let rasterizeCache = RasterizeCache(limit: sharedRasterizeEntryLimit)
 
     private final class RasterizeCache {
         private let limit: Int

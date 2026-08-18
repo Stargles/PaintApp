@@ -2455,6 +2455,10 @@ final class PerfBaselineTests: XCTestCase {
     /// runs in: a rebuild happens when the playhead changes drawing, and by then the drawings in the
     /// window have been reduced once each. `sourceMiss` in the test above is the other half.
     func testOnionSkinCostOfEachResolutionOption() {
+        // The owner's iPad 9 has 3 GB, and `CompositorBudget.textureBudgetBytes` is a sixteenth of
+        // that. Stated rather than read, for `textureBudgetBytes(physicalMemory:)`'s reason: the
+        // figures below describe that device, not whichever machine is running the test.
+        let threeGigabyteTextureBudget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024)
         func timeMin(_ repeats: Int = 4, _ body: () -> Void) -> Double {
             var best = Double.greatestFiniteMagnitude
             for _ in 0..<repeats {
@@ -2486,6 +2490,33 @@ final class PerfBaselineTests: XCTestCase {
                 rows.append(("\(name)Default2", milliseconds(timeMin { _ = OnionSkinFrame.composite(skins(2), size: size) })))
                 rows.append(("\(name)Max10", milliseconds(timeMin { _ = OnionSkinFrame.composite(skins(10), size: size) })))
                 rows.append(("\(name)Ceiling", megabytes(UInt64(OnionSkinBudget.residentCeilingBytes(for: canvas, resolution: resolution)))))
+                // **What producing one skin's source costs at this option, which is the half the two
+                // rows above leave out.** They composite from a pre-reduced source; this is the price
+                // of getting that source in the first place, and at Full it is not zero merely
+                // because `OnionSkinRasterCache` stores nothing there — the work moves to
+                // `PixelOps.rasterize` at canvas size, it does not disappear. Both caches are cleared
+                // per attempt, because a miss is inherently cold and the memoized Full path would
+                // otherwise report a hit.
+                var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
+                cel.bakedImage = CanvasFixture.solidImage(.blue,
+                                                          rect: CGRect(x: 0, y: 0, width: canvas.width * 0.6,
+                                                                       height: canvas.height * 0.6),
+                                                          size: canvas)
+                var bestMiss = Double.greatestFiniteMagnitude
+                for _ in 0..<4 {
+                    OnionSkinRasterCache.removeAll()
+                    PixelOps.clearRasterizeCache()
+                    let start = CFAbsoluteTimeGetCurrent()
+                    autoreleasepool { _ = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: size) }
+                    bestMiss = Swift.min(bestMiss, CFAbsoluteTimeGetCurrent() - start)
+                }
+                rows.append(("\(name)SourceMiss", milliseconds(bestMiss)))
+                rows.append(("\(name)Cached", "\(OnionSkinBudget.cachedSourceCount(for: canvas, resolution: resolution, sharedBudgetBytes: threeGigabyteTextureBudget))"))
+                rows.append(("\(name)Est10", milliseconds(OnionSkinBudget.estimatedRebuildMilliseconds(
+                    for: canvas, resolution: resolution, skins: 10,
+                    sharedBudgetBytes: threeGigabyteTextureBudget) / 1000)))
+                OnionSkinRasterCache.removeAll()
+                PixelOps.clearRasterizeCache()
             }
             report("onion skin cost per resolution option, \(label)", rows)
         }

@@ -154,10 +154,13 @@ struct OnionSkinPanel: View {
 
     // MARK: - Resolution
 
-    /// How sharp the skins are, as a fraction of the canvas (owner, 2026-08-17). The caption states
-    /// what the setting *costs*, because that is the only reason to reach for it — and it names the
-    /// floor when the floor is what is actually in force, so a small document does not look like it
-    /// is ignoring the control.
+    /// How sharp the skins are, as a fraction of the canvas (owner, 2026-08-17), with **each option's
+    /// actual composite size under it and one note line under that**.
+    ///
+    /// The owner ruled on both halves of this together (2026-08-18): the sizes are factual and always
+    /// visible, and the caution speaks only when the combination is genuinely expensive. A segmented
+    /// control cannot carry two lines per segment, so the sizes are a legend laid out on the picker's
+    /// own thirds — the same idiom as the caption already under `neighbourhoodPicker`, one row down.
     private var resolutionPicker: some View {
         VStack(alignment: .leading, spacing: 4) {
             Picker("Resolution", selection: binding(\.resolution)) {
@@ -166,24 +169,86 @@ struct OnionSkinPanel: View {
             .pickerStyle(.segmented)
             .accessibilityIdentifier("onionPanel.resolutionPicker")
 
-            Text(resolutionCaption)
-                .font(.caption2)
-                .foregroundColor(.white.opacity(0.55))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            resolutionSizeLegend
+            resolutionNote
         }
     }
 
-    private var resolutionCaption: String {
-        guard let canvas = canvasManager.canvasSize else { return "Sharper skins cost more to draw" }
+    /// The composite size each option will actually produce on this canvas, under the segment that
+    /// picks it. Not "half of 2048" but the number `OnionSkinBudget` will really use, so the
+    /// readability floor is visible as a fact — on the owner's 2048x1024 the legend reads
+    /// 2048x1024 / 1024x512 / **768x384**, and the last one being larger than a naive quarter needs
+    /// no sentence to explain it.
+    ///
+    /// Monospaced digits so the three columns do not shuffle as the canvas changes, and the selected
+    /// one is brighter rather than boxed — a second box under a segmented control reads as a second
+    /// control.
+    private var resolutionSizeLegend: some View {
+        HStack(spacing: 0) {
+            ForEach(OnionSkinSettings.Resolution.allCases) { resolution in
+                Text(compositeSizeLabel(resolution))
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundColor(.white.opacity(resolution == settings.resolution ? 0.85 : 0.45))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        // Three `Text`s in an `HStack` are three accessibility elements and a stack is none, so the
+        // identifier would name nothing without this — the trap `tintBar` does not hit only because
+        // a `ZStack` of shapes has no children to lose.
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("onionPanel.resolutionSizes")
+    }
+
+    private func compositeSizeLabel(_ resolution: OnionSkinSettings.Resolution) -> String {
+        guard let canvas = canvasManager.canvasSize else { return " " }
+        let size = OnionSkinBudget.compositeSize(for: canvas, resolution: resolution)
+        return "\(Int(size.width.rounded()))x\(Int(size.height.rounded()))"
+    }
+
+    /// One line, always present, carrying the most useful thing there is to say about the current
+    /// combination — the caution when the estimate crosses `OnionSkinBudget.cautionThresholdMilliseconds`,
+    /// the readability floor when it is what is actually in force, and otherwise the plain trade-off.
+    ///
+    /// **It occupies reserved space rather than animating in, and that is the deliberate half of this
+    /// control.** The caution's trigger is the count sliders and the resolution picker, so the moment
+    /// it would animate is the moment the artist is dragging something two rows below it — a line
+    /// that appears and disappears there pushes the opacity sliders up and down under the finger
+    /// already on them. Two lines' worth of height is held whether or not there is a caution, so
+    /// nothing below this ever moves; the cost is a little empty space on a panel that had room for
+    /// it, and the alternative was the panel's own layout fighting the gesture.
+    ///
+    /// The caution is brighter rather than coloured or badged. It is a caution, not an alarm: it says
+    /// what the current settings cost and what the cheaper one costs, and lets the artist decide.
+    private var resolutionNote: some View {
+        Text(resolutionNoteText)
+            .font(.caption2)
+            .foregroundColor(.white.opacity(caution == nil ? 0.55 : 0.85))
+            .lineLimit(2)
+            .minimumScaleFactor(0.85)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(height: 30, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("onionPanel.resolutionNote")
+    }
+
+    private var caution: String? {
+        guard let canvas = canvasManager.canvasSize else { return nil }
+        return OnionSkinBudget.caution(for: canvas, settings: settings)
+    }
+
+    private var resolutionNoteText: String {
+        if let caution { return caution }
+        guard let canvas = canvasManager.canvasSize else { return "Sharper skins cost more to draw." }
         let size = OnionSkinBudget.compositeSize(for: canvas, resolution: settings.resolution)
-        let edge = Int(max(size.width, size.height).rounded())
         let plain = max(canvas.width, canvas.height) * settings.resolution.fraction
+        let edge = Int(max(size.width, size.height).rounded())
         // The floor only gets a mention when it is doing something; the rest of the time saying so
         // would be noise about a rule that is not in force.
         return edge > Int(plain.rounded()) && size != canvas
-            ? "\(edge) px — held up from \(Int(plain.rounded())) px so lines stay readable"
-            : "\(edge) px — sharper costs more to draw"
+            ? "Held up from \(Int(plain.rounded())) px so lines stay readable."
+            : "Sharper skins cost more to draw."
     }
 
     // MARK: - Tint bar

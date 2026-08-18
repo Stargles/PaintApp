@@ -20,27 +20,34 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- [ ] **The onion skin panel — built, green, and parked unmerged** on `tmp/onion` (`f09f1bc`, worktree
-      `../PaintApp-onion`), 1123 tests / 1120 passed / 0 failed. Everything the owner asked for is
+- [ ] **The onion skin panel — built, green, and parked unmerged** on `tmp/onion` (worktree
+      `../PaintApp-onion`), 1149 tests / 1146 passed / 3 skipped / 0 failed. Everything the owner asked for is
       wired: Drawings|Frames (semantics confirmed by the owner), Behind|In Front, count sliders with the
       loop toggle, Tinted|Original, the tint gradient, per-slot opacity sliders, and linked opacity on by
       default. Out-of-pegs deliberately omitted, with the layout left able to take it.
       Resolution is a **Full/Half/Quarter setting defaulting to Half**, the fraction floored at a
       `readableFloorEdge` of 768 px so a small canvas cannot drop below the measured readability cliff
       (512 px fails visibly — hatching collapses to moiré and 2 px strokes vanish).
-      **Three things stand between it and merge**, none of them a code problem:
-      1. A device re-run of both perf tests. Simulator numbers at 4096²: Full 262 ms / 1495 ms for
-         2 / 10 skins, Half 61 ms / 380 ms, Quarter 15 ms / 93 ms. Device is ~1.1× the simulator for this
-         workload. **Full at ten skins is worse than the pre-fix implementation was** — flagged below.
-      2. The owner's ruling on whether Full needs a warning in the UI, given the above.
-      3. A rebase onto current `main` and the merge. Conflict surface is exactly two places in
-         `CanvasView.swift` — `updateUIView`'s call order (`updateOnionSkin()` was moved up deliberately
-         so "In Front" out-ranks `sandwichAbove` while sitting below the chrome overlays) and
-         `makeUIView`'s subview construction. A trial rebase was clean.
-      Two facts recorded nowhere else: the device/simulator ratio above, and that **Half + 10 skins at
-      4096² thrashes** — only ~3 cached sources fit a 10-skin window, so every rebuild pays ~7 misses.
-      Quarter is the setting for that combination. Fixed the shipped double-application of opacity along
-      the way (skins drew at 0.09 instead of 0.3) and closed the "onion skin renders unmasked" bug.
+      The picker now prints **each option's real composite size** under it, and a **caution line**
+      appears only when the estimate crosses 250 ms — the owner ruled "both" on 2026-08-18.
+      **One thing stands between it and merge**: a rebase onto current `main`. Conflict surface is
+      exactly two places in `CanvasView.swift` — `updateUIView`'s call order (`updateOnionSkin()` was
+      moved up deliberately so "In Front" out-ranks `sandwichAbove` while sitting below the chrome
+      overlays) and `makeUIView`'s subview construction. A trial rebase was clean.
+      Facts recorded nowhere else:
+      - **Device is ~1.26× the simulator for this workload, not the ~1.1× recorded here until
+        2026-08-18.** Six paired composite figures give 1.20–1.30 and the source miss gives 1.23; the
+        old number was a guess that never had six measurements behind it.
+      - **Half + 10 skins at 4096² thrashes** — only 3 cached sources fit a 10-skin window. The
+        "~7 misses" first written here is optimistic: FIFO over a window scanned in the same order
+        every rebuild misses *all ten*, every time. Quarter is the setting for that combination.
+      - **Full pays a full-canvas flatten per skin per rebuild on a large document, and the resolution
+        table does not show it.** `OnionSkinRasterCache` caches nothing at Full, so the sources go
+        through the compositor's own cache — three 4096² entries on a 3 GB iPad, shared with the
+        artwork. See BUGS.md. Full at 4096² is ~2.9 s a rebuild at ten skins, not the 1954 ms the
+        table says.
+      Fixed the shipped double-application of opacity along the way (skins drew at 0.09 instead of
+      0.3) and closed the "onion skin renders unmasked" bug.
 
 ## Queued
 

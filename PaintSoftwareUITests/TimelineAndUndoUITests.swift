@@ -44,6 +44,11 @@ final class TimelineGestureUITests: PaintUITestCase {
                            "onionPanel.nextCountSlider",
                            "onionPanel.colouringPicker",
                            "onionPanel.resolutionPicker",
+                           // Both halves of the owner's 2026-08-18 ruling: each option's real
+                           // composite size, always visible, and the note line under it that carries
+                           // the caution when there is one.
+                           "onionPanel.resolutionSizes",
+                           "onionPanel.resolutionNote",
                            "onionPanel.tintBar",
                            "onionPanel.linkOpacityToggle",
                            "onionPanel.previous.opacity1",

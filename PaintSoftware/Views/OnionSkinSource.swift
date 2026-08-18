@@ -571,14 +571,257 @@ enum OnionSkinBudget {
     ///
     /// **This is a ceiling, not a cost.** The cache only ever fills to the number of skins actually
     /// asked for, so the shipped default of one skin either side holds two sources and one composite.
+    ///
+    /// **At Full this cache holds nothing, and that is an accounting fact rather than a saving.** The
+    /// sources are canvas-sized, so `OnionSkinRasterCache.image(for:canvasSize:at:)` hands the call
+    /// straight to `PixelOps.rasterize` and the bytes land in the *compositor's* cache instead of
+    /// this one. The work does not go away with them — see `cachedSourceCount` — so a Full setting
+    /// costs no onion-skin memory and every bit of the source production.
     static func residentCeilingBytes(for canvasSize: CGSize,
                                      resolution: OnionSkinSettings.Resolution) -> Int {
         let size = compositeSize(for: canvasSize, resolution: resolution)
         let entry = Int(size.width.rounded()) * Int(size.height.rounded()) * 4
-        // At Full there is no reduction, so nothing is cached here at all — the sources are the
-        // compositor's own entries and are already counted against its budget, not this one.
         let cached = size == canvasSize ? 0 : entry * sourceCacheLimit(entryBytes: entry)
         return entry + cached
+    }
+
+    // MARK: - What a rebuild will cost, for the panel to say out loud
+
+    /// **Milliseconds per megapixel of composite, per skin.** Measured on the owner's iPad 9 (A13,
+    /// 3 GB) in Release on 2026-08-18, by
+    /// `PerfBaselineTests.testOnionSkinCostOfEachResolutionOption`.
+    ///
+    /// It is one constant rather than a table because the measurement says it can be: dividing each
+    /// of the six reported figures by (composite megapixels x skins) gives 11.5 at ten skins and 9.2
+    /// at two, and that holds across *both* canvases and all three options to within 3% —
+    ///
+    /// | canvas | option | 10 skins | ms / MP / skin |
+    /// |---|---|---|---|
+    /// | 2048x1024 | Full | 237.1 ms | 11.3 |
+    /// | 2048x1024 | Half | 59.8 ms | 11.4 |
+    /// | 2048x1024 | Quarter | 33.9 ms | 11.5 |
+    /// | 4096x4096 | Full | 1953.8 ms | 11.6 |
+    /// | 4096x4096 | Half | 486.2 ms | 11.6 |
+    /// | 4096x4096 | Quarter | 120.6 ms | 11.5 |
+    ///
+    /// — so an estimate here is arithmetic on a measured slope, not a guess. The ten-skin figure is
+    /// the one taken because a caution is about the expensive end; using 9.2 would under-report every
+    /// case the caution exists to catch, and the two figures differ by fixed per-composite overhead
+    /// (one context allocation) that matters less the more skins there are.
+    ///
+    /// **Calibrated to the slowest device the owner draws on, deliberately.** A faster iPad pays less
+    /// than this says, so the caution errs toward speaking on a machine where it need not — which is
+    /// the safe direction for a line that only ever suggests a cheaper setting.
+    static let compositeMillisecondsPerMegapixelPerSkin: Double = 11.5
+
+    /// **What producing one skin's source costs when the source has to be resampled** — the read of
+    /// the cel at canvas resolution, per megapixel of *canvas*. Same device, same day, same test.
+    ///
+    /// A miss flattens the cel at canvas resolution before anything is reduced, so the dominant term
+    /// scales with the document and not with the resolution the artist picked. **That is why Quarter
+    /// does not make a miss cheap**, and it is the single most surprising thing in this arithmetic.
+    static let sourceReadMillisecondsPerCanvasMegapixel: Double = 6.8
+
+    /// The resample's own cost, per megapixel of the buffer it writes. Only paid when the composite
+    /// is smaller than the canvas — a filtered downscale, as against the straight blit below.
+    static let sourceResampleMillisecondsPerMegapixel: Double = 13.2
+
+    /// **What producing one skin's source costs at Full, per megapixel of canvas — and it is the
+    /// *cheapest* of the three options, which is the opposite of what the rest of this file would
+    /// lead you to expect.** At Full there is no reduction, so the flatten is a 1:1 copy with no
+    /// interpolation filter in it at all; Half and Quarter pay a filtered downscale that Full does
+    /// not.
+    ///
+    /// So Full's problem is never the price of a miss. It is **how many misses there are**, which
+    /// `cachedSourceCount` answers, and it is much the worse of the two.
+    ///
+    /// The three constants above and this one reproduce every one of the six measured misses within
+    /// 4% — measured on the simulator by the same test and scaled by the 1.26x device factor that
+    /// the composite rows of the same run establish:
+    ///
+    /// | canvas | option | measured (device-scaled) | predicted |
+    /// |---|---|---|---|
+    /// | 2048x1024 | Full | 13.0 ms | 13.0 ms |
+    /// | 2048x1024 | Half | 20.4 ms | 20.2 ms |
+    /// | 2048x1024 | Quarter | 17.9 ms | 17.3 ms |
+    /// | 4096x4096 | Full | 103.8 ms | 104.0 ms |
+    /// | 4096x4096 | Half | 161.8 ms | 161.6 ms |
+    /// | 4096x4096 | Quarter | 122.3 ms (measured on device directly) | 122.0 ms |
+    static let sourceCopyMillisecondsPerCanvasMegapixel: Double = 6.5
+
+    /// How many of a document's cels can actually be held as onion-skin sources at once.
+    ///
+    /// **Two completely different caches answer this, and which one applies is decided by whether
+    /// the resolution reduces anything.**
+    ///
+    ///  * **Reduced (Half, Quarter, or Full on a canvas the floor has raised):** `OnionSkinRasterCache`
+    ///    holds them, bounded by `sourceCacheLimit`.
+    ///  * **Full:** the reduction is a no-op, so `OnionSkinRasterCache.image(for:canvasSize:at:)`
+    ///    falls through to `PixelOps.rasterize` and the sources live in the *compositor's* flatten
+    ///    cache — canvas-sized entries, `PixelOps.sharedRasterizeEntryLimit` of them, bounded by
+    ///    `CompositorBudget.textureBudgetBytes`. On a 3 GB iPad that budget is 192 MiB, so a
+    ///    4096x4096 document holds **three** and a 2048x1024 one holds twenty-four.
+    ///
+    /// The Full figure is an *upper* bound and the real one is lower, because those three slots are
+    /// shared with the artwork: the compositor is holding the current frame's own layers in the same
+    /// cache. Nothing here subtracts for that — the cel count is not knowable from a canvas size —
+    /// so read this as "at best".
+    static func cachedSourceCount(for canvasSize: CGSize,
+                                  resolution: OnionSkinSettings.Resolution,
+                                  sharedBudgetBytes: Int = CompositorBudget.textureBudgetBytes) -> Int {
+        let size = compositeSize(for: canvasSize, resolution: resolution)
+        let entry = Int(size.width.rounded()) * Int(size.height.rounded()) * 4
+        guard entry > 0 else { return PixelOps.sharedRasterizeEntryLimit }
+        guard size == canvasSize else { return sourceCacheLimit(entryBytes: entry) }
+        return max(1, min(PixelOps.sharedRasterizeEntryLimit, sharedBudgetBytes / entry))
+    }
+
+    /// How many of a rebuild's `skins` sources will be misses in the steady state.
+    ///
+    /// **One, or all of them — there is nothing in between, and the cliff is what makes this worth
+    /// computing rather than ignoring.** A rebuild happens when the playhead moves to a different
+    /// drawing, which shifts the window by one, so exactly one cel is new. If the cache can hold the
+    /// window *and* the newcomer, that one arrival is the only miss. If it cannot, eviction is FIFO
+    /// over a window scanned in the same order every rebuild, which is the textbook worst case for
+    /// FIFO: every entry is evicted a moment before it is wanted again, so **every skin misses, every
+    /// time, forever** — no amount of revisiting the same drawings warms it.
+    ///
+    /// `skins + 1` rather than `skins` is the same slack argument `sourceCacheLimit` already makes
+    /// for its "+2": a cache exactly the size of the window is full at all times and the arrival
+    /// evicts something still wanted.
+    ///
+    /// This is the second, independent reason a combination is expensive, and on a large document it
+    /// is the larger one — a miss is tens or hundreds of milliseconds each, and this decides whether
+    /// there is one of them or ten.
+    static func sourceMissesPerRebuild(for canvasSize: CGSize,
+                                       resolution: OnionSkinSettings.Resolution,
+                                       skins: Int,
+                                       sharedBudgetBytes: Int = CompositorBudget.textureBudgetBytes) -> Int {
+        guard skins > 0 else { return 0 }
+        let cached = cachedSourceCount(for: canvasSize, resolution: resolution,
+                                       sharedBudgetBytes: sharedBudgetBytes)
+        return cached >= skins + 1 ? 1 : skins
+    }
+
+    /// **What one onion-skin rebuild will cost, in milliseconds, on the owner's iPad.**
+    ///
+    /// A rebuild is two things and the panel has only ever been able to see one of them:
+    ///
+    ///     composite  = 11.5 ms x composite megapixels x skins
+    ///     one miss   = 6.8 ms x canvas MP + 13.2 ms x composite MP   (reduced: a filtered downscale)
+    ///                = 6.5 ms x canvas MP                            (Full: a 1:1 copy)
+    ///     rebuild    = composite + misses x one miss
+    ///
+    /// The miss term is the half that the per-option table in `PerfBaselineTests` leaves out, and
+    /// leaving it out is what made Full look merely linear. **At Full the source production does not
+    /// vanish, it relocates**: `OnionSkinRasterCache` stores nothing because there is no reduction to
+    /// store, so the flatten is paid through `PixelOps.rasterize` at canvas size and cached in the
+    /// compositor's own store — which on a 4096x4096 document holds three canvas-sized entries in
+    /// total, shared with the artwork. So Full on a large canvas is not "the table's number"; it is
+    /// the table's number plus ten full-canvas flattens, and it also evicts the compositor's working
+    /// set on the way past.
+    ///
+    /// `skins` is the total across both sides — `previousCount + nextCount`, capped at
+    /// `maxSkinsPerSide` each — not per side.
+    static func estimatedRebuildMilliseconds(for canvasSize: CGSize,
+                                             resolution: OnionSkinSettings.Resolution,
+                                             skins: Int,
+                                             sharedBudgetBytes: Int = CompositorBudget.textureBudgetBytes) -> Double {
+        guard skins > 0, canvasSize.width > 0, canvasSize.height > 0 else { return 0 }
+        let size = compositeSize(for: canvasSize, resolution: resolution)
+        let megapixel = 1024.0 * 1024.0
+        let compositeMP = Double(size.width * size.height) / megapixel
+        let canvasMP = Double(canvasSize.width * canvasSize.height) / megapixel
+        let composite = compositeMillisecondsPerMegapixelPerSkin * compositeMP * Double(skins)
+        let miss = sourceMissMilliseconds(canvasSize: canvasSize, compositeSize: size)
+        let misses = sourceMissesPerRebuild(for: canvasSize, resolution: resolution, skins: skins,
+                                            sharedBudgetBytes: sharedBudgetBytes)
+        return composite + Double(misses) * miss
+    }
+
+    /// What one source miss costs — the two regimes of `sourceCopyMillisecondsPerCanvasMegapixel`.
+    /// Split on whether anything is actually reduced rather than on the enum case, because the
+    /// readability floor can make Half or Quarter a no-op on a small document and then they are 1:1
+    /// blits too.
+    static func sourceMissMilliseconds(canvasSize: CGSize, compositeSize: CGSize) -> Double {
+        let megapixel = 1024.0 * 1024.0
+        let canvasMP = Double(canvasSize.width * canvasSize.height) / megapixel
+        let compositeMP = Double(compositeSize.width * compositeSize.height) / megapixel
+        guard compositeSize != canvasSize else {
+            return sourceCopyMillisecondsPerCanvasMegapixel * canvasMP
+        }
+        return sourceReadMillisecondsPerCanvasMegapixel * canvasMP
+            + sourceResampleMillisecondsPerMegapixel * compositeMP
+    }
+
+    /// **Where a rebuild stops reading as instant, and the number is about *when* the cost lands
+    /// rather than about how big it is.**
+    ///
+    /// A rebuild happens when the playhead moves to a different drawing — never while the artist is
+    /// drawing (`Coordinator.OnionSkinKey` is what guarantees that), so this is a hitch on a frame
+    /// change, not a per-frame cost. That is a much more forgiving budget than 16 ms: the artist has
+    /// just asked to look at a different drawing and is waiting to see it. Under about a tenth of a
+    /// second the new frame appears to arrive with the tap; by a third of a second it is a stutter
+    /// the artist notices but works through; past half a second scrubbing stops being usable.
+    ///
+    /// **250 ms**, and it survived having the source-miss term added to the estimate under it, which
+    /// is the only reason it is still 250. Adding a term that raises every figure is exactly the kind
+    /// of change that should move a threshold, so it was re-derived rather than kept: with the misses
+    /// in, the owner's 2048x1024 canvas tops out at **243 ms** — Full at the maximum ten skins, the
+    /// most expensive thing that document can be asked to do — so the whole of it stays silent, and
+    /// the 4096x4096 stress case speaks at Full even at the shipped default of two skins (472 ms).
+    /// Those are the two verdicts the measurements support, and 250 delivers both.
+    ///
+    /// **The margin at the top of the owner's canvas is 7 ms and that is worth knowing rather than
+    /// discovering.** It is small because the estimate is accurate, not because it is lucky: 243 is a
+    /// measured figure to within a few percent. A slightly taller document, or a fourth skin's worth
+    /// of anything, and Full will start to speak there — correctly, since a quarter-second hitch on
+    /// every drawing change is the thing this line exists to name.
+    ///
+    /// Pinned in both directions by `OnionSkinLogicTests`, so moving it is a decision rather than a
+    /// drift.
+    static let cautionThresholdMilliseconds: Double = 250
+
+    /// The caution the panel shows, or nil when the combination is fine.
+    ///
+    /// **Factual and short by construction**: what the current settings cost, and the sharpest
+    /// cheaper option that comes in under the threshold, with its cost. No adjectives, no severity
+    /// word — the numbers are the argument. When no option is under the threshold the line says so
+    /// and names the other lever, the skin count, because at that point resolution alone cannot fix
+    /// it.
+    ///
+    /// Returns nil for zero skins, which is not a cheap onion skin but no onion skin at all.
+    static func caution(for canvasSize: CGSize,
+                        settings: OnionSkinSettings,
+                        sharedBudgetBytes: Int = CompositorBudget.textureBudgetBytes) -> String? {
+        // Clamped both ways, as `opacities(on:)` does — the panel's sliders cannot produce anything
+        // outside 0...maxSkinsPerSide, but this is arithmetic on settings and not on a slider.
+        func clamp(_ count: Int) -> Int { max(0, min(count, OnionSkinSettings.maxSkinsPerSide)) }
+        let skins = clamp(settings.previousCount) + clamp(settings.nextCount)
+        guard skins > 0 else { return nil }
+        let cost = estimatedRebuildMilliseconds(for: canvasSize, resolution: settings.resolution,
+                                                skins: skins, sharedBudgetBytes: sharedBudgetBytes)
+        guard cost >= cautionThresholdMilliseconds else { return nil }
+
+        // Sharpest first, so the suggestion gives up as little picture as it has to.
+        let cheaper = OnionSkinSettings.Resolution.allCases
+            .filter { $0.fraction < settings.resolution.fraction }
+            .map { ($0, estimatedRebuildMilliseconds(for: canvasSize, resolution: $0, skins: skins,
+                                                     sharedBudgetBytes: sharedBudgetBytes)) }
+            .first { $0.1 < cautionThresholdMilliseconds }
+
+        let here = "About \(duration(cost)) each time the drawing changes."
+        guard let cheaper else { return here + " Fewer skins is the other lever." }
+        return here + " \(cheaper.0.title): about \(duration(cheaper.1))."
+    }
+
+    /// Milliseconds as the artist reads them: whole milliseconds below a second, one decimal above.
+    /// Rounded to 10 ms so a slider drag does not animate a digit that means nothing.
+    static func duration(_ milliseconds: Double) -> String {
+        // Rounded *before* the unit is chosen, so 999 ms reads as "1.0 s" rather than "1000 ms".
+        let rounded = (milliseconds / 10).rounded() * 10
+        guard rounded >= 1000 else { return "\(Int(rounded)) ms" }
+        return String(format: "%.1f s", rounded / 1000)
     }
 }
 

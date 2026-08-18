@@ -78,6 +78,51 @@ item 6.
 Distinct from "A mask sourced from a graded group can be stale" below, which is about the cache
 *key*; this is about the cache never being dropped.
 
+## Onion skin at Full pushes canvas-sized sources through the compositor's cache (2026-08-18)
+
+`OnionSkinRasterCache` exists to keep the onion skin's sources *out* of `PixelOps.rasterizeCache`, and
+its own doc comment says why: that cache evicts FIFO under a shared byte budget and its entries are
+canvas-sized, so "pushing ten small onion entries through it would walk the compositor's current-frame
+working set out of it in FIFO order, trading a stall on the onion skin for a stall on the artwork."
+
+**At Full it does exactly that.** `OnionSkinRasterCache.image(for:canvasSize:at:)` opens with
+
+```swift
+guard size.width < canvasSize.width || size.height < canvasSize.height else {
+    return PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+}
+```
+
+and at Full `size == canvasSize`, so every skin falls straight through to the shared cache — not as a
+small entry but as a **canvas-sized** one. `OnionSkinBudget.residentCeilingBytes` reports 0 bytes
+cached there, which is true and reads as a saving; it is only an accounting fact about which cache
+pays.
+
+Two consequences, and the second is the one that costs the artist time:
+
+1. **The onion skin can evict the artwork.** On a 3 GB iPad `CompositorBudget.textureBudgetBytes` is
+   192 MiB, so a 4096² document's shared cache holds **three** flattens in total. Ten skins at Full
+   walk it clean on every rebuild, and the current frame's own layers are what get walked.
+2. **Full's real rebuild cost is roughly half again what the resolution table says.**
+   `PerfBaselineTests.testOnionSkinCostOfEachResolutionOption` measured composite cost from
+   pre-reduced sources; at Full there is no such thing as a pre-reduced source, and the flatten cannot
+   be cached because three slots cannot hold ten skins. Measured 2026-08-18: 1953.8 ms of composite
+   plus ten misses at ~104 ms each is **~2.9 s per drawing change**, not 1954 ms.
+
+The owner's own 2048x1024 canvas is unaffected — an 8 MiB entry means the shared cache's 24-entry
+limit binds rather than its bytes, so the whole window caches and a rebuild pays one miss. This is a
+large-document problem.
+
+**Not fixed here, and the panel's caution is a mitigation rather than the fix.**
+`OnionSkinBudget.cachedSourceCount` now models the above and
+`OnionSkinBudget.estimatedRebuildMilliseconds` includes the misses, so the panel tells the artist what
+Full will cost on their document and names a cheaper setting. That leaves the eviction of the
+compositor's working set untouched. The shape of a real fix is to stop taking the shared cache's path
+at Full — either give `OnionSkinRasterCache` its own entries at canvas size under its own 64 MiB
+budget (correct, but 64 MiB holds one 4096² entry, so it buys almost nothing), or pass
+`memoize: false` at Full and accept an uncached flatten per skin (which stops the eviction and makes
+the cost honest rather than borrowed). Both are behaviour changes to the render path and neither is
+what the owner asked for on 2026-08-18, which is why this is written down instead.
 
 ## `validateProject` cannot see a file that is intact but unreadable (2026-08-17)
 

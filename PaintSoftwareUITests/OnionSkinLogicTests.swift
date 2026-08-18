@@ -647,6 +647,269 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertEqual(OnionSkinRasterCache.residentBytes, 0)
     }
 
+    // MARK: - What the panel says a rebuild will cost
+
+    /// The owner's canvas (TODO.md, 2026-08-17) and the stress case every earlier onion figure was
+    /// taken at, named once so the tables below cannot drift apart from each other.
+    private static let ownerCanvas = CGSize(width: 2048, height: 1024)
+    private static let stressCanvas = CGSize(width: 4096, height: 4096)
+
+    /// A 3 GB iPad 9's texture budget, stated rather than read — the estimate's cache arithmetic
+    /// depends on it and the machine running this test is not that device.
+    private static let deviceBudget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024)
+
+    private func settings(_ resolution: OnionSkinSettings.Resolution, skins: Int) -> OnionSkinSettings {
+        var settings = OnionSkinSettings()
+        settings.resolution = resolution
+        settings.previousCount = min(skins, OnionSkinSettings.maxSkinsPerSide)
+        settings.nextCount = max(0, skins - settings.previousCount)
+        return settings
+    }
+
+    /// **The test that stops the calibration constant rotting.**
+    ///
+    /// `OnionSkinBudget`'s four timing constants were fitted to measurements taken on the owner's
+    /// iPad 9 (A13, 3 GB) in Release on 2026-08-18 by
+    /// `PerfBaselineTests.testOnionSkinCostOfEachResolutionOption`. Nothing in the app re-measures
+    /// them, so without this they are four numbers that will quietly stop describing the device the
+    /// moment anything about the composite or the flatten changes — and the caution built on them
+    /// would go on speaking with total confidence.
+    ///
+    /// Each row is `composite + misses x miss`, both halves measured. The composite figures are the
+    /// device's own; the per-miss figures are the simulator's from the same test scaled by the 1.26x
+    /// device factor that the composite rows of the same pair of runs establish, except the 4096
+    /// Quarter one, which the device reported directly as `sourceMiss = 122.3 ms`.
+    ///
+    /// **Ten skins, not two, and that is the calibration point rather than an arbitrary choice.**
+    /// The composite constant is the ten-skin slope (11.5 ms/MP/skin against 9.2 at two), because a
+    /// caution is about the expensive end and the difference between the two is fixed per-composite
+    /// overhead. Two-skin cases are therefore *over*-estimated on purpose, which the test below
+    /// pins in that direction rather than leaving to be discovered as a discrepancy.
+    func testTheRebuildEstimateReproducesTheMeasuredDeviceFigures() {
+        // canvas, resolution, measured composite at 10 skins, measured cost of one miss
+        let measured: [(CGSize, OnionSkinSettings.Resolution, Double, Double)] = [
+            (Self.ownerCanvas,  .full,    237.1,  13.0),
+            (Self.ownerCanvas,  .half,     59.8,  20.4),
+            (Self.ownerCanvas,  .quarter,  33.9,  17.9),
+            (Self.stressCanvas, .full,   1953.8, 103.8),
+            (Self.stressCanvas, .half,    486.2, 161.8),
+            (Self.stressCanvas, .quarter, 120.6, 122.3),
+        ]
+
+        for (canvas, resolution, composite, miss) in measured {
+            let size = OnionSkinBudget.compositeSize(for: canvas, resolution: resolution)
+            // The miss half on its own first, so a failure says which of the two terms moved.
+            let predictedMiss = OnionSkinBudget.sourceMissMilliseconds(canvasSize: canvas, compositeSize: size)
+            XCTAssertEqual(predictedMiss, miss, accuracy: miss * 0.1,
+                           "one source miss at \(resolution.title) on \(Int(canvas.width))x\(Int(canvas.height))")
+
+            let misses = OnionSkinBudget.sourceMissesPerRebuild(for: canvas, resolution: resolution,
+                                                                skins: 10,
+                                                                sharedBudgetBytes: Self.deviceBudget)
+            let expected = composite + Double(misses) * miss
+            let estimate = OnionSkinBudget.estimatedRebuildMilliseconds(
+                for: canvas, resolution: resolution, skins: 10, sharedBudgetBytes: Self.deviceBudget)
+            XCTAssertEqual(estimate, expected, accuracy: expected * 0.1,
+                           "ten skins at \(resolution.title) on \(Int(canvas.width))x\(Int(canvas.height))")
+        }
+
+        // And the deliberate bias at the cheap end: two skins are over-estimated, never under, so a
+        // caution can only ever be early rather than late.
+        for (canvas, resolution, _, miss) in measured {
+            let misses = OnionSkinBudget.sourceMissesPerRebuild(for: canvas, resolution: resolution,
+                                                                skins: 2, sharedBudgetBytes: Self.deviceBudget)
+            let estimate = OnionSkinBudget.estimatedRebuildMilliseconds(
+                for: canvas, resolution: resolution, skins: 2, sharedBudgetBytes: Self.deviceBudget)
+            let floor = Double(misses) * miss
+            XCTAssertGreaterThan(estimate, floor,
+                                 "two skins must cost more than their misses alone")
+        }
+        // Two skins measured on the device at Full on the owner's canvas: 37.4 ms composite plus one
+        // 13.0 ms miss. The estimate is above that and within a third of it — the over-statement is
+        // bounded, not open-ended.
+        let twoSkins = OnionSkinBudget.estimatedRebuildMilliseconds(
+            for: Self.ownerCanvas, resolution: .full, skins: 2, sharedBudgetBytes: Self.deviceBudget)
+        XCTAssertGreaterThan(twoSkins, 37.4 + 13.0)
+        XCTAssertLessThan(twoSkins, (37.4 + 13.0) * 1.33)
+    }
+
+    /// **How many sources are actually held, which is the second and larger reason a combination is
+    /// expensive.** A miss is tens or hundreds of milliseconds; this is what decides whether a
+    /// rebuild pays one of them or ten.
+    ///
+    /// The Full row is the finding that this whole caution had to be designed around:
+    /// `OnionSkinRasterCache` stores nothing at Full — there is no reduction to store — so the
+    /// sources go through `PixelOps.rasterize` into the *compositor's* cache, whose entries are
+    /// canvas-sized. On a 3 GB iPad that budget holds **three** 4096x4096 flattens in total, shared
+    /// with the artwork, so a ten-skin window at Full cannot be cached at any count and every rebuild
+    /// re-flattens every skin. `residentCeilingBytes` reporting 0 bytes cached there is an accounting
+    /// fact about which cache pays, not a saving.
+    func testTheSourceCacheCannotHoldTheWindowAtFullOnALargeCanvasNorAtHalf() {
+        // 4096x4096, 3 GB device: 64 MiB an entry against a 192 MiB compositor budget.
+        XCTAssertEqual(OnionSkinBudget.cachedSourceCount(for: Self.stressCanvas, resolution: .full,
+                                                         sharedBudgetBytes: Self.deviceBudget), 3)
+        // Half at 4096 is the thrash the branch already documented: 16 MiB an entry out of the onion
+        // skin's own 64 MiB, so three fit and a ten-skin window does not.
+        XCTAssertEqual(OnionSkinBudget.cachedSourceCount(for: Self.stressCanvas, resolution: .half,
+                                                         sharedBudgetBytes: Self.deviceBudget), 3)
+        XCTAssertEqual(OnionSkinBudget.cachedSourceCount(for: Self.stressCanvas, resolution: .quarter,
+                                                         sharedBudgetBytes: Self.deviceBudget), 12)
+        // The owner's canvas is a different world: 8 MiB an entry, so the compositor's own entry
+        // limit is what binds rather than its bytes, and Full caches the whole window.
+        XCTAssertEqual(OnionSkinBudget.cachedSourceCount(for: Self.ownerCanvas, resolution: .full,
+                                                         sharedBudgetBytes: Self.deviceBudget),
+                       PixelOps.sharedRasterizeEntryLimit)
+
+        // Which turns into misses: one per rebuild when the window fits, all of them when it does
+        // not. FIFO over a window scanned in the same order every rebuild has no middle ground.
+        for skins in 1...10 {
+            XCTAssertEqual(OnionSkinBudget.sourceMissesPerRebuild(for: Self.ownerCanvas, resolution: .full,
+                                                                  skins: skins,
+                                                                  sharedBudgetBytes: Self.deviceBudget), 1,
+                           "the owner's canvas caches the whole window at Full")
+        }
+        XCTAssertEqual(OnionSkinBudget.sourceMissesPerRebuild(for: Self.stressCanvas, resolution: .full,
+                                                              skins: 10, sharedBudgetBytes: Self.deviceBudget), 10)
+        XCTAssertEqual(OnionSkinBudget.sourceMissesPerRebuild(for: Self.stressCanvas, resolution: .half,
+                                                              skins: 10, sharedBudgetBytes: Self.deviceBudget), 10)
+        // Three cached is enough for two skins plus the one arriving, and not for three.
+        XCTAssertEqual(OnionSkinBudget.sourceMissesPerRebuild(for: Self.stressCanvas, resolution: .half,
+                                                              skins: 2, sharedBudgetBytes: Self.deviceBudget), 1)
+        XCTAssertEqual(OnionSkinBudget.sourceMissesPerRebuild(for: Self.stressCanvas, resolution: .half,
+                                                              skins: 3, sharedBudgetBytes: Self.deviceBudget), 3)
+    }
+
+    /// **The threshold, from both sides.** 4096x4096 at Half straddles it on one skin: one skin
+    /// estimates 208 ms and two estimate 254 ms, so this pins that the line is where
+    /// `cautionThresholdMilliseconds` says it is and not merely somewhere nearby.
+    func testTheCautionAppearsExactlyAtTheThresholdAndNotBefore() {
+        let one = OnionSkinBudget.estimatedRebuildMilliseconds(
+            for: Self.stressCanvas, resolution: .half, skins: 1, sharedBudgetBytes: Self.deviceBudget)
+        let two = OnionSkinBudget.estimatedRebuildMilliseconds(
+            for: Self.stressCanvas, resolution: .half, skins: 2, sharedBudgetBytes: Self.deviceBudget)
+        XCTAssertLessThan(one, OnionSkinBudget.cautionThresholdMilliseconds,
+                          "premise: one skin is under the threshold")
+        XCTAssertGreaterThan(two, OnionSkinBudget.cautionThresholdMilliseconds,
+                             "premise: two skins are over it")
+
+        XCTAssertNil(OnionSkinBudget.caution(for: Self.stressCanvas, settings: settings(.half, skins: 1),
+                                             sharedBudgetBytes: Self.deviceBudget),
+                     "under the threshold the panel says nothing")
+        XCTAssertNotNil(OnionSkinBudget.caution(for: Self.stressCanvas, settings: settings(.half, skins: 2),
+                                                sharedBudgetBytes: Self.deviceBudget),
+                        "over the threshold it speaks")
+
+        // No skins is not a cheap onion skin, it is no onion skin, and a caution about nothing would
+        // be the panel talking to itself.
+        XCTAssertNil(OnionSkinBudget.caution(for: Self.stressCanvas, settings: settings(.full, skins: 0),
+                                             sharedBudgetBytes: Self.deviceBudget))
+    }
+
+    /// **The owner's own canvas is silent at every setting it can be put in, and the stress case is
+    /// not silent even at the shipped default.** This pair is the whole product requirement
+    /// (owner, 2026-08-18) — "silent on a document where Full is fine, speaking up when it is not" —
+    /// asserted rather than described.
+    func testTheOwnersCanvasIsSilentEverywhereAndTheStressCanvasSpeaksAtTheDefault() {
+        for resolution in OnionSkinSettings.Resolution.allCases {
+            for skins in 0...(OnionSkinSettings.maxSkinsPerSide * 2) {
+                XCTAssertNil(OnionSkinBudget.caution(for: Self.ownerCanvas,
+                                                     settings: settings(resolution, skins: skins),
+                                                     sharedBudgetBytes: Self.deviceBudget),
+                             "2048x1024 at \(resolution.title) with \(skins) skins must not caution")
+            }
+        }
+        // The most expensive thing that document can be asked to do, and the margin under the
+        // threshold, both pinned — 7 ms is small enough to be worth failing on if it moves.
+        let worst = OnionSkinBudget.estimatedRebuildMilliseconds(
+            for: Self.ownerCanvas, resolution: .full, skins: 10, sharedBudgetBytes: Self.deviceBudget)
+        XCTAssertEqual(worst, 243, accuracy: 5, "Full at ten skins on the owner's canvas")
+        XCTAssertLessThan(worst, OnionSkinBudget.cautionThresholdMilliseconds)
+
+        // The shipped default is one skin a side; the ruling was about what happens when Full is
+        // chosen on top of it.
+        let shipped = OnionSkinSettings()
+        XCTAssertEqual(shipped.previousCount + shipped.nextCount, 2, "premise: the default is two skins")
+        var fullAtDefault = shipped
+        fullAtDefault.resolution = .full
+        XCTAssertNil(OnionSkinBudget.caution(for: Self.ownerCanvas, settings: fullAtDefault,
+                                             sharedBudgetBytes: Self.deviceBudget),
+                     "Full on the owner's canvas at the shipped count is fine and must stay silent")
+        guard let stress = OnionSkinBudget.caution(for: Self.stressCanvas, settings: fullAtDefault,
+                                                   sharedBudgetBytes: Self.deviceBudget) else {
+            return XCTFail("4096x4096 at Full must caution even at the shipped two skins")
+        }
+
+        // And what it says: the cost here, and a cheaper option that is genuinely under the
+        // threshold rather than merely cheaper. Half at two skins on this canvas is 254 ms and so is
+        // not an answer; Quarter at 145 ms is.
+        XCTAssertTrue(stress.contains("Quarter"),
+                      "the suggestion must be an option that is actually under the threshold: \(stress)")
+        XCTAssertFalse(stress.contains("Half"),
+                       "Half is still over the threshold at this canvas and count: \(stress)")
+        XCTAssertFalse(stress.uppercased().contains("WARNING"), "it is a caution, not an alarm")
+
+        // Half at ten skins on this canvas is the thrash case the branch already documented, and the
+        // line names the setting that fixes it — which is the same answer TODO.md reached by hand.
+        guard let thrashing = OnionSkinBudget.caution(for: Self.stressCanvas, settings: settings(.half, skins: 10),
+                                                      sharedBudgetBytes: Self.deviceBudget) else {
+            return XCTFail("Half at ten skins on 4096x4096 must caution")
+        }
+        XCTAssertTrue(thrashing.contains("Quarter"),
+                      "Quarter at ten skins is 237 ms and is the answer here: \(thrashing)")
+
+        // And when no option is under the threshold, the line stops recommending one and names the
+        // other lever instead. An 8192x8192 document is over it at Quarter on composite cost alone.
+        let huge = CGSize(width: 8192, height: 8192)
+        guard let noWayOut = OnionSkinBudget.caution(for: huge, settings: settings(.quarter, skins: 10),
+                                                     sharedBudgetBytes: Self.deviceBudget) else {
+            return XCTFail("8192x8192 at Quarter with ten skins must caution")
+        }
+        XCTAssertTrue(noWayOut.contains("Fewer skins"),
+                      "with nothing cheaper to suggest the line must name the count: \(noWayOut)")
+    }
+
+    /// The sizes the panel now prints under each segment, at both canvases — the factual half of the
+    /// owner's ruling. Pinned here as well as in `PerfBaselineTests` because this is the string the
+    /// artist reads, and the readability floor is what makes two of these six not the obvious
+    /// fraction.
+    func testEachResolutionOptionReportsItsRealCompositeSize() {
+        let expected: [(CGSize, [(OnionSkinSettings.Resolution, CGSize)])] = [
+            (Self.ownerCanvas, [(.full, CGSize(width: 2048, height: 1024)),
+                                (.half, CGSize(width: 1024, height: 512)),
+                                // Not 512x256: the readability floor raises the long edge to 768.
+                                (.quarter, CGSize(width: 768, height: 384))]),
+            (Self.stressCanvas, [(.full, CGSize(width: 4096, height: 4096)),
+                                 (.half, CGSize(width: 2048, height: 2048)),
+                                 (.quarter, CGSize(width: 1024, height: 1024))]),
+        ]
+        for (canvas, rows) in expected {
+            for (resolution, size) in rows {
+                XCTAssertEqual(OnionSkinBudget.compositeSize(for: canvas, resolution: resolution), size,
+                               "\(resolution.title) on \(Int(canvas.width))x\(Int(canvas.height))")
+            }
+        }
+
+        // The legend has to distinguish the three options or it is decoration — and on the owner's
+        // canvas the floor is what keeps Quarter from collapsing onto something unreadable, so the
+        // three really are three.
+        let owner = OnionSkinSettings.Resolution.allCases.map {
+            OnionSkinBudget.compositeSize(for: Self.ownerCanvas, resolution: $0)
+        }
+        XCTAssertEqual(Set(owner.map(\.width)).count, 3)
+    }
+
+    /// The read-out the caution formats with. Rounded to 10 ms because the artist is reading an
+    /// estimate, and a digit that changes with a slider drag but means nothing is worse than no
+    /// digit.
+    func testTheDurationReadOutRoundsAndSwitchesToSecondsAtOne() {
+        XCTAssertEqual(OnionSkinBudget.duration(243), "240 ms")
+        XCTAssertEqual(OnionSkinBudget.duration(254), "250 ms")
+        XCTAssertEqual(OnionSkinBudget.duration(994), "990 ms")
+        XCTAssertEqual(OnionSkinBudget.duration(999), "1.0 s", "rounded before the unit is chosen")
+        XCTAssertEqual(OnionSkinBudget.duration(1000), "1.0 s")
+        XCTAssertEqual(OnionSkinBudget.duration(2880), "2.9 s")
+    }
+
     func testTenSkinsCostOneImageNotTen() {
         // The whole memory argument in one assertion: the composite's size does not depend on how
         // many frames go into it.
