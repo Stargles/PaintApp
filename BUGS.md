@@ -78,6 +78,7 @@ item 6.
 Distinct from "A mask sourced from a graded group can be stale" below, which is about the cache
 *key*; this is about the cache never being dropped.
 
+
 ## Onion skin at Full pushes canvas-sized sources through the compositor's cache (2026-08-18)
 
 `OnionSkinRasterCache` exists to keep the onion skin's sources *out* of `PixelOps.rasterizeCache`, and
