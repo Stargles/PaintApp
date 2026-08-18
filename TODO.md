@@ -45,6 +45,33 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
       implemented literally — the flood has to enter the ring in order to exclude it, and the wall
       property comes from the final intersect.
 
+- [ ] **The "To Cross" eraser leaves stubs, and its size does nothing** — owner, on device, 2026-08-18:
+      *"The cross eraser behaviour is a bit weird. I want it to erase the lines right at the point that
+      the line crosses the center of another line, but in many cases it leaves stubs. Also, the eraser
+      brush size should be the radius around which everything is erased. For example if I erase the
+      section where two lines intersect, it should erase both of them (up to any other lines they
+      hit)."*
+      Two rulings in one ask, against `VectorEraserMode.cutToIntersection`:
+      **(a) cut at the centreline crossing, not at the ink boundary.** `cutToIntersection` brackets the
+      touch with `low = max(p)` / `high = min(p)` over crossings found at a **width-aware tolerance**
+      (the sum of the two strokes' half-widths, `VectorEraser.swift:449-483`), so the surviving piece
+      runs to the *near edge of the tolerance band* rather than to where the centrelines actually meet
+      — which is a stub roughly a half-width long, sticking through the line that was supposed to stop
+      it. Hypothesis, to be verified before it is fixed.
+      **(b) the eraser radius selects the victims.** Today one drag cuts the single stroke under the
+      tip; the owner wants every stroke inside the brush's footprint cut, each back to *its own*
+      neighbouring crossings.
+
+- [ ] **The canvas border does not act as a fill boundary once there is padding** — owner, on device,
+      2026-08-18: *"Treating the canvas as fill border does not work. You can test this by increasing
+      padding, drawing a line which starts outside the canvas (in the padding), goes inside, and then
+      back out using the canvas border as a line in the enclosure while otherwise being open, then
+      using the fill tool on that enclosure. Right now it fills the entire page."*
+      `fillCanvasEdgeIsBoundary` shipped in session 41 and defaults on. Note that `setCanvasPadding`
+      grows `canvasSize` itself (`CanvasManager+Document.swift:19-57`), so with padding the buffer edge
+      is the *outer* margin and the artwork border the owner draws across is an inset rectangle no wall
+      rule currently knows about. Hypothesis, to be verified before it is fixed.
+
 ## Queued
 
 New this pass (owner, 2026-08-17):
@@ -89,83 +116,4 @@ Carried over:
 
 ## Done this pass
 
-- **An oval and a partial oval are one feature, with no modes** — built, all six stages. The model is
-  two defaulted scalars on `ShapeGeometry`: where on the outline the pen started, and the **signed,
-  never-wrapped** fraction it turned through. Not reducing that mod 1 is the whole trick — seam
-  crossing, direction and overshoot stop being cases and become the number itself. No new `Kind`, no
-  flag, no coverage threshold; the owner deleted the arc-vs-oval decision and nothing reintroduces it.
-  **Eccentric angle, and the snap is what proves it.** The two-finger snap is an anisotropic scale that
-  maps the point at eccentric angle `t` on the ellipse to the point at the same `t` on the circle,
-  exactly, for every `t` — so the drawn portion survives the snap with **zero new code in
-  `constrained`**. Polar angle is not invariant: on a 4:1 oval the end of a 45° arc would land 106.77 pt
-  away on a 200 pt circle. A test asserting only "a quarter oval snaps to a quarter circle" passes under
-  both, which is why the sweep tests an interior angle.
-  Both flagged risks measured rather than assumed. `testRejectsRandomScribble`'s fit error falls from
-  0.2230 against the box fit to **0.1399** against the conic fit, inside `closedFitErrorMax = 0.16`, so
-  it now survives on the length gate alone at ratio 31.23 — two independent rejections became one, and
-  the test carries a comment saying to tighten the *length* gate if it ever creeps. The conic fit
-  changes **every** oval, not just partial ones: across 50 jittered shapes, **zero** kind disagreements,
-  and full ovals come out slightly smaller and more accurate (149.10×39.73 against 151.95×41.66 on a
-  true 150×40 at 5 pt jitter). Real change, no tolerance retuned to hide it.
-  **Four numbers in the design were wrong and are corrected in the tests**: a chord length off by 2×
-  (an angle halved twice), a claimed "moves < 4 pt" that actually moves by the step's own arc length,
-  two sweeps asserting `.oval` for cases that are legitimately lines, and a guard slack claimed at 1.42×
-  that measures 2.83×.
-  **Pre-existing, found while testing, wants an owner ruling**: a double-traced ellipse detects as a
-  *rectangle* — the oval is correctly rejected at ratio 2.00 and the rectangle runner-up then wins.
-  Verified against the prior commit; not a regression.
-
-- **Add Text, the first stage of it: a mode you can enter.** The menu row, `Tool.text`,
-  `ActivePanel.text`, and the `activePanel` binding threaded into `ActionsMenu` — landing alone,
-  because `ActionsMenu` is shared by every panel and [ADD_TEXT.md](ADD_TEXT.md) says to bisect there.
-  Nothing text-visible yet: no font seam, no overlay, no bake. The row is disabled on a vector layer
-  with a reason, so this stage ships nothing it has to un-ship.
-  The question it had to answer was `Tool.paintsOnCanvas`, whose exhaustive switch refuses to compile
-  until a new case states its answer. Text is **false**: a text tap places a box for an overlay above
-  the layers, so the layer host must decline the touch — otherwise one tap paints a stroke *and* opens
-  a text box, which is the eyedropper bug of 2026-08-17 with a different tool's name on it. The smart
-  shapes are what make that non-obvious and they resolve it: a shape is not a `Tool` case at all, it
-  falls out of holding a stroke still, so its touch genuinely is a stroke and must reach the host.
-  **Also found: ADD_TEXT.md's Stage 2 was already built** — the per-element vector decode is the same
-  work as yesterday's `try?` data-loss fix, and `LossySlot`/`DecodeReport`/13 tests are on main. A
-  session following the plan literally would have rebuilt it. Marked done, number kept so references
-  to Stages 3-6 still resolve. Ten of the plan's line citations had drifted, one naming the wrong file.
-
-- **The app-switch triple save.** The owner's *"returning from another app freezes for a few seconds"*,
-  and their own answer is what found it: asked whether the app comes back where they left it or on the
-  Gallery, they said *"exactly where I left off"*, which rules out a jetsam kill because nothing in this
-  app restores state — a real relaunch provably lands on the Gallery. So it was never iOS; it was
-  `ContentView`'s scene-phase guard never looking at where the transition came *from*. SwiftUI passes
-  `.inactive` on both legs, so one round trip fired `saveIfNeeded()` three times, the last of them on
-  the way back in while the artist watched. `ScenePhaseSaveGate.shouldSave(from:to:)` is phrased as
-  "leaving `.active`" rather than an allow-list of the two known departures, deliberately: missing a
-  save loses work where an extra one only costs a stall, so an unrecognised phase still saves.
-  Two things found on the way that make the size of it clear. **`saveIfNeeded` has no dirty check at
-  all** — the "IfNeeded" is a guard on the *screen*, and `writePackage` stages a fresh directory so it
-  cannot reuse a prior file even in principle. All three saves did the full job. And every save mints a
-  rotating `auto-` backup slot, five deep, so **one app switch was consuming three of the artist's five
-  restore points, two of them byte-identical.**
-
-- **The performance investigation, and [PERFORMANCE.md](PERFORMANCE.md).** Ten read-only agents over
-  the drawing hot path, compositing, memory, the app-switch freeze, timeline/playback and
-  save/load/startup, then three ranking lenses and a synthesis. Two owner answers on 2026-08-18 did
-  more to rank it than any of the analysis: the app returns *"exactly where I left off"*, which rules
-  out a jetsam kill and demotes the whole memory programme, and the 17 fps was measured at 4096²,
-  which closes the one contradiction in the cost model. A citation audit of the investigation's own
-  output found every *mechanism* real but a third of the line numbers drifted, and four figures
-  labelled "measured on device" that appear nowhere in the tree — they came from the saved workflow
-  script's own ground text, which has since been corrected. **Verify numbers, trust mechanisms.**
-- **The onion skin panel**, merged. What the device settled: the old `skins5 > skins10` inversion was
-  a cold CPU (`skins5Cold` 98.8 ms against 56.2 ms warm), not cache ordering, and the warm series is
-  monotonic. At the owner's 2048×1024 the whole resolution question is smaller than it looked — Full
-  is 237 ms at ten skins, not the 1495 ms the 4096² table implied. Cost is calculable: 11.5 ms per
-  megapixel per skin at ten skins, holding within 3% across both canvases and all three options.
-  The device is **~1.3× the simulator** for this workload, not the ~1.1× previously recorded.
-  Owner ruled "Both" on the Full question, so the picker now shows each option's real composite size
-  and a caution line appears only when the estimate crosses 250 ms — silent on the owner's document at
-  every setting, speaking at 4096² Full even at the shipped default.
-  Closing it out turned up a finding worth more than the feature: **at Full, `OnionSkinRasterCache`
-  falls through to the compositor's shared cache with canvas-sized entries**, which is exactly the
-  eviction its own doc comment exists to prevent. Full's real cost at 4096² is ~2.9 s per drawing
-  change rather than 1954 ms, and the onion skin can walk the current frame's own layers out of the
-  cache. The owner's canvas is unaffected. In BUGS.md; the caution is a mitigation, not the fix.
+_(nothing yet this pass)_
