@@ -62,6 +62,12 @@ struct EraserSettingsPanel: View {
     /// Shows the erase shape's hardness/size as a punched-out hole over a checkerboard, standing in
     /// for the transparency an eraser leaves — a solid color swatch (like the brush preview) wouldn't
     /// mean anything here since the eraser's own color is irrelevant (see `BrushStamper.stampDab`).
+    ///
+    /// The circle is `eraserSize` **panel** points and does not track the canvas zoom, so read it as
+    /// "this shape, this hardness", not as "this is how big it will be on the artwork". That matters
+    /// more since 2026-08-18, when the size became Mode 3's selection radius rather than only its
+    /// reach: `StrokeCanvasView.updateEraserFootprint(at:)` draws the canvas-accurate circle, on the
+    /// canvas, under the finger, and that is the one to trust.
     private var preview: some View {
         VStack(alignment: .leading) {
             Text("Preview")

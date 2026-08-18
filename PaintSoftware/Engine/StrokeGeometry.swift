@@ -538,6 +538,24 @@ enum StrokeGeometry {
         var parameterOnA: CGFloat
         var parameterOnB: CGFloat
         var point: CGPoint
+        /// How far along `a` the contact extends — `parameterOnA...parameterOnA` for a crossing, which
+        /// happens at a point, and a wider range only when the two polylines run *parallel* over a
+        /// stretch and every position in it is equally close.
+        ///
+        /// A cut has to stop somewhere definite, and for a parallel overlap "the closest approach" is
+        /// not a place — `closestApproach` picks an arbitrary end of the tied interval and there is no
+        /// principled reason to prefer it. `VectorEraser.cutToIntersection` reads the end of this span
+        /// nearest the eraser instead, which makes a cut stop where the two lines part company rather
+        /// than eating the whole shared run.
+        var span: ClosedRange<CGFloat>
+
+        init(parameterOnA: CGFloat, parameterOnB: CGFloat, point: CGPoint,
+             span: ClosedRange<CGFloat>? = nil) {
+            self.parameterOnA = parameterOnA
+            self.parameterOnB = parameterOnB
+            self.point = point
+            self.span = span ?? parameterOnA...parameterOnA
+        }
     }
 
     /// Segment-segment crossing, or nil when the segments are parallel or miss each other.
@@ -608,60 +626,110 @@ enum StrokeGeometry {
         return result
     }
 
-    /// Exact crossings, plus one entry per *near contact* — a stretch where the two centerlines pass
-    /// within `tolerance` without crossing — placed at that stretch's closest approach.
+    /// Exact crossings, plus one entry per *contact region* — a continuous stretch of `a` that runs
+    /// within `tolerance` of `b` without crossing it — placed at that stretch's closest approach.
     ///
     /// Mode 3 needs this because "erase up to intersection" is width-aware in Clip Studio: two lines
     /// whose strokes visibly touch read as crossed to the user even when the centerlines miss by a
     /// point or two. The caller supplies `tolerance` as the sum of the two strokes' half-widths.
     ///
-    /// Near contacts are clustered rather than reported per segment pair: two nearly-parallel strokes
-    /// produce a candidate for every overlapping segment pair, and Mode 3 wants "they touch here",
-    /// once, not fifty times. Candidates whose parameters are within one segment of each other on
-    /// *both* polylines chain into one cluster, represented by its closest member. Candidates near an
-    /// exact crossing are dropped — the crossing already describes that contact, and a shallow-angle
-    /// crossing generates a halo of near-misses around itself.
+    /// **A region is a stretch of `a`, not a run of similar parameters, and that is the whole design.**
+    /// The previous implementation grouped candidates by "within one *sample index* on both polylines",
+    /// and dropped candidates within one sample index of an exact crossing. Sample index is not a
+    /// distance: a real stroke is sampled every point or two, while `tolerance` is the sum of two brush
+    /// half-widths — 10 to 20 points. So a genuine crossing came surrounded by a disk of near-contacts
+    /// tens of samples wide, the ±1-index shadow test excluded almost none of them, and the ±1-index
+    /// chain broke every time the fan of qualifying `parameterOnB` values jumped, leaving one
+    /// "cluster" per sample. `VectorEraser.cutToIntersection` brackets the touch with the *nearest*
+    /// obstacle on each side, so it picked the near edge of that disk and the erase stopped short of
+    /// the crossing by `tolerance / sin(angle)` — the stub the owner reported on 2026-08-18, which at a
+    /// shallow crossing ran to 29 points. Measured, before/after, in `VectorEraserLogicTests`'
+    /// `…LandsExactlyOnTheCrossing` tests.
+    ///
+    /// Grouping over contact along `a` instead is unit-correct and density-independent: every segment
+    /// of `a` with any qualifying partner joins a region, touching regions merge, and then
+    ///
+    /// * a region holding one or more exact crossings reports **those crossings and nothing else** —
+    ///   the crossings already say where the two lines meet, to full precision;
+    /// * a region with none reports its single closest approach, plus the `span` of positions tied for
+    ///   that distance (a point unless the lines run parallel).
+    ///
+    /// Every exact crossing is inside some region (its own segment pair is at distance zero, so it
+    /// always qualifies), which is what keeps the guarantee that the tolerant answer is a superset of
+    /// the exact one.
     static func intersections(between a: [CGPoint], and b: [CGPoint], tolerance: CGFloat) -> [Intersection] {
         let exact = intersections(between: a, and: b)
         guard tolerance > 0, a.count > 1, b.count > 1 else { return exact }
         let toleranceSquared = tolerance * tolerance
 
-        // Candidate near-contacts, with the distance kept so a cluster can pick its best member.
-        var candidates: [(hit: Intersection, distanceSquared: CGFloat)] = []
+        // One entry per segment of `a` that comes within tolerance of anything: its closest approach,
+        // and how far along that segment the contact holds at that distance. Distance-zero pairs are
+        // kept — a crossing's own segment is what anchors the region it sits in.
+        var contacts: [(segment: Int, hit: Intersection, distanceSquared: CGFloat)] = []
         for i in 0..<(a.count - 1) {
+            var best: (hit: Intersection, distanceSquared: CGFloat)?
             for j in 0..<(b.count - 1) {
                 let approach = closestApproach(betweenSegment: a[i], a[i + 1], andSegment: b[j], b[j + 1])
-                guard approach.distanceSquared > 0, approach.distanceSquared <= toleranceSquared else { continue }
+                guard approach.distanceSquared <= toleranceSquared else { continue }
+                // The tied stretch on this segment. Only a parallel pair has one wider than a point:
+                // the four ends of the two segments are the only places a tie can start or stop, so
+                // widening to whichever of them is also at the approach distance is exact.
+                var low = CGFloat(i) + approach.t, high = low
+                func widen(to parameter: CGFloat) {
+                    low = min(low, parameter)
+                    high = max(high, parameter)
+                }
+                if distanceSquared(from: a[i], toSegment: b[j], b[j + 1]) <= approach.distanceSquared + epsilon {
+                    widen(to: CGFloat(i))
+                }
+                if distanceSquared(from: a[i + 1], toSegment: b[j], b[j + 1]) <= approach.distanceSquared + epsilon {
+                    widen(to: CGFloat(i + 1))
+                }
+                for end in [b[j], b[j + 1]] {
+                    let foot = closestPointOnSegment(from: end, a: a[i], b: a[i + 1])
+                    if foot.distanceSquared <= approach.distanceSquared + epsilon {
+                        widen(to: CGFloat(i) + foot.t)
+                    }
+                }
                 let hit = Intersection(parameterOnA: CGFloat(i) + approach.t,
                                        parameterOnB: CGFloat(j) + approach.u,
-                                       point: approach.midpoint)
-                // Suppress the halo around a crossing we already have exactly.
-                let shadowed = exact.contains {
-                    abs($0.parameterOnA - hit.parameterOnA) <= 1 && abs($0.parameterOnB - hit.parameterOnB) <= 1
+                                       point: approach.midpoint, span: low...high)
+                guard let current = best else { best = (hit, approach.distanceSquared); continue }
+                if approach.distanceSquared < current.distanceSquared - epsilon {
+                    best = (hit, approach.distanceSquared)
+                } else if approach.distanceSquared <= current.distanceSquared + epsilon {
+                    // Equally close to two segments of `b` — one contact, spanning both.
+                    best?.hit.span = min(current.hit.span.lowerBound, low)...max(current.hit.span.upperBound, high)
                 }
-                if !shadowed { candidates.append((hit, approach.distanceSquared)) }
             }
+            if let best { contacts.append((i, best.hit, best.distanceSquared)) }
         }
-        guard !candidates.isEmpty else { return exact }
-        candidates.sort { $0.hit.parameterOnA < $1.hit.parameterOnA }
+        guard !contacts.isEmpty else { return exact }
 
         var result = exact
-        var clusterBest = candidates[0]
-        var clusterLastA = candidates[0].hit.parameterOnA
-        var clusterLastB = candidates[0].hit.parameterOnB
-        for candidate in candidates.dropFirst() {
-            let contiguous = candidate.hit.parameterOnA - clusterLastA <= 1
-                && abs(candidate.hit.parameterOnB - clusterLastB) <= 1
-            if contiguous {
-                if candidate.distanceSquared < clusterBest.distanceSquared { clusterBest = candidate }
-            } else {
-                result.append(clusterBest.hit)
-                clusterBest = candidate
+        var start = 0
+        while start < contacts.count {
+            var end = start
+            while end + 1 < contacts.count, contacts[end + 1].segment == contacts[end].segment + 1 { end += 1 }
+            defer { start = end + 1 }
+            let region = contacts[start...end]
+            // Region bounds in `a`'s parameter space: the first segment's start to the last one's end.
+            let regionLow = CGFloat(contacts[start].segment)
+            let regionHigh = CGFloat(contacts[end].segment + 1)
+            guard !exact.contains(where: { $0.parameterOnA >= regionLow - epsilon
+                                        && $0.parameterOnA <= regionHigh + epsilon }) else { continue }
+            var closest = CGFloat.greatestFiniteMagnitude
+            for member in region { closest = min(closest, member.distanceSquared) }
+            var representative: Intersection?
+            for member in region where member.distanceSquared <= closest + epsilon {
+                guard var found = representative else { representative = member.hit; continue }
+                let low = min(found.span.lowerBound, member.hit.span.lowerBound)
+                let high = max(found.span.upperBound, member.hit.span.upperBound)
+                found.span = low...high
+                representative = found
             }
-            clusterLastA = candidate.hit.parameterOnA
-            clusterLastB = candidate.hit.parameterOnB
+            if let representative { result.append(representative) }
         }
-        result.append(clusterBest.hit)
         result.sort { $0.parameterOnA < $1.parameterOnA }
         return result
     }

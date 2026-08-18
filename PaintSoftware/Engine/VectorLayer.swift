@@ -596,10 +596,14 @@ final class VectorCanvas {
         case .cutPoints:
             changed = cutAlongFootprint(sweep: sweep)
         case .cutToIntersection:
-            // Whole-gesture form, resolved once against the first sample. The live gesture driver
-            // uses `cutToIntersection(atCanvasPoint:…)` instead, since Mode 3 cuts on touch-down and
-            // re-resolves per crossing.
-            changed = cutToIntersection(sweep: sweep, near: localSamples[0].point) == .cut
+            // Whole-gesture form, resolved once against the first sample, against the gesture's whole
+            // swept footprint. It is not what ships: `StrokeCanvasView.endVectorStroke` skips Mode 3
+            // here because the live gesture driver has already committed per sample through
+            // `cutToIntersection(atCanvasPoint:…)`, since Mode 3 cuts on touch-down and re-resolves
+            // per crossing. Kept — and routed through the *same* private resolve as the live path, so
+            // it cannot drift into a second, differently-behaving Mode 3.
+            changed = cutToIntersection(sweep: sweep, near: localSamples[0].point,
+                                        suppressing: []).outcome == .cut
         }
         if changed { invalidate() }
         return changed
@@ -608,16 +612,21 @@ final class VectorCanvas {
     /// Mode 3 resolved against a **single** eraser position: the driver calls this once per touch
     /// sample, so a drag across three lines cuts three spans.
     ///
-    /// `cutting` is the driver's re-arming latch: after a cut the eraser is still sitting on the
-    /// stroke, so cutting again on the next sample would walk down the line deleting span after span
-    /// from one stationary finger. The driver disarms after a cut and re-arms only once this reports
-    /// `.missed`. `cutting: false` runs the same target search without mutating the display list.
+    /// `suppressing` is the driver's per-stroke latch: after a cut the eraser is still sitting on the
+    /// pieces it just made, so cutting again on the next sample would walk down the line deleting span
+    /// after span from one stationary finger. `VectorEraser.IntersectionDriver` holds the ids and this
+    /// returns the set now under the tip — the cut's own fresh pieces included — for it to hold next.
+    /// Passing every id on the layer therefore runs the same search as a pure, non-mutating query.
+    ///
+    /// Only this layer knows the ids, which is why the driver takes them back as a value rather than
+    /// asking a question it cannot phrase.
     @discardableResult
     func cutToIntersection(atCanvasPoint canvasPoint: CGPoint, pressure: CGFloat, brush: Brush,
-                           size: CGFloat, cutting: Bool = true) -> VectorEraser.CutOutcome {
+                           size: CGFloat, suppressing: Set<UUID> = [])
+        -> (outcome: VectorEraser.CutOutcome, underTip: Set<UUID>) {
         lock.lock()
         defer { lock.unlock() }
-        guard _elements.contains(where: { $0.stroke != nil }) else { return .missed }
+        guard _elements.contains(where: { $0.stroke != nil }) else { return (.missed, []) }
 
         let localSamples = Self.localSamples([VectorSample(x: canvasPoint.x, y: canvasPoint.y, pressure: pressure)],
                                              through: _transform)
@@ -626,11 +635,11 @@ final class VectorCanvas {
         // A one-sample sweep is the single dab stamped so far: `capsuleChain` yields one zero-length
         // capsule for it, so the footprint test below is the nib itself.
         guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: localSize,
-                                             mode: .cutToIntersection) else { return .missed }
+                                             mode: .cutToIntersection) else { return (.missed, []) }
 
-        let outcome = cutToIntersection(sweep: sweep, near: localSamples[0].point, cutting: cutting)
-        if outcome == .cut { invalidate() }
-        return outcome
+        let resolved = cutToIntersection(sweep: sweep, near: localSamples[0].point, suppressing: suppressing)
+        if resolved.outcome == .cut { invalidate() }
+        return resolved
     }
 
     // MARK: - Mode 1 — the hybrid
@@ -938,63 +947,99 @@ final class VectorCanvas {
         return changed
     }
 
-    /// Mode 3: the one stroke the eraser came down on loses the span between its two neighbouring
-    /// crossings. Caller must hold `lock`. `cutting: false` reports whether a target was found
-    /// without mutating anything — see `cutToIntersection(atCanvasPoint:…)`.
+    /// Mode 3: **every** stroke whose centreline passes under the eraser's footprint loses the span
+    /// between its own neighbouring crossings. Caller must hold `lock`. Returns the ids under the tip
+    /// alongside the outcome, so the driver can suppress them next sample; passing every id on the
+    /// layer in `suppressing` makes this a pure, non-mutating query.
+    ///
+    /// One footprint, many victims, is the owner's ruling of 2026-08-18 — *"the eraser brush size
+    /// should be the radius around which everything is erased… if I erase the section where two lines
+    /// intersect, it should erase both of them"*. It was one victim until then, chosen as the nearest
+    /// centreline, and the size only gated reachability.
+    ///
+    /// **Assumption, stated because the owner has not been asked yet**: a stroke is taken when its
+    /// *centreline* passes under the footprint, not merely when its ink does. That makes the circle the
+    /// user sees exactly the rule, at the cost of a thick line being left alone when the eraser clips
+    /// only its edge.
+    ///
+    /// Every victim is bracketed against the **pristine** display list and the splices applied
+    /// afterwards, in descending index. Two lines that cross each other and are both taken in one tap
+    /// must each see the other's original geometry, or whichever went second would compute its bracket
+    /// against a stroke that no longer crosses it and be deleted whole.
     private func cutToIntersection(sweep: VectorEraser.Sweep, near hitPoint: CGPoint,
-                                   cutting: Bool = true) -> VectorEraser.CutOutcome {
+                                   suppressing: Set<UUID>)
+        -> (outcome: VectorEraser.CutOutcome, underTip: Set<UUID>) {
         let index = strokeIndex()
         let candidates = Set(index.segments(near: sweep.bounds).map(\.elementIndex))
-        guard !candidates.isEmpty else { return .missed }
+        guard !candidates.isEmpty else { return (.missed, []) }
 
-        // The stroke the eraser came down on: nearest centreline among the candidates, only if the
-        // eraser's footprint actually reaches it (a near miss cuts nothing).
-        var target: (index: Int, stroke: VectorStroke, parameter: CGFloat)?
-        var bestDistanceSquared = CGFloat.infinity
+        // Everything the eraser came down on: every candidate whose centreline the footprint actually
+        // reaches (a near miss cuts nothing).
+        var victims: [(index: Int, stroke: VectorStroke, parameter: CGFloat)] = []
+        var underTip: Set<UUID> = []
         for elementIndex in candidates.sorted() {
             guard let stroke = _elements[elementIndex].stroke, stroke.composite == .paint,
                   !stroke.samples.isEmpty else { continue }
             guard let hit = StrokeGeometry.closestPoint(onPolyline: stroke.samples, to: hitPoint),
-                  hit.distanceSquared < bestDistanceSquared, sweep.contains(hit.point) else { continue }
-            bestDistanceSquared = hit.distanceSquared
-            target = (elementIndex, stroke, hit.parameter)
+                  sweep.contains(hit.point) else { continue }
+            underTip.insert(stroke.id)
+            guard !suppressing.contains(stroke.id) else { continue }
+            victims.append((elementIndex, stroke, hit.parameter))
         }
-        guard let target else { return .missed }
+        guard !underTip.isEmpty else { return (.missed, []) }
         // Past this point the tip *is* over ink, so every remaining exit says `.unchanged` rather than
-        // `.missed` — the driver must stay disarmed until the finger leaves the stroke.
-        guard cutting else { return .unchanged }
+        // `.missed` — the driver must stay latched until the finger leaves those strokes.
+        guard !victims.isEmpty else { return (.unchanged, underTip) }
 
-        // Everything that could cross it, with a width-aware tolerance per pair: lines whose ink
-        // visibly touches read as crossed even when the centrelines miss.
-        let targetReach = StrokeGeometry.stampRadius(forPressure: 1, brush: target.stroke.brush,
-                                                     size: target.stroke.size)
-        guard let targetBounds = StrokeGeometry.bounds(of: target.stroke.samples,
-                                                       padding: targetReach) else { return .unchanged }
-        var others: [(points: [CGPoint], tolerance: CGFloat)] = []
-        for elementIndex in Set(index.segments(near: targetBounds).map(\.elementIndex)).sorted()
-        where elementIndex != target.index {
-            guard let other = _elements[elementIndex].stroke, other.composite == .paint,
-                  other.samples.count > 1 else { continue }
-            let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: other.brush, size: other.size)
-            others.append((other.samples.map(\.point), targetReach + reach))
+        // INFERRED, not measured: this is the one place the change costs more per touch sample. Each
+        // victim runs the same per-stroke work the single target used to — a spatial-index query and
+        // an O(segments × segments) intersection test against each neighbour — so a wide eraser over
+        // n strokes is n times the old cost. The index bounds `others` per victim and n is the number
+        // of centrelines inside one nib, so it is small in practice; if a drag ever stutters in a
+        // dense drawing, this loop is where to look first.
+        var splices: [(index: Int, pieces: [VectorElement])] = []
+        for victim in victims {
+            // Everything that could cross it, with a width-aware tolerance per pair: lines whose ink
+            // visibly touches read as crossed even when the centrelines miss.
+            let targetReach = StrokeGeometry.stampRadius(forPressure: 1, brush: victim.stroke.brush,
+                                                         size: victim.stroke.size)
+            guard let targetBounds = StrokeGeometry.bounds(of: victim.stroke.samples,
+                                                           padding: targetReach) else { continue }
+            var others: [(points: [CGPoint], tolerance: CGFloat)] = []
+            for elementIndex in Set(index.segments(near: targetBounds).map(\.elementIndex)).sorted()
+            where elementIndex != victim.index {
+                guard let other = _elements[elementIndex].stroke, other.composite == .paint,
+                      other.samples.count > 1 else { continue }
+                let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: other.brush, size: other.size)
+                others.append((other.samples.map(\.point), targetReach + reach))
+            }
+
+            let cuts = Self.effectiveCuts(VectorEraser.cutToIntersection(in: victim.stroke.samples,
+                                                                         at: victim.parameter,
+                                                                         others: others, footprint: sweep),
+                                          in: victim.stroke.samples)
+            guard !cuts.isEmpty else { continue }
+
+            var pieces: [VectorElement] = []
+            for run in StrokeGeometry.splitStroke(victim.stroke.samples, removing: cuts) {
+                var piece = victim.stroke
+                piece.id = UUID()
+                piece.samples = run
+                // As in Mode 2: deletes geometry, so the piece is its own stroke from here on.
+                piece.lattice = nil
+                pieces.append(.stroke(piece))
+            }
+            splices.append((victim.index, pieces))
         }
+        guard !splices.isEmpty else { return (.unchanged, underTip) }
 
-        let cuts = Self.effectiveCuts(VectorEraser.cutToIntersection(in: target.stroke.samples,
-                                                                     at: target.parameter, others: others),
-                                      in: target.stroke.samples)
-        guard !cuts.isEmpty else { return .unchanged }
-
-        var pieces: [VectorElement] = []
-        for run in StrokeGeometry.splitStroke(target.stroke.samples, removing: cuts) {
-            var piece = target.stroke
-            piece.id = UUID()
-            piece.samples = run
-            // As in Mode 2: deletes geometry, so the piece is its own stroke from here on.
-            piece.lattice = nil
-            pieces.append(.stroke(piece))
+        // Descending, so an earlier splice cannot invalidate a later index.
+        for splice in splices.sorted(by: { $0.index > $1.index }) {
+            if let replaced = _elements[splice.index].stroke { underTip.remove(replaced.id) }
+            for piece in splice.pieces { if let stroke = piece.stroke { underTip.insert(stroke.id) } }
+            _elements.replaceSubrange(splice.index...splice.index, with: splice.pieces)
         }
-        _elements.replaceSubrange(target.index...target.index, with: pieces)
-        return .cut
+        return (.cut, underTip)
     }
 
     /// `cuts` reduced to what actually removes something, so a graze that merely touches a stroke's

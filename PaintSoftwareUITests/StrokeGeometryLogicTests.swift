@@ -389,6 +389,51 @@ final class StrokeGeometryLogicTests: XCTestCase {
                        "tolerance must not invent extra intersections around crossings we already have")
     }
 
+    /// The coverage gap that let the 2026-08-18 cross-eraser stub through, and the reason the case
+    /// above did not catch it: its segments are 10 units long against a tolerance of 3, which is the
+    /// *opposite* of a real stroke. A real one is sampled every point or two while the tolerance is the
+    /// sum of two brush half-widths, 10 to 20 points, and in that regime the halo around a crossing was
+    /// tens of samples wide in both parameters — 30 entries spanning `parameterOnA` 60…80 for the
+    /// square crossing here, 52 spanning 48…92 for the shallow one, where there is exactly one.
+    ///
+    /// Assert the tolerant answer *is* the exact one, entry for entry, not merely that it has the right
+    /// count: the bug was never a missing crossing, it was thirty spurious neighbours of a real one.
+    func testTolerantVariantDoesNotHaloACrossingAtRealisticSampleDensity() {
+        for degrees in [CGFloat(90), 26, 11] {
+            let radians = degrees * .pi / 180
+            let a = (0...200).map { CGPoint(x: CGFloat($0), y: 0) }
+            // Crossed at x = 70.5, and the crosser's samples straddle y = 0 rather than landing on it:
+            // a crossing *at a shared vertex* is reported once per touching segment pair, which is
+            // correct and has nothing to do with the halo under test here.
+            let b = stride(from: CGFloat(-120.5), through: 120.5, by: 1).map {
+                CGPoint(x: 70.5 + cos(radians) * $0, y: sin(radians) * $0)
+            }
+            let exact = StrokeGeometry.intersections(between: a, and: b)
+            let tolerant = StrokeGeometry.intersections(between: a, and: b, tolerance: 10)
+            XCTAssertEqual(exact.count, 1, "\(degrees)°: the two centrelines cross exactly once")
+            XCTAssertEqual(tolerant.count, 1, "\(degrees)°: haloed into \(tolerant.count) contacts")
+            guard tolerant.count == 1, exact.count == 1 else { continue }
+            XCTAssertEqual(tolerant[0].parameterOnA, exact[0].parameterOnA, accuracy: 1e-9)
+            XCTAssertEqual(tolerant[0].span.lowerBound, exact[0].parameterOnA, accuracy: 1e-9,
+                           "a crossing happens at a point, so its span is a point")
+            XCTAssertEqual(tolerant[0].span.upperBound, exact[0].parameterOnA, accuracy: 1e-9)
+        }
+    }
+
+    /// The one contact that is genuinely not a point: two lines running parallel 2 units apart from
+    /// x = 60 to x = 140, well inside a tolerance of 10. `closestApproach` has to pick some end of the
+    /// tied interval, so `span` reports the whole of it and `VectorEraser.cutToIntersection` reads the
+    /// end nearest the eraser — which is what stops a cut from swallowing the whole shared run.
+    func testTolerantVariantReportsTheFullSpanOfAParallelRun() {
+        let a = (0...200).map { CGPoint(x: CGFloat($0), y: 0) }
+        let b = (60...140).map { CGPoint(x: CGFloat($0), y: 2) }
+        let hits = StrokeGeometry.intersections(between: a, and: b, tolerance: 10)
+        XCTAssertEqual(hits.count, 1, "one place where they run together, not eighty")
+        guard hits.count == 1 else { return }
+        XCTAssertEqual(hits[0].span.lowerBound, 60, accuracy: 1e-6)
+        XCTAssertEqual(hits[0].span.upperBound, 140, accuracy: 1e-6)
+    }
+
     // MARK: - Sample interpolation and subdivision
 
     func testInterpolatedSampleInterpolatesPressureAsWellAsPosition() {

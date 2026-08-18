@@ -42,7 +42,10 @@ toolset, and a frame-by-frame animation timeline.
   heavily layered artwork — it reaches only what is on screen, never the saved file or the export
 - **Vector eraser**: three CSP-style modes (erase, cut points, cut to intersection). An eraser *is* a
   stroke — it is an `.erase` element in the same z-ordered display list as the paint it eats, so it
-  is non-destructive and undoable, and Mode 1 splits a cleanly severed stroke into real pieces
+  is non-destructive and undoable, and Mode 1 splits a cleanly severed stroke into real pieces.
+  In Mode 3 the brush size is a **selection radius**, not just a reach: every stroke whose centreline
+  the circle covers is cut back to its own nearest crossings outside the circle, so erasing where two
+  lines meet takes both. The circle is drawn on the canvas under the finger while the gesture is live
 - **Animation Timeline**: multi-cel frame-by-frame animation, scrub/play, per-cel copy/clear/extend
 - **Keyframe interpolation** on vector layers: mark two cels as references and the cels between them
   become derived (lattice + ARAP warp), with motion groups, guide strokes, editing at an in-between

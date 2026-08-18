@@ -461,8 +461,18 @@ enum VectorEraser {
     /// `tolerance` is width-aware on purpose: two strokes whose *ink* visibly touches read as crossed
     /// to the user even when the centrelines miss by a point or two. Callers pass the sum of the two
     /// strokes' half-widths; see `StrokeGeometry.intersections(between:and:tolerance:)`.
+    ///
+    /// `footprint` is the eraser's own reach, and crossings **inside** it are not obstacles. That is
+    /// the owner's ruling of 2026-08-18 — *"if I erase the section where two lines intersect, it should
+    /// erase both of them (up to any other lines they hit)"*: everything under the eraser goes, and each
+    /// line it took then runs on outward to its nearest crossing *outside* the circle. Stopping at a
+    /// crossing the eraser is sitting on would leave exactly the ink the user aimed at. Passing `nil`
+    /// is the zero-radius limit of the same rule and reproduces the old strictly-bracketing behaviour:
+    /// a crossing sitting exactly under the touch is skipped rather than collapsing the span to
+    /// nothing and silently erasing none of it.
     static func cutToIntersection(in samples: [VectorSample], at hit: CGFloat,
-                                  others: [(points: [CGPoint], tolerance: CGFloat)])
+                                  others: [(points: [CGPoint], tolerance: CGFloat)],
+                                  footprint: Sweep? = nil)
         -> [ClosedRange<CGFloat>] {
         guard samples.count > 1 else { return samples.isEmpty ? [] : [0...0] }
         let domainEnd = CGFloat(samples.count - 1)
@@ -473,46 +483,63 @@ enum VectorEraser {
         for other in others {
             for crossing in StrokeGeometry.intersections(between: points, and: other.points,
                                                          tolerance: other.tolerance) {
-                let p = crossing.parameterOnA
-                // Strictly bracketing, so a crossing sitting exactly under the touch doesn't collapse
-                // the span to nothing and silently erase none of it.
-                if p < hit { low = max(low, p) } else if p > hit { high = min(high, p) }
+                if let footprint, footprint.contains(crossing.point) { continue }
+                // `span` is a single point for a crossing and widens only where the two lines run
+                // parallel; taking the end nearest the touch stops the cut where they part company
+                // instead of eating the whole shared run. A span straddling the touch is no more an
+                // obstacle than a crossing under it.
+                let span = crossing.span
+                if span.upperBound < hit {
+                    low = max(low, span.upperBound)
+                } else if span.lowerBound > hit {
+                    high = min(high, span.lowerBound)
+                }
             }
         }
         guard high > low else { return [] }
         return [low...high]
     }
 
-    /// What one Mode-3 resolve did. `.missed` and `.unchanged` differ only in whether the eraser tip
-    /// was over ink at all, which is the entire input to `IntersectionDriver`'s re-arming rule.
+    /// What one Mode-3 resolve did, quantified over **every** stroke under the eraser rather than one.
+    /// `.missed` and `.unchanged` differ only in whether the eraser tip was over ink at all, which is
+    /// the entire input to `IntersectionDriver`'s re-arming rule.
     enum CutOutcome: Equatable {
-        /// No paint stroke's footprint reaches the tip.
+        /// No paint stroke's centreline is under the tip.
         case missed
-        /// A stroke is under the tip, but nothing came off it — either the caller asked not to cut, or
-        /// the span between its neighbouring crossings was already gone.
+        /// Strokes are under the tip, but nothing came off any of them — either every one of them was
+        /// suppressed, or the span between their neighbouring crossings was already gone.
         case unchanged
-        /// Geometry was removed.
+        /// Geometry was removed from at least one of them.
         case cut
     }
 
-    /// Turns a stream of eraser positions into Mode 3 cuts: cut on entering a stroke, then stay quiet
-    /// until the tip is over nothing again.
+    /// Turns a stream of eraser positions into Mode 3 cuts: cut a stroke when the eraser reaches it,
+    /// then leave *that stroke* alone until the eraser has left it again.
     ///
     /// Mode 3 wants a cut on touch-**down** and a re-query per crossing, so one drag across three lines
     /// cuts three spans. Cutting on *every* sample instead gets the three-line case
     /// right and everything else wrong: the span Mode 3 removes runs between the target's neighbouring
     /// crossings, which can be anywhere — including a few points from the finger — so a tip left
     /// sitting on a line would chew it away span by span, one per touch sample, from a stationary
-    /// finger. Latching on "the tip has left ink" is what makes "per crossing" mean per *crossing*
-    /// rather than per sample.
+    /// finger. Latching is what makes "per crossing" mean per *crossing* rather than per sample.
     ///
-    /// A `struct` here rather than the three lines of state inlined into `StrokeCanvasView` for one
+    /// **The latch is per stroke, not per gesture**, and it has to be, now that the eraser's size
+    /// selects its victims (2026-08-18). A single "am I armed" bit was enough while one position could
+    /// only ever cut one stroke: leaving ink re-armed it. A 40-point footprint in a dense drawing is
+    /// almost never over nothing at all, so a single bit would cut once at touch-down and then go dead
+    /// for the rest of the drag. Remembering the *ids* under the tip keeps the rule the same sentence
+    /// it always was — cut a line the first time you reach it, leave it alone while you are still on
+    /// it, re-arm for it when you leave — and with one stroke under a small nib it behaves exactly as
+    /// the single bit did.
+    ///
+    /// A `struct` here rather than the two fields inlined into `StrokeCanvasView` for one
     /// reason: this file compiles into the test target and that view does not, and the rule above is
     /// exactly the kind of thing that is easy to get subtly wrong and impossible to notice without a
     /// test. `StrokeCanvasView` owns an instance and feeds it outcomes.
     struct IntersectionDriver {
-        /// Whether the next position should cut. True at touch-down, so Mode 3 fires immediately.
-        private(set) var isArmed = true
+        /// The strokes the eraser is currently sitting on and has already dealt with. Empty at
+        /// touch-down, so Mode 3 fires immediately.
+        private(set) var suppressed: Set<UUID> = []
         /// Whether this gesture has removed anything, so the driver's owner can register exactly one
         /// undo entry for the drag — and none at all when the drag cut nothing.
         private(set) var didCut = false
@@ -520,18 +547,14 @@ enum VectorEraser {
         init() {}
 
         /// Feeds back the result of resolving at one position. Call with the outcome of a resolve made
-        /// with `cutting: isArmed`.
-        mutating func accept(_ outcome: CutOutcome) {
-            switch outcome {
-            case .missed:
-                // Over nothing: the next stroke entered is a new crossing and gets its own cut.
-                isArmed = true
-            case .unchanged:
-                isArmed = false
-            case .cut:
-                isArmed = false
-                didCut = true
-            }
+        /// with `suppressing: suppressed`, and the ids that resolve found under the tip — including the
+        /// pieces a cut has just minted, so a line cannot be re-cut on the very next sample.
+        ///
+        /// A stroke that has left the footprint drops out of the set and is cuttable again if the
+        /// eraser comes back to it; `underTip` empty (i.e. `.missed`) therefore re-arms everything.
+        mutating func accept(_ outcome: CutOutcome, underTip: Set<UUID>) {
+            if outcome == .cut { didCut = true }
+            suppressed = underTip
         }
     }
 

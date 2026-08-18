@@ -277,11 +277,11 @@ final class VectorEraserLogicTests: XCTestCase {
     @discardableResult
     private func pump(_ canvas: VectorCanvas, _ driver: inout VectorEraser.IntersectionDriver,
                       to point: CGPoint, nib: CGFloat = 6) -> VectorEraser.CutOutcome {
-        let outcome = canvas.cutToIntersection(atCanvasPoint: point, pressure: 1,
-                                               brush: fixedBrush(size: nib), size: nib,
-                                               cutting: driver.isArmed)
-        driver.accept(outcome)
-        return outcome
+        let resolved = canvas.cutToIntersection(atCanvasPoint: point, pressure: 1,
+                                                brush: fixedBrush(size: nib), size: nib,
+                                                suppressing: driver.suppressed)
+        driver.accept(resolved.outcome, underTip: resolved.underTip)
+        return resolved.outcome
     }
 
     /// One drag across three lines cuts three spans — which a lift-time-only implementation could
@@ -316,31 +316,49 @@ final class VectorEraserLogicTests: XCTestCase {
     /// The reason the driver latches at all, stated as a test.
     ///
     /// Mode 3 removes the span between the target's *neighbouring crossings*, and those can sit right
-    /// under the finger — here the tip is 2 points below the rail it just cut back to. Resolving again
-    /// at the same position finds the surviving stub, whose only crossing is at its own endpoint and
-    /// therefore brackets nothing, so the stub is deleted whole. Repeat per touch sample and a
-    /// stationary finger eats the line. The second half of this test is that exact runaway, which is
-    /// what makes the first half evidence rather than a coincidence.
-    func testTheLatchStopsAStationaryTipFromEatingTheSurvivingStub() {
-        let tip = CGPoint(x: 30, y: 42)
+    /// under the finger. Resolving again at the same position finds the surviving piece, whose only
+    /// contact is at its own endpoint and therefore brackets nothing, so the piece is deleted whole.
+    /// Repeat per touch sample and a stationary finger eats the line. The second half of this test is
+    /// that exact runaway, which is what makes the first half evidence rather than a coincidence.
+    ///
+    /// The geometry is a *near* contact, not a crossing, and that is deliberate: since 2026-08-18 a
+    /// crossing under the tip is not an obstacle, so a cut made against a crossing always ends outside
+    /// the footprint and a surviving piece cannot still be under it. A near contact is reported at the
+    /// midpoint of the gap between the two centrelines, which can sit outside the footprint while the
+    /// cut it produces — on this stroke's own centreline — sits inside. That is where a stationary tip
+    /// can still chew, and the whole reason the latch survives the redesign.
+    func testTheLatchStopsAStationaryTipFromEatingTheSurvivingPiece() {
+        // Rail's ink stops 6pt short of the run; both are 8 wide, so the width-aware tolerance is 8
+        // and they read as touching. Contact point (50, 97); cut boundary (50, 100).
+        func canvas() -> VectorCanvas {
+            VectorCanvas(size: CGSize(width: 200, height: 200), strokes: [
+                VectorStroke(brush: fixedBrush(size: 8), color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                             size: 8, opacity: 1, samples: samples([(0, 100), (100, 100)], pressure: 1)),
+                VectorStroke(brush: fixedBrush(size: 8), color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                             size: 8, opacity: 1, samples: samples([(50, 60), (50, 94)], pressure: 1))])
+        }
+        // 4.5pt radius: 5.0 from the contact point (an obstacle) and 4.0 from the cut boundary (under
+        // the tip). One position, both sides of the rule.
+        let tip = CGPoint(x: 54, y: 100)
 
-        let latched = VectorCanvas(size: CGSize(width: 200, height: 200),
-                                   strokes: [verticalLine(atX: 30), rail(atY: 40), rail(atY: 140)])
+        let latched = canvas()
         var driver = VectorEraser.IntersectionDriver()
-        XCTAssertEqual(pump(latched, &driver, to: tip), .cut)
-        // Still over the stub, so the driver stays disarmed and the second resolve reports rather
-        // than removes.
-        XCTAssertEqual(pump(latched, &driver, to: tip), .unchanged)
-        XCTAssertFalse(driver.isArmed)
-        XCTAssertEqual(latched.strokes.count, 4, "cut vertical (2 stubs) + 2 rails")
+        XCTAssertEqual(pump(latched, &driver, to: tip, nib: 9), .cut)
+        XCTAssertEqual(latched.strokes.count, 2)
+        XCTAssertEqual(latched.strokes[0].samples.last?.x ?? -1, 50, accuracy: 0.01,
+                       "the run is cut back to where the rail's ink reaches it")
+        // Still over the surviving piece, so it stays suppressed and the second resolve reports
+        // rather than removes.
+        XCTAssertEqual(pump(latched, &driver, to: tip, nib: 9), .unchanged)
+        XCTAssertEqual(latched.strokes.count, 2)
+        XCTAssertEqual(latched.strokes[0].samples.last?.x ?? -1, 50, accuracy: 0.01)
 
-        // Same two positions with the latch defeated: the stub goes too.
-        let unlatched = VectorCanvas(size: CGSize(width: 200, height: 200),
-                                     strokes: [verticalLine(atX: 30), rail(atY: 40), rail(atY: 140)])
-        let nib = fixedBrush(size: 6)
-        unlatched.cutToIntersection(atCanvasPoint: tip, pressure: 1, brush: nib, size: 6)
-        unlatched.cutToIntersection(atCanvasPoint: tip, pressure: 1, brush: nib, size: 6)
-        XCTAssertEqual(unlatched.strokes.count, 3, "the stub under the tip was deleted whole")
+        // Same two positions with the latch defeated: the piece goes too.
+        let unlatched = canvas()
+        let nib = fixedBrush(size: 9)
+        unlatched.cutToIntersection(atCanvasPoint: tip, pressure: 1, brush: nib, size: 9)
+        unlatched.cutToIntersection(atCanvasPoint: tip, pressure: 1, brush: nib, size: 9)
+        XCTAssertEqual(unlatched.strokes.count, 1, "the piece under the tip was deleted whole")
     }
 
     /// Leaving the ink re-arms, which is what makes "per crossing" mean per crossing rather than per
@@ -349,19 +367,19 @@ final class VectorEraserLogicTests: XCTestCase {
         let canvas = laddersCanvas()
         var driver = VectorEraser.IntersectionDriver()
         XCTAssertEqual(pump(canvas, &driver, to: CGPoint(x: 30, y: 90)), .cut)
-        XCTAssertFalse(driver.isArmed)
         XCTAssertEqual(pump(canvas, &driver, to: CGPoint(x: 45, y: 90)), .missed)
-        XCTAssertTrue(driver.isArmed)
+        XCTAssertTrue(driver.suppressed.isEmpty, "nothing under the tip re-arms every stroke")
     }
 
-    /// `cutting: false` has to be a pure query — the driver uses it on every disarmed sample, so if it
-    /// mutated, the latch would be worse than useless.
-    func testResolvingWithCuttingFalseNeverMutates() {
+    /// Suppressing everything has to be a pure query — the driver suppresses whatever it is sitting on
+    /// on every sample, so if a suppressed resolve mutated, the latch would be worse than useless.
+    func testResolvingWithEverythingSuppressedNeverMutates() {
         let canvas = laddersCanvas()
         let before = canvas.strokes.map(\.id)
-        let outcome = canvas.cutToIntersection(atCanvasPoint: CGPoint(x: 30, y: 90), pressure: 1,
-                                               brush: fixedBrush(size: 6), size: 6, cutting: false)
-        XCTAssertEqual(outcome, .unchanged)
+        let resolved = canvas.cutToIntersection(atCanvasPoint: CGPoint(x: 30, y: 90), pressure: 1,
+                                                brush: fixedBrush(size: 6), size: 6,
+                                                suppressing: Set(before))
+        XCTAssertEqual(resolved.outcome, .unchanged)
         XCTAssertEqual(canvas.strokes.map(\.id), before)
     }
 
@@ -375,5 +393,234 @@ final class VectorEraserLogicTests: XCTestCase {
         }
         XCTAssertFalse(driver.didCut)
         XCTAssertEqual(canvas.strokes.count, 5)
+    }
+
+    // MARK: - Mode 3: the stub, measured in points
+    //
+    // The owner, on device, 2026-08-18: *"I want it to erase the lines right at the point that the line
+    // crosses the center of another line, but in many cases it leaves stubs."*
+    //
+    // Every Mode-3 test above spaces its samples 10 points apart — wider than any width-aware
+    // tolerance — and that is the only reason none of them caught this. A real stroke arrives sampled
+    // every point or two, while the tolerance is the sum of two brush half-widths, 10 to 20 points, and
+    // in that regime `StrokeGeometry.intersections(between:and:tolerance:)` used to spray roughly one
+    // "crossing" per sample across the whole tolerance disk around a real one. The bracket then took
+    // the entry nearest the touch and the erase stopped short by `tolerance / sin(angle)`.
+    //
+    // These assert the *distance in points* between the cut and the true crossing. "Did it cut" was
+    // already green; "how far short" is the entire bug.
+
+    /// A run from `(0, 0)` to `(200, 0)` sampled every `spacing` points, crossed at `(70, 0)` by a
+    /// straight line `degrees` off it, and a touch at `x = 40`. Answers how far the cut boundary lands
+    /// from the true crossing — the length of the stub the owner reported.
+    private func stubLength(crossingAt degrees: CGFloat, tolerance: CGFloat,
+                            spacing: CGFloat = 1) -> CGFloat {
+        let run = samples(stride(from: CGFloat(0), through: 200, by: spacing).map { ($0, CGFloat(0)) })
+        let radians = degrees * .pi / 180
+        var crosser: [CGPoint] = []
+        var along: CGFloat = -120
+        while along <= 120 {
+            crosser.append(CGPoint(x: 70 + cos(radians) * along, y: sin(radians) * along))
+            along += spacing
+        }
+        guard let touch = StrokeGeometry.closestPoint(onPolyline: run, to: CGPoint(x: 40, y: 0)),
+              let cut = VectorEraser.cutToIntersection(in: run, at: touch.parameter,
+                                                       others: [(crosser, tolerance)]).first,
+              let boundary = StrokeGeometry.interpolatedSample(in: run, at: cut.upperBound)
+        else { return .infinity }
+        return abs(boundary.x - 70)
+    }
+
+    /// Measured against the implementation this replaced, same six configurations: 10.0, 18.0, 22.0,
+    /// 29.0 and 29.0 points of stub, and 0.0 only for the `tolerance == 0` control that skips the
+    /// tolerant path entirely. Shallow crossings are far worse than square ones — the stub is
+    /// `tolerance / sin(angle)` — which is why the owner said *"in many cases"* rather than "always".
+    func testTheCutLandsOnTheCrossingAtRealisticSampleDensity() {
+        for (degrees, tolerance) in [(CGFloat(90), CGFloat(10)), (90, 18), (26, 10), (11, 10), (11, 18)] {
+            XCTAssertEqual(stubLength(crossingAt: degrees, tolerance: tolerance), 0, accuracy: 0.01,
+                           "a \(degrees)° crossing at tolerance \(tolerance) left a stub")
+        }
+    }
+
+    /// Same, three points between samples — a quick stroke rather than a slow one — where the crossing
+    /// falls *between* two samples rather than on one. 19.25 points of stub before.
+    func testTheCutLandsOnTheCrossingAtCoarseSampleDensityToo() {
+        XCTAssertEqual(stubLength(crossingAt: 26, tolerance: 10, spacing: 3), 0, accuracy: 0.01)
+        XCTAssertEqual(stubLength(crossingAt: 90, tolerance: 18, spacing: 3), 0, accuracy: 0.01)
+    }
+
+    /// Two lines running alongside each other with no crossing anywhere — the one case where "the
+    /// closest approach" is not a place, since every position along the shared run is equally close.
+    /// The cut stops where the run begins, on the side the eraser came from, instead of swallowing all
+    /// 80 points of it. Symmetric from either side, and the same answer either way round.
+    func testAParallelOverlapIsCutBackToWhereTheLinesPartCompany() {
+        let run = samples((0...200).map { (CGFloat($0), CGFloat(0)) })
+        let alongside = (60...140).map { CGPoint(x: CGFloat($0), y: 2) }
+        assertCut(VectorEraser.cutToIntersection(in: run, at: 180, others: [(alongside, 10)]),
+                  140, 200, accuracy: 0.01)
+        assertCut(VectorEraser.cutToIntersection(in: run, at: 20, others: [(alongside, 10)]),
+                  0, 60, accuracy: 0.01)
+    }
+
+    // MARK: - Mode 3: the eraser's size is the selection radius
+    //
+    // The owner, same report: *"the eraser brush size should be the radius around which everything is
+    // erased. For example if I erase the section where two lines intersect, it should erase both of
+    // them (up to any other lines they hit)."* Two rulings — the footprint picks the victims, and a
+    // crossing inside the footprint is not something to stop at.
+    //
+    // **Assumption, taken because the owner has not been asked yet**: a stroke is taken when its
+    // *centreline* passes under the footprint, not merely when its ink does. That makes the circle the
+    // user sees exactly the rule; the cost is a thick line left alone when the eraser clips its edge.
+
+    private func nib(at point: CGPoint, size: CGFloat) -> VectorEraser.Sweep {
+        guard let sweep = VectorEraser.Sweep(samples: [VectorSample(x: point.x, y: point.y, pressure: 1)],
+                                             brush: fixedBrush(size: size), size: size,
+                                             mode: .cutToIntersection) else {
+            preconditionFailure("a one-sample gesture always has a footprint")
+        }
+        return sweep
+    }
+
+    private func stroke(_ points: [(CGFloat, CGFloat)], size: CGFloat = 4) -> VectorStroke {
+        VectorStroke(brush: fixedBrush(size: size),
+                     color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                     size: size, opacity: 1, samples: samples(points, pressure: 1))
+    }
+
+    /// The geometry half of ruling (b): the cut runs *through* a crossing the eraser is sitting on and
+    /// stops at the next one outside it. Stopping at the covered crossing would leave exactly the ink
+    /// the user aimed at.
+    func testACrossingUnderTheEraserIsNotAnObstacle() {
+        let run = samples((0...200).map { (CGFloat($0), CGFloat(0)) })
+        let others = [((-40...40).map { CGPoint(x: 70, y: CGFloat($0)) }, CGFloat(4)),
+                      ((-40...40).map { CGPoint(x: 130, y: CGFloat($0)) }, CGFloat(4))]
+        assertCut(VectorEraser.cutToIntersection(in: run, at: 70, others: others,
+                                                 footprint: nib(at: CGPoint(x: 70, y: 0), size: 20)),
+                  0, 130, accuracy: 0.01)
+        // A pinpoint tip a point off the same crossing stops at it — the r = 0 limit, and what every
+        // bracket test above asserts by passing no footprint at all.
+        assertCut(VectorEraser.cutToIntersection(in: run, at: 71, others: others,
+                                                 footprint: nib(at: CGPoint(x: 71, y: 0), size: 1)),
+                  70, 130, accuracy: 0.01)
+    }
+
+    /// The owner's own example. Two lines crossing at (100, 100), each also crossing a neighbour
+    /// further out; one tap on the crossing takes **both** lines, each back to its own neighbours.
+    /// Before this change the tap cut one line — the nearest centreline — and stopped at the crossing.
+    func testAWideEraserOnACrossingCutsBothLinesBackToTheirOwnNeighbours() {
+        let canvas = VectorCanvas(size: CGSize(width: 200, height: 200), strokes: [
+            stroke([(20, 100), (180, 100)]),        // the horizontal through the crossing
+            stroke([(100, 20), (100, 180)]),        // the vertical through the crossing
+            stroke([(60, 20), (60, 180)]),          // the horizontal's neighbours
+            stroke([(140, 20), (140, 180)]),
+            stroke([(20, 60), (180, 60)]),          // the vertical's neighbours
+            stroke([(20, 140), (180, 140)])])
+        var driver = VectorEraser.IntersectionDriver()
+        XCTAssertEqual(pump(canvas, &driver, to: CGPoint(x: 100, y: 100), nib: 20), .cut)
+
+        XCTAssertEqual(canvas.strokes.count, 8, "two victims in two pieces each, four neighbours intact")
+        let horizontals = canvas.strokes.filter { $0.samples.allSatisfy { abs($0.y - 100) < 0.01 } }
+        let verticals = canvas.strokes.filter { $0.samples.allSatisfy { abs($0.x - 100) < 0.01 } }
+        XCTAssertEqual(horizontals.count, 2, "the horizontal should be in two pieces")
+        XCTAssertEqual(verticals.count, 2, "the vertical should be in two pieces")
+        XCTAssertEqual(horizontals.first?.samples.last?.x ?? -1, 60, accuracy: 0.01)
+        XCTAssertEqual(horizontals.last?.samples.first?.x ?? -1, 140, accuracy: 0.01)
+        XCTAssertEqual(verticals.first?.samples.last?.y ?? -1, 60, accuracy: 0.01)
+        XCTAssertEqual(verticals.last?.samples.first?.y ?? -1, 140, accuracy: 0.01)
+    }
+
+    /// The same tap with nothing else on the canvas. Neither line has a crossing outside the tip, so
+    /// "the span between the neighbouring crossings" is each line entire and both go. That is the
+    /// existing whole-line rule reached by two strokes at once, and the biggest behavioural jump in
+    /// this change: with a 50-point eraser it can take a stray line the circle merely grazes.
+    func testAWideEraserOnALoneCrossingDeletesBothLines() {
+        let canvas = VectorCanvas(size: CGSize(width: 200, height: 200), strokes: [
+            stroke([(20, 100), (180, 100)]), stroke([(100, 20), (100, 180)])])
+        var driver = VectorEraser.IntersectionDriver()
+        XCTAssertEqual(pump(canvas, &driver, to: CGPoint(x: 100, y: 100), nib: 20), .cut)
+        XCTAssertEqual(canvas.strokes.count, 0)
+    }
+
+    /// Which strokes the circle takes, pinned from both sides. A 40-wide line carries 20 points of ink
+    /// either side of its centreline; a 10-point radius at `y = 125` covers ink from 115 to 120 and is
+    /// still 25 points from the centreline, so the line is left alone. At `y = 108` the centreline is
+    /// inside and the line goes.
+    func testAStrokeIsTakenByItsCentrelineNotByItsInk() {
+        func thickLine() -> VectorCanvas {
+            VectorCanvas(size: CGSize(width: 200, height: 200),
+                         strokes: [stroke([(0, 100), (200, 100)], size: 40)])
+        }
+        let grazed = thickLine()
+        var first = VectorEraser.IntersectionDriver()
+        XCTAssertEqual(pump(grazed, &first, to: CGPoint(x: 100, y: 125), nib: 20), .missed)
+        XCTAssertEqual(grazed.strokes.count, 1)
+
+        let taken = thickLine()
+        var second = VectorEraser.IntersectionDriver()
+        XCTAssertEqual(pump(taken, &second, to: CGPoint(x: 100, y: 108), nib: 20), .cut)
+        XCTAssertEqual(taken.strokes.count, 0)
+    }
+
+    /// Victims are bracketed against the display list as it was, then spliced — so two lines cut in the
+    /// same tap each see the other's original geometry, and the answer does not depend on which index
+    /// they happen to sit at. The splice runs in descending index for the same reason: an ascending one
+    /// would shift every later index by the pieces it just inserted.
+    func testVictimsAreCutAgainstPristineGeometryWhateverOrderTheySitIn() {
+        func survivors(victimsFirst: Bool) -> [String] {
+            let victims = [stroke([(20, 100), (180, 100)]), stroke([(100, 20), (100, 180)])]
+            let neighbours = [stroke([(60, 20), (60, 180)]), stroke([(140, 20), (140, 180)]),
+                              stroke([(20, 60), (180, 60)]), stroke([(20, 140), (180, 140)])]
+            let canvas = VectorCanvas(size: CGSize(width: 200, height: 200),
+                                      strokes: victimsFirst ? victims + neighbours : neighbours + victims)
+            var driver = VectorEraser.IntersectionDriver()
+            pump(canvas, &driver, to: CGPoint(x: 100, y: 100), nib: 20)
+            return canvas.strokes.map { stroke in
+                stroke.samples.map { String(format: "%.2f,%.2f", Double($0.x), Double($0.y)) }.joined(separator: " ")
+            }.sorted()
+        }
+        XCTAssertEqual(survivors(victimsFirst: true), survivors(victimsFirst: false))
+        XCTAssertEqual(survivors(victimsFirst: true).count, 8)
+    }
+
+    /// Why the latch had to become a *set*. A wide footprint in a dense drawing is almost never over
+    /// nothing at all, and the pre-2026-08-18 driver re-armed only when it was: one bit for the whole
+    /// gesture, cleared by `.missed`. Here a hairpin passes under the tip on both of its arms, so
+    /// cutting the near arm leaves the far one under the tip for the rest of the drag — the single bit
+    /// never sees `.missed` again and the four uprights are never reached. Remembering ids instead
+    /// suppresses the hairpin, which is already dealt with, and cuts each upright as the tip arrives.
+    ///
+    /// The second half is that failure, emulated against the same canvas and the same path, so the
+    /// first half is evidence rather than an assertion about a straw man.
+    func testAWideDragCutsEveryLineItReachesWhereOneLatchBitCutsOne() {
+        func hairpinCanvas() -> VectorCanvas {
+            VectorCanvas(size: CGSize(width: 200, height: 200),
+                         strokes: [stroke([(10, 85), (150, 85), (150, 95), (10, 95)])]
+                                + [CGFloat(30), 60, 90, 120].map { stroke([($0, 20), ($0, 180)]) }
+                                + [stroke([(0, 40), (200, 40)]), stroke([(0, 140), (200, 140)])])
+        }
+        let path = stride(from: CGFloat(22), through: 127, by: 5).map { CGPoint(x: $0, y: 90) }
+
+        let canvas = hairpinCanvas()
+        var driver = VectorEraser.IntersectionDriver()
+        for point in path { pump(canvas, &driver, to: point, nib: 50) }
+        XCTAssertTrue(driver.didCut)
+        XCTAssertEqual(canvas.strokes.count, 11, "hairpin remnant + four uprights in two pieces + two rails")
+        for x in [CGFloat(30), 60, 90, 120] {
+            XCTAssertEqual(canvas.strokes.filter { $0.samples.allSatisfy { abs($0.x - x) < 0.01 } }.count, 2,
+                           "the upright at x = \(x) should be in two pieces")
+        }
+
+        // One bit for the whole gesture: disarm on anything but `.missed`, and a disarmed sample
+        // suppresses everything — which is exactly what the old `cutting: false` did.
+        let single = hairpinCanvas()
+        var armed = true
+        for point in path {
+            let resolved = single.cutToIntersection(atCanvasPoint: point, pressure: 1,
+                                                    brush: fixedBrush(size: 50), size: 50,
+                                                    suppressing: armed ? [] : Set(single.strokes.map(\.id)))
+            armed = resolved.outcome == .missed
+        }
+        XCTAssertEqual(single.strokes.count, 8, "one bit goes dead after the first position and never re-arms")
     }
 }

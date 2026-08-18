@@ -166,8 +166,11 @@ enum VectorEraserMode: String, Codable, CaseIterable, Identifiable {
     /// edge. Always a real geometric split: no residue element, no alpha.
     case cutPoints
 
-    /// Mode 3 — removes the span of a stroke between the two nearest crossings with another stroke
-    /// in the same cel. A stroke with no crossings at all is deleted whole.
+    /// Mode 3 — removes, from **every** stroke whose centreline passes under the eraser tip, the span
+    /// between that stroke's own nearest crossings *outside* the tip. A stroke with no crossings at all
+    /// is deleted whole. The eraser's size is therefore the selection radius, not just a reach test:
+    /// erase where two lines cross and both lose their crossing, each running out to whatever it hits
+    /// next. Owner's ruling, 2026-08-18.
     case cutToIntersection
 
     var id: String { rawValue }

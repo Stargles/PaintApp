@@ -111,6 +111,9 @@ final class StrokeCanvasView: UIView {
     /// question. The recognizer reports through closures, so both arguments are nil by design.
     let strokeRecognizer = StrokeGestureRecognizer(target: nil, action: nil)
     private let imageView = UIImageView()
+    /// Mode 3's reach, outlined on the canvas under the finger while the gesture is live. Created on
+    /// first use, so every other tool pays nothing for it. See `updateEraserFootprint(at:)`.
+    private var eraserFootprintLayer: CAShapeLayer?
     private var strokeBeforeSnapshot: (image: UIImage?, count: Int)?
     /// The last position actually stamped, so `stampPath(to:)` lays down evenly-spaced stamps
     /// between input samples rather than one dot per sample — otherwise a fast drag draws a gappy
@@ -655,10 +658,11 @@ final class StrokeCanvasView: UIView {
     /// `VectorEraser.IntersectionDriver`; this resolves one position against the canvas and feeds
     /// the outcome back to it.
     private func resolveIntersectionCut(at point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas) {
-        let outcome = canvas.cutToIntersection(atCanvasPoint: point, pressure: pressure, brush: brush,
-                                               size: brushSize, cutting: intersectionDriver.isArmed)
-        intersectionDriver.accept(outcome)
-        if case .cut = outcome { vectorContentChanged = true }
+        let resolved = canvas.cutToIntersection(atCanvasPoint: point, pressure: pressure, brush: brush,
+                                                size: brushSize,
+                                                suppressing: intersectionDriver.suppressed)
+        intersectionDriver.accept(resolved.outcome, underTip: resolved.underTip)
+        if case .cut = resolved.outcome { vectorContentChanged = true }
     }
 
     private func endVectorStroke(_ touch: UITouch) {
@@ -769,6 +773,49 @@ final class StrokeCanvasView: UIView {
     private func endVectorScratch() {
         vectorScratch = nil
         vectorScratchRole = .overlay
+        updateEraserFootprint(at: nil)
+    }
+
+    /// Shows Mode 3's footprint ring at `point` in canvas space, or hides it.
+    ///
+    /// Modes 2 and 3 set `vectorScratchRole == .none` and so paint nothing at all during a drag, which
+    /// was tolerable while the eraser's size only decided how far it could *reach*. Since 2026-08-18
+    /// Mode 3's size **is** its selection radius — every stroke whose centreline the circle covers is
+    /// cut, and every crossing inside it is erased through — so an unseen radius turns the tool into
+    /// guesswork: the artist would be aiming a 50-point selection circle they cannot see. Mode 1 needs
+    /// none of this (its punch appears under the finger as it is made) and Mode 2 cuts at the
+    /// footprint's edge, which is its own feedback; only Mode 3 acts at a distance.
+    ///
+    /// Drawn in this view's own coordinates, which *are* canvas coordinates — `StrokeInput` takes
+    /// `touch.location(in:)` on this view, and that same point is what `cutToIntersection` resolves
+    /// against — so the canvas transform scales the ring with the artwork and the circle shown is
+    /// exactly the circle used. Only the outline width is divided back out, measured against the
+    /// window rather than read off a transform, so it stays a hairline at any zoom.
+    private func updateEraserFootprint(at point: CGPoint?) {
+        guard let point, isEraser, vectorCanvas != nil, vectorEraserMode == .cutToIntersection else {
+            eraserFootprintLayer?.isHidden = true
+            return
+        }
+        let ring = eraserFootprintLayer ?? {
+            let created = CAShapeLayer()
+            created.fillColor = nil
+            created.strokeColor = UIColor.systemBlue.withAlphaComponent(0.85).cgColor
+            // Above `imageView`'s layer whatever order they were added in.
+            created.zPosition = 1_000
+            // No implicit animation: the ring must sit under the finger, not chase it.
+            created.actions = ["path": NSNull(), "hidden": NSNull(), "lineWidth": NSNull()]
+            layer.addSublayer(created)
+            eraserFootprintLayer = created
+            return created
+        }()
+        let radius = StrokeGeometry.stampRadius(forPressure: 1, brush: brush, size: brushSize)
+        let origin = convert(CGPoint.zero, to: nil)
+        let unit = convert(CGPoint(x: 1, y: 0), to: nil)
+        let scale = max(hypot(unit.x - origin.x, unit.y - origin.y), 0.01)
+        ring.lineWidth = 1 / scale
+        ring.path = CGPath(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius,
+                                             width: radius * 2, height: radius * 2), transform: nil)
+        ring.isHidden = false
     }
 
     /// One touch sample offered to the vector tier. `force` marks a sample that is not optional
@@ -780,6 +827,9 @@ final class StrokeCanvasView: UIView {
     /// point sets makes the line move under the artist's hand at the moment they lift off. One
     /// decision, both consumers.
     private func recordVectorSample(at point: CGPoint, pressure: CGFloat, force: Bool = false) {
+        // Ungated, like Mode 3's own resolve below: the ring is where the finger is, not where the
+        // last stored sample was.
+        updateEraserFootprint(at: point)
         let stored = sampleGate.admits(point, pressure: pressure, unconditionally: force)
         if stored {
             currentVectorSamples.append(VectorSample(x: point.x, y: point.y, pressure: pressure))
