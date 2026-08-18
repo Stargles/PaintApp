@@ -348,11 +348,16 @@ enum ShapeDetector {
 
     /// The fewest outline steps worth emitting, so a tiny shape still reads as its own kind rather
     /// than as a couple of stray dabs.
-    private static func minimumSteps(for kind: ShapeGeometry.Kind) -> Int {
-        switch kind {
+    ///
+    /// The oval's floor scales with how much of the outline was actually drawn — 24 steps is what
+    /// makes a whole ellipse read as a curve rather than a polygon, and spending all 24 on a
+    /// twentieth of one would be a different, denser shape. At the default whole span this is
+    /// exactly the 24 it has always been.
+    private static func minimumSteps(for shape: ShapeGeometry) -> Int {
+        switch shape.kind {
         case .line: return 2
         case .rectangle: return 8
-        case .oval: return 24
+        case .oval: return max(4, Int((24 * abs(shape.spanSweep)).rounded()))
         }
     }
 
@@ -369,21 +374,29 @@ enum ShapeDetector {
     /// With no samples at all (nothing was captured before detection fired) the pressure is a flat
     /// 0.5, which makes this the sole shape-baking path rather than needing a separate fallback.
     /// `shape.rotation` is applied last, so the result lands exactly where the preview showed it.
+    ///
+    /// The walk runs along the *drawn* portion of the outline, which for a whole shape is the whole
+    /// outline and for a stroke that stopped short is the part it reached. There is no branch for
+    /// the two: `pointOnSpan(at: 1)` on a full span lands back on `spanStart`, so the seam still
+    /// closes by construction, and on a partial one it lands where the pen lifted. The bug the
+    /// paragraph above records — projecting samples and re-sorting them into a chord — stays
+    /// structurally impossible either way, because this still walks rather than projects.
     static func collapseSamplesToShape(samples: [VectorSample], shape: ShapeGeometry,
                                        spacing: CGFloat) -> [VectorSample] {
-        let length = shape.outlineLength
+        let length = shape.spanLength
         guard length > 0 else { return [] }
 
         let step = max(spacing, 1)
-        let steps = max(Int((length / step).rounded()), minimumSteps(for: shape.kind))
+        let steps = max(Int((length / step).rounded()), minimumSteps(for: shape))
         let profile = pressureProfile(samples: samples, shape: shape)
         let rotation = shape.rotationTransform
+        let period = shape.pressurePeriod
 
         return (0...steps).map { i in
-            let u = CGFloat(i) / CGFloat(steps)
-            let point = shape.pointOnOutline(at: u).applying(rotation)
+            let s = CGFloat(i) / CGFloat(steps)
+            let point = shape.pointOnSpan(at: s).applying(rotation)
             return VectorSample(x: point.x, y: point.y,
-                                pressure: pressure(at: u, in: profile, isClosed: shape.isClosed))
+                                pressure: pressure(at: s, in: profile, period: period))
         }
     }
 
@@ -392,37 +405,47 @@ enum ShapeDetector {
     /// The samples are compared against the shape's *unrotated* outline on purpose: they were drawn
     /// in that frame (rotation only ever gets applied afterwards, by the user turning the shape), so
     /// this keeps the pressure profile glued to the shape's own frame and lets it turn with it.
+    /// Keyed on the *drawn* arc's own parameter, so a stroke that covered a quarter of the ellipse
+    /// spreads its pressure over that quarter rather than over the whole figure. At the default
+    /// whole span this is `outlineParameter` exactly.
     private static func pressureProfile(samples: [VectorSample],
                                         shape: ShapeGeometry) -> [(u: CGFloat, pressure: CGFloat)] {
         samples
-            .map { (u: shape.outlineParameter(of: $0.point), pressure: max(0, min(1, $0.pressure))) }
+            .map { (u: shape.spanParameter(of: $0.point), pressure: max(0, min(1, $0.pressure))) }
             .sorted { $0.u < $1.u }
     }
 
-    /// Pressure at outline parameter `u`, linearly interpolated between the two profile entries
-    /// bracketing it. A closed shape wraps around the seam (last entry → first entry + 1) so its
-    /// pressure is continuous there instead of stepping at `u = 0`.
-    private static func pressure(at u: CGFloat, in profile: [(u: CGFloat, pressure: CGFloat)],
-                                 isClosed: Bool) -> CGFloat {
+    /// Pressure at drawn-arc parameter `s`, linearly interpolated between the two profile entries
+    /// bracketing it. Past either end the profile wraps to its other end one `period` away.
+    ///
+    /// **`period` is where a boolean used to be, and replacing it is the point.** This took
+    /// `isClosed` and had two `guard isClosed else { return first/last.pressure }` branches — the
+    /// "closed versus not closed" split that a feature with no modes must not re-derive under a new
+    /// name. One period covers all three cases as a limit rather than a case: a whole closed outline
+    /// has period 1, so the wrap partner sits exactly one turn away and this is bit-identical to the
+    /// old `isClosed == true` arm; a line has period 1e30, so `t` evaluates to exactly 1.0 in double
+    /// precision and returns the end value, bit-identical to the old `isClosed == false` arm; a
+    /// quarter arc has period 4, so the partner is three units away in `s` and carries under 1% of
+    /// the weight, and the ends behave as open without anything having tested for it.
+    private static func pressure(at s: CGFloat, in profile: [(u: CGFloat, pressure: CGFloat)],
+                                 period: CGFloat) -> CGFloat {
         guard let first = profile.first, let last = profile.last else { return 0.5 }
         guard profile.count > 1 else { return first.pressure }
 
-        // First index at or after `u`.
+        // First index at or after `s`.
         var low = 0, high = profile.count
         while low < high {
             let mid = (low + high) / 2
-            if profile[mid].u < u { low = mid + 1 } else { high = mid }
+            if profile[mid].u < s { low = mid + 1 } else { high = mid }
         }
 
         if low == 0 {
-            guard isClosed else { return first.pressure }
-            return interpolate(from: (last.u - 1, last.pressure), to: (first.u, first.pressure), at: u)
+            return interpolate(from: (last.u - period, last.pressure), to: (first.u, first.pressure), at: s)
         }
         if low == profile.count {
-            guard isClosed else { return last.pressure }
-            return interpolate(from: (last.u, last.pressure), to: (first.u + 1, first.pressure), at: u)
+            return interpolate(from: (last.u, last.pressure), to: (first.u + period, first.pressure), at: s)
         }
-        return interpolate(from: profile[low - 1], to: profile[low], at: u)
+        return interpolate(from: profile[low - 1], to: profile[low], at: s)
     }
 
     private static func interpolate(from a: (u: CGFloat, pressure: CGFloat),
