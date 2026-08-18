@@ -1061,4 +1061,600 @@ final class ShapeDetectorLogicTests: XCTestCase {
         XCTAssertEqual(moved.boundingRect.width, 100, accuracy: 0.001)
         XCTAssertEqual(moved.boundingRect.height, 100, accuracy: 0.001)
     }
+
+    // MARK: - Partial ovals
+    //
+    // The owner, 2026-08-18: *"The oval and arc feature should be the same feature with no modes.
+    // Whatever the user draws that follows an oval path whether partial or full spawns in that oval,
+    // and the stroke is then projected onto that oval. It may not be a full oval, in which case the
+    // stroke would only be projected to a portion of the oval. Finger snapping it will basically
+    // then turn that oval into a circle and the partial projection remains."*
+    //
+    // So there is no coverage threshold, no arc-vs-oval decision and no second shape kind below —
+    // and no test below asks whether a stroke was "complete enough". Every one of them measures how
+    // far round the pen turned and then checks that number was *used*. Two gates do survive, and
+    // neither is an arc-vs-oval decision: whether a stroke is a shape at all, and which of the three
+    // kinds it is. Both predate this feature and no constant in either moved.
+    //
+    // The counted sweeps use this file's existing idiom — accumulate into `failures`, then assert
+    // both `failures.isEmpty` and an exact `checks` total, so a sweep that quietly stops sweeping
+    // fails instead of printing green.
+
+    /// Where along the drawn arc each collapsed sample sits, as a canvas point.
+    private func canvasPointOnSpan(_ shape: ShapeGeometry, at s: CGFloat) -> CGPoint {
+        shape.pointOnSpan(at: s).applying(shape.rotationTransform)
+    }
+
+    // MARK: Detection and span measurement
+
+    /// The assertions on the *box* are the point of this test, not the ones on the kind. The old
+    /// bounding-box fitter returns a radius-45 circle centred 74 pt away from a quarter arc and
+    /// scores it well inside the error gate, so "it detects as an oval" alone would pass against a
+    /// garbage ellipse. Measured here: 179.99 × 179.99 centred (200.00, 200.00).
+    func testQuarterOvalDetectsAsAnOvalWithAQuarterSpan() {
+        let points = circlePoints(center: CGPoint(x: 200, y: 200), radius: 90, coverage: 0.25)
+        guard let shape = ShapeDetector.detect(from: points) else {
+            XCTFail("a quarter arc should detect")
+            return
+        }
+        XCTAssertEqual(shape.kind, .oval)
+        XCTAssertEqual(abs(shape.spanSweep), 0.25, accuracy: 0.02)
+        XCTAssertEqual(shape.boundingRect.width, 180, accuracy: 4,
+                       "the whole ellipse the arc lies on, not the box its points fill")
+        XCTAssertEqual(shape.boundingRect.height, 180, accuracy: 4)
+        XCTAssertEqual(shape.center.x, 200, accuracy: 3)
+        XCTAssertEqual(shape.center.y, 200, accuracy: 3)
+    }
+
+    /// The span is a measurement, so sweep it: every coverage from a quarter turn to a whole one, at
+    /// four rotations and three aspect ratios.
+    ///
+    /// **44 of the 192 come back as lines, and that is the design rather than a gap.** Below roughly
+    /// 85° of arc `lineDeviationMax` claims the stroke first, and that is the same angle below which
+    /// the ellipse stops being recoverable from the data at all — so there is deliberately no
+    /// minimum-sweep threshold anywhere in this feature, because the line gate already is one. The
+    /// count is pinned so that moving `lineDeviationMax` shows up here as a number rather than as a
+    /// silent change of behaviour.
+    func testSpanIsMeasuredAtEveryCoverageFromAQuarterToAFullTurn() {
+        var failures: [String] = []
+        var checks = 0
+        var lineCount = 0
+        for step in 0...15 {
+            let coverage = CGFloat(0.25) + CGFloat(step) * 0.05
+            for rotationStep in 0..<4 {
+                let rotation = CGFloat(rotationStep) * .pi / 5
+                for (a, b) in [(CGFloat(90), CGFloat(90)), (120, 60), (150, 50)] as [(CGFloat, CGFloat)] {
+                    let points = ellipseArcPoints(center: CGPoint(x: 250, y: 250), a: a, b: b,
+                                                  rotation: rotation, startTurn: 0,
+                                                  sweep: coverage, count: 56)
+                    let where_ = "coverage \(coverage) rot \(rotationStep) \(a)×\(b)"
+                    checks += 1
+                    guard let shape = ShapeDetector.detect(from: points) else {
+                        failures.append("nothing detected — \(where_)")
+                        continue
+                    }
+                    if shape.kind == .line { lineCount += 1; continue }
+                    if shape.kind != .oval {
+                        failures.append("detected \(shape.kind) — \(where_)")
+                        continue
+                    }
+                    // Measured worst error over this grid: 0.0002. The tolerance is loose enough to
+                    // survive a fit that is merely good rather than exact.
+                    let error = abs(abs(shape.spanSweep) - coverage)
+                    if error > (coverage > 0.5 ? 0.03 : 0.06) {
+                        failures.append("span \(abs(shape.spanSweep)) vs \(coverage) — \(where_)")
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(failures.count, 0, "\(failures.count) of \(checks): \(failures.prefix(5).joined(separator: " | "))")
+        XCTAssertEqual(checks, 16 * 4 * 3, "the sweep stopped sweeping")
+        XCTAssertEqual(lineCount, 44, "the short-arc band the line gate claims moved — see lineDeviationMax")
+    }
+
+    /// `lineDeviationMax` is now the sole arbiter of arc-versus-line, so pin where it bites. On a
+    /// circle the crossing is between 84° and 85° (the closed form puts it at 84.86°). It is
+    /// deliberately *not* moved by this feature: lowering it to catch shorter arcs is a decision
+    /// about **lines**, and it costs `testWobblyLineStaysALine` two thirds of its margin.
+    func testTheLineArcBoundaryIsWhereTheDeviationGateSaysItIs() {
+        var crossing = "never"
+        for degrees in stride(from: 70, through: 100, by: 5) {
+            let points = (0..<48).map { i -> CGPoint in
+                let t: CGFloat = CGFloat(degrees) * .pi / 180 * CGFloat(i) / 47
+                return CGPoint(x: 200 + 90 * cos(t), y: 200 + 90 * sin(t))
+            }
+            let kind = ShapeDetector.detect(from: points)?.kind
+            if degrees <= 80 {
+                XCTAssertEqual(kind, .line, "a \(degrees)° arc is flatter than the line gate's limit")
+            }
+            if degrees >= 90 {
+                XCTAssertEqual(kind, .oval, "a \(degrees)° arc is an oval")
+            }
+            if crossing == "never" && kind == .oval { crossing = "\(degrees)°" }
+        }
+        XCTAssertEqual(crossing, "85°", "the measured line/arc crossing moved from its recorded 84.86°")
+    }
+
+    /// The two-sided length gate, which is what replaced coverage. Hatching visits almost no extent
+    /// of the ellipse it sits inside while running up a large arc length, so the ratio explodes.
+    func testHatchingInsideAnEllipseHasNoSpanAndDetectsNothing() {
+        let points = (0..<60).map { i -> CGPoint in
+            let t: CGFloat = CGFloat(i)
+            return CGPoint(x: 150 + 200 * (t / 59), y: 200 + (i % 2 == 0 ? 70 : -70))
+        }
+        XCTAssertNil(ShapeDetector.detect(from: points))
+    }
+
+    // MARK: Spans either side of a closed loop — the case the owner named
+
+    /// Carrying past your own starting point gives the whole oval and no more. The concern this
+    /// answers is oscillation: a stroke jittering around 360° must not flip between "whole oval" and
+    /// "a 2° sliver". It cannot, because `min(hi − lo, 1)` is monotone with a single saturation
+    /// point and no hysteresis.
+    ///
+    /// The end of the arc **does** move as coverage grows, and it should — it moves by exactly the
+    /// arc length the extra coverage represents, then stops dead once saturated. Measured on a
+    /// radius-90 circle: 22.56 pt for a 0.04 step (0.04 × 2π × 90 = 22.62), 16.94 for 0.03, 11.30
+    /// for 0.02, 5.65 for 0.01, then 0.00 for every step past a full turn.
+    func testSpansEitherSideOfAClosedLoopDoNotJump() {
+        let coverages: [CGFloat] = [0.90, 0.94, 0.97, 0.99, 1.00, 1.01, 1.03, 1.06, 1.20]
+        var previousSweep: CGFloat = 0
+        var previousEnd: CGPoint?
+        var previousCoverage: CGFloat = 0
+        for coverage in coverages {
+            let points = circlePoints(center: CGPoint(x: 200, y: 200), radius: 90, count: 64,
+                                      coverage: coverage)
+            guard let shape = ShapeDetector.detect(from: points), shape.kind == .oval else {
+                XCTFail("coverage \(coverage) should detect as an oval")
+                return
+            }
+            let sweep = abs(shape.spanSweep)
+            XCTAssertGreaterThanOrEqual(sweep, previousSweep - 1e-6,
+                                        "span went backwards at coverage \(coverage)")
+            if coverage < 0.98 { XCTAssertLessThan(sweep, 1, "coverage \(coverage) is not a whole turn") }
+            if coverage >= 1.01 {
+                XCTAssertEqual(sweep, 1.0, accuracy: 0,
+                               "past a whole turn the span clamps exactly, at coverage \(coverage)")
+            }
+            let end = canvasPointOnSpan(shape, at: 1)
+            if let previous = previousEnd {
+                let moved = hypot(end.x - previous.x, end.y - previous.y)
+                // The step's own arc length, saturating at a whole turn.
+                let step: CGFloat = min(1, coverage) - min(1, previousCoverage)
+                let expected: CGFloat = max(0, step) * 2 * CGFloat.pi * 90
+                XCTAssertEqual(moved, expected, accuracy: 1.5,
+                               "the arc's end moved by \(moved) where the coverage step implies \(expected)")
+            }
+            previousSweep = sweep
+            previousEnd = end
+            previousCoverage = coverage
+        }
+    }
+
+    func testAnOvershootingStrokeGivesAFullOvalNotATinyOne() {
+        let points = circlePoints(center: CGPoint(x: 200, y: 200), radius: 90, count: 64, coverage: 1.06)
+        guard let shape = ShapeDetector.detect(from: points) else {
+            XCTFail("a 382° stroke should detect")
+            return
+        }
+        XCTAssertEqual(shape.kind, .oval)
+        XCTAssertEqual(abs(shape.spanSweep), 1.0, accuracy: 0,
+                       "a 382° stroke must be a whole oval, not a 22° one")
+        let collapsed = ShapeDetector.collapseSamplesToShape(samples: samples(points), shape: shape,
+                                                             spacing: 4)
+        XCTAssertGreaterThan(collapsed.count, 20)
+        let first = collapsed.first!, last = collapsed.last!
+        XCTAssertEqual(hypot(last.x - first.x, last.y - first.y), 0, accuracy: 0.01,
+                       "a whole span still closes its loop")
+    }
+
+    // MARK: Seam
+
+    /// An arc running eccentric 120° → 300° crosses `u = 0/1` at 180°. There is no interval with two
+    /// endpoints to order here — an origin and a signed turn cross the seam without noticing it.
+    /// Measured: spanStart 0.8333, sweep 0.5000, largest gap 6.18 pt at spacing 5, ends 170.5 pt
+    /// apart. A chord drawn across the seam would show up as a ~170 pt *gap*.
+    func testSpanCrossesTheSeamWithoutSplitting() {
+        let points = ellipseArcPoints(center: CGPoint(x: 200, y: 200), a: 120, b: 70,
+                                      startTurn: 120.0 / 360.0, sweep: 0.5, count: 48)
+        guard let shape = ShapeDetector.detect(from: points), shape.kind == .oval else {
+            XCTFail("a seam-crossing half arc should detect as an oval")
+            return
+        }
+        XCTAssertEqual(abs(shape.spanSweep), 0.5, accuracy: 0.02)
+        let collapsed = ShapeDetector.collapseSamplesToShape(samples: samples(points), shape: shape,
+                                                             spacing: 5)
+        XCTAssertLessThan(largestGap(collapsed), 10,
+                          "a gap this wide is a chord drawn across the seam")
+        let box = shape.boundingRect
+        let inverse = shape.rotationTransform.inverted()
+        for sample in collapsed {
+            let local = CGPoint(x: sample.x, y: sample.y).applying(inverse)
+            let nx: CGFloat = (local.x - box.midX) / (box.width / 2)
+            let ny: CGFloat = (local.y - box.midY) / (box.height / 2)
+            XCTAssertEqual(hypot(nx, ny), 1, accuracy: 0.01, "collapsed sample left the ellipse")
+        }
+        XCTAssertEqual(CGFloat(collapsed.count), shape.spanLength / 5, accuracy: 2)
+    }
+
+    // MARK: Direction and start
+
+    func testCollapsedPartialOvalStartsWhereTheArtistStarted() {
+        let points = ellipseArcPoints(center: CGPoint(x: 250, y: 230), a: 120, b: 80, rotation: 0.5,
+                                      startTurn: 0.2, sweep: 200.0 / 360.0, count: 56)
+        guard let shape = ShapeDetector.detect(from: points), shape.kind == .oval else {
+            XCTFail("a 200° arc should detect as an oval")
+            return
+        }
+        let collapsed = ShapeDetector.collapseSamplesToShape(samples: samples(points), shape: shape,
+                                                             spacing: 4)
+        let first = collapsed.first!, last = collapsed.last!
+        XCTAssertEqual(hypot(first.x - points.first!.x, first.y - points.first!.y), 0, accuracy: 2,
+                       "the ink should begin where the pen went down")
+        XCTAssertEqual(hypot(last.x - points.last!.x, last.y - points.last!.y), 0, accuracy: 2,
+                       "the ink should end where the pen lifted")
+    }
+
+    /// The convention `testDetectedLineKeepsTheDirectionItWasDrawn` sets for lines, extended to
+    /// ovals. Asserted on **positions**, never on `spanStart` numerically: for a near-circular fit
+    /// the rotation sweep has no preferred angle, so `spanStart` is measured in an arbitrary frame.
+    /// The pair is self-consistent; the number alone is not meaningful.
+    func testDetectedArcKeepsTheDirectionItWasDrawn() {
+        let forwardPoints = ellipseArcPoints(center: CGPoint(x: 200, y: 200), a: 110, b: 75,
+                                             startTurn: 30.0 / 360.0, sweep: 200.0 / 360.0, count: 48)
+        let backwardPoints = Array(forwardPoints.reversed())
+        guard let forward = ShapeDetector.detect(from: forwardPoints),
+              let backward = ShapeDetector.detect(from: backwardPoints) else {
+            XCTFail("both directions should detect")
+            return
+        }
+        XCTAssertEqual(forward.kind, .oval)
+        XCTAssertEqual(backward.kind, .oval)
+        XCTAssertGreaterThan(forward.spanSweep, 0, "drawn forwards")
+        XCTAssertLessThan(backward.spanSweep, 0, "drawn backwards")
+        XCTAssertEqual(abs(forward.spanSweep), abs(backward.spanSweep), accuracy: 0.005)
+        let forwardStart = canvasPointOnSpan(forward, at: 0)
+        let backwardEnd = canvasPointOnSpan(backward, at: 1)
+        XCTAssertEqual(hypot(forwardStart.x - backwardEnd.x, forwardStart.y - backwardEnd.y), 0,
+                       accuracy: 2, "the same arc drawn either way has the same two ends")
+    }
+
+    // MARK: The snap — the parameterisation, pinned
+
+    func testTheSpanSurvivesTheTwoFingerSnap() {
+        var failures: [String] = []
+        var checks = 0
+        for sweep in [CGFloat(0.15), 0.25, 0.5, 0.75, 1.0] {
+            for start in [CGFloat(0), 0.23, 0.5, 0.81] {
+                for rotation in [CGFloat(0), 0.4, 1.1] {
+                    for sign in [CGFloat(1), -1] {
+                        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: -200, y: -50),
+                                                  endPoint: CGPoint(x: 200, y: 50), rotation: rotation,
+                                                  spanStart: start, spanSweep: sweep * sign)
+                        let snapped = shape.constrained
+                        checks += 1
+                        if snapped.spanStart != start || snapped.spanSweep != sweep * sign {
+                            failures.append("the snap touched the span at (\(start), \(sweep * sign))")
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(failures.count, 0, "\(failures.count) of \(checks): \(failures.prefix(5).joined(separator: " | "))")
+        XCTAssertEqual(checks, 5 * 4 * 3 * 2, "the sweep stopped sweeping")
+    }
+
+    /// **The test that discriminates the eccentric parameter from the polar one**, and the reason
+    /// the span is stored in eccentric angle at all.
+    ///
+    /// The snap replaces the box with a square of the same centre, which in the shape's own frame is
+    /// the anisotropic scale `(x, y) → (R/a · x, R/b · y)`. That sends the point at eccentric angle
+    /// `t` to the point at eccentric angle `t` on the circle — exactly, for every `t` — so leaving
+    /// `spanStart`/`spanSweep` alone *is* "the ink lands where the ink went", and `constrained`
+    /// needs no new code. True polar angle is **not** invariant: the snap sends `φ → t`, so a polar
+    /// implementation slides the inked portion around the circle the instant the second finger lands.
+    ///
+    /// Deliberately an interior angle. At 0°/90°/180°/270° the two parameterisations agree and a
+    /// test built on "a quarter oval snaps to a quarter circle" would pass under both.
+    func testSnapMovesTheArcWithTheEllipseNotAlongIt() {
+        // A 4:1 oval centred on the origin; the artist drew from the right-hand tip an eighth of the
+        // way round, i.e. 45° of eccentric angle.
+        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: -200, y: -50),
+                                  endPoint: CGPoint(x: 200, y: 50),
+                                  spanStart: 0.5, spanSweep: 0.125)
+        let snapped = shape.constrained
+        XCTAssertEqual(snapped.boundingRect.width, 400, accuracy: 0.01)
+        XCTAssertEqual(snapped.boundingRect.height, 400, accuracy: 0.01)
+        XCTAssertEqual(snapped.center.x, 0, accuracy: 0.01)
+        XCTAssertEqual(snapped.center.y, 0, accuracy: 0.01)
+
+        let end = snapped.pointOnSpan(at: 1)
+        let middle = snapped.pointOnSpan(at: 0.5)
+        XCTAssertEqual(end.x, 141.42, accuracy: 0.01)
+        XCTAssertEqual(end.y, 141.42, accuracy: 0.01)
+        XCTAssertEqual(middle.x, 184.78, accuracy: 0.01)
+        XCTAssertEqual(middle.y, 76.54, accuracy: 0.01)
+        XCTAssertGreaterThan(hypot(end.x - 194.03, end.y - 48.51), 50,
+                             "the span was stored in true polar angle and slid 106.8 pt along the circle")
+    }
+
+    // MARK: Handles
+
+    /// A handle drag must not change the span. `spanStart`/`spanSweep` are a *material* coordinate —
+    /// they label ink in the shape's own body — so when a drag changes the body every material point
+    /// rides along, and dragging the minor axis out and back must land the ink where it started.
+    /// A span read off the geometry each frame satisfies none of that.
+    ///
+    /// The one permitted movement is exactly half a turn, across an anchor crossing: see
+    /// `testDraggingAnAxisHandleThroughItsAnchorKeepsTheArcOnTheSameSideOfTheCanvas`.
+    func testEveryHandleDragAndSnapSequenceLeavesTheSpanAlone() {
+        var failures: [String] = []
+        var checks = 0
+        let edges: [ShapeGeometry.Edge] = [.top, .bottom, .left, .right]
+        for rotation in Self.sweptRotations {
+            for edge in edges {
+                for step in 0..<25 {
+                    for snap in [false, true] {
+                        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 80, y: 130),
+                                                  endPoint: CGPoint(x: 320, y: 270), rotation: rotation,
+                                                  spanStart: 0.37, spanSweep: 0.42)
+                        let anchor = shape.canvasAnchor(opposite: edge)
+                        let bearing = CGFloat(step) * .pi / 12 + 0.11
+                        let distances: [CGFloat] = [8, 55, 140, 260, 400]
+                        let distance: CGFloat = distances[step % 5]
+                        let touch = CGPoint(x: anchor.x + cos(bearing) * distance,
+                                            y: anchor.y + sin(bearing) * distance)
+                        var dragged = shape.draggingEdge(edge, to: touch, anchor: anchor)
+                        if snap { dragged = dragged.constrained }
+                        let where_ = "rot \(rotation) \(edge) step \(step) snap \(snap)"
+
+                        checks += 1
+                        if abs(dragged.spanSweep - shape.spanSweep) > 1e-12 {
+                            failures.append("a drag changed the sweep to \(dragged.spanSweep) — \(where_)")
+                        }
+                        checks += 1
+                        let moved = abs(dragged.spanStart - shape.spanStart)
+                        if moved > 1e-12 && abs(moved - 0.5) > 1e-9 {
+                            failures.append("spanStart moved \(moved) — neither nothing nor half a turn — \(where_)")
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(failures.count, 0, "\(failures.count) of \(checks): \(failures.prefix(5).joined(separator: " | "))")
+        XCTAssertEqual(checks, 11 * 4 * 25 * 2 * 2, "the sweep stopped sweeping")
+    }
+
+    /// The π flip. `draggingEdge` reads its rotation from the anchor→touch bearing, so a drag taken
+    /// straight through its own anchor flips `theta` by exactly π. An ellipse is symmetric under
+    /// that flip — but a *span* is not, because a fixed local `u` names the antipodal point after
+    /// it. Without the half-turn correction to `spanStart` the ink teleports across the ellipse
+    /// mid-gesture: measured at up to 240 pt for a bare flip, and 99.0 pt frame-to-frame through
+    /// this very drag. With it, 0.90 pt.
+    ///
+    /// The drag accumulates, matching the app: `CanvasView` applies `draggingEdge` to
+    /// `canvasManager.activeShape`, so each frame starts from the previous one and only the anchor
+    /// is latched.
+    func testDraggingAnAxisHandleThroughItsAnchorKeepsTheArcOnTheSameSideOfTheCanvas() {
+        var shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 80, y: 130),
+                                  endPoint: CGPoint(x: 320, y: 270), rotation: 0.4,
+                                  spanStart: 0, spanSweep: 0.25)
+        let anchor = shape.canvasAnchor(opposite: .right)
+        let axis = CGPoint(x: cos(shape.rotation), y: sin(shape.rotation))
+        var previous: CGPoint?
+        var worst: CGFloat = 0
+        for step in stride(from: CGFloat(60), through: -60, by: -1) {
+            let touch = CGPoint(x: anchor.x + axis.x * step, y: anchor.y + axis.y * step)
+            let dragged = shape.draggingEdge(.right, to: touch, anchor: anchor)
+            let ink = canvasPointOnSpan(dragged, at: 0.5)
+            if let previous {
+                worst = max(worst, hypot(ink.x - previous.x, ink.y - previous.y))
+            }
+            previous = ink
+            shape = dragged
+        }
+        XCTAssertLessThan(worst, 3,
+                          "the arc jumped \(worst) pt across the ellipse — the π flip is ungauged")
+    }
+
+    // MARK: Collapsing
+
+    /// The deliberate counterpart to `testCollapsedOvalClosesItsSeam`, which stays green beside it:
+    /// a whole span closes, a partial one must not. The gap is the chord across the undrawn 8%,
+    /// `2 · 100 · sin(0.08π)` = 49.74 pt on a radius-100 circle.
+    func testCollapsedPartialOvalDoesNotCloseAndDoesNotChordAcrossItself() {
+        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 100, y: 100),
+                                  endPoint: CGPoint(x: 300, y: 300), spanStart: 0, spanSweep: 0.92)
+        let collapsed = ShapeDetector.collapseSamplesToShape(samples: [], shape: shape, spacing: 5)
+        let first = collapsed.first!, last = collapsed.last!
+        XCTAssertEqual(hypot(last.x - first.x, last.y - first.y), 2 * 100 * sin(0.08 * CGFloat.pi),
+                       accuracy: 2, "a 92% span must leave the 8% it did not draw undrawn")
+        XCTAssertLessThan(largestGap(collapsed), 10,
+                          "a gap this wide is a chord drawn across the shape")
+        for sample in collapsed {
+            XCTAssertEqual(hypot(sample.x - 200, sample.y - 200), 100, accuracy: 0.5)
+        }
+    }
+
+    /// Both halves of the old `isClosed` behaviour, from one branch-free formula. Along a partial
+    /// arc the pressure runs pen-down to pen-up and the ends stay put; around a whole oval the seam
+    /// is interpolated across rather than stepping, so the loop's two ends agree.
+    func testPressureRunsFromPenDownToPenUpAlongAPartialArcAndWrapsOnAFullOne() {
+        let arc = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 100, y: 100),
+                                endPoint: CGPoint(x: 300, y: 300), spanStart: 0.1, spanSweep: 0.5)
+        var ramp: [VectorSample] = []
+        for i in 0..<40 {
+            let s: CGFloat = CGFloat(i) / 39
+            let point = arc.pointOnSpan(at: s)
+            ramp.append(VectorSample(x: point.x, y: point.y, pressure: 0.2 + 0.7 * s))
+        }
+        let collapsed = ShapeDetector.collapseSamplesToShape(samples: ramp, shape: arc, spacing: 5)
+        XCTAssertEqual(collapsed.first?.pressure ?? -1, 0.2, accuracy: 0.06, "pen-down pressure")
+        XCTAssertEqual(collapsed.last?.pressure ?? -1, 0.9, accuracy: 0.06, "pen-up pressure")
+        for index in 1..<collapsed.count {
+            XCTAssertGreaterThanOrEqual(collapsed[index].pressure, collapsed[index - 1].pressure - 1e-9,
+                                        "the ramp should stay monotone along the drawn arc")
+        }
+
+        // The same ramp around a whole oval, laid down clear of the seam so the profile is
+        // unambiguous. The seam value is interpolated between the two ends — 0.55, the midpoint of
+        // 0.2 and 0.9 — which is what the `isClosed == true` branch used to do explicitly.
+        let full = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 100, y: 100),
+                                 endPoint: CGPoint(x: 300, y: 300))
+        var loop: [VectorSample] = []
+        for i in 0..<40 {
+            let u: CGFloat = 0.03 + 0.94 * CGFloat(i) / 39
+            let point = full.pointOnOutline(at: u)
+            loop.append(VectorSample(x: point.x, y: point.y, pressure: 0.2 + 0.7 * (CGFloat(i) / 39)))
+        }
+        let looped = ShapeDetector.collapseSamplesToShape(samples: loop, shape: full, spacing: 5)
+        XCTAssertEqual(looped.first?.pressure ?? -1, 0.55, accuracy: 0.06,
+                       "the seam interpolates across rather than stepping at u = 0")
+        XCTAssertEqual(looped.first?.pressure ?? -1, looped.last?.pressure ?? -2, accuracy: 1e-9,
+                       "a closed loop's two ends are the same place and must carry the same pressure")
+    }
+
+    // MARK: Back-compat, made executable
+
+    func testAnOvalBuiltWithoutASpanIsAWholeOval() {
+        let shape = ShapeGeometry(kind: .oval, startPoint: .zero, endPoint: CGPoint(x: 200, y: 200))
+        XCTAssertEqual(shape.spanStart, 0)
+        XCTAssertEqual(shape.spanSweep, 1)
+        XCTAssertTrue(shape.isClosed)
+        XCTAssertEqual(shape.outlineLength, CGFloat.pi * 200, accuracy: 0.1)
+        XCTAssertEqual(shape.spanLength, shape.outlineLength, accuracy: 1e-9)
+        let collapsed = ShapeDetector.collapseSamplesToShape(samples: [], shape: shape, spacing: 5)
+        let first = collapsed.first!, last = collapsed.last!
+        XCTAssertEqual(hypot(last.x - first.x, last.y - first.y), 0, accuracy: 0.01)
+    }
+
+    /// **The back-compat proof.** The collapse walk, at the default whole span, against an inline
+    /// reference implementing the old `u = i/steps` loop over the whole outline — the code this
+    /// replaced. Same step count, same points, to 1e-9.
+    func testDefaultSpanReproducesTodaysFullOutlineWalkExactly() {
+        let shapes: [ShapeGeometry] = [
+            ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 110, y: 110), endPoint: CGPoint(x: 290, y: 290)),
+            ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 80, y: 130), endPoint: CGPoint(x: 320, y: 270)),
+            ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 80, y: 130), endPoint: CGPoint(x: 320, y: 270), rotation: 0.61),
+            ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 20, y: 100), endPoint: CGPoint(x: 420, y: 190)),
+            ShapeGeometry(kind: .line, startPoint: CGPoint(x: 30, y: 40), endPoint: CGPoint(x: 330, y: 240)),
+        ]
+        for shape in shapes {
+            for spacing in [CGFloat(2), 4, 5, 13] {
+                let collapsed = ShapeDetector.collapseSamplesToShape(samples: [], shape: shape,
+                                                                     spacing: spacing)
+                // The old loop, verbatim.
+                let floorSteps: Int
+                switch shape.kind {
+                case .line: floorSteps = 2
+                case .rectangle: floorSteps = 8
+                case .oval: floorSteps = 24
+                }
+                let steps = max(Int((shape.outlineLength / max(spacing, 1)).rounded()), floorSteps)
+                XCTAssertEqual(collapsed.count, steps + 1,
+                               "\(shape.kind) at spacing \(spacing) changed its step count")
+                let transform = shape.rotationTransform
+                for i in 0...min(steps, collapsed.count - 1) {
+                    let u = CGFloat(i) / CGFloat(steps)
+                    let expected = shape.pointOnOutline(at: u).applying(transform)
+                    XCTAssertEqual(collapsed[i].x, expected.x, accuracy: 1e-9)
+                    XCTAssertEqual(collapsed[i].y, expected.y, accuracy: 1e-9)
+                }
+            }
+        }
+    }
+
+    /// Nothing persists a `ShapeGeometry` today, so this guards the conformance rather than a live
+    /// migration — but synthesised `Decodable` ignores property defaults, so without the hand-written
+    /// initialiser a record from before spans existed would throw instead of reading as the whole
+    /// outline it described.
+    func testOldGeometryWithoutASpanDecodesAsAWholeOne() {
+        let legacy = Data(#"{"kind":"oval","startPoint":[10,20],"endPoint":[210,160]}"#.utf8)
+        guard let decoded = try? JSONDecoder().decode(ShapeGeometry.self, from: legacy) else {
+            XCTFail("a record written before spans existed should still decode")
+            return
+        }
+        XCTAssertEqual(decoded.kind, .oval)
+        XCTAssertEqual(decoded.spanStart, 0)
+        XCTAssertEqual(decoded.spanSweep, 1)
+        XCTAssertEqual(decoded.rotation, 0)
+
+        let partial = ShapeGeometry(kind: .oval, startPoint: .zero, endPoint: CGPoint(x: 200, y: 100),
+                                    rotation: 0.4, spanStart: 0.3, spanSweep: -0.6)
+        guard let encoded = try? JSONEncoder().encode(partial),
+              let roundTripped = try? JSONDecoder().decode(ShapeGeometry.self, from: encoded) else {
+            XCTFail("a partial oval should round-trip")
+            return
+        }
+        XCTAssertEqual(roundTripped, partial)
+    }
+
+    /// Pins the Simpson rule and the retirement of Ramanujan in one place. Measured worst relative
+    /// error against a 4096-segment polyline of the same arc: 2.1e-5.
+    func testSpanLengthMatchesTheDrawnArcLength() {
+        for (a, b) in [(CGFloat(100), CGFloat(100)), (120, 60), (150, 50), (200, 50)] as [(CGFloat, CGFloat)] {
+            for tenth in 1...10 {
+                let sweep = CGFloat(tenth) / 10
+                let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: -a, y: -b),
+                                          endPoint: CGPoint(x: a, y: b),
+                                          spanStart: 0.17, spanSweep: sweep)
+                var reference: CGFloat = 0
+                var previous = shape.pointOnSpan(at: 0)
+                for i in 1...4096 {
+                    let point = shape.pointOnSpan(at: CGFloat(i) / 4096)
+                    reference += hypot(point.x - previous.x, point.y - previous.y)
+                    previous = point
+                }
+                XCTAssertEqual(shape.spanLength, reference, accuracy: reference * 0.001,
+                               "\(a)×\(b) at sweep \(sweep)")
+            }
+        }
+    }
+
+    /// The big one: every arc, at every phase and rotation, drawn both ways, comes back with its two
+    /// ends where the artist put them. Measured worst endpoint error over the grid: 0.11 pt.
+    ///
+    /// 32 of the 768 come back as **lines**, all of them at the 120° span and all at the phases that
+    /// start near a major-axis tip, where a 2:1 ellipse's arc is genuinely flatter than
+    /// `lineDeviationMax` allows. That is the same phase-dependence recorded on
+    /// `testSpanIsMeasuredAtEveryCoverageFromAQuarterToAFullTurn`, and pinning the count is what
+    /// makes a change to the line gate visible here rather than silent.
+    func testEveryArcRoundTripsThroughDetectionAtEveryPhaseAndRotation() {
+        var failures: [String] = []
+        var checks = 0
+        var lineCount = 0
+        for spanDegrees in [CGFloat(120), 160, 200, 250, 300, 360] {
+            for phase in 0..<8 {
+                for rotationStep in 0..<8 {
+                    for direction in [CGFloat(1), -1] {
+                        let rotation = CGFloat(rotationStep) * .pi / 8
+                        let start = CGFloat(phase) / 8
+                        let points = ellipseArcPoints(center: CGPoint(x: 240, y: 240), a: 115, b: 72,
+                                                      rotation: rotation, startTurn: start,
+                                                      sweep: direction * spanDegrees / 360, count: 56)
+                        let where_ = "span \(spanDegrees)° phase \(phase) rot \(rotationStep) dir \(direction)"
+                        checks += 1
+                        guard let shape = ShapeDetector.detect(from: points) else {
+                            failures.append("nothing detected — \(where_)")
+                            continue
+                        }
+                        if shape.kind == .line { lineCount += 1; continue }
+                        if shape.kind != .oval {
+                            failures.append("detected \(shape.kind) — \(where_)")
+                            continue
+                        }
+                        let start0 = canvasPointOnSpan(shape, at: 0)
+                        let end1 = canvasPointOnSpan(shape, at: 1)
+                        let startGap = hypot(start0.x - points.first!.x, start0.y - points.first!.y)
+                        let endGap = hypot(end1.x - points.last!.x, end1.y - points.last!.y)
+                        if startGap > 4 { failures.append("start off by \(startGap) — \(where_)") }
+                        if endGap > 4 { failures.append("end off by \(endGap) — \(where_)") }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(failures.count, 0, "\(failures.count) of \(checks): \(failures.prefix(5).joined(separator: " | "))")
+        XCTAssertEqual(checks, 6 * 8 * 8 * 2, "the sweep stopped sweeping")
+        XCTAssertEqual(lineCount, 32, "the short-arc band the line gate claims moved — see lineDeviationMax")
+    }
 }
