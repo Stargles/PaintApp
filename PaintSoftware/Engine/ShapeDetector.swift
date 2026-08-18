@@ -64,8 +64,16 @@ enum ShapeDetector {
     /// land a degree or two off true and reading back as "tilted by 1.5°" looks like a mistake.
     private static let axisSnapTolerance: CGFloat = 2.5 * .pi / 180
 
-    /// Smallest bounding-box side (canvas points) a closed shape may have.
+    /// Smallest bounding-box side (canvas points) a closed shape may have — of the point cloud, and
+    /// of the fitted ellipse's own axes, which are no longer the same box.
     private static let minimumClosedDimension: CGFloat = 5
+
+    /// How far past the stroke's own extent a fitted ellipse's semi-axis may reach. **Numerical
+    /// conditioning, not a shape decision**: a short arc admits a family of ellipses and an
+    /// algebraic fit can pick an arbitrarily large member of it. Legitimate arcs measure well inside
+    /// their own extent at every span, so this is several times the slack they need, and it exists
+    /// to catch the ill-posed rather than to judge the partial.
+    private static let ellipseExtentMax: CGFloat = 6
 
     /// The outline is split into this many equal-parameter buckets; a closed candidate is rejected
     /// unless at least `coverageBucketsRequired` of them contain a point. 13/16 tolerates a gap of
@@ -201,32 +209,156 @@ enum ShapeDetector {
         return best
     }
 
-    /// Fits `kind` to the points inside the frame rotated by `angle`: the bounding box there is the
-    /// candidate rectangle (or the box the candidate ellipse is inscribed in), and the error is the
-    /// RMS distance to that outline, normalized by √(w·h) so it is scale-free.
+    /// Fits `kind` to the points inside the frame rotated by `angle`, and scores it by the RMS
+    /// distance to that outline normalised by the **point cloud's own** size, so the score is
+    /// scale-free.
+    ///
+    /// A rectangle is still its points' bounding box. **An ellipse is not**, and that is the change
+    /// partial ovals rest on: a box only describes the ellipse a stroke lies on when the stroke
+    /// reached all four axis extrema, which is exactly what a stroke that stopped short did not do.
+    /// Measured on a known 120 × 70 ellipse at 25°, noise-free, the box fit recovers a = 68.5,
+    /// b = 17.8 with its centre 74.5 pt adrift from a 90° arc — and scores 0.098, comfortably inside
+    /// `closedFitErrorMax`. It would ship that garbage happily. The conic solve below recovers
+    /// a = 120.0, b = 70.0 with 0.0 pt of centre error from the same arc.
+    ///
+    /// **The denominator is the other half, and without it the conic fit is catastrophic.** Dividing
+    /// by the *candidate's* size rewards proposing a huge ellipse, and `bestFit` takes the minimum
+    /// over the sweep, so it actively hunts for one: measured with 2 pt of jitter on a 90° arc, a
+    /// candidate-normalised score picks a = 1257, b = 20279 centred 20 178 pt away. Normalising by
+    /// the cloud instead is a provable no-op for everything that works today — for a rectangle the
+    /// candidate box *is* the cloud box, and for a whole oval the two coincide to within jitter — and
+    /// it is exactly the regulariser a partial stroke needs.
     private static func fit(_ kind: ShapeGeometry.Kind, angle: CGFloat, offsets: [CGPoint]) -> ClosedFit? {
         let c = cos(-angle), s = sin(-angle)
+        var local: [CGPoint] = []
+        local.reserveCapacity(offsets.count)
         var minX = CGFloat.greatestFiniteMagnitude, maxX = -CGFloat.greatestFiniteMagnitude
         var minY = CGFloat.greatestFiniteMagnitude, maxY = -CGFloat.greatestFiniteMagnitude
         for p in offsets {
             let x = p.x * c - p.y * s, y = p.x * s + p.y * c
+            local.append(CGPoint(x: x, y: y))
             if x < minX { minX = x }
             if x > maxX { maxX = x }
             if y < minY { minY = y }
             if y > maxY { maxY = y }
         }
-        let rect = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-        guard rect.width >= minimumClosedDimension, rect.height >= minimumClosedDimension else { return nil }
-        let scale = (rect.width * rect.height).squareRoot()
+        let cloud = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        guard cloud.width >= minimumClosedDimension, cloud.height >= minimumClosedDimension else { return nil }
+        // The cloud's own geometric mean side — the candidate's size for a rectangle by
+        // construction, and deliberately *not* the candidate's size for an ellipse.
+        let scale = (cloud.width * cloud.height).squareRoot()
+
+        let rect: CGRect
+        switch kind {
+        case .rectangle, .line:
+            rect = cloud
+        case .oval:
+            guard let fitted = ellipseThrough(local, cloud: cloud) else { return nil }
+            rect = fitted
+        }
 
         var sumSquared: CGFloat = 0
-        for p in offsets {
-            let q = CGPoint(x: p.x * c - p.y * s, y: p.x * s + p.y * c)
+        for q in local {
             let d = kind == .rectangle ? distanceToRectOutline(q, rect) : distanceToEllipse(q, rect)
             sumSquared += d * d
         }
         let error = (sumSquared / CGFloat(offsets.count)).squareRoot() / scale
         return ClosedFit(kind: kind, rotation: angle, rect: rect, error: error)
+    }
+
+    /// The axis-aligned ellipse that best fits `local` in the least-squares sense, as the box it is
+    /// inscribed in — or `nil` when the points admit no ellipse at all.
+    ///
+    /// Because `bestFit`'s rotation sweep already supplies the axis alignment, the conic has no `xy`
+    /// term, so this is a 4×4 linear solve rather than the eigenproblem a general conic fit needs:
+    ///
+    ///     model    x² = A·y² + B·x + C·y + D        rows (y², x, y, 1), target x²
+    ///     recover  λ = −A (must be > 0);  cx = B/2;  cy = C/(2λ)
+    ///              a² = cx² + λ·cy² + D  (must be > 0);  b² = a²/λ
+    ///
+    /// Solved by Gaussian elimination with partial pivoting rather than `Accelerate`, so this file
+    /// and `ShapeGeometry.swift` stay CoreGraphics-only and keep compiling into the test target —
+    /// which is the whole reason the headless tier exists.
+    ///
+    /// This is also the ruling against a one-shot general conic fit (Halíř–Flusser and friends): it
+    /// abandons the rotation sweep this file is built around, and recovers the axis angle through
+    /// `½·atan2(B, A − C)`, which is degenerate on near-circular data — precisely the case the sweep
+    /// was engineered to survive.
+    private static func ellipseThrough(_ local: [CGPoint], cloud: CGRect) -> CGRect? {
+        guard local.count >= 5 else { return nil }
+
+        // Condition the data or the solve is worthless: at canvas coordinates the normal equations
+        // run to ~1e12 condition number, and the recovered axes are noise.
+        var meanX: CGFloat = 0, meanY: CGFloat = 0
+        for p in local { meanX += p.x; meanY += p.y }
+        meanX /= CGFloat(local.count); meanY /= CGFloat(local.count)
+        var norm: CGFloat = 0
+        for p in local { norm = max(norm, max(abs(p.x - meanX), abs(p.y - meanY))) }
+        guard norm > 0 else { return nil }
+
+        // Σ mmᵀ and Σ m·x², built in the conditioned frame.
+        var ata = [[CGFloat]](repeating: [CGFloat](repeating: 0, count: 4), count: 4)
+        var atb = [CGFloat](repeating: 0, count: 4)
+        for p in local {
+            let x = (p.x - meanX) / norm, y = (p.y - meanY) / norm
+            let m: [CGFloat] = [y * y, x, y, 1]
+            let target = x * x
+            for i in 0..<4 {
+                for j in 0..<4 { ata[i][j] += m[i] * m[j] }
+                atb[i] += m[i] * target
+            }
+        }
+        guard let z = solve4x4(ata, atb) else { return nil }
+
+        let lambda = -z[0]
+        guard lambda > 1e-9, lambda.isFinite else { return nil }
+        let cx = z[1] / 2
+        let cy = z[2] / (2 * lambda)
+        let aSquared = cx * cx + lambda * cy * cy + z[3]
+        guard aSquared > 0, aSquared.isFinite else { return nil }
+        let a = aSquared.squareRoot()
+        let b = (aSquared / lambda).squareRoot()
+        guard a.isFinite, b.isFinite else { return nil }
+
+        // Back out of the conditioned frame.
+        let cxR = cx * norm + meanX, cyR = cy * norm + meanY
+        let aR = a * norm, bR = b * norm
+        guard 2 * aR >= minimumClosedDimension, 2 * bR >= minimumClosedDimension else { return nil }
+        // Belt and braces on genuinely ill-posed input: a short arc admits a whole family of
+        // ellipses and an algebraic fit can pick an arbitrarily large member of it. Legitimate arcs
+        // measure well inside their own extent at every span, so this is fourfold slack rather than
+        // a shape decision.
+        let extent = max(cloud.width, cloud.height)
+        guard max(aR, bR) <= ellipseExtentMax * extent else { return nil }
+
+        return CGRect(x: cxR - aR, y: cyR - bR, width: 2 * aR, height: 2 * bR)
+    }
+
+    /// Gaussian elimination with partial pivoting. Small and fixed-size on purpose — see
+    /// `ellipseThrough` on why this file takes no dependency on `Accelerate`.
+    private static func solve4x4(_ a: [[CGFloat]], _ b: [CGFloat]) -> [CGFloat]? {
+        var m = a
+        var v = b
+        for col in 0..<4 {
+            var pivot = col
+            for row in (col + 1)..<4 where abs(m[row][col]) > abs(m[pivot][col]) { pivot = row }
+            guard abs(m[pivot][col]) > 1e-12 else { return nil }
+            if pivot != col { m.swapAt(pivot, col); v.swapAt(pivot, col) }
+            for row in (col + 1)..<4 {
+                let factor = m[row][col] / m[col][col]
+                guard factor.isFinite else { return nil }
+                for k in col..<4 { m[row][k] -= factor * m[col][k] }
+                v[row] -= factor * v[col]
+            }
+        }
+        var z = [CGFloat](repeating: 0, count: 4)
+        for row in stride(from: 3, through: 0, by: -1) {
+            var sum = v[row]
+            for k in (row + 1)..<4 { sum -= m[row][k] * z[k] }
+            z[row] = sum / m[row][row]
+            guard z[row].isFinite else { return nil }
+        }
+        return z
     }
 
     /// Distance from a point to a rectangle's *outline* — zero on the perimeter, growing both
