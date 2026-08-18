@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import SwiftUI
 
 /// Pure-logic tests for `ProjectStore.save`'s off-the-main-actor write (Stage 4.2), run against a
 /// per-test temp directory via `ProjectBackupManager.rootDirectoryOverride` — no app launch, no
@@ -664,6 +665,98 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertTrue(try encodedKeys(of: ordinary).contains("opacity"),
                       "`opacity` still goes out unconditionally — the §10.3 migration reads its absence, so it cannot follow `alphaMask`'s pattern")
         XCTAssertTrue(try encodedKeys(of: node).contains("compositorRole"))
+    }
+
+    // MARK: - Which scene-phase changes trigger a save
+
+    /// Every ordered pair of phases, stated as a table rather than as the three interesting cases.
+    ///
+    /// The bug this replaces existed precisely because the condition was under-specified — it named
+    /// two destinations and never asked where the scene had come from — so sampling the transitions
+    /// that look interesting would reproduce the original mistake in the test. The expectations here
+    /// are the contract; `ScenePhaseSaveGate` carries the argument for them.
+    ///
+    /// The two rows that matter most are the ones that used to be true and are now false:
+    /// `inactive → background` is the redundant second save on the way out, and `background →
+    /// inactive` is the one that landed on the return leg while the artist was watching.
+    private static let saveGateMatrix: [(from: ScenePhase, to: ScenePhase, save: Bool, why: String)] = [
+        // Leaving an active scene — the only phase the artist can have drawn in, so the only
+        // transition that can be carrying unsaved work.
+        (.active,     .inactive,   true,  "leaving leg of an app switch: the save that carries the artist's work"),
+        (.active,     .background, true,  "some paths skip .inactive and background the scene directly; it must still save"),
+
+        // Already gone. The document cannot have changed since the departure save a moment earlier.
+        (.inactive,   .background, false, "second leg of the same departure — re-saves a document nothing has touched"),
+
+        // Coming back. Nothing to write, and this is where the freeze was visible.
+        (.background, .inactive,   false, "return leg: the save the owner saw as a multi-second freeze"),
+        (.background, .active,     false, "direct return, skipping .inactive — equally nothing to save"),
+        (.inactive,   .active,     false, "return leg's second half, e.g. dismissing Control Centre"),
+
+        // Never delivered by onChange(of:), which fires only on a real change. Pinned anyway so the
+        // predicate is total: a gate that answered "save" here would fire on any spurious republish.
+        (.active,     .active,     false, "not a change"),
+        (.inactive,   .inactive,   false, "not a change"),
+        (.background, .background, false, "not a change"),
+    ]
+
+    func testTheSaveGateCoversEveryScenePhaseTransition() {
+        for row in Self.saveGateMatrix {
+            XCTAssertEqual(ScenePhaseSaveGate.shouldSave(from: row.from, to: row.to), row.save,
+                           "\(row.from) -> \(row.to) should \(row.save ? "" : "not ")save: \(row.why)")
+        }
+    }
+
+    /// The matrix is only the contract if it is the whole matrix — three phases means nine ordered
+    /// pairs, and a row quietly dropped from the table above would take its transition's coverage
+    /// with it while every remaining assertion still passed.
+    func testTheSaveGateMatrixIsExhaustive() {
+        let phases: [ScenePhase] = [.active, .inactive, .background]
+        let covered = Set(Self.saveGateMatrix.map { "\($0.from)->\($0.to)" })
+        for from in phases {
+            for to in phases {
+                XCTAssertTrue(covered.contains("\(from)->\(to)"), "no matrix row for \(from) -> \(to)")
+            }
+        }
+        XCTAssertEqual(Self.saveGateMatrix.count, phases.count * phases.count)
+    }
+
+    /// The bug in its own shape: one trip out to another app and back is one save, not three.
+    ///
+    /// This replays the phase sequence SwiftUI actually delivers rather than asserting on the
+    /// predicate directly, because the defect was never in a single decision — each of the three
+    /// saves was individually defensible under the old rule. It was in what the sequence added up to.
+    func testOneAppSwitchRoundTripSavesExactlyOnce() {
+        let roundTrip: [ScenePhase] = [.active, .inactive, .background, .inactive, .active]
+        XCTAssertEqual(savesFired(over: roundTrip), 1,
+                       "an app switch and back must write once, on the way out")
+    }
+
+    /// The same journey on the paths that skip `.inactive`, and one that never leaves the foreground.
+    /// Both still save exactly when they should — the fix narrows *which* transition saves, and must
+    /// not narrow it to a transition some routes never deliver.
+    func testTheDirectAndForegroundPathsEachSaveOnce() {
+        XCTAssertEqual(savesFired(over: [.active, .background, .active]), 1,
+                       "backgrounding without passing through .inactive must still save")
+        XCTAssertEqual(savesFired(over: [.active, .inactive, .active]), 1,
+                       "a Control Centre pull-down leaves the scene and comes back: one save, on the way out")
+        XCTAssertEqual(savesFired(over: [.background, .inactive, .background]), 0,
+                       "previewing a backgrounded app in the switcher never becomes active, so there is nothing to write")
+    }
+
+    /// Two round trips are two saves, not one — the gate is stateless, so a second departure with
+    /// fresh work between them is not swallowed by the first.
+    func testASecondDepartureSavesAgain() {
+        let twice: [ScenePhase] = [.active, .inactive, .background, .inactive, .active,
+                                   .inactive, .background, .inactive, .active]
+        XCTAssertEqual(savesFired(over: twice), 2)
+    }
+
+    /// Counts what `ContentView`'s `onChange(of: scenePhase)` would do across a phase sequence.
+    private func savesFired(over sequence: [ScenePhase]) -> Int {
+        zip(sequence, sequence.dropFirst())
+            .filter { ScenePhaseSaveGate.shouldSave(from: $0, to: $1) }
+            .count
     }
 
     private func encodedKeys(of folder: FolderManifest) throws -> Set<String> {

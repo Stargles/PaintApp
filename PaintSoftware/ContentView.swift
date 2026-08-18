@@ -27,8 +27,11 @@ struct ContentView: View {
         #if os(iOS)
         .statusBar(hidden: true)
         #endif
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .inactive || newPhase == .background {
+        // Both phases, not just the new one: `.inactive` occurs on the way out *and* on the way back,
+        // so testing `newPhase` alone saved three times per app switch and stalled the return leg.
+        // `ScenePhaseSaveGate` carries the reasoning and the transition matrix.
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if ScenePhaseSaveGate.shouldSave(from: oldPhase, to: newPhase) {
                 saveIfNeeded()
             }
         }
