@@ -67,23 +67,6 @@ New this pass (owner, 2026-08-17):
       size — they are a save that fires three times per app switch, a project open that blocks the
       main thread for an unmeasured multi-second stretch, and two ungated main-thread costs on every
       timeline tick.** Tier A is seven changes, none of which needs a device run to justify.
-- [ ] **An oval and a partial oval are one feature, with no modes.** The owner, asked whether a
-      nearly-closed stroke should be snapped shut, answered by collapsing the whole design:
-      *"The oval and arc feature should be the same feature with no modes. Whatever the user draws that
-      follows an oval path whether partial or full spawns in that oval, and the stroke is then projected
-      onto that oval. It may not be a full oval, in which case the stroke would only be projected to a
-      portion of the oval. Finger snapping it will basically then turn that oval into a circle and the
-      partial projection remains."*
-      So the model is **an ellipse plus the angular span the stroke covered**. The hold fits the full
-      ellipse the stroke lies on — always the whole ellipse, that is the geometry — and what gets drawn
-      is the stroke *projected* onto it, which is the whole ellipse when the stroke closed and a portion
-      of it when the stroke did not. Handles and editing operate on the ellipse; the two-finger snap
-      makes it a circle and **the span is preserved across the snap**.
-      **There is deliberately no arc-vs-oval decision to make**, and that is the point of the answer: no
-      coverage threshold, no "was this sloppy or intentional", no second shape kind. A full stroke
-      projects to a full oval and a half stroke to half, by the same rule. Anything that reintroduces a
-      mode here is a misreading. Wants the headless sweep harness `ShapeDetectorLogicTests` already has,
-      including spans either side of a closed loop and the span surviving a snap.
 
 Carried over:
 
@@ -105,6 +88,32 @@ Carried over:
       tile; already in BUGS.md.
 
 ## Done this pass
+
+- **An oval and a partial oval are one feature, with no modes** — built, all six stages. The model is
+  two defaulted scalars on `ShapeGeometry`: where on the outline the pen started, and the **signed,
+  never-wrapped** fraction it turned through. Not reducing that mod 1 is the whole trick — seam
+  crossing, direction and overshoot stop being cases and become the number itself. No new `Kind`, no
+  flag, no coverage threshold; the owner deleted the arc-vs-oval decision and nothing reintroduces it.
+  **Eccentric angle, and the snap is what proves it.** The two-finger snap is an anisotropic scale that
+  maps the point at eccentric angle `t` on the ellipse to the point at the same `t` on the circle,
+  exactly, for every `t` — so the drawn portion survives the snap with **zero new code in
+  `constrained`**. Polar angle is not invariant: on a 4:1 oval the end of a 45° arc would land 106.77 pt
+  away on a 200 pt circle. A test asserting only "a quarter oval snaps to a quarter circle" passes under
+  both, which is why the sweep tests an interior angle.
+  Both flagged risks measured rather than assumed. `testRejectsRandomScribble`'s fit error falls from
+  0.2230 against the box fit to **0.1399** against the conic fit, inside `closedFitErrorMax = 0.16`, so
+  it now survives on the length gate alone at ratio 31.23 — two independent rejections became one, and
+  the test carries a comment saying to tighten the *length* gate if it ever creeps. The conic fit
+  changes **every** oval, not just partial ones: across 50 jittered shapes, **zero** kind disagreements,
+  and full ovals come out slightly smaller and more accurate (149.10×39.73 against 151.95×41.66 on a
+  true 150×40 at 5 pt jitter). Real change, no tolerance retuned to hide it.
+  **Four numbers in the design were wrong and are corrected in the tests**: a chord length off by 2×
+  (an angle halved twice), a claimed "moves < 4 pt" that actually moves by the step's own arc length,
+  two sweeps asserting `.oval` for cases that are legitimately lines, and a guard slack claimed at 1.42×
+  that measures 2.83×.
+  **Pre-existing, found while testing, wants an owner ruling**: a double-traced ellipse detects as a
+  *rectangle* — the oval is correctly rejected at ratio 2.00 and the rectangle runner-up then wins.
+  Verified against the prior commit; not a regression.
 
 - **Add Text, the first stage of it: a mode you can enter.** The menu row, `Tool.text`,
   `ActivePanel.text`, and the `activePanel` binding threaded into `ActionsMenu` — landing alone,
