@@ -72,6 +72,28 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
       is the *outer* margin and the artwork border the owner draws across is an inset rectangle no wall
       rule currently knows about. Hypothesis, to be verified before it is fixed.
 
+- [ ] **A stroke that interrupts a menu is still broken — two menus, two different breakages** — owner,
+      on device, 2026-08-18, and they name the real concern themselves: *"This signals an alarm to me that
+      whatever partial fix was previously done did not fix the root cause. It also raises concerns that
+      multiple UI menus have different versions of this problem, which may signal bad architecture."*
+      **Symptom 1, the timeline menus.** *"Although the canvas can move freely after interrupting the menu
+      now, the stroke behaviour is weird. The stroke goes for only a certain amount and then stops
+      responding. This stroke seems to not be baked yet, as when the user then starts another stroke, the
+      first stroke disappears."* So `8ae8613` fixed the *transform* recognizers and moved the damage onto
+      the stroke: the touch sequence is still torn down mid-gesture, and the partial stroke is discarded
+      rather than committed.
+      **Symptom 2, the onion skin panel.** *"the canvas freezing happens in the onion menu, although the
+      stroke this time does not only go partially. However, after the stroke is lifted, the user cannot
+      paint again until the project is quitted (gallery) and then re-entered."* That is the **original**
+      freeze, unfixed, in a menu the fix never covered.
+      **The architecture is the finding, and it is the same shape this repo has already been burned by.**
+      `CanvasManager.interactionBegan` has exactly **two** subscribers — `AnimationTimeline` (which clears
+      `timelineMenu` and *only* `timelineMenu`, `AnimationTimeline.swift:163`) and `DrawingView`. The onion
+      skin popover is presented from the very same view, through a separate `@State showOnionSkinOptions`
+      (`AnimationTimeline.swift:424`), and nothing clears it. Every dismissible presentation has to opt in
+      by hand, so a new one is broken by default — which is `Tool.paintsOnCanvas` before session 40 made an
+      exhaustive `switch` refuse to compile. **The fix wanted here is that mechanism, not a third opt-in.**
+
 ## Queued
 
 New this pass (owner, 2026-08-17):
