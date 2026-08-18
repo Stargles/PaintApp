@@ -2455,7 +2455,6 @@ final class PerfBaselineTests: XCTestCase {
     /// runs in: a rebuild happens when the playhead changes drawing, and by then the drawings in the
     /// window have been reduced once each. `sourceMiss` in the test above is the other half.
     func testOnionSkinCostOfEachResolutionOption() {
-        let canvas = CGSize(width: 4096, height: 4096)
         func timeMin(_ repeats: Int = 4, _ body: () -> Void) -> Double {
             var best = Double.greatestFiniteMagnitude
             for _ in 0..<repeats {
@@ -2466,35 +2465,58 @@ final class PerfBaselineTests: XCTestCase {
             return best
         }
 
-        var rows: [(String, String)] = []
-        for resolution in OnionSkinSettings.Resolution.allCases {
-            let size = OnionSkinBudget.compositeSize(for: canvas, resolution: resolution)
-            let source = CanvasFixture.solidImage(.red,
-                                                  rect: CGRect(x: 0, y: 0, width: size.width * 0.6,
-                                                               height: size.height * 0.6),
-                                                  size: size)
-            func skins(_ n: Int) -> [OnionSkinFrame] {
-                (0..<n).map { OnionSkinFrame(image: source, opacity: CGFloat(n - $0) / CGFloat(n),
-                                             tint: .systemRed) }
-            }
-            // Warm, for `testOnionSkinCompositeCostScalesWithSkinCountAndNotWithMemory`'s reason: a
-            // cold clock inverted two of its figures on the device.
-            autoreleasepool { _ = OnionSkinFrame.composite(skins(10), size: size) }
+        func measure(_ canvas: CGSize, _ label: String) {
+            var rows: [(String, String)] = []
+            for resolution in OnionSkinSettings.Resolution.allCases {
+                let size = OnionSkinBudget.compositeSize(for: canvas, resolution: resolution)
+                let source = CanvasFixture.solidImage(.red,
+                                                      rect: CGRect(x: 0, y: 0, width: size.width * 0.6,
+                                                                   height: size.height * 0.6),
+                                                      size: size)
+                func skins(_ n: Int) -> [OnionSkinFrame] {
+                    (0..<n).map { OnionSkinFrame(image: source, opacity: CGFloat(n - $0) / CGFloat(n),
+                                                 tint: .systemRed) }
+                }
+                // Warm, for `testOnionSkinCompositeCostScalesWithSkinCountAndNotWithMemory`'s reason: a
+                // cold clock inverted two of its figures on the device.
+                autoreleasepool { _ = OnionSkinFrame.composite(skins(10), size: size) }
 
-            let name = resolution.title
-            rows.append(("\(name)Size", "\(Int(size.width))x\(Int(size.height))"))
-            rows.append(("\(name)Default2", milliseconds(timeMin { _ = OnionSkinFrame.composite(skins(2), size: size) })))
-            rows.append(("\(name)Max10", milliseconds(timeMin { _ = OnionSkinFrame.composite(skins(10), size: size) })))
-            rows.append(("\(name)Ceiling", megabytes(UInt64(OnionSkinBudget.residentCeilingBytes(for: canvas, resolution: resolution)))))
+                let name = resolution.title
+                rows.append(("\(name)Size", "\(Int(size.width))x\(Int(size.height))"))
+                rows.append(("\(name)Default2", milliseconds(timeMin { _ = OnionSkinFrame.composite(skins(2), size: size) })))
+                rows.append(("\(name)Max10", milliseconds(timeMin { _ = OnionSkinFrame.composite(skins(10), size: size) })))
+                rows.append(("\(name)Ceiling", megabytes(UInt64(OnionSkinBudget.residentCeilingBytes(for: canvas, resolution: resolution)))))
+            }
+            report("onion skin cost per resolution option, \(label)", rows)
         }
-        report("onion skin cost per resolution option, 4096x4096 canvas", rows)
+
+        // **The owner animates at 2048x1024** (TODO.md, 2026-08-17), and every onion figure this
+        // project has recorded was taken at 4096x4096 — eight times the pixels. The ruling on whether
+        // "Full" needs a warning in the UI turns on this table, not on the one below it, so it is
+        // measured first and the 4K case is kept as the stress case it always was.
+        let owner = CGSize(width: 2048, height: 1024)
+        measure(owner, "2048x1024 — the owner's canvas")
+        measure(CGSize(width: 4096, height: 4096), "4096x4096 — the stress case")
 
         // Structural, not a timing threshold: the options have to actually differ, or the control the
         // owner asked for is decoration.
         let sizes = OnionSkinSettings.Resolution.allCases.map {
-            OnionSkinBudget.compositeSize(for: canvas, resolution: $0)
+            OnionSkinBudget.compositeSize(for: CGSize(width: 4096, height: 4096), resolution: $0)
         }
         XCTAssertEqual(Set(sizes.map(\.width)).count, sizes.count,
                        "every resolution option must produce a different size on a 4096 canvas")
+
+        // **At the owner's canvas the readability floor is load-bearing, and it changes what the
+        // control means.** A naive quarter of 2048 is 512, which `readableFloorEdge` raises to 768 —
+        // so Half and Quarter are 1024 and 768 rather than 1024 and 512, a 1.8x gap in area where the
+        // 4K table shows 4x. Pinned rather than described, because the whole argument about which
+        // option an artist should reach for rests on it.
+        XCTAssertEqual(OnionSkinBudget.compositeSize(for: owner, resolution: .full), owner,
+                       "Full must be the canvas itself, never scaled")
+        XCTAssertEqual(OnionSkinBudget.compositeSize(for: owner, resolution: .half),
+                       CGSize(width: 1024, height: 512))
+        XCTAssertEqual(OnionSkinBudget.compositeSize(for: owner, resolution: .quarter),
+                       CGSize(width: 768, height: 384),
+                       "the readability floor must raise Quarter above the naive 512x256")
     }
 }
