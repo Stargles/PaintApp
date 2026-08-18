@@ -56,15 +56,14 @@ New this pass (owner, 2026-08-17):
       open-source font packs can be added later without touching call sites; and **delivered in stages,
       each one usable**, rather than as one branch that lands whole.
 - [ ] **A performance pass, calibrated to 2048×1024.** The owner asked for it directly: *"any
-      performance enhancements that can be made to reduce memory, stop lagspikes, or increase fps?"* A
-      ten-agent read-only investigation was written and launched, then cancelled when the session ran out
-      of usage. **Re-run it rather than re-deriving it** — the script survives at
-      `.claude/projects/-Users-juliapark-Desktop-Kevin-P-PaintSoftware/*/workflows/scripts/perf-investigation-wf_f6c930aa-045.js`
-      and is re-invokable as-is. It surveys the drawing hot path, compositing and invalidation, memory,
-      the app-switch freeze, timeline and playback, and save/load/startup; then ranks through three
-      lenses and synthesises a programme. Its whole point is the recalibration above — including a
-      required list of candidates *overrated by 4K bias*, since naming the work not worth doing matters
-      as much as naming the work.
+      performance enhancements that can be made to reduce memory, stop lagspikes, or increase fps?"*
+      **The investigation has been run; nothing has been built yet, which is why this stays open.**
+      Its output is [PERFORMANCE.md](PERFORMANCE.md) — a fourteen-item programme in three tiers, the
+      work deliberately *not* worth doing, and the open questions with the measurement that closes
+      each. The conclusion in one line: **the felt problems are not the compositor and not the canvas
+      size — they are a save that fires three times per app switch, a project open that blocks the
+      main thread for an unmeasured multi-second stretch, and two ungated main-thread costs on every
+      timeline tick.** Tier A is seven changes, none of which needs a device run to justify.
 - [ ] **An oval and a partial oval are one feature, with no modes.** The owner, asked whether a
       nearly-closed stroke should be snapped shut, answered by collapsing the whole design:
       *"The oval and arc feature should be the same feature with no modes. Whatever the user draws that
@@ -90,7 +89,15 @@ Carried over:
       `.overlay` branch allocates a fresh canvas-sized bitmap per touch-move. `renderResolution` never
       reaches that path, which is why the owner's 50% test changed nothing. Fix is to give the scratch
       its own layer; wants its own branch. Numbers in BUGS.md.
+      **The owner confirmed (2026-08-18) that the 17 fps was measured at 4096×4096**, not at their
+      usual 2048×1024 — so the area model holds and the extrapolated ~10.2 ms/dab at their canvas
+      stands. [PERFORMANCE.md](PERFORMANCE.md) item 11.
 - [ ] **Returning from another app freezes for a few seconds**, with no memory warning fired.
+      **Cause found, 2026-08-18.** The owner confirmed the app returns *"exactly where I left off"*,
+      which rules out a jetsam kill (a relaunch provably resets to the Gallery), so it is the app's
+      own main-thread work: `ContentView`'s scene-phase guard has no direction check, so one round
+      trip fires three full saves and one of them lands on the way back in. One-line fix,
+      [PERFORMANCE.md](PERFORMANCE.md) item 1; the defect is in BUGS.md.
 - [ ] **Leaving to the gallery takes ~3 s.** The thumbnail composites the full 4K canvas for a 320×320
       tile; already in BUGS.md.
 

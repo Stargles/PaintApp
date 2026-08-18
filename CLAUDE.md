@@ -310,6 +310,8 @@ runs did to this Mac).
 
 [README.md](README.md) is the app and its architecture. [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md)
 is the interpolation feature — settled decisions and the future-upgrade list. [BUGS.md](BUGS.md) is
-open issues only. [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) and
+open issues only. [PERFORMANCE.md](PERFORMANCE.md) is the ranked optimisation programme, the work
+ruled *not* worth doing, and every figure's provenance — read it before optimising anything, and
+label any number you add MEASURED or INFERRED. [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) and
 [REFACTOR_BASELINE.md](REFACTOR_BASELINE.md) are reference. Keep them short: prune what is done
 rather than appending status.
