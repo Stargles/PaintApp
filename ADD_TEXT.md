@@ -34,13 +34,13 @@ Exactly two `invalidate()` calls per session: one when the session opens, one wh
 
 ### Persistence: one new case, no sidecar, no version number
 
-`VectorCanvasData.ElementData` (`VectorLayer.swift:1331-1362`) gains a fourth case with kind string `"text"`, following the explicit-discriminator design that file's own comment says exists for this. Text rides inside the existing per-cel `<celID>_vector.json`.
+`VectorCanvasData.ElementData` (`Engine/VectorLayer.swift:1352`) gains a fourth case with kind string `"text"`, following the explicit-discriminator design that file's own comment says exists for this. Text rides inside the existing per-cel `<celID>_vector.json`.
 
 `VectorTextElement` is the first vector element whose runtime and persisted forms are the same type — it holds no runtime resource, so it needs none of the `ImageRef` / `<project>/images/` machinery that `.image` forces on `ProjectStore`.
 
 There is no `formatVersion` in this project and this feature does not add one. Compatibility is per-field `decodeIfPresent` with defaults, which means `TextRecipe` and `TextRecipe.Typography` carry **hand-written `init(from:)` from the first commit**, for the reason `VectorStroke` already does (`VectorLayer.swift:29-31`): synthesized `Decodable` ignores property defaults and throws on a missing key.
 
-**The backward-compatibility hazard, which is worse than it looks and must be fixed before Stage 3 merges.** `ProjectStore.swift:558-566` decodes the vector file through `try?`:
+**The backward-compatibility hazard, which is worse than it looks. It has since been fixed — see Stage 2 — and this section is kept because the reasoning is why the fix has to stay.** `ProjectStore.swift` decoded the vector file through `try?`:
 
 ```swift
 if let vectorFileName = celManifest.vectorFileName,
@@ -48,12 +48,12 @@ if let vectorFileName = celManifest.vectorFileName,
    let payload = try? JSONDecoder().decode(VectorCanvasData.self, from: data) {
 ```
 
-An older build meeting a `"text"` discriminator does **not** throw and lose the text — it swallows the error and degrades the whole cel to `.empty(size:)`, discarding every stroke, fill and image on that cel. Save from that build and the loss is permanent. Decode elements one at a time and skip only the unrecognised ones; that is the fix, and it belongs in the same stage that introduces the case.
+An older build meeting a `"text"` discriminator does **not** throw and lose the text — it swallows the error and degrades the whole cel to `.empty(size:)`, discarding every stroke, fill and image on that cel. Save from that build and the loss is permanent. Decoding elements one at a time and skipping only the unrecognised ones is the fix, and it is already in place; a `"text"` discriminator will therefore cost an older build the text element alone.
 
 ### The bake trigger is one line
 
 ```swift
-func beginCanvasEdit() {          // CanvasManager.swift:530-536
+func beginCanvasEdit() {          // CanvasManager.swift:556-562
     guard canvasEditDepth == 0 else { return }
     canvasEditDepth += 1
     defer { canvasEditDepth -= 1 }
@@ -65,17 +65,17 @@ func beginCanvasEdit() {          // CanvasManager.swift:530-536
 
 Last in the list, because the text overlay draws above the shape overlay and committing last preserves what the user was looking at.
 
-Every existing caller inherits the bake with no per-tool retrofit: brush and eraser touch-down through `CanvasView.Coordinator.commitTransientsAndRefresh` (`CanvasView.swift:1335`, from `onStrokeBegan` at `:427` — one wiring covers both, since `host.strokeView` is the same view for pen/pencil/eraser), fill start, shape start, image insert, the structure/interpolation undo brackets, `copyCel`, all five `SelectionModels` entry points, layer and frame switches, and — through `commitAllInteractiveState()` — save and app backgrounding.
+Every existing caller inherits the bake with no per-tool retrofit: brush and eraser touch-down through `CanvasView.Coordinator.commitTransientsAndRefresh` (`CanvasView.swift:1482`, from `onStrokeBegan` at `Views/Canvas/StrokeCanvasView.swift:59` — one wiring covers both, since `host.strokeView` is the same view for pen/pencil/eraser), fill start, shape start, image insert, the structure/interpolation undo brackets, `copyCel`, all five `SelectionModels` entry points, layer and frame switches, and — through `commitAllInteractiveState()` — save and app backgrounding.
 
 Three places cannot simply alias to it:
 
-**Undo/redo.** `finalizePendingGesturesForHistoryAction()` (`CanvasManager.swift:1777-1792`) needs its own three-way branch. A handle under the finger is discarded. Lifted-but-adjustable commits, so the following undo has a real step to revert. And the case fill and shape do not have: **keyboard focused with no finger down resigns first responder and then commits** — undo mid-typing must not strand a floating editor over a baked bitmap, and must not silently throw away what was typed. Within a session, `UITextView` provides its own undo, so undo while the caret is live routes there first.
+**Undo/redo.** `finalizePendingGesturesForHistoryAction()` (`CanvasManager.swift:1819`) needs its own three-way branch. A handle under the finger is discarded. Lifted-but-adjustable commits, so the following undo has a real step to revert. And the case fill and shape do not have: **keyboard focused with no finger down resigns first responder and then commits** — undo mid-typing must not strand a floating editor over a baked bitmap, and must not silently throw away what was typed. Within a session, `UITextView` provides its own undo, so undo while the caret is live routes there first.
 
-**The settings and colour panels must not bake.** `TopToolbar.toggle(_:)` (`:79-85`) calls `commitAllInteractiveState()`; `toggleSettingsPanel(_:)` (`:95-97`) deliberately does not, and its comment states why — committing a fill on the way into its panel "turns every slider in the panel into a no-op." The text panel routes through `toggleSettingsPanel(.text)`, and **while a text session is live, `.color` must too**, or picking a colour for your text bakes the text you were about to recolour. One conditional, extending a rule already written down.
+**The settings and colour panels must not bake.** `TopToolbar.toggle(_:)` (`:79-85`) calls `commitAllInteractiveState()`; `toggleSettingsPanel(_:)` (`:94-96`) deliberately does not, and its comment states why — committing a fill on the way into its panel "turns every slider in the panel into a no-op." The text panel routes through `toggleSettingsPanel(.text)`, and **while a text session is live, `.color` must too**, or picking a colour for your text bakes the text you were about to recolour. One conditional, extending a rule already written down.
 
-**Landing the pixels** is `registerUndoableCelChange(...)` (`SelectionModels.swift:447-456`), not `stampShapeIntoRaster`. Render the glyphs, warp into the destination bbox, `PixelOps.compositeOver` against the cel's raster, and hand it over — which wraps it via `bakedRasterTexture(image:likeExisting:)` into `Cel.raster` and never `bakedImage` (the ghost-layer bug documented at `:440-446`), applies by resolved layer/cel **ID**, and registers one atomic undo step. That primitive is already tool-agnostic across Fill, Shape, Move, Duplicate and both selection operations.
+**Landing the pixels** is `registerUndoableCelChange(...)` (`SelectionModels.swift:447`), not `stampShapeIntoRaster`. Render the glyphs, warp into the destination bbox, `PixelOps.compositeOver` against the cel's raster, and hand it over — which wraps it via `bakedRasterTexture(image:likeExisting:)` into `Cel.raster` and never `bakedImage` (the ghost-layer bug documented at `:440-446`), applies by resolved layer/cel **ID**, and registers one atomic undo step. That primitive is already tool-agnostic across Fill, Shape, Move, Duplicate and both selection operations.
 
-Vector commit is an upsert into `_elements` at the same index (preserving z-order), plus `registerVectorTextUndo` — a copy of `registerVectorFillUndo` (`CanvasManager+Fill.swift:254-267`): whole-array before/after swap, `bumpVersion()`, `celContentChangedOutsideStroke`. Coarse-grained whole-array swap is what every other element kind already does; no new undo machinery. One undo step per session, named "Add Text" or "Edit Text" — not one per keystroke, which would flood `UndoHistory` with entries whose `cost` accounting was never sized for it.
+Vector commit is an upsert into `_elements` at the same index (preserving z-order), plus `registerVectorTextUndo` — a copy of `registerVectorFillUndo` (`CanvasManager+Fill.swift:350`): whole-array before/after swap, `bumpVersion()`, `celContentChangedOutsideStroke`. Coarse-grained whole-array swap is what every other element kind already does; no new undo machinery. One undo step per session, named "Add Text" or "Edit Text" — not one per keystroke, which would flood `UndoHistory` with entries whose `cost` accounting was never sized for it.
 
 `setVectorTransform` (`CanvasManager.swift:260-269`) is explicitly **not** the pattern to copy: it contains no `recordUndo` call and its caller has no begin/end bracket. A text move/rotate/distort drag registers exactly one step on lift. (That existing gap is worth its own [BUGS.md](BUGS.md) line; it is adjacent to this work, not part of it.)
 
@@ -98,7 +98,7 @@ else:
 
 `H = [a b c; d e f; g h 1] · S`. Inverse is the 3×3 adjugate. `affine()` returns a `CGAffineTransform` when `|g|` and `|h|` are below an extent-scaled epsilon — true for every move, rotate and uniform scale, which is the overwhelmingly common case and which draws glyphs natively with no bitmap and no resampling at all.
 
-This is deliberately **not** `Lattice.bilinear` (`Engine/Deform/Lattice.swift:275-278`). Bilinear-in-(u,v) agrees with a homography at the four corners and along the four edges but has no perspective divide, so it bows interior content — and the interior is exactly where foreshortening lives. Right shape of primitive, wrong interpolation rule. `Lattice` is also points-only; there are zero `UIImage`/`CGImage`/texture references anywhere in `Engine/Deform`.
+This is deliberately **not** `Lattice.bilinear` (`Engine/Deform/Lattice.swift:473`). Bilinear-in-(u,v) agrees with a homography at the four corners and along the four edges but has no perspective divide, so it bows interior content — and the interior is exactly where foreshortening lives. Right shape of primitive, wrong interpolation rule. `Lattice` is also points-only; there are zero `UIImage`/`CGImage`/texture references anywhere in `Engine/Deform`.
 
 `Quad` and `Homography` live in `Engine/Deform/` beside `Lattice`, so the whole distort maths compiles standalone with `swiftc` in ~5 s instead of a 90 s `xcodebuild test`, and so a future interpolation feature can reach them.
 
@@ -151,7 +151,7 @@ protocol FontProvider {
 
 `FontDescriptor` stores `(familyName, faceName?, packID?)` — qualified by pack, so two packs shipping "Inter" cannot collide and a missing font is diagnosable rather than mysterious. `FontLibrary.resolve` walks exact face → any face in the family matching the descriptor's traits → system, and reports whether it substituted. The panel shows the substitution and a missing pack raises a `CanvasNotice` banner; the stored descriptor is never rewritten, so reinstalling the pack restores the intended face. Nothing short of embedding the font makes the document round-trip, and this design does not pretend otherwise. Same class of problem `Brush.customTextureFileName` already has.
 
-Picker UI follows the house idiom for many named options: a grouped native `Menu` with `Section`s and a checkmark on the current value, the `blendModeRow` / `BlendMode.menuGroups` pattern (`LayerPanel.swift:582-`), sectioned System / Serif / Sans / Mono / Display / *pack name*, each row drawn in its own face as the preview. Alignment is a segmented `Picker` (`EraserSettingsPanel.vectorModePicker:48-53`). Sliders are `StrokeSettingsPanel.sliderRow`.
+Picker UI follows the house idiom for many named options: a grouped native `Menu` with `Section`s and a checkmark on the current value, the `blendModeRow` / `BlendMode.menuGroups` pattern (`LayerPanel.swift:590-`), sectioned System / Serif / Sans / Mono / Display / *pack name*, each row drawn in its own face as the preview. Alignment is a segmented `Picker` (`EraserSettingsPanel.vectorModePicker:42`). Sliders are `StrokeSettingsPanel.sliderRow`.
 
 Licensing is a per-pack checklist, not a one-time task. OFL 1.1 requires the notice ship with the font, forbids selling the font standalone, and forbids a modified copy keeping the Reserved Font Name. That means a `LICENSE` per pack directory and a Legal/About screen — **which does not exist in this app** and is a real prerequisite for shipping any pack, not a footnote.
 
@@ -198,10 +198,9 @@ Each stage merges to `main` on its own and is usable on the owner's iPad. Follow
 **Explicitly not yet:** vector layers (the row is disabled with a note there — this stage ships nothing it has to un-ship), rotate, scale, distort, font packs.
 **Tests:** `TextLayoutLogicTests` (CoreText metrics for tracking/line-height/alignment/wrap against fixed expectations), `TextRecipeCodableLogicTests` (a JSON blob missing every optional key decodes to defaults), `FontResolveLogicTests` (exact face → family+traits → system, and the substitution flag). `TextBakeCharacterizationTests` for the composited bytes. Genuinely not headless: keyboard-over-canvas — first-responder handoff across panel toggles, `keyboardLayoutGuide` against a canvas with its own pan/zoom, and the box being off-screen or at 0.3× scale. **Record it on device with `ActionRecorder` early in this stage, not at the end** — focus fights with the canvas's own recognizers are exactly the bug class it exists for, and iOS attaches its own Scribble recognizer to the text view for free.
 
-**Stage 2 — the per-element decode fix.**
-Decode `VectorCanvasData.elements` one at a time so an unrecognised discriminator costs that element, not the cel. Small, self-contained, and it must land before any text reaches disk.
-**Explicitly not yet:** anything text-visible.
-**Tests:** `VectorCanvasDataLogicTests` — a payload with one bogus element and three good ones decodes to three elements, and every stroke/fill/image on the cel survives.
+**Stage 2 — the per-element decode fix. ~~To build~~ — already on `main`, do not build it (verified 2026-08-18).**
+It landed ahead of this plan, as the fix for the `try?` in `ProjectStore` that discarded a whole vector cel on one unreadable field. `VectorCanvasData` decodes its display list one element at a time through `LossySlot`, an unknown `kind` and a malformed known `kind` are told apart at the discriminator and logged at different severities, and the counts land in a `DecodeReport` (`Engine/VectorLayer.swift:1351-1436`). `VectorCanvasDataLogicTests` pins it with 13 tests, on counts and identities rather than "did not throw".
+The stage number is kept rather than renumbered so every reference to Stages 3-6 elsewhere in this document still means what it says.
 
 **Stage 3 — vector layers keep it editable.**
 `.text` on `VectorElement` (+ `id` arm, `text` accessor), `Kind.text` / `kind(of:)`, the `texts` accessor, the `renderLocalContent` arm and `Self.draw(text:into:quality:)`, the `contentBounds(of:)` arm via a measure-only `TextMeasure.inkBounds`, `topmostText(atCanvasPoint:)` (box hit through `H⁻¹`, not glyph hit). `.text` on `ElementData`. `editingElementID` suppression, `registerVectorTextUndo`, `isTextEditLive` in `makeSandwichKey`. Enable the row on vector layers.
