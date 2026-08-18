@@ -20,7 +20,30 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-_Nothing parked._
+- [ ] **The lasso fill fills the whole canvas** — owner, on device, 2026-08-18: *"Lasso tool is not
+      working as intended. When i circle something the entire canvas gets filled."* Diagnosed, ruled on,
+      specified, **not built**. Branch `tmp/lasso` (worktree `../PaintApp-lasso`) carries two test-only
+      commits: a characterization pinning today's behaviour, and a test-side proof that the replacement
+      works with no production change.
+      **It is the design, not a defect, and the design misses the gesture.** Every open pixel under the
+      loop is a seed and nothing bounds the flood, so *because circling something means drawing around
+      it*, the loop necessarily encircles paper outside the shape and that paper seeds the whole canvas.
+      Measured on a **perfectly closed** box, same tool and artwork, differing only in which side of the
+      outline the loop was drawn on: **1.000** of the canvas filled from outside, 0.338 from inside. No
+      setting recovers it. It shipped because every prior assertion sampled individual pixels and none
+      asked *how much*.
+      **The fix is specified in [LASSO_FILL.md](LASSO_FILL.md)** and the owner's own proposal — flood the
+      outside from the loop, then invert — turns out to be, word for word, steps 1-2 of Krita's shipped
+      *Enclose and Fill*, which was itself derived from studying Clip Studio Paint. Its formal name is
+      morphological hole filling. In this codebase it is roughly a one-character change to `Fill.metal`
+      plus swapping a union for an intersect; the multi-pixel seeding, the winding mask and the
+      gap-closing order are all already right.
+      **Three things the owner should see before it lands**: the real cost is not "circling blank paper
+      fills nothing" but *any loop not wholly containing an enclosed region fills nothing* — a loop drawn
+      inside a shape fills 0, one crossing the outline fills 0.0022; `fillExpand` (default 2) must be 0
+      in this mode or the fill runs 2 px past the artwork; and "the loop is a wall" must **not** be
+      implemented literally — the flood has to enter the ring in order to exclude it, and the wall
+      property comes from the final intersect.
 
 ## Queued
 

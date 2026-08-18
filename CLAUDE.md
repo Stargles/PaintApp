@@ -308,6 +308,7 @@ which is for what *we* find. **At most three items in flight at once**, unless t
 simulator; the cap is about the machine, not the plan (see `tools/simlock.sh` and what five concurrent
 runs did to this Mac).
 
+[LASSO_FILL.md](LASSO_FILL.md) is the lasso fill specification — the algorithm, its name in the literature, the edge cases decided, and what shipped applications do.
 [README.md](README.md) is the app and its architecture. [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md)
 is the interpolation feature — settled decisions and the future-upgrade list. [BUGS.md](BUGS.md) is
 open issues only. [PERFORMANCE.md](PERFORMANCE.md) is the ranked optimisation programme, the work
