@@ -96,9 +96,9 @@ struct FillSettingsPanel: View {
                 .padding(.horizontal)
 
                 // **Below the three sliders, not beside Gap Closing, and the reason is the panel's
-                // height rather than its logic.** It belongs with Gap Closing — it adds the canvas
-                // rectangle to the set of things gap-closing may bridge to, and does nothing while
-                // that slider reads 0 — but it is 110 pt tall, and put there it pushes Edge Overlap
+                // height rather than its logic.** It reads as a Gap Closing modifier — it also adds
+                // the canvas rectangle to the set of things gap-closing may bridge to — but it is
+                // 110 pt tall, and put there it pushes Edge Overlap
                 // out of a 420 pt scroll view that already holds more than it can show. Measured
                 // 2026-08-17 against `testRaisingEdgeOverlapAfterFillGrowsFillUnderSoftEdge`, which
                 // could no longer move that slider to 0.
@@ -112,7 +112,7 @@ struct FillSettingsPanel: View {
                     }
                     .tint(Self.selectedTint)
                     .accessibilityIdentifier("fillPanel.canvasEdgeBoundaryToggle")
-                    Text("Gap Closing may also bridge to the canvas edge, so a boundary stopping just short of it still seals.")
+                    Text("Fills stop at the canvas edge instead of spreading out into the padding, and Gap Closing may bridge to it so a line stopping just short still seals.")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }

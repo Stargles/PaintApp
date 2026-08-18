@@ -38,7 +38,9 @@ final class MetalFillEngine {
         var threshold: Float = 0
         var gapRadius: Float = 0
         var edgeOverlap: Float = 0
-        var _pad0: Float = 0
+        /// px the artwork rect is inset from the buffer on all four sides (see Fill.metal). Occupies
+        /// the slot that used to be `_pad0`, so the layout is unchanged.
+        var edgeInset: Float = 0
         var seedColor: SIMD4<Float> = .zero
         var fillColor: SIMD4<Float> = .zero
     }
@@ -243,15 +245,19 @@ final class MetalFillSession {
     /// Runs the full GPU pipeline and returns the painted region as premultiplied RGBA (row-major,
     /// `width*height*4`), transparent where unfilled. `fillColor` is premultiplied 0..1.
     ///
-    /// - Parameter canvasEdgeIsWall: let gap-closing bridge to the canvas edge, so a boundary that
-    ///   stops a few pixels short of the border seals against it instead of letting the fill run
-    ///   around its end. Additive — it can only turn background into wall — and inert at
-    ///   `gapRadius == 0`, since the flood is already clamped to this buffer and a zero-width wall
-    ///   one pixel outside it has nothing left to block. See `edgeBridge` in Fill.metal for what it
-    ///   does and, more usefully, for the simpler formulation that was tried first and is wrong.
+    /// - Parameter canvasEdgeIsWall: make the canvas edge bound the fill. Two mechanisms, both
+    ///   described at length above `edgeBridge` in Fill.metal: the artwork rect's boundary becomes a
+    ///   **barrier** the flood cannot travel across (unconditional — it does not consult
+    ///   `gapRadius`), and gap-closing may additionally **bridge** to that edge so a stroke stopping
+    ///   a few px short of it still seals.
+    /// - Parameter edgeInset: px the artwork rect is inset from this buffer on all four sides, i.e.
+    ///   `CanvasManager.canvasPadding`. 0 — the default, and what every caller with no padding
+    ///   passes — makes the artwork rect the buffer itself, at which point both mechanisms reduce to
+    ///   the buffer-rim behaviour the engine had before padding was a consideration. Ignored
+    ///   entirely when `canvasEdgeIsWall` is false.
     func fill(seedX: Int, seedY: Int, seedColor: SIMD4<Float>, threshold: Float,
               gapRadius: Float, edgeOverlap: Float, canvasEdgeIsWall: Bool = false,
-              fillColor: SIMD4<Float>) -> [UInt8]? {
+              edgeInset: Float = 0, fillColor: SIMD4<Float>) -> [UInt8]? {
         // A lasso session seeds from its whole mask, so there is no tapped pixel to be in bounds.
         guard lassoBuf != nil || isSeedInBounds(x: seedX, y: seedY) else { return nil }
         let p = engine.pipelines
@@ -261,6 +267,13 @@ final class MetalFillSession {
         params.seedX = UInt32(seedX); params.seedY = UInt32(seedY)
         params.threshold = threshold; params.gapRadius = gapRadius; params.edgeOverlap = edgeOverlap
         params.seedColor = seedColor; params.fillColor = fillColor
+        // **One place decides what the option means**, so "off" is provably the pre-padding binary:
+        // with `canvasEdgeIsWall` false the shader sees inset 0 and every edge rule collapses to the
+        // buffer rim. A degenerate inset (negative, or wide enough to leave no artwork rect at all —
+        // a project could load a padding inconsistent with its canvasSize) is treated the same way,
+        // because a zero-area rect would fence the flood into nothing.
+        let inset = edgeInset.rounded()
+        params.edgeInset = (canvasEdgeIsWall && inset > 0 && 2 * inset < Float(min(width, height))) ? inset : 0
         memcpy(paramsBuf.contents(), &params, MemoryLayout<MetalFillEngine.FillParams>.size)
 
         // Stage 1: walls, gap-closing disk close, flood init.
@@ -290,8 +303,10 @@ final class MetalFillSession {
             }
             closedSource = closedBuf
         } else {
-            // Nothing to do for the canvas edge at a zero radius: the flood is already confined to
-            // this buffer, so a zero-width wall one pixel outside it has nothing left to block.
+            // No *bridge* at a zero radius — the artist has said "bridge nothing" — but the barrier
+            // still applies: it lives inside `floodHoriz`/`floodVert`, which always run, and it is
+            // not a gap-closing behaviour. That is the one place the option's old contract ("inert
+            // at gapRadius 0") deliberately narrows to "inert at gapRadius 0 *and* no padding".
             closedSource = wallBuf
         }
         if let lassoBuf {

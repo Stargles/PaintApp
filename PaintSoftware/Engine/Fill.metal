@@ -12,7 +12,12 @@ struct FillParams {
     float threshold;    // 0..1 normalized colour distance above which a pixel is a wall
     float gapRadius;    // px, disk radius for the morphological close (gap bridging)
     float edgeOverlap;  // px, disk radius the filled region grows under the walls
-    float _pad0;        // the canvas-edge option is gated Swift-side; `edgeBridge` simply isn't encoded
+    /// px the *artwork rect* is inset from this buffer on all four sides — `CanvasManager.canvasPadding`
+    /// when "Canvas Edge Is a Boundary" is on, and 0 when it is off or there is no padding. 0 means the
+    /// artwork rect and the buffer coincide, which is the pre-padding world: every rule keyed off this
+    /// then reduces algebraically to the buffer rim it used to name. Occupies the slot that used to be
+    /// `_pad0`, so the struct layout is unchanged on both sides.
+    float edgeInset;
     float4 seedColor;   // straight RGBA 0..1 sampled at the seed
     float4 fillColor;   // premultiplied RGBA 0..1 painted into the region
 };
@@ -98,15 +103,60 @@ kernel void thresholdDistance(const device float2* coord      [[buffer(0)]],
 }
 
 // MARK: - The canvas edge as a boundary
+//
+// **"The canvas edge" is the edge of the artwork rect, not the edge of this buffer, and with padding
+// those are different rectangles.** `CanvasManager.setCanvasPadding` grows `canvasSize` itself by
+// 2*delta and re-places the content, so the buffer rim is the outer edge of the grey margin while the
+// border the artist draws across sits `edgeInset` px inside it. Everything below is written against
+// the artwork rect `[inset, width-inset) x [inset, height-inset)`; at `inset == 0` the two rectangles
+// coincide and each formula collapses to the buffer-rim one it replaced.
 
-// Distance from a pixel to the nearest pixel *outside* the canvas — to the imaginary ring one pixel
-// beyond each border. Column 0 is 1 away from the ring at x = -1, and so on.
-static inline float distanceToCanvasEdge(uint2 gid, constant FillParams& params) {
-    uint dx = min(gid.x + 1u, params.width  - gid.x);
-    uint dy = min(gid.y + 1u, params.height - gid.y);
-    return float(min(dx, dy));
+/// The artwork rect's inset in whole pixels. Swift already clamps it to `0 <= 2*inset < min(w, h)`;
+/// the `max` here is belt-and-braces against a float that arrived negative.
+static inline uint insetPixels(constant FillParams& params) {
+    return uint(max(params.edgeInset, 0.0f) + 0.5f);
 }
 
+/// Whether a pixel is inside the artwork rect (as opposed to out on the padding margin).
+static inline bool insideArtworkRect(uint x, uint y, constant FillParams& params) {
+    uint inset = insetPixels(params);
+    return x >= inset && y >= inset && x + inset < params.width && y + inset < params.height;
+}
+
+// Distance from a pixel to the ring one pixel *outside* the artwork rect. With no padding that ring
+// is one pixel beyond the buffer: column 0 is 1 away from the ring at x = -1, and so on — the
+// original formula, which this reduces to term for term at `inset == 0`. With padding the ring moves
+// inward to x = inset-1 / x = width-inset, and the absolute value lets a pixel out on the margin
+// measure to the same ring from the other side, so gap-closing seals against the paper edge from
+// whichever side the artwork approaches it.
+static inline float distanceToCanvasEdge(uint2 gid, constant FillParams& params) {
+    float inset = max(params.edgeInset, 0.0f);
+    float x = float(gid.x), y = float(gid.y);
+    float dx = min(fabs(x - inset + 1.0f), fabs(float(params.width)  - inset - x));
+    float dy = min(fabs(y - inset + 1.0f), fabs(float(params.height) - inset - y));
+    return min(dx, dy);
+}
+
+// **The canvas edge bounds a fill through two separate mechanisms, and this kernel is the second,
+// smaller one.** They are kept apart on purpose:
+//
+//   1. **The barrier** (`floodHoriz`/`floodVert` below). The artwork rect's boundary is a limit on
+//      where the flood may *travel*, exactly the way the buffer rim already was. It is
+//      unconditional — independent of the gap slider — and it is what stops a fill escaping onto the
+//      padding margin. This is the mechanism the artist means by "the canvas is a border".
+//   2. **The bridge** (this kernel). Gap-closing may reach *to* that edge, so a stroke that stops a
+//      few pixels short of it still seals instead of letting the fill run around its tip. Scoped to
+//      the gap radius, and needed even with the barrier in place: the barrier stops a fill leaving
+//      the paper, not one running around the end of a bar that never reached the paper's edge.
+//
+// **The barrier is deliberately not ink in the wall mask.** Adding the rect's boundary to the walls
+// before the morphological close would contain the same scenes and would silently cost what the
+// paragraph below measures: a closed r-disk cannot reach into a rectangle's interior corner, so every
+// corner grows an unfillable notch. Measured on this engine, a 1 px wall ring left 92 px of a blank
+// 128x128 canvas unfillable, 23 per corner. A barrier lives *between* pixels instead — it consumes no
+// pixel, never enters the dilate/erode, and grows no notch: a blank canvas still fills every pixel of
+// its artwork rect.
+//
 // Wall in the sliver between artwork and the canvas edge, so a boundary stroke that stops just short
 // of the border seals against it instead of letting the fill run around its end.
 //
@@ -126,7 +176,10 @@ static inline float distanceToCanvasEdge(uint2 gid, constant FillParams& params)
 // entirely: with nothing drawn near a border, nothing is added.
 //
 // It is also purely **additive** — it only ever turns a background pixel into a wall, never the
-// reverse — so switching the option on cannot break a fill that already worked.
+// reverse — so switching the option on cannot break a fill that already worked *inside* the artwork
+// rect. What the option does now take away is the margin: with it on, a fill started on the paper
+// stops at the paper's edge rather than spilling onto the grey. That is the reported bug, not a
+// regression, and it is the barrier's doing rather than this kernel's.
 kernel void edgeBridge(const device float2* wallCoord [[buffer(0)]],
                        device uchar*         out       [[buffer(1)]],
                        constant FillParams&  params    [[buffer(2)]],
@@ -186,6 +239,51 @@ kernel void floodInitFromLasso(const device uchar* wall   [[buffer(0)]],
     region[i] = (lasso[i] != 0 && wall[i] == 0) ? 1 : 0;
 }
 
+// One contiguous run of the sweep: forward then backward over `k` in `[k0, k1)`, filling every open
+// pixel connected through non-walls to an already-filled one. `stride` is 1 along a row and `width`
+// along a column. `prev` starts false at each end, so **splitting a line into runs is exactly what
+// makes a barrier**: the flood cannot carry across a run boundary in either direction, and the
+// boundary consumes no pixel of its own.
+static inline void sweepRun(device uchar* region, const device uchar* wall,
+                            uint base, uint stride, uint k0, uint k1,
+                            device atomic_uint* changed) {
+    if (k1 <= k0) return;
+    bool prev = false;
+    for (uint k = k0; k < k1; k++) {
+        uint i = base + k * stride;
+        if (wall[i]) { prev = false; }
+        else if (region[i]) { prev = true; }
+        else if (prev) { region[i] = 1; atomic_fetch_or_explicit(changed, 1u, memory_order_relaxed); }
+    }
+    prev = false;
+    for (uint k = k1; k-- > k0; ) {
+        uint i = base + k * stride;
+        if (wall[i]) { prev = false; }
+        else if (region[i]) { prev = true; }
+        else if (prev) { region[i] = 1; atomic_fetch_or_explicit(changed, 1u, memory_order_relaxed); }
+    }
+}
+
+// **The barrier, and it is a rectangle rather than four full-width cuts.** A row only crosses the
+// artwork rect's left and right edges if the row itself is beside the paper — a row up in the top
+// margin crosses no edge of the rect at all, and cutting it would slice the margin into corner
+// pieces instead of leaving it the single continuous ring the artist sees. So the split is decided
+// **once per line, from the thread's own coordinate**, and the inner loop keeps exactly the cost it
+// had: no per-pixel branch, no extra compare.
+//
+// At `inset == 0` the guard is always true and the cuts land on k == 0 and k == extent, which no
+// sweep ever crossed anyway — so the three runs collapse to the one full-line run this used to be,
+// and a padding-0 fill is byte-identical to the old code.
+static inline uint2 runSplit(uint alongExtent, uint acrossPos, uint acrossExtent,
+                             constant FillParams& params) {
+    uint inset = insetPixels(params);
+    // A degenerate inset leaves no artwork rect to bound anything, so sweep the line whole rather
+    // than fence the flood into nothing. Swift already rejects this case; the two agree deliberately.
+    if (2u * inset >= alongExtent || 2u * inset >= acrossExtent) return uint2(0u, alongExtent);
+    bool crossesTheRect = acrossPos >= inset && acrossPos + inset < acrossExtent;
+    return crossesTheRect ? uint2(inset, alongExtent - inset) : uint2(0u, alongExtent);
+}
+
 // One thread per row: fill every open pixel in the row that is horizontally connected (through
 // non-wall pixels) to an already-filled pixel, sweeping both directions. Whole horizontal spans
 // fill in a single pass; the vertical pass then seeds new rows.
@@ -197,20 +295,10 @@ kernel void floodHoriz(device uchar*        region  [[buffer(0)]],
     if (y >= params.height) return;
     uint w = params.width;
     uint base = y * w;
-    bool prev = false;
-    for (uint x = 0; x < w; x++) {
-        uint i = base + x;
-        if (wall[i]) { prev = false; }
-        else if (region[i]) { prev = true; }
-        else if (prev) { region[i] = 1; atomic_fetch_or_explicit(changed, 1u, memory_order_relaxed); }
-    }
-    prev = false;
-    for (int x = int(w) - 1; x >= 0; x--) {
-        uint i = base + uint(x);
-        if (wall[i]) { prev = false; }
-        else if (region[i]) { prev = true; }
-        else if (prev) { region[i] = 1; atomic_fetch_or_explicit(changed, 1u, memory_order_relaxed); }
-    }
+    uint2 split = runSplit(w, y, params.height, params);
+    sweepRun(region, wall, base, 1u, 0u, split.x, changed);
+    sweepRun(region, wall, base, 1u, split.x, split.y, changed);
+    sweepRun(region, wall, base, 1u, split.y, w, changed);
 }
 
 // One thread per column: the vertical analogue of floodHoriz.
@@ -222,25 +310,20 @@ kernel void floodVert(device uchar*        region  [[buffer(0)]],
     if (x >= params.width) return;
     uint w = params.width;
     uint h = params.height;
-    bool prev = false;
-    for (uint y = 0; y < h; y++) {
-        uint i = y * w + x;
-        if (wall[i]) { prev = false; }
-        else if (region[i]) { prev = true; }
-        else if (prev) { region[i] = 1; atomic_fetch_or_explicit(changed, 1u, memory_order_relaxed); }
-    }
-    prev = false;
-    for (int y = int(h) - 1; y >= 0; y--) {
-        uint i = uint(y) * w + x;
-        if (wall[i]) { prev = false; }
-        else if (region[i]) { prev = true; }
-        else if (prev) { region[i] = 1; atomic_fetch_or_explicit(changed, 1u, memory_order_relaxed); }
-    }
+    uint2 split = runSplit(h, x, params.width, params);
+    sweepRun(region, wall, x, w, 0u, split.x, changed);
+    sweepRun(region, wall, x, w, split.x, split.y, changed);
+    sweepRun(region, wall, x, w, split.y, h, changed);
 }
 
 // MARK: - Edge overlap + paint
 
 // Grow the region by a small disk so the fill slips under the anti-aliased wall pixels.
+//
+// The disk respects the barrier too: a pixel on the padding margin is never grown from a filled
+// pixel on the paper, nor the reverse. Without that, edge overlap would paint up to `edgeOverlap` px
+// of grey around a fill that the flood had correctly stopped at the paper's edge. At `inset == 0`
+// every pixel is inside the artwork rect, so the test is always true and this is the old kernel.
 kernel void edgeDilate(const device uchar* region [[buffer(0)]],
                        device uchar*        out    [[buffer(1)]],
                        constant FillParams& params [[buffer(2)]],
@@ -251,12 +334,14 @@ kernel void edgeDilate(const device uchar* region [[buffer(0)]],
     int r = int(round(params.edgeOverlap));
     if (r <= 0) { out[i] = 0; return; }
     float r2 = params.edgeOverlap * params.edgeOverlap;
+    bool onPaper = insideArtworkRect(gid.x, gid.y, params);
     for (int dy = -r; dy <= r; dy++) {
         for (int dx = -r; dx <= r; dx++) {
             if (float(dx * dx + dy * dy) > r2) continue;
             int nx = int(gid.x) + dx;
             int ny = int(gid.y) + dy;
             if (nx < 0 || ny < 0 || nx >= int(params.width) || ny >= int(params.height)) continue;
+            if (insideArtworkRect(uint(nx), uint(ny), params) != onPaper) continue;
             if (region[pixelIndex(uint(nx), uint(ny), params.width)]) { out[i] = 1; return; }
         }
     }

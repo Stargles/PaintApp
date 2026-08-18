@@ -464,12 +464,25 @@ final class CanvasManager: ObservableObject {
     /// Whether the canvas rectangle's edge bounds the fill the way a drawn line does. On by default,
     /// at the owner's request.
     ///
-    /// The flood is clamped to the canvas buffer whether this is on or off, so it is *not* what stops
-    /// a fill escaping — a region enclosed by artwork on three sides and the canvas edge on the fourth
-    /// has always filled and stopped. What the option adds is that gap-closing may bridge to the
-    /// border: a boundary stroke ending a few pixels short of the edge seals against it instead of
-    /// letting the fill run around its end and into the next compartment. It therefore does nothing
-    /// while `fillGapClosingDistance` is 0, which is the artist saying "bridge nothing".
+    /// **"The canvas edge" is the edge of the artwork rect — `canvasSize` inset by `canvasPadding` on
+    /// every side — and not the edge of the pixel buffer.** With padding those are different
+    /// rectangles, and confusing them is what made this option not work: the flood has always been
+    /// clamped to the *buffer*, which is free and needs no option, but with a margin around the
+    /// artwork that clamp sits `canvasPadding` px too far out and an enclosure that leans on the
+    /// paper's border is open along that whole border.
+    ///
+    /// Two things happen when it is on, and only the first is what the artist means by the name:
+    /// - the artwork rect's boundary **bounds the flood**, on both sides — a fill started on the
+    ///   paper stops at the paper's edge instead of spreading onto the grey margin, and a fill
+    ///   started on the margin stays there. This does not consult `fillGapClosingDistance` at all.
+    /// - gap-closing may additionally **bridge to that edge**, so a boundary stroke ending a few px
+    ///   short of it seals against it rather than letting the fill run around its end. This half is
+    ///   the one that does nothing while `fillGapClosingDistance` is 0.
+    ///
+    /// At `canvasPadding == 0` the two rectangles coincide, the flood already could not leave the
+    /// buffer, and the option reduces exactly to the bridge — byte-for-byte the behaviour it had
+    /// before padding was considered. See `edgeBridge` in Fill.metal for both mechanisms and for why
+    /// the boundary is a barrier between pixels rather than ink added to the wall mask.
     @Published var fillCanvasEdgeIsBoundary: Bool = true
     @Published var isFilling: Bool = false
 
@@ -1220,8 +1233,8 @@ final class CanvasManager: ObservableObject {
     /// `drainFillWork` coalesce a burst of drag updates into a single render of the latest params.
     let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
     let fillLock = NSLock()
-    var fillPending = FillKey(gap: 0, threshold: 0, edge: 0, edgeIsWall: true)
-    var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false)
+    var fillPending = FillKey(gap: 0, threshold: 0, edge: 0, edgeIsWall: true, inset: 0)
+    var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
     var fillWorkerScheduled = false
 
     /// Gesture context. `fillSession`/`fillSeedColor` are only touched on `fillQueue`; the rest is set on

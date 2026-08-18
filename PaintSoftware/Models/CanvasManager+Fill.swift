@@ -28,11 +28,20 @@ import UIKit
 
 extension CanvasManager {
 
-    /// The three quantized fill parameters, coalesced across a burst of touch-moves.
+    /// The quantized fill parameters, coalesced across a burst of touch-moves.
     ///
     /// Not `private`: `fillPending`/`fillRendered` in CanvasManager.swift are typed with it, and
     /// Swift scopes `private` to the file rather than the type.
-    struct FillKey: Equatable { var gap: Int; var threshold: Int; var edge: Int; var edgeIsWall: Bool }
+    ///
+    /// `inset` is `canvasPadding` — carried here rather than read in `drainFillWork` because that
+    /// runs on `fillQueue` and `canvasPadding` is `@Published` main-thread state. The key is already
+    /// the main-thread-captured carrier for everything the render used, so putting it here keeps
+    /// that invariant. It cannot change mid-gesture (`setCanvasPadding` calls
+    /// `commitAllInteractiveState` first), so it never needs to trigger a re-render during a drag —
+    /// but being part of the key means it would if that guarantee were ever relaxed.
+    struct FillKey: Equatable {
+        var gap: Int; var threshold: Int; var edge: Int; var edgeIsWall: Bool; var inset: Int
+    }
 
     /// Begins an interactive fill at `point` (canvas-pixel coords, top-left origin): composites every
     /// fill-reference layer into a reference image once, uploads it to a GPU `MetalFillSession`, samples
@@ -75,7 +84,7 @@ extension CanvasManager {
 
         fillLock.lock()
         fillPending = currentFillKey()
-        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false)
+        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
         fillWorkerScheduled = true // claimed here so early drag updates don't spawn a second worker
         fillLock.unlock()
 
@@ -90,11 +99,15 @@ extension CanvasManager {
         }
     }
 
-    private func currentFillKey() -> FillKey {
+    /// Internal rather than `private` so `FillBoundaryLogicTests` can assert the wiring: every other
+    /// fill test builds a raw buffer and drives `MetalFillSession` directly, which would let a
+    /// correct shader ship behind a `canvasPadding` that never reaches it.
+    func currentFillKey() -> FillKey {
         FillKey(gap: Int(fillGapClosingDistance.rounded()),
                 threshold: Int((fillThreshold * 1000).rounded()),
                 edge: Int(fillExpand.rounded()),
-                edgeIsWall: fillCanvasEdgeIsBoundary)
+                edgeIsWall: fillCanvasEdgeIsBoundary,
+                inset: Int(canvasPadding.rounded()))
     }
 
     /// Toggles "the canvas edge bounds the fill" and, if a fill is currently adjustable, re-runs it so
@@ -324,7 +337,7 @@ extension CanvasManager {
 
         fillLock.lock()
         fillPending = currentFillKey()
-        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false)
+        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
         fillWorkerScheduled = true
         fillLock.unlock()
 
@@ -411,7 +424,7 @@ extension CanvasManager {
                                      seedColor: fillSeedColor,
                                      threshold: Float(Double(key.threshold) / 1000.0),
                                      gapRadius: Float(key.gap), edgeOverlap: Float(key.edge),
-                                     canvasEdgeIsWall: key.edgeIsWall,
+                                     canvasEdgeIsWall: key.edgeIsWall, edgeInset: Float(key.inset),
                                      fillColor: fillGestureColor)
             let image = bytes.flatMap { Self.imageFromRGBA($0, width: session.width, height: session.height) }
             let layerID = fillGestureLayerID, celID = fillGestureCelID
