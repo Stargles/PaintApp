@@ -5,8 +5,8 @@ Written winding down at the session's usage limit. **Verify before trusting it**
 TODO.md (the owner's asks), [PERFORMANCE.md](PERFORMANCE.md) (new, and the largest thing this pass
 produced) and [BUGS.md](BUGS.md).
 
-`main` is at **1159 tests in the fast tier**, 1156 passed / 3 skipped / 0 failed. Four branches merged
-this pass; two are still open and both are described below.
+`main` is at **1178 tests in the fast tier**, 1175 passed / 3 skipped / 0 failed. Six branches merged
+this pass; one is still open — `tmp/lasso` — and it is the thing to start on.
 
 ## The one thing to read first
 
@@ -22,6 +22,8 @@ committed a characterization test pinning the wrong behaviour. **Start there.** 
 - **The app-switch save gate** — the owner's "returning from another app freezes for a few seconds".
 - **[PERFORMANCE.md](PERFORMANCE.md)** — the ranked programme from a ten-agent investigation.
 - **Add Text stage 1a** — the menu row and the mode, landing alone as the plan specified.
+- **The oval/partial-oval unification**, all six stages.
+- **[LASSO_FILL.md](LASSO_FILL.md)** — the specification for the open bug.
 
 ## The two owner answers that did more than any analysis
 
@@ -108,42 +110,48 @@ artwork and wants to be 0 for this mode.**
    the dividing line painted and *neither* compartment filled. A connected-component filter — drop
    components containing no non-wall pixel — fixes this and the bare-outline case together.
 
-**A research workflow was still running** when this was written: Clip Studio's documentation, other
-apps (Krita's open-source *Enclose and Fill* appears to have already enumerated this design space as
-explicit options), the algorithms under their proper names, and a deliberate attempt to break the
-invert. Its conclusion is the missing input; find it under this session's `workflows/` transcripts, run
-`wf_f0922af1-8cb`, or re-run the saved script.
+**The research landed and is merged as [LASSO_FILL.md](LASSO_FILL.md).** Read it before writing any
+code — it is the specification. The headline: the owner's proposal is, word for word, steps 1-2 of
+Krita's shipped *Enclose and Fill*, whose design document is explicitly an analysis and recreation of
+Clip Studio Paint's tool. Its formal name is morphological hole filling (Vincent 1993; Soille §6.3),
+with the artist's loop substituted for the image border.
+
+**One thing I got wrong and the research corrected**: I proposed adding a connected-component filter to
+stop isolated line art being painted with nothing around it. **Do not add it.** A face's eyes are walled
+off by their own ink, so they are unreachable from the loop and fill along with the face — which is the
+direct consequence of the owner's "all inner lines are filled over", since painting over the eye
+outlines necessarily paints their interiors. A component filter would make the eyes behave differently
+from the face and puts a branch back into a rule that does not need one.
 
 Tests that must change with the fix are enumerated in the agent's report and in the branch: six
 characterizations plus five existing assertions that pin the old contract, and three load-bearing doc
 comments (`CanvasManager+Fill.swift:275-289`, `Fill.metal:165-178`, `Tool.swift:66-78`).
 
-## Open: `tmp/oval` — the unification, part-built
+## The oval unification merged after this was first written
 
-Worktree `../PaintApp-oval`, four commits in and **behind main**. The design is settled and verified
-numerically; the plan is preserved at this session's scratchpad `oval-plan.md` and is worth reading in
-full before continuing.
+All six stages, `ShapeDetectorLogicTests` 48 → 67, fast tier 1178. Kept here because two facts about it
+are worth carrying and are not obvious from the diff.
 
 **The model is two defaulted scalars on `ShapeGeometry`** — where on the outline the pen started, and
-the **signed, never-wrapped** fraction it turned through. Not reducing mod 1 is what makes seam
-crossing, direction and overshoot fall out instead of needing cases. No new `Kind`, no flag, no
-threshold — the owner deleted the arc-vs-oval decision and reintroducing one is a misreading.
+the **signed, never-wrapped** fraction it turned through. Not reducing that mod 1 is the whole trick:
+seam crossing, direction and overshoot stop being cases and become the number itself.
 
-**Eccentric angle, and the snap proves it.** The two-finger snap is an anisotropic scale that maps the
-point at eccentric angle `t` on the ellipse to the point at the same `t` on the circle, exactly, for
-every `t` — so the span survives with **zero new code in `constrained`**. Polar angle is not invariant:
-on a 4:1 oval the end of a 45° arc would land 106.77 pt away on a 200 pt circle. A test checking only
-"a quarter oval snaps to a quarter circle" passes under both, which is why the sweep must test an
-interior angle.
+**Eccentric angle, and the snap proves it.** The two-finger snap is an anisotropic scale mapping the
+point at eccentric angle `t` on the ellipse to the same `t` on the circle, exactly, for every `t` — so
+the drawn portion survives with zero new code in `constrained`. Polar angle is not invariant (106.77 pt
+of slip on a 4:1 oval). **A test asserting only "a quarter oval snaps to a quarter circle" passes under
+both**, so the sweep tests an interior angle deliberately; do not simplify that test away.
 
-**Two numbers to watch**, from the plan's own risk list: `testRejectsRandomScribble`'s fit error drops
-from ~0.21 (box fit) to 0.1399 (conic fit), so it survives on the length gate alone — two independent
-rejections became one. And the conic fit changes **every** oval's fit, not only partial ones; hand-drawn
-ovals should come out a hair smaller. **Do not retune a tolerance to make an assertion pass** — that
-would hide a real behaviour change.
+Two things to watch if this area is touched again: `testRejectsRandomScribble` now survives on the
+length gate alone (fit error 0.1399 against a 0.16 ceiling), so if it ever creeps, **tighten the length
+gate, not the error gate** — the error gate's calibration is what keeps rectangles working. And the
+conic fit changed every oval's fit, not only partial ones; 50 jittered shapes gave zero kind
+disagreements, and full ovals now come out slightly smaller and more accurate.
 
-Two things the owner may overrule, both flagged to them and neither answered: a stroke that goes round
-twice is rejected, and there are no arc-end handles.
+**Open for the owner**: a double-traced ellipse detects as a *rectangle* (the oval is rejected at ratio
+2.00 and the rectangle runner-up wins). Pre-existing, verified against the prior commit, not a
+regression. And there are no arc-end handles, which the design flagged as the most likely thing they
+overrule.
 
 ## Still queued
 
