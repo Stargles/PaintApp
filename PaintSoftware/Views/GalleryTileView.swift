@@ -2,6 +2,10 @@ import SwiftUI
 
 struct GalleryTileView: View {
     let project: ProjectSummary
+    /// True while `ProjectStore.load` is running for this project — see `GalleryOpenState`. The
+    /// spinner sits on the tapped tile rather than over the grid because the artist tapped a
+    /// particular project and "which one" is half the feedback.
+    var isOpening: Bool = false
     var onOpen: () -> Void
     var onDelete: () -> Void
     var onShowVersions: () -> Void
@@ -21,6 +25,14 @@ struct GalleryTileView: View {
                         .aspectRatio(contentMode: .fill)
                 } else {
                     Color.gray.opacity(0.3)
+                }
+
+                if isOpening {
+                    Color.black.opacity(0.55)
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .accessibilityIdentifier("gallery.openingSpinner")
                 }
             }
             .frame(width: 160, height: 120)
@@ -47,7 +59,11 @@ struct GalleryTileView: View {
                 .foregroundColor(.white)
                 .lineLimit(1)
 
-            if project.isCorrupted {
+            if isOpening {
+                Text("Opening…")
+                    .font(.caption2)
+                    .foregroundColor(.white)
+            } else if project.isCorrupted {
                 Text("Damaged — tap to recover")
                     .font(.caption2)
                     .foregroundColor(.yellow)

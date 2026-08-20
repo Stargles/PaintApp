@@ -9,6 +9,8 @@ struct GalleryView: View {
     @State private var projectForVersions: ProjectSummary?
     @State private var showRecentlyDeleted = false
     @State private var showingUnrecoverableAlert = false
+    /// Which project is opening, if any — see `GalleryOpenState` for the two rules it carries.
+    @State private var openState = GalleryOpenState()
 
     var body: some View {
         NavigationStack {
@@ -32,6 +34,7 @@ struct GalleryView: View {
                         ForEach(projects) { project in
                             GalleryTileView(
                                 project: project,
+                                isOpening: openState.isOpening(project.id),
                                 onOpen: { open(project) },
                                 onDelete: { projectPendingDeletion = project },
                                 onShowVersions: { projectForVersions = project },
@@ -70,6 +73,11 @@ struct GalleryView: View {
             }
         }
         .preferredColorScheme(.dark)
+        // Not a scrim over the grid, deliberately: the tile carries its own spinner, and a
+        // full-screen cover would hide the one thing that says *which* project is opening. This is
+        // only the "no second tap" half of `GalleryOpenState`, expressed where SwiftUI can enforce it
+        // for the New Canvas button and the toolbar as well as for the tiles.
+        .disabled(openState.isBusy)
         .onAppear { refresh() }
         // Launch-time maintenance may have auto-restored a damaged project — re-list when it ends.
         .onReceive(NotificationCenter.default.publisher(for: .projectBackupMaintenanceDidFinish)) { _ in
@@ -107,9 +115,31 @@ struct GalleryView: View {
         projects = ProjectStore.listProjects()
     }
 
+    /// Opens a project, having first put a spinner on the tile.
+    ///
+    /// **This does not make the load faster, and it is not meant to.** `ProjectStore.load` is
+    /// `@MainActor` and serial, and moving its per-cel decode fan-out off the main thread is a
+    /// separate, larger change (PERFORMANCE.md items 8 and 9). What this removes is the *reading*: an
+    /// app that goes dead on the first tap of a session, with no indication it is doing anything, is
+    /// indistinguishable from one that has crashed, and it was listed on its own precisely so it did
+    /// not have to wait for the work that shortens the wait.
+    ///
+    /// **The yield is the whole mechanism, so it gets a sentence.** Setting `openState` marks the
+    /// view dirty; SwiftUI renders that at the end of the current run-loop turn. `await Task.yield()`
+    /// resumes on the main actor *after* that turn, so the spinner is on screen and committed before
+    /// the load takes the main thread away. Calling `load` synchronously here — or awaiting nothing —
+    /// would set the state and block in the same turn, and the artist would see exactly what they see
+    /// today: nothing.
     private func open(_ project: ProjectSummary) {
-        if let manager = ProjectStore.load(from: project.url) {
-            onOpenProject(manager)
+        guard openState.begin(project.id) else { return }
+        Task { @MainActor in
+            await Task.yield()
+            let manager = ProjectStore.load(from: project.url)
+            // Unconditional, and before the screen switch: a package that fails to decode returns nil
+            // and leaves the artist in the gallery, which must not be a gallery stuck behind a
+            // spinner. See `GalleryOpenState`.
+            openState.finish()
+            if let manager { onOpenProject(manager) }
         }
     }
 
