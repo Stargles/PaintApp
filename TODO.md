@@ -43,6 +43,13 @@ New this pass (owner, 2026-08-17):
         the largest main-thread term on a playback tick, and fixing it buys project open *and*
         scrubbing.
       - Item 8 (a 2048×1024 point for the vector-vs-raster preview) is device-only.
+      - **Item 10 is now measured (2026-08-20), and still not fixed on purpose.** A Mode 3
+        (`cutToIntersection`) live-drag cut costs ~95 ms per cut sample (a full vector-layer
+        re-stamp), against ~0 ms for a sample that does not cut — MEASURED, simulator, isolated run.
+        50 cuts in one 334-sample drag over a 200-stroke layer. Real and now a number, but narrow: it
+        fires only mid-drag, only on samples that cross a stroke. Any fix touches the eraser
+        machinery `tmp/crosseraser` rewrote hours before this measurement, so it waits for that to
+        settle and for 9(b) to land first.
       - Tier C — items 11, 13 and 14 — is real, recorded, and deliberately not urgent.
 
 Carried over:

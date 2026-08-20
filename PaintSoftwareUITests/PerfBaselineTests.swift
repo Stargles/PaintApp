@@ -968,6 +968,96 @@ final class PerfBaselineTests: XCTestCase {
         ])
     }
 
+    // MARK: - Mode 3 (cutToIntersection) live-drag cost — PERFORMANCE.md item 10, MEASURE ONLY
+
+    /// **Measure only; do not fix.** `StrokeCanvasView.recordVectorSample` calls
+    /// `resolveIntersectionCut` on **every** touch sample while Mode 3 is active, which calls
+    /// `VectorCanvas.cutToIntersection` once per sample. On a cut, `cutToIntersection` calls
+    /// `invalidate()`, nilling `cachedImage`, so the very next `refreshDisplay()` on this view calls
+    /// `render()` cold and re-stamps every stored stroke in the layer through `BrushStamper`. That is
+    /// O(total dabs in the layer), paid **per cut sample**, not once per gesture — and completely
+    /// independent of canvas resolution, unlike every other scenario in this file.
+    ///
+    /// Nothing before this exercised it: `testEraseHeavyVectorLayerCostAndMemory` commits through
+    /// `.erase`, which is a different code path (spatial-index-driven deletion/split/punch, one commit
+    /// per *gesture*) and never calls `cutToIntersection` or forces a mid-drag `render()`.
+    ///
+    /// The scene is `eraseScenePaintStrokes()` unchanged — the same 200-stroke "total dabs" layer
+    /// `testEraseHeavyVectorLayerCostAndMemory` uses, so the two numbers share a fixture. The drag is
+    /// a dense vertical sweep down one whole column (every 6pt — denser than `eraseSceneGesture`'s
+    /// 9-sample bands, because a live drag samples every touch-move, not once per test-authored
+    /// waypoint), crossing all 50 rows in that column, so a large fraction of samples actually cut
+    /// rather than miss.
+    ///
+    /// **Bucketed by outcome, not averaged**, because the bucket split *is* the finding: a
+    /// `.missed`/`.unchanged` sample is a cache hit (`render()` returns `cachedImage` in O(1)), and a
+    /// `.cut` sample is the one that pays the full re-stamp. Averaging the two together would hide the
+    /// asymmetry item 10 exists to quantify.
+    func testCutToIntersectionLiveDragCostPerSample() {
+        let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.eraseScenePaintStrokes())
+        let elementsBefore = canvas.elements.count
+
+        // Warm-up: faults in the spatial index and the first render, matching
+        // `testEraseHeavyVectorLayerCostAndMemory`'s rationale — otherwise sample 0 is charged a
+        // one-time cold-cache cost that has nothing to do with the per-sample question this test asks.
+        _ = autoreleasepool { canvas.render() }
+
+        // Column 0's x-centre (`eraseSceneGesture`'s spacing: x0 = 100 + column*480, strokes span
+        // x0...x0+400) and the column's full y-range (rows at 60, 100, …, 2020).
+        let x: CGFloat = 300
+        var samples: [CGPoint] = []
+        var y: CGFloat = 40
+        while y <= 2040 {
+            samples.append(CGPoint(x: x, y: y))
+            y += 6
+        }
+
+        var driver = VectorEraser.IntersectionDriver()
+        var cutTimes: [Double] = []
+        var missTimes: [Double] = []
+        let totalMeasured = measuringPeakMemory {
+            for point in samples {
+                autoreleasepool {
+                    let resolved = canvas.cutToIntersection(atCanvasPoint: point,
+                                                            brush: Self.eraseSceneEraserBrush,
+                                                            size: Self.eraseSceneEraserSize,
+                                                            suppressing: driver.suppressed)
+                    driver.accept(resolved.outcome, underTip: resolved.underTip)
+                    // `refreshDisplay()`'s call to `vectorCanvas.render()`, run right here rather than
+                    // batched, because the live view calls it after every `moveVectorStroke` — and at
+                    // typical Pencil sampling rates that is once per sample, not once per gesture.
+                    let start = CFAbsoluteTimeGetCurrent()
+                    _ = canvas.render()
+                    let elapsed = CFAbsoluteTimeGetCurrent() - start
+                    if resolved.outcome == .cut { cutTimes.append(elapsed) } else { missTimes.append(elapsed) }
+                }
+            }
+        }
+
+        let cuts = cutTimes.count
+        let misses = missTimes.count
+        let perCutMean = cuts > 0 ? cutTimes.reduce(0, +) / Double(cuts) : 0
+        let perMissMean = misses > 0 ? missTimes.reduce(0, +) / Double(misses) : 0
+
+        report("Mode 3 live-drag cut cost", [
+            ("paintStrokesBefore", "\(elementsBefore)"),
+            ("dragSamples", "\(samples.count)"),
+            ("samplesThatCut", "\(cuts)"),
+            ("samplesThatDidNotCut", "\(misses)"),
+            ("elementsAfter", "\(canvas.elements.count)"),
+            ("totalDragTime", milliseconds(totalMeasured.seconds)),
+            ("meanRenderAfterACut", milliseconds(perCutMean)),
+            ("meanRenderAfterAMiss", milliseconds(perMissMean)),
+            ("cutOverMissRatio", perMissMean > 0.000_001 ? String(format: "%.0fx", perCutMean / perMissMean) : "n/a (miss cost ~0)"),
+            ("peakFootprint", megabytes(totalMeasured.peakBytes)),
+        ])
+
+        XCTAssertGreaterThan(cuts, 0,
+                             "This scenario only measures what it claims to if the sweep actually crosses strokes and cuts them")
+        XCTAssertLessThan(totalMeasured.seconds, 60.0,
+                          "A single drag down one column taking a minute is a catastrophic regression, not slowness")
+    }
+
     // MARK: - The erase-heavy scene
 
     private static let eraseSceneStrokeCount = 200

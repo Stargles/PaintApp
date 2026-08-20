@@ -371,22 +371,55 @@ this item was scoped as when it was written.
 `load`; nothing gesture-adjacent, and a wrong answer fails loudly (missing or wrong thumbnails)
 rather than subtly.
 
-**10. Measure the Mode 3 eraser (`cutToIntersection`) live-drag cost. Do not fix it yet.**
+**10. Measure the Mode 3 eraser (`cutToIntersection`) live-drag cost. — MEASURED, 2026-08-20.**
 `recordVectorSample` calls `resolveIntersectionCut` on **every** sample
-(`StrokeCanvasView.swift:782-804`, the call at `:795`); on a cut, `VectorCanvas.cutToIntersection`
-calls `invalidate()` (`VectorLayer.swift:632` → `:389-393`), nilling the cached image, so the next
-`refreshDisplay` re-stamps every stored stroke in the layer through `BrushStamper`
-(`VectorLayer.swift:1160-1214`). The cost is O(total dabs), completely independent of canvas
-resolution, and no `PerfBaselineTests` scenario exercises it — the existing eraser test uses
-`.erase`, not `.cutToIntersection`.
+(`StrokeCanvasView.swift:905-923`, the call at `:921` — line numbers moved since this item was
+written, the mechanism did not); on a cut, `VectorCanvas.cutToIntersection` calls `invalidate()`
+(`VectorLayer.swift:652` → `:389-393`), nilling the cached image, so the next `refreshDisplay`
+re-stamps every stored stroke in the layer through `BrushStamper`. The cost is O(total dabs),
+completely independent of canvas resolution.
 *Why it is here at all, honestly stated*: this item's original motivation was that it was the leading
 hypothesis for why the owner's 17 fps report did not fit the ~98 fps the area model predicts at
 2048×1024. **That hypothesis is no longer needed** — the report was taken at 4096² (§6), and the area
 model holds. What survives is narrower and still true: an O(total dabs) cost on a per-sample path is
-structurally invisible to every area-scaled benchmark in the repo, and nobody has ever looked at it.
-*Win*: unknown, and that is the honest answer. Cheap to measure, hard to fix — any fix touches
-three-mode eraser machinery.
-*Verified*: add a scenario reusing `eraseScenePaintStrokes()` (`PerfBaselineTests.swift:986-1003`).
+structurally invisible to every area-scaled benchmark in the repo, and nobody had ever looked at it.
+*The number.* `testCutToIntersectionLiveDragCostPerSample` (new, `PerfBaselineTests.swift`) reuses
+`eraseScenePaintStrokes()` unchanged — the same 200-stroke, ~150-element-after layer
+`testEraseHeavyVectorLayerCostAndMemory` measures — and drives a dense 334-sample vertical drag down
+one column (every 6pt, denser than any hand-authored gesture fixture in this file, matching a real
+touch stream) through `VectorCanvas.cutToIntersection` and `VectorEraser.IntersectionDriver`
+verbatim, timing `render()` after every sample and bucketing by outcome.
+**MEASURED, iOS 26.5 simulator (`perf1012-1`, iPad Pro 13-inch M4 simulated), CoreGraphics
+(`VectorCanvas.render()` always uses `UIGraphicsImageRenderer` — this path has no Metal variant to
+pin), isolated run (`-only-testing` for this one test, no other `xcodebuild` process alive per
+`pgrep`, though general Mac CPU was 14–60% idle rather than fully quiet — three other agents were on
+this Mac in adjacent worktrees running non-`xcodebuild` work):**
+
+| outcome | mean `render()` cost | count of 334 samples |
+|---|---|---|
+| `.missed`/`.unchanged` (cache hit) | **0.0 ms** | 284 |
+| `.cut` (cache invalidated, full re-stamp) | **94.6 ms** | 50 |
+
+A same-scene run inside the full fast-tier suite (contended — queued behind other agents' builds)
+read 114.7 ms for the same 50-cut bucket, corroborating the same order of magnitude under worse
+contention; the isolated 94.6 ms is the more trustworthy of the two and is what the table reports.
+Take this as an order-of-magnitude figure, not a decimal-precision one — the machine was not the
+96.7%-idle standard item 4b's table used, and this path was not re-taken idle before writing it down
+given the queueing three concurrent agents already imposed.
+*What it means*: a cache hit is free; a cut sample costs essentially the whole re-stamp of a
+~150-element layer, ~95 ms, on a canvas-resolution-independent path. A real Mode 3 drag crossing
+several strokes therefore pays this once per crossing, not once per gesture — the drag measured here
+paid it 50 times in 5.2 s of simulated dragging, i.e. roughly a fifth of the wall-clock time of the
+gesture was spent re-stamping a layer whose *content* did not need to change on 49 of those 50
+occasions (only the underlying geometry did; the cache is coarser than the edit).
+*Win if fixed*: unmeasured — any fix (finer-grained invalidation, or re-stamping only the changed
+region) touches three-mode eraser machinery rewritten hours before this measurement was taken
+(`tmp/crosseraser`), and this item's brief was explicitly measure-only. **Do not fix it now.**
+*Where it ranks*: real and now quantified, but narrow — it fires only mid-Mode-3-drag, over a layer
+with enough accumulated geometry to make a re-stamp expensive, and only on the samples that actually
+cross a stroke. It is not a floor on every frame the way the sandwich snapshot (item 4b/9(b)) is. Worth
+scoping a fix once 9(b) is done and the eraser rewrite has settled, not before.
+*Verified*: `testCutToIntersectionLiveDragCostPerSample`, `PerfBaselineTests.swift`.
 
 ### Tier C — real, recorded, not urgent
 
