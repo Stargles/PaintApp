@@ -1118,21 +1118,101 @@ final class PerfBaselineTests: XCTestCase {
     /// A stack of `layerCount` layers, each carrying one canvas-sized baked image at a different
     /// offset so the composite has real overlap to resolve rather than a single opaque cover.
     @MainActor
-    private func compositorManager(layerCount: Int) -> CanvasManager {
+    private func compositorManager(layerCount: Int, canvasSize: CGSize = PerfBaselineTests.canvasSize) -> CanvasManager {
         let manager = CanvasManager()
-        manager.canvasSize = Self.canvasSize
+        manager.canvasSize = canvasSize
         for index in 0..<layerCount {
             manager.addLayer(name: "Layer \(index)")
             let inset = CGFloat(index) * 64
-            let image = UIGraphicsImageRenderer(size: Self.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+            let image = UIGraphicsImageRenderer(size: canvasSize, format: PixelOps.transparentFormat()).image { ctx in
                 UIColor(hue: CGFloat(index) / CGFloat(layerCount), saturation: 0.8, brightness: 0.9, alpha: 0.6).setFill()
                 ctx.cgContext.fill(CGRect(x: inset, y: inset,
-                                          width: Self.canvasSize.width - 2 * inset,
-                                          height: Self.canvasSize.height - 2 * inset))
+                                          width: canvasSize.width - 2 * inset,
+                                          height: canvasSize.height - 2 * inset))
             }
             manager.layers[index].cels[0].bakedImage = image
         }
         return manager
+    }
+
+    /// **The owner's canvas**, which is not the square this file's other cases use. TODO.md records
+    /// them animating at 2048x1024; 2048x2048 is the app's default and twice the pixels. A figure
+    /// that is going to be reasoned about at the document that actually exists has to be taken there.
+    private static let ownersCanvasSize = CGSize(width: 2048, height: 1024)
+
+    /// **How a sandwich rebuild splits between the picture the artist looks at and the two halves
+    /// that are only shown mid-stroke** — the number PERFORMANCE.md item 4's second half turns on and
+    /// which nobody had ever taken.
+    ///
+    /// `startSandwichRebuild` composites `full`, `below` and `above` unconditionally, but
+    /// `below`/`above` are displayed only while a stroke is down. Making them lazy would skip two
+    /// composites on every playback tick, scrub tick, undo and layer switch — and would also mean a
+    /// stroke's first frames have nothing to show but `full`, which is ink the artist cannot see yet.
+    /// **That trade cannot be judged without knowing how much of a rebuild the two halves are**, and
+    /// the estimate it was being judged on was arithmetic over a per-layer slope, not a measurement.
+    ///
+    /// So this reports the four terms separately. What matters is the **ratio**, not the absolutes:
+    /// this is a simulator on a shared Mac, and the pinned CoreGraphics backend is the reference
+    /// implementation rather than the shipped one. A device figure would still be worth taking; this
+    /// is what makes the question answerable without one.
+    ///
+    /// Six layers because that is the stack every other compositor case in this file uses, so the
+    /// numbers sit beside each other.
+    @MainActor
+    func testHowASandwichRebuildSplitsBetweenFullAndTheTwoHalvesAtTheOwnersCanvas() {
+        Compositor.backend = .coreGraphics
+        let manager = compositorManager(layerCount: 6, canvasSize: Self.ownersCanvasSize)
+        manager.currentLayerIndex = 3
+
+        var requests: SandwichRequests?
+        let snapshotCold = measuringPeakMemory {
+            requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 3)
+        }
+        guard let requests else { return XCTFail("Six leaves must cut at index 3") }
+
+        // **The same snapshot again, and the gap between the two is the point.** `PixelOps.rasterize`
+        // is memoized on cel identity, so what a rebuild pays for its `@MainActor` half depends
+        // entirely on whether the memo already holds these cels. A playback tick moves to a new
+        // frame and pays the cold figure; a layer switch stays on the same frame and pays the warm
+        // one. Sizing either optimisation against a single "snapshot" number would be sizing it
+        // against whichever of the two happened to get measured.
+        let snapshotWarm = measuringPeakMemory {
+            _ = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 4)
+        }
+
+        // Warm: `PixelOps.rasterize` is memoized and the snapshot above has just walked these cels,
+        // so a first composite would be measuring the memo filling rather than the walk. The same
+        // reason the onion-skin table reports a warm series and its cold outlier separately.
+        _ = Compositor.composite(requests.full)
+
+        var fullSeconds = 0.0, belowSeconds = 0.0, aboveSeconds = 0.0
+        autoreleasepool { fullSeconds = measuringPeakMemory { _ = Compositor.composite(requests.full) }.seconds }
+        autoreleasepool { belowSeconds = measuringPeakMemory { _ = Compositor.composite(requests.below) }.seconds }
+        autoreleasepool { aboveSeconds = measuringPeakMemory { _ = Compositor.composite(requests.above) }.seconds }
+
+        let rebuild = fullSeconds + belowSeconds + aboveSeconds
+        let halvesShare = rebuild > 0 ? (belowSeconds + aboveSeconds) / rebuild : 0
+
+        report("sandwich rebuild split, 6 layers at 2048x1024 (CoreGraphics)", [
+            ("snapshotCold", milliseconds(snapshotCold.seconds)),
+            ("snapshotWarm", milliseconds(snapshotWarm.seconds)),
+            ("full", milliseconds(fullSeconds)),
+            ("below", milliseconds(belowSeconds)),
+            ("above", milliseconds(aboveSeconds)),
+            ("rebuild", milliseconds(rebuild)),
+            ("halvesShareOfRebuild", String(format: "%.2f", halvesShare)),
+            ("compositeSize", "\(requests.full.canvasSize)"),
+        ])
+
+        // All three composite the same canvas, so the sizes are the one thing here that is not a
+        // timing and can be asserted rather than merely reported.
+        XCTAssertEqual(requests.below.canvasSize, requests.full.canvasSize)
+        XCTAssertEqual(requests.above.canvasSize, requests.full.canvasSize)
+        XCTAssertEqual(requests.full.canvasSize, Self.ownersCanvasSize,
+                       "Nothing should have reduced a 2048x1024 six-layer composite — `CompositorBudget` is inert at this size")
+        // An order-of-magnitude ceiling in this file's house style. Read the reported numbers; do not
+        // tighten this into a timing assertion on a machine that runs several suites at once.
+        XCTAssertLessThan(rebuild, 30.0, "A three-composite rebuild taking half a minute is structural, not contention")
     }
 
     /// **What one composited frame costs at the app's real canvas size**, split into the two halves

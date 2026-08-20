@@ -361,6 +361,41 @@ struct SandwichRequests {
     let above: RenderRequest
 }
 
+/// What `SandwichRequests.full` depends on — which is everything `CanvasView.SandwichKey` carries
+/// **except** `activeLayerIndex`.
+///
+/// **The claim this type makes, and it is checkable by reading `makeSandwichRequests`.** All three
+/// requests are built over one snapshot; `activeLayerIndex` is used in exactly one place, the
+/// `tree.split(atLeaf:)` that produces `below` and `above`. `full` is `request(tree)` — the whole
+/// tree, uncut. So switching the active layer changes *where the tree is cut* and nothing about the
+/// picture `full` composites, and a rebuild triggered by a layer tap recomposites, at native canvas
+/// size, an image byte-identical to the one already on screen.
+///
+/// `SandwichKey`'s own doc comment named this fix and declined it, in these words: "Worth the wasted
+/// composite rather than a second key and a second cache to keep them apart." What changed is the
+/// accounting rather than the argument — the composite it calls wasted is roughly 21 ms of a 54.8 ms
+/// rebuild on a six-layer document at the owner's canvas, and a layer tap is not a rare gesture. The
+/// second cache turns out to cost nothing extra either: the reused image is the one `sandwichImages`
+/// is already retaining, so this is a key beside it and not a second copy of the pixels.
+///
+/// Lives here rather than inside the coordinator so it can be tested as the value type it is: the
+/// property the reuse rests on — that this key moves for every input except the active layer — is
+/// exactly what a headless test can pin.
+struct SandwichFullKey: Equatable {
+    let tree: [RenderNode]
+    let frame: Int
+    /// Parallel to `layers`; nil where a layer has no cel at this frame.
+    let contents: [LayerContentVersion?]
+    let renderResolution: RenderResolution
+
+    init(tree: [RenderNode], frame: Int, contents: [LayerContentVersion?], renderResolution: RenderResolution) {
+        self.tree = tree
+        self.frame = frame
+        self.contents = contents
+        self.renderResolution = renderResolution
+    }
+}
+
 // MARK: - Building one
 
 extension CanvasManager {

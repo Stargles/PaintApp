@@ -1060,6 +1060,9 @@ struct CanvasView: UIViewRepresentable {
                 sandwichImages = nil
                 sandwichKey = nil
                 sandwichCacheKey = nil
+                // With the images, not after them: `sandwichFullKey` says "the `full` we are holding
+                // was built from this", and once we are holding none it is a claim about nothing.
+                sandwichFullKey = nil
                 // The mask image goes with them and for the same reason — it is another canvas-sized
                 // 16 MB, and re-engaging pays one `makeMaskImage` alongside the one rebuild.
                 liveMaskCache = nil
@@ -1218,9 +1221,13 @@ struct CanvasView: UIViewRepresentable {
         /// the key on its own; the frame and the per-layer content versions are what it does not
         /// carry, and the active index is what decides *where the tree is cut*.
         ///
-        /// `activeLayerIndex` moving rebuilds `full` as well, which is a picture identical to the one
-        /// already cached — switching layers changes only the cut. Worth the wasted composite rather
-        /// than a second key and a second cache to keep them apart.
+        /// `activeLayerIndex` moving rebuilds `below` and `above`, which is exactly right —
+        /// switching layers changes where the tree is cut. It used to rebuild `full` too, for a
+        /// picture identical to the one already cached, and this comment used to say that was "worth
+        /// the wasted composite rather than a second key and a second cache to keep them apart".
+        /// **That is no longer the trade.** `SandwichFullKey` is this key minus `activeLayerIndex`,
+        /// and the second cache costs nothing but the key: the image it hands back is the one
+        /// `sandwichImages` is already retaining. See `startSandwichRebuild`.
         private struct SandwichKey: Equatable {
             let tree: [RenderNode]
             let activeLayerIndex: Int
@@ -1282,6 +1289,18 @@ struct CanvasView: UIViewRepresentable {
         /// One rebuild in flight at a time. A key that moves while one is running is not queued: the
         /// far end of every rebuild re-derives the key from the model, so it picks up whatever has
         /// happened since rather than compositing an intermediate picture nobody will ever see.
+        /// What the `full` currently in `sandwichImages` was composited from, or nil when there is
+        /// none. Dropped with the images themselves on disengage — an address for pixels that have
+        /// been released is not a cache, it is a bug waiting for a coincidence.
+        private var sandwichFullKey: SandwichFullKey?
+
+        /// `key` with the active layer taken out — what `full` actually depends on. See
+        /// `SandwichFullKey`.
+        private func fullKey(from key: SandwichKey) -> SandwichFullKey {
+            SandwichFullKey(tree: key.tree, frame: key.frame, contents: key.contents,
+                            renderResolution: key.renderResolution)
+        }
+
         private func startSandwichRebuild(for key: SandwichKey) {
             guard !isSandwichRebuilding else { return }
             // Nil for a stale or non-leaf `activeLayerIndex`, or a degenerate canvas — it does not
@@ -1294,26 +1313,45 @@ struct CanvasView: UIViewRepresentable {
                                                                     activeLayerIndex: canvasManager.currentLayerIndex)
             else { return }
 
+            // **Reuse `full` when only the cut moved.** A layer tap changes `activeLayerIndex` and
+            // nothing else, so `SandwichFullKey` does not move and the picture `full` would
+            // composite is the one already on screen — see that type for why that is a property of
+            // `makeSandwichRequests` rather than a hope. Carried into the closure as a value, so the
+            // background queue reads no main-actor state.
+            let wantedFullKey = fullKey(from: key)
+            let reusableFull = (sandwichFullKey == wantedFullKey) ? sandwichImages?.full : nil
+
             isSandwichRebuilding = true
             Self.sandwichQueue.async { [weak self] in
-                let full = Compositor.composite(requests.full)
+                // `Compositor.composite` is skipped entirely rather than called and discarded: the
+                // count is the measurement (`CompositeProbe`), and a call that happens is a call that
+                // costs whatever the document makes it cost.
+                let full = reusableFull?.cgImage ?? Compositor.composite(requests.full)
                 let below = Compositor.composite(requests.below)
                 let above = Compositor.composite(requests.above)
                 Task { @MainActor in
-                    self?.finishSandwichRebuild(key: key, full: full, below: below, above: above)
+                    self?.finishSandwichRebuild(key: key, fullKey: wantedFullKey,
+                                                full: full, below: below, above: above,
+                                                reusedFull: reusableFull)
                 }
             }
         }
 
-        private func finishSandwichRebuild(key: SandwichKey, full: CGImage?, below: CGImage?, above: CGImage?) {
+        private func finishSandwichRebuild(key: SandwichKey, fullKey: SandwichFullKey,
+                                           full: CGImage?, below: CGImage?, above: CGImage?,
+                                           reusedFull: UIImage?) {
             isSandwichRebuilding = false
             // All three or none: a half-updated set would put a `below` from this frame under an
             // `above` from the last one. `composite` returns nil only for a degenerate canvas.
             if let full, let below, let above, key == sandwichKey {
-                sandwichImages = (full: UIImage(cgImage: full, scale: 1, orientation: .up),
+                // The reused image is passed straight back through rather than re-wrapped, so the
+                // `!==` identity checks in `updateSandwich` still read "nothing changed" and Core
+                // Animation is handed no new contents for a picture that did not move.
+                sandwichImages = (full: reusedFull ?? UIImage(cgImage: full, scale: 1, orientation: .up),
                                   below: UIImage(cgImage: below, scale: 1, orientation: .up),
                                   above: UIImage(cgImage: above, scale: 1, orientation: .up))
                 sandwichCacheKey = key
+                sandwichFullKey = fullKey
             }
             // The whole reconciliation rather than only the image swap: this result may be the first
             // one, and the first one is what unblocks blanking the hosts (trap 1 in `updateSandwich`).
