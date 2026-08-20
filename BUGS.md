@@ -4,6 +4,31 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## A vector layer's transform is not undoable at all (2026-08-20)
+
+`CanvasManager.setVectorTransform` (`CanvasManager.swift:260-269`) mutates the cel's `VectorCanvas`
+through `setTransform` and schedules a thumbnail regen. It registers **no undo step of any kind** —
+no `recordUndo`, no `withStructureUndo`, no bracket. So move, scale or rotate a vector layer with the
+object-transform overlay and Undo will not put it back; it reaches past the transform to whatever the
+artist did before it.
+
+**It cannot be fixed by adding `recordUndo` to that function**, and that is probably why it has
+survived. The call site is `CanvasView.objectTransformChanged` (`CanvasView.swift:1422-1438`), which
+fires **continuously while the drag is live** — one undo step per call would push hundreds of steps
+for one gesture, which is the failure `beginStructureGesture`/`commitStructureGesture` exist to
+prevent. What is wanted is a bracket opened when `isVectorTransforming` turns on and closed when it
+turns off, capturing the transform on each side.
+
+Note the two places it turns off **without** a gesture ending — `rasterizeLayer`
+(`CanvasManager.swift:281`) and `SelectionModels.swift:166` — so the close has to run on those paths
+too, or the bracket leaks. That is the same "runs however it ends" problem `CanvasPresentationModifier`
+solved for popovers, and its `.onDisappear`/`.onChange` interlock is the shape to copy.
+
+[ADD_TEXT.md](ADD_TEXT.md) §1 twice asks for this to be recorded here, and three sessions have now
+noticed it without writing it down — each time because it was adjacent to somebody's branch rather
+than in it. Written down now. **Not fixed**: it wants its own branch, and the vector-transform overlay
+is gesture-sensitive code.
+
 ## Onion skin at Full pushes canvas-sized sources through the compositor's cache (2026-08-18)
 
 `OnionSkinRasterCache` exists to keep the onion skin's sources *out* of `PixelOps.rasterizeCache`, and

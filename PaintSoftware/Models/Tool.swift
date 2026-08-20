@@ -99,7 +99,7 @@ extension Tool {
             // Neither mode of `.value` — the grade wrapper nor the flat colour — has a drawing
             // surface for the bake to land in (`LayerKind`, `Layer.hasNoDrawingSurface`). This is
             // not a "yet": text on a layer that holds no pixels has nothing to mean.
-            return "A value layer holds no pixels for text to land in. Add it on a raster layer."
+            return "A value layer holds no pixels for text to land in. Add it on a raster or vector layer."
         case nil:
             // `activeLayerKind` is legitimately nil mid-edit — `deleteLayer` parks the index at -1
             // while it removes the active layer — as well as on a document with no layers at all.
