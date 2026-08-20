@@ -1360,8 +1360,10 @@ final class VectorCanvas {
         return nil
     }
 
-    /// Point-in-quad with a slop collar, in the frame's own canvas-space corners. See
-    /// `topmostText(atCanvasPoint:)` for why this is the `H⁻¹` test and not an approximation of one.
+    /// Point-in-quad with a slop collar. Space-agnostic: `point` and `frame.corners` must simply be
+    /// in the *same* space — `topmostText(atCanvasPoint:)` maps the tap into local space first,
+    /// because that is where a `VectorCanvas` stores its geometry. See there for why this is the
+    /// `H⁻¹` test and not an approximation of one.
     static func frame(_ frame: TextFrame, contains point: CGPoint, slop: CGFloat = 0) -> Bool {
         let corners = frame.corners
         guard corners.count == 4 else { return false }
