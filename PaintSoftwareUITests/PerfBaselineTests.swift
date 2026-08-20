@@ -2000,6 +2000,20 @@ final class PerfBaselineTests: XCTestCase {
     ///
     /// Measured at both canvas sizes because the ratio between them is the other half of the claim:
     /// the owner's canvas is 4096², which is 4x the pixels of the 2048² this file's other cases use.
+    ///
+    /// **And at 2048×1024, which is the canvas the owner actually animates on** —
+    /// [PERFORMANCE.md](PERFORMANCE.md) item 8. Until 2026-08-20 this case measured 2048² and 4096²
+    /// and nothing between, so every statement in that document about the owner's own document was a
+    /// two-point linear fit (`fixed + k·area`) rather than a reading. The fit predicted ~10.2 ms per
+    /// dab there; this third call is what turns that into a number. It is a third of a second of test
+    /// time and it retires an inference the whole ranking leaned on.
+    ///
+    /// *The device figure is still owed.* Every number this case prints on this Mac is
+    /// simulator/CoreGraphics, and the 53.8 ms / 16.4 ms pair in [BUGS.md](BUGS.md) is Release on the
+    /// owner's iPad 9. The two are not interchangeable — see PERFORMANCE.md §1's ~1.3× device factor,
+    /// and §5 on why a simulator GPU figure is worth less than that. What the simulator *is* good for
+    /// here is the direction and the ratio, because this path is CPU-side: an allocation and two
+    /// blits, no GPU anywhere in it.
     @MainActor
     func testTheLiveStrokePreviewCostsFourTimesMoreOnAVectorLayerThanARaster() {
         func costs(at size: CGSize) -> (raster: Double, vector: Double) {
@@ -2050,14 +2064,20 @@ final class PerfBaselineTests: XCTestCase {
 
         let small = costs(at: Self.canvasSize)
         let large = costs(at: CGSize(width: 4096, height: 4096))
+        // PERFORMANCE.md item 8: the owner's own canvas, between the two that were already here.
+        let owner = costs(at: CGSize(width: 2048, height: 1024))
 
         report("live stroke preview, one dab", [
+            ("raster2048x1024", milliseconds(owner.raster)),
+            ("vector2048x1024", milliseconds(owner.vector)),
             ("raster2048", milliseconds(small.raster)),
             ("vector2048", milliseconds(small.vector)),
             ("raster4096", milliseconds(large.raster)),
             ("vector4096", milliseconds(large.vector)),
+            ("vectorOverRaster2048x1024", String(format: "%.1fx", owner.raster > 0 ? owner.vector / owner.raster : 0)),
             ("vectorOverRaster2048", String(format: "%.1fx", small.raster > 0 ? small.vector / small.raster : 0)),
             ("vectorOverRaster4096", String(format: "%.1fx", large.raster > 0 ? large.vector / large.raster : 0)),
+            ("fpsCeilingVector2048x1024", String(format: "%.0f", owner.vector > 0 ? 1 / owner.vector : 0)),
             ("fpsCeilingVector4096", String(format: "%.0f", large.vector > 0 ? 1 / large.vector : 0)),
             ("fpsCeilingRaster4096", String(format: "%.0f", large.raster > 0 ? 1 / large.raster : 0)),
         ])
@@ -2069,6 +2089,8 @@ final class PerfBaselineTests: XCTestCase {
                              "The overlay composite is a fresh bitmap plus two blits; raster is one render")
         XCTAssertGreaterThan(large.vector, large.raster,
                              "…and the gap must not close at the canvas size the owner actually draws on")
+        XCTAssertGreaterThan(owner.vector, owner.raster,
+                             "…nor at 2048x1024, the canvas the owner animates on")
     }
 
     /// **Where the two backends actually cross over on this device** — the measurement the
