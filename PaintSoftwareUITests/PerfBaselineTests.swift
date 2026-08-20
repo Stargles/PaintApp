@@ -3158,4 +3158,136 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertLessThan(Double(parallelPeak), Double(serialPeak) * 1.6,
                           "Fanning the decode out must not multiply peak footprint — every result is retained either way")
     }
+
+    // MARK: - Leaving to the gallery (PERFORMANCE.md §2 item 3)
+
+    /// The cel counts the save sweep runs at, as cels *per layer* over `openLayerCount` layers —
+    /// **8, 16 and 32 cels**.
+    ///
+    /// **Three points rather than one, and that is the entire point of this test.** PERFORMANCE.md §1
+    /// asserts that the gallery-exit wait "scales with cel count, not with area", and a single
+    /// document cannot confirm or refute a slope: 863 ms at 32 cels is equally consistent with a
+    /// fixed 863 ms cost and with 27 ms a cel. Three points at one canvas size separate them.
+    private static let saveCelsPerLayerSweep = [2, 4, 8]
+
+    /// **What leaving to the gallery actually costs**, split into the snapshot, the PNG re-encode,
+    /// the file I/O and the atomic-swap machinery — PERFORMANCE.md §6's "What does one cel's PNG
+    /// encode cost at 2048×1024?", and §2 item 3's "unmeasured at any resolution".
+    ///
+    /// `ContentView.returnToGallery` calls `saveIfNeeded { screen = .gallery }`, so the gallery
+    /// appears only once `ProjectStore.save`'s completion fires. That wait is what this measures, end
+    /// to end, exactly as the app imposes it — `awaited` below is the clock from the `save` call to
+    /// the completion, and `SaveProfile` is the same interval broken up from inside.
+    ///
+    /// **Two saves per document, and the second is the representative one.** The first save of a
+    /// package writes into empty space and has no live package to stash; every save after it stashes
+    /// the previous one as a restore point, which is what an artist's second and every subsequent
+    /// exit does. The first also finds `RasterLayerTexture.renderToUIImage()`'s memo cold on every
+    /// cel — the fixture's last act on each cel is `endStroke()`, which bumps the version — so it
+    /// pays a canvas-sized `makeImage()` per cel inside the snapshot, where a real document that has
+    /// been on screen has already paid it. Both are reported because the difference between them is
+    /// itself one of the answers.
+    ///
+    /// **Read `msPerCel` and `pngsEncoded`, not the total.** The total is a property of this fixture.
+    /// The per-cel millisecond scales to the artist's document, and the count is the half that
+    /// survives a machine change: a save that stopped re-encoding untouched cels would move
+    /// `pngsEncoded` whatever the clock said, which is the same reasoning
+    /// `LoadProfile.thumbnailRegenerations` records on the way in.
+    ///
+    /// **Raster-only, so this is a floor.** A vector cel adds a JSON payload and every placed image's
+    /// PNG on top of the raster one; a document with vector layers saves for more than this, not less.
+    @MainActor
+    func testWhatLeavingToTheGalleryCosts() async {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("perf-save-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let layerCount = Self.openLayerCount
+        var perCelBySize: [(cels: Int, msPerCel: Double)] = []
+
+        for celsPerLayer in Self.saveCelsPerLayerSweep {
+            let cels = layerCount * celsPerLayer
+            let url = ProjectStore.createNewProjectURL(name: "Perf Save \(cels)")
+
+            // Pass 0 is the package's first ever write; pass 1 re-saves the same document over it.
+            // Both measure one authoring document, so the pair is a comparison of the two saves and
+            // not of two fixtures — and it goes out of scope before the next cel count is built,
+            // because it holds a canvas-sized bitmap per cel and carrying it across sizes would put
+            // a quarter of a gigabyte into every later reading.
+            let authored = autoreleasepool { multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer) }
+            for pass in 0...1 {
+                let written = expectation(description: "save \(pass) of \(cels) cels lands")
+                let started = CFAbsoluteTimeGetCurrent()
+                ProjectStore.save(authored, to: url) { written.fulfill() }
+                await fulfillment(of: [written], timeout: 600)
+                let awaited = CFAbsoluteTimeGetCurrent() - started
+                guard let profile = ProjectStore.lastSaveProfile else {
+                    return XCTFail("Every save publishes a profile — see ProjectStore.SaveProfile")
+                }
+
+                let label = pass == 0
+                    ? "first write of the package, thumbnail memo cold"
+                    : "re-save over a live package, memo warm — the artist's ordinary exit"
+                report("leaving to the gallery — \(cels) cels at 2048x1024, \(label)", [
+                    ("cels", "\(profile.celCount)"),
+                    ("awaited", milliseconds(awaited)),
+                    ("profileTotal", milliseconds(profile.totalSeconds)),
+                    ("msPerCel", String(format: "%.1f", awaited * 1000 / Double(profile.celCount))),
+                    ("at100Cels", milliseconds(awaited * 100 / Double(profile.celCount))),
+                    ("snapshotOnMain", milliseconds(profile.snapshotSeconds)),
+                    ("celWalk", milliseconds(profile.celWalkSeconds)),
+                    ("encodeSummed", milliseconds(profile.encodeSeconds)),
+                    ("writeSummed", milliseconds(profile.writeSeconds)),
+                    ("package", milliseconds(profile.packageSeconds)),
+                    ("swap", milliseconds(profile.swapSeconds)),
+                    ("celWalkShare", String(format: "%.2f", profile.celWalkShare)),
+                    ("pngsEncoded", "\(profile.pngsEncoded)"),
+                    ("pngsReused", "\(profile.pngsReused)"),
+                    ("bytesWritten", megabytes(UInt64(profile.bytesWritten))),
+                    ("encodeThreads", "\(profile.encodeThreads)"),
+                    ("encodedOnMain", "\(profile.encodedOnMainThread)"),
+                ])
+
+                // Structure, not timing — these hold on any machine at any load.
+                XCTAssertEqual(profile.layerCount, layerCount)
+                XCTAssertEqual(profile.celCount, cels)
+                XCTAssertFalse(profile.encodedOnMainThread,
+                               "The encode-and-write half runs on `saveQueue`, never on the artist's thread")
+                // **The claim §1 makes, as an integer.** The fixture is raster-only, so a save that
+                // re-encodes the whole document encodes exactly one PNG per cel — and that is what
+                // makes the cost O(cel count) rather than O(area). If a future change makes a save
+                // skip untouched cels, this is the line that notices.
+                XCTAssertEqual(profile.pngsEncoded, cels,
+                               "Every save re-encodes every cel: one raster PNG each, nothing skipped")
+                XCTAssertEqual(profile.pngsReused, 0, "Nothing memoizes a cel's PNG bytes yet")
+
+                if pass == 1 { perCelBySize.append((cels, awaited * 1000 / Double(cels))) }
+            }
+        }
+
+        // Does it scale with cel count? Reported as the slope across the sweep, so the answer is
+        // legible from the attachment without arithmetic.
+        report("leaving to the gallery — does it scale with cel count?", perCelBySize.map {
+            ("msPerCel@\($0.cels)", String(format: "%.1f", $0.msPerCel))
+        })
+
+        // A per-cel cost that is flat across a 4x range of documents *is* linearity. Deliberately
+        // loose: this runs on a Mac that hosts several suites at once, and the assertion worth
+        // keeping is "the small document is not paying the large one's price", not a slope to three
+        // figures. The reported row above is where the actual shape is read.
+        if let smallest = perCelBySize.first, let largest = perCelBySize.last, smallest.cels != largest.cels {
+            XCTAssertLessThan(largest.msPerCel, smallest.msPerCel * 4,
+                              "Per-cel save cost must not grow with document size — that would mean a term that is not O(cel count)")
+        }
+
+        // An order-of-magnitude ceiling in this file's house style. Read the reported numbers; do not
+        // tighten this into a timing assertion on a machine that runs several suites at once.
+        XCTAssertLessThan(ProjectStore.lastSaveProfile?.totalSeconds ?? 0, 120.0,
+                          "A 32-cel save taking two minutes is structural, not contention")
+    }
 }

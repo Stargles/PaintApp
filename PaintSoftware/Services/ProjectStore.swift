@@ -291,6 +291,123 @@ enum ProjectStore {
     /// into place while the other is stashing what it believes is the live one.
     private static let saveQueue = DispatchQueue(label: "com.paintapp.ProjectStore.save", qos: .userInitiated)
 
+    /// What one `save(_:to:)` actually spent, split into the phases PERFORMANCE.md §2 item 3 names.
+    ///
+    /// **This exists because "leaving to the gallery takes ~3 s" had never been measured at any
+    /// resolution.** §1 says the wait is not the thumbnail but the whole-document PNG re-encode that
+    /// navigation gates on, and that its cost scales with cel count rather than with canvas area —
+    /// a claim nothing had tested. `LoadProfile` is the counterpart on the way in, and this is
+    /// deliberately the same shape: a handful of `CFAbsoluteTimeGetCurrent()` reads, plus counts.
+    ///
+    /// **`celCount` and `pngsEncoded` travel with the timings deliberately, and they are the more
+    /// durable half.** "How many cels did this save re-encode" survives a machine change, a contended
+    /// run and a Debug/Release swap in a way a millisecond does not — the same reasoning
+    /// `LoadProfile.thumbnailRegenerations` records one subsystem over. A save that stopped
+    /// re-encoding unchanged cels would show up here as a count, whatever the clock said.
+    struct SaveProfile: Equatable {
+        var layerCount: Int
+        var celCount: Int
+        /// `SaveSnapshot.init` on the main actor. **The only part of a save that blocks the artist's
+        /// thread** — everything below runs on `saveQueue` — so it and `totalSeconds` answer two
+        /// different questions: what froze, and what the gallery waited for.
+        var snapshotSeconds: Double
+        /// Every `pngData()` and `JSONEncoder.encode` in the per-cel walk, **summed across whatever
+        /// threads ran them**. Against `celWalkSeconds` below, the sum over the wall clock is the
+        /// fan-out's speedup, which is why it is a sum rather than an elapsed time.
+        var encodeSeconds: Double
+        /// Every `Data.write(to:)` in the per-cel walk, summed the same way.
+        var writeSeconds: Double
+        /// Wall clock of the per-cel walk itself — the phase `encodeSeconds`/`writeSeconds` are the
+        /// summed contents of.
+        var celWalkSeconds: Double
+        /// `writePackage` end to end: the per-cel walk, the custom-brush copy, the manifest, the
+        /// thumbnail PNG.
+        var packageSeconds: Double
+        /// `writeAtomically` minus `writePackage` — validate, stash, rename, refresh, prune. The
+        /// atomic-save machinery, kept separate because it is O(cel count) in *file opens* while the
+        /// walk above is O(cel count) in pixels, and the two would otherwise be one number.
+        var swapSeconds: Double
+        /// `save` being called to the package being on disk. What `ContentView.returnToGallery`
+        /// waits on before it shows the gallery.
+        var totalSeconds: Double
+        /// How many PNG encodes this save attempted. One per raster cel, plus fills, baked images and
+        /// placed vector images — so it is ≥ `celCount` on a real document and exactly `celCount` on
+        /// a raster-only one.
+        var pngsEncoded: Int
+        /// How many PNG encodes something answered without running the encoder. Zero today; the
+        /// field exists because it is the count a memoizing save would move, and PERFORMANCE.md §5
+        /// names that memo as the one permitted intermediate on this path.
+        var pngsReused: Int
+        var bytesWritten: Int
+        /// Whether the encode-and-write half ran on the main thread. False is what `saveQueue` is
+        /// *for*, and this is the flag that would notice if it silently stopped being true — the
+        /// same role `LoadProfile.decodedOnMainThread` plays on the way in.
+        var encodedOnMainThread: Bool
+        /// How many distinct threads the per-cel walk ran on. **An integer about the fan-out rather
+        /// than a millisecond about a machine**: 1 is a serial walk and >1 is a spread one, and no
+        /// amount of host load changes which.
+        var encodeThreads: Int
+
+        /// Milliseconds per cel — the figure that scales to a document of another size, and the one
+        /// worth quoting. The loop bound is the cel tree, so this is what makes a 32-cel reading say
+        /// something about the artist's hundred-cel project.
+        var millisecondsPerCel: Double { celCount > 0 ? totalSeconds * 1000 / Double(celCount) : 0 }
+
+        /// The per-cel walk's share of the whole save, 0...1. If this is not most of it, the
+        /// re-encode is not the story and §1's ranking is wrong.
+        var celWalkShare: Double { totalSeconds > 0 ? celWalkSeconds / totalSeconds : 0 }
+    }
+
+    /// Accumulates what one `writePackage` spent, across however many threads run it.
+    ///
+    /// A lock-guarded class rather than `inout` counters because the per-cel walk is spread over
+    /// cores: several workers add to the same sums at once, and one uncontended lock acquisition per
+    /// cel is nothing beside the PNG encode it is measuring.
+    private final class WriteTally: @unchecked Sendable {
+        private let lock = NSLock()
+        private var encode = 0.0
+        private var write = 0.0
+        private var encoded = 0
+        private var reused = 0
+        private var bytes = 0
+        private var threads = Set<ObjectIdentifier>()
+
+        func record(encodeSeconds: Double, writeSeconds: Double,
+                    pngsEncoded: Int, pngsReused: Int, bytesWritten: Int) {
+            lock.lock()
+            encode += encodeSeconds
+            write += writeSeconds
+            encoded += pngsEncoded
+            reused += pngsReused
+            bytes += bytesWritten
+            threads.insert(ObjectIdentifier(Thread.current))
+            lock.unlock()
+        }
+
+        var totals: (encode: Double, write: Double, encoded: Int, reused: Int, bytes: Int, threads: Int) {
+            lock.lock()
+            defer { lock.unlock() }
+            return (encode, write, encoded, reused, bytes, threads.count)
+        }
+    }
+
+    /// Where the most recent save's profile lives.
+    ///
+    /// A box rather than a plain static because this one is written from `saveQueue` — `lastLoadProfile`
+    /// can be `@MainActor` since a load ends on the main actor and a save does not. Read by
+    /// `PerfBaselineTests` and `ProjectSaveLogicTests`; nothing in the app reads it, and nothing
+    /// branches on it.
+    private final class SaveProfileBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: SaveProfile?
+        var value: SaveProfile? {
+            get { lock.lock(); defer { lock.unlock() }; return stored }
+            set { lock.lock(); stored = newValue; lock.unlock() }
+        }
+    }
+    private static let saveProfileBox = SaveProfileBox()
+    static var lastSaveProfile: SaveProfile? { saveProfileBox.value }
+
     /// Saves atomically: the new package is fully written and validated at a temp path before the
     /// live package is touched, the live package is stashed as a backup (never destroyed), and the
     /// swap is a same-volume rename — so a crash/kill at ANY point leaves either the complete old
@@ -307,7 +424,13 @@ enum ProjectStore {
     /// lands would show the project as missing or stale.
     @MainActor
     static func save(_ canvasManager: CanvasManager, to url: URL, completion: (@MainActor () -> Void)? = nil) {
+        // The clock starts here rather than on `saveQueue`, because the question this instrument
+        // exists to answer — "how long does leaving to the gallery take" — is about the wait
+        // `returnToGallery` imposes, and the snapshot below is part of that wait *and* the only part
+        // of it that is on the artist's own thread. See `SaveProfile`.
+        let saveStarted = CFAbsoluteTimeGetCurrent()
         let snapshot = SaveSnapshot(canvasManager)
+        let snapshotSeconds = CFAbsoluteTimeGetCurrent() - saveStarted
 
         // A save is usually triggered by the app being backgrounded (see ContentView's scenePhase
         // handler). While it ran on main, iOS's "finish what you were doing" window covered it; work
@@ -318,7 +441,7 @@ enum ProjectStore {
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ProjectStore.save")
 
         saveQueue.async {
-            writeAtomically(snapshot, to: url)
+            writeAtomically(snapshot, to: url, startedAt: saveStarted, snapshotSeconds: snapshotSeconds)
             Task { @MainActor in
                 completion?()
                 if backgroundTask != .invalid {
@@ -337,13 +460,45 @@ enum ProjectStore {
     /// main thread changes which thread executes the steps, not their order or their all-or-nothing
     /// character — a crash or kill at any point still leaves either the complete old package or the
     /// complete new one on disk, never a partial one.
-    private static func writeAtomically(_ snapshot: SaveSnapshot, to url: URL) {
+    private static func writeAtomically(_ snapshot: SaveSnapshot, to url: URL,
+                                        startedAt saveStarted: CFAbsoluteTime,
+                                        snapshotSeconds: Double) {
         let fm = FileManager.default
+        // Read here rather than inside the walk, for `decodeCels`' reason one direction over: the
+        // walk may recruit its caller as a worker, so asking inside an iteration would sometimes
+        // answer for a pool thread, and the question is about the caller.
+        let startedOnMainThread = Thread.isMainThread
+        let tally = WriteTally()
 
         // Stage the new package beside the live one.
         let stageURL = projectsDirectory.appendingPathComponent(".saving-\(UUID().uuidString)", isDirectory: true)
         try? fm.removeItem(at: stageURL)
-        writePackage(snapshot, to: stageURL)
+        let packageStarted = CFAbsoluteTimeGetCurrent()
+        let celWalkSeconds = writePackage(snapshot, to: stageURL, tally: tally)
+        let packageEnded = CFAbsoluteTimeGetCurrent()
+
+        // Published on every exit, including the three failure returns below: a save that bailed on a
+        // failed validate still spent its encode, and a profile that only ever describes the happy
+        // path would quietly under-report exactly the runs worth looking at.
+        defer {
+            let finished = CFAbsoluteTimeGetCurrent()
+            let totals = tally.totals
+            saveProfileBox.value = SaveProfile(
+                layerCount: snapshot.layers.count,
+                celCount: snapshot.layers.reduce(0) { $0 + $1.cels.count },
+                snapshotSeconds: snapshotSeconds,
+                encodeSeconds: totals.encode,
+                writeSeconds: totals.write,
+                celWalkSeconds: celWalkSeconds,
+                packageSeconds: packageEnded - packageStarted,
+                swapSeconds: finished - packageEnded,
+                totalSeconds: finished - saveStarted,
+                pngsEncoded: totals.encoded,
+                pngsReused: totals.reused,
+                bytesWritten: totals.bytes,
+                encodedOnMainThread: startedOnMainThread,
+                encodeThreads: totals.threads)
+        }
 
         // Only replace the live package once the staged one is provably complete (e.g. a PNG that
         // failed to encode must not clobber the last-known-good save). The broken stage is kept
@@ -375,7 +530,12 @@ enum ProjectStore {
     /// Writes the complete project package at `url` (used by `writeAtomically` to stage the package
     /// before the atomic swap). Runs on `saveQueue`, entirely from the snapshot — this is where the
     /// PNG and JSON encoding that used to block the main thread actually happens.
-    private static func writePackage(_ snapshot: SaveSnapshot, to url: URL) {
+    ///
+    /// Returns the wall clock of the per-cel walk alone, which is the term PERFORMANCE.md §1 claims
+    /// the whole gallery wait is made of; `tally` collects what that walk spent inside itself.
+    @discardableResult
+    private static func writePackage(_ snapshot: SaveSnapshot, to url: URL,
+                                     tally: WriteTally = WriteTally()) -> Double {
         let fm = FileManager.default
         try? fm.createDirectory(at: url, withIntermediateDirectories: true)
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)
@@ -383,61 +543,14 @@ enum ProjectStore {
 
         var layerManifests: [LayerManifest] = []
 
-        for layer in snapshot.layers {
-            var celManifests: [CelManifest] = []
-            for cel in layer.cels {
-                let fileName = "\(cel.id.uuidString)_raster.png"
-                if let data = cel.rasterImage.pngData() {
-                    try? data.write(to: imagesDir.appendingPathComponent(fileName))
-                }
+        let celWalkStarted = CFAbsoluteTimeGetCurrent()
+        let celManifestsByLayer: [[CelManifest]] = snapshot.layers.map { layer in
+            layer.cels.map { writeCel($0, to: imagesDir, tally: tally) }
+        }
+        let celWalkSeconds = CFAbsoluteTimeGetCurrent() - celWalkStarted
 
-                var fillFileName: String?
-                if let fillImage = cel.fillImage, let fillData = fillImage.pngData() {
-                    let name = "\(cel.id.uuidString)-fill.png"
-                    try? fillData.write(to: imagesDir.appendingPathComponent(name))
-                    fillFileName = name
-                }
-                var bakedFileName: String?
-                if let baked = cel.bakedImage, let bakedData = baked.pngData() {
-                    bakedFileName = "\(cel.id.uuidString)_baked.png"
-                    try? bakedData.write(to: imagesDir.appendingPathComponent(bakedFileName!))
-                }
-
-                // Vector content: write the placed images' PNGs, then a JSON of the strokes + image
-                // refs + overall transform (see VectorCanvasData).
-                var vectorFileName: String?
-                // `cel.vector` is this save's own copy (see `SaveSnapshot.CelContent`), so reading its
-                // strokes/fills/images here cannot race live drawing on the original.
-                if let vector = cel.vector, !vector.isEmpty {
-                    var imageFileNames: [UUID: String] = [:]
-                    for element in vector.images {
-                        let name = element.fileName ?? "\(cel.id.uuidString)_vec_\(element.id.uuidString).png"
-                        if let data = element.image.pngData() {
-                            try? data.write(to: imagesDir.appendingPathComponent(name))
-                            imageFileNames[element.id] = name
-                        }
-                    }
-                    let payload = VectorCanvasData(from: vector, imageFileNames: imageFileNames)
-                    if let data = try? JSONEncoder().encode(payload) {
-                        vectorFileName = "\(cel.id.uuidString)_vector.json"
-                        try? data.write(to: imagesDir.appendingPathComponent(vectorFileName!))
-                    }
-                }
-
-                // The interpolation recipe, when this cel is a derived one. Its own JSON file for the
-                // same reason the vector payload has one: it is unbounded in size (lattices) and the
-                // gallery reads every manifest in full.
-                var interpolationFileName: String?
-                if let recipe = cel.interpolation, let data = try? JSONEncoder().encode(recipe) {
-                    interpolationFileName = "\(cel.id.uuidString)_interp.json"
-                    try? data.write(to: imagesDir.appendingPathComponent(interpolationFileName!))
-                }
-
-                celManifests.append(CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
-                                                 rasterFileName: fileName, fillImageFileName: fillFileName, bakedImageFileName: bakedFileName,
-                                                 vectorFileName: vectorFileName,
-                                                 interpolationFileName: interpolationFileName))
-            }
+        for (layerIndex, layer) in snapshot.layers.enumerated() {
+            let celManifests = celManifestsByLayer[layerIndex]
 
             layerManifests.append(LayerManifest(
                 id: layer.id,
@@ -488,6 +601,101 @@ enum ProjectStore {
         if let thumbnailImage = snapshot.thumbnail, let data = thumbnailImage.pngData() {
             try? data.write(to: url.appendingPathComponent("thumbnail.png"))
         }
+
+        return celWalkSeconds
+    }
+
+    /// One cel's PNGs and JSON, encoded and written, with what each half cost recorded in `tally`.
+    ///
+    /// **Extracted from `writePackage`'s loop so the per-cel walk has a name and a boundary**, which
+    /// is what lets `SaveProfile` say how much of a save is this and how much is everything else.
+    /// The body is the old loop verbatim; the only additions are the two clocks.
+    ///
+    /// It reads this cel's own snapshot content and writes only files named after this cel's id, so
+    /// two cels share nothing — the same property that makes the load's `decodeCel` safe to fan out.
+    private static func writeCel(_ cel: SaveSnapshot.CelContent, to imagesDir: URL,
+                                 tally: WriteTally) -> CelManifest {
+        var encodeSeconds = 0.0
+        var writeSeconds = 0.0
+        var encoded = 0
+        var bytes = 0
+
+        func png(_ image: UIImage) -> Data? {
+            let started = CFAbsoluteTimeGetCurrent()
+            let data = image.pngData()
+            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
+            encoded += 1
+            return data
+        }
+        func json<T: Encodable>(_ value: T) -> Data? {
+            let started = CFAbsoluteTimeGetCurrent()
+            let data = try? JSONEncoder().encode(value)
+            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
+            return data
+        }
+        func write(_ data: Data, _ name: String) {
+            let started = CFAbsoluteTimeGetCurrent()
+            try? data.write(to: imagesDir.appendingPathComponent(name))
+            writeSeconds += CFAbsoluteTimeGetCurrent() - started
+            bytes += data.count
+        }
+
+        let fileName = "\(cel.id.uuidString)_raster.png"
+        if let data = png(cel.rasterImage) { write(data, fileName) }
+
+        var fillFileName: String?
+        if let fillImage = cel.fillImage, let fillData = png(fillImage) {
+            let name = "\(cel.id.uuidString)-fill.png"
+            write(fillData, name)
+            fillFileName = name
+        }
+        var bakedFileName: String?
+        if let baked = cel.bakedImage, let bakedData = png(baked) {
+            let name = "\(cel.id.uuidString)_baked.png"
+            write(bakedData, name)
+            bakedFileName = name
+        }
+
+        // Vector content: write the placed images' PNGs, then a JSON of the strokes + image
+        // refs + overall transform (see VectorCanvasData).
+        var vectorFileName: String?
+        // `cel.vector` is this save's own copy (see `SaveSnapshot.CelContent`), so reading its
+        // strokes/fills/images here cannot race live drawing on the original.
+        if let vector = cel.vector, !vector.isEmpty {
+            var imageFileNames: [UUID: String] = [:]
+            for element in vector.images {
+                let name = element.fileName ?? "\(cel.id.uuidString)_vec_\(element.id.uuidString).png"
+                if let data = png(element.image) {
+                    write(data, name)
+                    imageFileNames[element.id] = name
+                }
+            }
+            let payload = VectorCanvasData(from: vector, imageFileNames: imageFileNames)
+            if let data = json(payload) {
+                let name = "\(cel.id.uuidString)_vector.json"
+                write(data, name)
+                vectorFileName = name
+            }
+        }
+
+        // The interpolation recipe, when this cel is a derived one. Its own JSON file for the
+        // same reason the vector payload has one: it is unbounded in size (lattices) and the
+        // gallery reads every manifest in full.
+        var interpolationFileName: String?
+        if let recipe = cel.interpolation, let data = json(recipe) {
+            let name = "\(cel.id.uuidString)_interp.json"
+            write(data, name)
+            interpolationFileName = name
+        }
+
+        tally.record(encodeSeconds: encodeSeconds, writeSeconds: writeSeconds,
+                     pngsEncoded: encoded, pngsReused: 0, bytesWritten: bytes)
+
+        return CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
+                           rasterFileName: fileName, fillImageFileName: fillFileName,
+                           bakedImageFileName: bakedFileName,
+                           vectorFileName: vectorFileName,
+                           interpolationFileName: interpolationFileName)
     }
 
     // MARK: - Loading
