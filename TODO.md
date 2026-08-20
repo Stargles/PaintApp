@@ -112,26 +112,33 @@ Carried over:
   a machine — which matters on a Mac where contention is documented to make suites return wrong
   answers, not merely slow ones.
 
-- **Add Text, in the Actions menu — Stage 1 merged 2026-08-20. The ask itself is not finished:
-  Stages 3-6 remain**, and [ADD_TEXT.md](ADD_TEXT.md) §3 is the live list of them. What the owner
-  can do on the iPad today: Actions ▸ Add Text on a **raster** layer, tap the canvas to place a box,
-  type into it, drag its outline to move it, and set font family, face, size, tracking, line height,
-  line and paragraph spacing, alignment and colour. It bakes into the layer the moment anything else
-  touches the canvas — a stroke, an eraser, a fill, a layer or frame switch, a save — exactly as the
-  fill tool and the smart shapes already do, as one undo step per session however much was typed.
+- **Add Text, in the Actions menu — Stages 1 and 3 merged 2026-08-20. The ask itself is not
+  finished: Stages 4, 5 and 6 remain**, and [ADD_TEXT.md](ADD_TEXT.md) §3 is the live list of them.
+  What the owner can do on the iPad today: Actions ▸ Add Text on **any raster or vector layer**, tap
+  the canvas to place a box, type into it, drag its outline to move it, and set font family, face,
+  size, tracking, line height, line and paragraph spacing, alignment and colour.
+  **On a raster layer it bakes** into the pixels the moment anything else touches the canvas — a
+  stroke, an eraser, a fill, a layer or frame switch, a save — exactly as the fill tool and the smart
+  shapes already do, as one undo step per session however much was typed.
+  **On a vector layer it stays text, forever.** The object goes into the layer's display list, saves
+  into the project as itself, and comes back out of a reload as itself: tap it again and it re-opens
+  with the words and the type settings it was committed with, ready to retype or restyle, in the same
+  place in the stack it was before. Delete every character and the object goes away. The eraser hides
+  it like anything else but does not carve the letterforms — the owner's ruling of 2026-08-17.
   Undo while the caret is live steps back through the typing, and only once you tap away does it
-  remove the text object; that is the owner's own ruling of 2026-08-17.
-  **Not there yet, and deliberately so:** vector layers (the row is disabled with a note explaining
-  why, so the stage ships nothing it has to un-ship), rotate, scale, the four-corner perspective
-  distort, and font packs. Fonts are iOS's own, behind the `FontProvider` seam the owner asked for —
-  adding a pack later is "append a provider", not a change to any call site.
+  remove or restore the whole text object; that is the owner's ruling too.
+  **Not there yet, and deliberately so:** rotate, scale, the four-corner perspective distort (Stages
+  4-5), and font packs (Stage 6). Fonts are iOS's own, behind the `FontProvider` seam the owner asked
+  for — adding a pack later is "append a provider", not a change to any call site.
   **Two things want the owner.** *(1)* **Which faces belong on a favourites strip** at the top of the
   font picker — ADD_TEXT.md §5 item 5, the one question Stage 1 could not answer for itself. It
   shipped with all ~60-80 families grouped and no strip, because inventing a shortlist would have
   made it the answer by default. *(2)* **The keyboard over the canvas has never been tried on a real
   iPad** — first-responder handoff across panel toggles, the keyboard covering a box near the bottom
   of the screen, a box at 0.3× zoom, and iOS's own Scribble recognizer against the canvas's. None of
-  it is reachable headlessly; `ActionRecorder` is how to get a session of it off the device.
+  it is reachable headlessly; `ActionRecorder` is how to get a session of it off the device. Stage 3
+  adds one more to that list and no others: **whether tapping an existing label re-opens it under a
+  fingertip**, since the target is the box and the tap is also what would place a new box beside it.
 
 - **A second fill breaks the first** — merged 2026-08-20. The owner's reading was right and all
   three mechanisms were confirmed by a test that fails on the parent commit. **(a)** The first fill

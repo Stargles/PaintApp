@@ -158,10 +158,10 @@ final class ToolLogicTests: XCTestCase {
                      "`commitAllInteractiveState` settles a floating piece — if it did not, the test above measures nothing")
     }
 
-    /// **"Add Text" is disabled off a raster layer by asking the layer what kind it is**, not by a
-    /// list of kinds someone remembered to write. That is the same defect shape `paintsOnCanvas`
-    /// exists for, one level up: `ADD_TEXT.md` stage 3 turns the vector arm on, and any later
-    /// `LayerKind` must state its own answer rather than inherit "text is fine here".
+    /// **"Add Text" is offered or refused by asking the layer what kind it is**, not by a list of
+    /// kinds someone remembered to write. That is the same defect shape `paintsOnCanvas` exists for,
+    /// one level up: any later `LayerKind` must state its own answer rather than inherit "text is
+    /// fine here".
     ///
     /// Driven through a real `CanvasManager` rather than by calling the predicate with three
     /// literals, because "keyed off the *active layer's* kind" is the half a literal cannot show:
@@ -170,15 +170,15 @@ final class ToolLogicTests: XCTestCase {
         let manager = CanvasFixture.manager()          // one raster layer, and it is active
         XCTAssertEqual(manager.activeLayerKind, .raster)
         XCTAssertNil(Tool.textUnavailableReason(onLayerOfKind: manager.activeLayerKind),
-                     "Raster is the one kind stage 1 ships text on")
+                     "Raster is where text bakes to pixels")
 
         manager.addVectorLayer()
         XCTAssertEqual(manager.activeLayerKind, .vector, "fixture precondition: the new layer is active")
-        let vectorReason = Tool.textUnavailableReason(onLayerOfKind: manager.activeLayerKind)
-        XCTAssertNotNil(vectorReason, """
-            Text is disabled on a vector layer in stage 1 — it lands there as a real, re-editable \
-            element, and a row that half-worked by baking pixels onto a vector layer is exactly the \
-            thing `ADD_TEXT.md` means by shipping nothing it has to un-ship.
+        XCTAssertNil(Tool.textUnavailableReason(onLayerOfKind: manager.activeLayerKind), """
+            `ADD_TEXT.md` stage 3 turned this arm on, and deleting the "not available yet" string was \
+            the whole of that stage's UI change — stage 1 shipped nothing it would have to un-ship, \
+            and this is the un-shipping it planned for. On a vector layer text stays a real, \
+            re-editable element instead of baking.
             """)
 
         manager.addValueLayer()
@@ -196,8 +196,12 @@ final class ToolLogicTests: XCTestCase {
     /// The reasons are shown to the artist under a row they cannot tap, so they have to be sentences
     /// rather than nil-vs-non-nil. Pinned because a disabled control with an empty explanation is
     /// indistinguishable from a broken one.
+    ///
+    /// `.vector` left this list at stage 3, when the row stopped being disabled there. The two that
+    /// remain are not "yet"s: a value layer holds no pixels for text to mean anything against, and
+    /// with no layer selected there is nothing to add text to.
     func testEveryUnavailableReasonSaysSomething() {
-        for kind: LayerKind? in [.vector, .value, nil] {
+        for kind: LayerKind? in [.value, nil] {
             let reason = Tool.textUnavailableReason(onLayerOfKind: kind)
             XCTAssertFalse(reason?.isEmpty ?? true,
                            "\(String(describing: kind)) is unavailable and must say why")

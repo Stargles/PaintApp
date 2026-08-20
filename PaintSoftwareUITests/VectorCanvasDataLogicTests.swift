@@ -59,6 +59,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
             switch $0 {
             case .fill: return "fill"
             case .image: return "image"
+            case .text: return "text"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -69,6 +70,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
             switch $0 {
             case .fill: return "fill"
             case .image: return "image"
+            case .text: return "text"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -81,6 +83,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
             switch $0 {
             case .stroke(let stroke): return stroke.id.uuidString
             case .fill(let fill): return fill.id.uuidString
+            case .text(let text): return text.id.uuidString
             case .image(let ref): return ref.fileName
             }
         }
@@ -124,9 +127,15 @@ final class VectorCanvasDataLogicTests: XCTestCase {
     }
 
     /// A well-formed element of a kind this build has no case for — literally what a newer build
-    /// writing a new element type produces. `ADD_TEXT.md` ships exactly this.
+    /// writing a new element type produces.
+    ///
+    /// **It used to be `"text"`, and `ADD_TEXT.md` stage 3 is what made that stop being fictional**:
+    /// text is now a kind this build knows, so using it here would test the wrong branch entirely.
+    /// `"video"` is the next thing `VectorImageElement`'s own comment says will slot into the display
+    /// list, and it is still unwritten — the sentinel has to be a kind nothing implements, or this
+    /// test quietly starts asserting that a real feature is missing.
     private var futureElement: [String: Any] {
-        ["kind": "text", "text": ["string": "hello", "fontName": "Helvetica", "pointSize": 24]]
+        ["kind": "video", "video": ["fileName": "clip.mov", "x": 32, "y": 32]]
     }
 
     /// A `stroke` element whose payload is missing a required key. The discriminator is one this
@@ -189,7 +198,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
 
         XCTAssertEqual(ids(decoded.elements), [expected[0], expected[2], expected[3]])
         XCTAssertEqual(kinds(decoded.elements), ["fill", "stroke", "erase"])
-        XCTAssertEqual(decoded.decodeReport.unknownKinds, ["text"],
+        XCTAssertEqual(decoded.decodeReport.unknownKinds, ["video"],
                        "An unrecognised discriminator is reported by name, so a log line can say which feature is missing")
         XCTAssertEqual(decoded.decodeReport.malformedCount, 0,
                        "A newer build's element is not a malformed one — that distinction is the whole point of the report")
@@ -207,7 +216,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: try jsonData(object))
 
         XCTAssertEqual(kinds(decoded.elements), ["fill", "erase"])
-        XCTAssertEqual(decoded.decodeReport.unknownKinds, ["text"])
+        XCTAssertEqual(decoded.decodeReport.unknownKinds, ["video"])
         XCTAssertEqual(decoded.decodeReport.malformedCount, 1)
         XCTAssertEqual(decoded.decodeReport.droppedCount, 2)
         XCTAssertFalse(decoded.decodeReport.isClean)

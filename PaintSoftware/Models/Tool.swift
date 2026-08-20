@@ -84,15 +84,17 @@ extension Tool {
     /// has to state whether text may land on it before this compiles.
     ///
     /// Phrased as a *reason* rather than a `Bool` because the row it drives is disabled rather than
-    /// hidden, and a control that is visibly there and will not respond has to say why. `ADD_TEXT.md`
-    /// stage 1 ships raster-only and "ships nothing it has to un-ship" — the vector arm is stage 3's
-    /// to delete, at which point text stays a real, re-editable element instead of baking.
+    /// hidden, and a control that is visibly there and will not respond has to say why.
+    ///
+    /// **The `.vector` arm returned a "not available yet" string until `ADD_TEXT.md` stage 3, and
+    /// deleting it was the whole of that stage's UI change.** Stage 1 shipped raster-only and
+    /// "shipped nothing it would have to un-ship"; this is the un-shipping it planned for. On a
+    /// vector layer text now stays a real, re-editable element in the display list instead of baking
+    /// to pixels — see `CanvasManager.commitInteractiveText`.
     static func textUnavailableReason(onLayerOfKind kind: LayerKind?) -> String? {
         switch kind {
-        case .raster:
+        case .raster, .vector:
             return nil
-        case .vector:
-            return "Text isn't available on a vector layer yet. Add it on a raster layer for now."
         case .value:
             // Neither mode of `.value` — the grade wrapper nor the flat colour — has a drawing
             // surface for the bake to land in (`LayerKind`, `Layer.hasNoDrawingSurface`). This is

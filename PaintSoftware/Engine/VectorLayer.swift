@@ -179,12 +179,18 @@ enum VectorElement: Identifiable {
     case stroke(VectorStroke)
     case fill(VectorFillElement)
     case image(VectorImageElement)
+    /// A live text object — `ADD_TEXT.md` stage 3. **The only case whose payload is already its own
+    /// persisted form**: it holds no runtime resource, so unlike `.image` it needs none of the
+    /// `ImageRef` / `<project>/images/` machinery, and `VectorCanvasData.ElementData.text` stores the
+    /// very same value inline.
+    case text(VectorTextElement)
 
     var id: UUID {
         switch self {
         case .stroke(let stroke): return stroke.id
         case .fill(let fill): return fill.id
         case .image(let image): return image.id
+        case .text(let text): return text.id
         }
     }
 
@@ -200,6 +206,11 @@ enum VectorElement: Identifiable {
 
     var image: VectorImageElement? {
         if case .image(let image) = self { return image }
+        return nil
+    }
+
+    var text: VectorTextElement? {
+        if case .text(let text) = self { return text }
         return nil
     }
 }
@@ -233,6 +244,8 @@ final class VectorCanvas {
     /// parallel arrays, and `renderLocalContent()` for how it is walked.
     private var _elements: [VectorElement]
     private var _transform: CGAffineTransform
+    /// Backing store for `editingElementID`; see there.
+    private var _editingElementID: UUID?
 
     /// The display list itself. Existing code keeps using the three kind-filtered accessors below.
     var elements: [VectorElement] {
@@ -271,6 +284,48 @@ final class VectorCanvas {
             lock.lock()
             defer { lock.unlock() }
             _elements = Self.splicing(_elements, kind: .image, with: newValue.map { .image($0) })
+        }
+    }
+
+    /// The layer's text objects, back to front.
+    ///
+    /// The setter obeys the same splice contract as the three above — and inherits the same caveat,
+    /// which matters more here than for fills: text elements interleaved with strokes are gathered
+    /// back at the *first* one's index, so a get→set round trip on an interleaved list is order-
+    /// stable only for the bucket as a whole. `commitInteractiveText` therefore does **not** use this
+    /// setter; it upserts through `upsertText(_:)` and undoes by swapping the whole `elements` array,
+    /// which preserves every element's exact z-position (`registerVectorTextUndo`).
+    var texts: [VectorTextElement] {
+        get { lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.text) }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _elements = Self.splicing(_elements, kind: .text, with: newValue.map { .text($0) })
+        }
+    }
+
+    /// The one element suppressed from the flatten while its own editor is open, or nil.
+    ///
+    /// **The committed element is never lifted out of `_elements`** — `ADD_TEXT.md` §1 and §2 both
+    /// argue that at length. Lifting makes the persisted source of truth momentarily not contain an
+    /// object the artist already committed, on the one device whose `Compositor` header documents
+    /// jetsam killing the process rather than `makeTexture` failing gracefully, and it also removes
+    /// the object from thumbnails, the layer panel and other cels mid-edit. It buys nothing either,
+    /// because the `strokes`/`fills`/`images` setters splice without invalidating and callers follow
+    /// with `bumpVersion()`, so a lift costs a version bump exactly like this flag does.
+    ///
+    /// Transient: not persisted, and not carried by `makeCopy()`/`resized(to:offset:)`. Assigning it
+    /// invalidates, which is precisely the **two `invalidate()` calls per session** §4 rule 4 allows —
+    /// one as the session opens, one as it commits — and no more, because nothing else during a
+    /// session touches this canvas at all.
+    var editingElementID: UUID? {
+        get { lock.lock(); defer { lock.unlock() }; return _editingElementID }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            guard _editingElementID != newValue else { return }
+            _editingElementID = newValue
+            invalidate()
         }
     }
 
@@ -346,16 +401,28 @@ final class VectorCanvas {
     //
     // All `static`, so a method holding the non-reentrant `lock` can call them without re-entering it.
 
+    /// **`.text` sits below `.stroke` here, and that ordering is load-bearing rather than
+    /// alphabetical.** `insertionIndex` puts a new element after every element of the same or lower
+    /// kind, so keeping `.stroke` the highest is what makes a new brush stroke land at the very end
+    /// of the list — above any `.erase` punch, which `eraseHybrid` *appends* rather than inserting.
+    /// Number text above strokes and a stroke drawn after an erase would be inserted *underneath*
+    /// that punch and get eaten by an erase that happened before it existed.
+    ///
+    /// It does not mean text draws under strokes: `upsertText` appends a brand-new text object to the
+    /// end of the list (see there), so text and strokes stack in the order the artist made them. The
+    /// rawValue governs *insertion arithmetic*, not z-order.
     private enum Kind: Int {
         case fill = 0
         case image = 1
-        case stroke = 2
+        case text = 2
+        case stroke = 3
     }
 
     private static func kind(of element: VectorElement) -> Kind {
         switch element {
         case .fill: return .fill
         case .image: return .image
+        case .text: return .text
         case .stroke: return .stroke
         }
     }
@@ -491,6 +558,125 @@ final class VectorCanvas {
         defer { lock.unlock() }
         _elements.insert(.fill(element), at: Self.insertionIndex(forKind: .fill, in: _elements))
         invalidate()
+    }
+
+    /// Puts a text object into the display list: **replaced at its own index when one with that id is
+    /// already there, appended to the end when it is new.**
+    ///
+    /// The replace-in-place half is what makes re-editing safe. A text object that has been retyped,
+    /// restyled or moved is the same object at the same z-position; removing and re-adding it would
+    /// bring it to the front, so an edit to the label *behind* a drawing would silently pull it in
+    /// front of it. `VectorTextPersistenceLogicTests` pins that.
+    ///
+    /// The append half is why `Kind.text` is numbered below `.stroke` rather than above it — see
+    /// `Kind`. A brand-new object goes on top of what is already there, which is what every editor
+    /// does and what the artist just placed; text and strokes therefore stack chronologically.
+    ///
+    /// Frames are in **local** space, like every other stored geometry on this canvas. A caller
+    /// holding canvas-space corners maps them with `localPoints(fromCanvas:)` first.
+    func upsertText(_ element: VectorTextElement) {
+        lock.lock()
+        defer { lock.unlock() }
+        upsertTextLocked(element)
+        invalidate()
+    }
+
+    /// Drops a text object by id. What an edit session that ends with an empty string does to the
+    /// element it re-opened — deleting every character is how an artist removes a label, and leaving
+    /// an empty box behind would leave an invisible object they cannot select to get rid of.
+    @discardableResult
+    func removeText(id: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard removeTextLocked(id: id) else { return false }
+        invalidate()
+        return true
+    }
+
+    /// **The commit half of an edit session, and the session's second and last `invalidate()`.**
+    ///
+    /// Un-suppressing the element being edited and applying what the artist typed are one event, not
+    /// two, so they are one mutation here — `ADD_TEXT.md` §4 rule 4 allows exactly two invalidations
+    /// per session (open and commit) and doing this in two calls would spend three. Every bump
+    /// cascades into `RasterizeKey`, `LayerContentVersion`, `SandwichKey` and both upload caches,
+    /// each costing a fresh canvas-sized flatten and an LRU eviction.
+    ///
+    /// `element == nil` deletes the object the session opened — the artist emptied the box. Returns
+    /// whether the display list actually changed, so a session that placed a box and typed nothing
+    /// registers no undo step.
+    @discardableResult
+    func commitTextEdit(editingID: UUID?, element: VectorTextElement?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        var listChanged = false
+        if let element {
+            upsertTextLocked(element)
+            listChanged = true
+        } else if let editingID, removeTextLocked(id: editingID) {
+            listChanged = true
+        }
+        let wasSuppressing = _editingElementID != nil
+        _editingElementID = nil
+        if listChanged || wasSuppressing { invalidate() }
+        return listChanged
+    }
+
+    /// Caller must hold `lock`. See `upsertText(_:)` for the replace-in-place / append rule.
+    private func upsertTextLocked(_ element: VectorTextElement) {
+        if let index = _elements.firstIndex(where: { $0.id == element.id }) {
+            _elements[index] = .text(element)
+        } else {
+            _elements.append(.text(element))
+        }
+    }
+
+    /// Caller must hold `lock`.
+    private func removeTextLocked(id: UUID) -> Bool {
+        guard let index = _elements.firstIndex(where: { $0.id == id && $0.text != nil }) else { return false }
+        _elements.remove(at: index)
+        return true
+    }
+
+    /// A text object captured in **canvas** space expressed in this canvas's local space, and back.
+    ///
+    /// Needed for the reason `addStroke(canvasSpaceStroke:)` and `addFill(canvasSpacePath:)` are: the
+    /// draft is measured where the finger is, storage is local, and `render()` applies `transform`
+    /// afterwards — so a frame stored unmapped would go through the layer's transform twice. Both
+    /// directions are `mappingText` with the transform or its inverse, so a round trip is exact.
+    ///
+    /// **The point size and the box travel with the corners.** A layer scaled by *k* stores a stroke
+    /// at `size / k` so it comes back out the width it was drawn; type is the same statement about a
+    /// different scalar, and leaving `pointSize` in canvas points would re-lay the glyphs out at the
+    /// wrong size inside a box that had been scaled.
+    ///
+    /// **Rotation is the one part stage 3 does not carry.** A rotated layer transform gives the
+    /// mapped frame a rotated quad, which `VectorCanvas.draw(text:…)` then draws through its bounding
+    /// box — stage 5's homography is what makes that exact, and this is one of the two places it
+    /// lands (the other being a frame the artist rotated themselves).
+    func localText(fromCanvas element: VectorTextElement) -> VectorTextElement {
+        lock.lock()
+        defer { lock.unlock() }
+        return Self.mappingText(element, through: _transform.isIdentity ? _transform : _transform.inverted())
+    }
+
+    func canvasText(fromLocal element: VectorTextElement) -> VectorTextElement {
+        lock.lock()
+        defer { lock.unlock() }
+        return Self.mappingText(element, through: _transform)
+    }
+
+    private static func mappingText(_ element: VectorTextElement,
+                                    through t: CGAffineTransform) -> VectorTextElement {
+        guard !t.isIdentity else { return element }
+        var mapped = element
+        mapped.frame.corners = element.frame.corners.map { $0.applying(t) }
+        let s = scale(of: t)
+        if s > 0, abs(s - 1) > 1e-9 {
+            mapped.frame.size = CGSize(width: element.frame.size.width * s,
+                                       height: element.frame.size.height * s)
+            mapped.recipe.typography.pointSize = element.recipe.typography.pointSize * s
+        }
+        return mapped
     }
 
     /// Adds a fill whose path was captured in **canvas** space — where the flood-fill mask, the lasso,
@@ -830,6 +1016,11 @@ final class VectorCanvas {
                 if let path = fill.cgPath, path.boundingBoxOfPath.intersects(box) { return true }
             case .image(let image):
                 if Self.bounds(of: image).intersects(box) { return true }
+            case .text(let text):
+                // Text is content the punch can be hiding, and geometry the split could never have
+                // removed — the vector eraser does not bite letterforms (`ADD_TEXT.md` §1, §5.4), so
+                // any overlap means the punch is still doing work.
+                if let ink = TextMeasure.inkBounds(of: text), ink.intersects(box) { return true }
             case .stroke:
                 continue
             }
@@ -899,6 +1090,10 @@ final class VectorCanvas {
             return fill.cgPath?.boundingBoxOfPath
         case .image(let image):
             return bounds(of: image)
+        case .text(let text):
+            // Ink, not the box: an empty or whitespace-only object is not a backdrop, and a punch
+            // kept alive by a box with nothing in it is a hole in nothing that never gets collected.
+            return TextMeasure.inkBounds(of: text)
         }
     }
 
@@ -1124,6 +1319,77 @@ final class VectorCanvas {
         return best.flatMap { _elements[$0].stroke }
     }
 
+    /// The **topmost** text object whose box covers `point`, or nil for a tap on bare canvas. What
+    /// the text tool's placement tap asks before it makes a new box, so tapping an existing label
+    /// re-opens it instead of starting a fresh one on top of it.
+    ///
+    /// **The box is hit, not the glyphs.** Tapping the hole in an "O" is tapping the text — an artist
+    /// aims at the word, and a glyph-exact test would make a light script face nearly untappable and
+    /// would need a full CoreText layout per candidate per tap. Every editor tests the box.
+    ///
+    /// **And it is the box through `H⁻¹`, not the box's bounding rectangle.** `TextFrame` is a layout
+    /// box plus the four canvas points its corners map to; the inverse of that map sends `point` back
+    /// into box-local space, where the test is `0…width × 0…height`. Containment in the *quad* is the
+    /// same predicate written without the matrix — a homography maps the box onto the quad and takes
+    /// straight lines to straight lines, so "inside the box" and "inside the quad" are one statement —
+    /// which is why stage 3 can answer it exactly with no `Homography` type, a stage before that type
+    /// exists. Testing `frame.boundingBox` instead would claim the empty corners of a rotated box,
+    /// and `TextHitTestLogicTests` pins exactly that difference.
+    ///
+    /// `slop` widens the target by a fingertip, measured to the quad's edges rather than to a
+    /// rectangle's, so a rotated box is no harder to hit than an upright one.
+    ///
+    /// **The point is mapped into local space first**, unlike `topmostStroke(atCanvasPoint:)` beside
+    /// it, which tests a canvas-space point against local geometry and is therefore off by the
+    /// layer's transform on a layer that has been moved. That is a pre-existing gap in a query used
+    /// only by the motion-group retagging tap; it is not repeated here.
+    func topmostText(atCanvasPoint point: CGPoint, slop: CGFloat = 6) -> VectorTextElement? {
+        lock.lock()
+        defer { lock.unlock() }
+        var point = point
+        var slop = slop
+        if !_transform.isIdentity {
+            point = point.applying(_transform.inverted())
+            let s = Self.scale(of: _transform)
+            if s > 0 { slop /= s }
+        }
+        for element in _elements.reversed() {
+            guard let text = element.text else { continue }
+            if Self.frame(text.frame, contains: point, slop: slop) { return text }
+        }
+        return nil
+    }
+
+    /// Point-in-quad with a slop collar, in the frame's own canvas-space corners. See
+    /// `topmostText(atCanvasPoint:)` for why this is the `H⁻¹` test and not an approximation of one.
+    static func frame(_ frame: TextFrame, contains point: CGPoint, slop: CGFloat = 0) -> Bool {
+        let corners = frame.corners
+        guard corners.count == 4 else { return false }
+        // Winding sign, taken from the whole quad rather than per edge: a degenerate (zero-area) quad
+        // has no inside at all, and the per-edge signs of one are noise.
+        var area: CGFloat = 0
+        for i in 0..<4 {
+            let a = corners[i], b = corners[(i + 1) % 4]
+            area += a.x * b.y - b.x * a.y
+        }
+        if abs(area) > 1e-9 {
+            let sign: CGFloat = area > 0 ? 1 : -1
+            var inside = true
+            for i in 0..<4 {
+                let a = corners[i], b = corners[(i + 1) % 4]
+                let cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+                if cross * sign < 0 { inside = false; break }
+            }
+            if inside { return true }
+        }
+        guard slop > 0 else { return false }
+        for i in 0..<4 {
+            let a = corners[i], b = corners[(i + 1) % 4]
+            if StrokeGeometry.distanceSquared(from: point, toSegment: a, b) <= slop * slop { return true }
+        }
+        return false
+    }
+
     // MARK: - Rendering
 
     /// What an empty canvas renders to instead of a canvas-sized sheet of transparent pixels. Every
@@ -1214,17 +1480,21 @@ final class VectorCanvas {
     /// exactly one paint run. `quality` doesn't reach this logic — only `Self.draw(stroke:…)` branches
     /// on it — since the isolation rules must hold for a preview too.
     private func renderLocalContent(quality: RenderQuality = .full) -> UIImage {
+        // The one element whose editor is open is skipped, not removed — see `editingElementID`. The
+        // filter runs only while a session is live, and a session costs exactly one flatten at open
+        // and one at commit (§4 rule 4), so this is twice per session rather than per frame.
+        let elements = _editingElementID.map { id in _elements.filter { $0.id != id } } ?? _elements
         // `render()` has already returned by the time an empty canvas would reach here, so this
         // guard is for `localContentBounds()`: it spares the Move tool a canvas-sized rasterize plus
-        // a several-million-pixel alpha scan to conclude what emptiness already said.
-        guard !_elements.isEmpty else { return Self.transparentPixel }
+        // a several-million-pixel alpha scan to conclude what emptiness already said. Asked of the
+        // *filtered* list, so a cel whose only element is the one being edited says the same.
+        guard !elements.isEmpty else { return Self.transparentPixel }
         // `.standard` is load-bearing: `.preferredRange` defaults to `.automatic`, which on a
         // wide-colour iPad backs the context with an extended-range 16-bit bitmap, and stamping
         // thousands of radial gradients into that is drastically slower than into 8-bit. No fidelity
         // is lost — every raster tier already renders and persists as 8-bit deviceRGB.
         let format = PixelOps.transparentFormat()
         format.preferredRange = .standard
-        let elements = _elements
         // Hoisted so `lastRenderDabCount` can be read off it once the (synchronous) renderer closure
         // below has finished drawing.
         var target: CGContextDabTarget!
@@ -1241,6 +1511,11 @@ final class VectorCanvas {
                     index += 1
                 case .image(let element):
                     Self.draw(image: element, into: cg)
+                    index += 1
+                case .text(let element):
+                    // Ends a paint run exactly as a fill or an image does (rule 1 above): a stroke
+                    // before it and a stroke after it must not blend against each other through it.
+                    Self.draw(text: element, into: cg, quality: quality)
                     index += 1
                 case .stroke(let stroke) where stroke.composite == .erase:
                     // Never inside a transparency layer — see rule 3 on `renderLocalContent`.
@@ -1293,6 +1568,37 @@ final class VectorCanvas {
         // Reset here rather than after a whole block of fills: in an interleaved list a leftover
         // global alpha would dim whatever element came next.
         cg.setAlpha(1.0)
+    }
+
+    /// Draws a text element's glyphs into the layer's local space.
+    ///
+    /// **It routes to `TextLayout.draw`, which is the same routine the raster bake and the live
+    /// on-canvas overlay both draw through** — `ADD_TEXT.md` §2's closing warning is that sharing a
+    /// *transform* does not make two rasterizers agree, and stage 1's own report says the overlay's
+    /// `UITextView` draws no glyphs at all for exactly this reason. Adding a second rasterizer here
+    /// would put TextKit on screen and CoreText in the artwork; there is one, and this is it.
+    ///
+    /// `quality` is accepted and deliberately ignored. `.preview` exists because a *stroke* costs
+    /// hundreds of dabs and can be approximated by one stroked path; a CoreText pass into a text-box
+    /// path is well under a millisecond (§4 rule 3) and has no cheaper form that is still text, so
+    /// both tiers draw the same glyphs. The parameter is in the signature so that a future tier which
+    /// *does* want a cheaper text — a grey bar while scrubbing, say — has somewhere to go, and so the
+    /// reader is told the omission was decided rather than overlooked.
+    ///
+    /// Stage 3 draws through the frame's bounding box with a translate and no resampling, which is
+    /// exact for every frame stage 3 can make (upright, `.affine`). A rotated or distorted frame is
+    /// stages 4-5', and this is the branch `warpHomography` replaces.
+    private static func draw(text element: VectorTextElement, into cg: CGContext, quality: RenderQuality) {
+        _ = quality
+        let box = element.frame.boundingBox
+        guard !element.recipe.string.isEmpty, box.width > 0, box.height > 0 else { return }
+        let font = FontLibrary.shared.resolve(element.recipe.font,
+                                              size: element.recipe.typography.clamped.pointSize).font
+        cg.saveGState()
+        cg.translateBy(x: box.minX, y: box.minY)
+        TextLayout.draw(element.recipe, font: font, boxSize: box.size,
+                        clip: !element.frame.autoSize, into: cg)
+        cg.restoreGState()
     }
 
     private static func draw(image element: VectorImageElement, into cg: CGContext) {
@@ -1409,6 +1715,16 @@ struct VectorCanvasData: Codable {
         case stroke(VectorStroke)
         case fill(VectorFillElement)
         case image(ImageRef)
+        /// **No sidecar and no `TextRef`.** `VectorTextElement` is the first vector element whose
+        /// runtime and persisted forms are the same type — it holds no runtime resource, so it needs
+        /// none of the `ImageRef` / `<project>/images/` machinery `.image` forces on `ProjectStore`,
+        /// and the whole object rides inline in the cel's own `<celID>_vector.json`.
+        ///
+        /// The `"text"` discriminator is the fourth case the two-step decode above was built for. An
+        /// older build meeting it loses **this element** and keeps the rest of the cel; before the
+        /// per-element decode landed (`ADD_TEXT.md` stage 2) it would have swallowed the error and
+        /// degraded the whole cel to `.empty`, discarding every stroke, fill and image on it.
+        case text(VectorTextElement)
 
         /// The one decode failure worth naming. Everything else stays a `DecodingError` and is
         /// classified as malformed — see `VectorCanvasData.DecodeReport`.
@@ -1417,8 +1733,8 @@ struct VectorCanvasData: Codable {
             case unknownKind(String)
         }
 
-        private enum Kind: String, Codable { case stroke, fill, image }
-        private enum CodingKeys: String, CodingKey { case kind, stroke, fill, image }
+        private enum Kind: String, Codable { case stroke, fill, image, text }
+        private enum CodingKeys: String, CodingKey { case kind, stroke, fill, image, text }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1431,6 +1747,7 @@ struct VectorCanvasData: Codable {
             case .stroke: self = .stroke(try c.decode(VectorStroke.self, forKey: .stroke))
             case .fill: self = .fill(try c.decode(VectorFillElement.self, forKey: .fill))
             case .image: self = .image(try c.decode(ImageRef.self, forKey: .image))
+            case .text: self = .text(try c.decode(VectorTextElement.self, forKey: .text))
             }
         }
 
@@ -1446,6 +1763,9 @@ struct VectorCanvasData: Codable {
             case .image(let ref):
                 try c.encode(Kind.image, forKey: .kind)
                 try c.encode(ref, forKey: .image)
+            case .text(let text):
+                try c.encode(Kind.text, forKey: .kind)
+                try c.encode(text, forKey: .text)
             }
         }
     }
@@ -1528,6 +1848,9 @@ struct VectorCanvasData: Codable {
     var images: [ImageRef] {
         elements.compactMap { if case .image(let ref) = $0 { return ref } else { return nil } }
     }
+    var texts: [VectorTextElement] {
+        elements.compactMap { if case .text(let text) = $0 { return text } else { return nil } }
+    }
 
     private enum CodingKeys: String, CodingKey {
         case elements, transform
@@ -1545,6 +1868,7 @@ struct VectorCanvasData: Codable {
             switch element {
             case .stroke(let stroke): return .stroke(stroke)
             case .fill(let fill): return .fill(fill)
+            case .text(let text): return .text(text)
             case .image(let el):
                 // An image whose PNG was never written has no name to reference, so it is dropped
                 // rather than persisted as a dangling ref.
@@ -1618,6 +1942,7 @@ struct VectorCanvasData: Codable {
             switch data {
             case .stroke(let stroke): return .stroke(stroke)
             case .fill(let fill): return .fill(fill)
+            case .text(let text): return .text(text)
             case .image(let ref):
                 guard let image = resolveImage(ref) else { return nil }
                 return .image(VectorImageElement(image: image,

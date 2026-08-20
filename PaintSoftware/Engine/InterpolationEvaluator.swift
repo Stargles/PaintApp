@@ -452,6 +452,14 @@ enum InterpolationEvaluator {
             case .image(let image):
                 guard !hidden(nil) else { return nil }
                 return .image(warped(image) { fallback?.map($0, direction) ?? $0 })
+            case .text:
+                // Passed through unwarped. A text object's geometry is a layout box plus the four
+                // points its corners map to (`TextFrame`), and warping the box's *corners* through
+                // the group warp is the projective work `ADD_TEXT.md` defers to stage 5 — a lattice
+                // map would bow the interior, which is §2's argument against bilinear verbatim.
+                // Hidden with the group like a fill or an image, so a hidden frame hides it.
+                guard !hidden(nil) else { return nil }
+                return element
             }
         }
     }
@@ -718,6 +726,11 @@ enum InterpolationEvaluator {
             case .fill(var fill):
                 fill.opacity *= Double(weight)
                 return .fill(fill)
+            case .text(var text):
+                // Text *does* have an opacity to fade, unlike a placed image: it is a scalar on the
+                // recipe, and `TextLayout.attributedString` folds it into the glyph colour.
+                text.recipe.opacity *= Double(weight)
+                return .text(text)
             case .image:
                 // Nothing to scale — point 3 above.
                 return element

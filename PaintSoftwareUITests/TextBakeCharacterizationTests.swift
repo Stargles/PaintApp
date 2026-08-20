@@ -385,20 +385,172 @@ final class TextBakeCharacterizationTests: XCTestCase {
         XCTAssertEqual(g, 1, accuracy: 0.01, "With no session live it is the brush's colour again.")
     }
 
-    // MARK: - Where stage 3 will change this
+    // MARK: - The other destination: a vector layer keeps the object
+    //
+    // This block replaced `testTextIsRefusedOnAVectorLayerForNow`, which pinned stage 1's refusal and
+    // said in its own comment that stage 3 would rewrite it. It is the same three claims as above,
+    // asked of the other branch of `commitInteractiveText`: where the result lands, how many undo
+    // steps it costs, and that `beginCanvasEdit()` is what triggers it.
 
-    /// **This is the test stage 3 rewrites.** Today a vector layer refuses text outright — the
-    /// Actions row is disabled with a note, and `beginTextSession` re-asks the same question so a
-    /// converted recording or a future call site cannot get around it. Stage 3 makes the answer nil
-    /// and the object stay editable; until then, "ships nothing it has to un-ship" means this.
-    func testTextIsRefusedOnAVectorLayerForNow() {
+    /// The cel's vector display list after `manager` has been driven, or a failure.
+    private func vectorElements(_ manager: CanvasManager, layerIndex: Int = 1) -> [VectorElement] {
+        guard let celIndex = manager.activeCelIndex(inLayer: layerIndex, atFrame: manager.currentFrame),
+              let canvas = manager.layers[layerIndex].cels[celIndex].vector else {
+            XCTFail("No vector canvas on the active cel")
+            return []
+        }
+        return canvas.elements
+    }
+
+    private func vectorManager() -> CanvasManager {
         let manager = manager()
         manager.addVectorLayer()
-        XCTAssertEqual(manager.activeLayerKind, .vector)
-        XCTAssertNotNil(Tool.textUnavailableReason(onLayerOfKind: .vector))
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        XCTAssertEqual(manager.activeLayerKind, .vector, "fixture precondition")
+        return manager
+    }
 
+    /// Alpha coverage of the cel's **raster tier alone** — the one `registerUndoableCelChange` writes
+    /// and the eraser stamps. `celPixels` above is the whole flatten, which on a vector cel includes
+    /// `VectorCanvas.render()`, so it cannot tell "the element drew" from "the bake ran".
+    private func rasterTierPixelCount(_ manager: CanvasManager, layerIndex: Int = 1) -> Int {
+        guard let celIndex = manager.activeCelIndex(inLayer: layerIndex, atFrame: manager.currentFrame),
+              let cg = manager.layers[layerIndex].cels[celIndex].raster.renderToUIImage().cgImage,
+              let bytes = CanvasFixture.rgbaBytes(cg) else {
+            XCTFail("Could not read the cel's raster tier")
+            return -1
+        }
+        return coveredPixelCount(bytes)
+    }
+
+    /// **Stage 3's headline, at the model level**: on a vector layer the commit produces an element
+    /// that *renders*, and no pixels in the raster tier.
+    ///
+    /// Both halves are load-bearing. Ink in `Cel.raster` as well would be uneraseable duplicate
+    /// content that doubles on the next re-edit; an element that renders nothing would be an object
+    /// the artist cannot see, which is the same bug the vector fill's own commit path warns about
+    /// ("the vector twin of the raster ghost-layer bug").
+    func testAVectorCommitLandsAnElementThatRendersAndNoRasterPixels() {
+        let manager = vectorManager()
+        placeText(manager, "Label")
+        manager.commitInteractiveText()
+
+        let elements = vectorElements(manager)
+        XCTAssertEqual(elements.count, 1)
+        XCTAssertEqual(elements.first?.text?.recipe.string, "Label")
+        XCTAssertEqual(rasterTierPixelCount(manager), 0,
+                       "A vector layer's text must not also bake into the cel's raster tier.")
+        XCTAssertGreaterThan(coveredPixelCount(celPixels(manager, layerIndex: 1)), 0,
+                             "…and the element has to actually draw, or it is an invisible object.")
+    }
+
+    /// The suppression is visible in the pixels, which is what it is for: while the editor is open
+    /// the flatten must not also show the committed glyphs underneath it, or the artist sees their
+    /// text twice.
+    func testAnOpenEditRemovesTheGlyphsFromTheFlatten() {
+        let manager = vectorManager()
+        let box = placeText(manager, "Label")
+        manager.commitInteractiveText()
+        let committed = coveredPixelCount(celPixels(manager, layerIndex: 1))
+        XCTAssertGreaterThan(committed, 0)
+
+        manager.beginTextSession(at: CGPoint(x: box.midX, y: box.midY))
+        XCTAssertEqual(coveredPixelCount(celPixels(manager, layerIndex: 1)), 0,
+                       "The object being edited is skipped by the flatten for the life of the session.")
+
+        manager.commitInteractiveText()
+        XCTAssertEqual(coveredPixelCount(celPixels(manager, layerIndex: 1)), committed,
+                       "…and comes back exactly as it was when the session commits unchanged.")
+    }
+
+    /// The whole point of the stage: tap the object again and the *same* object comes back, with the
+    /// recipe it was committed with, ready to retype.
+    func testTappingCommittedTextReopensTheSameObject() {
+        let manager = vectorManager()
+        let box = placeText(manager, "before")
+        manager.commitInteractiveText()
+        let committedID = vectorElements(manager).first?.id
+
+        manager.beginTextSession(at: CGPoint(x: box.midX, y: box.midY))
+        XCTAssertTrue(manager.textGestureActive, "A tap on the object opens an edit session.")
+        XCTAssertEqual(manager.textRecipe.string, "before",
+                       "The draft is loaded from the element, not reset to empty.")
+        XCTAssertEqual(manager.textEditingElementID, committedID)
+        XCTAssertTrue(manager.isTextEditLive)
+
+        manager.updateTextString("after")
+        manager.commitInteractiveText()
+
+        let elements = vectorElements(manager)
+        XCTAssertEqual(elements.count, 1, "Re-editing must not leave a second copy behind.")
+        XCTAssertEqual(elements.first?.id, committedID, "Same object, not a replacement.")
+        XCTAssertEqual(elements.first?.text?.recipe.string, "after")
+    }
+
+    /// Suppressed from the flatten, never lifted out of the array — `ADD_TEXT.md` §1, and the reason
+    /// is a data-loss window on a device documented to be killed by jetsam rather than to fail
+    /// gracefully. A save taken mid-edit must still contain the object.
+    func testAnOpenEditSuppressesWithoutRemoving() {
+        let manager = vectorManager()
+        let box = placeText(manager, "still here")
+        manager.commitInteractiveText()
+
+        manager.beginTextSession(at: CGPoint(x: box.midX, y: box.midY))
+        let celIndex = manager.activeCelIndex(inLayer: 1, atFrame: manager.currentFrame)
+        let canvas = manager.layers[1].cels[celIndex ?? 0].vector
+        XCTAssertEqual(canvas?.elements.count, 1)
+        XCTAssertNotNil(canvas?.editingElementID)
+        XCTAssertEqual(canvas?.texts.first?.recipe.string, "still here")
+    }
+
+    /// One step for the whole session, whatever happened inside it — claim 2 above, on the other
+    /// branch. Undo takes the object back out; redo puts it back.
+    func testAVectorSessionIsOneUndoStep() {
+        let manager = vectorManager()
+        placeText(manager, "typed one character at a time")
+        manager.commitInteractiveText()
+
+        XCTAssertEqual(manager.history.undo(), .addText)
+        XCTAssertFalse(manager.history.canUndo,
+                       "One step for the whole session, not one per keystroke.")
+        XCTAssertTrue(vectorElements(manager).isEmpty)
+        manager.redo()
+        XCTAssertEqual(vectorElements(manager).count, 1)
+    }
+
+    /// Emptying the box deletes the object, and that is its own single step.
+    func testEmptyingAReopenedBoxDeletesTheObject() {
+        let manager = vectorManager()
+        let box = placeText(manager, "delete me")
+        manager.commitInteractiveText()
+
+        manager.beginTextSession(at: CGPoint(x: box.midX, y: box.midY))
+        manager.updateTextString("")
+        manager.commitInteractiveText()
+
+        XCTAssertTrue(vectorElements(manager).isEmpty)
+        manager.undo()
+        XCTAssertEqual(vectorElements(manager).first?.text?.recipe.string, "delete me",
+                       "Undo of a delete restores the object it removed.")
+    }
+
+    /// A box placed on a vector layer and never typed into changes nothing, so it registers nothing —
+    /// the same rule the raster bake follows, and for the same reason.
+    func testAnEmptyVectorSessionRegistersNothing() {
+        let manager = vectorManager()
         manager.beginTextSession(at: CGPoint(x: 20, y: 20))
-        XCTAssertFalse(manager.textGestureActive,
-                       "The row is disabled, and the model refuses independently of the row.")
+        manager.commitInteractiveText()
+        XCTAssertFalse(manager.history.canUndo)
+    }
+
+    /// Claim 3 on the other branch: `beginCanvasEdit()` is the trigger, so anything that edits the
+    /// canvas commits the session without the text tool being told about it.
+    func testAnUnrelatedCanvasEditCommitsTheVectorSession() {
+        let manager = vectorManager()
+        placeText(manager, "committed by something else")
+        manager.beginCanvasEdit()
+        XCTAssertFalse(manager.textGestureActive)
+        XCTAssertEqual(vectorElements(manager).count, 1)
     }
 }

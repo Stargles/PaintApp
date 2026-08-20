@@ -1243,10 +1243,28 @@ struct CanvasView: UIViewRepresentable {
             let renderResolution: RenderResolution
         }
 
+        /// The active layer's content version as of the first key built after a vector text edit
+        /// opened, and the layer it belongs to. Nil whenever no such edit is live.
+        ///
+        /// **Latched forward, not backward, and that is the difference from `isSandwichStrokeLive`.**
+        /// A dab publishes nothing, so holding the *previous* pass's version is exactly right for a
+        /// stroke. Opening a text edit does the opposite: it sets `VectorCanvas.editingElementID`,
+        /// which invalidates, so the previous pass's version is the one that still had the object in
+        /// the flatten — freezing against it would leave the committed glyphs composited underneath
+        /// the live editor, i.e. the artist would see their text twice. So the first key after the
+        /// session opens is computed fresh and *then* held for the rest of it.
+        private var textEditHeldContent: (layerIndex: Int, content: LayerContentVersion?)?
+
         private func makeSandwichKey(tree: [RenderNode]) -> SandwichKey {
             let frame = canvasManager.currentFrame
             let active = canvasManager.currentLayerIndex
             let held = sandwichKey?.contents
+            // `ADD_TEXT.md` §4 rule 5, the belt to rule 4's braces: a text edit session bumps the
+            // canvas exactly twice (open, commit) on its own, and this stops anything *else* — a
+            // timeline tick is the case §4 names — moving the key mid-session and paying for the
+            // 276 ms snapshot `RenderRequest` records as the expensive half of a composite.
+            let textEditLive = canvasManager.isTextEditLive
+            if !textEditLive { textEditHeldContent = nil }
             let contents = canvasManager.layers.indices.map { index -> LayerContentVersion? in
                 // **The active layer's content version is in the key only while no stroke is in
                 // progress, and that one clause is both halves of the contract.** During a dab the
@@ -1258,7 +1276,13 @@ struct CanvasView: UIViewRepresentable {
                 if isSandwichStrokeLive, index == active, let held, held.indices.contains(index) {
                     return held[index]
                 }
-                guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
+                if textEditLive, index == active, let latch = textEditHeldContent, latch.layerIndex == index {
+                    return latch.content
+                }
+                guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else {
+                    if textEditLive, index == active { textEditHeldContent = (index, nil) }
+                    return nil
+                }
                 // `valueFill` and `effect` alongside the cel, exactly as `renderSources` builds it: a
                 // value layer's content is its colour or its grade rather than its (blank) cel, so a
                 // key built from the cel alone would not move when the artist recolours or regrades
@@ -1270,9 +1294,11 @@ struct CanvasView: UIViewRepresentable {
                 // the two builders are documented as mirrors of each other and a reader checking that
                 // should not find one of them quietly short a field — and because "the tree happens
                 // to carry it" is a property of the derivation, not a promise this key makes.
-                return LayerContentVersion(cel: canvasManager.layers[index].cels[celIndex],
-                                           valueFill: canvasManager.layers[index].valueFill,
-                                           effect: canvasManager.layers[index].layerEffect)
+                let content = LayerContentVersion(cel: canvasManager.layers[index].cels[celIndex],
+                                                  valueFill: canvasManager.layers[index].valueFill,
+                                                  effect: canvasManager.layers[index].layerEffect)
+                if textEditLive, index == active { textEditHeldContent = (index, content) }
+                return content
             }
             return SandwichKey(tree: tree, activeLayerIndex: active, frame: frame, contents: contents,
                                renderResolution: canvasManager.renderResolution)

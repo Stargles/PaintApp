@@ -233,8 +233,16 @@ enum TextLayout {
     ///
     /// The one place CoreText's y-up convention is flipped for drawing — `measure` flips it for
     /// reading. Two flips in one file, both stated, rather than a flip per call site.
-    private static func draw(_ recipe: TextRecipe, font: UIFont, boxSize: CGSize, clip: Bool,
-                             into cg: CGContext) {
+    ///
+    /// **Internal rather than private, and that is the whole of stage 3's rasterizer story.**
+    /// `render` (the raster bake), `renderBox` (the live overlay's bitmap) and
+    /// `VectorCanvas.draw(text:into:quality:)` (the vector flatten) are three destinations for one
+    /// set of glyphs, and every one of them arrives here. `ADD_TEXT.md` §2's closing warning is that
+    /// a shared *transform* does not make two rasterizers agree; sharing the rasterizer is what does,
+    /// and a vector path that laid its own text out would be the second one this design exists to
+    /// prevent.
+    static func draw(_ recipe: TextRecipe, font: UIFont, boxSize: CGSize, clip: Bool,
+                     into cg: CGContext) {
         let attributed = attributedString(recipe, font: font)
         let framesetter = CTFramesetterCreateWithAttributedString(attributed)
         cg.saveGState()
@@ -248,5 +256,66 @@ enum TextLayout {
         let ctFrame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
         CTFrameDraw(ctFrame, cg)
         cg.restoreGState()
+    }
+}
+
+// MARK: - Measure-only
+
+/// Where a placed text object's ink actually lands on the canvas, and **nothing that rasterizes**.
+///
+/// Split out from `TextLayout` under its own name because the distinction is the point rather than
+/// tidiness: this is what the display list's *geometry* queries call, from inside
+/// `VectorCanvas`'s non-reentrant lock, on paths (`collectResidueGarbage`, `hasContentBeneath`) that
+/// run per eraser commit. A helper that quietly reached for `renderBox` there would put a bitmap
+/// allocation inside a lock on the eraser's path, which is the shape of the 53.8 ms trap `BUGS.md`
+/// records. Everything here is CoreText measurement — one framesetter pass, no context, no image.
+///
+/// Nothing is cached, for `TextLayout`'s own stated reason: the object stores a recipe and never a
+/// result, a measurement is well under a millisecond at text-box size, and a stale one is a bug that
+/// survives a font change.
+enum TextMeasure {
+
+    /// The canvas-space rectangle the element's glyphs cover, or nil when it has no ink at all.
+    ///
+    /// Line boxes rather than glyph outlines — the union of each line's (ascent + descent) band over
+    /// its typographic width, offset to the frame. That is a superset of the true outline and a
+    /// subset of the frame, which is the honest direction for both callers: a `contentBounds` that
+    /// under-reported would let the garbage collector drop an `.erase` punch that was still hiding
+    /// something, and the visible result of that is ink reappearing where the artist erased it.
+    ///
+    /// **Exact while the frame is upright, conservative once it is not.** A rotated or distorted
+    /// frame (stages 4-5) falls back to `frame.boundingBox`, because its line boxes are measured in
+    /// box-local space and mapping them through the frame's map is the homography stage 5 introduces.
+    /// Larger is the safe side, and the fallback is stated here rather than silently wrong later.
+    static func inkBounds(of element: VectorTextElement, library: FontLibrary = .shared) -> CGRect? {
+        let recipe = element.recipe
+        guard !recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let frame = element.frame
+        let box = frame.boundingBox
+        guard box.width > 0, box.height > 0 else { return nil }
+        guard frame.isUprightTranslation else { return box }
+
+        let font = library.resolve(recipe.font, size: recipe.typography.clamped.pointSize).font
+        // A sized box wraps and clips into its own width; a pristine one was grown to fit and never
+        // wraps. Same pair of answers `TextLayout.render` hands `clip:`.
+        let metrics = TextLayout.measure(recipe, font: font,
+                                         maxWidth: frame.autoSize ? nil : frame.size.width)
+        var ink: CGRect?
+        for line in metrics.lines where line.width > 0 {
+            let rect = CGRect(x: line.baselineOrigin.x,
+                              y: line.baselineOrigin.y - line.ascent,
+                              width: line.width,
+                              height: line.ascent + line.descent)
+            ink = ink.map { $0.union(rect) } ?? rect
+        }
+        guard var result = ink else { return nil }
+        // A sized box hides what runs past it (`ADD_TEXT.md` §5.3, "overflow clips"), so ink outside
+        // it is not on the canvas and must not be claimed as a backdrop.
+        if !frame.autoSize {
+            let local = CGRect(origin: .zero, size: frame.size)
+            guard result.intersects(local) else { return nil }
+            result = result.intersection(local)
+        }
+        return result.offsetBy(dx: box.minX, dy: box.minY)
     }
 }

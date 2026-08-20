@@ -46,6 +46,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// `UITextView` supplies within-session undo for free (`ADD_TEXT.md` §2, and §5.1 for the
     /// behaviour the artist sees).
     case addText
+    /// Re-opening a text object that is already on a vector layer and committing it again —
+    /// retyped, restyled, moved, or emptied out (which deletes it). Distinct from `.addText` so the
+    /// history reads as what the artist did; both are still one step for the whole session.
+    /// `ADD_TEXT.md` stage 3.
+    case editText
 
     // MARK: Layer/folder structure
 
@@ -142,6 +147,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .duplicatePiece: return "duplicate"
         case .insertImage: return "insert image"
         case .addText: return "add text"
+        case .editText: return "edit text"
 
         case .addLayer: return "add layer"
         case .addVectorLayer: return "add vector layer"

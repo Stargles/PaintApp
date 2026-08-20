@@ -8,10 +8,12 @@ import UIKit
 // class itself (see `CanvasManager.swift`'s header — extensions cannot declare them); the layout and
 // the rasterizer live in `Engine/TextLayout.swift`; the editor is `Views/TextOverlayView.swift`.
 //
-// **Stage 1 is raster-only and it bakes.** `Tool.textUnavailableReason` is what keeps it off vector
-// layers, so this file never has to ask: by the time anything here runs, the target is a raster cel.
-// Stage 3 is what makes a vector layer keep the object editable instead, at which point the branch
-// belongs in `commitInteractiveText` and nowhere else.
+// **Stage 3 added the vector half, and the branch is where stage 1 said it would be**: in
+// `commitInteractiveText`, plus the one in `beginTextSession` that re-opens an object already on the
+// layer instead of placing a new one over it. Everything between those two — typing, the panel's
+// sliders, dragging the box — is identical for both destinations, because the draft tier is the same
+// draft tier and `TextLayout` is the same rasterizer. On a raster layer the session bakes to pixels;
+// on a vector layer it lands as a `VectorTextElement` in the display list and stays editable forever.
 
 extension CanvasManager {
 
@@ -47,7 +49,8 @@ extension CanvasManager {
         }
     }
 
-    /// The text tool's placement tap. Puts an empty box at `canvasPoint` on the active raster cel.
+    /// The text tool's placement tap. Puts an empty box at `canvasPoint` on the active cel — **or, on
+    /// a vector layer, re-opens the text object already sitting under the tap.**
     ///
     /// **`beginCanvasEdit()` first**, exactly as `beginInteractiveShape` and `beginInteractiveFill`
     /// do: placing a new box is a canvas edit, so whatever was still pending — including a previous
@@ -65,8 +68,34 @@ extension CanvasManager {
         let layerIndex = currentLayerIndex
         guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return }
 
-        textGestureLayerID = layers[layerIndex].id
-        textGestureCelID = layers[layerIndex].cels[celIndex].id
+        let layerID = layers[layerIndex].id
+        let celID = layers[layerIndex].cels[celIndex].id
+        textGestureLayerID = layerID
+        textGestureCelID = celID
+        textEditingElementID = nil
+
+        // **The whole point of stage 3**: on a vector layer the object is still there, so a tap on it
+        // reopens the same object rather than dropping a second one on top. `topmostText` hits the
+        // *box*, not the glyphs — tapping the hole in an "O" is tapping the text.
+        if layers[layerIndex].kind == .vector,
+           let vectorCanvas = layers[layerIndex].cels[celIndex].vector,
+           let existing = vectorCanvas.topmostText(atCanvasPoint: canvasPoint) {
+            let draft = vectorCanvas.canvasText(fromLocal: existing)
+            textRecipe = draft.recipe
+            textFrame = draft.frame
+            textEditingElementID = existing.id
+            // Suppressed from the flatten, never lifted out of the array — `ADD_TEXT.md` §1/§2, and
+            // this assignment is the session's **first and only** invalidation until it commits.
+            vectorCanvas.editingElementID = existing.id
+            textFontSubstitution = TextLayout.resolvedFont(for: textRecipe).substitution
+            textGestureActive = true
+            textFingerDown = false
+            textIsFocused = false
+            celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+            refreshUndoRedoState()
+            return
+        }
+
         // The recipe carries over from the previous session — font, size, tracking, colour. An
         // artist labelling six things in a row sets the type once, which is what every other tool in
         // this app does with its settings and what the panel's sliders would otherwise mean nothing
@@ -183,17 +212,29 @@ extension CanvasManager {
         let frame = textFrame
         let layerID = textGestureLayerID
         let celID = textGestureCelID
+        let editingID = textEditingElementID
         defer {
             textGestureLayerID = nil
             textGestureCelID = nil
+            textEditingElementID = nil
             objectWillChange.send()
             refreshUndoRedoState()
         }
-        guard !recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let layerID, let celID, let canvasSize,
+        guard let layerID, let celID, let canvasSize,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
 
+        // **The layer's kind decides the destination outright**, exactly as `commitInteractiveFill`'s
+        // does and for the same reason: the two tiers are invisible to each other's renderer, so
+        // there is no fallback between them. A vector layer keeps a real element; a raster layer
+        // gets pixels.
+        if layers[layerIndex].kind == .vector {
+            commitTextToVector(recipe: recipe, frame: frame, editingID: editingID,
+                               layerIndex: layerIndex, celIndex: celIndex, layerID: layerID, celID: celID)
+            return
+        }
+
+        guard !recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard let glyphs = TextLayout.render(recipe: recipe, frame: frame, canvasSize: canvasSize) else { return }
 
         let cel = layers[layerIndex].cels[celIndex]
@@ -210,14 +251,93 @@ extension CanvasManager {
         scheduleThumbnailRegen(layerID: layerID, celID: celID)
     }
 
+    /// The vector arm of the commit: the draft becomes a real element in the cel's display list,
+    /// upserted **at its own index** so a re-edit cannot change what the object is in front of.
+    ///
+    /// One undo step for the whole session, whatever happened inside it — retyping, restyling,
+    /// dragging the box, or deleting every character (which removes the object). Not one per
+    /// keystroke: `UndoHistory`'s `cost` accounting was never sized for 200 entries out of one
+    /// sentence, and `UITextView` supplies within-session undo for free (`ADD_TEXT.md` §2, §5.1).
+    ///
+    /// A session that placed a box and typed nothing registers nothing at all — the same rule the
+    /// raster bake follows, and for the same reason: an "undo add text" that removes nothing is a
+    /// step the artist has to press through to reach real work.
+    private func commitTextToVector(recipe: TextRecipe, frame: TextFrame, editingID: UUID?,
+                                    layerIndex: Int, celIndex: Int, layerID: UUID, celID: UUID) {
+        // A vector layer's cel should always have a `VectorCanvas`, but a text object landing in the
+        // cel's raster would paint into a buffer a vector layer never displays — i.e. it would
+        // silently vanish. Materialise one instead. `commitInteractiveShape`'s reasoning, verbatim.
+        if layers[layerIndex].cels[celIndex].vector == nil, let canvasSize {
+            layers[layerIndex].cels[celIndex].vector = .empty(size: canvasSize)
+        }
+        guard let vectorCanvas = layers[layerIndex].cels[celIndex].vector else { return }
+
+        let before = vectorCanvas.elements
+        let isBlank = recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let element: VectorTextElement? = isBlank ? nil
+            : vectorCanvas.localText(fromCanvas: VectorTextElement(id: editingID ?? UUID(),
+                                                                   recipe: recipe, frame: frame))
+        // One call, so un-suppressing and applying are one invalidation — the session's second and
+        // last (`ADD_TEXT.md` §4 rule 4).
+        let changed = vectorCanvas.commitTextEdit(editingID: editingID, element: element)
+        guard changed else { return }
+
+        registerVectorTextUndo(vectorCanvas: vectorCanvas, oldElements: before,
+                               newElements: vectorCanvas.elements, layerID: layerID, celID: celID,
+                               label: editingID == nil ? .addText : .editText)
+        // Committing never goes through `strokeEnded`, so the layer panel keeps showing the cel as
+        // it was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.
+        scheduleThumbnailRegen(layerID: layerID, celID: celID)
+    }
+
+    /// `registerVectorFillUndo`'s twin, with one deliberate difference: it swaps the **whole
+    /// `elements` array** rather than one kind-filtered bucket.
+    ///
+    /// The kind-filtered setters gather every element of their kind back at the first one's index, so
+    /// a get→set round trip over a list where text is interleaved with strokes is order-stable only
+    /// for the bucket as a whole. Text *is* interleaved by construction — `upsertText` appends a new
+    /// object above whatever strokes are already there — so an undo through `texts` could quietly
+    /// move an object's z-position. The whole-array swap has nothing to reconstruct.
+    ///
+    /// Coarse-grained is what every other element kind already does; this adds no new undo machinery,
+    /// only a wider slice of the same one.
+    func registerVectorTextUndo(vectorCanvas: VectorCanvas,
+                                oldElements: [VectorElement], newElements: [VectorElement],
+                                layerID: UUID, celID: UUID, label: HistoryActionLabel) {
+        let cost = (oldElements.count + newElements.count) * 512
+        recordUndo(label: label, cost: cost, undo: { [weak self] in
+            vectorCanvas.elements = oldElements
+            vectorCanvas.bumpVersion()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        }, redo: { [weak self] in
+            vectorCanvas.elements = newElements
+            vectorCanvas.bumpVersion()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        })
+    }
+
     /// Throws the draft away without baking. The first arm of
     /// `finalizePendingGesturesForHistoryAction`'s three-way branch — a box under the finger when
     /// undo is pressed is discarded, exactly as a fill or a shape under the finger is.
+    ///
+    /// **A re-edit that is cancelled puts the object back**, which is the half a raster session has
+    /// no equivalent of: the element never left the display list, so all that is owed is clearing the
+    /// suppression. Doing it here rather than leaving it to the commit is what stops an undo pressed
+    /// mid-edit leaving a committed object permanently invisible.
     func cancelInteractiveText() {
         guard textGestureActive else { return }
         textGestureActive = false
         textFingerDown = false
         textIsFocused = false
+        if let layerID = textGestureLayerID, let celID = textGestureCelID,
+           textEditingElementID != nil,
+           let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
+           let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }),
+           let vectorCanvas = layers[layerIndex].cels[celIndex].vector {
+            vectorCanvas.editingElementID = nil
+            celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        }
+        textEditingElementID = nil
         textGestureLayerID = nil
         textGestureCelID = nil
         objectWillChange.send()

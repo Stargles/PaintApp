@@ -1219,6 +1219,12 @@ extension CanvasManager {
                 }
             case .image(let image):
                 points.append(image.transform.position)
+            case .text:
+                // Deliberately contributes nothing. `InterpolationEvaluator` passes text through
+                // unwarped (see its element switch), so sizing the lattice to cover a text object
+                // would only make the lattice bigger without anything inside it moving. Interpolating
+                // text is future work — VECTOR_INTERPOLATION.md's list, not `ADD_TEXT.md` stage 3.
+                continue
             }
         }
         return points

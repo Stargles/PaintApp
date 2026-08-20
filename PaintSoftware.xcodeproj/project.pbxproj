@@ -152,6 +152,8 @@
 		83228C9D6C066AEBE8B60A02 /* PaintSoftware/Models/CanvasManager+Text.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83228C9D6C066AEBE8B60A01 /* PaintSoftware/Models/CanvasManager+Text.swift */; };
 		6323A1DC0C883394F7DB1C02 /* TextLayoutLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6323A1DC0C883394F7DB1C01 /* TextLayoutLogicTests.swift */; };
 		A5A68D38B724AC5E7B05CC02 /* TextRecipeCodableLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */; };
+		3BC10692C536232621C6BB02 /* VectorTextPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */; };
+		23646AF05A85FB19D06D7B02 /* TextHitTestLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */; };
 		0997C0EA936D7E159238B002 /* FontResolveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */; };
 		7F1EC86AAE98AC9EBE2C6C02 /* TextBakeCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */; };
 		D5F38D4131EF5A758BC466D8 /* PaintSoftware/Views/GalleryOpenState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */; };
@@ -318,6 +320,8 @@
 		83228C9D6C066AEBE8B60A01 /* PaintSoftware/Models/CanvasManager+Text.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Text.swift"; sourceTree = "<group>"; };
 		6323A1DC0C883394F7DB1C01 /* TextLayoutLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextLayoutLogicTests.swift; sourceTree = "<group>"; };
 		A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextRecipeCodableLogicTests.swift; sourceTree = "<group>"; };
+		3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorTextPersistenceLogicTests.swift; sourceTree = "<group>"; };
+		23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextHitTestLogicTests.swift; sourceTree = "<group>"; };
 		0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FontResolveLogicTests.swift; sourceTree = "<group>"; };
 		7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextBakeCharacterizationTests.swift; sourceTree = "<group>"; };
 		3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/GalleryOpenState.swift; sourceTree = "<group>"; };
@@ -394,6 +398,8 @@
 			children = (
 				6323A1DC0C883394F7DB1C01 /* TextLayoutLogicTests.swift */,
 				A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */,
+				3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */,
+				23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */,
 				0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */,
 				7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */,
 				B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */,
@@ -664,6 +670,8 @@
 				83228C9D6C066AEBE8B60A02 /* PaintSoftware/Models/CanvasManager+Text.swift in Sources */,
 				6323A1DC0C883394F7DB1C02 /* TextLayoutLogicTests.swift in Sources */,
 				A5A68D38B724AC5E7B05CC02 /* TextRecipeCodableLogicTests.swift in Sources */,
+				3BC10692C536232621C6BB02 /* VectorTextPersistenceLogicTests.swift in Sources */,
+				23646AF05A85FB19D06D7B02 /* TextHitTestLogicTests.swift in Sources */,
 				0997C0EA936D7E159238B002 /* FontResolveLogicTests.swift in Sources */,
 				7F1EC86AAE98AC9EBE2C6C02 /* TextBakeCharacterizationTests.swift in Sources */,
 				5B37DD56067E721840FE9C66 /* PaintSoftware/Models/CanvasPresentation.swift in Sources */,

@@ -414,6 +414,7 @@ final class BrushEngineLogicTests: XCTestCase {
             switch $0 {
             case .fill: return "fill"
             case .image: return "image"
+            case .text: return "text"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -424,6 +425,7 @@ final class BrushEngineLogicTests: XCTestCase {
             switch $0 {
             case .fill: return "fill"
             case .image: return "image"
+            case .text: return "text"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }

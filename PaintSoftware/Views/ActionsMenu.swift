@@ -112,10 +112,12 @@ struct ActionsMenu: View {
     ///
     /// **Disabled rather than hidden where text cannot go, with the reason underneath it.** The row
     /// is the feature's only signpost: hidden, "can this app do text" has no answer on the layer the
-    /// artist happens to be standing on, and they conclude it cannot. `ADD_TEXT.md` ships stage 1
-    /// raster-only and says it "ships nothing it has to un-ship", so a row that half-worked on a
-    /// vector layer — baking pixels onto a layer whose whole point is that its content stays
-    /// editable geometry — is the thing being avoided, and saying so plainly is the honest version.
+    /// artist happens to be standing on, and they conclude it cannot.
+    ///
+    /// As of `ADD_TEXT.md` stage 3 the only kind that still refuses is `.value`, and that one is not
+    /// a "yet": a layer holding no pixels has nothing for text to mean. Raster bakes the glyphs;
+    /// vector keeps the object editable. The row was disabled on vector through stage 1 precisely so
+    /// that nothing had to be un-shipped when this arrived.
     ///
     /// `Tool.textUnavailableReason` is where the answer lives, keyed off the layer's *kind*: the
     /// caption and the disabled state read one value, so they cannot disagree about whether the row

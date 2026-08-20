@@ -1958,6 +1958,23 @@ final class CanvasManager: ObservableObject {
     /// array positions before it commits (`shapeGestureLayerID`'s reasoning).
     var textGestureLayerID: UUID?
     var textGestureCelID: UUID?
+    /// The id of the **already-committed vector element** this session re-opened, or nil for a box
+    /// that does not exist in any display list yet (a fresh placement, or any raster session).
+    ///
+    /// It is what makes the commit an upsert at the element's own index instead of an append, so
+    /// re-typing the label behind a drawing does not pull it in front of it, and it is what the
+    /// session's `VectorCanvas.editingElementID` suppression is set from. `ADD_TEXT.md` stage 3.
+    var textEditingElementID: UUID?
+    /// True while this session is re-editing a text object that is still sitting in a vector layer's
+    /// display list, suppressed from the flatten. What `CanvasView`'s `makeSandwichKey` reads to
+    /// freeze the active layer's content version for the session (`ADD_TEXT.md` §4 rule 5) — the
+    /// belt to rule 4's braces, and what stops an unrelated bump (a timeline tick) triggering a
+    /// full-canvas snapshot mid-edit.
+    ///
+    /// Deliberately *not* simply `textGestureActive`: a fresh box on a raster layer has nothing in
+    /// any display list to freeze against, and freezing there would hold the active layer's version
+    /// stale across whatever else the artist does while the box sits adjustable.
+    var isTextEditLive: Bool { textGestureActive && textEditingElementID != nil }
     /// What the font actually resolved to, and why it is not what was asked for. Recomputed on
     /// every recipe change by `refreshTextFontResolution()`; the panel shows it. Nil while no
     /// session is live.
