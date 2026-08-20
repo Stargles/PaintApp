@@ -2863,8 +2863,22 @@ final class PerfBaselineTests: XCTestCase {
     /// at version 0, so nothing memoized on cel identity can hit. That is an integer about the calls,
     /// so it survives a contended machine in a way milliseconds do not, and it is what 9(c) has to
     /// move rather than merely shrink.
+    /// **It measures both entry points against the same package in one run**, which is the only way to
+    /// compare them honestly on this Mac: several suites run at once here, and a figure from one
+    /// invocation against a figure from another is a comparison of host load as much as of code. The
+    /// blocking `load(from:)` is what a test or a reload-to-verify pays; `loadInBackground` is what the
+    /// gallery tap pays.
+    ///
+    /// **The gallery path is measured first, and the order is not arbitrary.** The first load in a
+    /// process has to fault in one fresh canvas-sized bitmap per cel — 256 MiB at this fixture — and
+    /// the second reuses pages the first already touched. Measured both ways while writing this: the
+    /// same code reported ~130 ms of decode on a second load against ~280 ms on a first, on one
+    /// contended run. That gap is larger than anything item 9(b) does, so which load is measured first
+    /// decides the answer. A fresh launch and a tap is a *first* load, so that is the one the gallery
+    /// figure describes. The blocking rows below it are consequently **warm and a floor**, useful for
+    /// the split between decode and thumbnails rather than as an absolute.
     @MainActor
-    func testWhatOpeningAMultiCelProjectCosts() {
+    func testWhatOpeningAMultiCelProjectCosts() async {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("perf-open-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -2876,51 +2890,99 @@ final class PerfBaselineTests: XCTestCase {
 
         let layerCount = Self.openLayerCount, celsPerLayer = Self.openCelsPerLayer
         let url = ProjectStore.createNewProjectURL(name: "Perf Open")
-        var saveSeconds = 0.0
+        // The snapshot `save` takes is synchronous, so the authoring document can go the moment it
+        // returns — which matters here: it holds one canvas-sized bitmap per cel, and keeping it
+        // alive across the loads below would put a quarter of a gigabyte into every peak reported.
+        let written = expectation(description: "the package is on disk")
+        let saveStarted = CFAbsoluteTimeGetCurrent()
         autoreleasepool {
             let authored = multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer)
-            let written = expectation(description: "the package is on disk")
-            let start = CFAbsoluteTimeGetCurrent()
             ProjectStore.save(authored, to: url) { written.fulfill() }
-            wait(for: [written], timeout: 600)
-            saveSeconds = CFAbsoluteTimeGetCurrent() - start
         }
+        await fulfillment(of: [written], timeout: 600)
+        let saveSeconds = CFAbsoluteTimeGetCurrent() - saveStarted
 
-        // The flatten memo must not be able to answer for a cel this load is about to rebuild. It
-        // cannot in the app — a fresh launch has an empty cache — and it holds entries here only
-        // because the authoring document above was built in the same process.
+        // The flatten memo must not be able to answer for a cel a load is about to rebuild. It cannot
+        // in the app — a fresh launch has an empty cache — and it holds entries here only because the
+        // authoring document above was built in the same process.
         PixelOps.clearRasterizeCache()
 
-        var manager: CanvasManager?
-        let open = measuringPeakMemory { manager = ProjectStore.load(from: url) }
-        guard let manager, let profile = ProjectStore.lastLoadProfile else {
+        var galleryProfile: ProjectStore.LoadProfile?
+        var backfillSeconds = 0.0
+        var backfilledThumbnails = 0
+        var placeholdersAtOpen = 0
+        var celCountAtOpen = 0
+        do {
+            let start = CFAbsoluteTimeGetCurrent()
+            let opened = await ProjectStore.loadInBackground(from: url)
+            let openedIn = CFAbsoluteTimeGetCurrent() - start
+            guard let opened, let profile = ProjectStore.lastLoadProfile else {
+                return XCTFail("The package must also open through the gallery path")
+            }
+            galleryProfile = profile
+            celCountAtOpen = opened.layers.reduce(0) { $0 + $1.cels.count }
+            placeholdersAtOpen = opened.layers.reduce(0) { $0 + $1.cels.filter { $0.thumbnail == nil }.count }
+            let backfillStart = CFAbsoluteTimeGetCurrent()
+            await opened.thumbnailBackfillTask?.value
+            backfillSeconds = CFAbsoluteTimeGetCurrent() - backfillStart
+            backfilledThumbnails = opened.thumbnailRegenerationCount
+            // Reported rather than asserted: `openedIn` includes the queue hops the profile does not.
+            report("project open — the gallery path, cold, \(layerCount)x\(celsPerLayer) cels at 2048x1024", [
+                ("cels", "\(profile.celCount)"),
+                ("awaitedTotal", milliseconds(openedIn)),
+                ("profileTotal", milliseconds(profile.totalSeconds)),
+                ("msPerCel", String(format: "%.1f", profile.celCount > 0 ? openedIn * 1000 / Double(profile.celCount) : 0)),
+                ("at100Cels", milliseconds(profile.celCount > 0 ? openedIn * 100 / Double(profile.celCount) : 0)),
+                ("thumbnailsInline", milliseconds(profile.thumbnailSeconds)),
+                ("thumbnailRegensInline", "\(profile.thumbnailRegenerations)"),
+                ("backfillAfter", milliseconds(backfillSeconds)),
+                ("decodedOnMain", "\(profile.decodedOnMainThread)"),
+            ])
+        }
+
+        // Second, and therefore warm: see this function's header. The split between decode and
+        // thumbnails is what these rows are for.
+        PixelOps.clearRasterizeCache()
+        var blockingPeak: UInt64 = 0
+        autoreleasepool { blockingPeak = measuringPeakMemory { _ = ProjectStore.load(from: url) }.peakBytes }
+        guard let blocking = ProjectStore.lastLoadProfile else {
             return XCTFail("The package this test just wrote must open")
         }
 
-        report("project open, \(layerCount) layers x \(celsPerLayer) cels at 2048x1024", [
-            ("cels", "\(profile.celCount)"),
-            ("total", milliseconds(profile.totalSeconds)),
-            ("decode", milliseconds(profile.decodeSeconds)),
-            ("thumbnails", milliseconds(profile.thumbnailSeconds)),
-            ("thumbnailShare", String(format: "%.2f", profile.thumbnailShare)),
-            ("msPerCel", String(format: "%.1f", profile.millisecondsPerCel)),
-            ("at100Cels", milliseconds(profile.millisecondsPerCel * 100 / 1000)),
-            ("thumbnailRegens", "\(profile.thumbnailRegenerations)"),
-            ("peak", megabytes(open.peakBytes)),
+        report("project open — blocking and warm, \(layerCount) layers x \(celsPerLayer) cels at 2048x1024", [
+            ("cels", "\(blocking.celCount)"),
+            ("total", milliseconds(blocking.totalSeconds)),
+            ("decode", milliseconds(blocking.decodeSeconds)),
+            ("thumbnails", milliseconds(blocking.thumbnailSeconds)),
+            ("thumbnailShare", String(format: "%.2f", blocking.thumbnailShare)),
+            ("msPerCel", String(format: "%.1f", blocking.millisecondsPerCel)),
+            ("at100Cels", milliseconds(blocking.millisecondsPerCel * 100 / 1000)),
+            ("thumbnailRegens", "\(blocking.thumbnailRegenerations)"),
+            ("peak", megabytes(blockingPeak)),
             ("saveForReference", milliseconds(saveSeconds)),
         ])
 
         // Structure, not timing — these hold on any machine at any load.
-        XCTAssertEqual(profile.layerCount, layerCount)
-        XCTAssertEqual(profile.celCount, layerCount * celsPerLayer)
-        XCTAssertEqual(manager.layers.count, layerCount)
-        // The headless half of item 9(a): opening an N-cel project costs exactly N uncached
-        // thumbnail rasterizes, on the main actor, after an N-cel decode has already run.
-        XCTAssertEqual(profile.thumbnailRegenerations, profile.celCount,
-                       "Every cel is rasterized once for its thumbnail during a load, and the cache cannot help — see `LoadProfile`")
+        XCTAssertEqual(blocking.layerCount, layerCount)
+        XCTAssertEqual(blocking.celCount, layerCount * celsPerLayer)
+        XCTAssertTrue(blocking.decodedOnMainThread, "`load(from:)` is the blocking entry point")
+        // The headless half of item 9(a): the blocking open rasterizes every cel once for its
+        // thumbnail, on the main actor, after an N-cel decode has already run — and the cache cannot
+        // help, because every texture it just built is a new object identity at version 0.
+        XCTAssertEqual(blocking.thumbnailRegenerations, blocking.celCount,
+                       "Every cel is rasterized once for its thumbnail during a blocking load — see `LoadProfile`")
+
+        // …and the headless half of 9(b) and 9(c): the gallery's open pays neither.
+        XCTAssertEqual(galleryProfile?.decodedOnMainThread, false, "item 9(b)")
+        XCTAssertEqual(galleryProfile?.thumbnailRegenerations, 0, "item 9(c)")
+        XCTAssertEqual(placeholdersAtOpen, celCountAtOpen,
+                       "every cel arrives on its placeholder and is filled in afterwards")
+        XCTAssertEqual(backfilledThumbnails, celCountAtOpen,
+                       "the deferred pass renders exactly one thumbnail per cel — the work moved, it did not vanish")
+
         // An order-of-magnitude ceiling in this file's house style. Read the reported numbers; do not
         // tighten this into a timing assertion on a machine that runs several suites at once.
-        XCTAssertLessThan(profile.totalSeconds, 120.0,
+        XCTAssertLessThan(blocking.totalSeconds, 120.0,
                           "Opening a 32-cel project taking two minutes is structural, not contention")
     }
 

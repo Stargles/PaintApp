@@ -1264,19 +1264,53 @@ final class CanvasManager: ObservableObject {
     /// view update.
     private(set) var thumbnailRegenerationCount = 0
 
+    /// Records renders performed by the deferred backfill, which happen off the main actor and so
+    /// cannot bump the counter where they run.
+    ///
+    /// Kept on the *same* counter deliberately. It means "cel rasterizes charged to thumbnails", and
+    /// a second counter would make the blocking and deferred opens incomparable — which is exactly
+    /// the comparison item 9(c) exists to make.
+    func recordThumbnailRenders(_ count: Int) { thumbnailRegenerationCount += count }
+
+    /// The deferred thumbnail pass started by `ProjectStore.loadInBackground`, if one is running —
+    /// see `startThumbnailBackfill` (PERFORMANCE.md item 9(c)). Held so a second load can cancel the
+    /// first's, and so a test can await it rather than sleep. Not `@Published`: nothing draws from it.
+    var thumbnailBackfillTask: Task<Void, Never>?
+
+    /// The timeline/layer-panel thumbnail box. Named because two renderers now fit into it — the
+    /// synchronous regen below and the deferred backfill in `CanvasManager+Document.swift` — and a
+    /// second literal is how they would start disagreeing about what a thumbnail is.
+    static let celThumbnailSize = CGSize(width: 120, height: 120)
+
+    /// One cel's thumbnail pixels. **Pure, and reachable from any thread**: it reads the cel it is
+    /// handed and nothing else, which is what lets the deferred backfill render off the main actor
+    /// through the *same* code the synchronous path uses. Every tier it touches serialises on its own
+    /// lock — see `PixelOps.parallelMap`, which makes the same argument at length.
+    static func celThumbnailImage(for cel: Cel, canvasSize: CGSize) -> UIImage {
+        if cel.bakedImage != nil || cel.vector != nil {
+            // PixelOps.rasterize folds fillImage/bakedImage/raster/vector into one image already.
+            return ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize),
+                                            canvasSize: canvasSize, thumbnailSize: celThumbnailSize)
+        }
+        return ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage,
+                                        canvasSize: canvasSize, thumbnailSize: celThumbnailSize)
+    }
+
     func regenerateThumbnail(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex),
               let canvasSize else { return }
         thumbnailRegenerationCount += 1
-        let cel = layers[layerIndex].cels[celIndex]
-        let image: UIImage
-        if cel.bakedImage != nil || cel.vector != nil {
-            // PixelOps.rasterize folds fillImage/bakedImage/raster/vector into one image already.
-            image = ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize), canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
-        } else {
-            image = ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage, canvasSize: canvasSize, thumbnailSize: CGSize(width: 120, height: 120))
-        }
+        let image = Self.celThumbnailImage(for: layers[layerIndex].cels[celIndex], canvasSize: canvasSize)
+        installThumbnail(image, layerIndex: layerIndex, celIndex: celIndex)
+    }
+
+    /// Puts a rendered thumbnail on its cel, and on the layer too when that cel is the one the
+    /// playhead is over. The single writer, so the deferred backfill cannot install one differently
+    /// from the synchronous path.
+    func installThumbnail(_ image: UIImage, layerIndex: Int, celIndex: Int) {
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].thumbnail = image
         if activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
             layers[layerIndex].thumbnail = image

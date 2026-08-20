@@ -623,7 +623,14 @@ enum ProjectStore {
             }
         }
         return await MainActor.run {
-            assemble(manifest: manifest, decoded: decoded.value, url: url, startedAt: loadStarted)
+            let manager = assemble(manifest: manifest, decoded: decoded.value, url: url,
+                                   startedAt: loadStarted, generatingThumbnails: false)
+            // Item 9(c). The thumbnails are a third of what an open used to cost (MEASURED: 96.3 ms
+            // of 303.6 ms) and none of it is needed to show the artwork, so the open no longer waits
+            // on it — see `CanvasManager.backfillMissingThumbnails`, which also explains why the
+            // placeholder is `nil` and why a stale thumbnail is the failure this is arranged around.
+            manager.startThumbnailBackfill()
+            return manager
         }
     }
 
@@ -769,9 +776,17 @@ enum ProjectStore {
 
     /// The main-actor half: everything that touches `@Published` state, given cels somebody else
     /// already decoded.
+    ///
+    /// **`generatingThumbnails` is the one place the two entry points genuinely differ in what they
+    /// hand back, so it is a parameter rather than a hidden branch.** `load(from:)` returns a
+    /// fully-formed manager because its callers read it on the next line — twenty-odd tests, and every
+    /// path that reloads a package to check it. `loadInBackground` returns one whose cel thumbnails
+    /// are nil and arriving, because the only caller that path has is a gallery tap, where a third of
+    /// the wait is worth more than a timeline that is already populated on the first frame.
     @MainActor
     private static func assemble(manifest: ProjectManifest, decoded: DecodedCels,
-                                 url: URL, startedAt loadStarted: CFAbsoluteTime) -> CanvasManager {
+                                 url: URL, startedAt loadStarted: CFAbsoluteTime,
+                                 generatingThumbnails: Bool = true) -> CanvasManager {
         let celsByLayer = decoded.celsByLayer
         let manager = CanvasManager()
         manager.projectID = manifest.id
@@ -848,7 +863,7 @@ enum ProjectStore {
         migrateGroupVisibility(manager, folders: manifest.folders)
         manager.currentLayerIndex = 0
         let decodeFinished = CFAbsoluteTimeGetCurrent()
-        manager.regenerateAllThumbnails()
+        if generatingThumbnails { manager.regenerateAllThumbnails() }
         let loadFinished = CFAbsoluteTimeGetCurrent()
         lastLoadProfile = LoadProfile(
             layerCount: layers.count,

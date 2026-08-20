@@ -956,4 +956,102 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(background?.layers.count, 1)
     }
 
+    // MARK: - The deferred thumbnail pass (PERFORMANCE.md item 9(c))
+
+    /// The gallery's open does not walk every cel a second time to make thumbnails, and the pass that
+    /// replaces it fills in every one.
+    ///
+    /// **Both halves are the test.** Deferring alone would be a regression dressed as an optimisation
+    /// — a timeline of empty blocks is worse than a slower open — so "the open costs zero thumbnail
+    /// rasterizes" is only worth asserting beside "and the backfill produces exactly as many as there
+    /// are cels". `thumbnailRegenerationCount` is the same counter on both sides on purpose, which is
+    /// what makes the two numbers comparable at all.
+    func testTheGalleryOpenDefersThumbnailsAndTheBackfillFillsEveryOne() async {
+        let manager = makeManager()
+        for start in [16, 20, 24] {
+            XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: start, frameCount: 2))
+        }
+        let url = projectURL()
+        let written = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(manager, to: url) { written.fulfill() }
+        await fulfillment(of: [written], timeout: 120)
+
+        guard let opened = await ProjectStore.loadInBackground(from: url),
+              let profile = ProjectStore.lastLoadProfile else {
+            return XCTFail("The saved package should open through the gallery path")
+        }
+        let celCount = opened.layers.reduce(0) { $0 + $1.cels.count }
+        XCTAssertGreaterThan(celCount, 4, "Setup: the deferral is only interesting with several cels")
+        XCTAssertEqual(profile.thumbnailRegenerations, 0,
+                       "the gallery's open must not walk every cel a second time — item 9(c)")
+        XCTAssertNotNil(opened.thumbnailBackfillTask, "…and it must have started the pass that will")
+
+        await opened.thumbnailBackfillTask?.value
+        XCTAssertEqual(opened.thumbnailRegenerationCount, celCount,
+                       "the backfill renders exactly one thumbnail per cel")
+        for (layerIndex, layer) in opened.layers.enumerated() {
+            for (celIndex, cel) in layer.cels.enumerated() {
+                XCTAssertNotNil(cel.thumbnail,
+                                "layer \(layerIndex) cel \(celIndex) is still on its placeholder after the backfill")
+            }
+        }
+    }
+
+    /// The pass leaves alone anything that already has a thumbnail — the half of the staleness guard
+    /// that can be pinned without racing it.
+    ///
+    /// A cel the artist edits between the open and the pass gets a debounced regen of its own, and
+    /// that regen's image is the newer one. If the backfill overwrote it, the artist would be looking
+    /// at a picture of the drawing as it was before their stroke, indefinitely, with nothing to
+    /// connect it to anything they did. So: same object, not merely an equal one.
+    func testTheBackfillNeverOverwritesAThumbnailThatAlreadyExists() async {
+        let manager = makeManager()
+        XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 16, frameCount: 2))
+        let url = projectURL()
+        let written = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(manager, to: url) { written.fulfill() }
+        await fulfillment(of: [written], timeout: 120)
+
+        guard let opened = await ProjectStore.loadInBackground(from: url) else {
+            return XCTFail("The saved package should open")
+        }
+        opened.thumbnailBackfillTask?.cancel()
+        await opened.thumbnailBackfillTask?.value
+
+        // Stand in for the debounced regen an edit would have scheduled.
+        opened.regenerateThumbnail(layerIndex: 0, celIndex: 0)
+        guard let alreadyThere = opened.layers[0].cels[0].thumbnail else {
+            return XCTFail("Setup: the stand-in regen should have produced a thumbnail")
+        }
+
+        await opened.backfillMissingThumbnails()
+        XCTAssertTrue(opened.layers[0].cels[0].thumbnail === alreadyThere,
+                      "the backfill must not replace a thumbnail something newer already installed")
+        // …and it still finishes the rest of the document.
+        for (celIndex, cel) in opened.layers[0].cels.enumerated() {
+            XCTAssertNotNil(cel.thumbnail, "layer 0 cel \(celIndex)")
+        }
+    }
+
+    /// Running the pass twice costs nothing the second time: everything is filled, so nothing is
+    /// rendered. The cheap guard against a backfill that re-renders the whole document whenever it is
+    /// re-entered.
+    func testASecondBackfillRendersNothing() async {
+        let manager = makeManager()
+        let url = projectURL()
+        let written = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(manager, to: url) { written.fulfill() }
+        await fulfillment(of: [written], timeout: 120)
+
+        guard let opened = await ProjectStore.loadInBackground(from: url) else {
+            return XCTFail("The saved package should open")
+        }
+        await opened.thumbnailBackfillTask?.value
+        let afterFirst = opened.thumbnailRegenerationCount
+        XCTAssertGreaterThan(afterFirst, 0, "Setup: the first pass must have rendered something")
+
+        await opened.backfillMissingThumbnails()
+        XCTAssertEqual(opened.thumbnailRegenerationCount, afterFirst,
+                       "a second pass over a fully-populated document must render nothing")
+    }
 }
