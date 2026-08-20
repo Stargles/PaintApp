@@ -20,23 +20,6 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- [ ] **The "To Cross" eraser leaves stubs, and its size does nothing** — owner, on device, 2026-08-18:
-      *"The cross eraser behaviour is a bit weird. I want it to erase the lines right at the point that
-      the line crosses the center of another line, but in many cases it leaves stubs. Also, the eraser
-      brush size should be the radius around which everything is erased. For example if I erase the
-      section where two lines intersect, it should erase both of them (up to any other lines they
-      hit)."*
-      Two rulings in one ask, against `VectorEraserMode.cutToIntersection`:
-      **(a) cut at the centreline crossing, not at the ink boundary.** `cutToIntersection` brackets the
-      touch with `low = max(p)` / `high = min(p)` over crossings found at a **width-aware tolerance**
-      (the sum of the two strokes' half-widths, `VectorEraser.swift:449-483`), so the surviving piece
-      runs to the *near edge of the tolerance band* rather than to where the centrelines actually meet
-      — which is a stub roughly a half-width long, sticking through the line that was supposed to stop
-      it. Hypothesis, to be verified before it is fixed.
-      **(b) the eraser radius selects the victims.** Today one drag cuts the single stroke under the
-      tip; the owner wants every stroke inside the brush's footprint cut, each back to *its own*
-      neighbouring crossings.
-
 - [ ] **A second fill breaks the first — the transient never bakes, and the second never renders** —
       owner, on device, 2026-08-19: *"Using the fill tool more than once breaks it sometimes. I think
       it has to do something with it being in the transient state, then another thing is filled, and
@@ -126,6 +109,49 @@ Carried over:
       tile; already in BUGS.md.
 
 ## Done this pass
+
+- **The "To Cross" eraser leaves stubs, and its size does nothing** — merged 2026-08-20. Both
+  rulings shipped, and hypothesis (a) was **confirmed by measurement, not accepted**: the cut landed
+  short of the true centreline crossing by the *whole* width-aware tolerance, not the half-width the
+  hypothesis guessed, and the miss grows as `tolerance / sin(angle)`. Measured on the unmodified
+  engine with a standalone `swiftc` harness — **10.0 pt** at a square crossing of two 20 pt brushes,
+  **18.0** at 36 pt, **22.0** at 26°, **29.0** at 11°; **0.0000 pt** in all of them after, and
+  **0.0** for the `tolerance == 0` control both before and after, which is what isolates tolerance as
+  the cause.
+  **The cause was `StrokeGeometry.intersections(between:and:tolerance:)`, not the bracket.** Its halo
+  suppression and its clustering were both written in *sample-index* units — drop a near-contact
+  within ±1 index of an exact crossing, chain candidates within 1 index on both polylines — while
+  `tolerance` is a physical distance, the sum of two brush half-widths, 10–20 pt. A real stroke
+  arrives sampled every point or two, so a genuine crossing came wrapped in a disk of near-contacts
+  tens of samples wide that the ±1 shadow excluded almost none of: **25 entries where there is one**
+  at 90°, **51** at 26°, **109** at 11°. `cutToIntersection`'s `max`/`min` bracket then mechanically
+  picked the entry furthest from the crossing and nearest the touch. Regrouped over *contact along the
+  stroke* instead — every segment with a qualifying partner joins a region, touching regions merge, a
+  region holding exact crossings reports those and nothing else — which is unit-correct and
+  density-independent; all three cases now report exactly 1.
+  **Every existing test missed it because every one of them spaced its samples wider than the
+  tolerance it tested** — a two-point crosser, which no real stroke is. That is the coverage gap, and
+  it is why the new tests assert the cut's *distance in points* from the crossing rather than that a
+  cut happened.
+  Ruling (b) went in as asked: the footprint now selects **every** stroke whose centreline it covers,
+  each cut back to its own neighbouring crossings, computed against the pristine display list and
+  spliced in descending index so two lines cut in one tap each see the other's original geometry. A
+  crossing *inside* the footprint is no longer an obstacle — otherwise a tap on an X would leave
+  exactly the ink the artist aimed at. The driver's single "am I armed" bit became a set of stroke
+  ids, because one bit goes dead after the first position once a wide footprint is almost never over
+  nothing (pinned by a test: the same drag cuts 4 uprights with the set, 1 with the bit). A
+  canvas-accurate footprint ring is drawn under the finger during the gesture, since a selection
+  radius that acts at a distance and cannot be seen is guesswork.
+  **One defect found reviewing the WIP**: it threaded the touch pressure into the footprint, so the
+  selection radius shrank under a light pencil (a finger reports pressure 1, a pencil reports
+  `force / maximumPossibleForce`) while the ring was drawn at full size. Pinned to the brush size,
+  which is what the owner's sentence says and what makes the ring an exact promise. Invisible to
+  every existing test — they all use `dynamics: .fixed`, which has no pressure term to leak.
+  **Two things the owner should rule on**, both consequences of taking the ask literally: a line the
+  circle covers that crosses *nothing* is deleted whole, so one tap near a busy corner can also wipe
+  a stray line nearby; and a stroke is taken by its **centreline**, so the eraser clipping only the
+  edge of a thick line leaves it alone (the circle is exactly the rule, rather than acting slightly
+  larger than it looks).
 
 - **The lasso fill fills the whole canvas** — merged 2026-08-19. Rebuilt to
   [LASSO_FILL.md](LASSO_FILL.md): the loop's ring seeds the flood, the flood may never leave the loop
