@@ -456,6 +456,12 @@ rather than across two commits, so the ratio is immune to the machine drifting b
 The after column *is* the raster column, within 5%, which was the whole claim: what is left is
 `scratch.renderToUIImage()` and a memo hit. This path's own fps ceiling at 4096² goes **21 → 253**.
 
+*Reproduced.* A second run an hour later, inside the whole fast tier rather than alone, on the same
+device at 96.7% idle: 7.4 → 2.2, 14.3 → 2.4, 44.2 → 3.2 ms, ceiling 23 → 309. Every figure is within
+8% of the table and the two runs disagree about nothing. Recorded because this repo has been burned
+by single readings, and because a ratio that survives being measured twice under different loads is a
+different kind of claim from one that has not been.
+
 *Two things this does not say.* It is not a device figure — see §5 and the still-open question in §6;
 a Release run on the owner's iPad is what closes it, and it is the one thing this item still owes.
 And it is not a frame rate: it is one term of a frame, and items 4, 5 and 9(b) are the others.
