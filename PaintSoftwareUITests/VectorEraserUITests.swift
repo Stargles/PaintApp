@@ -247,10 +247,23 @@ final class Mode1UITests: VectorEraserTestSupport {
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "Setup: ink on screen")
 
-        // A paint stroke previews by compositing its own ink *over* the render — a different role,
-        // and the baseline that shows the trace tracks the gesture rather than reporting a constant.
-        XCTAssertEqual(gestureTrace(canvas)?.role, "overlay",
+        // A paint stroke previews by showing its own ink *over* the render — a different role, and
+        // the baseline that shows the trace tracks the gesture rather than reporting a constant.
+        let paintTrace = gestureTrace(canvas)
+        XCTAssertEqual(paintTrace?.role, "overlay",
                        "A paint stroke should have previewed as an overlay")
+        // **The only observable claim about the `.overlay` path, and it is new as of
+        // PERFORMANCE.md item 11.** That branch used to flatten the committed render and the live
+        // scratch into a fresh canvas-sized bitmap on every touch-move — 53.8 ms a dab at 4096² —
+        // and now hands the scratch to a layer of its own for Core Animation to composite. The
+        // failure that change can cause is not wrong pixels: it is a scratch layer that receives the
+        // touch-down frame and then never updates, so the artist's ink stops following the pen and
+        // catches up all at once on lift. `frames > 1` is exactly that distinction, and it is
+        // unavailable to a screenshot for the reason this test's doc comment gives.
+        XCTAssertGreaterThan(paintTrace?.frames ?? 0, 1,
+                             "A paint stroke's scratch layer must be updated repeatedly *during* "
+                             + "the drag. Exactly 1 is the touch-down frame alone — ink that does "
+                             + "not follow the pen")
 
         app.buttons["toolbar.eraserButton"].tap()
         setEraserSize(app, normalized: 0.5)

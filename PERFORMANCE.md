@@ -341,7 +341,7 @@ reconciliation is still owed.
 
 **8. Add a 2048×1024 case to the vector-vs-raster preview perf test.** One more call to the existing
 `costs(at:)` closure inside
-`testTheLiveStrokePreviewCostsFourTimesMoreOnAVectorLayerThanARaster`
+`testTheLayeredLiveStrokePreviewCostsWhatTheRasterPathCosts`
 (`PerfBaselineTests.swift:1834-1893`), which today measures 2048² and 4096² and nothing between.
 *Win*: none directly. It replaces the two-point linear fit that §1 and §2 both lean on with a real
 number.

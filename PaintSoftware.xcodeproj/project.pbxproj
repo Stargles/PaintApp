@@ -32,6 +32,7 @@
 		B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */; };
 		B2C3D4E5F600112233445602 /* PaintSoftware/Engine/ShapeHoldClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F600112233445601 /* PaintSoftware/Engine/ShapeHoldClock.swift */; };
 		B2C3D4E5F600112233445502 /* ShapeHoldClockLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */; };
+		21F8A43BB9211B69B8F755BA /* VectorPreviewPlanLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DC3C52DAB88CB9CCEEFC2A4 /* VectorPreviewPlanLogicTests.swift */; };
 		9A7B5C3D1E2F000000000A02 /* PaintSoftware/Engine/StrokeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000A01 /* PaintSoftware/Engine/StrokeGeometry.swift */; };
 		9A7B5C3D1E2F000000000B02 /* PaintSoftware/Engine/StrokeSpatialIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000B01 /* PaintSoftware/Engine/StrokeSpatialIndex.swift */; };
 		9A7B5C3D1E2F000000000E02 /* VectorEraserLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000E01 /* VectorEraserLogicTests.swift */; };
@@ -159,6 +160,7 @@
 		D5F38D4131EF5A758BC466D8 /* PaintSoftware/Views/GalleryOpenState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */; };
 		1C08CCFE8F7995AE4DC68C35 /* GalleryOpenLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4CBDD8048BC75617CA2592 /* GalleryOpenLogicTests.swift */; };
 		7545BD810B772D38E87EF035 /* PaintSoftware/Views/TimelineLayoutKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */; };
+		6192452399C8B499E8D6F824 /* PaintSoftware/Views/VectorPreviewPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */; };
 		72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -200,6 +202,7 @@
 		B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeDetectorLogicTests.swift; sourceTree = "<group>"; };
 		B2C3D4E5F600112233445601 /* PaintSoftware/Engine/ShapeHoldClock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeHoldClock.swift; sourceTree = "<group>"; };
 		B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeHoldClockLogicTests.swift; sourceTree = "<group>"; };
+		0DC3C52DAB88CB9CCEEFC2A4 /* VectorPreviewPlanLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorPreviewPlanLogicTests.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000A01 /* PaintSoftware/Engine/StrokeGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeGeometry.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000B01 /* PaintSoftware/Engine/StrokeSpatialIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeSpatialIndex.swift; sourceTree = "<group>"; };
 		9A7B5C3D1E2F000000000E01 /* VectorEraserLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserLogicTests.swift; sourceTree = "<group>"; };
@@ -327,6 +330,7 @@
 		3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/GalleryOpenState.swift; sourceTree = "<group>"; };
 		EF4CBDD8048BC75617CA2592 /* GalleryOpenLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GalleryOpenLogicTests.swift; sourceTree = "<group>"; };
 		893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TimelineLayoutKey.swift; sourceTree = "<group>"; };
+		1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/VectorPreviewPlan.swift; sourceTree = "<group>"; };
 		79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineLayoutKeyLogicTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -414,6 +418,7 @@
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
 				B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */,
+				0DC3C52DAB88CB9CCEEFC2A4 /* VectorPreviewPlanLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
 				8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */,
 				0A266D16C60715591E6F9256 /* ToolLogicTests.swift */,
@@ -478,6 +483,7 @@
 				B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */,
 				B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/StrokeSampleGate.swift */,
 				893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */,
+				1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */,
 				3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */,
 				E538EEE418EF6AE18A4361C1 /* PaintSoftware/Engine/PinchMergeGate.swift */,
 				B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */,
@@ -695,6 +701,7 @@
 				B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */,
 				B2C3D4E5F600112233445602 /* PaintSoftware/Engine/ShapeHoldClock.swift in Sources */,
 				B2C3D4E5F600112233445502 /* ShapeHoldClockLogicTests.swift in Sources */,
+				21F8A43BB9211B69B8F755BA /* VectorPreviewPlanLogicTests.swift in Sources */,
 				9A7B5C3D1E2F000000000A02 /* PaintSoftware/Engine/StrokeGeometry.swift in Sources */,
 				9A7B5C3D1E2F000000000B02 /* PaintSoftware/Engine/StrokeSpatialIndex.swift in Sources */,
 				9A7B5C3D1E2F000000000E02 /* VectorEraserLogicTests.swift in Sources */,
@@ -706,6 +713,7 @@
 				9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */,
 				72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */,
 				7545BD810B772D38E87EF035 /* PaintSoftware/Views/TimelineLayoutKey.swift in Sources */,
+				6192452399C8B499E8D6F824 /* PaintSoftware/Views/VectorPreviewPlan.swift in Sources */,
 				1C08CCFE8F7995AE4DC68C35 /* GalleryOpenLogicTests.swift in Sources */,
 				D5F38D4131EF5A758BC466D8 /* PaintSoftware/Views/GalleryOpenState.swift in Sources */,
 				B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */,

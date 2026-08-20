@@ -329,7 +329,7 @@ the logic tier only**, and the UI suites stay on the simulator.
 
 ## Drawing on a vector layer at 4K is capped at ~19 fps by the live stroke preview (2026-08-16)
 
-**Measured on the owner's iPad 9, Release** (`PerfBaselineTests.testTheLiveStrokePreviewCostsFourTimesMoreOnAVectorLayerThanARaster`):
+**Measured on the owner's iPad 9, Release** (`PerfBaselineTests.testTheLayeredLiveStrokePreviewCostsWhatTheRasterPathCosts`):
 one dab costs **53.8 ms on a vector layer at 4096²** against 4.0 ms on a raster layer — a ceiling of
 **19 fps** before anything else in the frame, against 250 fps for raster. At 2048² it is 16.4 ms
 against 3.0 ms.

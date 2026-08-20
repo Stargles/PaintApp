@@ -113,6 +113,31 @@ final class StrokeCanvasView: UIView {
     /// question. The recognizer reports through closures, so both arguments are nil by design.
     let strokeRecognizer = StrokeGestureRecognizer(target: nil, action: nil)
     private let imageView = UIImageView()
+
+    /// The live vector-stroke preview, in a layer of its own directly above `imageView` — item 11's
+    /// whole change, and the reason `VectorPreviewPlan` has no way to say "composited".
+    ///
+    /// Empty and hidden except during an `.overlay` gesture, which is the only role that shows ink
+    /// the canvas render does not already contain. `.replacement` puts its punched copy in
+    /// `imageView` (it *is* the display, not an addition to it) and `.none` draws no preview at all,
+    /// so both keep the single canvas-sized render they had before this view existed.
+    ///
+    /// **Two sibling layers are not an approximation of the composite they replace.** Core Animation
+    /// composites siblings source-over, which is exactly what `scratch.draw(in:)` over `base` was
+    /// doing on the CPU — the difference is only where it happens and how often. The one place they
+    /// can disagree is *minification*: filtering each layer and then compositing is not identical to
+    /// compositing and then filtering, so an anti-aliased stroke edge can differ by a fraction of a
+    /// pixel while the canvas is zoomed out mid-stroke, and the difference disappears at lift when
+    /// the stroke commits to the vector canvas and this view empties. `LayerHostView` already stacks
+    /// three sibling views for the same layer's pixels (baked, fill, ink) under one `host.alpha`, so
+    /// this is the arrangement the canvas is already built on rather than a new premise. Group
+    /// opacity keeps layer opacity exact for the same reason.
+    ///
+    /// Kept as a stored `let` rather than created per stroke: `refreshDisplay` runs on every SwiftUI
+    /// pass for every layer, and a view allocated on the first touch of each stroke would be an
+    /// allocation and an autolayout pass at the worst possible moment.
+    private let scratchView = UIImageView()
+
     /// Mode 3's reach, outlined on the canvas under the finger while the gesture is live. Created on
     /// first use, so every other tool pays nothing for it. See `updateEraserFootprint(at:)`.
     private var eraserFootprintLayer: CAShapeLayer?
@@ -148,32 +173,22 @@ final class StrokeCanvasView: UIView {
     /// on screen until an unrelated edit happens to call `refreshDisplay()`.
     private var displayedRasterVersion: Int = -1
     /// Live-preview raster for the in-progress vector stroke (nil except mid-stroke).
-    private var vectorScratch: RasterLayerTexture?
+    ///
+    /// **Clearing this clears the scratch layer, and that is enforced here rather than left to
+    /// callers.** `scratchView` holds a `UIImage` rendered from this texture, so a path that dropped
+    /// the texture without also emptying the view would leave the last preview frame on screen with
+    /// nothing left to update or remove it — a ghost stroke sitting over the committed art, immune
+    /// to undo, until some unrelated edit happened to refresh the layer. Every release currently
+    /// goes through `endVectorScratch` and every one of those is followed by `refreshDisplay()`, so
+    /// this is belt and braces; it is here because the failure it prevents is silent, permanent, and
+    /// looks to the artist like corrupted artwork rather than like a bug in a preview.
+    private var vectorScratch: RasterLayerTexture? {
+        didSet { if vectorScratch == nil { showScratch(nil) } }
+    }
 
     /// How `vectorScratch` relates to the canvas's own render, which differs per tool and — for the
-    /// eraser — per mode. Set once in `beginVectorStroke` and read by `refreshDisplay`.
-    private enum VectorScratchRole {
-        /// A paint stroke: the scratch holds only this stroke's ink, composited over the canvas
-        /// render. The canvas itself is untouched until lift.
-        case overlay
-        /// Mode 1: the scratch starts as a copy of the canvas render and dabs punch
-        /// `.destinationOut` into it, replacing the canvas render for the stroke's duration — the
-        /// raster eraser's own code path applied to the vector layer's pixels.
-        case replacement
-        /// Modes 2 and 3: nothing is drawn into the scratch. Mode 3 commits during the drag and
-        /// Mode 2 on lift, so the canvas render alone is truth, and skipping the scratch avoids a
-        /// canvas-sized allocation/composite per touch sample.
-        case none
-
-        /// Name used in `lastVectorGestureTrace`.
-        var traceName: String {
-            switch self {
-            case .overlay: return "overlay"
-            case .replacement: return "replacement"
-            case .none: return "none"
-            }
-        }
-    }
+    /// eraser — per mode. Set once in `beginVectorStroke` and read by `refreshDisplay` through
+    /// `VectorPreviewPlan`, where the three roles' behaviour and the tests that pin it live.
     private var vectorScratchRole: VectorScratchRole = .overlay
 
     /// Non-nil exactly while a guide gesture is in flight, and what every handler branches on —
@@ -185,8 +200,10 @@ final class StrokeCanvasView: UIView {
     /// Empty means the gesture ended or was abandoned.
     var guideOverlayNeedsUpdate: (([TimedSample]) -> Void)?
 
-    /// Count of live preview frames shown before lift. Only `.replacement` counts; `.overlay`
-    /// composites over the canvas render and `.none` never draws.
+    /// Count of live preview frames shown before lift. `.replacement` and `.overlay` both count —
+    /// each publishes something the canvas render does not already contain — and `.none` never
+    /// draws, so it stays at zero. `VectorPreviewPlan.publishesLivePreviewFrame` is the rule and
+    /// carries the note on why `.overlay` was excluded until 2026-08-20 and is not any more.
     private var livePreviewFrames = 0
 
     /// What the last finished vector gesture did about live preview, as `"<role>,<frames>"` — read
@@ -195,9 +212,15 @@ final class StrokeCanvasView: UIView {
     /// A live preview is only observable while a finger is down, and XCUITest's
     /// `press(forDuration:thenDragTo:)` blocks the main thread for the gesture's whole duration, so
     /// any screenshot it takes is necessarily post-lift and proves nothing about the live path. This
-    /// records what the test can't watch: `frames > 1` means the punched copy reached the image view
+    /// records what the test can't watch: `frames > 1` means the preview reached its image view
     /// repeatedly during the drag, not just once at lift. It shows the live path ran, not that any
     /// pixel was actually clear — that's `RasterVectorParityLogicTests`' job.
+    ///
+    /// Since 2026-08-20 that is a claim about `.overlay` as well as `.replacement`, and for
+    /// `.overlay` it is the *only* claim available: its ink now reaches the screen through
+    /// `scratchView` rather than through a bitmap flattened into `imageView`, and nothing else an
+    /// XCUITest can reach distinguishes "the scratch layer is being updated" from "the scratch layer
+    /// is stuck on the touch-down frame".
     ///
     /// Static because exactly one gesture is ever in flight, across every layer's stroke view.
     static private(set) var lastVectorGestureTrace = "none,0"
@@ -245,11 +268,27 @@ final class StrokeCanvasView: UIView {
         imageView.layer.magnificationFilter = .nearest
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
+        // Every one of these has to match `imageView`'s exactly, and each for its own reason rather
+        // than out of symmetry. `.scaleToFill` plus identical constraints put the two on the same
+        // sample grid, which is what makes "filter each, then composite" agree with "composite, then
+        // filter" under magnification. `.nearest` is the same crispness contract the rest of the
+        // canvas keeps (see `LayerHostView`) — a bilinear scratch over a nearest base would show the
+        // live stroke softening at high zoom and then snapping sharp on lift.
+        scratchView.contentMode = .scaleToFill
+        scratchView.isUserInteractionEnabled = false
+        scratchView.layer.magnificationFilter = .nearest
+        scratchView.isHidden = true
+        scratchView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(scratchView)
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: topAnchor),
             imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
             imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scratchView.topAnchor.constraint(equalTo: topAnchor),
+            scratchView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scratchView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scratchView.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
 
         strokeRecognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
@@ -286,40 +325,56 @@ final class StrokeCanvasView: UIView {
         refreshDisplay()
     }
 
+    /// **One canvas-sized render per refresh, in every role.** What this used to do on the
+    /// `.overlay` path — allocate a fresh canvas-sized bitmap per touch-move and flatten the
+    /// committed render and the live scratch into it — is [PERFORMANCE.md](PERFORMANCE.md) item 11,
+    /// and `VectorPreviewPlan`'s doc comment carries the measurement and the reasoning. The short
+    /// version: Core Animation composites the two layers anyway, so doing it first on the CPU once
+    /// per pen sample cost 64 MiB of allocation and two full-canvas blits a dab at 4096², for a
+    /// result Core Animation would have produced for free.
+    ///
+    /// The decision of what goes where is `VectorPreviewPlan.forVectorLayer` — pure, and tested
+    /// headlessly across all twelve inputs, because this file is not in the UI-test target and the
+    /// only other way to check the three roles is a 22-minute suite.
     func refreshDisplay() {
         displayedRasterVersion = raster?.version ?? -1
-        if let vectorCanvas {
-            displayedVectorVersion = vectorCanvas.version
-            // An interpolated frame replaces the cel's own content outright. A live scratch still
-            // wins, so drawing at an in-between keeps its stroke preview.
-            if let interpolationImage, vectorScratch == nil {
-                imageView.image = interpolationImage
-                return
-            }
-            // `.replacement` never asks the canvas to render: the scratch already holds a copy of
-            // that render with this stroke's holes punched in, and it *is* the display.
-            if case .replacement = vectorScratchRole, let scratch = vectorScratch {
-                imageView.image = scratch.renderToUIImage()
-                livePreviewFrames += 1
-                return
-            }
-            // At an in-between the cel's own canvas is empty, so `interpolationImage` wins here too —
-            // and it must, or an in-between would display as nothing now that an empty canvas
-            // renders to nil rather than to a transparent sheet.
-            let base = interpolationImage ?? vectorCanvas.renderIfNonEmpty()
-            guard case .overlay = vectorScratchRole, let scratch = vectorScratch else {
-                imageView.image = base
-                return
-            }
-            // Mid vector stroke: composite the live scratch preview over the committed content.
-            let bounds = CGRect(origin: .zero, size: vectorCanvas.size)
-            imageView.image = UIGraphicsImageRenderer(size: vectorCanvas.size, format: PixelOps.transparentFormat()).image { _ in
-                base?.draw(in: bounds)
-                scratch.renderToUIImage().draw(in: bounds)
-            }
+        guard let vectorCanvas else {
+            showScratch(nil)
+            imageView.image = raster?.renderToUIImage()
             return
         }
-        imageView.image = raster?.renderToUIImage()
+        displayedVectorVersion = vectorCanvas.version
+        let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
+                                                    hasScratch: vectorScratch != nil,
+                                                    hasInterpolationImage: interpolationImage != nil)
+        // At an in-between the cel's own canvas is empty, so the interpolated frame wins the base
+        // slot — and it must, or an in-between would display as nothing now that an empty canvas
+        // renders to nil rather than to a transparent sheet.
+        let base: UIImage?
+        switch plan.base {
+        case .interpolation: base = interpolationImage
+        case .committedRender: base = vectorCanvas.renderIfNonEmpty()
+        case .scratch: base = vectorScratch?.renderToUIImage()
+        }
+        // Identity-checked because `renderIfNonEmpty()` is memoized on the canvas's `version` and an
+        // `.overlay` stroke does not touch the canvas until lift: every touch-move of a paint stroke
+        // hands back the *same* image, and re-assigning it would put a Core Animation contents
+        // change on the frame for nothing.
+        if imageView.image !== base { imageView.image = base }
+        showScratch(plan.showsScratchLayer ? vectorScratch?.renderToUIImage() : nil)
+        if plan.publishesLivePreviewFrame { livePreviewFrames += 1 }
+    }
+
+    /// Puts `image` in the scratch layer, or empties and hides it when nil.
+    ///
+    /// Hidden rather than merely emptied so Core Animation skips the layer outright, and
+    /// identity-guarded so the overwhelmingly common call — `nil` when it is already nil, once per
+    /// layer per SwiftUI pass — is a pointer comparison. That guard is what keeps `.replacement` and
+    /// `.none` at the one canvas-sized operation they had before this layer existed.
+    private func showScratch(_ image: UIImage?) {
+        guard scratchView.image !== image else { return }
+        scratchView.image = image
+        scratchView.isHidden = image == nil
     }
 
     /// **The retagging gesture.** While interpolate mode is on and a motion group is armed from its

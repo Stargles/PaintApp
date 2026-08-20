@@ -1993,10 +1993,21 @@ final class PerfBaselineTests: XCTestCase {
     /// - **Raster**, `refreshDisplay`'s last line: `imageView.image = raster?.renderToUIImage()`.
     ///   One canvas-sized render, memoized on `version` — and a dab bumps the version, so it is paid
     ///   per dab.
-    /// - **Vector**, `refreshDisplay`'s `.overlay` branch: a *fresh* canvas-sized
-    ///   `UIGraphicsImageRenderer` bitmap per dab, the committed render drawn into it, then the live
-    ///   scratch rendered and drawn over that. Four canvas-sized operations where raster has one, and
-    ///   one of them is an allocation rather than a blit.
+    /// - **Vector**, `refreshDisplay`'s `.overlay` branch: one canvas-sized render of the scratch
+    ///   into its own layer, plus a memoized read of the committed render for the layer beneath.
+    ///   Since [PERFORMANCE.md](PERFORMANCE.md) item 11 shipped (2026-08-20) that is the whole of
+    ///   it, and it is why `vectorLayered` below sits within noise of `raster`.
+    ///
+    /// **`vectorComposited` is the shape this branch had until item 11, kept deliberately.** It
+    /// allocated a *fresh* canvas-sized `UIGraphicsImageRenderer` bitmap per dab, drew the committed
+    /// render into it, rendered the live scratch and drew that over the top — four canvas-sized
+    /// operations where raster has one, and one of them an allocation rather than a blit. It is
+    /// retained here as a measured baseline rather than deleted, for two reasons: the before/after
+    /// then comes from **one run on one machine state** instead of two runs a commit apart, which on
+    /// this Mac is the difference between a number and a coin flip (CLAUDE.md on contention); and the
+    /// gap it reports is the standing argument against anyone flattening these two layers again.
+    /// It is dead code in the app and live evidence here, and that trade is worth about a second of
+    /// test time.
     ///
     /// Measured at both canvas sizes because the ratio between them is the other half of the claim:
     /// the owner's canvas is 4096², which is 4x the pixels of the 2048² this file's other cases use.
@@ -2015,8 +2026,8 @@ final class PerfBaselineTests: XCTestCase {
     /// here is the direction and the ratio, because this path is CPU-side: an allocation and two
     /// blits, no GPU anywhere in it.
     @MainActor
-    func testTheLiveStrokePreviewCostsFourTimesMoreOnAVectorLayerThanARaster() {
-        func costs(at size: CGSize) -> (raster: Double, vector: Double) {
+    func testTheLayeredLiveStrokePreviewCostsWhatTheRasterPathCosts() {
+        func costs(at size: CGSize) -> (raster: Double, composited: Double, layered: Double) {
             let raster = RasterLayerTexture.empty(size: size)
             BrushStamper.stampStroke(into: raster, samples: syntheticStroke(sampleCount: 60),
                                      brush: Brush(name: "Perf", shape: .softRound, size: 24),
@@ -2044,8 +2055,9 @@ final class PerfBaselineTests: XCTestCase {
                     _ = raster.renderToUIImage()
                 }
             }
-            // Verbatim `StrokeCanvasView.refreshDisplay`'s `.overlay` branch.
-            func vectorFrame() {
+            // `StrokeCanvasView.refreshDisplay`'s `.overlay` branch **before** item 11 — the cost
+            // being deleted, kept as the measured baseline. See the doc comment.
+            func compositedFrame() {
                 autoreleasepool {
                     dab(into: scratch)
                     let base = committed.renderIfNonEmpty()
@@ -2055,11 +2067,26 @@ final class PerfBaselineTests: XCTestCase {
                     }
                 }
             }
-            rasterFrame(); vectorFrame()  // discard the first of each: one-time faulting, not a dab
+            // Verbatim `StrokeCanvasView.refreshDisplay`'s `.overlay` branch as it stands now: the
+            // scratch rendered once into `scratchView`, and a base read that the identity check in
+            // `refreshDisplay` turns into a memo hit for every touch-move of a stroke (an `.overlay`
+            // gesture does not touch the canvas until lift, so `renderIfNonEmpty` returns the same
+            // object each time and the assignment never happens). Core Animation composites the two
+            // layers on the GPU and none of that is on this thread, which is exactly the point.
+            func layeredFrame() {
+                autoreleasepool {
+                    dab(into: scratch)
+                    _ = committed.renderIfNonEmpty()
+                    _ = scratch.renderToUIImage()
+                }
+            }
+            // Discard the first of each: one-time faulting, not a dab.
+            rasterFrame(); compositedFrame(); layeredFrame()
             let runs = 5
             let rasterTime = measuringPeakMemory { for _ in 0..<runs { rasterFrame() } }.seconds / Double(runs)
-            let vectorTime = measuringPeakMemory { for _ in 0..<runs { vectorFrame() } }.seconds / Double(runs)
-            return (rasterTime, vectorTime)
+            let compositedTime = measuringPeakMemory { for _ in 0..<runs { compositedFrame() } }.seconds / Double(runs)
+            let layeredTime = measuringPeakMemory { for _ in 0..<runs { layeredFrame() } }.seconds / Double(runs)
+            return (rasterTime, compositedTime, layeredTime)
         }
 
         let small = costs(at: Self.canvasSize)
@@ -2069,28 +2096,40 @@ final class PerfBaselineTests: XCTestCase {
 
         report("live stroke preview, one dab", [
             ("raster2048x1024", milliseconds(owner.raster)),
-            ("vector2048x1024", milliseconds(owner.vector)),
+            ("compositedWas2048x1024", milliseconds(owner.composited)),
+            ("layeredNow2048x1024", milliseconds(owner.layered)),
             ("raster2048", milliseconds(small.raster)),
-            ("vector2048", milliseconds(small.vector)),
+            ("compositedWas2048", milliseconds(small.composited)),
+            ("layeredNow2048", milliseconds(small.layered)),
             ("raster4096", milliseconds(large.raster)),
-            ("vector4096", milliseconds(large.vector)),
-            ("vectorOverRaster2048x1024", String(format: "%.1fx", owner.raster > 0 ? owner.vector / owner.raster : 0)),
-            ("vectorOverRaster2048", String(format: "%.1fx", small.raster > 0 ? small.vector / small.raster : 0)),
-            ("vectorOverRaster4096", String(format: "%.1fx", large.raster > 0 ? large.vector / large.raster : 0)),
-            ("fpsCeilingVector2048x1024", String(format: "%.0f", owner.vector > 0 ? 1 / owner.vector : 0)),
-            ("fpsCeilingVector4096", String(format: "%.0f", large.vector > 0 ? 1 / large.vector : 0)),
-            ("fpsCeilingRaster4096", String(format: "%.0f", large.raster > 0 ? 1 / large.raster : 0)),
+            ("compositedWas4096", milliseconds(large.composited)),
+            ("layeredNow4096", milliseconds(large.layered)),
+            ("item11Speedup2048x1024", String(format: "%.1fx", owner.layered > 0 ? owner.composited / owner.layered : 0)),
+            ("item11Speedup2048", String(format: "%.1fx", small.layered > 0 ? small.composited / small.layered : 0)),
+            ("item11Speedup4096", String(format: "%.1fx", large.layered > 0 ? large.composited / large.layered : 0)),
+            ("layeredOverRaster4096", String(format: "%.1fx", large.raster > 0 ? large.layered / large.raster : 0)),
+            ("fpsCeilingLayered4096", String(format: "%.0f", large.layered > 0 ? 1 / large.layered : 0)),
+            ("fpsCeilingCompositedWas4096", String(format: "%.0f", large.composited > 0 ? 1 / large.composited : 0)),
         ])
 
-        // Ceilings only, in this file's house style — the reported numbers are the output. The claim
-        // being pinned is the *direction*: the vector preview does strictly more work per dab than the
-        // raster one, at both sizes, and it is not close.
-        XCTAssertGreaterThan(small.vector, small.raster,
-                             "The overlay composite is a fresh bitmap plus two blits; raster is one render")
-        XCTAssertGreaterThan(large.vector, large.raster,
-                             "…and the gap must not close at the canvas size the owner actually draws on")
-        XCTAssertGreaterThan(owner.vector, owner.raster,
-                             "…nor at 2048x1024, the canvas the owner animates on")
+        // Ceilings only, in this file's house style — the reported numbers are the output.
+        //
+        // **The claim being pinned is the direction, and item 11 reversed which direction that is.**
+        // Until 2026-08-20 this test asserted `vector > raster` at every size: the overlay composite
+        // did strictly more work per dab than the raster path and it was not close, which was the
+        // defect. It now asserts the opposite property — that the layered path has *given that gap
+        // up* — because "the vector preview is slower than the raster one" is no longer something
+        // anyone should be able to reintroduce quietly.
+        for (name, size) in [("2048x1024", owner), ("2048", small), ("4096", large)] {
+            XCTAssertLessThan(size.layered, size.composited,
+                              "\(name): the layered preview must beat the bitmap composite it "
+                              + "replaced — a fresh canvas-sized allocation and two blits, per dab")
+            XCTAssertLessThan(size.layered, size.raster * 2,
+                              "\(name): the layered preview is one canvas-sized render plus a memo "
+                              + "hit, so it must land within a small multiple of the raster path's "
+                              + "one render. Drifting past this means a second full-canvas "
+                              + "operation crept back onto the per-touch-move path")
+        }
     }
 
     /// **Where the two backends actually cross over on this device** — the measurement the
