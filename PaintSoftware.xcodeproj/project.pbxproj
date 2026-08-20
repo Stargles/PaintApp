@@ -156,6 +156,8 @@
 		7F1EC86AAE98AC9EBE2C6C02 /* TextBakeCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */; };
 		D5F38D4131EF5A758BC466D8 /* PaintSoftware/Views/GalleryOpenState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */; };
 		1C08CCFE8F7995AE4DC68C35 /* GalleryOpenLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4CBDD8048BC75617CA2592 /* GalleryOpenLogicTests.swift */; };
+		7545BD810B772D38E87EF035 /* PaintSoftware/Views/TimelineLayoutKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */; };
+		72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -320,6 +322,8 @@
 		7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextBakeCharacterizationTests.swift; sourceTree = "<group>"; };
 		3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/GalleryOpenState.swift; sourceTree = "<group>"; };
 		EF4CBDD8048BC75617CA2592 /* GalleryOpenLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GalleryOpenLogicTests.swift; sourceTree = "<group>"; };
+		893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TimelineLayoutKey.swift; sourceTree = "<group>"; };
+		79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineLayoutKeyLogicTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -408,6 +412,7 @@
 				8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */,
 				0A266D16C60715591E6F9256 /* ToolLogicTests.swift */,
 				9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */,
+				79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */,
 				EF4CBDD8048BC75617CA2592 /* GalleryOpenLogicTests.swift */,
 				5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */,
 				710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */,
@@ -466,6 +471,7 @@
 				B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */,
 				B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */,
 				B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/StrokeSampleGate.swift */,
+				893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */,
 				3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */,
 				E538EEE418EF6AE18A4361C1 /* PaintSoftware/Engine/PinchMergeGate.swift */,
 				B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */,
@@ -690,6 +696,8 @@
 				C44F78B352EE5FCF8D33DAE6 /* EyedropperLogicTests.swift in Sources */,
 				C60715591E6F9256B720B7F3 /* ToolLogicTests.swift in Sources */,
 				9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */,
+				72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */,
+				7545BD810B772D38E87EF035 /* PaintSoftware/Views/TimelineLayoutKey.swift in Sources */,
 				1C08CCFE8F7995AE4DC68C35 /* GalleryOpenLogicTests.swift in Sources */,
 				D5F38D4131EF5A758BC466D8 /* PaintSoftware/Views/GalleryOpenState.swift in Sources */,
 				B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */,

@@ -159,17 +159,62 @@ struct TimelineTrackView: UIViewRepresentable {
         /// when the track actually has to grow rather than on every delegate callback.
         private var laidOutFrameCount = 0
 
+        /// What the laid-out track was built from, and the thumbnails that key's addresses name.
+        ///
+        /// Held together and dropped together: `TimelineLayoutKey.CelKey.thumbnail` is an
+        /// `ObjectIdentifier`, which is a sound identity only while the object behind it cannot be
+        /// freed and a new one land at the same address. See the key's doc comment.
+        private var laidOutKey: TimelineLayoutKey?
+        private var retainedThumbnails: [UIImage] = []
+
+        /// Re-lays-out the track, or does nothing if nothing it draws has moved.
+        ///
+        /// **The gate is the point.** This runs on every `updateUIView`, which is every SwiftUI pass,
+        /// and `CanvasManager` republishes on far more than a timeline edit — so most calls used to
+        /// redo work whose result was identical to what was already on screen. `TimelineLayoutKey`
+        /// carries the argument; `SandwichKey` and `InterpolationPreviewKey` are the same idiom, and
+        /// this is its third use.
+        ///
+        /// **`currentFrame` is deliberately not in the key**, and gets `movePlayhead()` instead. A
+        /// scrub moves the playhead and nothing else on the track — no block changes size, position
+        /// or picture — so keying on it would make the key move on every tick of the one gesture that
+        /// drives this function hardest (`onScrub` fires on every `.changed` sample, unthrottled).
+        /// The fast path assigns two frames and no view is redrawn.
         func relayout() {
             guard let scrollView, let contentView else { return }
 
             let sceneFrameCount = displayedFrameCount(for: scrollView)
-            laidOutFrameCount = sceneFrameCount
             let totalWidth = max(CGFloat(sceneFrameCount) * pixelsPerFrame, scrollView.bounds.width)
             let layers = canvasManager.layers
             // Same row order the layer panel and the pinned name column use — folder headers
             // included, collapsed folders' children omitted.
             let stackRows = canvasManager.layerStackRows
             let totalHeight = rulerHeight + CGFloat(max(stackRows.count, 1)) * (rowHeight + 2) + 8
+
+            let built = TimelineLayoutKey.make(
+                canvasManager: canvasManager,
+                stackRows: stackRows,
+                pixelsPerFrame: pixelsPerFrame,
+                displayedFrameCount: sceneFrameCount,
+                contentWidth: totalWidth,
+                rowHeight: rowHeight,
+                rulerHeight: rulerHeight,
+                drag: blockDrag.map {
+                    TimelineLayoutKey.DragKey(celID: $0.celID,
+                                              sourceLayerIndex: $0.sourceLayerIndex,
+                                              targetLayerIndex: $0.targetLayerIndex,
+                                              targetStartFrame: $0.targetStartFrame,
+                                              frameCount: $0.frameCount)
+                })
+            // Nothing the track draws has moved. Take the playhead's cheap path and leave every view,
+            // every accessibility identifier and the ruler's CoreText exactly as they are.
+            if built.key == laidOutKey {
+                movePlayhead(totalHeight: totalHeight)
+                return
+            }
+            laidOutKey = built.key
+            retainedThumbnails = built.retainedThumbnails
+            laidOutFrameCount = sceneFrameCount
 
             contentView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
             if scrollView.contentSize != contentView.frame.size {
@@ -189,7 +234,8 @@ struct TimelineTrackView: UIViewRepresentable {
             rulerView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: rulerHeight)
             rulerView.frameCount = sceneFrameCount
             rulerView.pixelsPerFrame = pixelsPerFrame
-            rulerView.currentFrame = canvasManager.currentFrame
+            // `currentFrame` is set by `movePlayhead` at the end of this function, and on the scrub
+            // fast path that skips it — one writer, so the two paths cannot disagree.
             rulerView.loopRange = (canvasManager.loopStartFrame != nil || canvasManager.loopEndFrame != nil) ? canvasManager.effectiveLoopRange : nil
             rulerView.setNeedsDisplay()
 
@@ -265,10 +311,23 @@ struct TimelineTrackView: UIViewRepresentable {
                            identifier: "timeline.folderTrack.\(folder?.name ?? entry.folderID.uuidString)")
             }
 
+            movePlayhead(totalHeight: totalHeight)
+        }
+
+        /// The scrub fast path: everything a `currentFrame` change actually moves.
+        ///
+        /// Two view frames and one scalar. The ruler is **not** invalidated — it draws frame numbers
+        /// and the loop band, neither of which depends on the playhead, and `rulerView.currentFrame`
+        /// exists only so a tap can recognise "the number I tapped was already selected". A
+        /// `setNeedsDisplay()` here would put the scene-length CoreText loop back on every scrub
+        /// sample, which is most of what the gate was added to remove.
+        private func movePlayhead(totalHeight: CGFloat) {
+            guard let contentView else { return }
             if playheadView.superview == nil {
                 playheadView.isUserInteractionEnabled = false
                 contentView.addSubview(playheadView)
             }
+            rulerView.currentFrame = canvasManager.currentFrame
             playheadView.frame = CGRect(
                 x: CGFloat(canvasManager.currentFrame) * pixelsPerFrame,
                 y: 0,
@@ -621,20 +680,37 @@ private final class TimelineRulerView: UIView {
         return convert(rect, to: nil)
     }
 
+    /// **Draws the frames in `rect`, not all of them.** This used to loop `0..<frameCount` and lay
+    /// out an `NSAttributedString` per frame of the whole scene regardless of how much of the ruler
+    /// was actually being asked for — O(scene length) CoreText work, and one of the two costs
+    /// `PERFORMANCE.md` classifies as area-independent: it is identical at 2048×1024 and at 4096²,
+    /// which is exactly why no canvas-scaled benchmark ever saw it.
+    ///
+    /// **Two things this does and does not buy, stated plainly so the next reader does not
+    /// over-credit it.** UIKit hands a full-bounds `rect` when the whole view is invalidated, which
+    /// is the common case today, so on its own this is not the saving — the `TimelineLayoutKey` gate
+    /// is, by cutting how *often* the invalidation happens. What clipping buys is that the cost is
+    /// now proportional to what is being redrawn: a partial invalidation (a tiled backing store on a
+    /// long track, or a future `setNeedsDisplay(_:)` scoped to one column) becomes cheap instead of
+    /// silently costing the whole scene.
+    ///
+    /// The band is clipped by CoreGraphics anyway; the loop is what had to be told.
     override func draw(_ rect: CGRect) {
         if let loopRange {
             let bandRect = CGRect(x: CGFloat(loopRange.lowerBound) * pixelsPerFrame,
                                   y: 0,
                                   width: CGFloat(loopRange.upperBound - loopRange.lowerBound + 1) * pixelsPerFrame,
                                   height: bounds.height)
-            UIColor.systemBlue.withAlphaComponent(0.25).setFill()
-            UIRectFill(bandRect)
+            if bandRect.intersects(rect) {
+                UIColor.systemBlue.withAlphaComponent(0.25).setFill()
+                UIRectFill(bandRect)
+            }
         }
         let attrs: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: 9),
             .foregroundColor: UIColor.gray
         ]
-        for frame in 0..<frameCount {
+        for frame in TimelineRulerClip.frames(in: rect, pixelsPerFrame: pixelsPerFrame, frameCount: frameCount) {
             let x = CGFloat(frame) * pixelsPerFrame + 2
             let text = "\(frame + 1)" as NSString
             text.draw(at: CGPoint(x: x, y: 2), withAttributes: attrs)
