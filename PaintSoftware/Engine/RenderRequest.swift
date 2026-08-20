@@ -309,6 +309,34 @@ struct RenderRequest {
     /// interpolation slider already turns. Reused rather than redefined: §9.1 asks the request to
     /// carry "a quality" and the app already has exactly one notion of what that means.
     let quality: RenderQuality
+
+    /// The canvas size a composite should use to fill a `bound`-sized box, aspect preserved and
+    /// **never larger than the canvas itself**.
+    ///
+    /// This is the rule behind `makeRenderRequest`'s `renderSize` hint, and it takes a bounding box
+    /// rather than an exact size on purpose: the caller that wants a small composite knows the box it
+    /// is filling (a 320×320 gallery tile) and has no business also computing which of the two
+    /// dimensions binds. Getting that arithmetic wrong is silent — a request whose `canvasSize` has
+    /// the wrong aspect composites a stretched picture that still looks like a picture — so it is
+    /// written once, here, and it is deliberately the same `min` of the two ratios that
+    /// `ThumbnailRenderer.render` uses to size the tile. The thumbnail's composite and its downscale
+    /// therefore agree by construction rather than by two authors happening to match.
+    ///
+    /// **Clamped at 1× because a hint may only ask for less.** Compositing above native invents no
+    /// detail and costs more than the native render it replaces, so a caller passing a box larger
+    /// than the canvas gets the canvas.
+    ///
+    /// Rounding to whole pixels happens here for `RenderResolution.renderSize`'s reason, which
+    /// applies identically: the backends round in different places, so an odd canvas scaled anywhere
+    /// but upstream of both yields a source a pixel wider than the composite reading it.
+    static func renderSize(fitting canvasSize: CGSize, within bound: CGSize) -> CGSize {
+        guard canvasSize.width > 0, canvasSize.height > 0,
+              bound.width > 0, bound.height > 0 else { return canvasSize }
+        let scale = min(bound.width / canvasSize.width, bound.height / canvasSize.height, 1)
+        guard scale < 1 else { return canvasSize }
+        return CGSize(width: max(1, (canvasSize.width * scale).rounded()),
+                      height: max(1, (canvasSize.height * scale).rounded()))
+    }
 }
 
 /// The three requests §5.2's sandwich is assembled from, over one snapshot.
@@ -342,15 +370,45 @@ extension CanvasManager {
     /// `@MainActor` for the same reason `ProjectStore.SaveSnapshot.init` is (ProjectStore.swift:185):
     /// this is the half that reads published state and renders, and it is deliberately the *only*
     /// half that may. Everything downstream of the value it returns is pure.
+    /// `fittingWithin` is an optional **bounding box for the composite**, and nil — the default and
+    /// every caller but one — means "native, exactly as before".
+    ///
+    /// **Why the hint exists.** The project thumbnail composited the entire canvas to make a 320×320
+    /// gallery tile: 2,097,152 pixels rendered to fill 51,200 at the owner's 2048×1024, and 16.8M at
+    /// 4096². That is main-actor work inside every save, and until the scene-phase gate landed it was
+    /// three of them per app switch. `makeSandwichRequests` has had the machinery to render smaller
+    /// since the live preview grew a resolution setting; this is that pattern at a second call site,
+    /// and nothing more.
+    ///
+    /// **It is a bounding box rather than a size, and a hint rather than an instruction.**
+    /// `RenderRequest.renderSize(fitting:within:)` fits the canvas's aspect inside it and refuses to
+    /// go above native; `CompositorBudget.affordableSize` then caps what the device can hold, in that
+    /// order, for `makeSandwichRequests`' reason — a preference may ask for less than the device
+    /// allows and never for more. The cap is inert at any thumbnail-sized box and is applied anyway,
+    /// so a future caller asking for something large is bounded by the same rule the live canvas is.
+    ///
+    /// **Nil skips all of it rather than passing the canvas through the same arithmetic**, so the
+    /// eyedropper, the live-mask resolve and every parity test composite at native size down the byte
+    /// — an identity that `affordableSize` does not promise on a 4096² document with a deep stack.
     @MainActor
     func makeRenderRequest(atFrame frame: Int,
                            quality: RenderQuality = .full,
-                           includeBackground: Bool) -> RenderRequest? {
+                           includeBackground: Bool,
+                           fittingWithin bound: CGSize? = nil) -> RenderRequest? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
         let tree = renderTree
+        let renderSize: CGSize
+        if let bound {
+            let wanted = RenderRequest.renderSize(fitting: canvasSize, within: bound)
+            let textures = tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
+            renderSize = CompositorBudget.affordableSize(for: wanted, textures: textures)
+        } else {
+            renderSize = canvasSize
+        }
+
         let maskStacks = maskSourceStacks(of: tree)
-        let snapshot = renderSources(atFrame: frame, canvasSize: canvasSize, quality: quality,
+        let snapshot = renderSources(atFrame: frame, canvasSize: renderSize, quality: quality,
                                      alsoIncluding: maskedLayerIndices(in: maskStacks))
         return RenderRequest(
             tree: tree,
@@ -358,7 +416,7 @@ extension CanvasManager {
             contentVersions: snapshot.versions,
             maskStacks: maskStacks,
             frame: frame,
-            canvasSize: canvasSize,
+            canvasSize: renderSize,
             background: includeBackground && isCanvasBackgroundVisible
                 ? RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor))
                 : nil,

@@ -190,6 +190,12 @@ enum ProjectStore {
         let layers: [LayerContent]
         let thumbnail: UIImage?
 
+        /// The box the gallery tile fits into — the composite's size hint *and* the renderer's
+        /// target, deliberately one constant so the two cannot drift apart. Named rather than
+        /// written twice because the whole point of the size hint is that the composite and the tile
+        /// agree; two literals is exactly how they would stop agreeing.
+        static let thumbnailBounds = CGSize(width: 320, height: 320)
+
         /// Reads published state and renders the per-cel images; deliberately does no encoding, so it
         /// stays the cheap half. It is a handful of canvas-sized draws over caches this initialiser
         /// has just warmed — nothing like the multi-second PNG encode that is being moved off main.
@@ -257,12 +263,21 @@ enum ProjectStore {
             // about what the thumbnail *should* contain, not about which code composites it, and
             // rolling it into the phase that removes the second compositor would make a behaviour
             // change look like a refactor.
+            // **The composite is sized to the tile it becomes, which it was not until 2026-08-20.**
+            // It used to render the whole canvas — 2,097,152 pixels at the owner's 2048×1024 to fill
+            // the 51,200 a 320-wide tile actually occupies, and 16.8M at 4096² — on the main actor,
+            // inside every save. `fittingWithin` is the same box `ThumbnailRenderer` fits into, passed
+            // to both, so the composite's aspect and the tile's come from one rule rather than two.
+            // The renderer's downscale is then very nearly the identity and is kept: it is what makes
+            // this correct for a canvas whose aspect the budget clamp did move, and it costs a copy
+            // of a tile-sized image.
             if let size = canvasManager.canvasSize,
                let request = canvasManager.makeRenderRequest(atFrame: canvasManager.currentFrame,
-                                                             includeBackground: false),
+                                                             includeBackground: false,
+                                                             fittingWithin: Self.thumbnailBounds),
                let composited = Compositor.composite(request) {
                 thumbnail = ThumbnailRenderer.render(UIImage(cgImage: composited, scale: 1, orientation: .up),
-                                                     canvasSize: size, thumbnailSize: CGSize(width: 320, height: 320))
+                                                     canvasSize: size, thumbnailSize: Self.thumbnailBounds)
             } else {
                 thumbnail = nil
             }

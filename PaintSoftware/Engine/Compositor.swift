@@ -238,6 +238,62 @@ enum CompositorBudget {
     }
 }
 
+/// Counts composites, and the size each was asked for — the instrument behind "how many of these did
+/// that pass actually do", which is the question two performance claims turn on and neither could
+/// answer before 2026-08-20.
+///
+/// **A count rather than a timing, deliberately.** A rebuild that composites three pictures where one
+/// is looked at, or a thumbnail that composites two million pixels to fill fifty thousand, is wrong
+/// by a *number* — and a number is stable under a loaded machine, which a millisecond on this Mac
+/// provably is not (CLAUDE.md records five concurrent runs returning wrong answers, not merely slow
+/// ones). So the assertions these serve are integers and sizes, and they need no device.
+///
+/// **Off by default and nearly free when off.** Armed only from a test, and the hook a shipped build
+/// pays is one relaxed `Bool` load before a branch that is never taken — the same shape and the same
+/// reasoning as `ActionRecorder`'s event tap, which is documented as costing exactly that. The lock
+/// is taken only while armed, which matters because `composite` runs on `sandwichQueue` and on the
+/// main actor both, sometimes in the same rebuild.
+enum CompositeProbe {
+
+    private static let lock = NSLock()
+    /// Read outside the lock on the hot path. A stale read is harmless in both directions: the probe
+    /// is armed before the code under test runs and read after it finishes, so there is no window in
+    /// which a missed or extra observation could change an assertion.
+    private static var isArmed = false
+    private static var sizes: [CGSize] = []
+
+    /// Starts recording, discarding anything held from a previous run.
+    static func begin() {
+        lock.lock(); defer { lock.unlock() }
+        sizes = []
+        isArmed = true
+    }
+
+    /// Stops recording and returns what was seen, in call order.
+    @discardableResult
+    static func end() -> [CGSize] {
+        lock.lock(); defer { lock.unlock() }
+        isArmed = false
+        let seen = sizes
+        sizes = []
+        return seen
+    }
+
+    /// Everything composited since `begin()`, without stopping. For a test that wants to look
+    /// part-way through a sequence.
+    static func observed() -> [CGSize] {
+        lock.lock(); defer { lock.unlock() }
+        return sizes
+    }
+
+    fileprivate static func record(_ size: CGSize) {
+        guard isArmed else { return }
+        lock.lock(); defer { lock.unlock() }
+        guard isArmed else { return }
+        sizes.append(size)
+    }
+}
+
 enum Compositor {
 
     /// The active backend. A `static var` rather than a `UserDefaults`-backed setting because this is
@@ -275,6 +331,7 @@ enum Compositor {
     /// Returns nil for a degenerate canvas size, **and now for one more case**: a GPU composite
     /// declined because the process is out of memory right now. See below.
     static func composite(_ request: RenderRequest) -> CGImage? {
+        CompositeProbe.record(request.canvasSize)
         switch backend {
         case .coreGraphics:
             return CoreGraphicsCompositor.composite(request)

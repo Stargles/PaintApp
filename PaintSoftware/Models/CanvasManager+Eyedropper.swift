@@ -43,6 +43,10 @@ extension CanvasManager {
     /// `renderResolution` (that is `makeSandwichRequests`, by design — see `RenderRequest.swift`). So
     /// an artist running a reduced live preview still samples the true colour rather than a
     /// downscaled approximation of it.
+    ///
+    /// The `fittingWithin` hint added for the project thumbnail is likewise not passed here, and
+    /// must not be: a sampled colour is the artist's answer to "what colour is *that* pixel", and a
+    /// reduced composite would blend the neighbours into it.
     @MainActor
     func eyedropperRequest() -> RenderRequest? {
         makeRenderRequest(atFrame: currentFrame, quality: .full, includeBackground: true)
@@ -55,10 +59,12 @@ extension CanvasManager {
     /// (see `Eyedropper`'s note on why there is no zoom arithmetic anywhere in this feature).
     ///
     /// **The point is mapped into the composited image's own grid rather than assumed equal to it.**
-    /// Today they are equal — `makeRenderRequest` never scales — so the two lines are a no-op. They
-    /// are here because the failure they prevent is silent: were a scale ever applied upstream, an
-    /// unmapped point would sample a real pixel at the wrong place, and a wrong colour looks exactly
-    /// like a right one.
+    /// Today they are equal for *this* caller — `eyedropperRequest` passes no size hint — so the two
+    /// lines are a no-op. They are here because the failure they prevent is silent: were a scale ever
+    /// applied upstream, an unmapped point would sample a real pixel at the wrong place, and a wrong
+    /// colour looks exactly like a right one. `makeRenderRequest` grew a `fittingWithin` hint on
+    /// 2026-08-20, which makes that hypothetical a live capability of the builder rather than a
+    /// speculation about one; this function is correct either way because it maps.
     ///
     /// Nil means "nothing to pick": off the canvas, or a fully transparent pixel. `Eyedropper` decides
     /// which; this only carries the answer.

@@ -111,6 +111,114 @@ final class ProjectSaveLogicTests: XCTestCase {
         PixelOps.opaqueContentBounds(cel.raster.renderToUIImage()) != nil
     }
 
+    // MARK: - The thumbnail composites the tile, not the canvas
+
+    /// The owner's canvas, not the 64×64 the rest of this file uses: `renderSize(fitting:within:)`
+    /// clamps at 1×, so a fixture smaller than the 320-point tile box makes the hint inert and every
+    /// assertion below vacuous. 2048×1024 is what [TODO.md](TODO.md) records the owner animating on.
+    private static let ownersCanvas = CGSize(width: 2048, height: 1024)
+
+    /// One layer, one cel, one hard-edged rectangle covering the top-left quarter — placed at exact
+    /// multiples of the 0.15625 tile scale so the two downsample paths compared below have no
+    /// sub-pixel edge to disagree about. What is under test is *where the pixels are composited*, and
+    /// an edge landing between two tile pixels would add a difference that is about filtering.
+    private func thumbnailManager() -> CanvasManager {
+        let manager = CanvasManager()
+        manager.canvasSize = Self.ownersCanvas
+        manager.addLayer()
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.red,
+                                                               rect: CGRect(x: 0, y: 0, width: 1024, height: 512),
+                                                               size: Self.ownersCanvas))
+        return manager
+    }
+
+    /// The rule, on its own. A bounding box, the canvas's aspect kept, and **never** an upscale.
+    func testTheRenderSizeHintFitsTheCanvasAspectInsideTheBoxAndNeverGrowsIt() {
+        let box = CGSize(width: 320, height: 320)
+
+        XCTAssertEqual(RenderRequest.renderSize(fitting: CGSize(width: 2048, height: 1024), within: box),
+                       CGSize(width: 320, height: 160),
+                       "The wide dimension binds, and the aspect is the canvas's — not the box's")
+        XCTAssertEqual(RenderRequest.renderSize(fitting: CGSize(width: 1024, height: 2048), within: box),
+                       CGSize(width: 160, height: 320),
+                       "…and the tall dimension binds on a tall canvas")
+        XCTAssertEqual(RenderRequest.renderSize(fitting: CGSize(width: 4096, height: 4096), within: box),
+                       box,
+                       "A square canvas fills the square box")
+
+        // A hint may only ask for less. Compositing above native invents no detail and costs more
+        // than the render it would replace.
+        XCTAssertEqual(RenderRequest.renderSize(fitting: CGSize(width: 64, height: 64), within: box),
+                       CGSize(width: 64, height: 64),
+                       "A canvas already smaller than the box is returned untouched, not stretched to fill it")
+
+        // Whole pixels, upstream of both backends — `RenderResolution.renderSize`'s reason, and the
+        // same failure it prevents: a source one pixel wider than the composite reading it.
+        let odd = RenderRequest.renderSize(fitting: CGSize(width: 1001, height: 333), within: box)
+        XCTAssertEqual(odd.width, odd.width.rounded(), "width is whole")
+        XCTAssertEqual(odd.height, odd.height.rounded(), "height is whole")
+        XCTAssertEqual(odd, CGSize(width: 320, height: 106))
+
+        // Degenerate inputs fall back to the canvas rather than to a zero-sized texture allocation.
+        XCTAssertEqual(RenderRequest.renderSize(fitting: Self.ownersCanvas, within: .zero), Self.ownersCanvas)
+        XCTAssertEqual(RenderRequest.renderSize(fitting: .zero, within: box), .zero)
+    }
+
+    /// **The waste, counted rather than timed.** A save composited the whole canvas to fill a
+    /// 320-point tile — 2,097,152 pixels for the 51,200 the tile occupies at the owner's canvas, on
+    /// the main actor, inside every save. This asserts the size the compositor was actually asked
+    /// for, which is a fact about the call and not about the machine it ran on.
+    func testTheProjectThumbnailCompositesAtTileSizeRatherThanCanvasSize() {
+        let manager = thumbnailManager()
+        let url = projectURL(name: "Thumbnail Size")
+
+        CompositeProbe.begin()
+        saveAndWait(manager, to: url)
+        let composited = CompositeProbe.end()
+
+        XCTAssertEqual(composited, [CGSize(width: 320, height: 160)],
+                       "One composite, sized to the tile. Before 2026-08-20 this was one composite at 2048×1024 — a 40× "
+                       + "overdraw on the main actor, and until the scene-phase gate landed, three of them per app switch")
+    }
+
+    /// …and the tile still looks the same. The saving is only a saving if the picture survives it, so
+    /// this composites the same document both ways and compares the two tiles.
+    ///
+    /// A mean absolute difference rather than an exact match: the two paths downsample in different
+    /// places — one filters 2048×1024 down to 320×160, the other composites at 320×160 directly — and
+    /// demanding byte equality between them would be asserting that two different filters agree,
+    /// which is not the claim. The claim is that a gallery tile is unchanged to the eye.
+    func testTheTileFromTheSizedCompositeMatchesTheTileFromTheFullOne() {
+        let manager = thumbnailManager()
+        let box = CGSize(width: 320, height: 320)
+
+        guard let native = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
+              let hinted = manager.makeRenderRequest(atFrame: 0, includeBackground: false, fittingWithin: box) else {
+            return XCTFail("Both requests must build")
+        }
+        XCTAssertEqual(native.canvasSize, Self.ownersCanvas, "No hint means native, exactly as before")
+        XCTAssertEqual(hinted.canvasSize, CGSize(width: 320, height: 160))
+
+        guard let nativeImage = Compositor.composite(native),
+              let hintedImage = Compositor.composite(hinted) else {
+            return XCTFail("Both must composite")
+        }
+        let fromNative = ThumbnailRenderer.render(UIImage(cgImage: nativeImage, scale: 1, orientation: .up),
+                                                  canvasSize: Self.ownersCanvas, thumbnailSize: box)
+        let fromHinted = ThumbnailRenderer.render(UIImage(cgImage: hintedImage, scale: 1, orientation: .up),
+                                                  canvasSize: Self.ownersCanvas, thumbnailSize: box)
+
+        XCTAssertEqual(fromNative.size, fromHinted.size, "Both paths produce the same tile geometry")
+        guard let a = fromNative.cgImage.flatMap(CanvasFixture.rgbaBytes),
+              let b = fromHinted.cgImage.flatMap(CanvasFixture.rgbaBytes), a.count == b.count else {
+            return XCTFail("Both tiles must be readable and the same shape")
+        }
+        let meanDifference = zip(a, b).reduce(0.0) { $0 + Double(abs(Int($1.0) - Int($1.1))) } / Double(a.count)
+        XCTAssertLessThan(meanDifference, 2.0,
+                          "The tile the artist sees is unchanged — mean channel difference \(meanDifference) of 255")
+    }
+
     // MARK: - Fully-formed package
 
     /// The baseline: everything the snapshot carries makes it to disk and comes back. If a field were
