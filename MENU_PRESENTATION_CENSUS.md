@@ -92,20 +92,22 @@ record of what was wrong, not as a list of open defects.*
 
 ## SETTLED SAFE (was UNKNOWN) — presents through a path this repo had never verified
 
-**Measured 2026-08-20 and safe; see the section after next for how.** Listed as they were found:
+**Measured 2026-08-20 and safe — see "The question the source could not answer", below, for how.**
+Listed as they were found:
 
 `Menu` / `.contextMenu` / stock `ColorPicker` / `ShareLink`, twelve of them: `MotionGroupRow.swift:126`
 and its nested `Picker` at `:134`, `GuideRow.swift:155`, `LayerPanel.swift:94`, `:415`, `:590`, `:969`,
 `ColorPickerPanel.swift:356`, `:419`, `EffectSection.swift:369`, `ActionRecorderControls.swift:142`,
 `OnionSkinPanel.swift:326`.
 
-## Why `.popover` is the confirmed hazard and `Menu` is not (yet)
+## Why `.popover` is the hazard and `Menu` is not
 
 The repo's own diagnosis (`AnimationTimeline.swift:146-162`, `StrokeGestureRecognizer.swift:270-278`)
 records as observed fact that a `.popover`'s outside-touch **does not swallow the touch**: the stroke
 begins, and the teardown lands mid-sequence. `Menu` and `.contextMenu` present through a different UIKit
-path whose touch-passthrough behaviour **nothing in this repo verifies**. `.alert` / `.sheet` /
-`PhotosPicker` are modal — no stroke can start under them, which is why all of those are SAFE.
+path, and on 2026-08-18 nothing in this repo had verified it. It has been now, and it swallows — the
+measurement is below. `.alert` / `.sheet` / `PhotosPicker` are modal — no stroke can start under them,
+which is why all of those are SAFE.
 
 ## SAFE, and worth knowing why
 
