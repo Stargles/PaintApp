@@ -250,6 +250,47 @@ final class MetalFillSession {
     /// `fillQueue`, which is serial and the only place `fill(...)` is called from in the app.
     private(set) var lastFilledPixelCount: Int = 0
 
+    /// The collar's **reached** set from the last `fill(...)` — one byte per pixel, non-zero wherever
+    /// the flood seeded at the loop's ring could walk. Nil for a bucket session.
+    ///
+    /// **What it is for, and the one thing it turns out not to be.** LASSO_FILL.md §7.2 asks that an
+    /// empty result show the artist *where the paint went* rather than a blank canvas and a sentence,
+    /// on the reasoning that the reached set is the escape route — so on a gap the colour visibly
+    /// pours out through it. Krita and Clip Studio Paint ship this algorithm with no such diagnostic
+    /// at all and Krita's users report the result as "it just won't fill anything", so the ambition
+    /// is right; the mechanics are narrower than §7.2 assumed.
+    ///
+    /// **On the path where it is displayed, this mask is the loop's whole interior.** The §7 signal
+    /// fires only when the fill came back empty, and `lassoInvert` paints every pixel the collar
+    /// could *not* reach — ink included, since ink is never passable. So an empty result means
+    /// precisely that the collar reached everything, and the tint built from it is congruent to the
+    /// fence. It says the true and useful thing for the case it fires on ("everything inside your
+    /// loop read as background, so there was nothing to hold out"); it is not the picture of a leak.
+    /// A genuine leak is *not* an empty result — the outline's own pixels are unreachable and get
+    /// painted, which is `testALeakThroughAWideGapPaintsOnlyTheOutlineTheCollarCouldNotEnter` — so it
+    /// announces itself by only the line being coloured, and never reaches this path.
+    /// `testTheCollarMaskCarriesTheLeakEvenWhereTheSignalDoesNotFire` pins both halves.
+    ///
+    /// Read lazily rather than snapshotted inside `fill(...)` because it is wanted only on the empty
+    /// path, which is rare, while `fill` runs on every slider tick. The buffers are
+    /// `.storageModeShared` and `fill` waits on its last command buffer, so their contents are
+    /// settled by the time this can be called — from `fillQueue`, which is the serial queue that ran
+    /// the fill and the only place either is touched.
+    func lastReachedMask() -> [UInt8]? {
+        guard isLasso else { return nil }
+        var reached = [UInt8](repeating: 0, count: count)
+        let a = regionBuf.contents().bindMemory(to: UInt8.self, capacity: count)
+        // The union over `c ∈ C`, matching `lassoInvert`'s own `reached` test exactly — a pixel either
+        // reference could walk to is one the artist should see tinted.
+        let b = region2Buf?.contents().bindMemory(to: UInt8.self, capacity: count)
+        reached.withUnsafeMutableBufferPointer { out in
+            for i in 0..<count {
+                out[i] = (a[i] != 0 || (b?[i] ?? 0) != 0) ? 255 : 0
+            }
+        }
+        return reached
+    }
+
     fileprivate init?(engine: MetalFillEngine, referenceRGBA: [UInt8], width: Int, height: Int,
                       lassoMask: [UInt8]? = nil) {
         guard width > 0, height > 0, referenceRGBA.count >= width * height * 4 else { return nil }

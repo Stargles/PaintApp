@@ -20,23 +20,6 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- [ ] **The lasso fill fills the whole canvas** — owner, on device, 2026-08-18: *"Lasso tool is not
-      working as intended. When i circle something the entire canvas gets filled."*
-      **Built on `tmp/lasso` (worktree `../PaintApp-lasso`), green on the fast tier, not yet merged and
-      not yet seen on the device.** [LASSO_FILL.md](LASSO_FILL.md) §6 implemented as specified: the
-      collar floods from the loop's one-pixel ring, is confined to the loop, and the fill is the loop
-      minus everything it reached. Circling a closed box now paints exactly the box (0.4004 of the
-      canvas) where it used to paint 1.000; a loop inside the shape, around blank paper, or crossing the
-      outline all fill nothing.
-      **What still needs the owner, on the iPad, not a test** (LASSO_FILL.md §8): whether the
-      paint-over destroys the outline on a single-layer sketch — and note that on two of the three
-      commit paths they will *not* see it happen, because [BUGS.md](BUGS.md)'s two "does not paint over
-      line art" entries mean same-cel raster strokes and every vector stroke redraw over the new fill.
-      Also whether the tool feels right on a textured pencil rather than a hard round brush.
-      **Not built: the §7.2 collar tint.** The empty result commits nothing, pushes no undo entry and
-      raises a banner; the translucent overlay showing *where it leaked* is the piece left, and it is
-      the one thing that turns "it just won't fill anything" into a diagnosis.
-
 - [ ] **The "To Cross" eraser leaves stubs, and its size does nothing** — owner, on device, 2026-08-18:
       *"The cross eraser behaviour is a bit weird. I want it to erase the lines right at the point that
       the line crosses the center of another line, but in many cases it leaves stubs. Also, the eraser
@@ -143,6 +126,23 @@ Carried over:
       tile; already in BUGS.md.
 
 ## Done this pass
+
+- **The lasso fill fills the whole canvas** — merged 2026-08-19. Rebuilt to
+  [LASSO_FILL.md](LASSO_FILL.md): the loop's ring seeds the flood, the flood may never leave the loop
+  (`lassoBarrier`), and the result is `loopMask ∧ ¬reached` — so the loop bounds the fill by
+  construction rather than by connectivity the artist does not control. Circling a closed box now
+  paints the box and nothing else (0.4004 of the canvas, its exact footprint) where it used to paint
+  1.000. All three traps the spec warned about held: the loop is not a literal wall, `fillExpand` is
+  forced to 0 in this mode, and there is no connected-component filter. §7's signal ships too — the
+  sentence, the redrawn fence, and the tinted collar.
+  **One correction to the spec, made while reviewing the unreviewed WIP that wired §7**: the collar
+  tint cannot show a leak, because a leak is not an empty result — ink is never passable, so a leaked
+  fill still paints the outline and the empty check never fires. On the path where the tint *is*
+  shown it is congruent to the loop's interior, and it says the true thing for that case ("everything
+  in here read as background"). Shipped, with the claim corrected in three doc comments and the
+  reasoning written into LASSO_FILL.md §7. **Whether a leak deserves its own signal is an open
+  question for the owner** — detecting one properly is a diagnostic-only connected-component pass.
+
 
 - **The canvas border does not act as a fill boundary once there is padding** — merged 2026-08-19.
   Both suspected causes were real and both are fixed. `setCanvasPadding` grows `canvasSize` itself, so

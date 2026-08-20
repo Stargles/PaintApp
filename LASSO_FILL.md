@@ -119,6 +119,17 @@ On an empty result:
 
 Do **not** add a partial-result warning for small-but-nonempty fills. A small fill is usually intentional and a false warning is worse than none.
 
+### What §7.2 turned out to be, once it was built (2026-08-19)
+
+**The collar tint cannot show a leak, because a leak is not an empty result.** Item 2 above was written on the reasoning that the reached set is the escape route, so the artist would watch the colour pour out through the gap. Two things in this same document make that unreachable:
+
+- §6 step 4's `fill = loopMask ∧ ¬reached` includes ink, because ink is never passable. A leaked fill therefore still paints the outline's own pixels — measured at 927 px on the test box — so `lastFilledPixelCount` is nowhere near the step-5 empty threshold and **the signal does not fire**.
+- Conversely, an empty result *means* the collar reached everything inside the fence. So on the one path where the tint is displayed, it is congruent to the loop's interior, every time.
+
+The tint is still worth shipping and is shipped: an orange wash filling the fence states *"every pixel in here counted as background"* far more directly than an outline does, and paired with §7.4's redrawn fence it separates the two causes the sentence names — a loop around blank paper looks nothing like one that closed early somewhere its owner did not intend. But it is a picture of **why nothing was enclosed**, not a picture of a leak, and the code says so where it used to claim otherwise.
+
+A leak still announces itself, just differently: only the line gets coloured. Whether that deserves its own signal is an open question for the owner. Detecting it properly means asking whether any ink component inside the loop encloses a region the collar walked into, which is the connected-component analysis §4 case 5 rules out of the fill path — it would be diagnostic-only, so the ruling does not forbid it, but it is new work rather than a correction.
+
 ## 8. Open risks
 
 **Needs the owner's eye on the device, not a test:**

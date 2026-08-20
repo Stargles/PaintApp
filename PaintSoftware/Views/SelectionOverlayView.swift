@@ -38,6 +38,20 @@ final class SelectionOverlayView: UIView {
     /// `updateSelection`.
     private let hatchLayer = CAShapeLayer()
 
+    /// LASSO_FILL.md §7.2's collar tint: the reached set of a lasso fill that enclosed nothing, drawn
+    /// registered to the artwork. Contents are a canvas-resolution image and this view's bounds *are*
+    /// the canvas (`CanvasView` sets `container.bounds` to `canvasSize`), so it maps one to one.
+    private let collarLayer = CALayer()
+    /// §7.4's redraw of the loop, in the same white-on-blue dashes the artist watched themselves
+    /// draw. Separate layers from `liveLayer`/`liveShadowLayer` rather than a reuse of them, because
+    /// these fade out under an animation and the live pair must be instantly usable by the next
+    /// gesture — a loop drawn during the fade would otherwise inherit an opacity on its way to zero.
+    private let diagnosticLoopShadowLayer = CAShapeLayer()
+    private let diagnosticLoopLayer = CAShapeLayer()
+    /// The diagnostic currently on screen, so a repeated `updateSelectionOverlay` pass — there are
+    /// many, and most change nothing — does not restart the fade from the top every time.
+    private var shownDiagnosticID: UUID?
+
     private var lassoPoints: [CGPoint] = []
     private var rectStart: CGPoint?
     private var currentSelectionPath: CGPath?
@@ -52,6 +66,17 @@ final class SelectionOverlayView: UIView {
         hatchLayer.fillRule = .evenOdd
         hatchLayer.isHidden = true
         layer.addSublayer(hatchLayer)
+
+        // Under the marching ants and under the live preview: the tint is a wash over the artwork,
+        // and an outline drawn on top of it stays readable where one drawn under it would not.
+        collarLayer.isHidden = true
+        collarLayer.opacity = 0
+        // Nearest-neighbour so a zoomed-in canvas shows the collar's actual pixel boundary. The
+        // artist is being asked to find a gap in their line; a bilinear smear over the very pixels
+        // they are hunting for would defeat the whole point of showing it.
+        collarLayer.magnificationFilter = .nearest
+        collarLayer.minificationFilter = .nearest
+        layer.addSublayer(collarLayer)
 
         antsShadowLayer.fillColor = UIColor.clear.cgColor
         antsShadowLayer.strokeColor = UIColor.systemBlue.cgColor
@@ -78,6 +103,25 @@ final class SelectionOverlayView: UIView {
         liveLayer.lineDashPattern = [6, 4]
         layer.addSublayer(liveLayer)
 
+        // Styled exactly as the live preview, because it *is* the live preview brought back: §7.4
+        // asks the artist to compare the fence they drew with the fence they thought they drew, and a
+        // second visual vocabulary for the same curve would be a third thing to interpret. No dash
+        // animation on these — a marching outline reads as "still working", which it is not.
+        diagnosticLoopShadowLayer.fillColor = UIColor.clear.cgColor
+        diagnosticLoopShadowLayer.strokeColor = UIColor.systemBlue.cgColor
+        diagnosticLoopShadowLayer.lineWidth = 2.5
+        diagnosticLoopShadowLayer.opacity = 0
+        diagnosticLoopShadowLayer.isHidden = true
+        layer.addSublayer(diagnosticLoopShadowLayer)
+
+        diagnosticLoopLayer.fillColor = UIColor.clear.cgColor
+        diagnosticLoopLayer.strokeColor = UIColor.white.cgColor
+        diagnosticLoopLayer.lineWidth = 1.5
+        diagnosticLoopLayer.lineDashPattern = [6, 4]
+        diagnosticLoopLayer.opacity = 0
+        diagnosticLoopLayer.isHidden = true
+        layer.addSublayer(diagnosticLoopLayer)
+
         let pan = TouchTypePanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         addGestureRecognizer(pan)
@@ -98,6 +142,86 @@ final class SelectionOverlayView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         refreshHatchPath() // the "outside" rect tracks the view's own bounds, which can change on rotation/resize
+        // Same reason, and the collar is the one layer here with a frame rather than a path: its
+        // contents are the canvas, so its frame has to stay the canvas. Inside a `CATransaction` with
+        // actions off, or a resize mid-fade animates the frame as well as the opacity.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        collarLayer.frame = bounds
+        CATransaction.commit()
+    }
+
+    // MARK: - The empty lasso fill's diagnostic (LASSO_FILL.md §7.2, §7.4)
+
+    /// Shows `diagnostic` — the tinted collar and the loop that produced it — held at full strength
+    /// and then faded out over `LassoFillDiagnostic.duration`. Nil takes whatever is up straight back
+    /// off; a diagnostic already on screen is left to finish its fade rather than restarted.
+    ///
+    /// **The view owns the timing**, exactly as `DrawingView` owns the notice banner's: how long a
+    /// transient stays up is a presentation decision, and driving it from Core Animation rather than
+    /// from a model timer means a fade cannot be left half-finished by a state change elsewhere.
+    ///
+    /// The fade holds first and then falls (`holdFraction`), rather than easing out from frame one:
+    /// the artist's eye has to arrive at the canvas before the picture is worth anything, and a
+    /// linear fade spends its most legible moment on a screen nobody is looking at yet.
+    func showLassoDiagnostic(_ diagnostic: LassoFillDiagnostic?) {
+        guard let diagnostic else {
+            if shownDiagnosticID != nil { clearLassoDiagnostic() }
+            return
+        }
+        guard diagnostic.id != shownDiagnosticID else { return }
+        shownDiagnosticID = diagnostic.id
+
+        let duration = LassoFillDiagnostic.duration
+        let hold = NSNumber(value: LassoFillDiagnostic.holdFraction)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        collarLayer.frame = bounds
+        collarLayer.contents = diagnostic.collar?.cgImage
+        collarLayer.isHidden = diagnostic.collar == nil
+        diagnosticLoopShadowLayer.path = diagnostic.loop
+        diagnosticLoopLayer.path = diagnostic.loop
+        diagnosticLoopShadowLayer.isHidden = false
+        diagnosticLoopLayer.isHidden = false
+        // The model value is the *end* state, so when the animation finishes the presentation already
+        // matches it — no `fillMode = .forwards` and no removal flicker to reason about.
+        collarLayer.opacity = 0
+        diagnosticLoopShadowLayer.opacity = 0
+        diagnosticLoopLayer.opacity = 0
+        CATransaction.commit()
+
+        for target in [collarLayer, diagnosticLoopShadowLayer, diagnosticLoopLayer] {
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [1, 1, 0]
+            fade.keyTimes = [0, hold, 1]
+            fade.duration = duration
+            fade.timingFunctions = [CAMediaTimingFunction(name: .linear), CAMediaTimingFunction(name: .easeIn)]
+            target.add(fade, forKey: "lassoDiagnosticFade")
+        }
+
+        // Releases the canvas-sized image once it is invisible. Guarded on the id so a *newer*
+        // diagnostic raised inside the window is not torn down by the older one's deadline — the same
+        // stale-timer trap `DrawingView`'s `.task(id:)` avoids for the banner.
+        let id = diagnostic.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            guard let self, self.shownDiagnosticID == id else { return }
+            self.clearLassoDiagnostic()
+        }
+    }
+
+    private func clearLassoDiagnostic() {
+        shownDiagnosticID = nil
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for target in [collarLayer, diagnosticLoopShadowLayer, diagnosticLoopLayer] {
+            target.removeAnimation(forKey: "lassoDiagnosticFade")
+            target.opacity = 0
+            target.isHidden = true
+        }
+        collarLayer.contents = nil
+        diagnosticLoopShadowLayer.path = nil
+        diagnosticLoopLayer.path = nil
+        CATransaction.commit()
     }
 
     /// - Parameter allowsOutsideInteraction: when false (the default "deny" state) and a selection

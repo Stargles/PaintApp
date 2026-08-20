@@ -740,6 +740,149 @@ final class LassoFillLogicTests: XCTestCase {
         XCTAssertNil(manager.notice, "…and nothing to report")
     }
 
+
+    // MARK: - What the artist is shown when the loop encloses nothing (§7)
+
+    /// Every pixel of the reached mask, as a set of coordinates, for the assertions below.
+    private func reachedCount(_ mask: [UInt8]) -> Int { mask.filter { $0 != 0 }.count }
+
+    private func isReached(_ mask: [UInt8], _ x: Int, _ y: Int) -> Bool {
+        mask[y * Self.w + x] != 0
+    }
+
+    /// **The collar is the paper the fence could walk to, and it stops dead at the fence.** This is
+    /// the mask §7.2 tints, so what it covers is what the artist is shown, and the two properties
+    /// that matter are both here: it is the ring of paper *between* the loop and the artwork, and it
+    /// is empty outside the loop — because `lassoBarrier` makes everything outside `loopMask` a wall,
+    /// which is §6 step 3's "the flood must never leave `loopMask`".
+    func testTheCollarIsTheRingOfPaperInsideTheFenceAndNothingOutsideIt() throws {
+        let session = try lassoSession(box(breakInRightWall: 0), loop: loopAroundEverything)
+        _ = session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
+                         gapRadius: 8, edgeOverlap: 0, canvasEdgeIsWall: true,
+                         fillColor: SIMD4<Float>(1, 0, 0, 1))
+        let reached = try XCTUnwrap(session.lastReachedMask())
+
+        XCTAssertTrue(isReached(reached, 12, 60), "The paper between the loop and the box")
+        XCTAssertFalse(isReached(reached, 60, 60), "…not the box's interior, which is what fills")
+        XCTAssertFalse(isReached(reached, 2, 2), "…and nothing at all outside the fence")
+        XCTAssertFalse(isReached(reached, 60, 21), "…nor the wall itself, which is not passable")
+    }
+
+    /// **The same mask, on the scene it was built for: a gap, and the collar streaming through it.**
+    /// The box has a three-row break in its right wall and gap-closing is off, so the collar walks in
+    /// and consumes the interior — and the mask says exactly that, which is the diagnosis §7.2 wants
+    /// to put on screen.
+    ///
+    /// **It is also the honest limit of the feature, and it belongs in a test rather than in a
+    /// comment nobody reads.** This scene does *not* raise the §7 signal, because the result is not
+    /// empty: the outline's own 927 px are unreachable and therefore painted (see
+    /// `testALeakThroughAWideGapPaintsOnlyTheOutlineTheCollarCouldNotEnter`, and §7's closing rule
+    /// against warning on small-but-nonempty results). So the tint the artist actually sees is the
+    /// one for a loop that enclosed *nothing at all* — around blank paper, or inside a solid — where
+    /// it covers the whole interior and says "the fence walked everywhere". A leak still announces
+    /// itself, but by only the outline being painted rather than by this picture.
+    func testTheCollarMaskCarriesTheLeakEvenWhereTheSignalDoesNotFire() throws {
+        let session = try lassoSession(box(breakInRightWall: 3), loop: loopAroundEverything)
+        _ = session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
+                         gapRadius: 0, edgeOverlap: 0, canvasEdgeIsWall: true,
+                         fillColor: SIMD4<Float>(1, 0, 0, 1))
+        let reached = try XCTUnwrap(session.lastReachedMask())
+
+        XCTAssertTrue(isReached(reached, 60, 60), "The collar got inside, which is the leak")
+        XCTAssertTrue(isReached(reached, 101, 60), "…through the break in the right wall")
+        XCTAssertGreaterThan(session.lastFilledPixelCount, CanvasManager.lassoFillMinimumArea,
+                             "…and the result is not empty, so the artist is shown no tint for it")
+    }
+
+    /// A bucket fill has no fence and therefore no collar. Nil rather than the flood's own region,
+    /// which would be a picture of the fill rather than of what escaped it.
+    func testTheCollarMaskIsNilForABucketFill() throws {
+        let engine = try XCTUnwrap(MetalFillEngine.shared)
+        let session = try XCTUnwrap(engine.makeSession(referenceRGBA: box(breakInRightWall: 0),
+                                                       width: Self.w, height: Self.h))
+        _ = session.fill(seedX: 60, seedY: 60, seedColor: .zero, threshold: 0.15,
+                         gapRadius: 0, edgeOverlap: 0, fillColor: SIMD4<Float>(1, 0, 0, 1))
+
+        XCTAssertNil(session.lastReachedMask())
+    }
+
+    /// The tint is flat and premultiplied, and both are load-bearing: flat because the artist's
+    /// question is binary (*did the paint get here?*) and a proportional wash would fade out along
+    /// the antialiased fringe where a leak is hardest to see; premultiplied because everything else
+    /// in this pipeline is, and a straight buffer handed to `premultipliedLast` shows as a dark halo.
+    func testTheCollarTintIsTheWarningHueWhereTheCollarWalkedAndClearElsewhere() {
+        var mask = [UInt8](repeating: 0, count: 4 * 3)
+        mask[5] = 1                                   // (x: 1, y: 1)
+        let rgba = LassoFillMask.collarTintRGBA(reached: mask, width: 4, height: 3)
+
+        XCTAssertEqual(rgba.count, 4 * 3 * 4)
+        XCTAssertEqual(Array(rgba[20..<24]), [102, 46, 10, 102],
+                       "Orange at 40%, premultiplied — 1.0/0.45/0.10 each scaled by the alpha")
+        XCTAssertEqual(Array(rgba[0..<4]), [0, 0, 0, 0], "Fully transparent where the collar did not walk")
+        XCTAssertEqual(rgba.filter { $0 != 0 }.count, 4, "Exactly one pixel is tinted")
+    }
+
+    /// A mask that is not the size it is being read at produces no tint rather than reading past its
+    /// end. The caller is `fillQueue` pairing a session's buffers with a canvas size; they cannot
+    /// disagree today, and this is what happens if they ever do.
+    func testTheCollarTintRefusesAMaskTooShortForTheCanvas() {
+        XCTAssertTrue(LassoFillMask.collarTintRGBA(reached: [UInt8](repeating: 1, count: 5),
+                                                   width: 4, height: 3).isEmpty)
+        XCTAssertTrue(LassoFillMask.collarTintRGBA(reached: [1, 1, 1, 1], width: 0, height: 3).isEmpty)
+    }
+
+    /// **§7's two halves arrive together: the sentence, and the picture that tells the artist which
+    /// of the two causes it was.** A loop around blank paper fills nothing, and the banner alone
+    /// cannot distinguish that from a fill that leaked — so the collar and the fence are raised in
+    /// the same breath as the notice, and the loop that comes back is the one the algorithm actually
+    /// rasterised (§7.4: a stylus loop closes somewhere other than its owner believed more often
+    /// than one would guess).
+    func testAnEmptyLassoFillShowsTheFenceAndTheCollarBesideTheSentence() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)   // blank paper: nothing to enclose
+        let loop = rectangleLoop(CGRect(x: 8, y: 8, width: 48, height: 48))
+
+        manager.beginInteractiveLassoFill(path: loop)
+        manager.endInteractiveFill()
+        settle()
+
+        let diagnostic = try XCTUnwrap(manager.lassoFillDiagnostic, "The picture was raised")
+        XCTAssertEqual(manager.notice?.code, "nothingEnclosed", "…beside the sentence")
+        XCTAssertEqual(diagnostic.loop.boundingBox, loop.boundingBox,
+                       "The fence redrawn is the fence the fill used")
+        XCTAssertNotNil(diagnostic.collar, "…and the collar it walked, tinted")
+    }
+
+    /// The other half of the pair: a fill that lands says nothing and shows nothing. Without this the
+    /// test above passes against a diagnostic raised on every gesture.
+    func testALassoFillThatFindsAShapeLeavesNoPicture() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.black, rect: CGRect(x: 20, y: 20, width: 20, height: 20)))
+
+        manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 8, y: 8, width: 48, height: 48)))
+        manager.endInteractiveFill()
+        settle()
+
+        XCTAssertNil(manager.lassoFillDiagnostic, "Nothing to explain")
+        XCTAssertNil(manager.notice)
+    }
+
+    /// A new loop retires the last one's picture the instant it starts, rather than leaving a stale
+    /// tint under a gesture that is about to say something else about the same canvas. The presenter
+    /// clears it on its own timer as well; this is the case that timer cannot cover, because it is
+    /// driven by a fill rather than by a clock.
+    func testANewLoopRetiresThePreviousPictureImmediately() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 8, y: 8, width: 48, height: 48)))
+        manager.endInteractiveFill()
+        settle()
+        XCTAssertNotNil(manager.lassoFillDiagnostic, "Fixture check: there is a picture to retire")
+
+        manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 4, y: 4, width: 40, height: 40)))
+
+        XCTAssertNil(manager.lassoFillDiagnostic, "Gone before the new fill has said anything")
+    }
+
     // MARK: - The tool option
 
     /// A *type option under the fill tool*, not a second tool: the toolbar's tool stays `.fill` either

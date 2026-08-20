@@ -95,6 +95,9 @@ extension CanvasManager {
                 self.fillSession = session
                 self.fillSeedColor = session?.seedColor(atX: seedX, y: seedY) ?? .zero
             }
+            // A tap has no fence to redraw. Cleared beside the session it belongs to, so the two can
+            // never describe different gestures — see `fillGestureLoopPath`.
+            self.fillGestureLoopPath = nil
             self.drainFillWork()
         }
     }
@@ -401,10 +404,15 @@ extension CanvasManager {
         fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
         fillWorkerScheduled = true
         fillLock.unlock()
-        lassoFillReportedEmpty = false
+        // A new loop supersedes the last one's §7 picture, even mid-fade: whatever the artist is
+        // about to be told is about *this* gesture. The presenter clears it on its own timer too;
+        // this is the case that timer cannot cover, because it fires from a fill, not a clock.
+        lassoFillDiagnostic = nil
 
         fillQueue.async { [weak self] in
             guard let self else { return }
+            self.lassoFillReportedEmpty = false
+            self.fillGestureLoopPath = path
             if let refBytes = Self.compositeReferenceRGBA(references: references, width: width, height: height) {
                 let session = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
                                                                  height: height, lassoMask: lassoMask)
@@ -505,6 +513,18 @@ extension CanvasManager {
             let enclosedNothing = session.isLasso && session.lastFilledPixelCount < Self.lassoFillMinimumArea
             let image = enclosedNothing ? nil
                 : bytes.flatMap { Self.imageFromRGBA($0, width: session.width, height: session.height) }
+            // Said once per empty *streak*, not once per render. The gesture stays adjustable, so a
+            // drag across the Threshold slider produces a burst of empty results through the
+            // coalescing loop above; re-raising on each would flicker the banner and strobe the tint
+            // under the artist's finger. Re-arms as soon as a fill lands, so losing it again is
+            // reported. Latched here rather than on the main thread because the tint below is built
+            // from this session's buffers, which only this queue may read — see the property's doc.
+            let firstEmpty = enclosedNothing && !lassoFillReportedEmpty
+            lassoFillReportedEmpty = enclosedNothing
+            // **§7.2 and §7.4: the picture that goes with the sentence.** Built only on the first
+            // empty result of a streak, so the canvas-sized tint costs nothing on the renders that
+            // fill something and nothing on the repeats that would not be shown anyway.
+            let diagnostic = firstEmpty ? lassoEmptyDiagnostic(from: session) : nil
             let layerID = fillGestureLayerID, celID = fillGestureCelID
             let regionW = session.width, regionH = session.height
             DispatchQueue.main.async { [weak self] in
@@ -517,20 +537,44 @@ extension CanvasManager {
                 self.fillLastRegionRGBA = enclosedNothing ? nil : bytes
                 self.fillLastRegionW = regionW
                 self.fillLastRegionH = regionH
-                // Said once per empty *streak*, not once per render. The gesture stays adjustable, so
-                // a drag across the Threshold slider produces a burst of empty results through the
-                // coalescing loop above; re-raising on each would flicker the banner under the
-                // artist's finger. Re-arms as soon as a fill lands, so losing it again is reported.
-                if enclosedNothing {
-                    if !self.lassoFillReportedEmpty {
-                        self.lassoFillReportedEmpty = true
-                        self.raise(.nothingEnclosed)
-                    }
-                } else {
-                    self.lassoFillReportedEmpty = false
+                // The two halves of §7, raised together: the sentence naming both causes, and the
+                // picture that lets the artist tell which one it was. `diagnostic` is non-nil exactly
+                // when this is the first empty result of a streak, so the latch that keeps the banner
+                // from flickering is the same one that keeps the tint from strobing.
+                if let diagnostic {
+                    self.lassoFillDiagnostic = diagnostic
+                    self.raise(.nothingEnclosed)
+                } else if !enclosedNothing {
+                    // A fill that landed retires the last one's picture rather than leaving it under
+                    // the new colour: the artist recovered the near-miss on a slider, and the tint is
+                    // now describing a state that no longer exists.
+                    self.lassoFillDiagnostic = nil
                 }
             }
         }
+    }
+
+    /// Builds LASSO_FILL.md §7's picture for a lasso session that has just come back empty: the
+    /// collar it reached, tinted, paired with the fence the artist drew.
+    ///
+    /// **The collar is where the paint went, and on this path that is the fence's whole interior.**
+    /// An empty result *means* the collar reached everything (`lassoInvert` keeps only what it could
+    /// not reach), so the tint says the thing the message names: the fence walked everywhere, and
+    /// there was nothing in there to hold out. Paired with §7.4's redrawn fence it separates the two
+    /// causes the sentence lists — a loop that enclosed blank paper looks different from one that
+    /// closed early somewhere the artist did not intend. It is *not* a picture of a leak; see
+    /// `MetalFillSession.lastReachedMask` for why a leak never reaches this path at all.
+    ///
+    /// Runs on `fillQueue`. Both of its inputs belong to that queue — the session's buffers, and
+    /// `fillGestureLoopPath` — and neither is safe to read anywhere else. Returns nil without a loop
+    /// rather than showing a tint with no fence beside it: half the picture invites the wrong reading
+    /// (that the tinted area is what *would* have been filled), and §7.4 is there precisely because
+    /// the fence is the thing most likely to be somewhere other than the artist believes.
+    private func lassoEmptyDiagnostic(from session: MetalFillSession) -> LassoFillDiagnostic? {
+        guard let loop = fillGestureLoopPath, let reached = session.lastReachedMask() else { return nil }
+        let tint = LassoFillMask.collarTintRGBA(reached: reached, width: session.width, height: session.height)
+        let collar = tint.isEmpty ? nil : Self.imageFromRGBA(tint, width: session.width, height: session.height)
+        return LassoFillDiagnostic(collar: collar, loop: loop)
     }
 
     /// Clips a fill preview to the active selection's path when the fill lands on the exact layer/cel

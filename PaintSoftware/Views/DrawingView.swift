@@ -178,6 +178,19 @@ struct DrawingView: View {
             guard !Task.isCancelled else { return }
             canvasManager.notice = nil
         }
+        // The banner's twin, for the picture that goes with it (LASSO_FILL.md §7.2/§7.4). Same
+        // argument, same shape: the model raises and stops, the presenter decides how long.
+        //
+        // This does *not* drive the fade — `SelectionOverlayView` runs that in Core Animation, which
+        // is where a fade belongs. All this does is drop the manager's reference to a canvas-sized
+        // image once it can no longer be seen, on the same deadline the overlay is already using, so
+        // the two agree by construction rather than by a second constant.
+        .task(id: canvasManager.lassoFillDiagnostic?.id) {
+            guard canvasManager.lassoFillDiagnostic != nil else { return }
+            try? await Task.sleep(nanoseconds: UInt64(LassoFillDiagnostic.duration * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            canvasManager.lassoFillDiagnostic = nil
+        }
     }
 
     /// Runs a notice's one-tap fix. These are the actions the modal alerts carried, kept verbatim:

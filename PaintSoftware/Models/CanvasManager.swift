@@ -630,6 +630,18 @@ final class CanvasManager: ObservableObject {
     /// business scheduling one. `CanvasNotice.duration` is the model's advice, not its behaviour.
     @Published var notice: CanvasNotice?
 
+    /// The picture half of a lasso fill that enclosed nothing — the tinted collar and the loop the
+    /// artist drew, for `SelectionOverlayView` to hold and fade (LASSO_FILL.md §7.2 and §7.4).
+    ///
+    /// Raised in the same breath as `.nothingEnclosed` and subject to the same once-per-streak latch,
+    /// so the two are never out of step: the banner tells the artist *what*, this tells them *where*.
+    /// See `LassoFillDiagnostic` for why it is not a `CanvasNotice` — it is registered to the artwork
+    /// rather than to the screen, so it has to live inside the canvas's transformed container.
+    ///
+    /// Cleared by whoever presents it, exactly as `notice` is, and for the same reason: the deadline
+    /// is a presentation decision. `LassoFillDiagnostic.duration` is this model's advice about it.
+    @Published var lassoFillDiagnostic: LassoFillDiagnostic?
+
     /// Shows a banner, **minting a fresh one every time**.
     ///
     /// A new `id` per raise is the whole of this method. Assigning an equal value to an `@Published`
@@ -1240,6 +1252,15 @@ final class CanvasManager: ObservableObject {
     /// Gesture context. `fillSession`/`fillSeedColor` are only touched on `fillQueue`; the rest is set on
     /// the main thread in `beginInteractiveFill` before any `fillQueue` work runs, then only read after.
     var fillSession: MetalFillSession?
+
+    /// The loop the live lasso gesture drew, in canvas coordinates — kept so an empty result can
+    /// redraw the artist's own fence (LASSO_FILL.md §7.4). Nil for a bucket fill.
+    ///
+    /// **Written beside `fillSession`, on `fillQueue`, and that pairing is the point**: the path and
+    /// the session are two halves of one gesture, and the queue is serial, so a second loop drawn
+    /// while the first is still rendering cannot pair one gesture's fence with the other's result.
+    /// Setting it on the main thread would allow exactly that.
+    var fillGestureLoopPath: CGPath?
     var fillSeedColor: SIMD4<Float> = .zero
     /// True while an interactive fill exists — either a finger is dragging it, or it's in the
     /// post-lift *adjustable* state (session still alive, preview shown, not yet baked). Cleared
@@ -1254,9 +1275,16 @@ final class CanvasManager: ObservableObject {
     /// flood, invert, empty check (see `beginInteractiveLassoFill` and LASSO_FILL.md §6).
     var fillGestureIsLasso = false     // main-thread only
     /// Whether the artist has already been told this lasso gesture encloses nothing. Latches the §7
-    /// notice to once per empty *streak*, so dragging a slider through a run of empty results does
+    /// signal to once per empty *streak*, so dragging a slider through a run of empty results does
     /// not flicker the banner; cleared as soon as a fill lands, or when a new gesture starts.
-    var lassoFillReportedEmpty = false  // main-thread only
+    ///
+    /// **`fillQueue`-owned, not main-thread**, and that is load-bearing rather than incidental: the
+    /// §7.2 collar tint is built from the session's buffers on that queue, so the decision *whether
+    /// to build it* has to be taken there too. Latching on main would mean rendering a canvas-sized
+    /// tint on every empty render just so the main thread could throw all but the first away — a
+    /// full-canvas allocation per slider tick, for a picture nobody sees. One latch rather than two
+    /// because two would drift, and the drift would show as a banner without its tint.
+    var lassoFillReportedEmpty = false  // fillQueue only
     /// True when a fill exists and the finger is NOT pressing (adjustable state). The coordinator checks
     /// this in the fill-press handler so that a two-finger pan's first touch doesn't commit the fill.
     var isFillInAdjustableState: Bool { fillGestureActive && !fillFingerDown }

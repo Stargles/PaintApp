@@ -1401,9 +1401,16 @@ struct CanvasView: UIViewRepresentable {
             overlay.isCapturingGestures = lassoFilling
                 || ((activePanel == .select) && (canvasManager.floatingPiece == nil))
             overlay.updateSelection(canvasManager.selection, allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection)
+            // LASSO_FILL.md §7.2/§7.4, pushed down the same way everything else here is: the overlay
+            // decides whether this is new and owns the fade, so a pass that changes nothing costs a
+            // UUID comparison. It is drawn here rather than over the layer stack because the tint has
+            // to stay registered to the artwork when the artist zooms in to find their gap, and this
+            // view is inside the transformed container.
+            overlay.showLassoDiagnostic(canvasManager.lassoFillDiagnostic)
             // Layer hosts are added after this overlay, so without this the marching ants/hatch
             // render underneath layer content — bring it back to front when it has something to show.
-            if overlay.isCapturingGestures || canvasManager.selection != nil {
+            if overlay.isCapturingGestures || canvasManager.selection != nil
+                || canvasManager.lassoFillDiagnostic != nil {
                 container.bringSubviewToFront(overlay)
             }
         }

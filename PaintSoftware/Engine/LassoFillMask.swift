@@ -190,4 +190,111 @@ enum LassoFillMask {
         let mean = sum / (Double(n) * 255.0)
         return SIMD4<Float>(Float(mean.x), Float(mean.y), Float(mean.z), Float(mean.w))
     }
+
+    // MARK: - The empty result's collar tint (LASSO_FILL.md §7.2)
+
+    /// The warning hue the collar is tinted with when a loop encloses nothing, as straight
+    /// (non-premultiplied) RGBA in 0…1.
+    ///
+    /// Orange rather than red: nothing has gone wrong with the app and the artist has not made an
+    /// error, so the tint reads as *here is where the paint went* rather than as a failure. The
+    /// nearest shipped analogue is OpenToonz's Gap Check, which highlights closeable gaps in magenta;
+    /// orange sits further from the blue the selection overlay already owns, so a tint and a set of
+    /// marching ants on screen together are never mistaken for each other.
+    ///
+    /// 40% is §7.2's figure, and it is the ceiling rather than a constant brightness — the overlay
+    /// fades the whole layer out from there over `LassoFillDiagnostic.duration`.
+    static let collarTintColour = SIMD4<Float>(1.0, 0.45, 0.10, 0.40)
+
+    /// Turns a **reached** mask (`MetalFillSession.lastReachedMask`) into premultiplied-last RGBA at
+    /// canvas resolution: `collarTintColour` wherever the collar walked, fully transparent elsewhere.
+    ///
+    /// **Flat rather than proportional to anything.** The artist's question on an empty result is
+    /// binary — *did the paint get here?* — and a tint that varied with the coverage ramp would fade
+    /// out exactly along the antialiased fringe of the line, which is the region where the leak is
+    /// hardest to see and most needs showing. A pixel is either in the escape route or it is not.
+    ///
+    /// Premultiplied because that is what every other buffer in this pipeline is and what
+    /// `CGImageAlphaInfo.premultipliedLast` wants; building it straight would show up as a dark
+    /// halo around the tint the moment it composites.
+    ///
+    /// Returns an empty array for a degenerate size or a mask too short to be one, so a caller that
+    /// got its mask from somewhere unexpected produces no tint rather than reading past the end.
+    static func collarTintRGBA(reached: [UInt8], width: Int, height: Int) -> [UInt8] {
+        let count = width * height
+        guard width > 0, height > 0, reached.count >= count else { return [] }
+        let c = collarTintColour
+        let a = UInt8(clamping: Int((c.w * 255).rounded()))
+        let r = UInt8(clamping: Int((c.x * c.w * 255).rounded()))
+        let g = UInt8(clamping: Int((c.y * c.w * 255).rounded()))
+        let b = UInt8(clamping: Int((c.z * c.w * 255).rounded()))
+        var out = [UInt8](repeating: 0, count: count * 4)
+        out.withUnsafeMutableBufferPointer { o in
+            for i in 0..<count where reached[i] != 0 {
+                let p = i * 4
+                o[p] = r; o[p + 1] = g; o[p + 2] = b; o[p + 3] = a
+            }
+        }
+        return out
+    }
+}
+
+/// What the canvas shows the artist when a lasso fill encloses nothing — LASSO_FILL.md §7 items 2
+/// and 4, the two halves that are pictures rather than words.
+///
+/// **The banner says what happened; this says where.** §7's opening finding is that neither Krita nor
+/// Clip Studio Paint gives any diagnostic when an enclosure yields nothing, and that Krita's users
+/// consequently report the tool as simply not working. A sentence alone would leave this app in the
+/// same place for the case that actually matters: the artist cannot tell a loop around blank paper
+/// from a loop whose fill escaped through a two-pixel break in their line, and those want opposite
+/// remedies. So:
+///
+///  * `collar` is the reached set, tinted — *the paint went everywhere shaded*. On the empty result
+///    that raises this, that is the fence's whole interior, and the statement it makes is "every
+///    pixel in here counted as background". See `MetalFillSession.lastReachedMask` for why it cannot
+///    also be the picture of a leak, which was §7.2's original hope.
+///  * `loop` is the fence the artist actually drew, redrawn (§7.4). A stylus loop closes somewhere
+///    other than where its owner believed more often than one would guess, and a fence that shut
+///    early explains an empty result all on its own.
+///
+/// Both are transient and neither is undoable, because neither is a document change: this type is
+/// carried on `CanvasManager` only as far as `SelectionOverlayView`, which draws it and fades it.
+///
+/// **Not a `CanvasNotice`.** That is a sentence in a pill at the top of the screen; this is pixels
+/// registered to the artwork, and it has to live inside the canvas's transformed container to stay
+/// registered when the artist zooms. They are raised together and they are different things.
+struct LassoFillDiagnostic: Identifiable {
+    /// Fresh per raise, for `CanvasNotice.raise`'s reason exactly: the presenter drives its fade off
+    /// this, so two consecutive empty results have to be distinguishable or the second shows nothing.
+    let id: UUID
+    /// The collar, at canvas resolution, already tinted — nil if the mask could not be turned into an
+    /// image, in which case the loop is still worth redrawing on its own.
+    let collar: UIImage?
+    /// The closed loop, in canvas coordinates: the same path `beginInteractiveLassoFill` rasterised,
+    /// so what is redrawn is the fence the algorithm actually used rather than a re-derivation of it.
+    let loop: CGPath
+
+    init(collar: UIImage?, loop: CGPath) {
+        self.id = UUID()
+        self.collar = collar
+        self.loop = loop
+    }
+
+    /// How long the whole diagnostic stays on screen, in seconds — §7.2's "held for ~0.8 s and
+    /// fading", and §7.4's "the same 0.8 s" for the loop.
+    ///
+    /// Advice to the presenter, not behaviour, for the reason `CanvasNotice.duration` is: a model
+    /// that schedules its own wall-clock teardown cannot be tested without sleeping. Deliberately
+    /// much shorter than the banner's 2.6 s — the sentence is there to be read, while this is there
+    /// to be *glanced at* in the moment the fill failed, and a tint that outstays that reads as a
+    /// rendering glitch rather than as an answer.
+    static let duration: TimeInterval = 0.8
+
+    /// The fraction of `duration` the tint holds at full strength before it starts fading. The
+    /// remainder is the fade.
+    ///
+    /// It holds first and fades second rather than fading throughout, because the artist's eye has to
+    /// *arrive* at the canvas before the information is gone — a linear fade from the first frame
+    /// spends its most legible moment on a screen nobody is looking at yet.
+    static let holdFraction: Double = 0.65
 }
