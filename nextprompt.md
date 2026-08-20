@@ -4,50 +4,61 @@ Paste the block below.
 
 ---
 
-Read HANDOFF.md, then CLAUDE.md and TODO.md. Four branches were stopped mid-flight at a usage limit and
-every one of them is committed and pushed — nothing needs recovering, but three carry a `WIP` commit that
-is **unreviewed and untested**, so read the diff before trusting any of it.
+Read HANDOFF.md, then CLAUDE.md and TODO.md.
 
-**Two work streams at a time, maximum.** The owner set that cap explicitly after a four-workflow pass
-burned 40% of a five-hour window in fifteen minutes. TODO.md's "three in flight" line is about the Mac's
-cores and is superseded. Prefer one scoped agent, or doing it inline; say what a fan-out will cost before
-you start it.
+**Nothing is in flight.** No worktrees, no `tmp/*` branches, no simulator debris, and `TODO.md`'s "In
+flight" section is empty — seven branches landed on 2026-08-19/20 and every owner ask on that list is
+merged. `main` is at 1357 fast-tier tests passing, 0 failing, verified on a fresh simulator *after*
+the merges rather than only on each branch's own base. You are starting clean, which has not been
+true for several passes.
 
-Take them in this order, two at a time:
+**Delegate.** The owner's standing instruction is that this session is an orchestrator: *"save your
+context by smartly delegating tasks to sonnet and opus agents"*, and *"if there was a restriction of
+using agents anywhere, remove it. You should just be smart in usage."* The old two-stream cap is
+lifted. The real throttle is `tools/simlock.sh`'s two slots, which serialize test runs on their own —
+so extra agents queue rather than starve the machine. Give each agent its **own** simulator that it
+creates and deletes, and tell it never to run `simctl shutdown all`.
 
-1. **`tmp/fillborder`** — the only clean branch, one commit, test status unknown. Verify the commit
-   actually addresses the cause before running anything: the suspicion is *two* stacked bugs, an inset
-   artwork rectangle nothing knew about plus an edge rule that was only conditional. Finish and merge.
-2. **`tmp/lasso`** — the specified algorithm is in, the WIP on top looks like the failure-signal UI being
-   wired. LASSO_FILL.md is the spec, the owner has ruled, do not re-open the design. When it lands,
-   deploy to the owner's iPad — they will check a shape with a gap in its outline and a loop drawn well
-   outside the shape.
-3. **`tmp/menuinterrupt`** — read MENU_PRESENTATION_CENSUS.md first; it is the pass's biggest finding and
-   it answers the owner's real question. The WIP carries three new files that are the mechanism half-built
-   and never reviewed. The owner does not want a third opt-in: the target is a compile-time guarantee like
-   `Tool.paintsOnCanvas`, and the close-out must say plainly whether that was achieved or came out weaker.
-4. **`tmp/crosseraser`** — WIP only, no reported design. Re-derive it from the diff.
+**Do the iPad pass first, before writing any code.** HANDOFF.md lists six things a simulator cannot
+answer and they are the whole reason to want the owner awake. The Add Text keyboard-over-canvas check
+is the priority — nothing headless reaches it, and a box placed near the bottom of the screen is the
+likeliest place a real defect is hiding, because there is no `keyboardLayoutGuide` handling at all.
+Ask for one `ActionRecorder` capture covering it. **Deploy is blocked, not skipped**: the iPad read
+`unavailable` all night. Run the deploy steps from `CLAUDE.md` out of the repo — `deploy/deploy.sh`
+pulls `main` and cannot ship branch work.
 
-Then Add Text stage 1b (ADD_TEXT.md; **Stage 2 is already on main and must not be rebuilt**) and the perf
-programme's Tier A in PERFORMANCE.md.
+**Seven things need the owner's ruling** and they are listed at the end of HANDOFF.md. Four are new
+consequences of what shipped (two of them change how the cross eraser behaves in ordinary use), three
+are carried. Ask them early — several are one-line answers that unblock real work.
 
-**Ask the owner for the third Action Recorder capture early** — a blend-mode `Menu` on the layer rail with
-a stroke drawn straight through it. It decides whether the census's 12 unknowns are broken, i.e. whether
-the count is 19 or 7, and nothing in the source can settle it. The other two captures (timeline menu,
-onion panel) are still worth having.
+Then, in rough order of value:
 
-Four things the owner owes an answer on are listed at the end of HANDOFF.md. Ask when they block work.
+1. **`PERFORMANCE.md` item 9(b)**, promoted by a measurement taken while building Tier A: on a
+   playback tick the `@MainActor` snapshot costs **78.2 ms** against **22.2 ms** of background
+   composite, so `renderSources` is now the largest main-thread term on the path. Item **4b is
+   declined**, on that measurement rather than on nerve — do not rebuild it. Revisit it only after
+   9(b) moves the snapshot off main and the table is re-taken.
+2. **Add Text stage 3** — vector layers keep text editable. `ADD_TEXT.md` §3 has the file-by-file
+   scope and the tests. Stage 1 is done; **stage 2 is on `main` and must not be rebuilt.**
+3. Tier B, which is instruments rather than fixes and mostly wants device numbers.
 
 ---
 
 ## Notes for whoever writes the next prompt
 
-**Why fillborder is first and lasso second**, despite lasso being the older ask: fillborder is clean and
-small, both touch the fill engine, and whichever lands second pays the rebase. Cheapest order.
+**Check `git log` for a file before building what a document says is outstanding.** `PERFORMANCE.md`
+and `BUGS.md` both described the `scenePhase` triple-save as to-do for two days after `1cbec5b` fixed
+it. An agent went to build it and found it already there. That lag is now written into
+`PERFORMANCE.md` as the finding beside the item.
 
-**Do not re-run the four stopped workflows.** Their journals hold what each agent returned, including
-diagnosis phases whose conclusions never reached a report — paths are in HANDOFF.md, and reading them is
-far cheaper than re-deriving. They are session-scoped; read before they are pruned.
+**Two of tonight's agents were saved by a control test, and one was not saved by three of them.** The
+`Menu` measurement's first draft counted raster strokes on a vector-by-default layer — right answer,
+impossible reason — and its paired no-menu control caught it. Conversely, two of the three original
+cross-eraser diagnosis agents confidently declared the stub hypothesis *refuted*; both were wrong,
+because every test they cited spaced its samples wider than the tolerance it tested, which no real
+stroke does. Ask what a passing test would look like if the code were broken.
 
-**Do not ask the owner to re-check the lasso, the cross eraser or the menu bugs on the current build.**
-All four are known broken and they reported every one of them.
+**Do not tell an agent to cache a UDID in the scratchpad.** Subagents share the parent session's
+scratchpad directory, so a fixed filename is silently overwritten — one agent ran a full suite on
+another's simulator. Hold it in a shell variable, and read the xcresult's `deviceName` alongside the
+count.
