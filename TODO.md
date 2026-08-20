@@ -26,31 +26,23 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 New this pass (owner, 2026-08-17):
 
-- [ ] **A performance pass, calibrated to 2048×1024 — Tier A is built, and items 8, 10, 11 and 12
-      with it.**
+- [ ] **A performance pass, calibrated to 2048×1024 — Tiers A and B are done, and all of Tier C but
+      two items.**
       The owner asked for it directly: *"any performance enhancements that can be made to reduce
       memory, stop lagspikes, or increase fps?"* [PERFORMANCE.md](PERFORMANCE.md) is the fourteen-item
-      programme; **items 1–8 and 10–12 are now resolved** (see "Done this pass" for what that means
-      item by item). **This stays queued because three items remain**, and the two that matter most
-      are the instruments rather than the fixes:
-      - **Item 9(a)** — instrument project open. Still *the largest unmeasured quantity in the app*:
-        nobody can say whether tapping a project costs 200 ms or 4 s. Item 2 gave it a spinner, which
-        changed what the wait looks like and not how long it is.
-      - **Item 9(b)** — move the per-cel decode/rasterize fan-out off `@MainActor`. **Promoted by a
-        measurement taken on 2026-08-20**: the same fan-out runs inside every sandwich rebuild as
-        `renderSources`, at **78.2 ms on the main actor** for six layers at 2048×1024 when the
-        playhead moves to a new frame, against 22.2 ms for all three composites together. It is now
-        the largest main-thread term on a playback tick, and fixing it buys project open *and*
-        scrubbing.
-      - Item 8 (a 2048×1024 point for the vector-vs-raster preview) is device-only.
+      programme; **items 1–12 are now resolved** (see "Done this pass" for what that means item by
+      item). **This stays queued for two reasons, and the second is the larger**: two items remain,
+      and **none of the wins has been seen on the owner's iPad** — every after-figure in the document
+      is a simulator in Debug, so the shape of each result transfers and the multiplier does not.
       - **Item 10 is now measured (2026-08-20), and still not fixed on purpose.** A Mode 3
         (`cutToIntersection`) live-drag cut costs ~95 ms per cut sample (a full vector-layer
         re-stamp), against ~0 ms for a sample that does not cut — MEASURED, simulator, isolated run.
         50 cuts in one 334-sample drag over a 200-stroke layer. Real and now a number, but narrow: it
         fires only mid-drag, only on samples that cross a stroke. Any fix touches the eraser
         machinery `tmp/crosseraser` rewrote hours before this measurement, so it waits for that to
-        settle and for 9(b) to land first.
-      - Tier C — items 11, 13 and 14 — is real, recorded, and deliberately not urgent.
+        settle. **9(b) has now landed, which promotes this**: at ~95 ms a cut sample is four times the
+        whole cold sandwich rebuild, so it is the largest single-frame cost left anywhere in the app.
+      - Tier C — items 13 and 14 — is real, recorded, and deliberately not urgent.
 
 Carried over:
 
@@ -71,6 +63,30 @@ Carried over:
       steps from the worktree — and one sentence from them.
 
 ## Done this pass
+
+- **Performance, item 9 — merged 2026-08-20. Project open was measured for the first time, and then
+  made 5.7× shorter.** All three stages shipped.
+  **The answer, which was the point of the item**: tapping a project cost **303.6 ms** on a 32-cel
+  document at the owner's 2048×1024 — 207.3 ms decoding the cels, 96.3 ms building thumbnails —
+  which is **~0.95 s on a hundred-cel project**. [PERFORMANCE.md](PERFORMANCE.md) had carried a guess
+  of "1-3 s" for two months and called it the largest unmeasured quantity in the app; the real figure
+  is about three times smaller, which is the same shape of error as the 4K recalibration.
+  It is now **53.5 ms** for that document, ~0.17 s at a hundred cels: the per-cel decode runs across
+  cores and off the main thread, and the thumbnails no longer happen before the canvas appears — the
+  cels arrive on the blank placeholder the timeline already draws, and a background pass fills them
+  in a layer at a time.
+  **The same fan-out is what every sandwich rebuild runs**, so scrubbing and playback got it too:
+  **78.2 ms → ~22 ms** of main-actor work on the tick where the playhead moves to a new frame. That
+  claim is checkable rather than asserted — the same test's three composites are unchanged code and
+  read within 4% across the before and after runs, which is what says the two machines were
+  comparable.
+  **Two honest limits.** The 3.9× is on eight cores; the owner's iPad 9 has two performance cores and
+  four efficiency ones, so expect less there. And everything above is a simulator in Debug — the shape
+  transfers, the multiplier does not.
+  **What it cost to get right**: a machine three other sessions were also testing on made the same
+  test report 303 ms, 448 ms and 527 ms for the same work, so the figures that survived are the ones
+  taken at 79-81% idle with nothing else running, and the paired serial-versus-parallel cases that
+  measure both sides in one run.
 
 - **Performance, items 8 and 11 — merged 2026-08-20. The live vector stroke gets its own layer.**
   `StrokeCanvasView.refreshDisplay` flattened the committed render and the in-progress stroke into a

@@ -54,7 +54,7 @@ benchmark — which is why none has ever been under the microscope.
 | `relayout()` on every SwiftUI pass | O(scene frames) + O(total cels), touches no canvas pixels | `TimelineTrackView.swift:71-78` |
 | The ruler redraws every frame label | O(scene length), ignores the dirty rect | `TimelineTrackView.swift:624-642` |
 | Save re-encodes every PNG in the document | O(cel count) × per-PNG size | `ProjectStore.swift:363-471` |
-| Load decodes and rasterizes every cel, serially, on main | O(cel count), fully serial | `ProjectStore.swift:520-675` |
+| Load decodes and rasterizes every cel | O(cel count) — no longer serial, and no longer on main for the gallery's open (item 9) | `ProjectStore.load` / `loadInBackground` |
 | `UndoHistory.maxCost` = 300 MiB | A hardcoded literal, neither device- nor canvas-derived | `UndoHistory.swift:24` |
 | Compositor fixed per-call overhead | A fixed term, paid three times per sandwich rebuild | `RenderTree.swift:429-431`, paid at `CanvasView.swift:1236-1238` |
 | Mode 3 eraser re-stamps the whole vector layer per cut | O(total dabs in the layer) | `VectorLayer.swift:615-634`, `:1160-1214` |
@@ -121,9 +121,17 @@ guaranteed cache-cold because every fresh texture is a new object identity at ve
 Plausibly 1-3 s of hard-frozen UI on a hundred-cel project — INFERRED, and **still completely
 unmeasured**; it is the first thing that happens every session.
 
-**Item 2 shipped a spinner, 2026-08-20, and that is all it did.** The wait is the same length; it now
-looks like a wait rather than like a crash. The measurement is item 9(a) and it has not been taken —
-this is still the largest unmeasured quantity in the app.
+**Item 2 shipped a spinner, 2026-08-20, and that is all it did.** The wait was the same length; it
+merely looked like a wait rather than like a crash.
+
+**Item 9 then measured it and shortened it, the same day, and the paragraph above is kept as the
+diagnosis rather than as a live defect.** MEASURED: a 32-cel document at 2048×1024 opened in
+**303.6 ms** — 207.3 ms of decode, 96.3 ms of thumbnails — so the guess of "1-3 s on a hundred-cel
+project" was high by roughly 2-3×, and the real figure is **~0.95 s at a hundred cels** (INFERRED,
+linear in cel count). It is now **53.5 ms** for the same document and **~0.17 s** at a hundred cels:
+the decode fans out over cores and off the main thread, and the thumbnails happen after the canvas is
+up. Full provenance in item 9. **What is still unknown is the same thing as everywhere else here** —
+these are simulator figures on an 8-core Mac, and an A13's 2+4 cores will not divide by four.
 
 **3. Leaving to the gallery.** Navigation waits on the full write (`ContentView.swift:47-54`), which
 re-encodes every PNG in the document regardless of what changed. Encoding is correctly off-main on
@@ -138,9 +146,12 @@ invalidates nothing. `updateOnionSkin()` was the only render path in `CanvasView
 `onScrub` fires unthrottled on every `.changed` sample. **Magnitude still unmeasured** — see item 3
 for why a millisecond was not taken and what the counts say instead.
 
-The cost that replaced them as the tick's main-actor headline is the sandwich **snapshot**: 78.2 ms
+The cost that replaced them as the tick's main-actor headline was the sandwich **snapshot**: 78.2 ms
 for six layers at 2048×1024 when the playhead moves to a new frame (MEASURED, simulator/CoreGraphics
-— see item 4b). That one is item 9(b)'s shape, not the timeline's.
+— see item 4b). **Item 9(b) took that to ~22 ms on 2026-08-20** by spreading the per-cel flatten over
+cores, so it is no longer the tick's headline; the three composites, at 22.4 ms and off the main
+thread, are now the same size as it. Nothing on this tick is unmeasured any more, and none of it is
+the timeline's.
 
 **5. Playback stuttering on documents with a mask, blend mode, or grade.** `startSandwichRebuild`
 still computes `below` and `above` unconditionally even though they are shown only while `midStroke`
@@ -296,6 +307,31 @@ territory (`renderSources` is the same per-cel rasterize fan-out `ProjectStore.l
 Anyone returning to 4b should do 9(b) first and then re-take this table — if the snapshot moves off
 main, the composites become the tick's critical path and 4b becomes worth its risk again.
 
+**Item 9(b) landed the same day and the table was re-taken. 4b stays declined, and for a better
+reason than before.** MEASURED 2026-08-20, same test, same canvas and backend, two runs at 79–81%
+idle with no other `xcodebuild` and no other booted simulator:
+
+| term | before 9(b) | after 9(b) |
+|---|---|---|
+| snapshot, memo cold | 78.2 ms | **23.9 / 21.2 ms** |
+| snapshot, memo warm | 0.1 ms | 0.2 ms |
+| `composite(full)` | 11.0 | 11.4 / 11.5 |
+| `composite(below)` | 6.7 | 6.6 |
+| `composite(above)` | 4.5 | 4.4 |
+| the three composites together | 22.2 | 22.4 / 22.6 |
+
+**The three composites are the control** — unchanged code, within 4% — which is what says the two runs
+are about the same machine and the snapshot's 3.5× is about the code.
+
+A cold tick is now **~22 ms on the main actor and ~22 ms of background composite**, not ~100 ms. The
+halves are 11.0 ms of the 22.4, so lazy halves would now remove **half the composites and a quarter of
+the tick** rather than 11%. That is a genuinely better trade than the one declined above — and it is
+still declined, because the thing being bought has changed: at 2048×1024 the background rebuild now
+**fits inside the 41.6 ms budget at 24 fps with room to spare**, so the halves are no longer costing
+frames, and the price is unchanged (a stroke whose first frames have no visible ink, on the most
+latency-sensitive path in the app). Revisit it if a document is found that misses the budget *after*
+9(b) — the 4096² stress case and the iPad's ~1.3× are where to look.
+
 **5. Give `makeRenderRequest` a render-size hint. — SHIPPED** (`fittingWithin:`, and
 `RenderRequest.renderSize(fitting:within:)`). Applied at one call site, the thumbnail composite in
 `ProjectStore.SaveSnapshot`; nil everywhere else, which is native and byte-for-byte as before.
@@ -361,27 +397,79 @@ lands within 14% of the iPad 9 on it. What genuinely still needs the owner's har
 rate* claim: whether 17 fps is now something else on their 4096² document. Nothing here can answer
 that, and no arithmetic over these numbers should be presented as if it had.
 
-**9. Instrument project open, then move its decode off `@MainActor`.** Staged, and the instrument
-comes first. (a) A `PerfBaselineTests` case that saves a realistic multi-cel document then times
-`ProjectStore.load` end to end, split into the decode loop and `regenerateAllThumbnails()` — the same
-shape as `testCompositeCostAndMemoryAtCanvasResolution`. `CanvasManager.thumbnailRegenerationCount`
-already exists for exactly this (`CanvasManager.swift:1145-1149`), so "how many uncached rasterizes
-did open cost" is a headless assertion rather than a timing. (b) Move the per-cel decode fan-out off
-the main thread. (c) Defer thumbnail regeneration to a background pass with placeholders.
-*Win*: (a) none directly — but right now nobody can say whether §2 item 2 is 200 ms or 4 s, and that
-is **the largest unmeasured quantity in the app**. (b) and (c) cut the wall clock; the size is
-unknown until (a) lands.
-**Promoted 2026-08-20, and (b) now has a second beneficiary.** The same per-cel rasterize fan-out
-`load` runs is what `renderSources` runs for every sandwich rebuild, and that was measured at
-**78.2 ms on the main actor for six layers at 2048×1024** when the playhead moves to a new frame
-(MEASURED, simulator/CoreGraphics, machine idle — the table is in item 4b). Warm, on the same frame,
-it is 0.1 ms, so the memo works and the cost is entirely the cold case. That is the largest
-main-thread term on a playback tick and it is bigger than every composite in the rebuild put
-together. Moving the fan-out off main therefore buys project open *and* scrubbing, which is not what
-this item was scoped as when it was written.
-*Safety*: (a) is test-only. (b) and (c) are threading and `@MainActor` assumptions confined to
-`load`; nothing gesture-adjacent, and a wrong answer fails loudly (missing or wrong thumbnails)
-rather than subtly.
+**9. Instrument project open, then move its decode off `@MainActor`. — ALL THREE STAGES SHIPPED,
+2026-08-20.**
+
+**Every figure below is MEASURED on `perf9-1`** — an iOS 26.5 simulator (iPad Pro 13-inch M4) on the
+8-core MacBook, **Debug** build, CoreGraphics backend, the owner's 2048×1024. Two provenances are
+involved and they are kept apart. The *before* row was taken at **96.7% idle** with no other
+`xcodebuild` and no other booted simulator; the *after* rows come from two runs at **79–81% idle**,
+also with no other `xcodebuild` and no other booted simulator. **The two are comparable, and that is
+checkable rather than asserted**: the thumbnail walk is unchanged code and reads 96.3 ms in the
+before run against 90.1/92.1 ms in the after runs — 5%, which is the error bar on everything here.
+
+**(a) The instrument, and the answer to §6's oldest question.** `ProjectStore.LoadProfile` splits one
+`load(from:)` into the per-cel decode and `regenerateAllThumbnails()` and carries the cel count, so a
+figure can be scaled to a document of another size; `PerfBaselineTests.testWhatOpeningAMultiCelProjectCosts`
+writes a four-layer, eight-cel-per-layer document with real ink on every cel, saves it, and opens it
+back. **Opening a 32-cel project cost 303.6 ms** — **207.3 ms** of decode and **96.3 ms** of
+thumbnails, **9.5 ms per cel**.
+
+**So it was neither 200 ms nor 4 s: it was about a second for a hundred cels** (INFERRED at that
+per-cel rate, which is what the loop bound makes linear), or ~1.2 s on the owner's iPad 9 at §1's
+~1.3× (INFERRED). Nearer the bottom of the guessed range than the top — and **the thumbnail walk was
+a third of it**, which is what made (c) worth building rather than an afterthought.
+
+**(b) The fan-out is parallel, and off main for the gallery.** `PixelOps.parallelMap` is the one
+primitive for the two per-cel walks, which are the same walk; `ProjectStore.loadInBackground` runs
+the decode on a queue of its own so the spinner item 2 shipped can animate rather than merely have
+been drawn. `load(from:)` still blocks, for the twenty-odd tests that read the result on the next
+line.
+
+| fan-out, alternated serial/parallel in one run | serial | parallel | |
+|---|---|---|---|
+| decode, 32 cels | 162.0 ms | **41.6 ms** | **3.89×** |
+| flatten (`renderSources`' walk), 6 cels | 58.9 ms | **15.0 ms** | **3.92×** |
+
+Peak footprint over the decode is **349 → 373 MB**, +7%: both walks retain every texture they build,
+so the fan-out must not multiply what a load holds, and `parallelMap` drains an autorelease pool per
+iteration so a worker's temporaries cannot accumulate. That is asserted, not just reported.
+
+**`renderSources`' 78.2 ms is now ~22 ms, and the same test's own composites prove the machines are
+comparable.** Re-taking item 4b's table: snapshot cold **78.2 → 23.9 / 21.2 ms**, while `full`
+11.0 → 11.4/11.5, `below` 6.7 → 6.6, `above` 4.5 → 4.4 — three unchanged terms within 4%. So **~56 ms
+of main-actor work leaves every playback or scrub tick on which the playhead moves to a new frame.**
+
+**(c) The gallery's open no longer waits on thumbnails.** The cels arrive with `thumbnail == nil` —
+the placeholder already existed, since `TimelineTrackView`'s cell hides its image view when there is
+none — and `CanvasManager.backfillMissingThumbnails()` fills them in a layer at a time, off the main
+actor, installing each batch in one main-actor turn.
+
+| what the artist waits for, 32 cels at 2048×1024 | before | after |
+|---|---|---|
+| decode | 207.3 ms | **53.5 ms** (cold, gallery path) |
+| thumbnails, inline | 96.3 ms | **0** |
+| **total** | **303.6 ms** | **53.5 ms** |
+| per cel | 9.5 ms | **1.7 ms** |
+| thumbnails, after the canvas is up | — | 23.8 / 24.3 ms |
+
+**5.7× on the wait itself**, and the thumbnail work that remains is 3.8× cheaper too because the
+backfill uses the same fan-out. At a hundred cels that is **~0.95 s → ~0.17 s** (INFERRED, linear in
+cel count).
+
+**Two honest qualifications.** The 3.9× is on **8 cores**; the owner's iPad 9 is an A13 with 2
+performance and 4 efficiency cores, so expect meaningfully less there — the shape of the win
+transfers, the multiplier does not (INFERRED). And the first load in a process faults in a fresh
+canvas-sized bitmap per cel: cold is **53.5 ms** against **39.4 ms** warm on a quiet machine, about
+1.4×. Under host load that same gap read ~280 against ~130 ms, which is why every figure here says
+what the machine was doing.
+
+*Safety*: (a) was test-only. (b) preserves cel order explicitly rather than by completion order —
+`activeCelIndex` scans that order — and `LoadProfile.decodedOnMainThread` makes the threading claim a
+test assertion rather than a doc comment. (c) is arranged around a **stale** thumbnail rather than a
+missing one: missing is loud, stale is a picture of the drawing as it was before a stroke, so every
+install re-resolves layer and cel by id and compares a `LayerContentVersion` captured *before* the
+render against the live one.
 
 **10. Measure the Mode 3 eraser (`cutToIntersection`) live-drag cost. — MEASURED, 2026-08-20.**
 `recordVectorSample` calls `resolveIntersectionCut` on **every** sample
@@ -429,8 +517,10 @@ region) touches three-mode eraser machinery rewritten hours before this measurem
 (`tmp/crosseraser`), and this item's brief was explicitly measure-only. **Do not fix it now.**
 *Where it ranks*: real and now quantified, but narrow — it fires only mid-Mode-3-drag, over a layer
 with enough accumulated geometry to make a re-stamp expensive, and only on the samples that actually
-cross a stroke. It is not a floor on every frame the way the sandwich snapshot (item 4b/9(b)) is. Worth
-scoping a fix once 9(b) is done and the eraser rewrite has settled, not before.
+cross a stroke. It is not a floor on every frame the way the sandwich snapshot (item 4b/9(b)) is.
+**9(b) is now done (2026-08-20) and this is the item that gains most by it**: at 94.6 ms a cut sample
+is four times the whole cold sandwich rebuild, so it is the largest single-frame cost left anywhere in
+the app. Scope a fix once the eraser rewrite has settled.
 *Verified*: `testCutToIntersectionLiveDragCostPerSample`, `PerfBaselineTests.swift`.
 
 ### Tier C — real, recorded, not urgent
@@ -674,7 +764,9 @@ listing, and startup. `runStartupMaintenance` is already `Task.detached` off-mai
 COW clones; `validateProject` reads an 8-byte PNG magic, not a decode; backup rotation uses
 same-volume renames. None is a multi-second stall at any realistic scale.
 
-**Do not build a dirty-tracking save until item 1 has landed and item 9's instrumentation exists.**
+**Do not build a dirty-tracking save.** *(Both preconditions this entry named are now met — item 1
+landed 2026-08-18 and item 9's instrumentation landed 2026-08-20 — so what follows is the whole of
+the argument rather than a wait.)*
 Skipping unchanged PNGs is the right eventual answer to the gallery-exit wait, but it is the
 data-loss class of risk: a dirty check that is wrong once silently drops artwork, which is worse than
 any stall — and this repo already carries `ProjectBackupManager` and `validateProject` precisely
@@ -705,11 +797,22 @@ Both cost one question and no runs, and both overturned something a code-tracing
 **Ask before building** — that is now three times the owner's behavioural report has beaten an agent
 reading code.
 
-### Still open
+**What does opening a real project actually cost? — ANSWERED 2026-08-20 by item 9(a): 303.6 ms for a
+32-cel document at 2048×1024**, 207.3 ms of decode and 96.3 ms of thumbnails, 9.5 ms a cel — so
+**~0.95 s at a hundred cels** (INFERRED), against a standing guess of 1-3 s. It is now 53.5 ms and
+~0.17 s for the same documents; full provenance in item 9. **The interesting part is that this was
+the largest unmeasured quantity in the app for two months and the answer was three times smaller than
+the guess** — the same shape as the 4K recalibration in §1, and the reason this document insists on
+labels.
 
-**What does opening a real project actually cost?** Nobody can say whether it is 200 ms or 4 s. *The
-measurement*: item 9(a). This is the largest unmeasured quantity in the app, and item 2's spinner did
-not change that — it changed what the wait looks like, not how long it is.
+**How much does a machine under load change a figure here? — ANSWERED, and it is worse than "slower".**
+The same test, same binary, same day: `saveForReference` read 863 ms on an idle Mac, 988 ms with two
+other suites running, and 3187 ms with three. The decode's cold-versus-warm gap read 1.4× idle and
+~2.2× contended. A number taken under contention is not a number with a wider error bar; it is a
+number about a different thing. `pgrep -fl xcodebuild` and `top -l 2 -n 0 -s 2` before, and state
+what they said.
+
+### Still open
 
 **What does one cel's PNG encode cost at 2048×1024?** The entire "leave to gallery" ranking rests on
 order-of-magnitude reasoning. *The measurement*: a `PerfBaselineTests` case timing `writePackage`
