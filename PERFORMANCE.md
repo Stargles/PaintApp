@@ -34,8 +34,13 @@ work, and because the device figure for the fixed path has still not been taken.
 **The "~3 s to leave to the gallery" is not the thumbnail composite.** That figure was taken against
 the full 4K canvas. At 2048×1024 the thumbnail's over-render extrapolates to tens of milliseconds
 (INFERRED). The multi-second wait is the whole-document PNG re-encode that navigation gates on
-(`ProjectStore.swift:363-471`, called from `ContentView.swift:47-54`), and that cost scales with
+(`ProjectStore.writePackage`, called from `ContentView.swift:47-54`), and that cost scales with
 **cel count**, not with area. Fixing only the pre-flagged thumbnail would leave the complaint intact.
+*Confirmed 2026-08-20 by item 15, which is the first time either half was measured.* The re-encode is
+**95% of the wait** (455 ms of 480 on a 32-cel document) and the cost is flat at **15.0 ms a cel**
+across a 4× range of documents, so the scaling claim holds as written. The snapshot the thumbnail
+lives in is **2.5 ms**. Item 15 then took the wait to 117 ms; ~3 s on the owner's iPad is a ~150-cel
+document at the old rate (INFERRED).
 
 **`CompositorBudget` is inert at this size.** Six canvas-sized textures are 48 MiB at 2048×1024
 against a 192 MiB device-derived budget (`Compositor.swift:167-170`, `physicalMemory / 16` on a 3 GB
@@ -53,7 +58,7 @@ benchmark — which is why none has ever been under the microscope.
 |---|---|---|
 | `relayout()` on every SwiftUI pass | O(scene frames) + O(total cels), touches no canvas pixels | `TimelineTrackView.swift:71-78` |
 | The ruler redraws every frame label | O(scene length), ignores the dirty rect | `TimelineTrackView.swift:624-642` |
-| Save re-encodes every PNG in the document | O(cel count) × per-PNG size | `ProjectStore.swift:363-471` |
+| Save re-encodes every PNG in the document | O(cel count) × per-PNG size — measured, and no longer serial (item 15) | `ProjectStore.writePackage` |
 | Load decodes and rasterizes every cel | O(cel count) — no longer serial, and no longer on main for the gallery's open (item 9) | `ProjectStore.load` / `loadInBackground` |
 | `UndoHistory.maxCost` = 300 MiB | A hardcoded literal, neither device- nor canvas-derived | `UndoHistory.swift:24` |
 | Compositor fixed per-call overhead | A fixed term, paid three times per sandwich rebuild | `RenderTree.swift:429-431`, paid at `CanvasView.swift:1236-1238` |
@@ -93,7 +98,7 @@ with no direction check. SwiftUI passes through `.inactive` on *both* legs, so o
 trip fires `saveIfNeeded()` three times — one of them on the way back in, while the artist is looking
 at the screen. `saveIfNeeded` has no dirty check of any kind (`ContentView.swift:56-68`; the "if
 needed" is the screen guard), so each of the three is a full save: a `SaveSnapshot` built
-synchronously on `@MainActor` (`ProjectStore.swift:205`, `:295`) that composites the **whole canvas**
+synchronously on `@MainActor` (`ProjectStore.SaveSnapshot.init`, `ProjectStore.save`) that composites the **whole canvas**
 to make a 320×320 tile (`:261-265`), *before* `beginBackgroundTask` is even requested at `:303`, then
 a full-document PNG re-encode enqueued behind it. Three of those compete for the A13's cores per
 switch.
@@ -112,7 +117,7 @@ asserts 1. And the one save left composites **320×160** instead of the whole ca
 the owner's own document — that needs their iPad, not another read of this code.
 
 **2. Tapping a project in the gallery and the app going dead.** `ProjectStore.load` is `@MainActor`
-and fully serial (`ProjectStore.swift:520-675`): per cel, a PNG decode, then `RasterLayerTexture`
+and fully serial (`ProjectStore.load` as it then was): per cel, a PNG decode, then `RasterLayerTexture`
 forces a full canvas-sized `CGContext` allocation and draw (`RasterLayerTexture.swift:196-203` →
 `:235-247` → `:218-231`), then line **673** runs `regenerateAllThumbnails()` — a second full walk,
 guaranteed cache-cold because every fresh texture is a new object identity at version 0.
@@ -133,9 +138,19 @@ the decode fans out over cores and off the main thread, and the thumbnails happe
 up. Full provenance in item 9. **What is still unknown is the same thing as everywhere else here** —
 these are simulator figures on an 8-core Mac, and an A13's 2+4 cores will not divide by four.
 
-**3. Leaving to the gallery.** Navigation waits on the full write (`ContentView.swift:47-54`), which
-re-encodes every PNG in the document regardless of what changed. Encoding is correctly off-main on
-`saveQueue`, so nothing freezes — the artist simply waits. Unmeasured at any resolution.
+**3. Leaving to the gallery. — MEASURED and shortened 2026-08-20 (item 15); this paragraph is now
+the diagnosis rather than a live defect.** Navigation waits on the full write
+(`ContentView.swift:47-54`), which re-encodes every PNG in the document regardless of what changed.
+Encoding is correctly off-main on `saveQueue`, so nothing freezes — the artist simply waits.
+
+**It was 480.3 ms for a 32-cel document at 2048×1024**, of which **455.2 ms was `pngData()`**, 11.7 ms
+was the file I/O and 2.5 ms was the snapshot the thumbnail lives in — so **15.0 ms a cel**, flat from
+8 cels to 32, or **~1.50 s at a hundred cels** and **~1.95 s on the owner's iPad 9** (INFERRED). The
+owner's "~3 s" is a ~150-cel document at that rate; it needed no other explanation.
+**It is now 117.1 ms for the same document, ~0.37 s at a hundred cels**: the per-cel encode runs
+across cores. Full provenance, the alternated-in-one-run proof and the two unchanged control phases
+are in item 15. **What is still unknown is the device multiplier** — an A13's 2+4 cores will not
+divide by four.
 
 **4. Scrubbing the timeline, and playback dropping frames. — both gates now exist.** Two ungated
 main-thread costs used to fire on the same `currentFrame` write. `relayout()` ran on every SwiftUI
@@ -523,6 +538,90 @@ is four times the whole cold sandwich rebuild, so it is the largest single-frame
 the app. Scope a fix once the eraser rewrite has settled.
 *Verified*: `testCutToIntersectionLiveDragCostPerSample`, `PerfBaselineTests.swift`.
 
+**15. Instrument the save the gallery waits on, then fan its encode out. — BOTH STAGES SHIPPED,
+2026-08-20.** The other half of "leaving to the gallery takes ~3 s"; §6 asked for exactly this run
+and had asked since the document was written.
+
+**Every figure below is MEASURED on `save-gallery-1`** — an iOS 26.5 simulator (iPad Pro 13-inch M4)
+on the 8-core MacBook, **Debug** build, CoreGraphics, the owner's 2048×1024, raster-only cels with
+real ink. Before and after were taken **minutes apart on the same idle machine**: `pgrep -fl
+xcodebuild` empty both times, `top` at **93.7% idle** before and **93.3%** after (one other agent's
+simulator was booted and idle). The `deviceName` in both xcresults is `save-gallery-1`, not a clone.
+
+**(a) The instrument, and the answer.** `ProjectStore.SaveProfile` splits one `save(_:to:)` into the
+main-actor snapshot, the per-cel walk (with the PNG encode and the file I/O summed separately inside
+it), and the atomic-swap machinery, and carries `celCount` and `pngsEncoded` so a figure scales to a
+document of another size. `PerfBaselineTests.testWhatLeavingToTheGalleryCosts` sweeps **three** cel
+counts, because the claim under test is a slope.
+
+| leaving the editor, 4 layers at 2048×1024 | 8 cels | 16 cels | 32 cels |
+|---|---|---|---|
+| **what the artist waits for** | **126.1 ms** | **270.3 ms** | **480.3 ms** |
+| ms per cel | 15.8 | 16.9 | 15.0 |
+| snapshot, on the main actor | 2.8 | 3.2 | 2.5 |
+| per-cel walk | 117.1 | 242.5 | 467.3 |
+| — of which `pngData()` | 114.2 | 235.7 | **455.2** |
+| — of which `Data.write` | 2.7 | 6.4 | 11.7 |
+| validate + stash + rename + prune | 3.7 | 6.9 | 7.8 |
+
+**§1's claim is confirmed, and sharpened.** The cost *is* O(cel count): 15.0–16.9 ms a cel, flat
+across a 4× range of documents (a second run on a busier machine — 64% idle — read 15.8/15.1/15.2,
+which is the error bar). And it is **95% one call**: `pngData()` is 455 of the 480 ms, the file I/O
+everyone assumes a save is bounded by is **2%**, and the whole atomic-save machinery §5 warns not to
+rearrange is **1.6%**. The main-actor snapshot after item 5 made the tile 320×160 is **2.5 ms** —
+the thumbnail half really is finished.
+
+**So the owner's "~3 s" is arithmetic, not a mystery**: 15.0 ms a cel is **~1.50 s at a hundred
+cels** and **~1.95 s on their iPad 9** at §1's ~1.3× (both INFERRED, linear in cel count). Three
+seconds is a **~150-cel document** on that device — well inside what an animator has. Nothing else on
+this path is big enough to be the complaint.
+
+**(b) The fan-out.** It is `decodeCels`' problem pointing the other way, and it takes the same fix:
+`writePackage` flattens the cel tree across layers, runs `writeCel` through `PixelOps.parallelMap`,
+and rebuilds the manifest's cel order from the job list rather than from completion order.
+
+| what the artist waits for | 8 cels | 16 cels | 32 cels | at 100 cels (INFERRED) |
+|---|---|---|---|---|
+| serial | 126.1 ms | 270.3 ms | 480.3 ms | ~1.50 s |
+| over cores | **72.4 ms** | **65.2 ms** | **117.1 ms** | **~0.37 s** |
+| ms per cel | 9.1 | 4.1 | 3.7 | |
+
+**4.1× on the wait itself at 32 cels, and the proof is not that table.** Two arms alternated three
+times each inside one test — the only comparison a machine that hosts several suites at once cannot
+distort — read **500.3 ms serial against 96.2 ms parallel, 5.20×**, at 283.8 vs 284.3 MB peak (+0.2%:
+a PNG per worker, not a bitmap per worker). `activeProcessorCount` was 8.
+**The control is the two phases this did not touch**: the snapshot reads 2.5 → 2.2 ms and the atomic
+swap 7.8 → 7.4 ms across the two runs, so the machines are comparable.
+
+**One number goes the wrong way, and it is worth stating rather than hiding.** `pngData()` **summed
+across workers** rises from 455.2 to 734.4 ms at 32 cels — spreading an encode over eight cores makes
+each worker's own encode slower, because they contend for memory bandwidth. The wall clock is what
+the artist waits for and it fell by 4×; the CPU-seconds bill rose by 1.6×, which on a battery-powered
+device is a real if minor cost.
+
+**The qualification is item 9(b)'s, unchanged.** The 5.2× is on **8 cores**. The owner's iPad 9 is an
+A13 with 2 performance and 4 efficiency cores; the shape of the win transfers and the multiplier does
+not (INFERRED). A hundred-cel save on that device is somewhere between 0.4 s and 1 s, and **nobody
+has measured it there** — see §6.
+
+*Safety*: (a) was instrumentation only. (b) changes **nothing about what is written** — the same
+bytes to the same files, named after cel ids that are UUIDs, from `UIImage`s that are immutable and
+one per worker. The failure a fan-out could introduce is a manifest assembled in completion order,
+which would shuffle an artist's drawings between frames while still validating and loading; the order
+is reconstructed from the job list, and `ProjectSaveLogicTests.testEveryCelsPixelsAndOrderSurviveTheParallelWrite`
+pins it by giving every cel a dot at a position derived from its own index. Nothing covered that
+before: every other round-trip test in that file reads `cels[0]`, and one cel per layer cannot show
+an ordering.
+
+**What was deliberately not built: the memo.** §5's entry on this path stands. Skipping the encode
+for a cel whose pixels have not moved is worth far more than 4× on a document where the artist
+touched three cels — but it is the data-loss class of risk, it belongs beside
+`RasterLayerTexture`'s existing version-keyed `renderToUIImage()` cache rather than in a second
+identity scheme in `ProjectStore`, and `SaveProfile.pngsReused` exists as the counter it would move.
+*Verified*: `testWhatLeavingToTheGalleryCosts`, `testSavePngEncodeFanOutIsWorthIt`
+(`PerfBaselineTests.swift`), `testEveryCelsPixelsAndOrderSurviveTheParallelWrite`
+(`ProjectSaveLogicTests.swift`).
+
 ### Tier C — real, recorded, not urgent
 
 **11. Give the `.overlay` vector scratch its own layer. — SHIPPED 2026-08-20** (`VectorPreviewPlan`,
@@ -766,7 +865,10 @@ same-volume renames. None is a multi-second stall at any realistic scale.
 
 **Do not build a dirty-tracking save.** *(Both preconditions this entry named are now met — item 1
 landed 2026-08-18 and item 9's instrumentation landed 2026-08-20 — so what follows is the whole of
-the argument rather than a wait.)*
+the argument rather than a wait. **Item 15 then measured this path and took the safe 4× off it
+without touching what gets written**, which lowers the pressure on this entry rather than raising
+it: the encode is now spread over cores, so the memo below is worth a further ~3.7 ms a cel on the
+cels that did not change, not the whole 15.)*
 Skipping unchanged PNGs is the right eventual answer to the gallery-exit wait, but it is the
 data-loss class of risk: a dirty check that is wrong once silently drops artwork, which is worse than
 any stall — and this repo already carries `ProjectBackupManager` and `validateProject` precisely
@@ -805,6 +907,14 @@ the largest unmeasured quantity in the app for two months and the answer was thr
 the guess** — the same shape as the 4K recalibration in §1, and the reason this document insists on
 labels.
 
+**What does one cel's PNG encode cost at 2048×1024? — ANSWERED 2026-08-20 by item 15: 14.2 ms**, and
+it is **95% of the whole gallery-exit wait** (455.2 ms of 480.3 on a 32-cel document; the file I/O is
+11.7 ms and the atomic-swap machinery 7.8). The wait is **15.0 ms a cel**, flat from 8 cels to 32 —
+so §1's "scales with cel count, not with area" is confirmed rather than assumed, and the owner's
+"~3 s" is simply a ~150-cel document on their iPad (INFERRED). It is now 117.1 ms for that document.
+**The surprise was the ratio, not the total**: the entire ranking of this path had assumed the file
+write mattered, and it is 2%.
+
 **How much does a machine under load change a figure here? — ANSWERED, and it is worse than "slower".**
 The same test, same binary, same day: `saveForReference` read 863 ms on an idle Mac, 988 ms with two
 other suites running, and 3187 ms with three. The decode's cold-versus-warm gap read 1.4× idle and
@@ -813,10 +923,6 @@ number about a different thing. `pgrep -fl xcodebuild` and `top -l 2 -n 0 -s 2` 
 what they said.
 
 ### Still open
-
-**What does one cel's PNG encode cost at 2048×1024?** The entire "leave to gallery" ranking rests on
-order-of-magnitude reasoning. *The measurement*: a `PerfBaselineTests` case timing `writePackage`
-(`ProjectStore.swift:363-471`) on a realistic multi-cel document, split per cel.
 
 **What is the true per-touch-move cost at 2048×1024? — ANSWERED on the simulator 2026-08-20 (item 8),
 and the question that replaced it is better.** The fit said ~10.2 ms; the reading is 8.0 ms before
@@ -840,6 +946,15 @@ of Select/Move/Fill-selection operations.
 **What is the real cache occupancy at background time?** Item 12's ~384 MiB is a budget ceiling, not
 an observation. *The measurement*: sample `residentBytes()` and the upload-cache counters immediately
 before backgrounding, on the device.
+
+**Does leaving to the gallery still feel like ~3 s?** Item 15 measured the wait for the first time and
+made it 4× shorter, but every figure is a Debug simulator on 8 cores and the owner's report is a
+Release build on an A13 with 2+4. Both the before and the after transfer in *shape* and neither
+transfers in *multiplier*. *The measurement*: the owner leaves a real document to the gallery on their
+iPad and says — and, for a figure rather than an impression, a Release build of `main` on that iPad
+with `SaveProfile` read out. **Ask before building anything further here**: if it now feels instant,
+§5's memo stays unbuilt for good, and if it still feels like seconds the interesting question is what
+their cel count actually is.
 
 **Is one save on the way out still a felt pause?** Tier A cut the app switch from three full saves to
 one, and made that one composite a 320×160 tile instead of the whole canvas. Whether the freeze the

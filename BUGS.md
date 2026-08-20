@@ -81,7 +81,7 @@ what the owner asked for on 2026-08-18, which is why this is written down instea
 entries below it.** `ProjectBackupManager.validateProject` (`ProjectBackupManager.swift:451`) is what
 decides whether a package is damaged — it gates auto-repair at launch (`:137-138`), the gallery's
 `isCorrupted` flag (`ProjectStore.swift:44`/`:54`), and the atomic save's refusal to swap a bad stage
-over a good package (`ProjectStore.swift:336`). It checks that the manifest decodes and that every
+over a good package (`ProjectStore.writeAtomically`). It checks that the manifest decodes and that every
 file the manifest names **exists**, plus, for PNGs only, that the first 8 bytes are the PNG signature.
 
 The vector JSON is checked for existence alone: `:476` passes `isPNG: false`, and `:463` returns
@@ -143,7 +143,7 @@ which was scoped to the silent path.
 
 ## A corrupt raster PNG silently yields a blank cel (2026-08-17)
 
-`ProjectStore.swift:581-582` loads a cel's raster as
+`ProjectStore.decodeCel` loads a cel's raster as
 `UIImage(contentsOfFile: rasterURL.path).map { RasterLayerTexture.load(...) } ?? .empty(size:)`. A
 file that is missing, or present but not decodable as an image, gives a blank raster for that cel with
 no signal of any kind, and the next save writes the blank over it.

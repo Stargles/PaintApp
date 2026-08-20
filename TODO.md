@@ -29,9 +29,9 @@ New this pass (owner, 2026-08-17):
 - [ ] **A performance pass, calibrated to 2048×1024 — Tiers A and B are done, and all of Tier C but
       two items.**
       The owner asked for it directly: *"any performance enhancements that can be made to reduce
-      memory, stop lagspikes, or increase fps?"* [PERFORMANCE.md](PERFORMANCE.md) is the fourteen-item
-      programme; **items 1–12 are now resolved** (see "Done this pass" for what that means item by
-      item). **This stays queued for two reasons, and the second is the larger**: two items remain,
+      memory, stop lagspikes, or increase fps?"* [PERFORMANCE.md](PERFORMANCE.md) is the fifteen-item
+      programme; **items 1–12 and 15 are now resolved** (see "Done this pass" for what that means item
+      by item). **This stays queued for two reasons, and the second is the larger**: two items remain,
       and **none of the wins has been seen on the owner's iPad** — every after-figure in the document
       is a simulator in Debug, so the shape of each result transfers and the multiplier does not.
       - **Item 10 is now measured (2026-08-20), and still not fixed on purpose.** A Mode 3
@@ -46,12 +46,22 @@ New this pass (owner, 2026-08-17):
 
 Carried over:
 
-- [ ] **Leaving to the gallery takes ~3 s — the thumbnail half is fixed, the wait is probably not.**
-      The tile now composites 320×160 instead of the whole canvas (Tier A item 5), so the save is far
-      cheaper. But [PERFORMANCE.md](PERFORMANCE.md) §1 says the multi-second wait was never the
-      thumbnail: navigation gates on a whole-document PNG re-encode whose cost scales with **cel
-      count**, not with area. Unmeasured at any resolution. Worth asking the owner whether it still
-      feels like ~3 s now.
+- [ ] **Leaving to the gallery — measured for the first time and made 4× shorter; the *report* is not
+      closed.** Both halves are now fixed and neither has been seen on the owner's iPad, so this
+      stands in exactly the position the 17 fps item below does.
+      **The number, which was the point**: leaving a 32-cel document at 2048×1024 cost **480 ms** —
+      **95% of it a single `pngData()` loop** (455 ms), against 12 ms of actual file writing and 2.5 ms
+      for the thumbnail snapshot Tier A item 5 already shrank. That is **15.0 ms a cel and flat from 8
+      cels to 32**, so [PERFORMANCE.md](PERFORMANCE.md) §1's "scales with cel count, not area" is
+      confirmed rather than assumed, and **~3 s is simply a ~150-cel document on their iPad**
+      (INFERRED) — the report needed no other explanation. It is now **117 ms** for that document,
+      ~0.37 s at a hundred cels: the per-cel encode runs across cores (item 15).
+      *What would close it*: the owner leaves a real document to the gallery on their iPad and says.
+      **They do still need to be asked** — every figure above is a Debug simulator on 8 cores and
+      theirs is a Release build on an A13 with 2+4, so the shape transfers and the multiplier does
+      not. If it still feels like seconds, the next question is what their cel count actually is, and
+      [PERFORMANCE.md](PERFORMANCE.md) §5's memo — encoding only the cels whose pixels moved — is the
+      one remaining lever, deliberately unbuilt because it is the data-loss class of risk.
 
 - [ ] **17 fps drawing on a 4K canvas — the fix is merged; the *report* is not closed.** The cost is
       gone (see Done this pass), but every after-figure is the simulator and 17 fps is something the
@@ -63,6 +73,25 @@ Carried over:
       steps from the worktree — and one sentence from them.
 
 ## Done this pass
+
+- **Performance, item 15 — merged 2026-08-20. Leaving to the gallery was measured for the first time,
+  and then made 4× shorter.** Both stages shipped.
+  **The answer**: a 32-cel document at the owner's 2048×1024 cost **480.3 ms** to leave —
+  **455.2 ms of it `pngData()`**, 11.7 ms of file writes, 7.8 ms of the atomic-swap machinery and
+  2.5 ms for the thumbnail snapshot. **15.0 ms a cel, flat from 8 cels to 32**, so ~1.50 s at a
+  hundred cels and ~1.95 s on their iPad 9 (INFERRED) — the owner's "~3 s" is a ~150-cel document.
+  [PERFORMANCE.md](PERFORMANCE.md) §1 had claimed for two months that this cost scales with cel count
+  rather than area and that the file I/O was the shape of it; the first half is now confirmed and the
+  second was wrong by a lot — **the write is 2% of a save**.
+  It is now **117.1 ms** for that document, ~0.37 s at a hundred cels: `writePackage` flattens the
+  cel tree and runs the per-cel encode through the same `PixelOps.parallelMap` item 9(b) added, with
+  the manifest's order rebuilt from the job list rather than from completion.
+  **The 4.1× is checkable rather than asserted**: two arms alternated three times inside one test read
+  500.3 vs 96.2 ms (5.20×) at +0.2% peak memory, and the two phases the change did not touch — the
+  snapshot and the atomic swap — read the same across the before and after runs.
+  **Nothing about what gets written changed.** §5's memo, which would skip the encode for a cel whose
+  pixels have not moved, stays unbuilt: it is the data-loss class of risk and it belongs beside
+  `RasterLayerTexture`'s existing version-keyed cache, not in a second identity scheme.
 
 - **Performance, item 9 — merged 2026-08-20. Project open was measured for the first time, and then
   made 5.7× shorter.** All three stages shipped.
