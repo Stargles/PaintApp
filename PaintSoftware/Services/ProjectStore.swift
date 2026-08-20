@@ -532,8 +532,48 @@ enum ProjectStore {
         }
     }
 
+    /// What one `load(from:)` actually spent, split into the two halves PERFORMANCE.md item 9
+    /// separates: the per-cel decode fan-out, and `regenerateAllThumbnails()`.
+    ///
+    /// **This exists because nobody could say whether opening a project costs 200 ms or 4 s.**
+    /// PERFORMANCE.md §6 calls that the largest unmeasured quantity in the app, and the spinner that
+    /// shipped on 2026-08-20 changed what the wait *looks* like rather than how long it is. Two
+    /// `CFAbsoluteTimeGetCurrent()` reads per project open is the whole cost of knowing.
+    ///
+    /// **`celCount` travels with the timings deliberately.** The decode is driven by cel count, not
+    /// by canvas area — the manifest's layer/cel tree is the loop bound — so a millisecond figure
+    /// without it cannot be scaled to the document the artist actually has, which is the mistake
+    /// PERFORMANCE.md §1 exists to record.
+    struct LoadProfile: Equatable {
+        var layerCount: Int
+        var celCount: Int
+        /// Manifest decode plus the per-cel PNG decode and `RasterLayerTexture` build — everything
+        /// up to but not including the thumbnail walk.
+        var decodeSeconds: Double
+        /// `regenerateAllThumbnails()`. Guaranteed cache-cold: every texture the decode just built
+        /// is a new object identity at version 0, so nothing memoized on cel identity can hit.
+        var thumbnailSeconds: Double
+        var totalSeconds: Double
+        /// `CanvasManager.thumbnailRegenerationCount` at the end of the load. An integer about the
+        /// calls rather than a millisecond about a machine, which is the more durable half of this
+        /// instrument — see `CompositeProbe` for the same reasoning one subsystem over.
+        var thumbnailRegenerations: Int
+
+        /// Milliseconds per cel — the figure that scales to a document of another size, and the one
+        /// worth quoting.
+        var millisecondsPerCel: Double { celCount > 0 ? totalSeconds * 1000 / Double(celCount) : 0 }
+
+        /// The thumbnail walk's share of the whole open, 0...1.
+        var thumbnailShare: Double { totalSeconds > 0 ? thumbnailSeconds / totalSeconds : 0 }
+    }
+
+    /// The profile of the most recent `load(from:)`, or nil if none has run. Read by
+    /// `PerfBaselineTests`; nothing in the app reads it, and nothing branches on it.
+    @MainActor private(set) static var lastLoadProfile: LoadProfile?
+
     @MainActor
     static func load(from url: URL) -> CanvasManager? {
+        let loadStarted = CFAbsoluteTimeGetCurrent()
         guard let manifest = loadManifest(at: url) else { return nil }
 
         let manager = CanvasManager()
@@ -685,7 +725,16 @@ enum ProjectStore {
         manager.layers = layers
         migrateGroupVisibility(manager, folders: manifest.folders)
         manager.currentLayerIndex = 0
+        let decodeFinished = CFAbsoluteTimeGetCurrent()
         manager.regenerateAllThumbnails()
+        let loadFinished = CFAbsoluteTimeGetCurrent()
+        lastLoadProfile = LoadProfile(
+            layerCount: layers.count,
+            celCount: layers.reduce(0) { $0 + $1.cels.count },
+            decodeSeconds: decodeFinished - loadStarted,
+            thumbnailSeconds: loadFinished - decodeFinished,
+            totalSeconds: loadFinished - loadStarted,
+            thumbnailRegenerations: manager.thumbnailRegenerationCount)
         return manager
     }
 

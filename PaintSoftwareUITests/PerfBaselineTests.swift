@@ -2781,4 +2781,146 @@ final class PerfBaselineTests: XCTestCase {
                        CGSize(width: 768, height: 384),
                        "the readability floor must raise Quarter above the naive 512x256")
     }
+
+    // MARK: - Opening a project (PERFORMANCE.md item 9)
+
+    /// How many layers and cels the open measurement uses. **Four layers of eight drawings each** is a
+    /// modest but real animation document; the figure that matters is reported *per cel*, because the
+    /// loop `ProjectStore.load` runs is bounded by the manifest's cel tree and nothing else, so a
+    /// hundred-cel project extrapolates from it directly.
+    private static let openLayerCount = 4
+    private static let openCelsPerLayer = 8
+
+    /// Real ink on one cel: three wavy strokes crossing the canvas.
+    ///
+    /// **A blank cel would make the whole measurement a lie in the cheap direction.** A transparent
+    /// PNG compresses to almost nothing and inflates to almost nothing, so a document of empty cels
+    /// would measure the `CGContext` allocation and nothing else — and the allocation is the half that
+    /// does *not* depend on what the artist drew.
+    private func inkOneCel(_ raster: RasterLayerTexture, canvas: CGSize, brush: Brush, seed: Int) {
+        for strokeIndex in 0..<3 {
+            let baseline = canvas.height * CGFloat(strokeIndex + 1) / 4
+            let samples: [BrushStamper.Sample] = (0..<80).map { step in
+                let t = CGFloat(step) / 79
+                let y = baseline + sin(t * .pi * 3 + CGFloat(seed) * 0.7) * canvas.height * 0.15
+                return BrushStamper.Sample(point: CGPoint(x: canvas.width * t, y: y),
+                                           pressure: 0.3 + 0.7 * sin(t * .pi))
+            }
+            BrushStamper.stampStroke(into: raster, samples: samples, brush: brush,
+                                     color: .black, brushSize: 18, brushOpacity: 1)
+            raster.endStroke()
+        }
+    }
+
+    /// `layerCount` raster layers of `celsPerLayer` cels each at the owner's 2048x1024, every cel
+    /// carrying ink.
+    ///
+    /// Cels are built directly rather than through `addCel`, which would refuse them: `addLayer`
+    /// gives its first cel `frameCount: max(sceneFrameCount, 1)`, so it already spans every frame a
+    /// second cel could start on.
+    ///
+    /// **Raster layers only, and that makes the number a floor rather than a ceiling.** A vector cel
+    /// re-stamps its whole display list through `BrushStamper` on the first render, which is a cost
+    /// with no counterpart on the raster path — a document with vector layers in it opens for more
+    /// than this, not less.
+    @MainActor
+    private func multiCelDocument(layerCount: Int, celsPerLayer: Int) -> CanvasManager {
+        let canvas = Self.ownersCanvasSize
+        let manager = CanvasManager()
+        manager.canvasSize = canvas
+        manager.fps = 24
+        manager.sceneFrameCount = celsPerLayer * 2
+        for layerIndex in 0..<layerCount {
+            manager.addLayer(name: "Layer \(layerIndex)")
+            manager.layers[layerIndex].cels = (0..<celsPerLayer).map { celIndex in
+                Cel(id: UUID(), startFrame: celIndex * 2, frameCount: 2, raster: .empty(size: canvas))
+            }
+            for celIndex in 0..<celsPerLayer {
+                autoreleasepool {
+                    inkOneCel(manager.layers[layerIndex].cels[celIndex].raster, canvas: canvas,
+                              brush: manager.selectedBrush, seed: layerIndex * celsPerLayer + celIndex)
+                }
+            }
+        }
+        return manager
+    }
+
+    /// **What tapping a project in the gallery actually costs**, split into the per-cel decode and
+    /// `regenerateAllThumbnails()` — PERFORMANCE.md §6's "largest unmeasured quantity in the app",
+    /// and item 9(a).
+    ///
+    /// Nobody could say whether §2 item 2 was 200 ms or 4 s. The spinner that shipped on 2026-08-20
+    /// changed what the wait looks like and not how long it is, so the ranking of every remaining
+    /// item rested on an INFERRED "plausibly 1-3 s". This is the run that replaces it.
+    ///
+    /// **Read `msPerCel`, not the total.** The total is a property of this fixture; the per-cel figure
+    /// is the one that transfers, because the decode loop's bound is the cel tree. The split between
+    /// the two halves is the other durable output: it is what says whether item 9(b) or 9(c) is the
+    /// bigger half before either is built.
+    ///
+    /// **And read the count, which is not a timing at all.** A load rasterizes every cel once for its
+    /// thumbnail, guaranteed cache-cold — every texture the decode just built is a new object identity
+    /// at version 0, so nothing memoized on cel identity can hit. That is an integer about the calls,
+    /// so it survives a contended machine in a way milliseconds do not, and it is what 9(c) has to
+    /// move rather than merely shrink.
+    @MainActor
+    func testWhatOpeningAMultiCelProjectCosts() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("perf-open-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let layerCount = Self.openLayerCount, celsPerLayer = Self.openCelsPerLayer
+        let url = ProjectStore.createNewProjectURL(name: "Perf Open")
+        var saveSeconds = 0.0
+        autoreleasepool {
+            let authored = multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer)
+            let written = expectation(description: "the package is on disk")
+            let start = CFAbsoluteTimeGetCurrent()
+            ProjectStore.save(authored, to: url) { written.fulfill() }
+            wait(for: [written], timeout: 600)
+            saveSeconds = CFAbsoluteTimeGetCurrent() - start
+        }
+
+        // The flatten memo must not be able to answer for a cel this load is about to rebuild. It
+        // cannot in the app — a fresh launch has an empty cache — and it holds entries here only
+        // because the authoring document above was built in the same process.
+        PixelOps.clearRasterizeCache()
+
+        var manager: CanvasManager?
+        let open = measuringPeakMemory { manager = ProjectStore.load(from: url) }
+        guard let manager, let profile = ProjectStore.lastLoadProfile else {
+            return XCTFail("The package this test just wrote must open")
+        }
+
+        report("project open, \(layerCount) layers x \(celsPerLayer) cels at 2048x1024", [
+            ("cels", "\(profile.celCount)"),
+            ("total", milliseconds(profile.totalSeconds)),
+            ("decode", milliseconds(profile.decodeSeconds)),
+            ("thumbnails", milliseconds(profile.thumbnailSeconds)),
+            ("thumbnailShare", String(format: "%.2f", profile.thumbnailShare)),
+            ("msPerCel", String(format: "%.1f", profile.millisecondsPerCel)),
+            ("at100Cels", milliseconds(profile.millisecondsPerCel * 100 / 1000)),
+            ("thumbnailRegens", "\(profile.thumbnailRegenerations)"),
+            ("peak", megabytes(open.peakBytes)),
+            ("saveForReference", milliseconds(saveSeconds)),
+        ])
+
+        // Structure, not timing — these hold on any machine at any load.
+        XCTAssertEqual(profile.layerCount, layerCount)
+        XCTAssertEqual(profile.celCount, layerCount * celsPerLayer)
+        XCTAssertEqual(manager.layers.count, layerCount)
+        // The headless half of item 9(a): opening an N-cel project costs exactly N uncached
+        // thumbnail rasterizes, on the main actor, after an N-cel decode has already run.
+        XCTAssertEqual(profile.thumbnailRegenerations, profile.celCount,
+                       "Every cel is rasterized once for its thumbnail during a load, and the cache cannot help — see `LoadProfile`")
+        // An order-of-magnitude ceiling in this file's house style. Read the reported numbers; do not
+        // tighten this into a timing assertion on a machine that runs several suites at once.
+        XCTAssertLessThan(profile.totalSeconds, 120.0,
+                          "Opening a 32-cel project taking two minutes is structural, not contention")
+    }
 }
