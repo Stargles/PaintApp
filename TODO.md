@@ -86,16 +86,6 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
       generation the worker carries and checks before it renders and before it publishes, and a
       commit path that does not depend on the async publish having landed.
 
-- [ ] **The canvas border does not act as a fill boundary once there is padding** — owner, on device,
-      2026-08-18: *"Treating the canvas as fill border does not work. You can test this by increasing
-      padding, drawing a line which starts outside the canvas (in the padding), goes inside, and then
-      back out using the canvas border as a line in the enclosure while otherwise being open, then
-      using the fill tool on that enclosure. Right now it fills the entire page."*
-      `fillCanvasEdgeIsBoundary` shipped in session 41 and defaults on. Note that `setCanvasPadding`
-      grows `canvasSize` itself (`CanvasManager+Document.swift:19-57`), so with padding the buffer edge
-      is the *outer* margin and the artwork border the owner draws across is an inset rectangle no wall
-      rule currently knows about. Hypothesis, to be verified before it is fixed.
-
 - [ ] **A stroke that interrupts a menu is still broken — two menus, two different breakages** — owner,
       on device, 2026-08-18, and they name the real concern themselves: *"This signals an alarm to me that
       whatever partial fix was previously done did not fix the root cause. It also raises concerns that
@@ -162,4 +152,14 @@ Carried over:
 
 ## Done this pass
 
-_(nothing yet this pass)_
+- **The canvas border does not act as a fill boundary once there is padding** — merged 2026-08-19.
+  Both suspected causes were real and both are fixed. `setCanvasPadding` grows `canvasSize` itself, so
+  "the canvas edge" is an *artwork rect* inset from the pixel buffer by `canvasPadding`; the shader now
+  carries that inset (`FillParams.edgeInset`, in the slot that was `_pad0`) and every edge rule is
+  written against the inset rect, collapsing to the old buffer-rim formula at inset 0. And the edge rule
+  was only ever a gap-closing *bridge*, conditional on artwork being within the gap radius — so a long
+  stretch of bare border was never a wall. It is now an unconditional **barrier** inside
+  `floodHoriz`/`floodVert`, living *between* pixels rather than as ink in the wall mask: ink would have
+  cost an unfillable notch in every corner (measured: 92 px of a blank 128² canvas, 23 per corner),
+  a barrier costs none.
+
