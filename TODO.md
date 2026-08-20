@@ -46,15 +46,6 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 New this pass (owner, 2026-08-17):
 
-- [ ] **Add Text, in the Actions menu.** Fonts from a large selection, plus colour, size, spacing and
-      the rest of what a text tool carries. Move, rotate, and **distort by dragging each of the four
-      corners independently, giving a 3D-perspective warp** (a projective/homography transform, not an
-      affine one). **On a raster layer it bakes** once a canvas action follows it — a brush stroke,
-      eraser, fill — the way the fill tool and smart shapes already behave. **On a vector layer it stays
-      an editable object.** Large enough to be its own project, not a single branch.
-      Owner's decisions, 2026-08-17: **iOS system fonts to begin with, behind a provider seam** so
-      open-source font packs can be added later without touching call sites; and **delivered in stages,
-      each one usable**, rather than as one branch that lands whole.
 - [ ] **A performance pass, calibrated to 2048×1024.** The owner asked for it directly: *"any
       performance enhancements that can be made to reduce memory, stop lagspikes, or increase fps?"*
       **The investigation has been run; nothing has been built yet, which is why this stays open.**
@@ -85,6 +76,27 @@ Carried over:
       tile; already in BUGS.md.
 
 ## Done this pass
+
+- **Add Text, in the Actions menu — Stage 1 merged 2026-08-20. The ask itself is not finished:
+  Stages 3-6 remain**, and [ADD_TEXT.md](ADD_TEXT.md) §3 is the live list of them. What the owner
+  can do on the iPad today: Actions ▸ Add Text on a **raster** layer, tap the canvas to place a box,
+  type into it, drag its outline to move it, and set font family, face, size, tracking, line height,
+  line and paragraph spacing, alignment and colour. It bakes into the layer the moment anything else
+  touches the canvas — a stroke, an eraser, a fill, a layer or frame switch, a save — exactly as the
+  fill tool and the smart shapes already do, as one undo step per session however much was typed.
+  Undo while the caret is live steps back through the typing, and only once you tap away does it
+  remove the text object; that is the owner's own ruling of 2026-08-17.
+  **Not there yet, and deliberately so:** vector layers (the row is disabled with a note explaining
+  why, so the stage ships nothing it has to un-ship), rotate, scale, the four-corner perspective
+  distort, and font packs. Fonts are iOS's own, behind the `FontProvider` seam the owner asked for —
+  adding a pack later is "append a provider", not a change to any call site.
+  **Two things want the owner.** *(1)* **Which faces belong on a favourites strip** at the top of the
+  font picker — ADD_TEXT.md §5 item 5, the one question Stage 1 could not answer for itself. It
+  shipped with all ~60-80 families grouped and no strip, because inventing a shortlist would have
+  made it the answer by default. *(2)* **The keyboard over the canvas has never been tried on a real
+  iPad** — first-responder handoff across panel toggles, the keyboard covering a box near the bottom
+  of the screen, a box at 0.3× zoom, and iOS's own Scribble recognizer against the canvas's. None of
+  it is reachable headlessly; `ActionRecorder` is how to get a session of it off the device.
 
 - **A second fill breaks the first** — merged 2026-08-20. The owner's reading was right and all
   three mechanisms were confirmed by a test that fails on the parent commit. **(a)** The first fill
