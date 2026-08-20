@@ -26,14 +26,17 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 New this pass (owner, 2026-08-17):
 
-- [ ] **A performance pass, calibrated to 2048×1024 — Tiers A and B are done, and all of Tier C but
-      two items.**
+- [ ] **A performance pass, calibrated to 2048×1024 — every item is now resolved, and the ask stays
+      open on the owner's iPad.**
       The owner asked for it directly: *"any performance enhancements that can be made to reduce
       memory, stop lagspikes, or increase fps?"* [PERFORMANCE.md](PERFORMANCE.md) is the fifteen-item
-      programme; **items 1–12 and 15 are now resolved** (see "Done this pass" for what that means item
-      by item). **This stays queued for two reasons, and the second is the larger**: two items remain,
-      and **none of the wins has been seen on the owner's iPad** — every after-figure in the document
-      is a simulator in Debug, so the shape of each result transfers and the multiplier does not.
+      programme; **all fifteen are now resolved** (see "Done this pass" for what that means item by
+      item) — thirteen built, item 10 measured and deliberately left alone, item 14 measured and
+      declined. **This stays queued for one reason only, and it is the larger of the two it used to
+      have**: **none of the wins has been seen on the owner's iPad.** Every after-figure in the
+      document is a simulator in Debug, so the shape of each result transfers and the multiplier does
+      not. Nothing further should be built here until they have run a Release build and said what
+      changed.
       - **Item 10 is now measured (2026-08-20), and still not fixed on purpose.** A Mode 3
         (`cutToIntersection`) live-drag cut costs ~95 ms per cut sample (a full vector-layer
         re-stamp), against ~0 ms for a sample that does not cut — MEASURED, simulator, isolated run.
@@ -42,7 +45,22 @@ New this pass (owner, 2026-08-17):
         machinery `tmp/crosseraser` rewrote hours before this measurement, so it waits for that to
         settle. **9(b) has now landed, which promotes this**: at ~95 ms a cut sample is four times the
         whole cold sandwich rebuild, so it is the largest single-frame cost left anywhere in the app.
-      - Tier C — items 13 and 14 — is real, recorded, and deliberately not urgent.
+      - **Item 13 is built (2026-08-20).** `UndoHistory.maxCost` was the one memory budget in the app
+        that knew nothing about the machine — a bare 300 MiB literal, and the *largest* single budget
+        there, against 192 MiB apiece for two caches sized from a measured crash. It is now
+        `physicalMemory / 16` on `CompositorBudget`'s own rule, and a memory warning trims it rather
+        than clearing it, which is a response to pressure it simply did not have before. On the
+        owner's iPad 9 that is 300 → 192 MiB: ~11,400 cropped freehand strokes either way (MEASURED at
+        17,680 bytes a stroke), and 18 → 12 whole-cel operations.
+      - **Item 14 is measured and declined (2026-08-20).** A drawn raster cel is **6.6 MiB resident**
+        at 2048×1024 (MEASURED; the estimate was 8.0), unbounded in cel count, so 120 cels is 787 MB —
+        more than every budget in item 13 put together. It is declined rather than built because the
+        cheap half turned out to be worth **zero bytes** (the derived render memo is copy-on-write on
+        the same buffer, measured at 0.0 MiB a cel), and the expensive half is a contract flip across
+        drawing, undo, thumbnails, compositing and save with no confirmed harm to prevent.
+      - **One question would settle item 14 and it is the owner's, not a run's: how many drawn cels
+        does a real document of theirs carry?** 787 MB is 120 cels; at 30 it is ~200 MB and the item
+        does not exist.
 
 Carried over:
 
@@ -73,6 +91,31 @@ Carried over:
       steps from the worktree — and one sentence from them.
 
 ## Done this pass
+
+- **Performance, Tier C items 13 and 14 — merged 2026-08-20. The last two on the board: one built,
+  one measured and declined.** With these the fifteen-item programme is closed.
+  **Item 13 — the undo budget now knows what device it is on, and the app's five memory budgets tell
+  one story.** `UndoHistory.maxCost` was `300 * 1024 * 1024`, a bare literal, and the *largest single
+  memory budget in the app* — bigger than either of the two caches that were sized from a measured
+  crash on the owner's own iPad. It is now `physicalMemory / 16`, character for character
+  `CompositorBudget`'s rule, with a test pinning the two equal so they cannot drift. On the iPad 9
+  that is 300 → 192 MiB, and the cut is stated rather than glossed: a cropped freehand stroke costs
+  **17,680 bytes** (MEASURED), so 192 MiB is ~11,400 of them and the cut is inert for drawing; it
+  bites on whole-cel operations, **18 → 12**. What pays for it is that undo was the only one of the
+  five budgets with **no response to a memory warning at all** — the caches drop wholesale, this sat
+  at its high-water mark. It now trims the oldest steps to half the budget and puts the budget back,
+  because a cache entry costs one recomputation and an undo step costs work the artist cannot get
+  back.
+  **Item 14 — measured, and the build declined on what the measurement found.** A drawn raster cel is
+  **6.6 MiB resident** at 2048×1024 (MEASURED, twice, under opposite host loads; the estimate it
+  replaced was 8.0 MiB), linear in cel count with nothing bounding it, so 120 cels is **787 MB** —
+  more than all five budgets above put together. Declined for two reasons neither of which was known
+  before the run: **the cheap half is worth zero bytes** (the derived render memo shares the context's
+  buffer copy-on-write — 0.0 MiB a cel, measured rather than assumed), and item 9(c)'s thumbnail
+  backfill touches every cel within a second of an open, so any lazy scheme is defeated unless
+  thumbnails are persisted first. That precondition is now written down.
+  **What is still owed on both**: the same thing owed on everything else here — a Release build on the
+  owner's iPad. And for item 14, one sentence from them: how many drawn cels a real document carries.
 
 - **Performance, item 15 — merged 2026-08-20. Leaving to the gallery was measured for the first time,
   and then made 4× shorter.** Both stages shipped.

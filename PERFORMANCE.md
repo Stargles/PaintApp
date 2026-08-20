@@ -624,6 +624,12 @@ identity scheme in `ProjectStore`, and `SaveProfile.pngsReused` exists as the co
 
 ### Tier C — real, recorded, not urgent
 
+**All four are now closed — 11 and 12 shipped, 13 shipped, 14 measured and declined — and with
+them the whole programme.** Fifteen items: thirteen built, item 10 measured and deliberately
+left alone until the eraser rewrite settles, item 14 measured and declined. **What none of it
+has is the owner's iPad**: every after-figure in this document is a Debug simulator, so each
+result's shape transfers and its multiplier does not (§6).
+
 **11. Give the `.overlay` vector scratch its own layer. — SHIPPED 2026-08-20** (`VectorPreviewPlan`,
 `StrokeCanvasView.scratchView`). The `.overlay` branch flattened the committed render and the live
 scratch into a fresh canvas-sized bitmap on every touch-move; `scratchView` is a sibling
@@ -804,26 +810,81 @@ notification and `canUndo` must still be right afterwards.
 (`StrokeCanvasView.swift:528-555`), which is why the small-stroke row above is 17 kB and not 16 MiB.
 Whether a real session reaches any cap is **still unmeasured** — see §6.
 
-**14. Bound raster-cel residency.** `RasterLayerTexture.init` allocates a full canvas-sized
-`CGContext` and draws the decoded PNG in whenever an image is passed (`:196-203` → `:235-247` →
-`:218-231`), and `load` does this for every cel of every layer. There is no eviction of any kind —
-unlike the vector tier's `evictDistantVectorRenderCaches`
-(`CanvasManager+Interpolation.swift:489-511`, capped at 12 cels).
-**The asymmetry is principled**: a vector render is re-derivable from
-retained geometry; a raster cel's pixels are the primary data. So the fix is different in kind — hold
-compressed `Data` for cels outside a playhead window and rehydrate on demand.
-*Win*: 8.0 MiB per drawn cel with no ceiling today — ~960 MiB for 120 cels (INFERRED arithmetic) —
-against a bounded ~96 MiB with a 12-cel window.
-*Risk*: **high, and this is a project not a patch.** It flips the contract from "always-resident
-bitmap is the source of truth" to "possibly evicted, rehydrated on demand", and every call site
-assuming synchronous availability — drawing, undo restore, thumbnail regen, compositing, save — must
-tolerate rehydration or be proven never to hit an evicted cel.
-*Why it moved down*: jetsam again. Without a kill to prevent, this is a large refactor of the most
-data-critical path in the app for a memory number nobody has yet observed causing harm.
-*Verified*: measure first. Extend the `residentBytes`/`measuringPeakMemory` harness
-(`PerfBaselineTests.swift:37-46`, `:51`) across a synthetic N-cel manager and assert residency stays
-bounded as N grows past the window. Then, separately, assert a scrub to an evicted cel round-trips
-pixel-exact against an `alphaFingerprint` taken before eviction. **Do not build this on inference.**
+**14. Bound raster-cel residency. — MEASURED 2026-08-20, and the build DECLINED on what the
+measurement found.** The item's own closing line was *"Do not build this on inference."* The
+inference has been replaced; the conclusion is that the cheap version of this does not exist and the
+expensive version has no confirmed harm to prevent.
+
+`RasterLayerTexture.init` allocates a full canvas-sized `CGContext` and draws the decoded PNG in
+whenever an image is passed (`:196-203` → `:235-247` → `:218-231`), and `load` does this for every cel
+of every layer. There is no eviction of any kind — unlike the vector tier's
+`evictDistantVectorRenderCaches` (`CanvasManager+Interpolation.swift:489-511`, capped at 12 cels).
+**The asymmetry is principled**: a vector render is re-derivable from retained geometry; a raster
+cel's pixels are the primary data. So the fix is different in kind — hold compressed `Data` for cels
+outside a playhead window and rehydrate on demand.
+
+**The number.** `PerfBaselineTests.testWhatOneDrawnRasterCelCostsResidentAtTheOwnersCanvas` (new)
+builds inked cels one at a time and differences `phys_footprint`, in two equal halves so the slope can
+be checked for flatness rather than assumed. **MEASURED on `tierc-1` (iOS 26.5 simulator, iPad Pro
+13-inch M4, Debug), 24 cels at the owner's 2048×1024:**
+
+| | |
+|---|---|
+| per drawn cel, first half / second half | **6.6 / 6.6 MiB** |
+| the arithmetic this item was sized on (`w·h·4`) | 8.0 MiB |
+| `renderToUIImage()`'s memo, per cel | **0.0 MiB** |
+| 120 cels | **787 MB** (INFERRED, linear in cel count) |
+
+**Taken twice under deliberately different host load and it did not move** — once at 3.7% idle and
+once at 95.9% idle, no other `xcodebuild` either time, 6.6 MiB both times. A footprint *difference*
+between two readings seconds apart cancels the host noise that makes milliseconds untrustworthy here,
+which is why this is one of the few figures in this document that did not need a quiet machine.
+
+**So the premise holds and the estimate was ~20% high**: every drawn cel is resident, residency is
+linear in cel count, nothing bounds it, and 120 cels is 787 MB rather than ~960 MiB — against the
+~1.4 GB pre-jetsam ceiling and on top of item 13's 656 MiB of budget ceilings. At 4096² the same slope
+is ~53 MiB a cel (INFERRED, at the measured 82% of arithmetic), so **22 drawn cels would exhaust the
+device on their own** — a fact about the stress canvas rather than about the document the owner
+animates.
+
+**Three findings, and the second and third are why this is declined rather than deferred.**
+
+*The estimate was high but the shape was right.* Nothing here rescues the item; it is a real unbounded
+cost, and it is the largest single memory number in this document.
+
+*There is no cheap half to ship.* The obvious low-risk subset was to evict the **derived** buffer and
+leave the primary data alone — the exact shape of `evictDistantVectorRenderCaches`, and
+correctness-neutral by construction. It is worth **zero bytes**: `CGContext.makeImage()` on a
+CG-allocated bitmap returns an image sharing the context's buffer copy-on-write, so the memo costs
+nothing until the cel is drawn into again. That was measured at 0.0 MiB a cel rather than assumed in
+either direction, because "second allocation or view of the first?" is not answerable from
+CoreGraphics' documentation and it decides the whole question. **The only thing left to evict is the
+primary data**, which is precisely the high-risk contract flip.
+
+*And item 9(c), merged the same day, forecloses the lazy variants.*
+`CanvasManager.backfillMissingThumbnails` renders a thumbnail for **every cel with `thumbnail == nil`**
+immediately after an open, and thumbnails are not persisted in the package — so every cel is
+materialised within a second of opening the document however lazily it was loaded. Any residency bound
+must therefore either run *after* the backfill, evicting what the backfill just built, or be preceded
+by persisting thumbnails so that walk stops needing the pixels. **That is the precondition, and
+whoever picks this up should do it first.**
+
+*Risk, unchanged and now the deciding term*: **high, and this is a project not a patch.** It flips the
+contract from "always-resident bitmap is the source of truth" to "possibly evicted, rehydrated on
+demand", and every call site assuming synchronous availability — drawing, undo restore, thumbnail
+regen, compositing, save — must tolerate rehydration or be proven never to hit an evicted cel. Item
+9(c)'s backfill is now among them: it compares a `LayerContentVersion` captured *before* the render,
+and a buffer evicted between capture and read is a failure mode that did not exist when this item was
+written.
+*Why it is declined and not merely deferred*: jetsam is disconfirmed (§6), so there is no kill to
+prevent; the derived-cache subset is worth nothing; and the full version needs a prerequisite nobody
+has scoped. **What would change the answer is one number nobody has: how many drawn cels the owner's
+real documents carry.** 787 MB is 120 cels; at 30 cels it is ~200 MB and this item does not exist.
+*The measurement*: ask them, or count the cels in a real package.
+*If it is ever built*, the verification the original entry asked for still stands: assert residency
+stays bounded as N grows past the window, and — separately — that a scrub to an evicted cel
+round-trips pixel-exact against an `alphaFingerprint` taken before eviction.
+*Shipped from this item*: the instrument, which is item 9(a)'s pattern — measure, record, then decide.
 
 ---
 
@@ -1016,6 +1077,14 @@ device, or after a scripted sequence of Select/Move/Fill-selection operations.
 It leaves six whole-cel operations on a memory warning. Whether that is generous or stingy is the
 owner's call and nothing here can make it: *the measurement* is the same sample, plus asking them how
 far back they ever reach.
+
+**How many drawn cels does a real document of the owner's actually carry? — this is now the largest
+open question in the document, and it is one sentence to the owner rather than a run.** Item 14
+measures a drawn raster cel at 6.6 MiB resident at 2048×1024 and nothing bounds the count, so the
+answer decides whether unbounded residency is the app's biggest memory number (787 MB at 120 cels,
+more than every budget in item 13 put together) or does not exist (~200 MB at 30). Every other
+consumer in this app has a ceiling; the document does not. *The measurement*: ask them, or count the
+cels in a real package.
 
 **What is the real cache occupancy at background time?** Item 12's ~384 MiB is a budget ceiling, not
 an observation. *The measurement*: sample `residentBytes()` and the upload-cache counters immediately

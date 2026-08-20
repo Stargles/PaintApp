@@ -3384,4 +3384,122 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertLessThan(Double(parallelPeak), Double(serialPeak) * 1.6,
                           "Fanning the encode out must not multiply peak footprint — a PNG per worker, not a bitmap per worker")
     }
+
+    // MARK: - Raster-cel residency (PERFORMANCE.md item 14)
+
+    /// **What one drawn raster cel actually costs to keep resident, at the owner's 2048x1024.**
+    ///
+    /// PERFORMANCE.md item 14 proposes evicting raster cels outside a playhead window and rehydrating
+    /// them from compressed `Data` on demand, sized on the arithmetic "8.0 MiB per drawn cel, ~960 MiB
+    /// for 120 cels". That arithmetic is `width x height x 4` and nothing else, and the item's own
+    /// closing line is **"Do not build this on inference."** This is the measurement it asks for, and
+    /// it is deliberately taken *before* any eviction machinery exists, so the number it reports is
+    /// what the app costs today rather than what a fix left behind.
+    ///
+    /// **It reports the marginal cost of a cel, not a total.** A `CanvasManager` at this canvas holds
+    /// a great deal besides its cels, and `phys_footprint` on a simulator includes the host's own
+    /// noise; a difference between two footprints taken seconds apart in one process cancels both.
+    /// The cels are added in two equal halves so the *second* half's slope can be compared against the
+    /// first — a per-cel cost that is flat across the two is a per-cel cost, and one that decays is a
+    /// first-touch fault being counted as residency.
+    ///
+    /// **Three residency components are separated, because item 14's fix only reaches one of them.**
+    /// A `RasterLayerTexture` holds a `CGContext` bitmap (the primary data, what item 14 would
+    /// compress), and `renderToUIImage()` memoizes a `UIImage` beside it (derived, droppable the way
+    /// `VectorCanvas.dropCachedImage()` already drops the vector tier's). Whether that memo is a
+    /// second canvas-sized allocation or a copy-on-write view of the same buffer is not answerable by
+    /// reading CoreGraphics' documentation, and it decides whether a cheap derived-cache eviction is
+    /// worth anything at all — so it is measured here rather than assumed in either direction.
+    ///
+    /// **MEASURED 2026-08-20, iOS 26.5 simulator (`tierc-1`, iPad Pro 13-inch M4 simulated), Debug,
+    /// 24 cels at 2048x1024: 6.6 MiB of `phys_footprint` per drawn cel, flat across both halves, and
+    /// 0.0 MiB for the render memo.** So a drawn cel costs about its own bitmap — item 14's premise
+    /// holds — but the arithmetic it was sized on (8.0 MiB, `w x h x 4`) is ~20% high, and 120 cels is
+    /// **787 MB** rather than the ~960 MiB the item inferred.
+    ///
+    /// **Taken twice under deliberately different host load and it did not move**, which is the
+    /// property that makes a memory figure worth more than a timing on this Mac: once with the machine
+    /// at 3.7% idle and once at 95.9% idle, no other `xcodebuild` running either time, reading 6.6 MiB
+    /// both times. A `phys_footprint` *difference* between two readings seconds apart cancels the host
+    /// noise that CLAUDE.md warns makes milliseconds untrustworthy here.
+    ///
+    /// **The 0.0 MiB is the load-bearing half and it closes off the cheap version of item 14.**
+    /// `CGContext.makeImage()` on a CG-allocated bitmap hands back an image sharing the context's
+    /// buffer copy-on-write, so the memo is free until the cel is drawn into again. There is therefore
+    /// no raster counterpart to `evictDistantVectorRenderCaches` worth writing: the only thing left to
+    /// evict is the primary data, which is exactly the contract flip item 14 calls high risk.
+    @MainActor
+    func testWhatOneDrawnRasterCelCostsResidentAtTheOwnersCanvas() {
+        let canvas = Self.ownersCanvasSize
+        let celBitmapBytes = Int(canvas.width) * Int(canvas.height) * 4
+        let halfCount = 12
+
+        let manager = CanvasManager()
+        manager.canvasSize = canvas
+        manager.addLayer(name: "Residency")
+        let brush = manager.selectedBrush
+
+        // One warm-up cel outside the measurement: the first canvas-sized bitmap in a process faults
+        // in pages every later one reuses, and item 9 measured that first-touch gap at ~1.4x.
+        var cels: [Cel] = []
+        autoreleasepool {
+            let warm = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
+            inkOneCel(warm.raster, canvas: canvas, brush: brush, seed: 999)
+            _ = warm.raster.renderToUIImage()
+            cels.append(warm)
+        }
+
+        func addInkedCels(_ count: Int, offset: Int) {
+            for index in 0..<count {
+                autoreleasepool {
+                    let cel = Cel(id: UUID(), startFrame: offset + index, frameCount: 1,
+                                  raster: .empty(size: canvas))
+                    inkOneCel(cel.raster, canvas: canvas, brush: brush, seed: offset + index)
+                    cels.append(cel)
+                }
+            }
+        }
+
+        let base = residentBytes()
+        addInkedCels(halfCount, offset: 1)
+        let afterFirstHalf = residentBytes()
+        addInkedCels(halfCount, offset: 1 + halfCount)
+        let afterSecondHalf = residentBytes()
+
+        // Now the derived half. Every cel gets its `renderToUIImage()` memo populated — which is what
+        // a thumbnail regen, a flatten, a save and a composite each do — and the growth from that
+        // alone is the answer to whether the memo is a second buffer or a view of the first.
+        for cel in cels { _ = cel.raster.renderToUIImage() }
+        let afterMemos = residentBytes()
+
+        let firstHalfPerCel = Double(afterFirstHalf &- base) / Double(halfCount)
+        let secondHalfPerCel = Double(afterSecondHalf &- afterFirstHalf) / Double(halfCount)
+        let memoPerCel = Double(afterMemos &- afterSecondHalf) / Double(cels.count)
+        let drawnPerCel = Double(afterSecondHalf &- base) / Double(halfCount * 2)
+
+        report("raster-cel residency at 2048x1024 (item 14)", [
+            ("celsMeasured", "\(halfCount * 2)"),
+            ("bitmapArithmetic", megabytes(UInt64(celBitmapBytes))),
+            ("firstHalfPerCel", megabytes(UInt64(max(0, firstHalfPerCel)))),
+            ("secondHalfPerCel", megabytes(UInt64(max(0, secondHalfPerCel)))),
+            ("drawnPerCel", megabytes(UInt64(max(0, drawnPerCel)))),
+            ("renderMemoPerCel", megabytes(UInt64(max(0, memoPerCel)))),
+            ("at120Cels", megabytes(UInt64(max(0, drawnPerCel) * 120))),
+            ("at120CelsWithMemos", megabytes(UInt64(max(0, drawnPerCel + memoPerCel) * 120))),
+            ("footprintBase", megabytes(base)),
+            ("footprintAfterCels", megabytes(afterSecondHalf)),
+            ("footprintAfterMemos", megabytes(afterMemos)),
+        ])
+
+        // The claim item 14 rests on: residency grows linearly with cel count and nothing bounds it.
+        // Asserted loosely — `phys_footprint` is noisy — but a per-cel cost of at least half the
+        // bitmap arithmetic is what says "every drawn cel is resident", which is the whole premise.
+        XCTAssertGreaterThan(drawnPerCel, Double(celBitmapBytes) / 2,
+                             "Every drawn cel must be costing about its own bitmap, or item 14's premise is wrong")
+        // And the slope must not be decaying: a second half far cheaper than the first would mean the
+        // first half's figure was mostly first-touch faulting, not residency.
+        XCTAssertGreaterThan(secondHalfPerCel, firstHalfPerCel / 2,
+                             "Per-cel residency must be flat across the two halves, or this is measuring page faults")
+        XCTAssertGreaterThan(cels.count, halfCount * 2, "the warm-up cel must be retained too")
+    }
 }

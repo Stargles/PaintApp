@@ -4,6 +4,39 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## The mask cache is the one canvas-sized cache with no byte bound (2026-08-20)
+
+Found while reconciling the app's memory budgets for PERFORMANCE.md item 13, and deliberately not
+fixed there — recorded because it is the sort of asymmetry that reads as intentional until somebody
+works at 4096².
+
+`MaskResolver.cache` is `MaskCache(limit: MaskResolver.cacheEntryLimit)` — **eight entries and no byte
+budget of any kind.** Its two siblings both have one, and their own comments say why an entry count
+stopped being a bound: `PixelOps.rasterizeCache` carries "the byte budget below is what actually
+bounds it; the entry count is kept as a second ceiling for small canvases", and
+`CompositorMetalEngine`'s upload cache has `budgetBytes` set per composite. Both learned that from a
+measured crash on the owner's iPad.
+
+A coverage buffer is 1 byte per pixel, so the arithmetic is:
+
+| canvas | per entry | 8 entries |
+|---|---|---|
+| 2048×1024 — the owner's | 2 MiB | **16 MiB** |
+| 2048² | 4 MiB | 32 MiB |
+| 4096² | 16 MiB | **128 MiB** |
+
+**At the owner's canvas this is not a problem and should not be treated as one** — 16 MiB against
+192 MiB apiece for the two caches that do have budgets, which is exactly the eightfold overstatement
+PERFORMANCE.md §1 exists to warn about, and §5's "do not tune a budget that never fires" applies. At
+4096² it is 128 MiB, two thirds of the whole Metal budget, held by a cache of coverage masks, and it
+cannot be capped by anything except being small.
+
+The fix, if a future session works at that size routinely, is the one `PixelOps` already wrote: borrow
+`CompositorBudget.textureBudgetBytes` at some fraction and evict on bytes first, count second, never
+evicting the entry just stored. It is perhaps fifteen lines. What stopped it here is that choosing the
+fraction is unmeasured tuning — `/4` gives three entries at 4096², and whether three is enough for a
+frame with several masked layers is not answerable from this side of the owner's document.
+
 ## A vector layer's transform is not undoable at all (2026-08-20)
 
 `CanvasManager.setVectorTransform` (`CanvasManager.swift:260-269`) mutates the cel's `VectorCanvas`
