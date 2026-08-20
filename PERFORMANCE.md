@@ -101,35 +101,49 @@ on the main thread *before* the background-time request that was meant to cover 
 "something bad in the backend" their sentence left room for. Mechanism READ-confirmed; the
 multi-second magnitude INFERRED, and corroborated by the owner reporting the symptom.
 
+**Both halves are now fixed, and this paragraph is kept as the diagnosis rather than as a live
+defect.** `ScenePhaseSaveGate` (2026-08-18) makes it **one** save per switch, on the way out —
+`ProjectSaveLogicTests.testOneAppSwitchRoundTripSavesExactlyOnce` replays the phase sequence and
+asserts 1. And the one save left composites **320×160** instead of the whole canvas (item 5,
+2026-08-20). What remains unknown is whether one cheap save on the way out is still a felt pause on
+the owner's own document — that needs their iPad, not another read of this code.
+
 **2. Tapping a project in the gallery and the app going dead.** `ProjectStore.load` is `@MainActor`
 and fully serial (`ProjectStore.swift:520-675`): per cel, a PNG decode, then `RasterLayerTexture`
 forces a full canvas-sized `CGContext` allocation and draw (`RasterLayerTexture.swift:196-203` →
 `:235-247` → `:218-231`), then line **673** runs `regenerateAllThumbnails()` — a second full walk,
 guaranteed cache-cold because every fresh texture is a new object identity at version 0.
-`GalleryView.open(_:)` calls it inside a Button action with no `Task`, no loading state, no
-`ProgressView` anywhere (`GalleryView.swift:110-113`). The cost is driven by cel count, so it does
-not shrink at 2048×1024. Plausibly 1-3 s of hard-frozen UI on a hundred-cel project — INFERRED, and
-**completely unmeasured**; it appears in neither [BUGS.md](BUGS.md) nor [TODO.md](TODO.md). It is the
-first thing that happens every session.
+`GalleryView.open(_:)` called it inside a Button action with no `Task`, no loading state, no
+`ProgressView` anywhere. The cost is driven by cel count, so it does not shrink at 2048×1024.
+Plausibly 1-3 s of hard-frozen UI on a hundred-cel project — INFERRED, and **still completely
+unmeasured**; it is the first thing that happens every session.
+
+**Item 2 shipped a spinner, 2026-08-20, and that is all it did.** The wait is the same length; it now
+looks like a wait rather than like a crash. The measurement is item 9(a) and it has not been taken —
+this is still the largest unmeasured quantity in the app.
 
 **3. Leaving to the gallery.** Navigation waits on the full write (`ContentView.swift:47-54`), which
 re-encodes every PNG in the document regardless of what changed. Encoding is correctly off-main on
 `saveQueue`, so nothing freezes — the artist simply waits. Unmeasured at any resolution.
 
-**4. Scrubbing the timeline, and playback dropping frames.** Two ungated main-thread costs fire on
-the same `currentFrame` write. `relayout()` runs unconditionally on every SwiftUI pass with no
-equality gate — unlike `SandwichKey` (`CanvasView.swift:1161`) and `InterpolationPreviewKey`
-(`:1532`), which check `!=` first — redrawing the ruler and re-diffing every cel row.
-`updateOnionSkin()` is the only render path in `CanvasView` without a key gate (`:273`, `:1661-1681`),
-allocating a canvas-sized bitmap and blitting per pass even though the previous cel is unchanged
-within a cel's span. Scrubbing drives both harder than playback does, since `onScrub` fires
-unthrottled on every `.changed` sample (`TimelineTrackView.swift:604-607`). Magnitude unmeasured; a
-300-frame scene means 300 CoreText layouts per tick.
+**4. Scrubbing the timeline, and playback dropping frames. — both gates now exist.** Two ungated
+main-thread costs used to fire on the same `currentFrame` write. `relayout()` ran on every SwiftUI
+pass with no equality gate, redrawing the ruler and re-diffing every cel row; `TimelineLayoutKey`
+gates it as of 2026-08-20, with a playhead-only fast path so a scrub moves two view frames and
+invalidates nothing. `updateOnionSkin()` was the only render path in `CanvasView` without a key gate;
+`OnionSkinKey` arrived with `tmp/onion`. Scrubbing drives both harder than playback does, since
+`onScrub` fires unthrottled on every `.changed` sample. **Magnitude still unmeasured** — see item 3
+for why a millisecond was not taken and what the counts say instead.
+
+The cost that replaced them as the tick's main-actor headline is the sandwich **snapshot**: 78.2 ms
+for six layers at 2048×1024 when the playhead moves to a new frame (MEASURED, simulator/CoreGraphics
+— see item 4b). That one is item 9(b)'s shape, not the timeline's.
 
 **5. Playback stuttering on documents with a mask, blend mode, or grade.** `startSandwichRebuild`
-computes `full`, `below` and `above` unconditionally (`CanvasView.swift:1236-1238`), but
-`below`/`above` are only shown while `midStroke` is true (`:1048-1056`). Every playback tick, scrub
-tick, undo and layer switch computes two composites nobody sees. It runs off-main on `sandwichQueue`,
+still computes `below` and `above` unconditionally even though they are shown only while `midStroke`
+is true — item 4b explains why that was measured and left alone, and item 4a removed the third
+composite on a layer switch. Every playback tick, scrub tick and undo still computes two composites
+nobody sees. It runs off-main on `sandwichQueue`,
 so it burns cores rather than freezing the UI — but `isSandwichRebuilding` serialises, so a rebuild
 slower than the frame interval drops frames. A six-layer sandwich rebuild at 2048² costs **54.8 ms
 warm on Metal, 64.7 ms on CoreGraphics** (MEASURED, iPad 9, Release, `Compositor.swift:36`) against a
@@ -148,79 +162,166 @@ Three tiers. Tier A is work that is correct on its own terms and cheap enough no
 measurement first. Tier B is instruments — the point is to stop guessing. Tier C is real, recorded,
 and deliberately not urgent.
 
-### Tier A — do these
+### Tier A — built 2026-08-20
 
-**1. Make the `scenePhase` save guard direction-aware.** `onChange(of:)` already hands both values;
-compare `oldPhase` so the save fires once, on the leaving leg only. Extract a pure
-`shouldSave(from:to:)` predicate.
-*Win*: removes two of three saves per app switch, including the only one that lands while the artist
-is watching — **the confirmed cause of the freeze the owner has been living with** (§2 item 1).
-*Safety*: one guard condition, no gesture code, no drawing path; the worst case is a save that stops
-firing on some transition, which `ProjectSaveLogicTests` covers.
-*Verified*: headless logic test over the predicate — `(active, inactive)` saves, `(background,
-inactive)` and `(inactive, active)` do not.
+**Six of the seven are on `main`, and the seventh was already there.** What follows is what each one
+turned out to be, kept rather than deleted because several of the estimates below were corrected by
+building the thing. Item 4 is the one that did not ship whole, and its second half is now **declined
+on a measurement rather than deferred on a risk** — see it.
 
-**2. Give project open a loading state.** A `Task` and a `ProgressView` in `GalleryView.open`
-(`GalleryView.swift:110-113`) turns a frozen app into a spinner.
-*Win*: removes the "it crashed" reading of §2 item 2 entirely, for almost no risk. It does not make
-the load faster — items 8 and 9 do that — and it is listed separately precisely because it should not
-wait for them.
+**1. Make the `scenePhase` save guard direction-aware. — ALREADY DONE, 2026-08-18** (commit
+`1cbec5b`, `ScenePhaseSaveGate.swift`). This document and [BUGS.md](BUGS.md) both described it as
+outstanding for two days after it shipped; that lag is the finding, not the fix.
+*Does it really remove two of the three saves?* Yes, and `ProjectSaveLogicTests` proves it by
+replaying the phase sequence SwiftUI delivers rather than by asserting on the predicate:
+`testOneAppSwitchRoundTripSavesExactlyOnce` runs `[active, inactive, background, inactive, active]`
+and asserts **1**. `testTheDirectAndForegroundPathsEachSaveOnce` covers the routes that skip
+`.inactive`, `testASecondDepartureSavesAgain` pins that the gate is stateless, and
+`testTheSaveGateMatrixIsExhaustive` pins that all nine ordered pairs are covered — a matrix is only a
+contract if it is the whole matrix.
+*Still wants the owner's iPad.* The count is now provably 1; whether **one** save on the way out is
+still a felt pause on their document is a question only they can answer, and item 5 below is what
+makes that one save cheaper.
+
+**2. Give project open a loading state. — SHIPPED** (`GalleryOpenState.swift`, `GalleryView.open`,
+`GalleryTileView`). The spinner is on the tapped tile rather than over the grid, because "which
+project" is half the feedback, and `.disabled` covers the New Canvas button and the toolbar too.
+*Win*: removes the "it crashed" reading of §2 item 2. It does **not** make the load faster — items 8
+and 9 do that.
+*What the build added to the plan.* The `Task` is the smaller half. `await Task.yield()` is the
+mechanism: setting the state marks the view dirty, SwiftUI renders at the end of the current
+run-loop turn, and the yield resumes after it — so the spinner is committed before the load takes
+the main thread. Awaiting nothing would set the state and block in the same turn, and the artist
+would see exactly what they see today.
+*And a spinner creates two rules that are silent when wrong*, which is what `GalleryOpenState` is
+for rather than the spinner itself. **One load at a time**: a frozen app invites a second tap, and
+two loads is two `CanvasManager`s racing with the last to finish winning — a lottery between two
+projects rather than a slow open of one. **Every load ends**: `ProjectStore.load` returns nil for a
+package whose manifest will not decode, so a release-on-success would answer a *damaged file* with a
+spinner that never stops, reporting a hang for something merely broken.
 
 **3. Gate `TimelineTrackView.relayout()` behind an equality-checked key, and clip the ruler to its
-dirty rect.** Build a key struct from cel identity+version, `pixelsPerFrame`, `sceneFrameCount` and
-drag state, following the `SandwichKey`/`InterpolationPreviewKey` idiom this codebase already uses
-three times; keep a cheap playhead-only fast path. Separately, make `draw(_ rect:)` consult its rect
-instead of looping `0..<frameCount` (`TimelineTrackView.swift:637`).
-*Win*: identical at 2048×1024 to what it would be at 4K, which is the point — this is the clearest
-member of the area-independent category. Eliminates O(scene frames) CoreText layouts and O(total
-cels) of view churn on the overwhelming majority of ticks. Magnitude unmeasured.
-*Safety*: pure memoization; the failure mode is a stale timeline row, immediately visible. The ruler
-clip is independently safe and can land alone.
-*Verified*: the key struct is a pure value type — a headless test pins which mutations move it. A
-synthetic 300-frame/6-layer timing of `relayout()` sizes the win without a device.
+dirty rect. — SHIPPED** (`TimelineLayoutKey.swift`, `TimelineRulerClip`). The third use of the
+`SandwichKey`/`InterpolationPreviewKey` idiom, and its rules travelled with it.
+*Win*: identical at 2048×1024 to what it would be at 4K, which is the point — the clearest member of
+the area-independent category. Still **unmeasured in milliseconds**, and deliberately so: see below.
+*`currentFrame` is the one input left out of the key.* The playhead is its own subview and a scrub
+moves nothing else on the track, so it gets a two-frame fast path. Keying on it would move the key on
+every sample of the one gesture that drives `relayout()` hardest — `onScrub` fires on every
+`.changed` with no throttle.
+*The correction the build made, and it belongs here rather than in a commit message.* **This is a
+constant-factor win, not an asymptotic one.** Building the key is itself O(total cels): it walks the
+same cels and pays the same folder-span flat-map. What it does not pay is the view mutation, the
+per-cel interpolated accessibility identifier, the sort, the animation bookkeeping and the ruler's
+CoreText — those are the expensive terms. Only the scene-length term is removed outright, and by the
+gate rather than by the clip.
+*And the ruler clip on its own buys less than it reads.* UIKit hands `draw(_:)` a full-bounds rect
+when the whole view is invalidated, which is the common case today, so the clip is not what removes
+the 300 CoreText layouts — the gate is, by removing the invalidations. What the clip buys is that
+the cost becomes proportional to what is being redrawn, so a tiled backing store on a long track, or
+a future `setNeedsDisplay(_:)` scoped to one column, is cheap rather than silently costing the whole
+scene. `TimelineRulerClip` keeps one frame of slack each side: a label is drawn at its column's left
+edge + 2pt and can overhang, so a clip taking only the columns whose origins fall inside the rect
+drops exactly the two at the boundary, and the failure mode of a clip is a hole.
+*Verified*: 19 headless tests, each a pair — change one thing about the document and assert the key
+moved, or, for the playhead, that it did not. Plus `TimelineGestureUITests` (10) and
+`UndoAndLayerHistoryUITests` (6) green, which is what says a gated relayout still lays out.
+*The timing this document asked for was not taken, on purpose.* A synthetic `relayout()` timing needs
+`TimelineTrackView.Coordinator`, which is a `UIViewRepresentable` coordinator and not reachable
+headlessly; and a millisecond taken on this Mac is the least trustworthy number available (CLAUDE.md
+records contention making suites return wrong answers). The counts are the honest instrument here.
 
-**4. Cache `full` across a pure `activeLayerIndex` change, and compute `below`/`above` lazily.** Two
-fixes to the same waste, different in risk. The first is a second cache key excluding
-`activeLayerIndex` — `CanvasView.swift:1158-1160` names this fix in its own comment and records that
-it was declined only for the cost of that key, not for correctness. The second moves `below`/`above`
-off the unconditional path at `:1236-1238`.
-*Win*: the layer-switch fix skips one of three composites on every layer tap; the lazy fix skips two
-on every non-stroke rebuild, including every playback and scrub tick. A six-layer document at 2048²
-costs 54.8 ms per rebuild on Metal (MEASURED, above); the per-layer slope is 2.4 ms and the
-per-composite intercept 7.0 ms (MEASURED, `Compositor.swift:32-33`), so `full` alone is roughly
-6 × 2.4 + 7.0 ≈ **21 ms** (INFERRED) — from missing the 24 fps budget to fitting inside it.
-*Safety*: the layer-switch key changes only *which cached image serves*, never what is displayed —
-low risk, take it first. The lazy fix is riskier and structurally so: the current design deliberately
-pre-pays `below`/`above` so touch-down has zero composite work, which is what
-`RenderRequest.swift:316-320` means when it says those two are the ones that have to be *fast*. A
-naive version trades ink latency for playback smoothness at the moment latency matters most. The safe
-shape is to kick them off on `sandwichQueue` at `sandwichStrokeBegan` and accept `full`-only for the
-first frame or two.
-*Verified*: headless, and it is a **call count** rather than a timing. Count `Compositor.composite`
-calls across a layer-switch-only pass and across a playback tick, and assert 1 where there are 3
-today. No device needed.
+**4a. Cache `full` across a pure `activeLayerIndex` change. — SHIPPED** (`SandwichFullKey` in
+`RenderRequest.swift`, used by `CanvasView.startSandwichRebuild`). `SandwichKey`'s own comment named
+this fix and declined it — "worth the wasted composite rather than a second key and a second cache to
+keep them apart" — and what changed is the accounting, not the argument.
+*Why it is sound*: `makeSandwichRequests` reads `activeLayerIndex` in exactly one place, the
+`split(atLeaf:)` that makes `below` and `above`. `full` is the whole tree, uncut. Pinned by
+`testFullIsTheSamePictureWhicheverLayerIsActive`, pixel-identical over every index on a document with
+a blend in it.
+*Why the second cache is free*: the image handed back is the one `sandwichImages` already retains,
+and it is passed through un-rewrapped so `updateSandwich`'s `!==` checks still read "nothing changed".
+*Verified*: the call count this document asked for. `CompositeProbe` (new, in `Compositor.swift`)
+records every composite and its size; `testALayerSwitchCompositesTwiceRatherThanThreeTimes` asserts
+**2 where there were 3**, all the same size.
+*Sized properly for the first time*, and it is a bigger fraction than the old estimate implied — see
+4b's table, where a layer switch turns out to be snapshot-warm and therefore almost entirely
+composite.
 
-**5. Give `makeRenderRequest` a render-size hint.** `makeSandwichRequests` already carries the
-machinery — `renderResolution.renderSize(for:)` then `CompositorBudget.affordableSize`
-(`RenderRequest.swift:442-444`); this copies an established in-repo pattern to a second call site,
-the thumbnail composite at `ProjectStore.swift:261-265`.
-*Win*: 2,097,152 pixels composited for the 102,400 the tile needs — 20× waste, on the main thread,
-inside every save, and therefore three times per app switch until item 1 lands. Tens of milliseconds
-for a plain document (INFERRED), several hundred once the stack carries an effect: six *faded* levels
-cost 1071.7 ms against 41.6 ms flat, **roughly 25×** (`PerfBaselineTests.swift:1229-1234`; MEASURED
-at 2048² on the CoreGraphics backend, which that test pins deliberately — no device or Release
-provenance is recorded for it, so take the ratio and not the absolutes).
-*Safety*: localised to one request builder and two callers; the output is a 320×320 tile, so visual
-verification is forgiving.
-*Verified*: headless — assert the composited size, and compare downscaled tiles.
-*Why not higher*: its headline is 4K-inflated. It earns its place because it is cheap, because it is
-main-thread, and because it stops being irrelevant the moment the stack carries an effect — which is
-exactly the scene an animator builds at the end of a shot.
+**4b. Compute `below`/`above` lazily. — DECLINED, on a measurement.** Not deferred on risk: the
+number that justified it was arithmetic over a per-layer slope, and taking the real one changes the
+answer.
 
-**6. Wire `MaskResolver.clearCache()` to the memory-warning notification.** One `addObserver` block
-copied verbatim from `PixelOps.swift:150-154`.
+`testHowASandwichRebuildSplitsBetweenFullAndTheTwoHalvesAtTheOwnersCanvas` (`PerfBaselineTests`) is
+the instrument. **MEASURED 2026-08-20, iOS 26.5 simulator on the 8-core MacBook, CoreGraphics backend
+pinned, six layers at 2048×1024, machine 96.7% idle with no other `xcodebuild` running:**
+
+| term | ms |
+|---|---|
+| snapshot, memo cold (a playback/scrub tick — a new frame) | **78.2** |
+| snapshot, memo warm (a layer switch — same frame) | **0.1** |
+| `composite(full)` | 11.0 |
+| `composite(below)` | 6.7 |
+| `composite(above)` | 4.5 |
+| the three composites together | 22.2 |
+
+These are simulator figures on the *reference* backend, so read the ratios and not the absolutes; the
+device is ~1.3× (§1) and ships `.automatic`.
+
+**Two things fall out, and the second is why 4b is declined.**
+
+*A layer switch is snapshot-warm.* `PixelOps.rasterize` is memoized on cel identity and the playhead
+has not moved, so the `@MainActor` half is 0.1 ms and the rebuild is essentially its three
+composites. 4a therefore skips **half** of a layer-switch rebuild (11.0 of 22.2), not a fifth.
+
+*A playback or scrub tick is snapshot-cold, and the snapshot is the story.* 78.2 ms on the main actor
+against 22.2 ms of background composite. Making the halves lazy removes 11.2 ms — **about 11% of a
+~100 ms tick, in the half that was never on the main thread** — in exchange for a stroke whose first
+frames have no visible ink, on the most latency-sensitive path in the app. This document previously
+put that trade at "from missing the 24 fps budget to fitting inside it", from `6 × 2.4 + 7.0 ≈ 21 ms`
+(INFERRED). That estimate was not wrong about `full`'s share of the *composites*; it was wrong about
+the composites' share of the *tick*.
+
+**What this promotes instead: the snapshot.** 78.2 ms of main-actor work per playback tick is a
+larger, unconditional cost sitting in front of the one 4b was aiming at, and it is item 9(b)'s
+territory (`renderSources` is the same per-cel rasterize fan-out `ProjectStore.load` runs serially).
+Anyone returning to 4b should do 9(b) first and then re-take this table — if the snapshot moves off
+main, the composites become the tick's critical path and 4b becomes worth its risk again.
+
+**5. Give `makeRenderRequest` a render-size hint. — SHIPPED** (`fittingWithin:`, and
+`RenderRequest.renderSize(fitting:within:)`). Applied at one call site, the thumbnail composite in
+`ProjectStore.SaveSnapshot`; nil everywhere else, which is native and byte-for-byte as before.
+*Win, now MEASURED as a size rather than inferred*: the save's composite was **2048×1024 and is now
+320×160** at the owner's canvas, asserted by `testTheProjectThumbnailCompositesAtTileSizeRatherThanCanvasSize`
+via `CompositeProbe`. That is 2,097,152 pixels for the 51,200 the tile occupies — **41× the pixels**,
+on the main actor, inside every save. (This document said "20× waste" for a 320×320 tile; the tile is
+320×160 on a 2:1 canvas, so the ratio is twice what was written.) At 4096² it was 16.8M for 102,400.
+*Why the ratio is what matters*: the absolute cost is tens of milliseconds for a plain document
+(INFERRED) but several hundred once the stack carries an effect — six *faded* levels cost 1071.7 ms
+against 41.6 ms flat, roughly 25× (`PerfBaselineTests`; MEASURED at 2048² on CoreGraphics, no device
+or Release provenance, so take the ratio).
+*What the build added*: the hint is a **bounding box, not a size**. The caller knows the box it is
+filling and has no business also deciding which dimension binds — getting that wrong is silent,
+because a request whose `canvasSize` has the wrong aspect composites a stretched picture that still
+looks like a picture. So the fit rule is written once and is the same `min` of the two ratios
+`ThumbnailRenderer` uses, and `ProjectStore` passes one named constant to both. Clamped at 1× (a hint
+may only ask for less), then capped by `CompositorBudget.affordableSize`.
+*Verified*: the size rule alone (aspect, both binding dimensions, the clamp, whole pixels, degenerate
+inputs); the probed save; and the two tiles compared, since a saving that changes the picture is not
+a saving — a mean-channel-difference bound rather than byte equality, because the two paths filter in
+different places and demanding they agree exactly would be asserting something other than the claim.
+
+**6. Wire `MaskResolver.clearCache()` to the memory-warning notification. — SHIPPED**
+(`MaskCache.init`). One `addObserver` block, `PixelOps.RasterizeCache.init`'s verbatim.
 *Win*: ≤16 MiB at 2048×1024 (8 entries, 1 byte/px coverage, ~2 MiB each — INFERRED). Small; the
 ≤128 MiB figure that makes this look important is a 4096² number.
+*Verified*: a pair, because either half alone proves nothing. A control resolve that must return the
+**same** `ResolvedMask` object (`==` is `===` on that type, deliberately, so identity reads the
+cache); then the notification; then a resolve that must return a different one, with the same
+coverage bytes. Without the control a resolver that never cached would pass; without the miss an
+observer that was never registered would.
+*One correction to the entry below*: the app held **three** `addObserver` calls before this, not two
+— `OnionSkinSource.swift:936` arrived with `tmp/onion`.
 *Why do it anyway*: `MaskResolver.swift:133-135`'s doc comment says the method exists "for a memory
 warning", and **every call site in the repo is a test** — verified by grep across the whole tree, and
 the app contains exactly two `addObserver` calls, neither of them this one. Its real value is closing
@@ -229,14 +330,12 @@ records having already been found and fixed once. Now also in [BUGS.md](BUGS.md)
 *Safety*: `ResolvedMask` is fully re-derivable; two existing observers establish the pattern.
 *Verified*: headless — post the notification, assert a fresh resolve.
 
-**7. Merge `tmp/onion` rather than writing an onion-skin fix.** The branch already carries the
-`OnionSkinKey` gate that `main`'s unconditional composite at `CanvasView.swift:1661-1681` lacks, is
-green at 1120/1123, and **the device re-run that was blocking it has been done** — see §4.
-*Win*: the multi-skin feature, plus the per-tick waste of §2 item 4's onion half.
-*Safety*: already tested green; the recorded rebase conflict was two spots in `CanvasView.swift` and
-the rebase onto current `main` has since been taken cleanly.
-*Note*: this adds a fifth static memory budget on top of the four in item 13; land it with that
-reconciliation in view.
+**7. Merge `tmp/onion`. — ALREADY DONE** (commit `c97ee93`, "Close out tmp/onion"). `OnionSkinKey`
+is on `main` (`CanvasView.swift`), as is `OnionSkinSource.swift` with its own memory-warning
+observer. Nothing was rebuilt; the item was checked before anything was written, which is what the
+plan asked for.
+*Note that survives*: this is a fifth static memory budget on top of the four in item 13, and that
+reconciliation is still owed.
 
 ### Tier B — measure before building
 
@@ -260,6 +359,14 @@ the main thread. (c) Defer thumbnail regeneration to a background pass with plac
 *Win*: (a) none directly — but right now nobody can say whether §2 item 2 is 200 ms or 4 s, and that
 is **the largest unmeasured quantity in the app**. (b) and (c) cut the wall clock; the size is
 unknown until (a) lands.
+**Promoted 2026-08-20, and (b) now has a second beneficiary.** The same per-cel rasterize fan-out
+`load` runs is what `renderSources` runs for every sandwich rebuild, and that was measured at
+**78.2 ms on the main actor for six layers at 2048×1024** when the playhead moves to a new frame
+(MEASURED, simulator/CoreGraphics, machine idle — the table is in item 4b). Warm, on the same frame,
+it is 0.1 ms, so the memo works and the cost is entirely the cold case. That is the largest
+main-thread term on a playback tick and it is bigger than every composite in the rebuild put
+together. Moving the fan-out off main therefore buys project open *and* scrubbing, which is not what
+this item was scoped as when it was written.
 *Safety*: (a) is test-only. (b) and (c) are threading and `@MainActor` assumptions confined to
 `load`; nothing gesture-adjacent, and a wrong answer fails loudly (missing or wrong thumbnails)
 rather than subtly.
@@ -496,7 +603,8 @@ reading code.
 ### Still open
 
 **What does opening a real project actually cost?** Nobody can say whether it is 200 ms or 4 s. *The
-measurement*: item 9(a). This is the largest unmeasured quantity in the app.
+measurement*: item 9(a). This is the largest unmeasured quantity in the app, and item 2's spinner did
+not change that — it changed what the wait looks like, not how long it is.
 
 **What does one cel's PNG encode cost at 2048×1024?** The entire "leave to gallery" ranking rests on
 order-of-magnitude reasoning. *The measurement*: a `PerfBaselineTests` case timing `writePackage`
@@ -518,3 +626,9 @@ of Select/Move/Fill-selection operations.
 **What is the real cache occupancy at background time?** Item 12's ~384 MiB is a budget ceiling, not
 an observation. *The measurement*: sample `residentBytes()` and the upload-cache counters immediately
 before backgrounding, on the device.
+
+**Is one save on the way out still a felt pause?** Tier A cut the app switch from three full saves to
+one, and made that one composite a 320×160 tile instead of the whole canvas. Whether the freeze the
+owner reported is *gone* or merely *smaller* is not answerable from here. *The measurement*: the
+owner switching away from a real document on their iPad and saying. This is the one Tier A result
+that wants them rather than a run.

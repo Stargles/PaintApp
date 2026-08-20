@@ -26,17 +26,32 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 New this pass (owner, 2026-08-17):
 
-- [ ] **A performance pass, calibrated to 2048×1024.** The owner asked for it directly: *"any
-      performance enhancements that can be made to reduce memory, stop lagspikes, or increase fps?"*
-      **The investigation has been run; nothing has been built yet, which is why this stays open.**
-      Its output is [PERFORMANCE.md](PERFORMANCE.md) — a fourteen-item programme in three tiers, the
-      work deliberately *not* worth doing, and the open questions with the measurement that closes
-      each. The conclusion in one line: **the felt problems are not the compositor and not the canvas
-      size — they are a save that fires three times per app switch, a project open that blocks the
-      main thread for an unmeasured multi-second stretch, and two ungated main-thread costs on every
-      timeline tick.** Tier A is seven changes, none of which needs a device run to justify.
+- [ ] **A performance pass, calibrated to 2048×1024 — Tier A is built; Tiers B and C are not.**
+      The owner asked for it directly: *"any performance enhancements that can be made to reduce
+      memory, stop lagspikes, or increase fps?"* [PERFORMANCE.md](PERFORMANCE.md) is the fourteen-item
+      programme; **items 1–7 are now resolved** (see "Done this pass" for what that means item by
+      item). **This stays queued because seven items remain**, and the two that matter most are the
+      instruments rather than the fixes:
+      - **Item 9(a)** — instrument project open. Still *the largest unmeasured quantity in the app*:
+        nobody can say whether tapping a project costs 200 ms or 4 s. Item 2 gave it a spinner, which
+        changed what the wait looks like and not how long it is.
+      - **Item 9(b)** — move the per-cel decode/rasterize fan-out off `@MainActor`. **Promoted by a
+        measurement taken on 2026-08-20**: the same fan-out runs inside every sandwich rebuild as
+        `renderSources`, at **78.2 ms on the main actor** for six layers at 2048×1024 when the
+        playhead moves to a new frame, against 22.2 ms for all three composites together. It is now
+        the largest main-thread term on a playback tick, and fixing it buys project open *and*
+        scrubbing.
+      - Item 8 (a 2048×1024 point for the vector-vs-raster preview) is device-only.
+      - Tier C — items 11 to 14 — is real, recorded, and deliberately not urgent.
 
 Carried over:
+
+- [ ] **Leaving to the gallery takes ~3 s — the thumbnail half is fixed, the wait is probably not.**
+      The tile now composites 320×160 instead of the whole canvas (Tier A item 5), so the save is far
+      cheaper. But [PERFORMANCE.md](PERFORMANCE.md) §1 says the multi-second wait was never the
+      thumbnail: navigation gates on a whole-document PNG re-encode whose cost scales with **cel
+      count**, not with area. Unmeasured at any resolution. Worth asking the owner whether it still
+      feels like ~3 s now.
 
 - [ ] **17 fps drawing on a 4K canvas.** Diagnosed and **not** the compositor: one dab costs 53.8 ms on
       a vector layer at 4096² against 4.0 ms on raster, because `StrokeCanvasView.refreshDisplay`'s
@@ -46,16 +61,48 @@ Carried over:
       **The owner confirmed (2026-08-18) that the 17 fps was measured at 4096×4096**, not at their
       usual 2048×1024 — so the area model holds and the extrapolated ~10.2 ms/dab at their canvas
       stands. [PERFORMANCE.md](PERFORMANCE.md) item 11.
-- [ ] **Returning from another app freezes for a few seconds**, with no memory warning fired.
-      **Cause found, 2026-08-18.** The owner confirmed the app returns *"exactly where I left off"*,
-      which rules out a jetsam kill (a relaunch provably resets to the Gallery), so it is the app's
-      own main-thread work: `ContentView`'s scene-phase guard has no direction check, so one round
-      trip fires three full saves and one of them lands on the way back in. One-line fix,
-      [PERFORMANCE.md](PERFORMANCE.md) item 1; the defect is in BUGS.md.
-- [ ] **Leaving to the gallery takes ~3 s.** The thumbnail composites the full 4K canvas for a 320×320
-      tile; already in BUGS.md.
 
 ## Done this pass
+
+- **Performance, Tier A — merged 2026-08-20. Six changes, one of them already there, and one
+  sub-item declined on a measurement.** The owner's ask is not finished (Tiers B and C remain, above);
+  this is the half that needed no device run to justify.
+  **1. The app-switch freeze — already fixed 2026-08-18**, two days before this document said it was
+  outstanding. `ScenePhaseSaveGate` makes one round trip out and back fire **one** save instead of
+  three, on the way out only, and `ProjectSaveLogicTests` proves it by replaying the phase sequence
+  SwiftUI actually delivers rather than by asserting on the predicate. **Whether the freeze the owner
+  reported is gone or merely smaller wants their iPad** — the count is provably 1, but one save is
+  still a save.
+  **2. Opening a project now shows a spinner** on the tile you tapped, and refuses a second tap while
+  it runs. It is not faster — that is item 9 — but an app that goes dead on the first tap of a session
+  reads as one that crashed. The state machine, not the spinner, is what carries the two rules that
+  fail silently: one load at a time (two loads is a lottery between two projects), and *every* load
+  ends, including the one that returns nil for a damaged package, or the gallery is stuck behind a
+  spinner that never stops.
+  **3. The timeline stops re-laying-out on every SwiftUI pass.** A key gates it, and a scrub takes a
+  playhead-only fast path — two view frames, no redraw — because keying on `currentFrame` would move
+  the key on every sample of the gesture the gate exists for. Honestly sized in the doc: it is a
+  large constant factor, not an asymptotic win, since building the key walks the same cels. The
+  ruler's `draw` now consults its dirty rect, which buys less than it reads and the doc says so.
+  **4a. A layer tap composites twice instead of three times.** `full` is the whole tree, uncut, so
+  switching layers changes only where the tree is cut — it was recompositing an image byte-identical
+  to the one on screen. **4b was declined, on a number rather than on nerve**: making `below`/`above`
+  lazy would remove ~11% of a playback tick, in the half that was never on the main thread, in
+  exchange for a stroke whose first frames have no visible ink. The estimate that made it look like
+  "from missing the 24 fps budget to fitting inside it" was arithmetic over a per-layer slope.
+  **5. The gallery tile composites 320×160, not 2048×1024** — 41× the pixels, on the main actor,
+  inside every save. The hint is a bounding box rather than a size, so the one thing that is silent
+  when wrong (which dimension binds) is written once and shared with the thumbnail renderer.
+  **6. A memory warning now reaches the mask cache**, which its own doc comment had claimed for two
+  months while every caller in the tree was a test. Small bytes; the point is closing the lie before
+  a third instance of it — `PixelOps` records the identical defect being found and fixed once
+  already.
+  **7. Onion skin was already merged** (session 42). Checked before anything was written; nothing
+  rebuilt.
+  **The instrument that came out of it may outlast the fixes.** `CompositeProbe` counts composites
+  and their sizes, so two of these claims are integers about the calls rather than milliseconds about
+  a machine — which matters on a Mac where contention is documented to make suites return wrong
+  answers, not merely slow ones.
 
 - **Add Text, in the Actions menu — Stage 1 merged 2026-08-20. The ask itself is not finished:
   Stages 3-6 remain**, and [ADD_TEXT.md](ADD_TEXT.md) §3 is the live list of them. What the owner

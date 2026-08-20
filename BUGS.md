@@ -4,81 +4,6 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
-## One app switch fires three full saves, and one of them lands on the way back in (2026-08-18)
-
-**This is the owner's "returning from another app freezes for a few seconds", and the owner's own
-answer is what settled it.** Asked on 2026-08-18 whether the app comes back where they left it or on
-the Gallery, they said *"Exactly where I left off. It only freezes for a few seconds though, which
-honestly is to be expected unless something bad is going on in the backend."* There is no
-`@SceneStorage` anywhere and `ContentView.screen` is plain `@State` (`ContentView.swift:10-11`), so a
-genuine relaunch provably resets to the Gallery. Coming back in place means **the process was never
-killed** — jetsam is ruled out, and what is left is the app's own main-thread work.
-
-`ContentView.swift:30-34` guards the save on `newPhase == .inactive || newPhase == .background` and
-never looks at where the transition came *from*:
-
-```swift
-.onChange(of: scenePhase) { _, newPhase in
-    if newPhase == .inactive || newPhase == .background {
-        saveIfNeeded()
-    }
-}
-```
-
-SwiftUI passes through `.inactive` on **both** legs, so one background round trip fires three times —
-active→inactive, inactive→background, and background→inactive on the way back, that last one while
-the artist is looking at the screen. `onChange(of:)` already hands both values; comparing `oldPhase`
-is the whole fix.
-
-**Each of those three is a full save, and "IfNeeded" does not mean what it looks like.**
-`saveIfNeeded` (`ContentView.swift:56-68`) has no dirty check of any kind — the guard is on the
-*screen*, not on whether anything changed. So every one of the three builds a `SaveSnapshot`
-synchronously on `@MainActor` (`ProjectStore.swift:205`, constructed at `:295`), which composites the
-**whole canvas** to produce a 320×320 tile (`:261-265`) — 2 M pixels for 102 k at 2048×1024 — and
-does it *before* `beginBackgroundTask` is requested at `:303`, then enqueues a full-document PNG
-re-encode behind it. Three of those compete for the A13's cores per switch.
-
-Mechanism READ-confirmed; the multi-second magnitude is INFERRED, and corroborated by the owner
-reporting the symptom. The fix and its verification are [PERFORMANCE.md](PERFORMANCE.md) item 1: a
-pure `shouldSave(from:to:)` predicate, testable headlessly.
-
-**Not the same thing as the `ContentView.saveIfNeeded` note under Cleanup opportunities below**,
-which is about a save that *fails* to fire on a direct project→project transition. These are the two
-opposite failures of the same undirected guard.
-
-
-## `MaskResolver.clearCache()` says it handles a memory warning and is wired to nothing (2026-08-18)
-
-`MaskResolver.swift:133-135`:
-
-```swift
-/// Drops every resolved mask. For tests that need to measure an uncached resolution, and for a
-/// memory warning — nothing here is state, so throwing it away only costs time.
-static func clearCache() { cache.removeAll() }
-```
-
-**Every call site in the repo is a test** — `ValueLayerLogicTests`, `EffectLayerLogicTests`,
-`MaskParityLogicTests`, `PerfBaselineTests`, and nothing in `PaintSoftware/`. The app contains
-exactly two `NotificationCenter.addObserver` calls (`MetalCompositor.swift:386`,
-`PixelOps.swift:150`) and neither is this one. So a memory warning reaches the Metal caches and the
-flatten memo and steps around the mask cache entirely, while the doc comment says otherwise.
-
-**This is the identical bug class that `PixelOps.swift:145-149` records having already been found and
-fixed once**, in a comment that opens "Nothing dropped these before" and explains that the doc
-comment there said "and for a memory warning" while no code anywhere subscribed. Two instances of the
-same defect from the same cause — a doc comment describing an intent nobody wired — is a pattern, and
-the fix is one `addObserver` block copied verbatim from the file that already got it right.
-
-**The bytes are small and that is not the point.** At 2048×1024 a resolved mask is 1 byte per pixel,
-so 8 entries is ≤16 MiB (INFERRED); the ≤128 MiB figure that makes this look urgent is 4096²
-arithmetic. `ResolvedMask` is fully re-derivable, so the change is correctness-neutral. Its value is
-closing a documented lie before a third instance of it appears. [PERFORMANCE.md](PERFORMANCE.md)
-item 6.
-
-Distinct from "A mask sourced from a graded group can be stale" below, which is about the cache
-*key*; this is about the cache never being dropped.
-
-
 ## Onion skin at Full pushes canvas-sized sources through the compositor's cache (2026-08-18)
 
 `OnionSkinRasterCache` exists to keep the onion skin's sources *out* of `PixelOps.rasterizeCache`, and
@@ -435,21 +360,6 @@ which it is doing anyway. That deletes the per-dab allocation and both blits, le
 code in the app (`vectorScratchRole` has three modes and `.replacement` and `.none` behave
 differently), so it wants its own branch and its own pass through the vector-eraser UI suites, not a
 rider on a compositor-memory fix.
-
-## The project thumbnail composites the whole canvas to make a 320x320 tile (2026-08-16)
-
-`ProjectStore.SaveSnapshot` builds a full `makeRenderRequest` at native canvas size, composites it,
-and hands the result to `ThumbnailRenderer.render(…, thumbnailSize: 320x320)`. On a 4096² document
-that is 16.8M pixels rendered to fill 102k — and on a 3 GB device the GPU path declines it
-(`CompositorBudget`, which sizes only the *live canvas* down), so it lands on the CoreGraphics
-reference. With a bloom and a blur in the stack that is minutes of background CPU per save.
-
-**Not a regression from the Metal flip** — with the old `.coreGraphics` default the thumbnail took
-exactly the same path — and on a device with room it is now much faster than it was. Left alone here
-because fixing it properly means deciding what size a thumbnail composite should be and checking that
-against `ProjectSaveLogicTests`, which is a save-path change and not a crash fix. The shape of the
-fix: give `makeRenderRequest` an optional render size the way `makeSandwichRequests` has one, and
-have `ProjectStore` ask for something near the tile's own size.
 
 ## The Metal composite hands Core Animation a non-native pixel format (2026-08-16)
 
