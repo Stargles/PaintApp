@@ -20,7 +20,7 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-*Nothing. Every owner ask on this list is merged; the next one starts here.*
+*Nothing. The next owner ask starts here.*
 
 ## Queued
 
