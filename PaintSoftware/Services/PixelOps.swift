@@ -22,7 +22,9 @@ enum PixelOps {
     /// are the same walk: `ProjectStore.load` decodes one cel per iteration, and `renderSources`
     /// rasterizes one. Both were serial, both are embarrassingly parallel — no iteration reads what
     /// another writes — and the second was MEASURED at 78.2 ms on the main actor for six layers at
-    /// 2048×1024 on a playback tick, which is the largest main-thread term on that tick.
+    /// 2048×1024 on a playback tick, which was the largest main-thread term on that tick. With this
+    /// in place the same test reads **~22 ms** (MEASURED 2026-08-20; PERFORMANCE.md item 4b carries
+    /// the re-taken table and the three unchanged composites that calibrate it).
     ///
     /// **What this does and does not buy, stated plainly.** It shortens wall clock by spreading the
     /// work over cores. It does **not** move the work off the calling thread — `concurrentPerform`

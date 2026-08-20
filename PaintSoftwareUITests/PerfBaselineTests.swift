@@ -2995,8 +2995,10 @@ final class PerfBaselineTests: XCTestCase {
     ///
     /// `renderSources` runs this fan-out on every sandwich rebuild, and item 4b's table MEASURED it at
     /// **78.2 ms on the main actor** for six layers at 2048×1024 when the playhead moves to a new
-    /// frame, against 22.2 ms for all three composites of that rebuild put together. It is the largest
-    /// main-thread term on a playback tick.
+    /// frame, against 22.2 ms for all three composites of that rebuild put together — the largest
+    /// main-thread term on a playback tick. `testHowASandwichRebuildSplitsBetweenFullAndTheTwoHalvesAtTheOwnersCanvas`
+    /// is where the same figure is re-taken end to end (~22 ms now); this case isolates the fan-out
+    /// itself, so the two answer different questions and both are worth having.
     ///
     /// **The two figures are taken alternately and reported as a ratio**, which is the point. This Mac
     /// runs several suites at once and CLAUDE.md records contention making a suite return *wrong*

@@ -557,12 +557,15 @@ extension CanvasManager {
     /// second copy of the elision rule is a second thing to update — which phase 6 proved by
     /// changing it: `alsoIncluding` is §6.6's "a mask ignores its source's visibility", and a hidden
     /// layer that clips something has to be rasterized after all.
+    ///
     /// **Two passes as of PERFORMANCE.md item 9(b), and the split is the whole change.** Pass 1 asks
     /// the model which layers contribute and from which cel — `@Published` reads, no pixels. Pass 2
     /// rasterizes the survivors across every core via `PixelOps.parallelMap`, because two different
     /// cels share no mutable state and this was the largest main-thread term on a playback tick:
     /// **78.2 ms** for six layers at 2048×1024, memo-cold, against 22.2 ms for all three composites of
-    /// the rebuild put together (MEASURED 2026-08-20 — item 4b's table).
+    /// the rebuild put together. It is **~22 ms** now, so the snapshot and the composites are the same
+    /// size and neither dominates (both MEASURED 2026-08-20 — item 4b carries the before/after table
+    /// and the three unchanged composites that calibrate the two runs against each other).
     ///
     /// **It is still on the main actor, and that is deliberate rather than unfinished.** The snapshot
     /// being synchronous is what makes it *atomic* with respect to the artist's own edits: nothing can
