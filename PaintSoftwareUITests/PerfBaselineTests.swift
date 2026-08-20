@@ -3265,6 +3265,12 @@ final class PerfBaselineTests: XCTestCase {
                 XCTAssertEqual(profile.pngsEncoded, cels,
                                "Every save re-encodes every cel: one raster PNG each, nothing skipped")
                 XCTAssertEqual(profile.pngsReused, 0, "Nothing memoizes a cel's PNG bytes yet")
+                // The fan-out, as an integer rather than as a clock. A serial walk touches one
+                // thread; a spread one touches several, and no amount of host load changes which —
+                // so this is the line that would notice if `writePackage` silently went back to a
+                // `for` loop, which is a change that would go on passing every functional test.
+                XCTAssertGreaterThan(profile.encodeThreads, 1,
+                                     "The per-cel walk runs over cores — see `writePackage`")
 
                 if pass == 1 { perCelBySize.append((cels, awaited * 1000 / Double(cels))) }
             }
@@ -3289,5 +3295,93 @@ final class PerfBaselineTests: XCTestCase {
         // tighten this into a timing assertion on a machine that runs several suites at once.
         XCTAssertLessThan(ProjectStore.lastSaveProfile?.totalSeconds ?? 0, 120.0,
                           "A 32-cel save taking two minutes is structural, not contention")
+    }
+
+    /// **What spreading the per-cel PNG encode over cores is worth**, measured against a serial walk
+    /// of the same images in the same run.
+    ///
+    /// The two arms alternate, three times each, and the minimum of each is reported. That is not
+    /// fussiness: this Mac hosts several suites at once, and PERFORMANCE.md §6 records the same test
+    /// reading 863 / 988 / 3187 ms on the same binary purely by how many other runs were live. A
+    /// serial number from one invocation against a parallel number from another is a comparison of
+    /// host load as much as of code; alternating them makes the ratio contention-proof by
+    /// construction, and the minimum picks the quietest slice each arm got.
+    ///
+    /// **It encodes and writes the same images the save does**, taken straight off the fixture's
+    /// cels, so the unit of work is the one `writeCel` performs — not a synthetic stand-in.
+    ///
+    /// The peak-memory pair is the claim worth pinning beside the clock: the fan-out holds one PNG
+    /// per *worker* where the serial walk holds one at a time, and that difference must stay in the
+    /// noise of a document that is already holding a canvas-sized bitmap per cel.
+    @MainActor
+    func testSavePngEncodeFanOutIsWorthIt() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("perf-encode-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let layerCount = Self.openLayerCount, celsPerLayer = Self.openCelsPerLayer
+        // One `UIImage` per cel, rendered once up front — exactly what `SaveSnapshot` hands the
+        // write, so neither arm below is measuring `renderToUIImage()` instead of the encoder.
+        let images: [UIImage] = autoreleasepool {
+            let authored = multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer)
+            return authored.layers.flatMap { $0.cels.map { $0.raster.renderToUIImage() } }
+        }
+        XCTAssertEqual(images.count, layerCount * celsPerLayer)
+
+        func encodeAndWrite(_ index: Int) -> Int {
+            guard let data = images[index].pngData() else { return 0 }
+            try? data.write(to: root.appendingPathComponent("cel-\(index).png"))
+            return data.count
+        }
+        func serialWalk() -> Double {
+            measuringPeakMemory {
+                autoreleasepool {
+                    var bytes = 0
+                    for index in images.indices { bytes += autoreleasepool { encodeAndWrite(index) } }
+                    XCTAssertGreaterThan(bytes, 0)
+                }
+            }.seconds
+        }
+        func parallelWalk() -> Double {
+            measuringPeakMemory {
+                autoreleasepool {
+                    let bytes = PixelOps.parallelMap(images.count) { encodeAndWrite($0) }
+                    XCTAssertEqual(bytes.count, images.count)
+                }
+            }.seconds
+        }
+
+        var serial = Double.greatestFiniteMagnitude, parallel = Double.greatestFiniteMagnitude
+        for _ in 0..<3 {
+            serial = Swift.min(serial, serialWalk())
+            parallel = Swift.min(parallel, parallelWalk())
+        }
+        var serialPeak: UInt64 = 0, parallelPeak: UInt64 = 0
+        autoreleasepool { serialPeak = measuringPeakMemory { _ = serialWalk() }.peakBytes }
+        autoreleasepool { parallelPeak = measuringPeakMemory { _ = parallelWalk() }.peakBytes }
+
+        report("save encode fan-out, \(images.count) cels at 2048x1024", [
+            ("serial", milliseconds(serial)),
+            ("parallel", milliseconds(parallel)),
+            ("speedup", String(format: "%.2fx", parallel > 0 ? serial / parallel : 0)),
+            ("serialPerCel", String(format: "%.1f", serial * 1000 / Double(images.count))),
+            ("parallelPerCel", String(format: "%.1f", parallel * 1000 / Double(images.count))),
+            ("serialPeak", megabytes(serialPeak)),
+            ("parallelPeak", megabytes(parallelPeak)),
+            ("activeProcessorCount", "\(ProcessInfo.processInfo.activeProcessorCount)"),
+        ])
+
+        // Deliberately not a speedup assertion: on a one-core host, or a machine already saturated
+        // by another suite, the honest answer is 1x. What is asserted is that the fan-out is not
+        // *multiples slower* than the serial walk, which is what an encoder serialising on a shared
+        // lock would look like — and that is the failure this change could actually introduce.
+        XCTAssertLessThan(parallel, serial * 4,
+                          "The parallel encode must not cost multiples of the serial walk — that is contention on a lock, not scheduling")
+        // Each worker holds one PNG where the serial walk holds one at a time. Generous, because
+        // `phys_footprint` on a shared machine is noisy — this is here to catch a fan-out that had
+        // started stockpiling canvas-sized temporaries, not to police a few megabytes.
+        XCTAssertLessThan(Double(parallelPeak), Double(serialPeak) * 1.6,
+                          "Fanning the encode out must not multiply peak footprint — a PNG per worker, not a bitmap per worker")
     }
 }

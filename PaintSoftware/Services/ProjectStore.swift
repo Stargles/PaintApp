@@ -543,9 +543,35 @@ enum ProjectStore {
 
         var layerManifests: [LayerManifest] = []
 
+        // **The per-cel walk, spread over cores — the save's mirror of item 9(b).** MEASURED
+        // 2026-08-20 before this landed: 15.2 ms a cel at 2048x1024, of which 95.6% was `pngData()`,
+        // flat from 8 cels to 32 — so the whole gallery-exit wait is one embarrassingly parallel
+        // encode loop, and the file I/O it was assumed to be bounded by is 2% of it.
+        //
+        // **Flattened across the whole tree rather than run per layer**, for `decodeCels`' reason
+        // exactly: an animator's document is a handful of layers with many cels each, and a
+        // per-layer fan-out leaves most of the machine idle while the longest layer finishes.
+        //
+        // **Order is reconstructed from the job list, not from completion order.** `parallelMap`
+        // returns results in index order and the regrouping walks that array once appending in
+        // order, so each layer's cels are written to the manifest exactly as the snapshot listed
+        // them — which is the order `activeCelIndex` scans on the way back in, and the one property
+        // here that would be quiet if it were wrong.
+        //
+        // **Nothing about *what* gets written changes**, which is what makes this the safe half of
+        // PERFORMANCE.md §5's entry on this path: the same bytes go to the same files, and the
+        // memo that would skip an unchanged cel entirely is a separate change with a separate risk.
         let celWalkStarted = CFAbsoluteTimeGetCurrent()
-        let celManifestsByLayer: [[CelManifest]] = snapshot.layers.map { layer in
-            layer.cels.map { writeCel($0, to: imagesDir, tally: tally) }
+        let jobs: [(layerIndex: Int, cel: SaveSnapshot.CelContent)] =
+            snapshot.layers.enumerated().flatMap { layerIndex, layer in
+                layer.cels.map { (layerIndex, $0) }
+            }
+        let written = PixelOps.parallelMap(jobs.count) { index in
+            writeCel(jobs[index].cel, to: imagesDir, tally: tally)
+        }
+        var celManifestsByLayer = [[CelManifest]](repeating: [], count: snapshot.layers.count)
+        for (index, celManifest) in written.enumerated() {
+            celManifestsByLayer[jobs[index].layerIndex].append(celManifest)
         }
         let celWalkSeconds = CFAbsoluteTimeGetCurrent() - celWalkStarted
 
@@ -612,7 +638,15 @@ enum ProjectStore {
     /// The body is the old loop verbatim; the only additions are the two clocks.
     ///
     /// It reads this cel's own snapshot content and writes only files named after this cel's id, so
-    /// two cels share nothing — the same property that makes the load's `decodeCel` safe to fan out.
+    /// two cels share nothing — the same property that makes the load's `decodeCel` safe to fan out,
+    /// and the reason `writePackage` now runs this over cores.
+    ///
+    /// **What a wrong answer here would look like, since that is what ranks the risk.** Every path
+    /// out of this function names its file after `cel.id`, which is a UUID, so two workers cannot
+    /// target the same path; `UIImage` is immutable and each worker holds a different one; the
+    /// `JSONEncoder` is per-call. The failure mode a fan-out could introduce is a *manifest* whose
+    /// cels came back in completion order, and `writePackage` reconstructs that order from the job
+    /// list rather than from completion — see its comment.
     private static func writeCel(_ cel: SaveSnapshot.CelContent, to imagesDir: URL,
                                  tally: WriteTally) -> CelManifest {
         var encodeSeconds = 0.0

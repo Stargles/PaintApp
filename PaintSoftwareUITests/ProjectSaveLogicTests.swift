@@ -1054,4 +1054,77 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(opened.thumbnailRegenerationCount, afterFirst,
                        "a second pass over a fully-populated document must render nothing")
     }
+
+    // MARK: - The per-cel write runs over cores
+
+    /// **Every cel's drawing comes back on that cel, and in that order**, after a save whose per-cel
+    /// walk ran on several threads at once (`ProjectStore.writePackage`).
+    ///
+    /// This is the one property the fan-out could break quietly. A save that wrote the right bytes to
+    /// the wrong cel, or assembled the manifest in completion order rather than in the document's,
+    /// would still produce a package that validates, loads, and looks fully formed to every other
+    /// test in this file — the artist would simply find their drawings shuffled between frames the
+    /// next time they opened the project. Nothing here was covered before: the existing round-trip
+    /// tests read `cels[0]`, and one cel per layer cannot show an ordering.
+    ///
+    /// Each cel carries a dot at a position derived from its own index, so "cel 7's ink is on cel 7"
+    /// is checkable rather than merely "there are pixels somewhere".
+    func testEveryCelsPixelsAndOrderSurviveTheParallelWrite() {
+        let layerCount = 3, celsPerLayer = 5
+        let manager = CanvasFixture.manager(layerCount: layerCount)
+        manager.sceneFrameCount = celsPerLayer * 2
+
+        /// Where cel `index`'s dot goes. Distinct per cel, comfortably inside the 64x64 fixture, and
+        /// far enough apart that two cels' bounds cannot be confused for one another.
+        func dotCentre(_ index: Int) -> CGPoint {
+            CGPoint(x: 8 + CGFloat(index % celsPerLayer) * 11, y: 8 + CGFloat(index / celsPerLayer) * 11)
+        }
+
+        // Built directly rather than through `addCel`, which would refuse them: a layer's first cel
+        // already spans every frame a second could start on.
+        for layerIndex in 0..<layerCount {
+            manager.layers[layerIndex].cels = (0..<celsPerLayer).map { celIndex in
+                Cel(id: UUID(), startFrame: celIndex * 2, frameCount: 2,
+                    raster: .empty(size: CanvasFixture.canvasSize))
+            }
+            for celIndex in 0..<celsPerLayer {
+                let raster = manager.layers[layerIndex].cels[celIndex].raster
+                raster.beginStroke()
+                raster.stampCircle(at: dotCentre(layerIndex * celsPerLayer + celIndex), radius: 3,
+                                   color: .red, alpha: 1, hardness: 1)
+                raster.endStroke()
+            }
+        }
+
+        let expectedIDs = manager.layers.map { $0.cels.map(\.id) }
+        let expectedStarts = manager.layers.map { $0.cels.map(\.startFrame) }
+
+        let url = projectURL(name: "Parallel Write")
+        saveAndWait(manager, to: url)
+
+        guard let reloaded = ProjectStore.load(from: url) else {
+            return XCTFail("The saved package should load")
+        }
+        XCTAssertEqual(reloaded.layers.count, layerCount)
+
+        for layerIndex in 0..<layerCount {
+            let cels = reloaded.layers[layerIndex].cels
+            XCTAssertEqual(cels.map(\.id), expectedIDs[layerIndex],
+                           "Layer \(layerIndex)'s cels must come back in the order the document had them, not in the order the workers finished")
+            XCTAssertEqual(cels.map(\.startFrame), expectedStarts[layerIndex],
+                           "Layer \(layerIndex)'s cel timings must survive the write")
+
+            for (celIndex, cel) in cels.enumerated() {
+                guard let bounds = PixelOps.opaqueContentBounds(cel.raster.renderToUIImage()) else {
+                    return XCTFail("Layer \(layerIndex) cel \(celIndex) came back empty — its PNG went somewhere else")
+                }
+                let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+                let wanted = dotCentre(layerIndex * celsPerLayer + celIndex)
+                XCTAssertEqual(centre.x, wanted.x, accuracy: 2,
+                               "Layer \(layerIndex) cel \(celIndex) is carrying another cel's drawing")
+                XCTAssertEqual(centre.y, wanted.y, accuracy: 2,
+                               "Layer \(layerIndex) cel \(celIndex) is carrying another cel's drawing")
+            }
+        }
+    }
 }
