@@ -62,6 +62,30 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
       tip; the owner wants every stroke inside the brush's footprint cut, each back to *its own*
       neighbouring crossings.
 
+- [ ] **A second fill breaks the first — the transient never bakes, and the second never renders** —
+      owner, on device, 2026-08-19: *"Using the fill tool more than once breaks it sometimes. I think
+      it has to do something with it being in the transient state, then another thing is filled, and
+      it doesnt bake the first one properly before going to the second."*
+      **The owner's reading is right, and there is a specific race behind it.** `beginInteractiveFill`
+      does its work asynchronously on `fillQueue` (composite the reference, upload it, run the GPU
+      flood), then publishes the preview back with a `DispatchQueue.main.async`. A second tap that
+      lands before that publish runs is the failure, and it breaks three ways at once:
+      **(a) the first fill is dropped.** `commitInteractiveFill` bails on
+      `guard cel.fillImage != nil` — "nothing was previewed" — which is true whenever the first
+      fill's render has not reached the main thread yet. No undo entry, no pixels, silent.
+      **(b) the second fill never renders.** The first gesture's `drainFillWork` is still looping. It
+      re-reads `fillPending` (now the second gesture's key), sets `fillRendered` to it, and renders
+      *that key* against the **first** session — so when the second gesture's own worker finally gets
+      a session, `key == fillRendered` and it returns without drawing anything at all.
+      **(c) the render it does produce is wrong.** That stale loop pairs the second tap's
+      `fillGestureSeed` with the first tap's `fillSeedColor` and reference composite, so the preview
+      on screen is a flood from the new point against the old picture at the old tolerance.
+      The invariant this violates is written down at `CanvasManager.swift:1227` — *"the rest is set on
+      the main thread in `beginInteractiveFill` before any `fillQueue` work runs, then only read
+      after."* A second gesture is exactly the case that breaks it. The fix wants a per-gesture
+      generation the worker carries and checks before it renders and before it publishes, and a
+      commit path that does not depend on the async publish having landed.
+
 - [ ] **The canvas border does not act as a fill boundary once there is padding** — owner, on device,
       2026-08-18: *"Treating the canvas as fill border does not work. You can test this by increasing
       padding, drawing a line which starts outside the canvas (in the padding), goes inside, and then
