@@ -2870,13 +2870,17 @@ final class PerfBaselineTests: XCTestCase {
     /// gallery tap pays.
     ///
     /// **The gallery path is measured first, and the order is not arbitrary.** The first load in a
-    /// process has to fault in one fresh canvas-sized bitmap per cel — 256 MiB at this fixture — and
-    /// the second reuses pages the first already touched. Measured both ways while writing this: the
-    /// same code reported ~130 ms of decode on a second load against ~280 ms on a first, on one
-    /// contended run. That gap is larger than anything item 9(b) does, so which load is measured first
-    /// decides the answer. A fresh launch and a tap is a *first* load, so that is the one the gallery
-    /// figure describes. The blocking rows below it are consequently **warm and a floor**, useful for
-    /// the split between decode and thumbnails rather than as an absolute.
+    /// process faults in one fresh canvas-sized bitmap per cel — 256 MiB at this fixture — and every
+    /// later one reuses pages the first already touched. MEASURED 2026-08-20 on a quiet machine: the
+    /// cold decode is **53.5 ms** against **39.4 ms** warm, about 1.4×. A fresh launch and a tap is a
+    /// *first* load, so that is the one the gallery figure describes, and the blocking rows below it
+    /// are consequently **warm and a floor** — read them for the split between decode and thumbnails
+    /// rather than as an absolute.
+    ///
+    /// **That gap widens to multiples under host load, which is a trap worth naming.** The same pair
+    /// read ~280 ms cold against ~130 ms warm while three other suites were running, so a cold figure
+    /// from a busy run and a warm one from a quiet run can differ by more than anything item 9(b)
+    /// does. Every figure quoted from this case has to carry what the machine was doing.
     @MainActor
     func testWhatOpeningAMultiCelProjectCosts() async {
         let root = FileManager.default.temporaryDirectory
@@ -3045,5 +3049,111 @@ final class PerfBaselineTests: XCTestCase {
         // of magnitude, which is what a fan-out that had started serialising on a lock would look like.
         XCTAssertLessThan(parallel, serial * 4,
                           "The parallel snapshot must not cost multiples of the serial walk — that is contention on a lock, not scheduling")
+    }
+
+    /// **What spreading the per-cel *decode* over cores is worth**, measured against a serial walk of
+    /// the same PNGs in the same run — the other half of item 9(b), and the half that turned out to
+    /// have a confound worth writing down.
+    ///
+    /// The body of each iteration is exactly what `ProjectStore.decodeCel` does for the raster tier:
+    /// `UIImage(contentsOfFile:)` then `RasterLayerTexture.load`, which allocates a canvas-sized
+    /// `CGContext` and draws the decoded image into it. That is the whole cost for a raster-only
+    /// document, which this fixture is.
+    ///
+    /// **Alternating best-of-three, so both sides are warm.** The first decode in a process faults in
+    /// one fresh 8 MiB bitmap per cel and every later one reuses pages the first already touched, and
+    /// that is measurable *once* — so it cannot be part of a paired comparison. This reports the
+    /// steady-state ratio, which is the honest thing a ratio can say here; the cold-start figure lives
+    /// in `testWhatOpeningAMultiCelProjectCosts`, where it is what the artist actually waits for.
+    ///
+    /// **The peak is the second claim and it is the one that could have gone wrong quietly.** Both
+    /// walks retain every texture they build, so fanning out must not multiply what a load holds —
+    /// which is why `PixelOps.parallelMap` drains an autorelease pool per iteration rather than
+    /// letting each worker's temporaries pile up until the enclosing pool ends.
+    @MainActor
+    func testTheDecodeFanOutIsSpreadOverCoresRatherThanWalkedSerially() async {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("perf-decode-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let layerCount = Self.openLayerCount, celsPerLayer = Self.openCelsPerLayer
+        let url = ProjectStore.createNewProjectURL(name: "Perf Decode")
+        let written = expectation(description: "the package is on disk")
+        autoreleasepool {
+            let authored = multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer)
+            ProjectStore.save(authored, to: url) { written.fulfill() }
+        }
+        await fulfillment(of: [written], timeout: 600)
+
+        let canvas = Self.ownersCanvasSize
+        let imagesDir = url.appendingPathComponent("images", isDirectory: true)
+        let pngs = ((try? FileManager.default.contentsOfDirectory(at: imagesDir, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "png" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        // A raster-only document writes exactly one PNG per cel. If that stops being true the two
+        // walks below are still measuring the same thing as each other, but no longer the thing the
+        // name claims, so it is asserted rather than assumed.
+        XCTAssertEqual(pngs.count, layerCount * celsPerLayer,
+                       "the fixture is raster-only, so `images/` holds one raster PNG per cel and nothing else")
+        guard !pngs.isEmpty else { return }
+
+        func decodeOne(_ file: URL) -> RasterLayerTexture {
+            UIImage(contentsOfFile: file.path).map { RasterLayerTexture.load(from: $0, size: canvas) }
+                ?? .empty(size: canvas)
+        }
+        func serialWalk() -> Double {
+            measuringPeakMemory {
+                autoreleasepool {
+                    var built: [RasterLayerTexture] = []
+                    built.reserveCapacity(pngs.count)
+                    for file in pngs { built.append(decodeOne(file)) }
+                    XCTAssertEqual(built.count, pngs.count)
+                }
+            }.seconds
+        }
+        func parallelWalk() -> Double {
+            measuringPeakMemory {
+                autoreleasepool {
+                    let built = PixelOps.parallelMap(pngs.count) { decodeOne(pngs[$0]) }
+                    XCTAssertEqual(built.count, pngs.count)
+                }
+            }.seconds
+        }
+
+        var serial = Double.greatestFiniteMagnitude, parallel = Double.greatestFiniteMagnitude
+        var serialPeak: UInt64 = 0, parallelPeak: UInt64 = 0
+        for _ in 0..<3 {
+            serial = Swift.min(serial, serialWalk())
+            parallel = Swift.min(parallel, parallelWalk())
+        }
+        // One more of each, for the peak rather than the clock — the fan-out holds every result at
+        // once either way, so this should be flat, and a fan-out that had started stockpiling
+        // temporaries would show up here and nowhere else.
+        autoreleasepool { serialPeak = measuringPeakMemory { _ = serialWalk() }.peakBytes }
+        autoreleasepool { parallelPeak = measuringPeakMemory { _ = parallelWalk() }.peakBytes }
+
+        report("decode fan-out, \(pngs.count) cels at 2048x1024 (steady state)", [
+            ("serial", milliseconds(serial)),
+            ("parallel", milliseconds(parallel)),
+            ("speedup", String(format: "%.2fx", parallel > 0 ? serial / parallel : 0)),
+            ("serialPerCel", String(format: "%.1f", serial * 1000 / Double(pngs.count))),
+            ("parallelPerCel", String(format: "%.1f", parallel * 1000 / Double(pngs.count))),
+            ("serialPeak", megabytes(serialPeak)),
+            ("parallelPeak", megabytes(parallelPeak)),
+            ("activeProcessorCount", "\(ProcessInfo.processInfo.activeProcessorCount)"),
+        ])
+
+        XCTAssertLessThan(parallel, serial * 4,
+                          "The parallel decode must not cost multiples of the serial walk")
+        // The peak is the claim worth pinning: the parallel walk retains the same set of textures the
+        // serial one does, so spreading it over cores must not multiply what a load holds. Generous,
+        // because `phys_footprint` on a shared machine is noisy.
+        XCTAssertLessThan(Double(parallelPeak), Double(serialPeak) * 1.6,
+                          "Fanning the decode out must not multiply peak footprint — every result is retained either way")
     }
 }

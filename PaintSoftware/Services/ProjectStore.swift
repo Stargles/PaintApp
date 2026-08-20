@@ -665,9 +665,9 @@ enum ProjectStore {
     /// **Order is reconstructed from the job list, not from completion order.** `parallelMap` returns
     /// results in index order, and the regrouping walks that array once appending in order, so each
     /// layer's cels come back exactly as the manifest listed them. Cel order is not cosmetic — it is
-    /// what `activeCelIndex` binary-searches and what `addCel` maintains with an explicit sort — so
-    /// this is the one property of the change that would be quiet if it were wrong, and it is
-    /// therefore the one that is arranged rather than assumed.
+    /// what `activeCelIndex` scans and what `addCel` maintains with an explicit sort — so this is the
+    /// one property of the change that would be quiet if it were wrong, and it is therefore the one
+    /// that is arranged rather than assumed.
     private static func decodeCels(manifest: ProjectManifest, projectURL: URL, canvasSize: CGSize) -> DecodedCels {
         // Read before the fan-out, because `concurrentPerform` recruits its caller as one of the
         // workers: asking inside an iteration would sometimes answer for the caller's thread and

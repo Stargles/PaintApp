@@ -2,13 +2,19 @@ import Foundation
 
 /// Which project the gallery is opening, and what a tap is allowed to start while it is.
 ///
-/// **Opening a project is the longest main-thread stall in the app and it has never had a spinner.**
-/// `ProjectStore.load` is `@MainActor` and fully serial: per cel a PNG decode, then a full
-/// canvas-sized `CGContext` allocation and draw, then `regenerateAllThumbnails()` walks the lot again
-/// guaranteed cache-cold. The cost is driven by cel count, so it does not shrink at the owner's
+/// **Opening a project was the longest main-thread stall in the app and had never had a spinner.**
+/// `ProjectStore.load` was `@MainActor` and fully serial: per cel a PNG decode, then a full
+/// canvas-sized `CGContext` allocation and draw, then `regenerateAllThumbnails()` walking the lot
+/// again guaranteed cache-cold. The cost is driven by cel count, so it does not shrink at the owner's
 /// 2048×1024 the way an area-scaled cost does, and it is the first thing that happens every session.
 /// `GalleryView.open` called it straight out of a tap handler — no `Task`, no loading state, nothing
 /// on screen — so the app went dead and the honest reading of that is "it crashed".
+///
+/// **The wait is now much shorter and this type still earns its keep.** PERFORMANCE.md item 9 moved
+/// the decode off the main thread and deferred the thumbnails
+/// (`ProjectStore.loadInBackground`), so the gallery path is a fraction of what it was — but it is not
+/// zero, the spinner is still what the artist sees while it runs, and the two rules below are about
+/// what a *tap* is allowed to start rather than about how long the work takes.
 ///
 /// This type is the small part of that fix worth isolating: not the spinner, which is a view, but the
 /// **two rules a spinner creates**, both of which are silent when wrong.

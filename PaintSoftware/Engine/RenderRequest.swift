@@ -581,9 +581,9 @@ extension CanvasManager {
     -> (sources: [LayerRenderSource?], versions: [LayerContentVersion?]) {
         var sources = [LayerRenderSource?](repeating: nil, count: layers.count)
         var versions = [LayerContentVersion?](repeating: nil, count: layers.count)
-        /// Layers that need a cel flattened, and which cel. Carries the `Layer` by value: it is a
-        /// struct, so this is a copy of the metadata and a retain of the texture objects, and pass 2
-        /// therefore reads nothing off `self`.
+        // Layers that need a cel flattened, and which cel. Carries the `Layer` by value: it is a
+        // struct, so this is a copy of the metadata and a retain of the texture objects, and pass 2
+        // therefore reads nothing off `self`.
         var rasterJobs: [(index: Int, layer: Layer, celIndex: Int)] = []
         for index in layers.indices {
             let layer = layers[index]

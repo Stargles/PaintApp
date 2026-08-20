@@ -148,13 +148,18 @@ extension CanvasManager {
     /// thirty-two of them individually would trade a 96 ms block for thirty-two relayouts spread
     /// across the next second, which is not obviously the better deal. A layer at a time gives the
     /// timeline something to show while the rest arrives, at one relayout per layer.
+    ///
+    /// **The loop walks layer *ids*, not indices, and that is not fastidiousness.** It suspends once
+    /// per layer, and `layers` is a `@Published` array the artist can add to, delete from or reorder
+    /// across any of those suspensions. An index loop would then silently skip a layer — leaving it on
+    /// its placeholder until something else happened to repaint it, which is a bug nobody could trace
+    /// back to here.
     @MainActor
     func backfillMissingThumbnails() async {
         guard let canvasSize else { return }
-        for layerIndex in layers.indices {
+        for layerID in layers.map(\.id) {
             if Task.isCancelled { return }
-            guard layers.indices.contains(layerIndex) else { return }
-            let layerID = layers[layerIndex].id
+            guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }) else { continue }
             // The version is captured **here, before the render**, and that placement is the whole
             // guard. `Cel.raster` is a class, so a `LayerContentVersion` built from a captured `Cel`
             // at install time would read the *live* counter through the same object and compare equal
