@@ -20,30 +20,6 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- [ ] **A second fill breaks the first — the transient never bakes, and the second never renders** —
-      owner, on device, 2026-08-19: *"Using the fill tool more than once breaks it sometimes. I think
-      it has to do something with it being in the transient state, then another thing is filled, and
-      it doesnt bake the first one properly before going to the second."*
-      **The owner's reading is right, and there is a specific race behind it.** `beginInteractiveFill`
-      does its work asynchronously on `fillQueue` (composite the reference, upload it, run the GPU
-      flood), then publishes the preview back with a `DispatchQueue.main.async`. A second tap that
-      lands before that publish runs is the failure, and it breaks three ways at once:
-      **(a) the first fill is dropped.** `commitInteractiveFill` bails on
-      `guard cel.fillImage != nil` — "nothing was previewed" — which is true whenever the first
-      fill's render has not reached the main thread yet. No undo entry, no pixels, silent.
-      **(b) the second fill never renders.** The first gesture's `drainFillWork` is still looping. It
-      re-reads `fillPending` (now the second gesture's key), sets `fillRendered` to it, and renders
-      *that key* against the **first** session — so when the second gesture's own worker finally gets
-      a session, `key == fillRendered` and it returns without drawing anything at all.
-      **(c) the render it does produce is wrong.** That stale loop pairs the second tap's
-      `fillGestureSeed` with the first tap's `fillSeedColor` and reference composite, so the preview
-      on screen is a flood from the new point against the old picture at the old tolerance.
-      The invariant this violates is written down at `CanvasManager.swift:1227` — *"the rest is set on
-      the main thread in `beginInteractiveFill` before any `fillQueue` work runs, then only read
-      after."* A second gesture is exactly the case that breaks it. The fix wants a per-gesture
-      generation the worker carries and checks before it renders and before it publishes, and a
-      commit path that does not depend on the async publish having landed.
-
 - [ ] **A stroke that interrupts a menu is still broken — two menus, two different breakages** — owner,
       on device, 2026-08-18, and they name the real concern themselves: *"This signals an alarm to me that
       whatever partial fix was previously done did not fix the root cause. It also raises concerns that
@@ -109,6 +85,30 @@ Carried over:
       tile; already in BUGS.md.
 
 ## Done this pass
+
+- **A second fill breaks the first** — merged 2026-08-20. The owner's reading was right and all
+  three mechanisms were confirmed by a test that fails on the parent commit. **(a)** The first fill
+  was dropped: `commitInteractiveFill`, reached through `beginCanvasEdit` at the top of the *next*
+  `begin*Fill`, bailed on `guard cel.fillImage != nil` — and `fillImage` is written by the render's
+  hop to main, so a rendered fill that had not yet reached the main thread read as "nothing was
+  previewed". **(b)** The second fill never rendered: the superseded worker re-read `fillPending`,
+  booked `fillRendered` against the new gesture's key, and the new gesture's own worker then found
+  `key == fillRendered` and returned having drawn nothing. **(c)** What it rendered instead paired
+  the new tap's seed with the *old* session, reference composite and sampled colour, and installed
+  itself anyway, because the publish only ever asked whether *some* fill was active.
+  **The fix is a per-gesture generation plus a snapshot.** Every `begin*Fill` claims a
+  `fillGeneration` under `fillLock` (commit and cancel retire it), and the worker carries an
+  immutable `FillGestureContext` instead of reading `fillGestureSeed`/`fillGestureColor`/the target
+  ids off the queue — so pairing a new seed with an old session is now unrepresentable rather than
+  merely warned against. The generation is checked before a key is claimed, before a result is
+  stored, and again on main before it is installed. `drainFillWork` also stores each render under
+  the lock the *moment* it exists, so the commit can bake a fill whose pixels are real but have not
+  reached main; an empty lasso stores none, so LASSO_FILL.md §7.1's no-undo-entry rule still falls
+  out of the same guard. `beginInteractiveLassoFill` had the identical exposure and is covered.
+  **`FillGestureRestartLogicTests` forces both interleavings exactly rather than racing for them** —
+  `fillQueue.sync {}` is "rendered, not yet published", and a semaphore on the serial queue orders a
+  superseded worker after the gesture that replaced it. A race test that hopes to lose a race is
+  worth nothing in either direction.
 
 - **The "To Cross" eraser leaves stubs, and its size does nothing** — merged 2026-08-20. Both
   rulings shipped, and hypothesis (a) was **confirmed by measurement, not accepted**: the cut landed
