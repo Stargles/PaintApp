@@ -300,6 +300,42 @@ final class MaskParityLogicTests: XCTestCase {
                               "The group composites first and is clipped once, exactly as its opacity is applied once")
     }
 
+    // MARK: - The cache answers a memory warning
+
+    /// **The cache is shared and identity is what says whether an entry survived.** `ResolvedMask` is
+    /// a reference type whose `==` is `===` precisely so a hit can be recognised as *the same* mask
+    /// rather than an equal one, which makes this assertion about the cache rather than about the
+    /// resolver's arithmetic: two resolutions of an unchanged document return one object, and they
+    /// stop doing so exactly when something has dropped the entry between them.
+    ///
+    /// Written as a pair — a control that must hit, then the notification, then a miss — because
+    /// either half alone proves nothing. Without the control, a resolver that never cached at all
+    /// would pass; without the miss, an observer that was never registered would.
+    func testAMemoryWarningDropsTheResolvedMaskCache() {
+        let manager = clippedManager()
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+            return XCTFail("Fixture must build a request")
+        }
+        let masks = [AlphaMask(sources: [.layer(manager.layers[0].id)])]
+
+        guard let first = MaskResolver.coverage(for: masks, of: request),
+              let cached = MaskResolver.coverage(for: masks, of: request) else {
+            return XCTFail("The mask must resolve")
+        }
+        XCTAssertTrue(first === cached,
+                      "Control: an unchanged document resolves to the same object, so identity reads the cache")
+
+        NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+
+        guard let afterWarning = MaskResolver.coverage(for: masks, of: request) else {
+            return XCTFail("A dropped cache re-resolves rather than failing")
+        }
+        XCTAssertFalse(first === afterWarning,
+                       "A memory warning drops the entry — this is what `clearCache`'s doc comment promised and nothing delivered until 2026-08-20")
+        XCTAssertEqual(afterWarning.coverage, first.coverage,
+                       "…and re-resolving is correctness-neutral: the same coverage, byte for byte")
+    }
+
     // MARK: - Cycles are broken, not diagnosed (§6.2)
 
     func testALayerMaskingItselfIsIgnored() {

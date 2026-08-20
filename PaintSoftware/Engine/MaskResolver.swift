@@ -132,6 +132,12 @@ enum MaskResolver {
 
     /// Drops every resolved mask. For tests that need to measure an uncached resolution, and for a
     /// memory warning — nothing here is state, so throwing it away only costs time.
+    ///
+    /// **The memory warning half of that sentence is now true.** It was not until 2026-08-20: every
+    /// call site in the repo was a test, so a warning reached the Metal caches and the flatten memo
+    /// and stepped around this one entirely while the comment said otherwise. `MaskCache.init`
+    /// subscribes now — see the note there, and `PixelOps.RasterizeCache.init`, which is the same
+    /// defect found and fixed one file earlier.
     static func clearCache() { cache.removeAll() }
 
     // MARK: - Resolution
@@ -257,7 +263,27 @@ enum MaskResolver {
         private var order: [CacheKey] = []
         private let lock = NSLock()
 
-        init(limit: Int) { self.limit = limit }
+        init(limit: Int) {
+            self.limit = limit
+            // **Nothing dropped these before**, exactly as nothing dropped `PixelOps`'s rasterize
+            // memo before that one was wired: `clearCache`'s doc comment said "and for a memory
+            // warning" while every caller in the tree was a test. Two instances of one defect from
+            // one cause, so this block is that file's verbatim, down to where it lives — registered
+            // in the cache's own initialiser rather than in a view or the app delegate, because this
+            // is what knows it is a cache. The observer's lifetime is the cache's, and both are the
+            // process's, so there is nothing to remove and no ordering to get wrong.
+            //
+            // Correctness-neutral by construction: a `ResolvedMask` is derived from the masks and the
+            // content versions in the key, so dropping one costs the resolution again and nothing
+            // else. The bytes are modest at the canvas the owner works at — 8 entries × 1 byte per
+            // pixel is ≤16 MiB at 2048×1024 (INFERRED) — and closing the lie is the point rather than
+            // the recovery.
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
+            ) { [weak self] _ in
+                self?.removeAll()
+            }
+        }
 
         func value(for key: CacheKey) -> ResolvedMask? {
             lock.lock(); defer { lock.unlock() }
