@@ -1569,4 +1569,49 @@ final class CompositorParityLogicTests: XCTestCase {
         XCTAssertNil(request.background, "An invisible background is no background, not a white one")
         assertWalksAgree(manager, "Which makes it identical to the flat walk again")
     }
+
+    // MARK: - Backgrounding purges the caches too (PERFORMANCE.md item 12)
+
+    /// **Two independent caches, one event.** `CompositorMetalEngine`'s upload cache and `PixelOps`'s
+    /// flatten memo each already answered a memory warning (`MaskParityLogicTests
+    /// .testAMemoryWarningDropsTheResolvedMaskCache` pins the sibling case for `MaskResolver`'s); the
+    /// owner reports that event never arriving on their device, while backgrounding always does.
+    ///
+    /// Written as a pair for each cache — warm it, assert non-empty, post the notification, assert it
+    /// emptied — because either half alone proves nothing: without the warm step a cache that was
+    /// never populated would pass for free, and without the post step an observer that was never
+    /// registered would too.
+    func testEnteringBackgroundPurgesTheUploadCacheAndTheRasterizeCache() throws {
+        try skipUnlessGPUAvailable()
+        guard let engine = CompositorMetalEngine.shared else {
+            return XCTFail("Skipped above if nil")
+        }
+        // Start from a known-empty state — a prior test in the same process may have left either
+        // cache warm, and this test's control assertion needs to know the warming below is what did it.
+        engine.purge()
+        PixelOps.clearRasterizeCache()
+
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        _ = PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: request.canvasSize)
+        guard MetalCompositor.composite(request) != nil else {
+            return XCTFail("The GPU backend must render this fixture")
+        }
+
+        XCTAssertGreaterThan(engine.uploadCacheEntryCount, 0,
+                             "Control: compositing must populate the upload cache, or the purge below proves nothing")
+        XCTAssertGreaterThan(PixelOps.rasterizeCacheBytes, 0,
+                             "Control: rasterizing must populate the flatten memo, or the purge below proves nothing")
+
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+        XCTAssertEqual(engine.uploadCacheEntryCount, 0,
+                       "Backgrounding must drop the upload cache — this is the event the owner reports actually arriving, unlike the memory warning")
+        XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0,
+                       "Backgrounding must drop the flatten memo too — same notification, `PixelOps.RasterizeCache.init`'s new observer")
+    }
 }

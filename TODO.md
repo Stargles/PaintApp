@@ -26,11 +26,12 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 New this pass (owner, 2026-08-17):
 
-- [ ] **A performance pass, calibrated to 2048×1024 — Tier A is built; Tiers B and C are not.**
+- [ ] **A performance pass, calibrated to 2048×1024 — Tier A is built; item 12 is built; Tiers B and
+      the rest of C are not.**
       The owner asked for it directly: *"any performance enhancements that can be made to reduce
       memory, stop lagspikes, or increase fps?"* [PERFORMANCE.md](PERFORMANCE.md) is the fourteen-item
-      programme; **items 1–7 are now resolved** (see "Done this pass" for what that means item by
-      item). **This stays queued because seven items remain**, and the two that matter most are the
+      programme; **items 1–7 and 12 are now resolved** (see "Done this pass" for what that means item
+      by item). **This stays queued because six items remain**, and the two that matter most are the
       instruments rather than the fixes:
       - **Item 9(a)** — instrument project open. Still *the largest unmeasured quantity in the app*:
         nobody can say whether tapping a project costs 200 ms or 4 s. Item 2 gave it a spinner, which
@@ -42,7 +43,7 @@ New this pass (owner, 2026-08-17):
         the largest main-thread term on a playback tick, and fixing it buys project open *and*
         scrubbing.
       - Item 8 (a 2048×1024 point for the vector-vs-raster preview) is device-only.
-      - Tier C — items 11 to 14 — is real, recorded, and deliberately not urgent.
+      - Tier C — items 11, 13 and 14 — is real, recorded, and deliberately not urgent.
 
 Carried over:
 

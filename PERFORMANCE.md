@@ -408,25 +408,47 @@ correctness needs the full vector-eraser UI suite — 22 minutes, historically e
 [CLAUDE.md](CLAUDE.md) on triaging those).
 *Sequencing*: item 8 first, so the before/after is a number rather than a fit.
 
-**12. Purge the compositor and flatten caches on backgrounding, not only on a memory warning.**
-`MetalCompositor.swift:378-381`'s own doc comment names the exact scenario — caches "sit at their
+**12. Purge the compositor and flatten caches on backgrounding, not only on a memory warning. — SHIPPED, 2026-08-20.**
+`MetalCompositor.swift`'s own doc comment names the exact scenario — caches "sit at their
 high-water mark … against a document nobody is looking at" when the artist switches apps — and then
-subscribes to the one event the owner reports never arriving (`:386-390`). Add a
-`didEnterBackgroundNotification` observer calling the same `purge()`/`removeAll()` that already
-exist. There is no `didEnterBackground` observer anywhere in the app; verified by grep.
+(before this change) subscribed only to the one event the owner reports never arriving. Two
+`didEnterBackgroundNotification` observers now call the same `purge()`/`removeAll()` that already
+existed for the memory-warning case: `CompositorMetalEngine.init` (`MetalCompositor.swift`, right
+after its existing memory-warning observer) and `PixelOps.RasterizeCache.init`
+(`PixelOps.swift`, same spot) — both caches item 12's win figure names, not just the Metal one.
+*Re-verified before writing, as asked, because a similar claim was off by one the day before this
+one*: `grep -rn "didEnterBackgroundNotification" --include="*.swift" .` returned zero matches before
+this change. `grep -rn "addObserver"` returned exactly four — `OnionSkinSource.swift:936`,
+`MetalCompositor.swift:386` (the existing memory-warning one), `MaskResolver.swift:281`,
+`PixelOps.swift:168` (the existing memory-warning one) — consistent with item 6's correction that the
+app held three before *its* addition, plus `MetalCompositor`'s own. **The "no `didEnterBackground`
+observer anywhere" claim held.** It now holds six: the four above plus the two new ones.
+*A note on scope*: item 12's brief named only `MetalCompositor.swift`, but its own win figure
+(384 MiB) is 192 MiB Metal **plus** 192 MiB flatten memo — the memo is `PixelOps.RasterizeCache`, a
+different file. Purging only the Metal half would have shipped half the doc comment's promise and
+half the win figure, so `PixelOps.swift` was touched too; the change there is the same three-line
+shape as the existing memory-warning observer immediately above it.
 *Win*: up to ~384 MiB off the background resident footprint (192 MiB Metal + 192 MiB flatten memo,
-both device-derived so both at full size here). INFERRED — the budgets and the missing observer are
-READ; real cache occupancy is not measured.
-*Why it moved down*: this was sized against the jetsam hypothesis, and **the owner's answer
-disconfirmed it** (§2 item 1, §6). Keep it as cheap hygiene whose own doc comment already promises
-the behaviour — a smaller background footprint is still the right thing on a 3 GB device — but it is
-no longer buying a fix for a bug anyone has.
-*Safety*: `purgeLocked()` is documented "correctness-neutral by construction"
-(`MetalCompositor.swift:393-394`); the cost is one cold composite on return. MEASURED at 2048² on the
-iPad 9: a six-layer sandwich rebuild is 108.1 ms cold against 54.8 ms warm on Metal
-(`Compositor.swift:36-37`), so about **53 ms of one-time cost** on the frame after a return.
-*Verified*: headless — post the notification, assert the upload cache count and rasterize cache are
-empty.
+both device-derived so both at full size here). **Still INFERRED** — the budgets and the (now fixed)
+missing observer are READ/shipped; real cache occupancy in a live session was not measured, and this
+change does not measure it either.
+*Why it moved down, and stays down*: this was sized against the jetsam hypothesis, and **the owner's
+answer disconfirmed it** (§2 item 1, §6). It ships as cheap hygiene whose own doc comment already
+promised the behaviour — a smaller background footprint is still the right thing on a 3 GB device —
+**and this no longer buys a fix for a bug anyone has.** Nothing about shipping it changes that framing.
+*Safety*: `purgeLocked()` is documented "correctness-neutral by construction"; the cost is one cold
+composite on return. MEASURED at 2048² on the iPad 9: a six-layer sandwich rebuild is 108.1 ms cold
+against 54.8 ms warm on Metal (`Compositor.swift:36-37`), so about **53 ms of one-time cost** on the
+frame after a return.
+*Verified*: `testEnteringBackgroundPurgesTheUploadCacheAndTheRasterizeCache`
+(`CompositorParityLogicTests.swift`) — headless, a control/post/assert pair for *each* cache (either
+half alone proves nothing: without the warm step a cache that was never populated would pass for
+free; without the post step an observer that was never registered would too). Warms
+`CompositorMetalEngine`'s upload cache via a real `MetalCompositor.composite(_:)` and the flatten memo
+via `PixelOps.rasterize(cel:canvasSize:)`, asserts both non-empty, posts
+`didEnterBackgroundNotification`, asserts both empty. `CompositorMetalEngine.uploadCacheEntryCount`
+(new, alongside the existing lifetime `uploadCacheCounts`) and `PixelOps.rasterizeCacheBytes`
+(existing) are what the test reads. Skips if no Metal device is available in the test process.
 
 **13. Device-scale `UndoHistory.maxCost`, and reconcile the four static budgets.** Derive it from
 `physicalMemory` the way `CompositorBudget` already does (`Compositor.swift:167-170`), and on a

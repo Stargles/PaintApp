@@ -261,6 +261,10 @@ private final class UploadCache {
     private(set) var hits = 0
     private(set) var misses = 0
 
+    /// Current entry count — distinct from `hits`/`misses`, which are lifetime totals and cannot say
+    /// whether the cache is empty right now. For `CompositorMetalEngine.uploadCacheEntryCount`.
+    var count: Int { entries.count }
+
     func texture(for key: Key) -> MTLTexture? {
         guard var entry = entries[key] else {
             misses += 1
@@ -388,6 +392,18 @@ final class CompositorMetalEngine {
         ) { [weak self] _ in
             self?.purge()
         }
+
+        // **The event that actually arrives.** The memory warning above is the one the owner reports
+        // never firing on their device; backgrounding is the moment this doc comment already
+        // describes — the artist switches apps and these caches sit at their high-water mark against
+        // a document nobody is looking at. Same `purge()`, same correctness-neutral guarantee; the
+        // only new cost is one cold composite (~53 ms at 2048², MEASURED, iPad 9, Metal — see
+        // PERFORMANCE.md item 12) on the frame after the artist returns.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            self?.purge()
+        }
     }
 
     /// Drops everything held between composites. Correctness-neutral by construction — see the
@@ -442,6 +458,14 @@ final class CompositorMetalEngine {
         lock.lock()
         defer { lock.unlock() }
         return (uploads.hits, uploads.misses)
+    }
+
+    /// The upload cache's current entry count, for the backgrounding-purge test — `uploadCacheCounts`
+    /// is a lifetime hit/miss pair and cannot say whether the cache is empty *right now*. Same lock.
+    var uploadCacheEntryCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return uploads.count
     }
 
     /// **Everything below is state that outlives one composite, and this is what makes that safe.**

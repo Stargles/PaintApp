@@ -170,6 +170,16 @@ enum PixelOps {
             ) { [weak self] _ in
                 self?.removeAll()
             }
+            // The event that actually arrives — see `CompositorMetalEngine.init`'s identical addition
+            // and PERFORMANCE.md item 12. This cache sits at its high-water mark against a document
+            // nobody is looking at exactly as long as the memory warning above never fires; purging on
+            // backgrounding instead is the same `removeAll()`, correctness-neutral, paid back as one
+            // cache-cold flatten the next time each cel is touched.
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil
+            ) { [weak self] _ in
+                self?.removeAll()
+            }
         }
 
         func value(for key: RasterizeKey) -> UIImage? {
