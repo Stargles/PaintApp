@@ -252,10 +252,28 @@ enum MaskResolver {
         let tuningGeneration: Int
     }
 
-    /// Small on purpose: a coverage buffer is 4.2 MB at 2048² and 16 MB at 4000², and a document with
-    /// more than a handful of distinct masks in one frame is not the case worth holding memory for.
+    /// How many resolved masks this cache holds. **A named constant because something outside this
+    /// file has to be able to ask** — `MemoryBudgetLogicTests` asserts the app's five memory budgets
+    /// against one another (PERFORMANCE.md item 13), and a budget stated only as a literal buried in
+    /// an initialiser cannot appear in that table. The same reason `PixelOps.sharedRasterizeEntryLimit`
+    /// is public; read-only, and the cache below is still the only user.
+    ///
+    /// Small on purpose: a coverage buffer is 1 byte per pixel — 2.1 MB at the owner's 2048x1024,
+    /// 4.2 MB at 2048² and 16 MB at 4000² — and a document with more than a handful of distinct masks
+    /// in one frame is not the case worth holding memory for.
+    ///
+    /// **Entries and not bytes, unlike the two large caches, and that is a deliberate difference
+    /// rather than an oversight.** `PixelOps.rasterizeCache` and `CompositorMetalEngine`'s upload
+    /// cache both carry byte budgets because their entries are canvas-sized RGBA — 64 MiB apiece at
+    /// 4096², where counting entries stops being a bound. A coverage buffer is a quarter of that per
+    /// pixel and the count is eight, so at the owner's canvas this whole cache is ~16 MiB against
+    /// 192 MiB apiece for those two. At 4096² it would be ~128 MiB, which is the figure PERFORMANCE.md
+    /// item 6 flagged as 4K arithmetic; if a future session works at that size routinely, a byte
+    /// budget borrowed from `CompositorBudget` the way `PixelOps` borrows one is the shape of the fix.
+    static let cacheEntryLimit = 8
+
     /// Evicts in insertion order, as `PixelOps.rasterizeCache` does and for the same reason.
-    private static let cache = MaskCache(limit: 8)
+    private static let cache = MaskCache(limit: cacheEntryLimit)
 
     private final class MaskCache {
         private let limit: Int

@@ -807,6 +807,42 @@ final class CanvasManager: ObservableObject {
                 self?.flushPendingThumbnailRegens()
             }
             .store(in: &cancellables)
+
+        // **Undo gives bytes back under memory pressure, by trimming rather than clearing.**
+        // PERFORMANCE.md item 13: undo was the only one of the app's five memory budgets with no
+        // response to a memory warning at all — `PixelOps.rasterizeCache`, `CompositorMetalEngine`'s
+        // upload cache and `MaskResolver.cache` each drop wholesale, and this one sat at its
+        // high-water mark. See `UndoBudget.pressuredMaxCostBytes` for why a trim and not a clear.
+        //
+        // **Registered here rather than in `UndoHistory` itself**, unlike the three caches, which
+        // each subscribe from their own initialiser. Two reasons, and both are about this class
+        // rather than about style: `canUndo`/`canRedo` are `@Published` mirrors that `UndoHistory`
+        // cannot reach, so a trim that empties the stack has to be followed by
+        // `refreshUndoRedoState()` or the toolbar offers an Undo that does nothing; and
+        // `UndoHistory` imports Foundation alone and stays headless — the UIKit dependency belongs
+        // on the side that already has one.
+        //
+        // **A Combine subscription rather than the caches' `addObserver` block, and that is not
+        // cosmetic.** Those three caches are process-lifetime singletons, so a subscription they
+        // never remove is exactly as long-lived as they are. A `CanvasManager` is per-document and
+        // the test target builds dozens, and `addObserver(forName:…)` hands back a token that stays
+        // registered until it is passed to `removeObserver` — `[weak self]` stops the *object*
+        // leaking while leaving a dead closure behind for every document ever opened. `cancellables`
+        // already exists two lines up and unsubscribes on deinit, which is the whole fix.
+        //
+        // `receive(on: DispatchQueue.main)` because `UndoHistory` has no lock of its own (the caches
+        // do): every other caller reaches it from the main actor, and a notification is the one entry
+        // point that could arrive from anywhere. The main *queue* rather than the main run loop
+        // because that also makes the hop observable in order — a test that posts the warning and
+        // then enqueues its own block on the same serial queue is guaranteed to see the trim first,
+        // where a run-loop source and a queue block have no defined ordering between them.
+        NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                if self.history.trimUnderMemoryPressure() > 0 { self.refreshUndoRedoState() }
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Layers

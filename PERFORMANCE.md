@@ -60,7 +60,7 @@ benchmark — which is why none has ever been under the microscope.
 | The ruler redraws every frame label | O(scene length), ignores the dirty rect | `TimelineTrackView.swift:624-642` |
 | Save re-encodes every PNG in the document | O(cel count) × per-PNG size — measured, and no longer serial (item 15) | `ProjectStore.writePackage` |
 | Load decodes and rasterizes every cel | O(cel count) — no longer serial, and no longer on main for the gallery's open (item 9) | `ProjectStore.load` / `loadInBackground` |
-| `UndoHistory.maxCost` = 300 MiB | A hardcoded literal, neither device- nor canvas-derived | `UndoHistory.swift:24` |
+| `UndoHistory.maxCost` | Was a hardcoded literal; device-derived as of item 13, still canvas-independent | `UndoHistory.swift` |
 | Compositor fixed per-call overhead | A fixed term, paid three times per sandwich rebuild | `RenderTree.swift:429-431`, paid at `CanvasView.swift:1236-1238` |
 | Mode 3 eraser re-stamps the whole vector layer per cut | O(total dabs in the layer) | `VectorLayer.swift:615-634`, `:1160-1214` |
 
@@ -722,21 +722,87 @@ via `PixelOps.rasterize(cel:canvasSize:)`, asserts both non-empty, posts
 (new, alongside the existing lifetime `uploadCacheCounts`) and `PixelOps.rasterizeCacheBytes`
 (existing) are what the test reads. Skips if no Metal device is available in the test process.
 
-**13. Device-scale `UndoHistory.maxCost`, and reconcile the four static budgets.** Derive it from
-`physicalMemory` the way `CompositorBudget` already does (`Compositor.swift:167-170`), and on a
-memory warning temporarily lower it and re-run `trim()` rather than clearing — undo is user data, not
-a cache. Do it alongside a reconciliation of the four static budgets (flatten memo 192 MiB, Metal
-192 MiB, undo 300 MiB, mask ~16 MiB), which sum to **~700 MiB** against the ~1.4 GB pre-jetsam
-ceiling this repo's own comment cites (`Compositor.swift:102`), before a single cel bitmap.
-*Win*: proportionally larger than the 4K framing implies, since 300 MiB is 300 MiB at any canvas
-size.
-*Why it moved down*: same reason as item 12 — sized against jetsam, and jetsam is disconfirmed. The
-~700 MiB arithmetic is still worth having written down.
-*Safety*: pure logic, fully headless; the tradeoff is losing deep undo under pressure, which wants
-the owner's opinion on trim depth.
-*Note*: freehand strokes are already stored as cropped dirty rects
-(`StrokeCanvasView.swift:528-555`), so reaching the cap needs many whole-cel operations. Whether real
-sessions get there is unmeasured — see §6.
+**13. Device-scale `UndoHistory.maxCost`, and reconcile the four static budgets. — SHIPPED
+2026-08-20** (`UndoBudget` in `UndoHistory.swift`, the subscription in `CanvasManager.init`,
+`MaskResolver.cacheEntryLimit`, `MemoryBudgetLogicTests`).
+
+**The budget is now the device's, on the rule the item named.** `UndoBudget.maxCostBytes(physicalMemory:)`
+is `min(max(physical / 16, 64 MiB), 768 MiB)` — `CompositorBudget.textureBudgetBytes`'s arithmetic
+character for character, deliberately written twice rather than called, because `CompositorBudget`
+carries `budgetOverrideBytes` and an undo budget that moved whenever a compositor test set it would be
+a genuinely nasty coupling. `testTheThreeLargeBudgetsRunOnOneRule` pins the two equal on every device,
+so the duplication is loud if anyone edits one.
+
+**And there are five budgets, not four** — item 7 found the fifth and left the reconciliation owed.
+Here they are at the owner's 2048×1024 on the owner's iPad 9, before and after:
+
+| budget | what it holds | rule | before | after |
+|---|---|---|---|---|
+| `CompositorBudget.textureBudgetBytes` | GPU pool, effect intermediates, upload cache | `physical / 16` | 192 MiB | 192 MiB |
+| `PixelOps.rasterizeCache` | CPU flattens, one memo before upload | borrows the line above | 192 MiB | 192 MiB |
+| **`UndoHistory.maxCost`** | **before/after snapshots — user data** | **was a literal, now `physical / 16`** | **300 MiB** | **192 MiB** |
+| `MaskResolver.cache` | resolved coverage, 8 entries at 1 byte/px | entry count | ~16 MiB | ~16 MiB |
+| `OnionSkinBudget.residentBudgetBytes` | reduced ghost sources plus composite | flat literal | 64 MiB | 64 MiB |
+| **sum** | | | **764 MiB** | **656 MiB** |
+
+At 4096² only the mask row differs — 8 × 16 MiB = 128 MiB rather than 16, so the sums are 876 and
+768 MiB. Every figure in that table is INFERRED arithmetic over the constants, and
+`testTheFiveBudgetsSumToLessThanTheJetsamCeilingOnTheOwnersDevice` asserts the whole row rather than
+reciting it.
+
+**The one story they tell.** The three that are big enough to matter run on one rule, a sixteenth of
+the device each. The two that do not scale say why they do not: a mask cache is bounded by how many
+distinct masks one frame can plausibly carry and an onion budget by how soft a ghost may be, and
+neither becomes a different question on a bigger iPad. What changed is that undo used to be the
+**largest single budget in the app** — 300 MiB against 192 apiece for two caches sized from a measured
+crash table — with nothing behind the difference but the literal somebody typed.
+
+**Two honest qualifications on the ~700 MiB arithmetic this item was built on.** It is five *ceilings*
+added together and nothing has ever observed them full at once (item 12 makes the same point about its
+own 384 MiB, and §6 still lists real occupancy as open). And it is not the app's memory story anyway:
+item 14 measures a drawn raster cel at **6.6 MiB resident**, so a 120-cel scene is ~787 MB —
+**more than all five budgets together, and unbudgeted**. The reconciliation's real finding is that the
+budgeted half of the app is the smaller half.
+
+*What the cut costs the iPad 9, stated rather than glossed, because a regression in undo is one the
+owner feels the same day.* It is 300 → 192 MiB there. In the two units that matter, MEASURED
+2026-08-20 on `tierc-1` (iOS 26.5 simulator, iPad Pro 13-inch M4, Debug, machine 95.9% idle with no
+other `xcodebuild` running), `testManySmallStrokesAllStayUndoableWithinTheBudget`:
+
+| step | cost | at 300 MiB | at 192 MiB |
+|---|---|---|---|
+| small freehand stroke (cropped dirty rect) | **17,680 bytes** MEASURED | ~17,800 | **~11,400** |
+| canvas-spanning stroke at 2048² | **24.9 MB** MEASURED | 12 | 7 |
+| whole-cel operation at 2048×1024 (fill, clear, insert, bake) | 16 MiB INFERRED (`w·h·4` twice) | 18 | **12** |
+
+**So for freehand drawing the cut is inert** — eleven thousand strokes is not a session — and it bites
+only on whole-cel operations, 18 → 12. The cut is also self-targeting: it can only bite in a session
+that has already retained 192 MiB of history, which is the session nearest the ceiling anyway.
+
+*The pressure valve, which is what makes the smaller ceiling a net improvement rather than a
+trade.* Undo was **the only one of the five with no response to a memory warning at all** — the two
+large caches and the mask cache each drop wholesale, and this one sat at its high-water mark.
+`trimUnderMemoryPressure()` lowers the budget to half, runs the ordinary `trim()`, and puts the budget
+back, so the bytes come back now and depth grows again as the artist works; leaving it lowered would
+turn one transient warning into a permanently shallow history. It trims the **oldest** and never
+clears, because a cache entry costs one recomputation and an undo step costs work the artist cannot
+get back. On the iPad 9 that is 96 MiB retained — six whole-cel operations — against 300 MiB that
+previously could not give back a byte.
+*The one judgement here that wants the owner rather than an argument is that fraction.* Half is a
+guess dressed as a constant; §6 carries the measurement that would replace it.
+*Safety*: pure logic, fully headless, plus one Combine subscription. The subscription is `cancellables`
+rather than the caches' `addObserver` block on purpose — those three are process-lifetime singletons,
+but a `CanvasManager` is per-document and the test target builds dozens, so an unremoved observer
+token would leave a dead closure behind for every document ever opened.
+*Verified*: nine cases in `MemoryBudgetLogicTests` — the rule against `CompositorBudget`'s on five
+device sizes plus both clamps and a monotonicity check; the five-budget sum; the pressure trim as a
+**pair** (a control history inside the pressured budget that must lose nothing, then one at the budget
+that must lose exactly half and keep its newest step); that redo is untouched; that the budget is
+restored and the history grows back; and the wiring, where a real `CanvasManager` is posted the
+notification and `canUndo` must still be right afterwards.
+*Note that survives*: freehand strokes are stored as cropped dirty rects
+(`StrokeCanvasView.swift:528-555`), which is why the small-stroke row above is 17 kB and not 16 MiB.
+Whether a real session reaches any cap is **still unmeasured** — see §6.
 
 **14. Bound raster-cel residency.** `RasterLayerTexture.init` allocates a full canvas-sized
 `CGContext` and draws the decoded PNG in whenever an image is passed (`:196-203` → `:235-247` →
@@ -939,9 +1005,17 @@ is a background IOSurface conversion, a lazy decode at commit-prepare on the cal
 nothing meaningful is not answerable by reading code. *The measurement*: one Instruments Core
 Animation "Color Copied Images" pass on the device. Until it comes back, see §5.
 
-**Does undo history ever approach its 300 MiB cap in real use?** *The measurement*: sample
-`UndoHistory`'s summed cost at the end of a real session on the device, or after a scripted sequence
-of Select/Move/Fill-selection operations.
+**Does undo history ever approach its cap in real use? — still open, and item 13 made it cheap to
+answer.** The cap is now `physical / 16` — **192 MiB on the owner's iPad 9**, down from the 300 MiB
+literal — and `UndoHistory.currentCost` exists precisely so this can be sampled rather than argued
+about. Item 13's table says 192 MiB is ~11,400 cropped freehand strokes or 12 whole-cel operations, so
+the question is really "does a session do a dozen fills, clears, inserts or selection bakes without
+closing the document?" *The measurement*: sample `currentCost` at the end of a real session on the
+device, or after a scripted sequence of Select/Move/Fill-selection operations.
+**And the fraction the pressure valve trims to — half — is a guess wearing a constant's clothes.**
+It leaves six whole-cel operations on a memory warning. Whether that is generous or stingy is the
+owner's call and nothing here can make it: *the measurement* is the same sample, plus asking them how
+far back they ever reach.
 
 **What is the real cache occupancy at background time?** Item 12's ~384 MiB is a budget ceiling, not
 an observation. *The measurement*: sample `residentBytes()` and the upload-cache counters immediately
