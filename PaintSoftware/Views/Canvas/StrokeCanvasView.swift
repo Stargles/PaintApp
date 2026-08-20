@@ -57,7 +57,9 @@ final class StrokeCanvasView: UIView {
     /// Called at stroke start so a still-adjustable fill commits before this stroke's own undo step
     /// registers — keeping undo order intuitive (stroke undoes first, fill after).
     var onStrokeBegan: (() -> Void)?
-    /// Called when a stroke is abandoned rather than finished (see `StrokeGestureRecognizer.onCancel`).
+    /// Called when a stroke is abandoned *and rolled back* — `StrokeGiveUp.handedOver` only. An
+    /// interrupted stroke commits instead and reports through `onStrokeEnded`, so this stays what it
+    /// always was: "the layer is back where it started".
     var onStrokeCancelled: (() -> Void)?
     /// Called for each coalesced touch sample during a stroke, in canvas coordinates.
     ///
@@ -253,7 +255,7 @@ final class StrokeCanvasView: UIView {
         strokeRecognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
         strokeRecognizer.onMove = { [weak self] touch, event in self?.handleMove(touch, event) }
         strokeRecognizer.onEnd = { [weak self] touch in self?.handleEnd(touch) }
-        strokeRecognizer.onCancel = { [weak self] in self?.handleCancel() }
+        strokeRecognizer.onGiveUp = { [weak self] reason in self?.handleGiveUp(reason) }
         addGestureRecognizer(strokeRecognizer)
     }
 
@@ -459,12 +461,23 @@ final class StrokeCanvasView: UIView {
             onStrokeEnded?()
             return
         }
-        guard let raster, let before = strokeBeforeSnapshot else { return }
-        // Stamp through to the raw lift point, bypassing the stabilizer, so a lagging trailing
-        // point doesn't drop the last segment — e.g. leaving gaps at a traced square's corners that
-        // a bucket fill would leak through.
         let input = StrokeInput(touch: touch, in: self)
-        stampPath(to: input.position, pressure: input.pressure, into: raster)
+        commitRasterStroke(finalSample: (input.position, input.pressure))
+    }
+
+    /// Bakes the stroke into the layer and registers its undo step. **Split out of `handleEnd` so
+    /// that a stroke which never reaches its lift can still be committed** — see `handleInterrupted`.
+    ///
+    /// - Parameter finalSample: the raw lift point, or nil when there was no lift. When present it is
+    ///   stamped through bypassing the stabilizer, so a lagging trailing point doesn't drop the last
+    ///   segment — e.g. leaving gaps at a traced square's corners that a bucket fill would leak
+    ///   through. When absent, the stroke simply ends at the last sample that arrived, which is the
+    ///   honest answer: nothing here can recover samples UIKit never delivered.
+    private func commitRasterStroke(finalSample: (position: CGPoint, pressure: CGFloat)?) {
+        guard let raster, let before = strokeBeforeSnapshot else { return }
+        if let finalSample {
+            stampPath(to: finalSample.position, pressure: finalSample.pressure, into: raster)
+        }
         if let clipPath = selectionClipPath {
             // Revert pixels outside the selection before the undo snapshot is captured, so
             // undo/redo only ever sees the already-clipped result.
@@ -480,9 +493,57 @@ final class StrokeCanvasView: UIView {
         onStrokeEnded?()
     }
 
+    /// The one entry point for "this stroke is not going to reach its lift", routed by *why*.
+    ///
+    /// **`StrokeGiveUp.inkSurvives` is the whole decision and it lives on the enum**, not here, so
+    /// that a third reason added later cannot inherit an answer — the `switch` behind it is
+    /// exhaustive with no `default:`, in `Tool.paintsOnCanvas`'s image. This function is the wiring.
+    private func handleGiveUp(_ reason: StrokeGiveUp) {
+        if reason.inkSurvives { handleInterrupted() } else { handleCancel() }
+    }
+
+    /// The sequence stopped reaching this view without ever lifting — a presentation torn down over
+    /// the canvas, the app going to the background, the system taking the touch. **Commit what was
+    /// painted**, with an undo step, exactly as a lift would have.
+    ///
+    /// This is the artist-facing half of the 2026-08-18 report. Before it, a stroke interrupted this
+    /// way was left painted into the live buffer but never baked: visible, un-undoable, and destroyed
+    /// the moment the next touch landed and took `handleCancel` below. "The stroke goes for only a
+    /// certain amount and then stops responding... when the user then starts another stroke, the
+    /// first stroke disappears" is that sentence, in the owner's words.
+    ///
+    /// The stroke is shorter than the artist intended, and nothing here can fix that — the samples
+    /// were never delivered. A short stroke they can undo, or draw over, is the best answer available.
+    ///
+    /// **A guide is the one thing that still drops, and on purpose.** A guide stroke is not ink: it
+    /// lays down a construction line that renders in the overlay rather than in the layer, it commits
+    /// only at lift (`endGuideStroke` needs the lift point), and it is two seconds to redraw. The
+    /// rule this function implements is about the artist's *ink*.
+    private func handleInterrupted() {
+        if guideStartTime != nil { cancelGuideStroke(); return }
+        // A retag already landed as its own undo step, so there's only the flag to clear.
+        if consumedAsMotionGroupTap { consumedAsMotionGroupTap = false; return }
+        if shapeFollowingTouch {
+            // Already reverted when the shape was detected; the shape itself is what survives, and
+            // a lift is how it reaches its adjustable state.
+            shapeFollowingTouch = false
+            onStrokeEnded?()
+            return
+        }
+        if vectorCanvas != nil { commitVectorStroke(finalSample: nil); return }
+        commitRasterStroke(finalSample: nil)
+    }
+
     /// Rolls the abandoned stroke back to where the canvas was before it started. Nothing is
     /// committed and no undo step is registered — as far as the document is concerned this stroke
     /// never happened.
+    ///
+    /// **Reached only for `StrokeGiveUp.handedOver` now**, which is the case it was always written
+    /// for: a second finger landed and the canvas transform is taking the sequence, so the dab or two
+    /// already down is an artefact of how that gesture starts rather than a mark anyone drew. It used
+    /// to be reached for every abandonment, including the interruptions `handleInterrupted` above now
+    /// takes, and that is how a stroke the artist drew on purpose came to vanish when they started
+    /// the next one.
     private func handleCancel() {
         // A guide only commits at lift, which a cancel never reaches, so its samples are dropped.
         if guideStartTime != nil { cancelGuideStroke(); return }
@@ -669,17 +730,25 @@ final class StrokeCanvasView: UIView {
     }
 
     private func endVectorStroke(_ touch: UITouch) {
+        let input = StrokeInput(touch: touch, in: self)
+        commitVectorStroke(finalSample: (input.position, input.pressure))
+    }
+
+    /// The vector half of `commitRasterStroke`, and split out for the same reason: `finalSample` is
+    /// nil for a stroke that was interrupted rather than lifted.
+    private func commitVectorStroke(finalSample: (position: CGPoint, pressure: CGFloat)?) {
         if shapeFollowingTouch {
             shapeFollowingTouch = false
             onStrokeEnded?()
             return
         }
         guard let vectorCanvas, vectorScratch != nil else { return }
-        let input = StrokeInput(touch: touch, in: self)
         // The lift point bypasses both the stabilizer (`handleEnd` explains why) and the sample
         // gate. Artists decelerate into the end of a stroke, so its last samples each fail the
         // travel test on their own; without this the stroke would stop short of where the pen did.
-        recordVectorSample(at: input.position, pressure: input.pressure, force: true)
+        if let finalSample {
+            recordVectorSample(at: finalSample.position, pressure: finalSample.pressure, force: true)
+        }
         let before = vectorElementsBeforeSnapshot ?? vectorCanvas.elements
 
         // Selection clip: a stroke that exits the selection and re-enters must become two pieces,

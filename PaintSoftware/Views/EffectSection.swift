@@ -110,6 +110,12 @@ func effectMenuSlug(_ effect: Effect) -> String {
 /// and five sliders inline would push Delete off the bottom of a 240pt-wide rail panel.
 struct EffectSettingsMenu: View {
     let effect: Effect
+    /// Carried purely so the two colour popovers below can be declared through
+    /// `View.canvasPresentation` — this panel reads nothing else off the manager. Threaded rather
+    /// than reached through the environment because every other view in this app takes it as a
+    /// parameter, and one view that does not is one view whose dependencies do not show in its
+    /// signature.
+    @ObservedObject var canvasManager: CanvasManager
     var onChange: (Effect) -> Void
     /// Brackets a whole slider drag into one undo step, the way the value layer's colour picker
     /// brackets a whole picking session — see `LayerOptionsPanel.valueColorRow`.
@@ -135,18 +141,6 @@ struct EffectSettingsMenu: View {
             // Bounded rather than free: Levels and Gradient Map are the tall ones, and a panel that
             // grew past the rail would clip its own Back button off the bottom.
             .frame(maxHeight: 340)
-            // A panel torn down with the colour popover still up would leave `colorRow`'s bracket
-            // open, and the next unrelated edit would record itself inside it — `LayerOptionsPanel`'s
-            // `onDisappear` guards the value-layer swatch against exactly this. On the `ScrollView`
-            // rather than on the enclosing `Group`, because a modifier on a `Group` is applied to
-            // each of its children and would fire once per child.
-            //
-            // The flag is deliberately *not* cleared here: writing it would re-fire `colorRow`'s own
-            // `onChange(of: showingColorPicker)` and close the bracket a second time.
-            .onDisappear {
-                guard showingColorPicker else { return }
-                onEditEnded()
-            }
         }
     }
 
@@ -209,6 +203,7 @@ struct EffectSettingsMenu: View {
 
         case .gradientMap(let params):
             GradientStopsEditor(stops: params.stops,
+                                canvasManager: canvasManager,
                                 onChange: { onChange(.gradientMap(Effect.GradientMap(stops: $0, mix: params.mix))) },
                                 onEditBegan: onEditBegan,
                                 onEditEnded: onEditEnded)
@@ -435,14 +430,19 @@ struct EffectSettingsMenu: View {
             // The hex rather than the resolved `Color`, for `blendModeRow`'s reason: it survives the
             // panel closing and reopening, so a test can confirm the pick reached the model.
             .accessibilityValue(color.color.hexString)
-            .popover(isPresented: $showingColorPicker) {
+            // The bracket is `onPresent`/`onDismiss` rather than `.onChange(of: showingColorPicker)`
+            // for `LayerOptionsPanel.valueColorRow`'s reason: `.onChange` is silent when the *host*
+            // is deleted with the picker still up, which is what a canvas touch does to this whole
+            // rail. This panel used to carry a hand-written `.onDisappear` to catch that; the
+            // modifier runs `onDismiss` however the presentation ends, so it no longer needs one —
+            // and must not have one, since two of them would close the bracket twice.
+            .canvasPresentation(.effectOutlineColour, isPresented: $showingColorPicker,
+                                canvasManager: canvasManager,
+                                onPresent: onEditBegan, onDismiss: onEditEnded) {
                 ColorPickerPanel(color: Binding(get: { color.color }, set: { change($0.effectColor) }))
                     .frame(width: ColorPickerPanel.popoverSize.width,
                            height: ColorPickerPanel.popoverSize.height)
                     .accessibilityIdentifier("effectSettings.\(identifier)Picker")
-            }
-            .onChange(of: showingColorPicker) { _, showing in
-                if showing { onEditBegan() } else { onEditEnded() }
             }
         }
         .padding(.horizontal, 14)
@@ -765,6 +765,9 @@ struct CurveEditor: View {
 /// drag a slider past its neighbour would shuffle the list under their finger for no rendering gain.
 struct GradientStopsEditor: View {
     let stops: [GradientStop]
+    /// See `EffectSettingsMenu`'s field of the same name: carried only so the per-stop colour
+    /// popover can be declared through `View.canvasPresentation`.
+    @ObservedObject var canvasManager: CanvasManager
     var onChange: ([GradientStop]) -> Void
     var onEditBegan: () -> Void
     var onEditEnded: () -> Void
@@ -783,14 +786,9 @@ struct GradientStopsEditor: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        // `EffectSettingsMenu`'s rule for its own swatch: a stop's colour popover torn down with the
-        // panel would otherwise leave its undo bracket open for the next unrelated edit to fall into.
-        // `colorPickerIndex` is left as it is, for the reason `EffectSettingsMenu`'s note gives:
-        // clearing it would re-fire the row's own `onChange` and close the bracket twice.
-        .onDisappear {
-            guard colorPickerIndex != nil else { return }
-            onEditEnded()
-        }
+        // No `.onDisappear` closing the bracket here any more: `View.canvasPresentation` on the row
+        // below runs `onDismiss` when the host is deleted as well as when the flag goes false, and a
+        // second closer would decrement the bracket twice.
     }
 
     private var preview: some View {
@@ -830,8 +828,16 @@ struct GradientStopsEditor: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("effectSettings.gradientStop.\(index).color")
             .accessibilityValue(stops[index].color.color.hexString)
-            .popover(isPresented: Binding(get: { colorPickerIndex == index },
-                                          set: { if !$0 { colorPickerIndex = nil } })) {
+            // The bracket is the popover's lifetime, `colorRow`'s rule — stated per row rather than
+            // once for the editor because `colorPickerIndex` changing from one row to another is a
+            // close *and* an open, and a single observer would see one transition where there are
+            // two. Every row carries the same `CanvasPresentation` case: only one can be open at a
+            // time, since `colorPickerIndex` is one optional index.
+            .canvasPresentation(.effectGradientStopColour,
+                                isPresented: Binding(get: { colorPickerIndex == index },
+                                                     set: { if !$0 { colorPickerIndex = nil } }),
+                                canvasManager: canvasManager,
+                                onPresent: onEditBegan, onDismiss: onEditEnded) {
                 // `supportsOpacity: false` — a stop's alpha is not the artist's to set, since
                 // `Effect.gradientTable` maps luminance to an opaque colour. This is the one
                 // capability the stock `ColorPicker` had that unifying on `ColorPickerPanel` would
@@ -880,12 +886,6 @@ struct GradientStopsEditor: View {
             // flat colour, and a gradient map that cannot map is not an effect the artist chose.
             .disabled(stops.count <= 2)
             .accessibilityIdentifier("effectSettings.gradientStop.\(index).remove")
-        }
-        // The bracket is the popover's lifetime, `colorRow`'s rule — stated per row rather than once
-        // for the editor because `colorPickerIndex` changing from one row to another is a close *and*
-        // an open, and a single observer would see one transition where there are two.
-        .onChange(of: colorPickerIndex == index) { _, isOpen in
-            if isOpen { onEditBegan() } else { onEditEnded() }
         }
     }
 

@@ -143,26 +143,21 @@ struct AnimationTimeline: View {
         } message: {
             Text("Moving a vector block onto a raster layer flattens its strokes to pixels. They can still be erased and painted over, but they can no longer be reshaped as vectors. This can be undone.")
         }
-        // Touching the canvas closes whatever timeline menu is open, *before* the touch becomes a
-        // stroke — the same contract `DrawingView` already applies to the top-bar dropdowns, and for
-        // a sharper reason than tidiness.
+        // **There is deliberately no `.onReceive(canvasManager.interactionBegan)` here any more.**
         //
-        // `timelineMenu` drives a `.popover`, and a popover left to its own dismissal is dismissed
-        // *by* the touch that lands outside it. When that touch is the start of a stroke, the
-        // presentation is torn down in the middle of the touch sequence, and UIKit then never sends
-        // `StrokeGestureRecognizer` its `reset()`: the recognizer is stranded in a terminal-but-not-
-        // `.failed` state, and
-        // `CanvasView.Coordinator.gestureRecognizer(_:shouldRequireFailureOf:)` has all three
-        // canvas-transform recognizers waiting on exactly that recognizer failing. Two-finger
-        // pan/pinch/rotate then stay dead for the life of the drawing view — the reported freeze,
-        // and the reason returning to the gallery and reopening clears it without an app quit.
+        // There used to be, clearing `timelineMenu` by name. It was right about the mechanism — a
+        // popover left to its own dismissal is dismissed *by* the touch that lands outside it, and
+        // when that touch starts a stroke the presentation comes down in the middle of the touch
+        // sequence — and it was the wrong shape of fix twice over. It covered one of the three
+        // popovers in this file, leaving the two declared a few lines above it (onion skin,
+        // interpolate) broken in the way the owner reported on 2026-08-18. And closing the popover
+        // *earlier* does not stop the teardown landing mid-sequence, it only moves it a frame: the
+        // canvas stopped freezing and the artist's ink started disappearing instead.
         //
-        // `interactionBegan` fires from `StrokeGestureRecognizer.touchesBegan` before any of that,
-        // so the popover is on its way out before the sequence it would otherwise break is underway.
-        // Pinned by `CanvasTransformFreezeUITests`.
-        .onReceive(canvasManager.interactionBegan) {
-            timelineMenu = nil
-        }
+        // Both halves now live outside this file. `View.canvasPresentation` registers each of the
+        // three popovers below, `CanvasManager.dismissPresentationsOverLiveCanvas()` closes them
+        // from one place, and `StrokeGiveUp.interrupted` is what makes a mid-sequence teardown cost
+        // the artist nothing worse than a short stroke they can undo.
         .onDisappear { stopPlayback() }
     }
 
@@ -217,7 +212,8 @@ struct AnimationTimeline: View {
                                            @ViewBuilder content: @escaping () -> Content) -> some View {
         Color.clear
             .frame(width: max(rect.width, 1), height: max(rect.height, 1))
-            .popover(isPresented: isPresented, content: content)
+            .canvasPresentation(.timelineSlotMenu, isPresented: isPresented,
+                                canvasManager: canvasManager, content: content)
             .position(x: rect.midX - origin.x, y: rect.midY - origin.y)
     }
 
@@ -421,7 +417,8 @@ struct AnimationTimeline: View {
         }
         .foregroundColor(canvasManager.isOnionSkinEnabled ? .blue : .white)
         .accessibilityIdentifier("timeline.onionSkinToggle")
-        .popover(isPresented: $showOnionSkinOptions) {
+        .canvasPresentation(.onionSkinOptions, isPresented: $showOnionSkinOptions,
+                            canvasManager: canvasManager) {
             OnionSkinPanel(canvasManager: canvasManager)
                 .frame(width: 380, height: 640)
                 .presentationCompactAdaptation(.popover)
@@ -467,7 +464,8 @@ struct AnimationTimeline: View {
         }
         .foregroundColor(canvasManager.isInterpolateMode ? .blue : .white)
         .accessibilityIdentifier("timeline.interpolateButton")
-        .popover(isPresented: $showInterpolateOptions) {
+        .canvasPresentation(.interpolateOptions, isPresented: $showInterpolateOptions,
+                            canvasManager: canvasManager) {
             InterpolatePanel(canvasManager: canvasManager)
                 .frame(width: 260)
                 .presentationCompactAdaptation(.popover)

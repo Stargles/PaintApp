@@ -539,7 +539,56 @@ final class CanvasManager: ObservableObject {
     /// Fires whenever a real drawing/fill interaction begins on the canvas — `DrawingView` uses this
     /// to auto-dismiss whatever top-bar dropdown is open, so the first touch both closes the menu
     /// and performs the stroke/fill, rather than being swallowed by a dismiss tap first.
+    ///
+    /// **Do not send this directly; call `canvasInteractionBegan()`.** The subject is still how the
+    /// two `activePanel`-shaped consumers hear about a canvas touch (`activePanel` is view `@State`
+    /// and cannot live here), but the *presentations* are now closed centrally, and a send that
+    /// bypassed that would be exactly the hand-written half-fix this whole mechanism replaced.
     let interactionBegan = PassthroughSubject<Void, Never>()
+
+    // MARK: - Open presentations
+
+    /// Which of the app's bindable presentations are on screen right now.
+    ///
+    /// Maintained by `View.canvasPresentation(_:isPresented:)`, which is the only way a presentation
+    /// in `CanvasPresentation` is allowed to be declared. Nothing in the app reads this to decide
+    /// layout — it exists so the *rule* below has something to apply itself to, and so a device
+    /// capture can say which panel was up when a stroke went wrong.
+    @Published private(set) var openPresentations: Set<CanvasPresentation> = []
+
+    func presentationDidAppear(_ presentation: CanvasPresentation) {
+        openPresentations.insert(presentation)
+    }
+
+    func presentationDidDisappear(_ presentation: CanvasPresentation) {
+        openPresentations.remove(presentation)
+    }
+
+    /// **The rule, in one place.** A touch on the canvas closes every open presentation that could be
+    /// sitting over a live canvas, before that touch becomes a stroke.
+    ///
+    /// This is what used to be two hand-written subscribers clearing one named variable each, and
+    /// what `CanvasPresentation.overlapsLiveCanvas` now answers for the whole closed set. Returns
+    /// what it closed so a test can assert on it; the app ignores the value.
+    @discardableResult
+    func dismissPresentationsOverLiveCanvas() -> Set<CanvasPresentation> {
+        let doomed = openPresentations.filter(\.overlapsLiveCanvas)
+        guard !doomed.isEmpty else { return [] }
+        openPresentations.subtract(doomed)
+        return doomed
+    }
+
+    /// The single entry point for "a touch has landed on the canvas": closes every presentation over
+    /// the live canvas, then tells the `activePanel` subscribers.
+    ///
+    /// Order is deliberate but not load-bearing — both halves are SwiftUI state writes that land in
+    /// the same transaction. What *is* load-bearing is that there is one function, called from all
+    /// four canvas-touch sites in `CanvasView`, rather than a `.send()` at each of them and a
+    /// separately-remembered dismissal somewhere else.
+    func canvasInteractionBegan() {
+        dismissPresentationsOverLiveCanvas()
+        interactionBegan.send()
+    }
 
     // MARK: - Canvas-edit chokepoint
 

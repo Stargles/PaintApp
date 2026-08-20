@@ -11,10 +11,15 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     var onBegin: ((UITouch) -> Void)?
     var onMove: ((UITouch, UIEvent) -> Void)?
     var onEnd: ((UITouch) -> Void)?
-    /// The tracked touch went away without finishing its stroke — a second finger arrived and handed
-    /// the sequence to the transform recognizers, or the system cancelled it. Distinct from `onEnd`
-    /// because there is no stroke to commit: whatever was painted so far has to be rolled back.
-    var onCancel: (() -> Void)?
+    /// The tracked touch went away without finishing its stroke. Distinct from `onEnd` because the
+    /// stroke did not reach its lift — and **the reason decides what happens to the ink**, which is
+    /// the whole of `StrokeGiveUp`: a second finger arriving hands the sequence to the transform
+    /// recognizers and the dab so far is rolled back, while a sequence that simply stopped being
+    /// delivered gets committed with an undo step rather than thrown away.
+    ///
+    /// This replaced a bare `onCancel` that meant "roll back" unconditionally, which is how a stroke
+    /// drawn under a timeline menu came to vanish the moment the artist started the next one.
+    var onGiveUp: ((StrokeGiveUp) -> Void)?
     /// Fires for every touch that lands here, *before* the pencil-only gate below is even checked —
     /// used to dismiss an open top-bar dropdown the instant the canvas is touched at all. A finger tap
     /// while pencil-only mode is on fails that gate and never actually draws, but should still close
@@ -130,6 +135,21 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
         super.touchesBegan(touches, with: event)
         onAnyTouchBegan?()
         if let tracked = trackedTouch {
+            // **First: is the tracked stroke alive, or is it a corpse?** Everything below this line
+            // was written for one situation — a second touch landing while the artist's first is
+            // still on the glass — and until now it was applied to both, because the class could not
+            // tell them apart. That mis-answer is symptom 1 of the owner's 2026-08-18 report: a
+            // stroke whose delivery was cut by a presentation teardown leaves this recognizer
+            // holding a dead touch, the next stroke's touch-down lands here, and the hand-off path
+            // discards the ink that is sitting visible on the canvas. See `StrokeInterruption`.
+            let reason = StrokeInterruption.giveUpReason(
+                trackedTouchIsAmongArrivals: touches.contains(tracked),
+                trackedTouchIsStillInTheEvent: event.allTouches?.contains(tracked) ?? true,
+                trackedTouchHasFinished: tracked.phase == .ended || tracked.phase == .cancelled)
+            if reason == .interrupted {
+                giveUpTrackedStroke(.interrupted)
+                return
+            }
             let arrivals = touches.filter { $0 !== tracked }
             // Nothing new began — UIKit does not re-deliver a touch's `began`, so this is defensive
             // only, but every branch below reads "what arrived" and an empty answer means "nothing".
@@ -147,7 +167,7 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
             // on the canvas views (see `StrokeCanvasView.init`) a second touch in a later event was
             // never delivered here at all, so a palm landing mid-stroke was harmless by accident. It
             // arrives now, and it must not take the artist's stroke away: a hand resting on the glass
-            // is not a request to stop drawing, and `failTrackedStroke` discards everything painted so
+            // is not a request to stop drawing, and `giveUpTrackedStroke(.handedOver)` discards everything painted so
             // far with no undo step (see `handleCancel`).
             //
             // The rule is by *type*, not by count: **a finger cannot interrupt a pencil stroke.** A
@@ -175,7 +195,7 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
                 for finger in fingers { ignore(finger, for: event) }
                 return
             }
-            failTrackedStroke()
+            giveUpTrackedStroke(.handedOver)
             return
         }
         guard touches.count == 1, let touch = touches.first,
@@ -214,7 +234,11 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
         guard let trackedTouch, touches.contains(trackedTouch) else { return }
         transition(to: .cancelled)
         self.trackedTouch = nil
-        onCancel?()
+        // `.interrupted`, not `.handedOver`: UIKit cancels a sequence when it takes the touch away —
+        // a presentation coming down over the canvas, the app going to the background, a view leaving
+        // the hierarchy — and in every one of those the artist drew a line and meant it. The
+        // hand-off case does not come through here at all; it is decided in `touchesBegan`.
+        onGiveUp?(.interrupted)
     }
 
     private func releaseAccompanying(_ touches: Set<UITouch>) {
@@ -238,16 +262,20 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
         reportAccompanyingFingers()
     }
 
-    /// Gives up a stroke already in progress. Failing without this left the partial stroke painted
-    /// into the layer with no undo step behind it (the recognizer stops receiving touches the moment
-    /// it fails, so `onEnd` never came), which is how a two-finger pan started mid-stroke used to
-    /// leave a permanent, un-undoable mark.
+    /// Gives up a stroke already in progress, and says why. **The reason is what decides whether
+    /// the artist keeps their ink** — see `StrokeGiveUp`, which is where that decision lives.
     ///
-    /// **What the readback on the next line defends against, and what it does not.** This is reached
-    /// only from `touchesBegan`, and only when a touch is already tracked — so the recognizer is in
-    /// `.began` or `.changed`, never `.possible`. `.failed` is documented as a transition *out of
-    /// `.possible`*, so this assignment is, on paper, not a legal move. If UIKit were to drop it, the
-    /// recognizer would sit in `.began` with `trackedTouch` already nil: `touchesEnded` and
+    /// Failing without this left the partial stroke painted into the layer with no undo step behind
+    /// it (the recognizer stops receiving touches the moment it fails, so `onEnd` never came), which
+    /// is how a two-finger pan started mid-stroke used to leave a permanent, un-undoable mark. That
+    /// is still exactly right for `.handedOver`. It was being applied to `.interrupted` too, and
+    /// there it is the 2026-08-18 report: ink the artist drew on purpose, discarded because the path
+    /// that discards a stray pan-dab was the only path there was.
+    ///
+    /// **What the readback on the third line defends against, and what it does not.** The recognizer
+    /// here is in `.began` or `.changed`, never `.possible`. `.failed` is documented as a transition
+    /// *out of `.possible`*, so this assignment is, on paper, not a legal move. If UIKit were to drop
+    /// it, the recognizer would sit in `.began` with `trackedTouch` already nil: `touchesEnded` and
     /// `touchesCancelled` would both bail at their `guard let trackedTouch`, no terminal state would
     /// ever be reached, `reset()` would never run, and the recognizer would never return to
     /// `.possible`. That recognizer is exactly the one
@@ -256,36 +284,31 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     /// working. Re-reading `state` and falling back to `.cancelled` — legal from `.began` and
     /// `.changed` both — closes that off.
     ///
-    /// **Whether any of that can actually happen is unverified, in both directions.** Nothing in this
-    /// repo reaches this function: measured, every two-finger gesture the test suite synthesises
-    /// arrives as a single `touchesBegan` carrying `touches.count == 2`, which is caught by the
-    /// `touches.count == 1` guard above and takes the ordinary, legal `.possible → .failed` path.
-    /// `failTrackedStroke` is only reachable when a second touch lands in a *later* event than the
-    /// first, which is what a real hand does and what no test here produces. So we have never
-    /// observed UIKit honouring `.began → .failed`, and we have never observed it dropping one
-    /// either. Treat the paragraph above as the hazard this line is priced against, not as something
-    /// that was seen.
+    /// **Whether any of that can happen is still unverified in both directions**, and the
+    /// `.interrupted` arm has not changed that: XCUITest cannot deliver a second touch in its own
+    /// event, so no test in this repo reaches this function from `touchesBegan`. What did change is
+    /// that the function is now reachable from a *first* touch — the one that finds a corpse — which
+    /// is a sequence a real hand produces constantly and a synthesised gesture never does.
     ///
-    /// **It is emphatically not the "canvas freezes until you quit and re-enter" bug.** An earlier
-    /// version of this comment claimed it was; that attribution was wrong. The real trigger is a
-    /// stroke that begins while one of the timeline's popovers ("Add Drawing" / "Paste" / loop) is
-    /// still up: the popover is dismissed *by* the touch that starts the stroke, and its teardown
-    /// mid-sequence is what strands this recognizer without a `reset()`. The fix is in
-    /// `AnimationTimeline` — `.onReceive(canvasManager.interactionBegan)` closes the three popovers
-    /// before the touch becomes a stroke — and the pair of tests in `CanvasTransformFreezeUITests`
-    /// (the failing case plus the dismiss-first control) is what pins it there. Nothing in this file
-    /// was load-bearing for that bug.
+    /// **On the reported freeze, corrected.** An older version of this comment said the freeze was
+    /// not this function's business at all: the trigger was a stroke begun under a timeline popover,
+    /// the popover's teardown stranded this recognizer without a `reset()`, and the fix lived in
+    /// `AnimationTimeline`. The diagnosis was right and the fix was in the wrong place. It covered
+    /// one popover of the eight that can sit over a live canvas, and closing a popover *earlier* only
+    /// moves the teardown a frame — the canvas stopped freezing and the ink started disappearing.
+    /// The dismissal now lives in `CanvasManager.dismissPresentationsOverLiveCanvas()` over the
+    /// closed set `CanvasPresentation`, and this file's contribution to the same bug is the
+    /// `.interrupted` arm below.
     ///
-    /// Two alternatives were considered. Assigning `.cancelled` unconditionally is one line shorter
-    /// and always legal, but `.cancelled` means "I recognized, then was cancelled", a *weaker*
-    /// release of a failure requirement than `.failed`'s "I never recognized" — so it would change
-    /// the release semantics of every ordinary pan-begun-mid-stroke, on every build, to guard against
-    /// something never observed. Deleting the readback instead was the other: it is the honest
-    /// response to "no test covers this", but the line costs one comparison, provably cannot change
-    /// behaviour on any build where `.failed` is honoured, and is the cheaper side of a bet whose odds
-    /// nobody here knows. It stays as defence-in-depth. If it ever needs settling, the thing to write
-    /// is a test that delivers the second touch in its own event.
-    private func failTrackedStroke() {
+    /// **What this does not fix, stated so nobody re-derives it.** The touch that *discovered* the
+    /// corpse does not go on to draw: it returns here, having committed the previous stroke, and the
+    /// recognizer lands in a terminal state where it receives nothing further until UIKit resets it.
+    /// So an interrupted stroke still costs the artist one swallowed touch — the third attempt is the
+    /// first that draws. Binding the new touch instead would mean driving `state` from `.changed` or
+    /// `.ended` back to `.began`, which is not a documented transition, and getting that wrong breaks
+    /// drawing outright rather than delaying it by one touch. `StrokeInterruptionLogicTests` records
+    /// the limit as a test so that it stays a known cost rather than becoming a new surprise.
+    private func giveUpTrackedStroke(_ reason: StrokeGiveUp) {
         trackedTouch = nil
         transition(to: .failed)
         // Routed through `transition` as well, so a recording shows *which* of the two branches ran.
@@ -293,6 +316,6 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
         // has no test reaching it, but a recorder file that shows a `.cancelled` here would settle
         // it on the spot.
         if state != .failed { transition(to: .cancelled) }
-        onCancel?()
+        onGiveUp?(reason)
     }
 }

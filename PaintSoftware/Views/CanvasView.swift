@@ -630,7 +630,7 @@ struct CanvasView: UIViewRepresentable {
                 }
                 host.strokeView.strokeRecognizer.onAnyTouchBegan = { [weak self] in
                     // Touching the canvas at all dismisses whatever top-bar dropdown is open.
-                    self?.canvasManager.interactionBegan.send()
+                    self?.canvasManager.canvasInteractionBegan()
                 }
                 host.strokeView.onStrokeEnded = { [weak self, weak host] in
                     guard let self else { return }
@@ -2708,7 +2708,7 @@ struct CanvasView: UIViewRepresentable {
         @objc func handleCatchAllTap(_ recognizer: TouchTypePressRecognizer) {
             guard recognizer.state == .began else { return }
             // Before every other guard, including the tool check: any touch, any tool, any touch type.
-            canvasManager.interactionBegan.send()
+            canvasManager.canvasInteractionBegan()
             // `Tool.paintsOnCanvas`, not a second spelling of the same three cases: this path exists
             // to explain why a touch that *would have drawn* did not, so it is asking `shouldInteract`'s
             // tool clause over again and must give the same answer. The fill and the eyedropper have
@@ -2743,8 +2743,8 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// **The gate is here and not in the recognizer**, which is the same split
         /// `handleCatchAllTap` makes and for the same reason — see `TouchTypePressRecognizer`. It sits
-        /// *after* `interactionBegan.send()` deliberately: a rejected finger still closes whatever
-        /// top-bar dropdown is open, because closing a menu by tapping away from it is not drawing and
+        /// *after* `canvasInteractionBegan()` deliberately: a rejected finger still closes whatever
+        /// dropdown or popover is open, because closing a menu by tapping away from it is not drawing and
         /// every other canvas touch already does it. Beyond that the touch does nothing at all — no
         /// notice, no fill — matching what a finger does on an ordinary layer with the preference on.
         ///
@@ -2761,7 +2761,7 @@ struct CanvasView: UIViewRepresentable {
             switch recognizer.state {
             case .began:
                 // Continuing to fill dismisses whatever top-bar dropdown is open.
-                canvasManager.interactionBegan.send()
+                canvasManager.canvasInteractionBegan()
                 // The same test `StrokeGestureRecognizer.touchesBegan` applies, read straight off the
                 // source flag rather than off a third copy of the preference, so the fill path and the
                 // stroke path cannot drift apart.
@@ -2869,7 +2869,7 @@ struct CanvasView: UIViewRepresentable {
             guard let container = containerView else { return }
             // Before the gate, as every canvas touch is: a declined finger still closes an open
             // top-bar dropdown, because closing a menu by tapping away from it is not drawing.
-            canvasManager.interactionBegan.send()
+            canvasManager.canvasInteractionBegan()
             guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             guard !eyedropperPickInFlight else { return }
 

@@ -87,7 +87,8 @@ struct LayerPanel: View {
                 .cornerRadius(6)
             }
             .accessibilityIdentifier("layerPanel.viewsButton")
-            .popover(isPresented: $showViewSelector) {
+            .canvasPresentation(.layerViewSelector, isPresented: $showViewSelector,
+                                canvasManager: canvasManager) {
                 ViewSelectorMenu(canvasManager: canvasManager, isPresented: $showViewSelector)
             }
 
@@ -197,7 +198,8 @@ struct LayerPanel: View {
             // The brush's picker, not a second one — this row is the owner's report ("the canvas
             // color changer is different than the color changer for the brush"). See
             // `ColorPickerPanel`, which grew a `Binding<Color>` for exactly this.
-            .popover(isPresented: $showBackgroundColorPicker) {
+            .canvasPresentation(.canvasBackgroundColour, isPresented: $showBackgroundColorPicker,
+                                canvasManager: canvasManager) {
                 ColorPickerPanel(color: $canvasManager.canvasBackgroundColor)
                     .frame(width: ColorPickerPanel.popoverSize.width,
                            height: ColorPickerPanel.popoverSize.height)
@@ -260,6 +262,7 @@ struct LayerOptionsPanel: View {
                     // longer applied would be a panel editing nothing.
                     EffectSettingsMenu(
                         effect: effect,
+                        canvasManager: canvasManager,
                         onChange: { canvasManager.setLayerEffect(layerIndex: index, to: $0) },
                         onEditBegan: { canvasManager.beginStructureGesture() },
                         onEditEnded: { canvasManager.commitStructureGesture(label: .valueLayerEffect) },
@@ -286,13 +289,13 @@ struct LayerOptionsPanel: View {
             showingMaskMenu = false
             showingEffectSettings = false
         }
-        // A panel torn down with the colour picker still open would leave `valueColorRow`'s undo
-        // bracket open, and the next unrelated edit would record itself inside it. Drop it instead:
-        // the colour the artist picked stays applied, it simply records no step of its own.
-        .onDisappear {
-            guard showingValueColorPicker else { return }
-            canvasManager.cancelStructureGesture()
-        }
+        // **The hand-written `.onDisappear` that used to sit here is gone, and its job is done for
+        // it.** A panel torn down with the colour picker still open would leave `valueColorRow`'s
+        // undo bracket open, and the next unrelated edit would record itself inside it; the guard
+        // against that is now `View.canvasPresentation`'s own `onDisappear`, which runs that row's
+        // `onDismiss` however the presentation ends. Two of them would have been worse than none —
+        // each closes the bracket, and closing it twice decrements `structureGestureDepth` past
+        // zero, which is the leak wearing the other sign.
         .alert("Rename Layer", isPresented: $isRenaming) {
             TextField("Name", text: $draftName)
                 .accessibilityIdentifier("layerOptions.nameField")
@@ -491,30 +494,40 @@ struct LayerOptionsPanel: View {
             // The hex rather than the resolved `Color`, for `blendModeRow`'s reason: a test can read
             // it back after the panel closes and reopens and know the pick reached the model.
             .accessibilityValue(canvasManager.layers[index].valueFill?.color.hex ?? "")
-            .popover(isPresented: $showingValueColorPicker) {
-                ColorPickerPanel(color: valueColorBinding(index: index))
-                    .frame(width: ColorPickerPanel.popoverSize.width,
-                           height: ColorPickerPanel.popoverSize.height)
-                    .accessibilityIdentifier("layerOptions.valueColorPicker")
-            }
             // One undo step for the whole picking session, not one per tick of the picker's own
             // sliders — the bracket the opacity drag uses (`CanvasManager.beginStructureGesture`),
             // with the popover's lifetime standing in for the drag's. A picker opened and dismissed
             // without a change cancels instead of committing, since `commitStructureGesture` records
             // a step whether or not the snapshots differ.
-            .onChange(of: showingValueColorPicker) { _, showing in
-                guard let index = layerIndex, canvasManager.layers.indices.contains(index) else { return }
-                if showing {
-                    fillWhenPickerOpened = canvasManager.layers[index].fill
-                    canvasManager.beginStructureGesture()
-                } else {
-                    if canvasManager.layers[index].fill == fillWhenPickerOpened {
-                        canvasManager.cancelStructureGesture()
-                    } else {
-                        canvasManager.commitStructureGesture(label: .valueLayerColor)
-                    }
-                    fillWhenPickerOpened = nil
-                }
+            //
+            // **`onPresent`/`onDismiss` rather than `.onChange(of: showingValueColorPicker)`, and
+            // that is the point of the modifier.** `.onChange` does not fire when the *host* is
+            // deleted with the picker still up — which is what a canvas touch does to this whole
+            // rail — so this bracket used to need a hand-written `.onDisappear` on the panel to
+            // catch that case. Somebody had to know to write it; the modifier now runs `onDismiss`
+            // however the presentation ends, so nobody does.
+            .canvasPresentation(.valueLayerColour, isPresented: $showingValueColorPicker,
+                                canvasManager: canvasManager,
+                                onPresent: {
+                                    guard let index = layerIndex,
+                                          canvasManager.layers.indices.contains(index) else { return }
+                                    fillWhenPickerOpened = canvasManager.layers[index].fill
+                                    canvasManager.beginStructureGesture()
+                                },
+                                onDismiss: {
+                                    guard let index = layerIndex,
+                                          canvasManager.layers.indices.contains(index) else { return }
+                                    if canvasManager.layers[index].fill == fillWhenPickerOpened {
+                                        canvasManager.cancelStructureGesture()
+                                    } else {
+                                        canvasManager.commitStructureGesture(label: .valueLayerColor)
+                                    }
+                                    fillWhenPickerOpened = nil
+                                }) {
+                ColorPickerPanel(color: valueColorBinding(index: index))
+                    .frame(width: ColorPickerPanel.popoverSize.width,
+                           height: ColorPickerPanel.popoverSize.height)
+                    .accessibilityIdentifier("layerOptions.valueColorPicker")
             }
         }
         .padding(.horizontal, 14)
@@ -822,6 +835,7 @@ struct FolderOptionsPanel: View {
                 // which `setMixBlendMode` clears the effect for.
                 EffectSettingsMenu(
                     effect: effect,
+                    canvasManager: canvasManager,
                     onChange: { canvasManager.setNodeEffect(folderID, to: $0) },
                     onEditBegan: { canvasManager.beginStructureGesture() },
                     onEditEnded: { canvasManager.commitStructureGesture(label: .valueLayerEffect) },
