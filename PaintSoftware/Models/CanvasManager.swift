@@ -1249,8 +1249,27 @@ final class CanvasManager: ObservableObject {
     var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
     var fillWorkerScheduled = false
 
-    /// Gesture context. `fillSession`/`fillSeedColor` are only touched on `fillQueue`; the rest is set on
-    /// the main thread in `beginInteractiveFill` before any `fillQueue` work runs, then only read after.
+    /// **Which gesture `fillQueue` is working for.** Bumped by every `begin*Fill`, and again by
+    /// `commitInteractiveFill`/`cancelInteractiveFill` when the gesture retires. Written on the main
+    /// thread under `fillLock`, read on `fillQueue` under it, read freely on main (the only writer).
+    ///
+    /// It exists because a *second* fill is the case the old invariant did not cover — the owner's
+    /// *"using the fill tool more than once breaks it sometimes"*. A worker whose gesture has been
+    /// replaced must not claim the new gesture's key as rendered, must not render, and must not
+    /// publish; `drainFillWork` checks this at each of those three points. See
+    /// `CanvasManager+Fill.swift`'s `beginFillGeneration` / `FillGestureContext`.
+    var fillGeneration: UInt64 = 0
+
+    /// The live gesture's latest render, stored by `drainFillWork` on `fillQueue` under `fillLock`
+    /// *before* the hop to main that installs it — so `commitInteractiveFill` can bake a fill whose
+    /// pixels exist but have not reached the main thread yet. See `FillRenderResult`.
+    var fillRenderedRegion: FillRenderResult?
+
+    /// Gesture context. `fillSession`/`fillSeedColor`/`fillGestureLoopPath` are only touched on
+    /// `fillQueue`; everything below is main-thread only. **Nothing here is read from `fillQueue`** —
+    /// a worker gets what it needs as an immutable `FillGestureContext` snapshot instead, because the
+    /// old arrangement ("set on the main thread before any `fillQueue` work runs, then only read
+    /// after") is false the moment a second gesture starts while the first is still on the GPU.
     var fillSession: MetalFillSession?
 
     /// The loop the live lasso gesture drew, in canvas coordinates — kept so an empty result can

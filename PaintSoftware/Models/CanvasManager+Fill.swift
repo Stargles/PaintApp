@@ -43,6 +43,90 @@ extension CanvasManager {
         var gap: Int; var threshold: Int; var edge: Int; var edgeIsWall: Bool; var inset: Int
     }
 
+    /// Everything a `fillQueue` render needs from the gesture that asked for it, snapshotted on the
+    /// main thread and handed to the worker as a value.
+    ///
+    /// **This exists because "set before any `fillQueue` work runs, then only read after" was not
+    /// true of a second gesture**, which is the whole of the owner's *"using the fill tool more than
+    /// once breaks it sometimes"*. `drainFillWork` used to read `fillGestureSeed`,
+    /// `fillGestureColor`, `fillGestureLayerID` and `fillGestureCelID` — all main-thread state —
+    /// off the fill queue, so a tap that landed while the previous tap's flood was still on the GPU
+    /// paired the *new* seed with the *old* session, the old reference composite and the old sampled
+    /// colour. Passing a snapshot instead makes that combination unrepresentable rather than merely
+    /// warned against.
+    ///
+    /// `generation` is the gesture's identity: see `CanvasManager.fillGeneration`.
+    struct FillGestureContext {
+        var generation: UInt64
+        var seedX: Int, seedY: Int
+        var color: SIMD4<Float>       // premultiplied
+        var layerID: UUID, celID: UUID
+    }
+
+    /// A finished render, as `fillQueue` produced it — stored under `fillLock` the instant it exists,
+    /// *before* the `DispatchQueue.main.async` that installs it as the preview.
+    ///
+    /// **The commit path reads this, and that is the point.** `cel.fillImage` and
+    /// `fillLastRegionRGBA` are both written by that main hop, and `beginCanvasEdit` calls
+    /// `commitInteractiveFill` from inside `beginInteractiveFill` — so "the artist tapped twice
+    /// quickly" arrives at the commit with the first fill *rendered and about to be shown* but not
+    /// yet on the main thread. Against `guard cel.fillImage != nil` alone that fill was silently
+    /// dropped: no pixels, no undo entry, no message.
+    ///
+    /// Not `private`, for `FillKey`'s reason: `fillRenderedRegion` in CanvasManager.swift is typed
+    /// with it. Carries no extra memory — `bytes` is the same COW buffer `fillLastRegionRGBA` gets.
+    struct FillRenderResult {
+        var generation: UInt64
+        var bytes: [UInt8]
+        var width: Int, height: Int
+    }
+
+    /// The live gesture's render inputs, for the two schedulers that don't start a gesture of their
+    /// own (`scheduleFillRender`, `endInteractiveFill`). Main thread only.
+    private func fillGestureContext(generation: UInt64) -> FillGestureContext? {
+        guard let layerID = fillGestureLayerID, let celID = fillGestureCelID else { return nil }
+        return FillGestureContext(generation: generation, seedX: fillGestureSeed.x, seedY: fillGestureSeed.y,
+                                  color: fillGestureColor, layerID: layerID, celID: celID)
+    }
+
+    /// Claims the next gesture generation and resets the render bookkeeping for it. Main thread only;
+    /// the write is under `fillLock` so the workers' reads pair with it.
+    ///
+    /// **Resetting `fillRendered` to the sentinel here is what retires a superseded worker's claim.**
+    /// A worker that got as far as `fillRendered = key` before this ran would otherwise have booked
+    /// the *new* gesture's key as already rendered, and the new gesture's own worker would then find
+    /// `key == fillRendered` and return having drawn nothing at all. The two are ordered by the lock,
+    /// so the claim is always either wiped by this or refused by the generation check in
+    /// `drainFillWork`.
+    private func beginFillGeneration() -> UInt64 {
+        fillLock.lock()
+        fillGeneration &+= 1
+        let generation = fillGeneration
+        fillPending = currentFillKey()
+        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
+        fillRenderedRegion = nil
+        // Claimed here so early drag updates don't spawn a second worker. Every caller enqueues a
+        // worker of this generation immediately after, which is what lets a *superseded* worker
+        // return without clearing the flag: it is the live gesture's to clear, not theirs.
+        fillWorkerScheduled = true
+        fillLock.unlock()
+        return generation
+    }
+
+    /// Ends the live gesture's claim on `fillQueue`: nothing in flight may publish onto the document
+    /// after this. Called by both `commitInteractiveFill` and `cancelInteractiveFill`, and it returns
+    /// the render the queue had already produced for the gesture being retired — the bytes the commit
+    /// bakes when the main hop has not run yet.
+    private func endFillGeneration() -> FillRenderResult? {
+        let live = fillGeneration
+        fillLock.lock()
+        let queued = fillRenderedRegion
+        fillGeneration &+= 1
+        fillRenderedRegion = nil
+        fillLock.unlock()
+        return queued?.generation == live ? queued : nil
+    }
+
     /// Begins an interactive fill at `point` (canvas-pixel coords, top-left origin): composites every
     /// fill-reference layer into a reference image once, uploads it to a GPU `MetalFillSession`, samples
     /// the tapped colour, and paints an initial fill. A plain tap is just this immediately followed by
@@ -77,19 +161,18 @@ extension CanvasManager {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
         fillGestureFillColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
-        fillGestureLayerID = layers[layerIndex].id
-        fillGestureCelID = layers[layerIndex].cels[celIndex].id
+        let layerID = layers[layerIndex].id
+        let celID = layers[layerIndex].cels[celIndex].id
+        fillGestureLayerID = layerID
+        fillGestureCelID = celID
         fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
         refreshUndoRedoState() // the fill is undoable from the moment it starts, even on a blank canvas
 
-        fillLock.lock()
-        fillPending = currentFillKey()
-        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
-        fillWorkerScheduled = true // claimed here so early drag updates don't spawn a second worker
-        fillLock.unlock()
+        let context = FillGestureContext(generation: beginFillGeneration(), seedX: seedX, seedY: seedY,
+                                         color: fillGestureColor, layerID: layerID, celID: celID)
 
         fillQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self, self.isCurrentFillGeneration(context.generation) else { return }
             if let refBytes = Self.compositeReferenceRGBA(references: references, width: width, height: height) {
                 let session = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width, height: height)
                 self.fillSession = session
@@ -98,8 +181,21 @@ extension CanvasManager {
             // A tap has no fence to redraw. Cleared beside the session it belongs to, so the two can
             // never describe different gestures — see `fillGestureLoopPath`.
             self.fillGestureLoopPath = nil
-            self.drainFillWork()
+            self.drainFillWork(context)
         }
+    }
+
+    /// Whether `generation` is still the gesture `fillQueue` is working for. Safe from either thread:
+    /// only the main thread writes `fillGeneration`, and always under `fillLock`.
+    ///
+    /// The early-out it guards at the top of each `begin*Fill` worker is not only tidiness — a tap
+    /// that has already been superseded would otherwise composite the whole canvas and upload a GPU
+    /// session for a gesture nobody is waiting on, which is time the *live* tap is queued behind on a
+    /// serial queue.
+    func isCurrentFillGeneration(_ generation: UInt64) -> Bool {
+        fillLock.lock()
+        defer { fillLock.unlock() }
+        return generation == fillGeneration
     }
 
     /// **Edge Overlap is forced to 0 for a lasso gesture, and that is not a tidiness choice.**
@@ -180,13 +276,14 @@ extension CanvasManager {
 
     /// Coalesces a re-render of the current fill for the latest `@Published` parameters onto `fillQueue`.
     private func scheduleFillRender() {
+        guard let context = fillGestureContext(generation: fillGeneration) else { return }
         fillLock.lock()
         fillPending = currentFillKey()
         let alreadyScheduled = fillWorkerScheduled
         fillWorkerScheduled = true
         fillLock.unlock()
         if !alreadyScheduled {
-            fillQueue.async { [weak self] in self?.drainFillWork() }
+            fillQueue.async { [weak self] in self?.drainFillWork(context) }
         }
     }
 
@@ -230,7 +327,8 @@ extension CanvasManager {
     func endInteractiveFill() {
         guard fillGestureActive, fillFingerDown else { return }
         fillFingerDown = false
-        fillQueue.async { [weak self] in self?.drainFillWork() } // render anything still pending; keep session
+        guard let context = fillGestureContext(generation: fillGeneration) else { return }
+        fillQueue.async { [weak self] in self?.drainFillWork(context) } // render anything still pending; keep session
     }
 
     /// Bakes the current adjustable fill into the layer as a single "Fill" undo step and tears the
@@ -247,9 +345,20 @@ extension CanvasManager {
         fillFingerDown = false
         let label: HistoryActionLabel = fillGestureIsLasso ? .lassoFill : .fill
         fillGestureIsLasso = false
+        // Retire the gesture on `fillQueue` too, and take back whatever it had already rendered.
+        //
+        // **The second half is the owner's bug.** `fillLastRegionRGBA` is written by the render's
+        // hop to main, and this method is called from `beginCanvasEdit` at the top of the *next*
+        // `begin*Fill` — so a second tap arrives here with the first fill rendered but its hop not
+        // yet run, and reading only the main-thread copy dropped it. `endFillGeneration` hands back
+        // the bytes straight off the queue's side of `fillLock` instead.
+        let queuedRender = endFillGeneration()
         // Capture the mask bytes before clearing — needed for the vector-path extraction below.
-        let regionBytes = fillLastRegionRGBA
-        let regionW = fillLastRegionW, regionH = fillLastRegionH
+        var regionBytes = fillLastRegionRGBA
+        var regionW = fillLastRegionW, regionH = fillLastRegionH
+        if regionBytes == nil, let queuedRender {
+            regionBytes = queuedRender.bytes; regionW = queuedRender.width; regionH = queuedRender.height
+        }
         fillLastRegionRGBA = nil
         fillQueue.async { [weak self] in self?.fillSession = nil }
         let fillColor = fillGestureFillColor
@@ -258,6 +367,16 @@ extension CanvasManager {
         guard let layerID = fillGestureLayerID, let celID = fillGestureCelID,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
+        // The preview may be rendered but not yet installed (see `endFillGeneration` above). Build it
+        // from the bytes the queue produced, clipped exactly as the hop would have clipped it, so the
+        // guard below asks *"was anything filled?"* rather than *"did the main thread get there in
+        // time?"*. An empty lasso result stores no bytes at all, so §7.1's "no undo entry for a loop
+        // that enclosed nothing" still falls out of that same guard.
+        if layers[layerIndex].cels[celIndex].fillImage == nil, let bytes = regionBytes,
+           regionW > 0, regionH > 0, let rebuilt = Self.imageFromRGBA(bytes, width: regionW, height: regionH) {
+            setFillImage(layerIndex: layerIndex, celIndex: celIndex,
+                         image: clippedForSelection(rebuilt, layerIndex: layerIndex, celIndex: celIndex))
+        }
         guard layers[layerIndex].cels[celIndex].fillImage != nil else { return }  // nothing was previewed
 
         if layers[layerIndex].kind == .vector {
@@ -394,23 +513,24 @@ extension CanvasManager {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
         fillGestureFillColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
-        fillGestureLayerID = layers[layerIndex].id
-        fillGestureCelID = layers[layerIndex].cels[celIndex].id
+        let layerID = layers[layerIndex].id
+        let celID = layers[layerIndex].cels[celIndex].id
+        fillGestureLayerID = layerID
+        fillGestureCelID = celID
         fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
         refreshUndoRedoState()
 
-        fillLock.lock()
-        fillPending = currentFillKey()
-        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
-        fillWorkerScheduled = true
-        fillLock.unlock()
+        // A lasso session seeds from its mask, so the seed coordinate is unused — but the generation
+        // is not, and this begin is exposed to a second gesture exactly as the bucket fill's is.
+        let context = FillGestureContext(generation: beginFillGeneration(), seedX: 0, seedY: 0,
+                                         color: fillGestureColor, layerID: layerID, celID: celID)
         // A new loop supersedes the last one's §7 picture, even mid-fade: whatever the artist is
         // about to be told is about *this* gesture. The presenter clears it on its own timer too;
         // this is the case that timer cannot cover, because it fires from a fill, not a clock.
         lassoFillDiagnostic = nil
 
         fillQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self, self.isCurrentFillGeneration(context.generation) else { return }
             self.lassoFillReportedEmpty = false
             self.fillGestureLoopPath = path
             if let refBytes = Self.compositeReferenceRGBA(references: references, width: width, height: height) {
@@ -422,7 +542,7 @@ extension CanvasManager {
                 // the two from reading differently to anyone debugging a gesture.
                 self.fillSeedColor = session?.referenceColours.0 ?? .zero
             }
-            self.drainFillWork()
+            self.drainFillWork(context)
         }
     }
 
@@ -456,6 +576,7 @@ extension CanvasManager {
         fillGestureActive = false // stops any in-flight render from applying (its main hop checks this)
         fillFingerDown = false
         fillGestureIsLasso = false
+        _ = endFillGeneration()   // …and retires it on `fillQueue`, so a restart can't inherit its work
         fillLastRegionRGBA = nil
         if let layerID = fillGestureLayerID, let celID = fillGestureCelID,
            let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
@@ -478,9 +599,22 @@ extension CanvasManager {
     /// Runs on `fillQueue`. Recomputes the fill for the latest requested parameters and pushes the painted
     /// preview to the active cel, looping until pending == last-rendered so a burst of drag updates
     /// collapses to a single trailing render.
-    private func drainFillWork() {
+    ///
+    /// **`context` is the gesture this worker belongs to, and every step re-checks that it is still the
+    /// live one** — before it claims a key, before it stores the result, and again on the main thread
+    /// before it installs one. Without that a worker whose gesture has been replaced does three
+    /// separate kinds of damage, all of which the artist reads as *"filling twice breaks it"*: it
+    /// books the new gesture's key as rendered (so the new gesture's own worker draws nothing at all),
+    /// it renders the new seed against the old session, and its result installs itself as the new
+    /// gesture's preview because the main hop only ever asked whether *some* fill was active.
+    ///
+    /// A superseded worker returns **without clearing `fillWorkerScheduled`**: the flag belongs to
+    /// whichever gesture is live, and `begin*Fill` both sets it and enqueues a worker of its own, so
+    /// it is always some live worker's job to clear it.
+    private func drainFillWork(_ context: FillGestureContext) {
         while true {
             fillLock.lock()
+            guard context.generation == fillGeneration else { fillLock.unlock(); return }
             let key = fillPending
             if key == fillRendered {
                 fillWorkerScheduled = false
@@ -494,12 +628,12 @@ extension CanvasManager {
                 fillLock.lock(); fillWorkerScheduled = false; fillLock.unlock()
                 return
             }
-            let bytes = session.fill(seedX: fillGestureSeed.x, seedY: fillGestureSeed.y,
+            let bytes = session.fill(seedX: context.seedX, seedY: context.seedY,
                                      seedColor: fillSeedColor,
                                      threshold: Float(Double(key.threshold) / 1000.0),
                                      gapRadius: Float(key.gap), edgeOverlap: Float(key.edge),
                                      canvasEdgeIsWall: key.edgeIsWall, edgeInset: Float(key.inset),
-                                     fillColor: fillGestureColor)
+                                     fillColor: context.color)
             // **The lasso's empty result, and it must leave no trace** (LASSO_FILL.md §6 step 5, §7.1).
             // A loop that encloses nothing — because it leaked through a gap, or because there was
             // nothing inside it — has to commit nothing *and push no undo entry*: a no-op that eats
@@ -525,13 +659,25 @@ extension CanvasManager {
             // empty result of a streak, so the canvas-sized tint costs nothing on the renders that
             // fill something and nothing on the repeats that would not be shown anyway.
             let diagnostic = firstEmpty ? lassoEmptyDiagnostic(from: session) : nil
-            let layerID = fillGestureLayerID, celID = fillGestureCelID
             let regionW = session.width, regionH = session.height
+            // **Publish to the commit path before publishing to the screen.** `commitInteractiveFill`
+            // reads this the moment a second tap arrives, which is long before the hop below runs.
+            // Empty means empty here too, so §7.1's no-undo-entry rule still holds by the same
+            // mechanism (nothing to bake, so nothing recorded).
+            let rendered = (enclosedNothing ? nil : bytes).map {
+                FillRenderResult(generation: context.generation, bytes: $0, width: regionW, height: regionH)
+            }
+            fillLock.lock()
+            let stillCurrent = context.generation == fillGeneration
+            if stillCurrent { fillRenderedRegion = rendered }
+            fillLock.unlock()
+            // Superseded while the GPU was busy: neither the result nor the loop's next iteration
+            // belongs to anybody. The gesture that replaced us has its own worker enqueued behind us.
+            guard stillCurrent else { return }
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.fillGestureActive,
-                      let layerID, let celID,
-                      let layerIndex = self.layers.firstIndex(where: { $0.id == layerID }),
-                      let celIndex = self.layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
+                guard let self, context.generation == self.fillGeneration, self.fillGestureActive,
+                      let layerIndex = self.layers.firstIndex(where: { $0.id == context.layerID }),
+                      let celIndex = self.layers[layerIndex].cels.firstIndex(where: { $0.id == context.celID }) else { return }
                 let clipped = self.clippedForSelection(image, layerIndex: layerIndex, celIndex: celIndex)
                 self.setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: clipped)
                 self.fillLastRegionRGBA = enclosedNothing ? nil : bytes
@@ -580,9 +726,11 @@ extension CanvasManager {
     /// Clips a fill preview to the active selection's path when the fill lands on the exact layer/cel
     /// the selection belongs to and outside interaction is denied — the flood-fill tool analogue of
     /// `StrokeCanvasView.selectionClipPath`, so a bucket fill can't paint outside the marching ants
-    /// any more than a brush stroke can. Runs on the main thread (called from the `fillQueue` render's
-    /// `DispatchQueue.main.async` hop), same as every other read of `selection`/
-    /// `allowsPaintingOutsideSelection` here.
+    /// any more than a brush stroke can. Runs on the main thread — from the `fillQueue` render's
+    /// `DispatchQueue.main.async` hop, and from `commitInteractiveFill` on the path where that hop
+    /// has not run yet — same as every other read of `selection`/`allowsPaintingOutsideSelection`
+    /// here. Both callers must clip, or a fill baked by a second tap would ignore the selection that
+    /// the same fill previewed inside.
     private func clippedForSelection(_ image: UIImage?, layerIndex: Int, celIndex: Int) -> UIImage? {
         guard let image, let selection, !allowsPaintingOutsideSelection,
               layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
