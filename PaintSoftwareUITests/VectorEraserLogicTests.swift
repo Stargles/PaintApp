@@ -277,8 +277,7 @@ final class VectorEraserLogicTests: XCTestCase {
     @discardableResult
     private func pump(_ canvas: VectorCanvas, _ driver: inout VectorEraser.IntersectionDriver,
                       to point: CGPoint, nib: CGFloat = 6) -> VectorEraser.CutOutcome {
-        let resolved = canvas.cutToIntersection(atCanvasPoint: point, pressure: 1,
-                                                brush: fixedBrush(size: nib), size: nib,
+        let resolved = canvas.cutToIntersection(atCanvasPoint: point, brush: fixedBrush(size: nib), size: nib,
                                                 suppressing: driver.suppressed)
         driver.accept(resolved.outcome, underTip: resolved.underTip)
         return resolved.outcome
@@ -356,8 +355,8 @@ final class VectorEraserLogicTests: XCTestCase {
         // Same two positions with the latch defeated: the piece goes too.
         let unlatched = canvas()
         let nib = fixedBrush(size: 9)
-        unlatched.cutToIntersection(atCanvasPoint: tip, pressure: 1, brush: nib, size: 9)
-        unlatched.cutToIntersection(atCanvasPoint: tip, pressure: 1, brush: nib, size: 9)
+        unlatched.cutToIntersection(atCanvasPoint: tip, brush: nib, size: 9)
+        unlatched.cutToIntersection(atCanvasPoint: tip, brush: nib, size: 9)
         XCTAssertEqual(unlatched.strokes.count, 1, "the piece under the tip was deleted whole")
     }
 
@@ -376,8 +375,7 @@ final class VectorEraserLogicTests: XCTestCase {
     func testResolvingWithEverythingSuppressedNeverMutates() {
         let canvas = laddersCanvas()
         let before = canvas.strokes.map(\.id)
-        let resolved = canvas.cutToIntersection(atCanvasPoint: CGPoint(x: 30, y: 90), pressure: 1,
-                                                brush: fixedBrush(size: 6), size: 6,
+        let resolved = canvas.cutToIntersection(atCanvasPoint: CGPoint(x: 30, y: 90), brush: fixedBrush(size: 6), size: 6,
                                                 suppressing: Set(before))
         XCTAssertEqual(resolved.outcome, .unchanged)
         XCTAssertEqual(canvas.strokes.map(\.id), before)
@@ -562,6 +560,48 @@ final class VectorEraserLogicTests: XCTestCase {
         XCTAssertEqual(taken.strokes.count, 0)
     }
 
+    /// The selection radius is the brush **size**, full stop — a pressure-sensitive brush selects
+    /// exactly what a fixed one of the same size does.
+    ///
+    /// This is the owner's sentence taken literally: *"the eraser brush size should be the radius
+    /// around which everything is erased."* Modes 1 and 2 lay down a hole that *is* ink and should
+    /// thin under a light pencil; Mode 3's footprint is a selection, and one that quietly shrank with
+    /// pressure would erase a different amount every pass with nothing on screen to explain it — and
+    /// would make the footprint ring, drawn at full size, a promise the cut does not keep.
+    ///
+    /// Every other Mode-3 test here uses `dynamics: .fixed`, which is precisely why none of them can
+    /// see this: with a fixed brush there is no pressure term to leak. `StrokeInput` reports pressure
+    /// 1 for a finger and `force / maximumPossibleForce` for a pencil, so a leak here would have been
+    /// invisible in the simulator and shown up only on the owner's own iPad.
+    func testTheSelectionRadiusIsTheBrushSizeWhateverThePressureDynamicsSay() {
+        // At half pressure this brush stamps a dab 0.6x its nominal size — radius 6, not 10. The
+        // centrelines below sit 8 points from the tip: inside the size-derived radius, outside the
+        // pressure-derived one, so the two rules give opposite answers on every stroke here.
+        let dynamic = Brush(name: "pressure-sensitive", shape: .hardRound, size: 20,
+                            dynamics: BrushDynamics(sizePressure: 1, opacityPressure: 0,
+                                                    minSizeFraction: 0.2))
+        XCTAssertEqual(StrokeGeometry.stampRadius(forPressure: 1, brush: dynamic, size: 20), 10, accuracy: 1e-9)
+        XCTAssertEqual(StrokeGeometry.stampRadius(forPressure: 0.5, brush: dynamic, size: 20), 6, accuracy: 1e-9)
+
+        func canvas() -> VectorCanvas {
+            VectorCanvas(size: CGSize(width: 200, height: 200),
+                         strokes: [stroke([(20, 108), (180, 108)]), stroke([(60, 20), (60, 180)]),
+                                   stroke([(140, 20), (140, 180)])])
+        }
+        func survivors(_ brush: Brush) -> [String] {
+            let live = canvas()
+            let resolved = live.cutToIntersection(atCanvasPoint: CGPoint(x: 100, y: 100),
+                                                  brush: brush, size: 20)
+            XCTAssertEqual(resolved.outcome, .cut, "a centreline 8pt away is inside a radius of 10")
+            return live.strokes.map { stroke in
+                stroke.samples.map { String(format: "%.2f,%.2f", Double($0.x), Double($0.y)) }
+                    .joined(separator: " ")
+            }.sorted()
+        }
+        XCTAssertEqual(survivors(dynamic), survivors(fixedBrush(size: 20)))
+        XCTAssertEqual(survivors(dynamic).count, 4, "the horizontal in two pieces + two uprights")
+    }
+
     /// Victims are bracketed against the display list as it was, then spliced — so two lines cut in the
     /// same tap each see the other's original geometry, and the answer does not depend on which index
     /// they happen to sit at. The splice runs in descending index for the same reason: an ascending one
@@ -616,8 +656,7 @@ final class VectorEraserLogicTests: XCTestCase {
         let single = hairpinCanvas()
         var armed = true
         for point in path {
-            let resolved = single.cutToIntersection(atCanvasPoint: point, pressure: 1,
-                                                    brush: fixedBrush(size: 50), size: 50,
+            let resolved = single.cutToIntersection(atCanvasPoint: point, brush: fixedBrush(size: 50), size: 50,
                                                     suppressing: armed ? [] : Set(single.strokes.map(\.id)))
             armed = resolved.outcome == .missed
         }

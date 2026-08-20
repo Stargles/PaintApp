@@ -620,15 +620,26 @@ final class VectorCanvas {
     ///
     /// Only this layer knows the ids, which is why the driver takes them back as a value rather than
     /// asking a question it cannot phrase.
+    ///
+    /// **Takes no pressure, deliberately.** Modes 1 and 2 lay down a hole and that hole *is* ink, so
+    /// it should breathe with the pencil like any other stroke. Mode 3's footprint is not ink — it is
+    /// a *selection*, and the owner asked for it in so many words: *"the eraser brush size should be
+    /// the radius around which everything is erased"* (2026-08-18). A radius that shrank with a light
+    /// touch would erase a different amount each pass with nothing on screen to explain why, and would
+    /// make `StrokeCanvasView.updateEraserFootprint(at:)`'s ring — drawn at full size — a promise the
+    /// cut does not keep. `StrokeInput` reports pressure 1 for a finger but `force /
+    /// maximumPossibleForce` for a pencil (StrokeInput.swift:36), so this was invisible in the
+    /// simulator and would have shown up only on the owner's own iPad. Pinning at 1 also matches the
+    /// `forPressure: 1` the width-aware tolerances below already use.
     @discardableResult
-    func cutToIntersection(atCanvasPoint canvasPoint: CGPoint, pressure: CGFloat, brush: Brush,
+    func cutToIntersection(atCanvasPoint canvasPoint: CGPoint, brush: Brush,
                            size: CGFloat, suppressing: Set<UUID> = [])
         -> (outcome: VectorEraser.CutOutcome, underTip: Set<UUID>) {
         lock.lock()
         defer { lock.unlock() }
         guard _elements.contains(where: { $0.stroke != nil }) else { return (.missed, []) }
 
-        let localSamples = Self.localSamples([VectorSample(x: canvasPoint.x, y: canvasPoint.y, pressure: pressure)],
+        let localSamples = Self.localSamples([VectorSample(x: canvasPoint.x, y: canvasPoint.y, pressure: 1)],
                                              through: _transform)
         let scale = Self.scale(of: _transform)
         let localSize = scale > 0 ? size / scale : size

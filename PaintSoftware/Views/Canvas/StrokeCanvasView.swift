@@ -657,8 +657,11 @@ final class StrokeCanvasView: UIView {
     /// Mode 3's incremental commit, called once per touch sample. The cut-on-entry rule lives in
     /// `VectorEraser.IntersectionDriver`; this resolves one position against the canvas and feeds
     /// the outcome back to it.
-    private func resolveIntersectionCut(at point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas) {
-        let resolved = canvas.cutToIntersection(atCanvasPoint: point, pressure: pressure, brush: brush,
+    ///
+    /// No pressure passed: Mode 3's footprint is a selection radius fixed at the brush size, not a
+    /// dab that thins under a light pencil — see `VectorCanvas.cutToIntersection(atCanvasPoint:…)`.
+    private func resolveIntersectionCut(at point: CGPoint, in canvas: VectorCanvas) {
+        let resolved = canvas.cutToIntersection(atCanvasPoint: point, brush: brush,
                                                 size: brushSize,
                                                 suppressing: intersectionDriver.suppressed)
         intersectionDriver.accept(resolved.outcome, underTip: resolved.underTip)
@@ -791,6 +794,10 @@ final class StrokeCanvasView: UIView {
     /// against — so the canvas transform scales the ring with the artwork and the circle shown is
     /// exactly the circle used. Only the outline width is divided back out, measured against the
     /// window rather than read off a transform, so it stays a hairline at any zoom.
+    ///
+    /// Drawn at full size, and the cut is resolved at full size to match: Mode 3's radius is the brush
+    /// size and does not thin under a light pencil, which is what lets this ring be an exact promise
+    /// rather than an upper bound. See `VectorCanvas.cutToIntersection(atCanvasPoint:…)`.
     private func updateEraserFootprint(at point: CGPoint?) {
         guard let point, isEraser, vectorCanvas != nil, vectorEraserMode == .cutToIntersection else {
             eraserFootprintLayer?.isHidden = true
@@ -842,7 +849,7 @@ final class StrokeCanvasView: UIView {
         // much is stored. There is nothing to save here anyway: Mode 3 commits during the drag and
         // `endVectorStroke` never reads `currentVectorSamples` for it.
         if let vectorCanvas, isEraser, vectorEraserMode == .cutToIntersection, inBetweenCelID == nil {
-            resolveIntersectionCut(at: point, pressure: pressure, in: vectorCanvas)
+            resolveIntersectionCut(at: point, in: vectorCanvas)
             return
         }
         guard stored else { return }
