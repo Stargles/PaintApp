@@ -20,27 +20,7 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- [ ] **A stroke that interrupts a menu is still broken — two menus, two different breakages** — owner,
-      on device, 2026-08-18, and they name the real concern themselves: *"This signals an alarm to me that
-      whatever partial fix was previously done did not fix the root cause. It also raises concerns that
-      multiple UI menus have different versions of this problem, which may signal bad architecture."*
-      **Symptom 1, the timeline menus.** *"Although the canvas can move freely after interrupting the menu
-      now, the stroke behaviour is weird. The stroke goes for only a certain amount and then stops
-      responding. This stroke seems to not be baked yet, as when the user then starts another stroke, the
-      first stroke disappears."* So `8ae8613` fixed the *transform* recognizers and moved the damage onto
-      the stroke: the touch sequence is still torn down mid-gesture, and the partial stroke is discarded
-      rather than committed.
-      **Symptom 2, the onion skin panel.** *"the canvas freezing happens in the onion menu, although the
-      stroke this time does not only go partially. However, after the stroke is lifted, the user cannot
-      paint again until the project is quitted (gallery) and then re-entered."* That is the **original**
-      freeze, unfixed, in a menu the fix never covered.
-      **The architecture is the finding, and it is the same shape this repo has already been burned by.**
-      `CanvasManager.interactionBegan` has exactly **two** subscribers — `AnimationTimeline` (which clears
-      `timelineMenu` and *only* `timelineMenu`, `AnimationTimeline.swift:163`) and `DrawingView`. The onion
-      skin popover is presented from the very same view, through a separate `@State showOnionSkinOptions`
-      (`AnimationTimeline.swift:424`), and nothing clears it. Every dismissible presentation has to opt in
-      by hand, so a new one is broken by default — which is `Tool.paintsOnCanvas` before session 40 made an
-      exhaustive `switch` refuse to compile. **The fix wanted here is that mechanism, not a third opt-in.**
+*Nothing. Every owner ask on this list is merged; the next one starts here.*
 
 ## Queued
 
@@ -165,6 +145,33 @@ Carried over:
   edge of a thick line leaves it alone (the circle is exactly the rule, rather than acting slightly
   larger than it looks).
 
+- **A stroke that interrupts a menu is still broken — two menus, two different breakages** — merged
+  2026-08-20. The owner's real concern was the architecture, and it was right: `interactionBegan` was a
+  bare signal with two hand-written subscribers clearing one named variable each, so a presentation was
+  **broken by default** and became safe only if whoever added it remembered a line. A read-only sweep
+  ([MENU_PRESENTATION_CENSUS.md](MENU_PRESENTATION_CENSUS.md)) found **seven** such popovers — including
+  two declared nine lines below the sink written to fix exactly this class of bug — and twelve further
+  presentations nothing in the repo could rule on.
+  **The fix is the mechanism they asked for, not a third opt-in.** `CanvasPresentation` is a
+  `CaseIterable` enum of every bindable presentation whose `overlapsLiveCanvas` is an exhaustive
+  `switch` with no `default:`, in `Tool.paintsOnCanvas`'s image; `View.canvasPresentation` is the single
+  declaration site; `CanvasManager.dismissPresentationsOverLiveCanvas()` is the rule, in one place.
+  **And closing popovers earlier was never sufficient** — it only moves the teardown a frame, which is
+  how the previous fix turned a freeze into a vanishing stroke. So the other half is `StrokeGiveUp`:
+  a second finger arriving still rolls the stroke back (`.handedOver`, which is what stops a pan-dab
+  becoming a permanent un-undoable mark), while a sequence that simply stopped being delivered now
+  **commits with an undo step** (`.interrupted`). Symptom 2, the onion-skin freeze, is covered because
+  that popover is one of the seven.
+  **Measured, and it halves the problem**: a SwiftUI `Menu`'s dismiss region absorbs the whole touch —
+  the drag neither reaches the canvas nor even closes the menu — so the twelve unverifiable ones are
+  **safe**, and the defect was seven, not nineteen.
+  **Honest limit**: adding a *case* is now compiler-forced, but writing a raw `.popover` and adding no
+  case is not. That half is a test-time gate instead —
+  `CanvasPresentationLogicTests.testNoBarePopoverIsDeclaredOutsideTheModifier` reads the real source
+  tree off `#filePath` and fails naming the file and line, with `tools/presentation-census.sh` as the
+  same check from a shell. Two remaining costs are recorded in [BUGS.md](BUGS.md): the interrupted
+  stroke is still *short*, and the touch that finds the stranded stroke is spent finding it.
+
 - **The lasso fill fills the whole canvas** — merged 2026-08-19. Rebuilt to
   [LASSO_FILL.md](LASSO_FILL.md): the loop's ring seeds the flood, the flood may never leave the loop
   (`lassoBarrier`), and the result is `loopMask ∧ ¬reached` — so the loop bounds the fill by
@@ -180,7 +187,6 @@ Carried over:
   in here read as background"). Shipped, with the claim corrected in three doc comments and the
   reasoning written into LASSO_FILL.md §7. **Whether a leak deserves its own signal is an open
   question for the owner** — detecting one properly is a diagnostic-only connected-component pass.
-
 
 - **The canvas border does not act as a fill boundary once there is padding** — merged 2026-08-19.
   Both suspected causes were real and both are fixed. `setCanvasPadding` grows `canvasSize` itself, so

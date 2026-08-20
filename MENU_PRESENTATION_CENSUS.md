@@ -1,11 +1,18 @@
 <!-- Written 2026-08-18 from an exhaustive read-only sweep of every dismissible presentation in the app,
 after the owner reported the menu-interrupted stroke a third time and said: "I'm not sure if this bug
 extends far past the scope of 2 UI menus, frankly it is possible that many other ones have this problem."
-They were right. This is the census that answers that question. The fix is on tmp/menuinterrupt. -->
+They were right — for seven of the nineteen. This is the census that answers that question. The fix
+merged 2026-08-20, and the twelve unverifiable ones were measured then too. -->
 
 # Every dismissible presentation, and whether a stroke under it breaks
 
-## The contract, and why it does not hold
+## The contract, and why it did not hold
+
+*Past tense as of 2026-08-20: `CanvasPresentation` + `View.canvasPresentation` +
+`CanvasManager.dismissPresentationsOverLiveCanvas()` are the registry, the declaration site and the
+rule this section says did not exist. Kept because the shape of the absence is what made the defect,
+and the next hand-written `interactionBegan` sink will look reasonable for the same reasons this one
+did.*
 
 `CanvasManager.interactionBegan` (`CanvasManager.swift:529`) is a bare `PassthroughSubject<Void, Never>`.
 It is **sent** from four canvas-touch sites, all in `CanvasView.swift` — `:589` (stroke), `:2582`
@@ -33,7 +40,14 @@ Every dismissal in this app is system presentation dismissal.
 
 ## Counts
 
-**BROKEN 7 · UNKNOWN 12 · SAFE 44**
+**BROKEN 7 · UNKNOWN 12 · SAFE 44** — the sweep of 2026-08-18, before anything was fixed.
+
+**Settled 2026-08-20: BROKEN 7 · SAFE 56.** The twelve UNKNOWNs are **safe, MEASURED** — see "The
+question the source could not answer", below, which is now answered. So the true size of the defect
+was seven, not nineteen. All seven are fixed: each is declared through `View.canvasPresentation`
+with a case in `CanvasPresentation`, closed centrally by
+`CanvasManager.dismissPresentationsOverLiveCanvas()`, and a stroke a teardown does interrupt now
+commits rather than vanishing (`StrokeGiveUp.interrupted`).
 
 ## The four distinct versions of the problem
 
@@ -62,6 +76,10 @@ panel (`ActionRecorderControls.swift:142`).
 
 ## BROKEN — a stroke under it dismisses it mid-sequence, nothing clears it first
 
+*All seven are fixed as of 2026-08-20. Each now names its case in the "Holds it open" column's
+`CanvasPresentation` twin and is declared through `View.canvasPresentation`; the table is kept as the
+record of what was wrong, not as a list of open defects.*
+
 | file:line | What it is | Holds it open |
 |---|---|---|
 | `AnimationTimeline.swift:424` | Onion Skin options panel (380×640) | `showOnionSkinOptions` |
@@ -72,7 +90,9 @@ panel (`ActionRecorderControls.swift:142`).
 | `EffectSection.swift:438` | Outline colour swatch picker | `showingColorPicker` — **`onEditBegan`/`Ended` bracket at `:448`** |
 | `EffectSection.swift:833` | Per-gradient-stop colour picker | `colorPickerIndex` |
 
-## UNKNOWN — presents through a path this repo has never verified
+## SETTLED SAFE (was UNKNOWN) — presents through a path this repo had never verified
+
+**Measured 2026-08-20 and safe; see the section after next for how.** Listed as they were found:
 
 `Menu` / `.contextMenu` / stock `ColorPicker` / `ShareLink`, twelve of them: `MotionGroupRow.swift:126`
 and its nested `Picker` at `:134`, `GuideRow.swift:155`, `LayerPanel.swift:94`, `:415`, `:590`, `:969`,
@@ -98,13 +118,37 @@ exists on that screen (`ContentView.swift:19-25` switches screens). The five pan
 `TextSettingsPanel`, `StrokeSettingsPanel`, `MaskTuningSection` and `InterpolatePanel` contain no
 presentations at all.
 
-## The one open question the source cannot answer
+## The question the source could not answer — MEASURED 2026-08-20, and the answer is no
 
 **Does a SwiftUI `Menu`/`.contextMenu` outside-touch pass through to the canvas the way `.popover`
-demonstrably does here?** That single fact separates the twelve UNKNOWNs from BROKEN.
-`CanvasTransformFreezeUITests` pins only the popover case, and no comment in the tree addresses it.
-Settle it empirically — an ActionRecorder capture over a blend-mode menu, or an XCUITest in the shape of
-`CanvasTransformFreezeUITests` — before assuming either answer.
+demonstrably does here?** That single fact separated the twelve UNKNOWNs from BROKEN.
+
+**It does not.** `MenuInterruptionUITests.testDrawingStraightThroughAnOpenBlendModeMenu` opens the
+layer's blend-mode `Menu` and draws straight through it, in the shape of `CanvasTransformFreezeUITests`.
+On iPad Pro 13" (M4), iOS 26.5, three readings, all of one piece:
+
+| reading | result |
+|---|---|
+| Does the menu come down? | **No.** `layerOptions.blendMode.multiply` is still on screen after the drag. |
+| Did the stroke reach the canvas? | **No.** The layer's committed `.paint` count is 0. |
+| Does the canvas still work? | **Yes.** The next stroke commits (count 1) and the pinch still moves the canvas. |
+
+A `Menu`'s dismiss region absorbs the whole touch sequence rather than passing it through — it does
+not even take a *drag* as a dismissal, where a `.popover` is dismissed by the very touch that starts
+the stroke. So the stroke that would have been interrupted never begins, and there is no sequence for
+a teardown to land in the middle of. **The true size of the defect was seven, not nineteen.**
+
+`testTheSameStrokeWithNoMenuOpenCommitsNormally` is the control and it is not decoration: the first
+draft of that class counted *raster* strokes on a layer that is vector by default, so it read 0
+through the menu and would have reached the right answer for a reason that could not have been wrong.
+The control failed, and that is what caught it. Read the `.vector` marker here, never
+`readLayerStrokeCount`.
+
+**What this does not say.** It measures SwiftUI's `Menu` on this OS. `.contextMenu` presents through
+the same `UIContextMenuInteraction` family and is taken with it; the stock `ColorPicker`'s own
+presentation and `ShareLink`'s activity popover are not separately measured, and both sit *inside*
+presentations already covered (`OnionSkinPanel` and the Actions panel), so a stroke reaches them only
+through a parent that is already registered.
 
 ## Coverage limits of this sweep
 

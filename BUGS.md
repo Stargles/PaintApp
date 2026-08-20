@@ -353,18 +353,36 @@ switch is implicated in the Fill entry below), or UIKit dropping the sequence as
 presentation overlay is torn down. Instrumenting the touch lifecycle is what separates them.
 
 **Do not "fix" it by deferring the popover teardown** — that directly reopens the canvas-freeze bug
-`CanvasTransformFreezeUITests` pins; see `AnimationTimeline`'s comment there.
+`CanvasTransformFreezeUITests` pins.
 
 The *line* half is already closed from the other end: the smart-shape hold is now a subtraction
 between two `UITouch.timestamp`s (`ShapeHoldClock`), so a stroke whose samples stop arriving can never
-complete a hold. That fix stands under both this diagnosis and the dead lag-spike one, but it only
-suppresses the line — the stub itself is untouched and the pen would stub silently like the eraser.
+complete a hold. That fix stands under both this diagnosis and the dead lag-spike one.
 
-Underneath sits a product call, not an engineering one: `handleCancel` discards a partial stroke on
-purpose — "as far as the document is concerned this stroke never happened" — because that is what
-stops a two-finger pan begun mid-stroke from leaving a permanent, un-undoable mark. Whether a cancel
-caused by *the app's own popover* should also throw the artist's ink away is the owner's decision, and
-committing it instead would reopen the pan case. Not changed unilaterally.
+**The stub half is closed as of 2026-08-20, and what is left is the residue.** The product call this
+entry left to the owner — whether a cancel caused by *the app's own popover* should throw the artist's
+ink away — they made in their 2026-08-18 report, and it is answered by splitting the one abandonment
+path in two. `StrokeGiveUp.handedOver` still rolls back, so a two-finger pan begun mid-stroke still
+leaves no permanent mark; `StrokeGiveUp.interrupted` commits, with an undo step, exactly as a lift
+would have. The stub therefore no longer survives the lift and no longer vanishes when the next stroke
+starts. Seven popovers also now close *before* the touch becomes a stroke, centrally
+(`CanvasManager.dismissPresentationsOverLiveCanvas()`).
+
+**Two costs remain, both known and both deliberate:**
+
+ * **The stroke is still short.** Closing the presentation a frame earlier does not stop the teardown
+   landing mid-sequence; nothing in this app can recover samples UIKit never delivered. The artist gets
+   a truncated stroke they can undo or draw over, instead of one that disappears.
+ * **The touch that discovers the stranded stroke is spent discovering it.** `touchesBegan` commits the
+   corpse and returns, so the *third* attempt is the first that draws, not the second. Binding the new
+   touch instead means driving `state` from `.changed`/`.ended` back to `.began`, which is not a
+   documented transition and whose failure mode is "drawing stops working" rather than "drawing is
+   delayed by one touch". `StrokeInterruptionLogicTests.testTheTouchThatDiscoversACorpseIsSpentDiscoveringIt`
+   records it so it stays a known cost.
+
+Still unseparated, and it no longer changes a decision: whether delivery stops because of a view-level
+`isUserInteractionEnabled` flip (`reconcileLayers`) or because UIKit drops the sequence as the
+presentation's overlay is torn down. Instrumenting the touch lifecycle is what would separate them.
 
 ## XCUITests cannot launch into the editor on the iPad 9 (2026-08-16)
 
