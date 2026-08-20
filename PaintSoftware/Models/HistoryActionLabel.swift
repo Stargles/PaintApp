@@ -41,6 +41,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// `.duplicateGuide`, which duplicate a different kind of thing entirely.
     case duplicatePiece
     case insertImage
+    /// A whole text session baking down — **one step per session, never one per keystroke.**
+    /// `UndoHistory`'s `cost` accounting was never sized for 200 entries out of one sentence, and
+    /// `UITextView` supplies within-session undo for free (`ADD_TEXT.md` §2, and §5.1 for the
+    /// behaviour the artist sees).
+    case addText
 
     // MARK: Layer/folder structure
 
@@ -136,6 +141,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .move: return "move"
         case .duplicatePiece: return "duplicate"
         case .insertImage: return "insert image"
+        case .addText: return "add text"
 
         case .addLayer: return "add layer"
         case .addVectorLayer: return "add vector layer"

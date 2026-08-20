@@ -193,10 +193,17 @@ It is constructed with only `canvasManager` (`DrawingView.swift:289`) and has no
 
 Each stage merges to `main` on its own and is usable on the owner's iPad. Follow the multi-session protocol in [CLAUDE.md](CLAUDE.md): one worktree per stage, and a new *test* file needs a hand-written `project.pbxproj` entry with an id derived from the file name — plus the duplicate-id check after any rebase touching that file.
 
-**Stage 1 — "Add Text" exists, on raster layers, and it bakes.**
-`TextObject.swift` (`TextRecipe`, `FontDescriptor`, `Typography`, `TextFrame` with `.affine` only, `VectorTextElement`). `Tool.text`, `ActivePanel.text`, `activePanel` threaded into `ActionsMenu`, the row. `FontProvider`/`SystemFontProvider`/`FontLibrary` with the resolve-and-report-substitution contract. The full `TextSettingsPanel` in the `StrokeSettingsPanel` shape — grouped font `Menu`, `sliderRow`s for size/tracking/line-height/line-spacing/paragraph-spacing, segmented alignment `Picker`, colour swatch — inside the existing 300×420 scrolling card, with `toggleSettingsPanel` routing so opening it does not bake. A canvas-native `UITextView` overlay inside `container`, drag-the-box to move. `commitInteractiveText()` in `beginCanvasEdit()`, the three-way branch in `finalizePendingGesturesForHistoryAction()`, bake through `registerUndoableCelChange`.
-**Explicitly not yet:** vector layers (the row is disabled with a note there — this stage ships nothing it has to un-ship), rotate, scale, distort, font packs.
-**Tests:** `TextLayoutLogicTests` (CoreText metrics for tracking/line-height/alignment/wrap against fixed expectations), `TextRecipeCodableLogicTests` (a JSON blob missing every optional key decodes to defaults), `FontResolveLogicTests` (exact face → family+traits → system, and the substitution flag). `TextBakeCharacterizationTests` for the composited bytes. Genuinely not headless: keyboard-over-canvas — first-responder handoff across panel toggles, `keyboardLayoutGuide` against a canvas with its own pan/zoom, and the box being off-screen or at 0.3× scale. **Record it on device with `ActionRecorder` early in this stage, not at the end** — focus fights with the canvas's own recognizers are exactly the bug class it exists for, and iOS attaches its own Scribble recognizer to the text view for free.
+**Stage 1 — "Add Text" exists, on raster layers, and it bakes. ~~To build~~ — done and on `main` (2026-08-20).**
+`TextObject.swift` (`TextRecipe`, `FontDescriptor`, `Typography`, `TextFrame` with `.affine` only, `VectorTextElement`), plus `Engine/TextLayout.swift`, `Engine/FontLibrary.swift`, `Models/CanvasManager+Text.swift`, `Views/TextOverlayView.swift`, and `TextSettingsPanel` filled in. `Tool.text`, `ActivePanel.text` and the `ActionsMenu` row landed first and alone, ahead of the rest. `commitInteractiveText()` is in `beginCanvasEdit()`; the three-way branch is in `finalizePendingGesturesForHistoryAction()`; the bake goes through `registerUndoableCelChange`.
+Three things shipped differently from the sketch this entry used to carry, and each is written up where it lives:
+
+- **The overlay's `UITextView` draws no glyphs.** It supplies the caret, the selection, the keyboard and Scribble; the pixels are `TextLayout.renderBox`, *the same drawing code the bake calls*. Sharing the rasterizer rather than only the transform is what makes the live preview and the commit agree — §2's closing warning, taken seriously a stage early.
+- **The font `Menu`'s rows are not drawn in their own faces.** A SwiftUI `Menu` is presented by UIKit, which discards a custom `.font` on a button label. A live per-face preview needs a custom picker sheet; that is more UI than this stage should spend.
+- **`autoSize` stops growing at the canvas's right edge and wraps instead.** A point-text box is supposed to grow rightward forever, but with no handles until Stage 4 there is no way to drag a runaway one back. `TextLayout.autoSize` carries the note; the cap can go once handles exist.
+
+**Still not done here:** vector layers (the row is disabled with a note), rotate, scale, distort, font packs.
+**Tests:** 75, across `TextLayoutLogicTests`, `TextRecipeCodableLogicTests`, `FontResolveLogicTests` and `TextBakeCharacterizationTests`. The layout tests assert *identities* rather than measured widths — tracking adds exactly `t × (characters − 1)`, each spacing knob moves one baseline gap by exactly its own delta, the alignments place a line at `0` / `box − width` / `(box − width)/2`, a justified line that is not the last fills the box — because "this string is 412.5 points wide" is a claim about a font file Apple revises, not about this code.
+**Still owed, and it needs the owner's iPad.** Keyboard-over-canvas was never exercised: first-responder handoff across panel toggles, `keyboardLayoutGuide` against a canvas with its own pan/zoom, a box off-screen or at 0.3× scale, and whether iOS's own Scribble recognizer fights the canvas's. None of it is reachable headlessly, and **`ActionRecorder` is how to get it off the device** rather than guessing at a simulator.
 
 **Stage 2 — the per-element decode fix. ~~To build~~ — already on `main`, do not build it (verified 2026-08-18).**
 It landed ahead of this plan, as the fix for the `try?` in `ProjectStore` that discarded a whole vector cel on one unreadable field. `VectorCanvasData` decodes its display list one element at a time through `LossySlot`, an unknown `kind` and a malformed known `kind` are told apart at the discriminator and logged at different severities, and the counts land in a `DecodeReport` (`Engine/VectorLayer.swift:1351-1436`). `VectorCanvasDataLogicTests` pins it with 13 tests, on counts and identities rather than "did not throw".
@@ -267,6 +274,9 @@ should not be re-litigated.
    first cut, after which the text is no longer text.
 
 5. **The font picker gets a favourites strip**, above the full grouped list, in the same shape as the
-   brush presets. **Which faces belong in it is still open** — ask when Stage 1 reaches the panel.
-
-5. **How many fonts on the picker.** iOS ships roughly 60-80 families and Stage 1 lists all of them, grouped. Would a short favourites strip at the top — the same shape as the brush presets — be worth it, and if so which faces belong there?
+   brush presets. **Which faces belong in it is still open, and it is now the one thing Stage 1 left
+   unanswered.** Stage 1 has reached the panel and shipped *without* a strip — all families grouped
+   System / Serif / Sans / Mono / Display, with a second menu for the faces within the chosen family
+   — because inventing a shortlist would have made it the answer by default. iOS ships roughly 60-80
+   families; naming five or six turns the picker from a list into a set of defaults, so it wants the
+   owner's own list rather than a guess at one.

@@ -87,6 +87,39 @@ struct CanvasView: UIViewRepresentable {
         container.addSubview(shapeOverlay)
         context.coordinator.shapeOverlay = shapeOverlay
 
+        // The live text editor (`ADD_TEXT.md` stage 1). Above the shape overlay because the text
+        // overlay is the one the artist is looking at while a session is live, and because
+        // `beginCanvasEdit` commits text *after* the shape for the same reason. It claims only its
+        // own box and the move band around it — see `TextOverlayView.hitTest` — so being higher
+        // costs the shape handles nothing.
+        let textOverlay = TextOverlayView()
+        textOverlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(textOverlay)
+        context.coordinator.textOverlay = textOverlay
+        textOverlay.onDragBegan = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.beginTextFrameDrag()
+        }
+        textOverlay.onDragged = { [weak coordinator = context.coordinator] origin in
+            coordinator?.canvasManager.dragTextFrame(toOrigin: origin)
+        }
+        textOverlay.onDragEnded = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.endTextFrameDrag()
+        }
+        textOverlay.onTextChanged = { [weak coordinator = context.coordinator] string in
+            coordinator?.canvasManager.updateTextString(string)
+        }
+        textOverlay.onFocusChanged = { [weak coordinator = context.coordinator] focused in
+            coordinator?.canvasManager.textIsFocused = focused
+        }
+        // The two hooks the model holds so it can drop the keyboard and route undo without knowing
+        // what a first responder is. Weak on both sides: the manager outlives the view.
+        context.coordinator.canvasManager.textFocusResigner = { [weak textOverlay] in
+            textOverlay?.resignEditor()
+        }
+        context.coordinator.canvasManager.textEditUndoHandler = { [weak textOverlay] isRedo in
+            textOverlay?.handleEditUndo(isRedo: isRedo) ?? false
+        }
+
         // Above everything, including the shape overlay: a guide annotates the whole frame. It
         // claims only its own handle hitboxes, so being topmost costs a shape handle only where
         // the two coincide — and the two are never both live, since guides need interpolate mode.
@@ -180,6 +213,10 @@ struct CanvasView: UIViewRepresentable {
             shapeOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             shapeOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             shapeOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            textOverlay.topAnchor.constraint(equalTo: container.topAnchor),
+            textOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            textOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            textOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             guideOverlay.topAnchor.constraint(equalTo: container.topAnchor),
             guideOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             guideOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -270,6 +307,7 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.updateSelectionOverlay()
         context.coordinator.updateFloatingOverlay()
         context.coordinator.updateShapeOverlay()
+        context.coordinator.updateTextOverlay()
         context.coordinator.hostBoundsDidChange()
 
         return host
@@ -291,6 +329,7 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.updateSelectionOverlay()
         context.coordinator.updateFloatingOverlay()
         context.coordinator.updateShapeOverlay()
+        context.coordinator.updateTextOverlay()
         context.coordinator.hostBoundsDidChange()
     }
 
@@ -358,6 +397,11 @@ struct CanvasView: UIViewRepresentable {
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
+        /// The live text editor. `ADD_TEXT.md` stage 1.
+        weak var textOverlay: TextOverlayView?
+        /// The text tool's placement tap. A fourth `TouchTypePressRecognizer`, not a fourth
+        /// mechanism — see `setUpGestures`.
+        weak var textTapRecognizer: TouchTypePressRecognizer?
         /// True while the two-finger snap constraint is engaged. Owned here rather than by the
         /// overlay, since the engaging touches usually land on the canvas, not the overlay.
         private(set) var isShapeConstraintEngaged = false
@@ -1460,6 +1504,23 @@ struct CanvasView: UIViewRepresentable {
             overlay.isUserInteractionEnabled = isAdjustable
         }
 
+        /// Pushes the live text session down to the on-canvas editor, and nothing else. Cheap on
+        /// every pass where nothing changed — `TextOverlayView.update` is written around that, since
+        /// this runs on every SwiftUI pass like every other `update*` here.
+        func updateTextOverlay() {
+            guard let overlay = textOverlay, let container = containerView else { return }
+            let active = canvasManager.textGestureActive
+            overlay.update(isActive: active,
+                           frame: canvasManager.textFrame,
+                           recipe: canvasManager.textRecipe,
+                           canvasScale: canvasContentScale)
+            guard active else { return }
+            // Above every layer host so the box is visible and its band hit-testable. It claims only
+            // the box and the band (`TextOverlayView.hitTest`), so everything else still falls
+            // through to whatever is underneath.
+            container.bringSubviewToFront(overlay)
+        }
+
         /// Coalesces preview re-renders to one per run-loop turn — a Pencil delivers several coalesced
         /// samples per frame, and re-stamping a canvas-sized preview per sample costs far more than
         /// the frame of lag this trades for. Feeds the overlay directly to avoid re-scheduling itself.
@@ -1505,6 +1566,15 @@ struct CanvasView: UIViewRepresentable {
             // nowhere to land. Suspended while Select is engaged or a piece is floating for the
             // fill's reason: those overlays own the canvas's single-touch gestures while they are up.
             eyedropperTapRecognizer?.isEnabled = (canvasManager.selectedTool == .eyedropper)
+                && activePanel != .select && canvasManager.floatingPiece == nil
+
+            // The text tool's placement tap, on the eyedropper's side of the guard rather than the
+            // fill's: it is suspended while Select is engaged or a piece is floating for the fill's
+            // reason (those overlays own the canvas's single-touch gestures while they are up), but
+            // it needs no active layer *index* check here — `beginTextSession` asks
+            // `Tool.textUnavailableReason` about the layer's kind, which is the one place that
+            // question is answered.
+            textTapRecognizer?.isEnabled = (canvasManager.selectedTool == .text)
                 && activePanel != .select && canvasManager.floatingPiece == nil
 
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
@@ -2075,6 +2145,9 @@ struct CanvasView: UIViewRepresentable {
             // identity guard skips passes that change nothing in Core Animation, and anything
             // downstream that has to track the transform reads a stale value if it sits below.
             shapeOverlay?.canvasScale = canvasContentScale
+            // The text box's outline and its move band are screen-point chrome for the same reason
+            // the shape handles are, so the scale has to reach it on the same passes.
+            textOverlay?.canvasScale = canvasContentScale
             guard let container = containerView, let baseCenter else { return }
             let scale = fitScale * committedScale * liveScale
             let rotation = effectiveRotation()
@@ -2258,10 +2331,59 @@ struct CanvasView: UIViewRepresentable {
             eyedropperPress.name = "canvas.eyedropperPress"
             view.addGestureRecognizer(eyedropperPress)
             eyedropperTapRecognizer = eyedropperPress
+
+            // The text tool's placement tap. A fourth `TouchTypePressRecognizer` for the reason the
+            // eyedropper's comment above gives for the third: this is a canvas-touch tool and so
+            // needs the same touch-type gate, and the app has exactly two spellings of that gate. A
+            // fifth would be a fifth place for the pencil test to drift.
+            //
+            // `minimumPressDuration = 0` like the other two, but for the opposite reason to the
+            // fill's: placing a box applies nothing and pushes no undo step, so there is nothing a
+            // mistaken contact could do that tapping elsewhere does not undo by itself.
+            let textPress = TouchTypePressRecognizer(target: self, action: #selector(handleTextPress(_:)))
+            textPress.minimumPressDuration = 0
+            textPress.numberOfTouchesRequired = 1
+            textPress.delegate = self
+            textPress.cancelsTouchesInView = false
+            textPress.isEnabled = false
+            textPress.name = "canvas.textPress"
+            view.addGestureRecognizer(textPress)
+            textTapRecognizer = textPress
+        }
+
+        /// The text tool's placement tap: put a box where the artist tapped and raise the keyboard.
+        ///
+        /// **A tap that lands on the live box does nothing here**, and the guard is the whole
+        /// subtlety: `TextOverlayView` has already taken that touch (its `hitTest` claims the box and
+        /// the band), but this recognizer sits on the *container* with `cancelsTouchesInView = false`
+        /// and therefore sees it too. Without the guard, tapping into your own text to move the caret
+        /// would commit that text and open a fresh empty box on top of it.
+        ///
+        /// **Gated on pencil-only drawing** like the fill and the eyedropper, and for the same
+        /// reason stated there: placing text changes what the artist's next action does, and a
+        /// resting palm must not do that.
+        @objc func handleTextPress(_ recognizer: TouchTypePressRecognizer) {
+            guard recognizer.state == .began, let container = containerView else { return }
+            canvasManager.interactionBegan.send()
+            guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+            // container's bounds equal canvasSize, so `location(in:)` there is canvas-pixel space —
+            // the same mapping `handleFillPress` uses.
+            let canvasPoint = recognizer.location(in: container)
+            if canvasManager.textGestureActive,
+               let overlay = textOverlay, overlay.hitTest(canvasPoint, with: nil) != nil {
+                return
+            }
+            canvasManager.beginTextSession(at: canvasPoint)
+            guard canvasManager.textGestureActive else { return }
+            updateTextOverlay()
+            // After `updateTextOverlay`, which is what un-hides the editor: `becomeFirstResponder`
+            // on a hidden view is refused, and the refusal is silent — the box would appear with no
+            // keyboard and no caret, and the artist would have to tap it a second time.
+            textOverlay?.focusEditor()
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer, eyedropperTapRecognizer]
+            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer, eyedropperTapRecognizer, textTapRecognizer]
             if alwaysConcurrent.contains(where: { $0 === gestureRecognizer }) || alwaysConcurrent.contains(where: { $0 === otherGestureRecognizer }) {
                 return true
             }

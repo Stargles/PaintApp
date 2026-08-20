@@ -315,7 +315,10 @@ struct DrawingView: View {
         case .eraser:
             EraserSettingsPanel(canvasManager: canvasManager)
         case .color:
-            ColorPickerPanel(color: $canvasManager.brushColor)
+            // `activeEditColor`, not `brushColor`: while a text session is live this panel is that
+            // session's colour picker, which is what makes `TopToolbar.toggle`'s no-bake conditional
+            // mean anything. See `CanvasManager.activeEditColor`.
+            ColorPickerPanel(color: $canvasManager.activeEditColor)
         case .fill:
             FillSettingsPanel(canvasManager: canvasManager)
         case .text:

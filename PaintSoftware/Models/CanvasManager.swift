@@ -572,6 +572,11 @@ final class CanvasManager: ObservableObject {
         defer { canvasEditDepth -= 1 }
         commitInteractiveFill()
         commitInteractiveShape()
+        // Last in the list, because the text overlay draws above the shape overlay and committing
+        // last preserves what the user was looking at. `ADD_TEXT.md` §1 "The bake trigger is one
+        // line" — every existing caller of this method inherits the text bake with no per-tool
+        // retrofit, which is the whole reason the chokepoint exists.
+        commitInteractiveText()
     }
 
     /// `beginCanvasEdit()` plus settling a floating Move/Duplicate piece — for the points where the
@@ -1875,6 +1880,57 @@ final class CanvasManager: ObservableObject {
     var shapePreviewCache: (shape: ShapeGeometry, image: UIImage)?
     var shapePreviewTexture: RasterLayerTexture?
 
+    // MARK: - Text session state (the operations live in CanvasManager+Text.swift)
+    //
+    // Here rather than in the extension for the reason the two blocks above say: extensions cannot
+    // declare stored properties. `ADD_TEXT.md` §1 "the overlay is the editor; the model is the
+    // owner" — every mutation during a session lands in this draft tier, mirroring the smart-shape
+    // scalars directly above, and `commitInteractiveText()` is what moves it into the document.
+
+    /// True while a text session exists — a box is placed, whether or not the caret is in it.
+    /// Cleared only on commit or cancel. Main-thread only.
+    @Published var textGestureActive = false
+    /// True only while the box is being dragged. The text tool's counterpart to `shapeFingerDown`,
+    /// and the first arm of `finalizePendingGesturesForHistoryAction`'s three-way branch.
+    var textFingerDown = false
+    /// True while the on-canvas `UITextView` holds first responder. The arm fill and shape do not
+    /// have: undo mid-typing must not strand a floating editor over a baked bitmap, so this is what
+    /// tells `finalizePendingGesturesForHistoryAction` to resign focus before it commits.
+    var textIsFocused = false
+
+    /// The draft the panel's sliders and the overlay's keystrokes both write. `@Published` because,
+    /// unlike the shape scalars, a whole settings panel is bound straight to it.
+    @Published var textRecipe = TextRecipe()
+    /// Where the draft sits on the canvas. Not `@Published`: it changes on every frame of a box
+    /// drag, and the only view that reads it is the overlay, which the coordinator pushes to
+    /// directly. `objectWillChange.send()` covers the panel's needs.
+    var textFrame = TextFrame(origin: .zero, size: .zero)
+    /// Identify the target cel by ID, not index — the session outlives other edits that may shift
+    /// array positions before it commits (`shapeGestureLayerID`'s reasoning).
+    var textGestureLayerID: UUID?
+    var textGestureCelID: UUID?
+    /// What the font actually resolved to, and why it is not what was asked for. Recomputed on
+    /// every recipe change by `refreshTextFontResolution()`; the panel shows it. Nil while no
+    /// session is live.
+    var textFontSubstitution: FontSubstitution?
+
+    /// Installed by the on-canvas overlay so the model can drop the keyboard without knowing what a
+    /// first responder is. Nil whenever no overlay is mounted, which is every headless test.
+    ///
+    /// A closure rather than a delegate protocol because there is exactly one caller and exactly one
+    /// implementor, and a protocol for that pair is ceremony that hides the coupling instead of
+    /// naming it.
+    var textFocusResigner: (() -> Void)?
+
+    /// Installed by the same overlay. Asked *before* undo/redo does anything: returns true when the
+    /// caret is live and the keyboard's own undo stack consumed the action.
+    ///
+    /// This is `ADD_TEXT.md` §5.1 — "undo while you are typing undoes the typing" — and it is the
+    /// owner's decision, not an implementation convenience. Only once you tap away does undo remove
+    /// the whole text object. The alternative, undo always stepping through drawing history, throws
+    /// away typing corrections.
+    var textEditUndoHandler: ((_ isRedo: Bool) -> Bool)?
+
     /// What must happen when a cel's committed content changes without a live stroke driving it (a
     /// transient baking down, an undo/redo of one): refresh the layer-panel thumbnail and republish.
     ///
@@ -1889,6 +1945,11 @@ final class CanvasManager: ObservableObject {
     // MARK: - Undo / redo
 
     func undo() {
+        // Before everything, including the finalize below: with the caret live, undo belongs to the
+        // keyboard's own stack (`textEditUndoHandler`, and §5.1 of `ADD_TEXT.md` for why the owner
+        // chose that). Returning here is the whole of it — the drawing history is untouched, so the
+        // next undo after tapping away still finds the text object waiting on it.
+        if textEditUndoHandler?(false) == true { return }
         finalizePendingGesturesForHistoryAction()
         // `history.undo()` returns nil (and does nothing) on an empty stack — that is the "silent
         // when nothing happened" case `raise` must not be called for. `finalizePendingGesturesFor-
@@ -1902,6 +1963,8 @@ final class CanvasManager: ObservableObject {
     }
 
     func redo() {
+        // `undo()`'s twin — see the comment there.
+        if textEditUndoHandler?(true) == true { return }
         finalizePendingGesturesForHistoryAction()
         if let label = history.redo() {
             raise(.historyRedo(label))
@@ -1924,13 +1987,34 @@ final class CanvasManager: ObservableObject {
         } else if shapeGestureActive {
             commitInteractiveShape()
         }
+        // Text's own three-way branch (`ADD_TEXT.md` §1, "The bake trigger is one line"). The first
+        // two arms are the fill's and the shape's: a box under the finger is discarded, a
+        // lifted-but-adjustable one commits so the following undo has a real step to revert.
+        //
+        // The third is the case neither of them has. **Keyboard focused with no finger down resigns
+        // first responder and then commits**: undo mid-typing must not strand a floating editor over
+        // a baked bitmap, and must not silently throw away what was typed. It is reachable only when
+        // `textEditUndoHandler` above declined — i.e. the keyboard's own undo stack is empty — so an
+        // artist who undoes past the start of their typing gets the object itself back, which is
+        // exactly §5.1's "only once you tap away".
+        if textFingerDown {
+            cancelInteractiveText()
+        } else if textIsFocused {
+            textFocusResigner?()
+            commitInteractiveText()
+        } else if textGestureActive {
+            commitInteractiveText()
+        }
     }
 
     func refreshUndoRedoState() {
         // A lifted-but-not-yet-committed fill or shape is itself an undoable action (undo finalizes
         // then reverts it), so the Undo affordance must be live even when the committed stack is empty.
-        let newCanUndo = fillGestureActive || shapeGestureActive || history.canUndo
-        let newCanRedo = !fillGestureActive && !shapeGestureActive && history.canRedo
+        // A live text session joins the fill and the shape: it is an undoable action in its own
+        // right (undo finalizes it, then reverts it), so the affordance must be live even on an
+        // empty committed stack.
+        let newCanUndo = fillGestureActive || shapeGestureActive || textGestureActive || history.canUndo
+        let newCanRedo = !fillGestureActive && !shapeGestureActive && !textGestureActive && history.canRedo
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }
     }

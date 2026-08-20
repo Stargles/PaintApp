@@ -75,7 +75,10 @@ struct TopToolbar: View {
 
             Button(action: { toggle(.color) }) {
                 Circle()
-                    .fill(canvasManager.brushColor)
+                    // The text's colour while a session is live — see `CanvasManager.activeEditColor`.
+                    // A swatch showing the brush colour above a picker editing the text's would be
+                    // the worse half of the two to get wrong.
+                    .fill(canvasManager.activeEditColor)
                     .frame(width: 34, height: 34)
                     .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
             }
@@ -101,6 +104,19 @@ struct TopToolbar: View {
     }
 
     private func toggle(_ panel: ActivePanel) {
+        // **The colour panel, while a text session is live, is that session's own settings panel**,
+        // and so it follows `toggleSettingsPanel`'s rule instead of this one: baking on the way in
+        // would freeze the very text the artist opened it to recolour, which is the fill's
+        // "every slider in the panel becomes a no-op" with a larger stake. `ADD_TEXT.md` §1 calls
+        // this out as the one conditional the rule needs.
+        //
+        // One conditional rather than a `.color` arm inside `toggleSettingsPanel`, because the rule
+        // is about *this moment*, not about the panel: with no text session live, the colour button
+        // is the brush's and must bake a pending fill or shape exactly as it always has.
+        if panel == .color, canvasManager.textGestureActive {
+            $activePanel.toggleSettingsPanel(.color)
+            return
+        }
         // Switching to any other tool/panel commits an in-progress Move/Duplicate/shape/fill rather
         // than silently discarding or stranding it — Undo is the way to back out of a completed move,
         // matching Procreate (there's no separate "cancel transform").
