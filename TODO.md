@@ -26,13 +26,13 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 New this pass (owner, 2026-08-17):
 
-- [ ] **A performance pass, calibrated to 2048×1024 — Tier A is built; item 12 is built; Tiers B and
-      the rest of C are not.**
+- [ ] **A performance pass, calibrated to 2048×1024 — Tier A is built, and items 8, 10, 11 and 12
+      with it.**
       The owner asked for it directly: *"any performance enhancements that can be made to reduce
       memory, stop lagspikes, or increase fps?"* [PERFORMANCE.md](PERFORMANCE.md) is the fourteen-item
-      programme; **items 1–7 and 12 are now resolved** (see "Done this pass" for what that means item
-      by item). **This stays queued because six items remain**, and the two that matter most are the
-      instruments rather than the fixes:
+      programme; **items 1–8 and 10–12 are now resolved** (see "Done this pass" for what that means
+      item by item). **This stays queued because three items remain**, and the two that matter most
+      are the instruments rather than the fixes:
       - **Item 9(a)** — instrument project open. Still *the largest unmeasured quantity in the app*:
         nobody can say whether tapping a project costs 200 ms or 4 s. Item 2 gave it a spinner, which
         changed what the wait looks like and not how long it is.
@@ -61,16 +61,33 @@ Carried over:
       count**, not with area. Unmeasured at any resolution. Worth asking the owner whether it still
       feels like ~3 s now.
 
-- [ ] **17 fps drawing on a 4K canvas.** Diagnosed and **not** the compositor: one dab costs 53.8 ms on
-      a vector layer at 4096² against 4.0 ms on raster, because `StrokeCanvasView.refreshDisplay`'s
-      `.overlay` branch allocates a fresh canvas-sized bitmap per touch-move. `renderResolution` never
-      reaches that path, which is why the owner's 50% test changed nothing. Fix is to give the scratch
-      its own layer; wants its own branch. Numbers in BUGS.md.
-      **The owner confirmed (2026-08-18) that the 17 fps was measured at 4096×4096**, not at their
-      usual 2048×1024 — so the area model holds and the extrapolated ~10.2 ms/dab at their canvas
-      stands. [PERFORMANCE.md](PERFORMANCE.md) item 11.
+- [ ] **17 fps drawing on a 4K canvas — the fix is merged; the *report* is not closed.** The cost is
+      gone (see Done this pass), but every after-figure is the simulator and 17 fps is something the
+      owner measured on their iPad. **This stays until they draw on the 4096² canvas and say.** If it
+      still feels like 17 fps, the remaining cost is somewhere nobody has looked — start at
+      [PERFORMANCE.md](PERFORMANCE.md) items 4, 5 and 9(b), which are the other terms of that frame,
+      and treat the fix below as ruled out rather than as suspect.
+      *What would close it*: a Release build on their iPad — `deploy.sh` pulls `main`, so run its
+      steps from the worktree — and one sentence from them.
 
 ## Done this pass
+
+- **Performance, items 8 and 11 — merged 2026-08-20. The live vector stroke gets its own layer.**
+  `StrokeCanvasView.refreshDisplay` flattened the committed render and the in-progress stroke into a
+  fresh canvas-sized bitmap on **every touch-move** — a 64 MiB allocation and two full-canvas blits
+  per dab at 4096², to produce something Core Animation was going to composite anyway. It now hands
+  the live stroke to a sibling image view and lets Core Animation do it.
+  MEASURED per dab, simulator/CoreGraphics, machine 93.6% idle with nothing else running, before →
+  after: **8.0 → 2.2 ms** at 2048×1024, **16.1 → 2.5 ms** at 2048², **47.1 → 3.9 ms** at 4096². The
+  raster path costs 2.1 / 2.4 / 3.6 ms at those sizes, so drawing on a vector layer now costs what
+  drawing on a raster layer costs. Item 8 landed first, as its own commit: it added the owner's own
+  2048×1024 to the measurement, replacing a two-point fit that said ~10.2 ms with a reading of 8.0.
+  **This was the highest-risk item on the board** — `.replacement` (Mode 1) and `.none` (Modes 2/3)
+  were already one-operation paths where a regression shows up as an eraser that does nothing until
+  you lift, not as slow ink. Neither gained an operation, and the three roles are now pinned in the
+  fast tier by `VectorPreviewPlanLogicTests` instead of only by a 22-minute UI suite.
+  **It has not been seen on the owner's iPad** — see the entry still open in Queued, and
+  [PERFORMANCE.md](PERFORMANCE.md) item 11.
 
 - **Performance, Tier A — merged 2026-08-20. Six changes, one of them already there, and one
   sub-item declined on a measurement.** The owner's ask is not finished (Tiers B and C remain, above);

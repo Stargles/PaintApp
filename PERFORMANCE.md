@@ -22,11 +22,14 @@ overstated eightfold against the document that actually exists.
 Three headline issues shrink to a fraction of their reputation.
 
 **The "~19 fps ceiling" on vector layers is a 4K artifact.** [BUGS.md](BUGS.md) records 53.8 ms per
-live-stroke refresh at 4096² and 16.4 ms at 2048², both MEASURED on the owner's iPad 9 in Release
-(`PerfBaselineTests.swift:1834-1893`). Fitting `fixed + k·area` through those two points gives
-**~10.2 ms at 2048×1024** — about 98 fps in isolation, not 19 (INFERRED). That is still ~61% of a
-60 Hz frame budget, on the most latency-sensitive path in the app, so it is worth fixing. It is not
-the app's top bottleneck and it should not be the first thing anyone opens.
+live-stroke refresh at 4096² and 16.4 ms at 2048², both MEASURED on the owner's iPad 9 in Release.
+Fitting `fixed + k·area` through those two points gives **~10.2 ms at 2048×1024** — about 98 fps in
+isolation, not 19 (INFERRED). That is still ~61% of a 60 Hz frame budget, on the most
+latency-sensitive path in the app, so it is worth fixing. It is not the app's top bottleneck and it
+should not be the first thing anyone opens.
+*Fixed 2026-08-20 by item 11, and the fit is retired by item 8's third point — 8.0 ms measured where
+10.2 was extrapolated. The paragraph stands as written because it is the reasoning that ranked the
+work, and because the device figure for the fixed path has still not been taken.*
 
 **The "~3 s to leave to the gallery" is not the thumbnail composite.** That figure was taken against
 the full 4K canvas. At 2048×1024 the thumbnail's over-render extrapolates to tens of milliseconds
@@ -150,9 +153,14 @@ warm on Metal, 64.7 ms on CoreGraphics** (MEASURED, iPad 9, Release, `Compositor
 41.6 ms budget at 24 fps: it already misses. Only fires where `needsCompositorOnCanvas` is true; a
 flat stack stays on Core Animation and pays none of it.
 
-**6. Drawing on a vector layer feeling heavier than raster.** ~10.2 ms vs ~2.8 ms per touch-move at
-2048×1024 (INFERRED from the two MEASURED points in §1). A tax on the frame, not a cap on it — but it
-stacks with items 4 and 5 inside the same frame, and together they plausibly do blow 16.7 ms.
+**6. Drawing on a vector layer feeling heavier than raster. — FIXED 2026-08-20 (item 11), and the
+device has not confirmed it.** It was ~10.2 ms vs ~2.8 ms per touch-move at 2048×1024 (INFERRED from
+the two MEASURED points in §1); item 8 then measured the real thing at 8.0 ms, and item 11 took it to
+2.2 ms against the raster path's 2.1 ms — MEASURED, simulator/CoreGraphics, machine idle, table in
+item 11. The gap this entry is about is gone on the simulator at all three canvas sizes.
+**What is not established is the artist's experience of it.** This was one term of a frame, and items
+4, 5 and 9(b) are the others; whether the owner's 4096² document now draws at something other than 17
+fps is a question only their iPad answers, and it is open in §6.
 
 ---
 
@@ -339,15 +347,19 @@ reconciliation is still owed.
 
 ### Tier B — measure before building
 
-**8. Add a 2048×1024 case to the vector-vs-raster preview perf test.** One more call to the existing
-`costs(at:)` closure inside
-`testTheLayeredLiveStrokePreviewCostsWhatTheRasterPathCosts`
-(`PerfBaselineTests.swift:1834-1893`), which today measures 2048² and 4096² and nothing between.
-*Win*: none directly. It replaces the two-point linear fit that §1 and §2 both lean on with a real
-number.
-*Device-only*: the number itself must come from a Release run on the owner's iPad. A simulator figure
-is worthless here, and this repo's own history is explicit that the simulator misreports GPU cost by
-more than 10×.
+**8. Add a 2048×1024 case to the vector-vs-raster preview perf test. — SHIPPED 2026-08-20**, as its
+own commit ahead of item 11 so the baseline exists in history whatever happened to the risky half.
+One more call to `costs(at:)` inside `testTheLayeredLiveStrokePreviewCostsWhatTheRasterPathCosts`,
+which measured 2048² and 4096² and nothing between.
+*What it replaced*: the two-point linear fit `fixed + k·area` that §1 and §2 item 6 both leaned on,
+which predicted ~10.2 ms/dab at the owner's canvas. Measured: **8.0 ms** on the simulator, for the
+code as it stood before item 11. See item 11 for the table and for what the simulator is and is not
+worth on this particular path.
+*Still device-only, in one respect.* The original entry said a simulator figure was worthless here.
+That was too strong and item 11's before/after shows why — this path is CPU-side, and the simulator
+lands within 14% of the iPad 9 on it. What genuinely still needs the owner's hardware is the *frame
+rate* claim: whether 17 fps is now something else on their 4096² document. Nothing here can answer
+that, and no arithmetic over these numbers should be presented as if it had.
 
 **9. Instrument project open, then move its decode off `@MainActor`.** Staged, and the instrument
 comes first. (a) A `PerfBaselineTests` case that saves a realistic multi-cel document then times
@@ -423,23 +435,55 @@ scoping a fix once 9(b) is done and the eraser rewrite has settled, not before.
 
 ### Tier C — real, recorded, not urgent
 
-**11. Give the `.overlay` vector scratch its own layer.** The fix [BUGS.md](BUGS.md) sketches:
-separate layer, let Core Animation composite, deleting three of the four canvas-sized operations at
-`StrokeCanvasView.swift:304-314` (the committed render at `:304`, the fresh
-`UIGraphicsImageRenderer` allocation at `:311`, and both blits at `:312-313`).
-*Win*: ~10.2 ms → ~2.8 ms per touch-move at 2048×1024, ~7.4 ms of frame budget recovered (INFERRED).
-At 4096² it is 53.8 → ~4 ms (MEASURED baseline) and genuinely dramatic.
-*Why it is in Tier C and not lower*: the recalibration demoted this on the reasoning that its
-headline was 4K-inflated and nobody was feeling it. **Half of that is now wrong.** The owner's 17 fps
-report was taken at 4096×4096 (§6) — the exact canvas where this change is worth ~50 ms a dab. So
-somebody *was* feeling it, on their stress canvas. It stays out of Tier A because the blast radius
-has not changed, not because the win is imaginary.
-*Risk*: **highest on the board.** [BUGS.md](BUGS.md) calls this the most gesture-sensitive code in
-the app; `vectorScratchRole` has three modes that behave differently (`.replacement` at
-`StrokeCanvasView.swift:296-300` and `.none` are already one-op paths and must not regress), and
-correctness needs the full vector-eraser UI suite — 22 minutes, historically environmental-flaky (see
-[CLAUDE.md](CLAUDE.md) on triaging those).
-*Sequencing*: item 8 first, so the before/after is a number rather than a fit.
+**11. Give the `.overlay` vector scratch its own layer. — SHIPPED 2026-08-20** (`VectorPreviewPlan`,
+`StrokeCanvasView.scratchView`). The `.overlay` branch flattened the committed render and the live
+scratch into a fresh canvas-sized bitmap on every touch-move; `scratchView` is a sibling
+`UIImageView` above the base one, and Core Animation composites the two — which it was doing to the
+result anyway. Three of the four canvas-sized operations are gone: the allocation and both blits.
+
+*Win — MEASURED, simulator/CoreGraphics, per dab, before → after.* Taken 2026-08-20 on this Mac with
+**93.6% idle CPU and no other `xcodebuild` running**, which is stated because three sessions were
+working this repo that night and CLAUDE.md records that contention here does not slow a suite down so
+much as make it **return wrong answers**. Both shapes are measured **in the same run seconds apart**
+rather than across two commits, so the ratio is immune to the machine drifting between them.
+
+| canvas | raster path | `.overlay` before | `.overlay` after | speedup |
+|---|---|---|---|---|
+| 2048×1024 (the owner's) | 2.1 ms | 8.0 ms | **2.2 ms** | 3.6× |
+| 2048×2048 | 2.4 ms | 16.1 ms | **2.5 ms** | 6.6× |
+| 4096×4096 (the 17 fps report) | 3.6 ms | 47.1 ms | **3.9 ms** | 11.9× |
+
+The after column *is* the raster column, within 5%, which was the whole claim: what is left is
+`scratch.renderToUIImage()` and a memo hit. This path's own fps ceiling at 4096² goes **21 → 253**.
+
+*Two things this does not say.* It is not a device figure — see §5 and the still-open question in §6;
+a Release run on the owner's iPad is what closes it, and it is the one thing this item still owes.
+And it is not a frame rate: it is one term of a frame, and items 4, 5 and 9(b) are the others.
+
+*What the simulator turned out to be worth here, which is more than §5 would lead you to expect.* The
+before column is measurable against [BUGS.md](BUGS.md)'s device numbers, because it is the same code
+path: 47.1 ms simulator against **53.8 ms** device at 4096², and 16.1 against **16.4** at 2048². So
+on *this* path the simulator lands within 14% and 2% of the iPad 9 — because the cost is CPU-side (an
+allocation and two blits) with no GPU in it, which is exactly the condition §5's "the simulator
+misreports GPU cost by more than 10×" does not cover. Do not generalise it: it is a fact about a
+CPU-bound path, not a new device factor, and §1's ~1.3× still governs compositing work.
+
+*And it retires the fit.* §1 and §2 item 6 extrapolated ~10.2 ms/dab at 2048×1024 from two points.
+Item 8's third point measures the same shape at **8.0 ms** on the simulator. The fit was in the right
+place and slightly high; the paragraphs that leaned on it are left standing rather than rewritten,
+because the number they used is now history either way.
+
+*Risk, and how it was discharged.* This was the highest-risk item on the board and the reasoning
+stands: [BUGS.md](BUGS.md) calls this the most gesture-sensitive code in the app, and `.replacement`
+(Mode 1) and `.none` (Modes 2/3) were **already** one-operation paths where a regression is not slow
+ink but an eraser that shows nothing until lift. Neither gains an operation — both take an
+identity-guarded `showScratch(nil)`, a pointer comparison. Three things pin it: `VectorPreviewPlan`
+has **no case that can express the old composite**, so reintroducing it means changing the type;
+`VectorPreviewPlanLogicTests` walks all twelve (role × scratch × interpolation) inputs in the fast
+tier; and the full UI suite ran clean, with `VectorEraserUITests` asserting `.replacement` publishes
+more than one live frame, `.none` publishes zero, and — new — `.overlay` publishes more than one, the
+only observable difference between a scratch layer that follows the pen and one stuck on touch-down.
+*Sequencing*: item 8 landed first, as its own commit, so the baseline exists in history independently.
 
 **12. Purge the compositor and flatten caches on backgrounding, not only on a memory warning. — SHIPPED, 2026-08-20.**
 `MetalCompositor.swift`'s own doc comment names the exact scenario — caches "sit at their
@@ -665,9 +709,15 @@ not change that — it changed what the wait looks like, not how long it is.
 order-of-magnitude reasoning. *The measurement*: a `PerfBaselineTests` case timing `writePackage`
 (`ProjectStore.swift:363-471`) on a realistic multi-cel document, split per cel.
 
-**What is the true per-touch-move cost at 2048×1024?** §1, §2 item 6 and item 11's win all lean on
-one extrapolated line through two MEASURED points. *The measurement*: item 8, plus a Release run on
-the owner's iPad. Simulator numbers are worthless here.
+**What is the true per-touch-move cost at 2048×1024? — ANSWERED on the simulator 2026-08-20 (item 8),
+and the question that replaced it is better.** The fit said ~10.2 ms; the reading is 8.0 ms before
+item 11 and 2.2 ms after, simulator/CoreGraphics. The "simulator numbers are worthless here" this
+entry used to carry was wrong for this path and item 11 says why.
+**The live question is now the owner's, not a run's: does their 4096² document still draw at 17 fps?**
+Item 11 deleted ~43 ms of per-dab CPU work at that size on the simulator, and 53.8 ms of it was
+MEASURED on their own iPad in Release. If the number has not moved on the device, the remaining cost
+is somewhere this document has not looked. *The measurement*: they draw on the stress canvas and say
+— and, for a figure rather than an impression, a Release build of this branch on that iPad.
 
 **Does Core Animation actually pay for the non-native pixel format, and where?** Whether the mismatch
 is a background IOSurface conversion, a lazy decode at commit-prepare on the calling thread, or

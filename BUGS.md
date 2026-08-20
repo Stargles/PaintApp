@@ -327,39 +327,42 @@ behaviour is real. Likely fix: make `launchIntoEditor` scroll the size picker or
 keyboard rather than tapping a button that can land off-screen. Until then, **device testing means
 the logic tier only**, and the UI suites stay on the simulator.
 
-## Drawing on a vector layer at 4K is capped at ~19 fps by the live stroke preview (2026-08-16)
+## Drawing on a vector layer at 4K was capped at ~19 fps by the live stroke preview — FIXED 2026-08-20
 
-**Measured on the owner's iPad 9, Release** (`PerfBaselineTests.testTheLayeredLiveStrokePreviewCostsWhatTheRasterPathCosts`):
-one dab costs **53.8 ms on a vector layer at 4096²** against 4.0 ms on a raster layer — a ceiling of
-**19 fps** before anything else in the frame, against 250 fps for raster. At 2048² it is 16.4 ms
-against 3.0 ms.
+**Kept rather than deleted, and only until the owner has drawn on it.** This file is open issues
+only, and the defect is closed on the simulator. What is not closed is the report it came from: the
+owner said *17 fps*, and nobody has watched their iPad since the fix. The entry stays as the record
+of what to compare against; delete it when they say the canvas draws.
 
-**The owner reports 17 fps, and that report was taken at 4096×4096** — confirmed by them on
-2026-08-18, and worth pinning here because this entry did not say so and the omission cost real
-work. It matches the measured ceiling on that canvas, so there is nothing left to explain: fitting
-`fixed + k·area` through the two points above gives ~10.2 ms/dab at the owner's usual 2048×1024, and
-the area model holds. See [PERFORMANCE.md](PERFORMANCE.md) §1 — a figure without its canvas is not a
-figure in this repo.
+**What it was, MEASURED on the owner's iPad 9 in Release** (`PerfBaselineTests`, now
+`testTheLayeredLiveStrokePreviewCostsWhatTheRasterPathCosts`): one dab cost **53.8 ms on a vector
+layer at 4096²** against 4.0 ms on a raster layer — a ceiling of **19 fps** before anything else in
+the frame, against 250 fps for raster. At 2048² it was 16.4 ms against 3.0 ms. The owner's 17 fps
+report was taken at 4096×4096, confirmed by them 2026-08-18.
 
-`StrokeCanvasView.refreshDisplay`'s `.overlay` branch runs once per touch-move and does four
-canvas-sized things where the raster path does one: it allocates a **fresh** canvas-sized
-`UIGraphicsImageRenderer` bitmap, draws the committed vector render into it, renders the live scratch,
-and draws that over the top. At 4096² the allocation alone is 64 MiB, per dab.
+`StrokeCanvasView.refreshDisplay`'s `.overlay` branch ran once per touch-move and did four
+canvas-sized things where the raster path does one: it allocated a **fresh** canvas-sized
+`UIGraphicsImageRenderer` bitmap, drew the committed vector render into it, rendered the live scratch,
+and drew that over the top. At 4096² the allocation alone is 64 MiB, per dab.
 
-**This is not the compositor and it is not this branch.** No composite runs during a dab —
-`makeSandwichKey` freezes the active layer's content version for the duration of a stroke precisely so
-the compositor stays off the drawing path — and `refreshDisplay` predates the Metal work. The owner's
-own experiment proves it from the other side: halving `renderResolution` cuts a sandwich rebuild from
-40.6 ms to 13.1 ms on that device and **changed the frame rate not at all**, because
-`RenderResolution` is applied in `makeSandwichRequests` and reaches nothing on this path.
+**The fix, as shipped.** `StrokeCanvasView.scratchView` is a sibling `UIImageView` directly above the
+base one, so Core Animation composites the live stroke over the committed render — which it was doing
+to the flattened result anyway. The allocation and both blits are gone; what is left is
+`scratch.renderToUIImage()`, the raster path's own cost. The decision of what goes in which slot is
+`VectorPreviewPlan`, extracted so the three `vectorScratchRole` behaviours can be asserted in the
+fast tier rather than only by a 22-minute UI suite — and the type has **no case that can express the
+old composite**, which is the guard against it coming back.
 
-**The fix, and it belongs in its own branch.** Stop compositing the two into one bitmap: give the
-scratch its own `UIImageView`/`CALayer` over the committed one and let Core Animation composite them,
-which it is doing anyway. That deletes the per-dab allocation and both blits, leaving only
-`scratch.renderToUIImage()` — the raster path's cost. It is a change to the most gesture-sensitive
-code in the app (`vectorScratchRole` has three modes and `.replacement` and `.none` behave
-differently), so it wants its own branch and its own pass through the vector-eraser UI suites, not a
-rider on a compositor-memory fix.
+MEASURED per dab, simulator/CoreGraphics, machine 93.6% idle with no other `xcodebuild` running,
+before → after: **8.0 → 2.2 ms** at 2048×1024, **16.1 → 2.5 ms** at 2048², **47.1 → 3.9 ms** at
+4096². The raster path costs 2.1 / 2.4 / 3.6 ms at those sizes, so the vector preview now costs what
+raster costs. Full table and provenance in [PERFORMANCE.md](PERFORMANCE.md) item 11.
+
+**What remains unknown, and it is the whole reason this is still here.** Every after-figure is the
+simulator. The before-figures happen to agree with the device closely on this path (47.1 vs 53.8 at
+4096²) because the cost is CPU-side, but *frame rate* is not one cost — it is items 4, 5 and 9(b)
+too. **Needs the owner's iPad**: a Release build of this on their 4096² document, and their answer to
+"does it still feel like 17 fps?" If it does, the remaining cost is somewhere nobody has looked yet.
 
 ## The Metal composite hands Core Animation a non-native pixel format (2026-08-16)
 
