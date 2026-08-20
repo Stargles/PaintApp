@@ -16,6 +16,46 @@ enum PixelOps {
 
     static let deviceRGBColorSpace = CGColorSpaceCreateDeviceRGB()
 
+    /// `transform` applied to `0..<count` across every core, results in index order.
+    ///
+    /// **The one fan-out primitive for the two per-cel walks PERFORMANCE.md item 9 is about**, which
+    /// are the same walk: `ProjectStore.load` decodes one cel per iteration, and `renderSources`
+    /// rasterizes one. Both were serial, both are embarrassingly parallel — no iteration reads what
+    /// another writes — and the second was MEASURED at 78.2 ms on the main actor for six layers at
+    /// 2048×1024 on a playback tick, which is the largest main-thread term on that tick.
+    ///
+    /// **What this does and does not buy, stated plainly.** It shortens wall clock by spreading the
+    /// work over cores. It does **not** move the work off the calling thread — `concurrentPerform`
+    /// blocks its caller and in fact recruits it as one of the workers, so a main-actor caller is
+    /// still blocked, for a fraction of what it was. Getting off the main thread entirely is a
+    /// separate change with a separate risk (`ProjectStore.loadInBackground`), and conflating the two
+    /// would have made this primitive look like it did something it does not.
+    ///
+    /// **Every tier the two callers touch is already documented as reachable off-main**, which is why
+    /// this is safe rather than merely plausible: `RasterLayerTexture` serialises on its own `NSLock`,
+    /// `VectorCanvas.render()` says in its own header that a background queue reaches it, the
+    /// `rasterizeCache` is lock-guarded, and `Compositor.composite` has run `UIGraphicsImageRenderer`
+    /// on `sandwichQueue` since the sandwich landed. What this adds is concurrency *between* cels, and
+    /// two different cels share no mutable state at all.
+    ///
+    /// Below two iterations there is nothing to distribute and the dispatch is pure overhead, so the
+    /// call runs inline — which also keeps a one-layer document exactly as it was.
+    static func parallelMap<T>(_ count: Int, _ transform: (Int) -> T) -> [T] {
+        guard count > 1 else { return count == 1 ? [transform(0)] : [] }
+        let buffer = UnsafeMutablePointer<T>.allocate(capacity: count)
+        // An autorelease pool per iteration, for `PerfBaselineTests.stamp`'s reason one tier up: each
+        // of these produces a canvas-sized `UIImage` (8 MiB at 2048×1024), and without a pool per
+        // worker thread they accumulate until the enclosing pool drains — which for a 32-cel document
+        // is a quarter of a gigabyte of temporaries that the serial version never held at once.
+        DispatchQueue.concurrentPerform(iterations: count) { index in
+            autoreleasepool { (buffer + index).initialize(to: transform(index)) }
+        }
+        let results = Array(UnsafeBufferPointer(start: buffer, count: count))
+        buffer.deinitialize(count: count)
+        buffer.deallocate()
+        return results
+    }
+
     /// A genuinely independent copy of `rect` out of `image`, in UIKit top-left coordinates.
     ///
     /// **Not** `CGImage.cropping(to:)`: that returns an image which keeps a reference to the original

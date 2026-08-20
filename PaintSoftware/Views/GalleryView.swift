@@ -117,24 +117,25 @@ struct GalleryView: View {
 
     /// Opens a project, having first put a spinner on the tile.
     ///
-    /// **This does not make the load faster, and it is not meant to.** `ProjectStore.load` is
-    /// `@MainActor` and serial, and moving its per-cel decode fan-out off the main thread is a
-    /// separate, larger change (PERFORMANCE.md items 8 and 9). What this removes is the *reading*: an
-    /// app that goes dead on the first tap of a session, with no indication it is doing anything, is
-    /// indistinguishable from one that has crashed, and it was listed on its own precisely so it did
-    /// not have to wait for the work that shortens the wait.
+    /// **The spinner came first and the speed came second, in that order and on purpose.** An app
+    /// that goes dead on the first tap of a session, with no indication it is doing anything, is
+    /// indistinguishable from one that has crashed; that was fixed on its own so it did not have to
+    /// wait for the work that shortens the wait. `loadInBackground` is that work (PERFORMANCE.md item
+    /// 9(b)): the per-cel decode now runs on `ProjectStore.loadQueue`, spread over cores, so the main
+    /// thread is free to *animate* the spinner rather than merely to have drawn it. What is still on
+    /// the main actor is the `CanvasManager` assembly and the thumbnail walk.
     ///
-    /// **The yield is the whole mechanism, so it gets a sentence.** Setting `openState` marks the
-    /// view dirty; SwiftUI renders that at the end of the current run-loop turn. `await Task.yield()`
-    /// resumes on the main actor *after* that turn, so the spinner is on screen and committed before
-    /// the load takes the main thread away. Calling `load` synchronously here — or awaiting nothing —
-    /// would set the state and block in the same turn, and the artist would see exactly what they see
-    /// today: nothing.
+    /// **The yield stays, and it is still load-bearing.** Setting `openState` marks the view dirty;
+    /// SwiftUI renders that at the end of the current run-loop turn. `await Task.yield()` resumes on
+    /// the main actor *after* that turn, so the spinner is on screen and committed before anything
+    /// else happens. `loadInBackground` suspends immediately after its manifest read, which would
+    /// usually be enough — but "usually" is not a guarantee about when a suspension point is reached,
+    /// and one line is cheaper than depending on one.
     private func open(_ project: ProjectSummary) {
         guard openState.begin(project.id) else { return }
         Task { @MainActor in
             await Task.yield()
-            let manager = ProjectStore.load(from: project.url)
+            let manager = await ProjectStore.loadInBackground(from: project.url)
             // Unconditional, and before the screen switch: a package that fails to decode returns nil
             // and leaves the artist in the gallery, which must not be a gallery stuck behind a
             // spinner. See `GalleryOpenState`.

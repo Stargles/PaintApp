@@ -558,6 +558,12 @@ enum ProjectStore {
         /// calls rather than a millisecond about a machine, which is the more durable half of this
         /// instrument — see `CompositeProbe` for the same reasoning one subsystem over.
         var thumbnailRegenerations: Int
+        /// Whether the per-cel decode fan-out started on the main thread. False is what
+        /// `loadInBackground` is *for*, and true is what `load(from:)` promises its synchronous
+        /// callers — so a test can assert the difference instead of trusting a doc comment. Item
+        /// 9(b) is the kind of change that would go on passing every functional test if it silently
+        /// stopped happening; this is the flag that would not.
+        var decodedOnMainThread: Bool
 
         /// Milliseconds per cel — the figure that scales to a document of another size, and the one
         /// worth quoting.
@@ -571,11 +577,202 @@ enum ProjectStore {
     /// `PerfBaselineTests`; nothing in the app reads it, and nothing branches on it.
     @MainActor private(set) static var lastLoadProfile: LoadProfile?
 
+    /// Opens the package at `url`, blocking the caller.
+    ///
+    /// **The decode fan-out inside it is parallel as of item 9(b)** — see `decodeCels` — but this
+    /// entry point still runs it on the calling thread, because `concurrentPerform` recruits its
+    /// caller as a worker rather than releasing it. That is right for the twenty-odd tests and the
+    /// one-shot paths that call this and then immediately read the result. The gallery wants
+    /// `loadInBackground(from:)` instead, which is the same load with the fan-out on a queue of its
+    /// own so the main thread is free to draw the spinner it was given on 2026-08-20.
     @MainActor
     static func load(from url: URL) -> CanvasManager? {
         let loadStarted = CFAbsoluteTimeGetCurrent()
         guard let manifest = loadManifest(at: url) else { return nil }
+        let canvasSize = CGSize(width: manifest.canvasWidth, height: manifest.canvasHeight)
+        let decoded = decodeCels(manifest: manifest, projectURL: url, canvasSize: canvasSize)
+        return assemble(manifest: manifest, decoded: decoded, url: url, startedAt: loadStarted)
+    }
 
+    /// The same open with the per-cel decode on `loadQueue` instead of on the main thread — the
+    /// gallery's path, and item 9(b).
+    ///
+    /// **What actually moves, and what deliberately does not.** The decode is the half that touches
+    /// nothing shared: a `CelManifest` in, a `Cel` out, per cel, reading files this project owns and
+    /// building objects nobody else has a reference to yet. That is now off main *and* spread over
+    /// cores. Everything after it — the `CanvasManager`, its `@Published` layers, the thumbnails —
+    /// stays on the main actor, because that state is what SwiftUI observes and moving it would be a
+    /// change to the app's isolation model rather than to a load.
+    ///
+    /// **A wrong answer here is loud, which is the property that made it worth doing.** If a decode
+    /// were not in fact independent, the failure is a cel with the wrong pixels or none — a blank or
+    /// scrambled drawing the artist sees the instant the project opens — not a subtly slower app. The
+    /// assembly order is preserved explicitly (see `decodeCels`) rather than left to completion order,
+    /// so "the layers came back shuffled" is not among the ways it can go wrong.
+    ///
+    /// `loadManifest` stays on the calling side: it is one small JSON read, and hopping a queue for it
+    /// would cost more than it saves.
+    static func loadInBackground(from url: URL) async -> CanvasManager? {
+        let loadStarted = CFAbsoluteTimeGetCurrent()
+        guard let manifest = loadManifest(at: url) else { return nil }
+        let canvasSize = CGSize(width: manifest.canvasWidth, height: manifest.canvasHeight)
+        let decoded: Transfer<DecodedCels> = await withCheckedContinuation { continuation in
+            loadQueue.async {
+                continuation.resume(returning: Transfer(decodeCels(manifest: manifest, projectURL: url,
+                                                                   canvasSize: canvasSize)))
+            }
+        }
+        return await MainActor.run {
+            assemble(manifest: manifest, decoded: decoded.value, url: url, startedAt: loadStarted)
+        }
+    }
+
+    /// Hands one value from the queue that made it to the actor that will own it.
+    ///
+    /// `Cel` holds `RasterLayerTexture` and `UIImage`, neither of which is `Sendable`, and neither
+    /// should be: they are mutable buffers whose thread-safety is their owners' business. What the
+    /// compiler cannot see is that these particular ones are *newly built and unreferenced* — the
+    /// decode is the only thing that has ever touched them, it has finished, and it keeps nothing. So
+    /// this is a transfer of ownership rather than sharing, which is exactly what the annotation
+    /// claims and exactly as much as it claims.
+    private struct Transfer<Value>: @unchecked Sendable {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+
+    /// Serialises nothing and owns nothing; it exists so `loadInBackground` has a named place to run
+    /// that is not the main thread and not a global queue whose QoS is somebody else's. Concurrent
+    /// rather than serial because `decodeCels` fans out with `concurrentPerform` on whatever thread it
+    /// lands on, and a serial queue would be a needless funnel in front of that.
+    private static let loadQueue = DispatchQueue(label: "com.paintapp.ProjectStore.load",
+                                                 qos: .userInitiated, attributes: .concurrent)
+
+    /// Every cel in the document, decoded in parallel and regrouped by layer in manifest order.
+    ///
+    /// **Flattened across the whole tree rather than run per layer**, which is the difference between
+    /// parallelising and appearing to: an animator's document is often a handful of layers with many
+    /// cels each, and a per-layer fan-out over six layers leaves most of the machine idle while the
+    /// longest layer finishes. Flattened, the unit of work is one cel and the tree's shape stops
+    /// mattering.
+    ///
+    /// **Order is reconstructed from the job list, not from completion order.** `parallelMap` returns
+    /// results in index order, and the regrouping walks that array once appending in order, so each
+    /// layer's cels come back exactly as the manifest listed them. Cel order is not cosmetic — it is
+    /// what `activeCelIndex` binary-searches and what `addCel` maintains with an explicit sort — so
+    /// this is the one property of the change that would be quiet if it were wrong, and it is
+    /// therefore the one that is arranged rather than assumed.
+    private static func decodeCels(manifest: ProjectManifest, projectURL: URL, canvasSize: CGSize) -> DecodedCels {
+        // Read before the fan-out, because `concurrentPerform` recruits its caller as one of the
+        // workers: asking inside an iteration would sometimes answer for the caller's thread and
+        // sometimes for a pool thread, and the question is about the caller.
+        let startedOnMainThread = Thread.isMainThread
+        let imagesDir = projectURL.appendingPathComponent("images", isDirectory: true)
+        let jobs: [(layerIndex: Int, cel: CelManifest, kind: LayerKind)] =
+            manifest.layers.enumerated().flatMap { layerIndex, layerManifest in
+                layerManifest.cels.map { (layerIndex, $0, layerManifest.kind) }
+            }
+        let decoded = PixelOps.parallelMap(jobs.count) { index in
+            decodeCel(jobs[index].cel, layerKind: jobs[index].kind,
+                      imagesDir: imagesDir, canvasSize: canvasSize)
+        }
+        var celsByLayer = [[Cel]](repeating: [], count: manifest.layers.count)
+        for (index, cel) in decoded.enumerated() {
+            celsByLayer[jobs[index].layerIndex].append(cel)
+        }
+        return DecodedCels(celsByLayer: celsByLayer, startedOnMainThread: startedOnMainThread)
+    }
+
+    /// What `decodeCels` hands back: the cels, and which thread asked for them.
+    private struct DecodedCels {
+        let celsByLayer: [[Cel]]
+        let startedOnMainThread: Bool
+    }
+
+    /// One cel's pixels and geometry, off any particular thread.
+    ///
+    /// Reads files and builds objects; touches no `CanvasManager`, no `@Published` state and nothing
+    /// another iteration can see. That is what makes `decodeCels` safe to fan out, and it is why this
+    /// is a free function over a manifest entry rather than a method on anything.
+    private static func decodeCel(_ celManifest: CelManifest, layerKind: LayerKind,
+                                  imagesDir: URL, canvasSize: CGSize) -> Cel {
+        let rasterURL = imagesDir.appendingPathComponent(celManifest.rasterFileName)
+        let raster = UIImage(contentsOfFile: rasterURL.path).map { RasterLayerTexture.load(from: $0, size: canvasSize) }
+            ?? .empty(size: canvasSize)
+        var fillImage: UIImage?
+        if let fillFileName = celManifest.fillImageFileName {
+            fillImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fillFileName).path)
+        }
+        var bakedImage: UIImage?
+        if let bakedFileName = celManifest.bakedImageFileName {
+            bakedImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(bakedFileName).path)
+        }
+
+        // Vector content: decode the JSON (the ordered display list + image refs + transform)
+        // and reload each placed image's PNG. A `.vector` layer with no saved payload (never
+        // drawn) still gets an empty VectorCanvas so it stays a working vector layer.
+        //
+        // The list is restored in its saved order, which is what preserves z-position between
+        // strokes, fills, images and erase elements. A legacy payload that predates the display
+        // list has no order to restore, so `VectorCanvasData.init(from:)` reconstructs the one
+        // the old renderer used (fills, then images, then strokes) while decoding.
+        //
+        // **Three outcomes, kept apart deliberately**, because collapsing them into one `try?`
+        // chain is exactly what made this a silent data-loss path. No file (nothing was saved);
+        // a file that will not parse *as a payload* (unsalvageable, and loud); and a file that
+        // parses with some entries unreadable — which now costs those entries alone, because
+        // `VectorCanvasData` decodes element by element. An unrecognised `kind` written by a
+        // newer build therefore costs one element rather than every stroke, fill and image on
+        // the cel, which is the same reasoning the interpolation recipe below already applies.
+        var vector: VectorCanvas?
+        if let vectorFileName = celManifest.vectorFileName {
+            let vectorURL = imagesDir.appendingPathComponent(vectorFileName)
+            if let data = try? Data(contentsOf: vectorURL) {
+                do {
+                    let payload = try JSONDecoder().decode(VectorCanvasData.self, from: data)
+                    let elements = payload.elements { ref in
+                        UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path)
+                    }
+                    vector = VectorCanvas(size: canvasSize, elements: elements, transform: payload.affineTransform)
+                    report(payload.decodeReport, cel: celManifest.id, file: vectorFileName)
+                } catch {
+                    log.error("""
+                        Vector payload \(vectorFileName, privacy: .public) for cel \
+                        \(celManifest.id.uuidString, privacy: .public) is not readable as a payload — \
+                        the cel loads empty: \(String(describing: error), privacy: .public)
+                        """)
+                }
+            } else {
+                log.error("""
+                    Vector payload \(vectorFileName, privacy: .public) for cel \
+                    \(celManifest.id.uuidString, privacy: .public) is missing or unreadable on disk — \
+                    the cel loads empty
+                    """)
+            }
+        }
+        if vector == nil, layerKind == .vector {
+            vector = .empty(size: canvasSize)
+        }
+
+        // The interpolation recipe. A cel whose recipe file is missing or unreadable loads as
+        // an ordinary cel rather than failing the whole project: the recipe *derives*
+        // content, so losing it costs the link, not the drawing.
+        var interpolation: InterpolationRecipe?
+        if let interpolationFileName = celManifest.interpolationFileName,
+           let data = try? Data(contentsOf: imagesDir.appendingPathComponent(interpolationFileName)) {
+            interpolation = try? JSONDecoder().decode(InterpolationRecipe.self, from: data)
+        }
+
+        return Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
+                   raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector,
+                   interpolation: interpolation)
+    }
+
+    /// The main-actor half: everything that touches `@Published` state, given cels somebody else
+    /// already decoded.
+    @MainActor
+    private static func assemble(manifest: ProjectManifest, decoded: DecodedCels,
+                                 url: URL, startedAt loadStarted: CFAbsoluteTime) -> CanvasManager {
+        let celsByLayer = decoded.celsByLayer
         let manager = CanvasManager()
         manager.projectID = manifest.id
         manager.projectName = manifest.name
@@ -625,84 +822,9 @@ enum ProjectStore {
             return ViewPreset(id: vp.id, name: vp.name, layerVisibility: vis, folderVisibility: folderVis)
         }
 
-        let imagesDir = url.appendingPathComponent("images", isDirectory: true)
-        let canvasSize = manager.canvasSize ?? CGSize(width: 1, height: 1)
-
         var layers: [Layer] = []
-        for layerManifest in manifest.layers {
-            var cels: [Cel] = []
-            for celManifest in layerManifest.cels {
-                let rasterURL = imagesDir.appendingPathComponent(celManifest.rasterFileName)
-                let raster = UIImage(contentsOfFile: rasterURL.path).map { RasterLayerTexture.load(from: $0, size: canvasSize) }
-                    ?? .empty(size: canvasSize)
-                var fillImage: UIImage?
-                if let fillFileName = celManifest.fillImageFileName {
-                    fillImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fillFileName).path)
-                }
-                var bakedImage: UIImage?
-                if let bakedFileName = celManifest.bakedImageFileName {
-                    bakedImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(bakedFileName).path)
-                }
-
-                // Vector content: decode the JSON (the ordered display list + image refs + transform)
-                // and reload each placed image's PNG. A `.vector` layer with no saved payload (never
-                // drawn) still gets an empty VectorCanvas so it stays a working vector layer.
-                //
-                // The list is restored in its saved order, which is what preserves z-position between
-                // strokes, fills, images and erase elements. A legacy payload that predates the display
-                // list has no order to restore, so `VectorCanvasData.init(from:)` reconstructs the one
-                // the old renderer used (fills, then images, then strokes) while decoding.
-                //
-                // **Three outcomes, kept apart deliberately**, because collapsing them into one `try?`
-                // chain is exactly what made this a silent data-loss path. No file (nothing was saved);
-                // a file that will not parse *as a payload* (unsalvageable, and loud); and a file that
-                // parses with some entries unreadable — which now costs those entries alone, because
-                // `VectorCanvasData` decodes element by element. An unrecognised `kind` written by a
-                // newer build therefore costs one element rather than every stroke, fill and image on
-                // the cel, which is the same reasoning the interpolation recipe below already applies.
-                var vector: VectorCanvas?
-                if let vectorFileName = celManifest.vectorFileName {
-                    let vectorURL = imagesDir.appendingPathComponent(vectorFileName)
-                    if let data = try? Data(contentsOf: vectorURL) {
-                        do {
-                            let payload = try JSONDecoder().decode(VectorCanvasData.self, from: data)
-                            let elements = payload.elements { ref in
-                                UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path)
-                            }
-                            vector = VectorCanvas(size: canvasSize, elements: elements, transform: payload.affineTransform)
-                            report(payload.decodeReport, cel: celManifest.id, file: vectorFileName)
-                        } catch {
-                            log.error("""
-                                Vector payload \(vectorFileName, privacy: .public) for cel \
-                                \(celManifest.id.uuidString, privacy: .public) is not readable as a payload — \
-                                the cel loads empty: \(String(describing: error), privacy: .public)
-                                """)
-                        }
-                    } else {
-                        log.error("""
-                            Vector payload \(vectorFileName, privacy: .public) for cel \
-                            \(celManifest.id.uuidString, privacy: .public) is missing or unreadable on disk — \
-                            the cel loads empty
-                            """)
-                    }
-                }
-                if vector == nil, layerManifest.kind == .vector {
-                    vector = .empty(size: canvasSize)
-                }
-
-                // The interpolation recipe. A cel whose recipe file is missing or unreadable loads as
-                // an ordinary cel rather than failing the whole project: the recipe *derives*
-                // content, so losing it costs the link, not the drawing.
-                var interpolation: InterpolationRecipe?
-                if let interpolationFileName = celManifest.interpolationFileName,
-                   let data = try? Data(contentsOf: imagesDir.appendingPathComponent(interpolationFileName)) {
-                    interpolation = try? JSONDecoder().decode(InterpolationRecipe.self, from: data)
-                }
-
-                cels.append(Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
-                                 raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector,
-                                 interpolation: interpolation))
-            }
+        for (layerIndex, layerManifest) in manifest.layers.enumerated() {
+            let cels = celsByLayer[layerIndex]
 
             let parentID = layerManifest.parentFolderID.flatMap { UUID(uuidString: $0) }
             layers.append(Layer(
@@ -734,7 +856,8 @@ enum ProjectStore {
             decodeSeconds: decodeFinished - loadStarted,
             thumbnailSeconds: loadFinished - decodeFinished,
             totalSeconds: loadFinished - loadStarted,
-            thumbnailRegenerations: manager.thumbnailRegenerationCount)
+            thumbnailRegenerations: manager.thumbnailRegenerationCount,
+            decodedOnMainThread: decoded.startedOnMainThread)
         return manager
     }
 

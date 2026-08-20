@@ -557,14 +557,34 @@ extension CanvasManager {
     /// second copy of the elision rule is a second thing to update — which phase 6 proved by
     /// changing it: `alsoIncluding` is §6.6's "a mask ignores its source's visibility", and a hidden
     /// layer that clips something has to be rasterized after all.
+    /// **Two passes as of PERFORMANCE.md item 9(b), and the split is the whole change.** Pass 1 asks
+    /// the model which layers contribute and from which cel — `@Published` reads, no pixels. Pass 2
+    /// rasterizes the survivors across every core via `PixelOps.parallelMap`, because two different
+    /// cels share no mutable state and this was the largest main-thread term on a playback tick:
+    /// **78.2 ms** for six layers at 2048×1024, memo-cold, against 22.2 ms for all three composites of
+    /// the rebuild put together (MEASURED 2026-08-20 — item 4b's table).
+    ///
+    /// **It is still on the main actor, and that is deliberate rather than unfinished.** The snapshot
+    /// being synchronous is what makes it *atomic* with respect to the artist's own edits: nothing can
+    /// stamp a dab into one of these textures between the first layer being read and the last.
+    /// Suspending in the middle would buy a free main thread at the price of a torn frame — some
+    /// layers pre-stroke, some post — on the most latency-sensitive path in the app. Spreading the
+    /// same work over cores shortens the block without opening that window at all.
+    ///
+    /// **A value layer stays in pass 1**, where its `resolvedColor(atFrame:)` runs on the main actor.
+    /// It is a memset rather than a rasterize, so there is nothing to parallelise, and resolving a
+    /// `Color` is the one thing here whose thread-safety is not already established by somebody else's
+    /// doc comment.
     @MainActor
     private func renderSources(atFrame frame: Int, canvasSize: CGSize, quality: RenderQuality,
                                alsoIncluding maskSourceLayers: Set<Int> = [])
     -> (sources: [LayerRenderSource?], versions: [LayerContentVersion?]) {
-        var sources: [LayerRenderSource?] = []
-        var versions: [LayerContentVersion?] = []
-        sources.reserveCapacity(layers.count)
-        versions.reserveCapacity(layers.count)
+        var sources = [LayerRenderSource?](repeating: nil, count: layers.count)
+        var versions = [LayerContentVersion?](repeating: nil, count: layers.count)
+        /// Layers that need a cel flattened, and which cel. Carries the `Layer` by value: it is a
+        /// struct, so this is a copy of the metadata and a retain of the texture objects, and pass 2
+        /// therefore reads nothing off `self`.
+        var rasterJobs: [(index: Int, layer: Layer, celIndex: Int)] = []
         for index in layers.indices {
             let layer = layers[index]
             // The visibility check is an elision, not the compositing rule — `RenderNode.isVisible`
@@ -604,56 +624,52 @@ extension CanvasManager {
             // both is exactly right.
             guard layer.isVisible || maskSourceLayers.contains(index),
                   let celIndex = activeCelIndex(inLayer: index, atFrame: frame)
-            else {
-                sources.append(nil)
-                versions.append(nil)
+            else { continue }
+            versions[index] = LayerContentVersion(cel: layer.cels[celIndex], valueFill: layer.valueFill,
+                                                  effect: layer.layerEffect)
+            guard layer.layerEffect == nil else { continue }
+
+            // **§4.5's value layer, resolved here, and this line's *placement* is the one
+            // architectural decision that feature exists to get right.** This function already takes
+            // the frame and already exists to turn "one layer" into "one layer's pixels at one
+            // frame", so a value layer becomes an ordinary `LayerRenderSource` and **the compositor
+            // never learns that value layers exist** — neither backend has a leaf case for a colour,
+            // neither `RenderNode` nor `RenderRequest` carries one, and a fill is indistinguishable
+            // downstream from a layer somebody painted flat.
+            //
+            // The owner wants keyframed values eventually and explicitly does not want them built
+            // now. Doing the read here is what makes that a one-function change later: a keyframe
+            // phase adds a track inside `ValueFill`, `resolvedColor(atFrame:)` starts reading it, and
+            // this call site is already passing the frame. Resolving anywhere further in (in
+            // `Compositor.draw`, or by giving `RenderNode` a colour field) puts the constant
+            // somewhere the frame is not in scope, which is precisely the seam this buys.
+            //
+            // A value layer's cel is blank and unrendered — kept, like an effect layer's, so that
+            // every cel-lifecycle path in the app goes on working rather than the timeline learning
+            // about a layer without cels. It still gates: the `activeCelIndex` guard above is what
+            // decides whether this layer contributes at this frame at all, so deleting a value
+            // layer's block at frame *n* removes its colour at *n*, which is what every other layer
+            // does and what the timeline shows.
+            if let fill = layer.valueFill {
+                if let image = LayerRenderSource.solid(fill.resolvedColor(atFrame: frame), canvasSize: canvasSize) {
+                    sources[index] = LayerRenderSource(image: image)
+                }
                 continue
             }
-            versions.append(LayerContentVersion(cel: layer.cels[celIndex], valueFill: layer.valueFill,
-                                                effect: layer.layerEffect))
-            guard layer.layerEffect == nil,
-                  let image = sourceImage(for: layer, celIndex: celIndex, atFrame: frame,
-                                          canvasSize: canvasSize, quality: quality)
-            else {
-                sources.append(nil)
-                continue
-            }
-            sources.append(LayerRenderSource(image: image))
+            rasterJobs.append((index, layer, celIndex))
+        }
+
+        // Pass 2. `parallelMap` returns in index order and runs inline below two jobs, so a one- or
+        // two-layer document behaves exactly as it did before this split.
+        let images = PixelOps.parallelMap(rasterJobs.count) { job in
+            PixelOps.rasterize(cel: rasterJobs[job].layer.cels[rasterJobs[job].celIndex],
+                               canvasSize: canvasSize, quality: quality).cgImage
+        }
+        for (job, image) in zip(rasterJobs, images) {
+            guard let image else { continue }
+            sources[job.index] = LayerRenderSource(image: image)
         }
         return (sources, versions)
-    }
-
-    /// One layer's pixels at one frame — the cel flattened, or, for §4.5's value layer, its fill
-    /// resolved into a canvas-sized solid.
-    ///
-    /// **This is the frame-aware boundary the value layer's fill is resolved at, and that placement is
-    /// the one architectural decision the feature exists to get right.** `renderSources` already takes
-    /// the frame and already exists to turn "one layer" into "one layer's pixels at one frame", so a
-    /// value layer becomes an ordinary `LayerRenderSource` here and **the compositor never learns that
-    /// value layers exist** — neither backend has a leaf case for a colour, neither `RenderNode` nor
-    /// `RenderRequest` carries one, and a fill is indistinguishable downstream from a layer somebody
-    /// painted flat.
-    ///
-    /// The owner wants keyframed values eventually and explicitly does not want them built now. Doing
-    /// the read here is what makes that a one-function change later: a keyframe phase adds a track
-    /// inside `ValueFill`, `resolvedColor(atFrame:)` starts reading it, and this call site is already
-    /// passing the frame. Resolving anywhere further in (in `Compositor.draw`, or by giving
-    /// `RenderNode` a colour field) puts the constant somewhere the frame is not in scope, which is
-    /// precisely the seam this buys.
-    ///
-    /// A value layer's cel is blank and unrendered — kept, like an effect layer's, so that every
-    /// cel-lifecycle path in the app goes on working rather than the timeline learning about a layer
-    /// without cels. It still gates: the `activeCelIndex` guard above is what decides whether this
-    /// layer contributes at this frame at all, so deleting a value layer's block at frame *n* removes
-    /// its colour at *n*, which is what every other layer does and what the timeline shows.
-    @MainActor
-    private func sourceImage(for layer: Layer, celIndex: Int, atFrame frame: Int,
-                             canvasSize: CGSize, quality: RenderQuality) -> CGImage? {
-        if let fill = layer.valueFill {
-            return LayerRenderSource.solid(fill.resolvedColor(atFrame: frame), canvasSize: canvasSize)
-        }
-        return PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize,
-                                  quality: quality).cgImage
     }
 
     // MARK: - Mask sources (§6.2)

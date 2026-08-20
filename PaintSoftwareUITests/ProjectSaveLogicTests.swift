@@ -872,4 +872,88 @@ final class ProjectSaveLogicTests: XCTestCase {
         guard let dictionary = object as? [String: Any] else { return [] }
         return Set(dictionary.keys)
     }
+
+    // MARK: - Opening off the main thread (PERFORMANCE.md item 9(b))
+
+    /// `loadInBackground` decodes off the main thread, and hands back the same document `load` does.
+    ///
+    /// **Two claims, and they fail in opposite ways.** That the decode is off main is the *whole
+    /// point* of item 9(b) and is invisible to every other test in this file: revert the fan-out to a
+    /// synchronous main-thread walk and every assertion about the loaded document still passes, which
+    /// is exactly the shape of change that quietly comes back. `LoadProfile.decodedOnMainThread` is
+    /// the flag that would not pass.
+    ///
+    /// That the *document* is identical is the claim the parallelism could break, and cel order is
+    /// where it would break first: the fan-out is flat across the whole tree, so a layer's cels are
+    /// finished in whatever order the cores get to them and are regrouped by index afterwards. Cel
+    /// order is not cosmetic — `activeCelIndex` searches it and `addCel` maintains it with an explicit
+    /// sort — so a shuffle would show up as the wrong drawing at a frame, some time later, with
+    /// nothing to connect it to a load. Asserting the ids in order is what makes that loud now.
+    func testLoadingInBackgroundDecodesOffTheMainThreadAndMatchesTheSynchronousLoad() async {
+        let manager = makeManager()
+        // Enough cels on one layer that order is observable rather than accidental — one cel per
+        // layer would pass a shuffle.
+        for start in [16, 20, 24, 28] {
+            XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: start, frameCount: 2),
+                          "Setup: layer 0 should take a cel at frame \(start)")
+        }
+        XCTAssertGreaterThan(manager.layers[0].cels.count, 4, "Setup: the ordering claim needs several cels")
+
+        let url = projectURL()
+        let written = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(manager, to: url) { written.fulfill() }
+        await fulfillment(of: [written], timeout: 120)
+
+        guard let synchronous = ProjectStore.load(from: url),
+              let synchronousProfile = ProjectStore.lastLoadProfile else {
+            return XCTFail("The saved package should load")
+        }
+        XCTAssertTrue(synchronousProfile.decodedOnMainThread,
+                      "`load(from:)` is the blocking entry point — its callers read the result on the next line")
+
+        guard let background = await ProjectStore.loadInBackground(from: url),
+              let backgroundProfile = ProjectStore.lastLoadProfile else {
+            return XCTFail("The saved package should also open through the background path")
+        }
+        XCTAssertFalse(backgroundProfile.decodedOnMainThread,
+                       "`loadInBackground` exists to keep the per-cel decode off the main thread — item 9(b)")
+
+        XCTAssertEqual(background.layers.map(\.id), synchronous.layers.map(\.id),
+                       "layer order must survive the fan-out")
+        for (index, pair) in zip(synchronous.layers, background.layers).enumerated() {
+            XCTAssertEqual(pair.1.cels.map(\.id), pair.0.cels.map(\.id),
+                           "layer \(index): cel order must survive the fan-out")
+            XCTAssertEqual(pair.1.cels.map(\.startFrame), pair.0.cels.map(\.startFrame),
+                           "layer \(index): cel start frames must survive the fan-out")
+            XCTAssertEqual(pair.1.kind, pair.0.kind)
+        }
+        // The pixels, not only the bookkeeping: `makeManager` stamps ink on the first cel of the two
+        // raster layers, and a decode that raced itself would most cheaply show up as a blank one.
+        for layerIndex in 0..<2 {
+            XCTAssertTrue(hasVisiblePixels(background.layers[layerIndex].cels[0]),
+                          "layer \(layerIndex)'s stamped cel must come back with its pixels")
+        }
+        // The vector layer's display list is decoded on the same fan-out and is the other thing that
+        // could come back empty.
+        XCTAssertEqual(background.layers[2].cels[0].vector?.strokes.count,
+                       synchronous.layers[2].cels[0].vector?.strokes.count)
+        XCTAssertEqual(background.layers[2].cels[0].vector?.strokes.count, 1)
+    }
+
+    /// A single-cel document still loads through both paths — the fan-out runs inline below two jobs,
+    /// and "the degenerate case took the other branch and broke" is the classic way that optimisation
+    /// goes wrong.
+    func testASingleCelDocumentLoadsThroughBothPaths() async {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let url = projectURL(name: "One Cel")
+        let written = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(manager, to: url) { written.fulfill() }
+        await fulfillment(of: [written], timeout: 120)
+
+        XCTAssertEqual(ProjectStore.load(from: url)?.layers.first?.cels.count, 1)
+        let background = await ProjectStore.loadInBackground(from: url)
+        XCTAssertEqual(background?.layers.first?.cels.count, 1)
+        XCTAssertEqual(background?.layers.count, 1)
+    }
+
 }

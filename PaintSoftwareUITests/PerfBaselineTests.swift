@@ -2923,4 +2923,65 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertLessThan(profile.totalSeconds, 120.0,
                           "Opening a 32-cel project taking two minutes is structural, not contention")
     }
+
+    /// **What spreading the per-cel flatten over cores is actually worth**, measured against a serial
+    /// walk of the same six cels in the same run — item 9(b)'s other beneficiary.
+    ///
+    /// `renderSources` runs this fan-out on every sandwich rebuild, and item 4b's table MEASURED it at
+    /// **78.2 ms on the main actor** for six layers at 2048×1024 when the playhead moves to a new
+    /// frame, against 22.2 ms for all three composites of that rebuild put together. It is the largest
+    /// main-thread term on a playback tick.
+    ///
+    /// **The two figures are taken alternately and reported as a ratio**, which is the point. This Mac
+    /// runs several suites at once and CLAUDE.md records contention making a suite return *wrong*
+    /// answers rather than merely slow ones; a serial number from one run against a parallel number
+    /// from another would measure the host. Alternating best-of-three puts both under the same load.
+    ///
+    /// The parallel side goes through the real `makeSandwichRequests`, so it carries that call's tree
+    /// build and mask walk as well as the fan-out. Those are model reads on six layers — the ratio is
+    /// therefore a slight *under*-statement of what the fan-out itself gained.
+    @MainActor
+    func testTheSnapshotFanOutIsSpreadOverCoresRatherThanWalkedSerially() {
+        Compositor.backend = .coreGraphics
+        let manager = compositorManager(layerCount: 6, canvasSize: Self.ownersCanvasSize)
+        manager.currentLayerIndex = 3
+
+        func serialWalk() -> Double {
+            PixelOps.clearRasterizeCache()
+            return measuringPeakMemory {
+                autoreleasepool {
+                    for index in manager.layers.indices {
+                        _ = PixelOps.rasterize(cel: manager.layers[index].cels[0],
+                                               canvasSize: Self.ownersCanvasSize).cgImage
+                    }
+                }
+            }.seconds
+        }
+        func parallelSnapshot() -> Double {
+            PixelOps.clearRasterizeCache()
+            return measuringPeakMemory {
+                autoreleasepool { _ = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 3) }
+            }.seconds
+        }
+
+        var serial = Double.greatestFiniteMagnitude, parallel = Double.greatestFiniteMagnitude
+        for _ in 0..<3 {
+            serial = Swift.min(serial, serialWalk())
+            parallel = Swift.min(parallel, parallelSnapshot())
+        }
+        let speedup = parallel > 0 ? serial / parallel : 0
+
+        report("snapshot fan-out, 6 cels at 2048x1024 (CoreGraphics)", [
+            ("serial", milliseconds(serial)),
+            ("parallel", milliseconds(parallel)),
+            ("speedup", String(format: "%.2fx", speedup)),
+            ("activeProcessorCount", "\(ProcessInfo.processInfo.activeProcessorCount)"),
+        ])
+
+        // Not a threshold on the speedup — that is a property of the host, and on a saturated machine
+        // it is legitimately 1. What is asserted is that the parallel path is not *slower* by an order
+        // of magnitude, which is what a fan-out that had started serialising on a lock would look like.
+        XCTAssertLessThan(parallel, serial * 4,
+                          "The parallel snapshot must not cost multiples of the serial walk — that is contention on a lock, not scheduling")
+    }
 }
