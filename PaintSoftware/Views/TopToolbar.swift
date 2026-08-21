@@ -46,7 +46,7 @@ struct TopToolbar: View {
             // toolbar buttons already carry one; this is the seventh.
             iconButton(system: "wrench.and.screwdriver", isActive: activePanel == .actions) { toggle(.actions) }
                 .accessibilityIdentifier("toolbar.actionsButton")
-            iconButton(system: "lasso", isActive: activePanel == .select) { toggle(.select) }
+            iconButton(system: "lasso", isActive: CanvasManager.selectIconIsActive(selectPanelOpen: activePanel == .select, selection: canvasManager.selection)) { toggle(.select) }
                 .accessibilityIdentifier("toolbar.selectButton")
             iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.isVectorTransforming) { toggleMove() }
                 .accessibilityIdentifier("toolbar.moveButton")
@@ -92,13 +92,16 @@ struct TopToolbar: View {
 
     /// Brush/eraser/fill are mutually exclusive with Select and Move: only one of these "which tool is
     /// active" indicators should ever read as engaged. Select and Move are each driven by their own
-    /// independent state (`activePanel == .select`, and floating-piece/vector-transform respectively)
-    /// rather than `selectedTool`, so without this, switching to Select while a paint tool was active
-    /// left that paint tool's icon highlighted too — both showing selected at once. Layers is
-    /// deliberately not part of this: it's a utility panel, not a tool, so it highlights independent
-    /// of whichever tool is current. Select immediately followed by Move is the one intentional
-    /// exception to "only one tool active" (Move then transforms the current selection), so this only
-    /// suppresses the *paint* tools, never Select/Move's own highlighting.
+    /// independent state (`CanvasManager.selectIconIsActive` — the Select panel being open, or a
+    /// selection being live — and floating-piece/vector-transform respectively) rather than
+    /// `selectedTool`, so without this, switching to Select while a paint tool was active left that
+    /// paint tool's icon highlighted too — both showing selected at once. Layers is deliberately not
+    /// part of this: it's a utility panel, not a tool, so it highlights independent of whichever tool
+    /// is current. Select immediately followed by Move is the one intentional exception to "only one
+    /// tool active" (Move then transforms the current selection), so this only suppresses the *paint*
+    /// tools, never Select/Move's own highlighting — and, since the owner's 2026-08-21 ask, a live
+    /// selection keeps Select's own highlight on right alongside whichever paint tool is now current,
+    /// which is a second instance of that same exception rather than a new one.
     private var isToolHighlightSuppressed: Bool {
         activePanel == .select || canvasManager.floatingPiece != nil || canvasManager.isVectorTransforming
     }

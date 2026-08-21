@@ -208,6 +208,29 @@ extension CanvasManager {
         selection = nil
     }
 
+    // MARK: Toolbar highlight
+
+    /// Whether the toolbar's Select/lasso icon should read as active (blue) — see the owner's ask
+    /// logged 2026-08-21: "blue means the lasso is currently on," and a live selection outlives
+    /// whichever tool made it. Picking the brush/eraser/fill never clears `selection` (see the
+    /// "MARK: Making a selection" operations above and `handleActiveContextChanged`'s doc comment
+    /// for the things that *do*), so the highlight must not drop either.
+    ///
+    /// Two independent things can each turn it on, the same shape Move's own highlight already
+    /// uses (`TopToolbar.iconButton` for the move icon is driven by `floatingPiece != nil ||
+    /// isVectorTransforming`, not by which panel is open): the Select panel being open — today's
+    /// only driver, unchanged — or a selection being live regardless of which tool is now current.
+    ///
+    /// A static function on `CanvasManager` rather than inlined into `TopToolbar.body`, purely so a
+    /// headless `...LogicTests` file can reach it: `TopToolbar.swift` is a `View` file, and per the
+    /// project file's "App sources shared with PaintSoftwareUITests" group (see
+    /// `CanvasManagerTestSupport.swift`'s doc comment), View files are not compiled a second time
+    /// into the logic-test target — `@testable import PaintSoftware` type-checks there but does not
+    /// link, so anything a fast-tier test needs to call has to live outside a `View` file.
+    static func selectIconIsActive(selectPanelOpen: Bool, selection: Selection?) -> Bool {
+        selectPanelOpen || selection != nil
+    }
+
     // MARK: Move / Duplicate — lifting into a floating piece
 
     /// Begins transforming the current selection (or, if there isn't one, the whole current layer),
