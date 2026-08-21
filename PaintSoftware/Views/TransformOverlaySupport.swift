@@ -1,9 +1,9 @@
 import UIKit
 
-/// Shared projection math for the two on-canvas transform-handle overlays
-/// (`ObjectTransformOverlayView`'s `LayerTransform`, `FloatingPieceOverlayView`'s
-/// `FloatingTransform`): both map a point in an object's own local (untransformed, centered-on-
-/// origin) space into the overlay's coordinate space by applying scale, rotation, and position —
+/// Shared projection math for the two on-canvas transform models (`ObjectTransformFrame`'s
+/// `LayerTransform`, `FloatingPieceOverlayView`'s `FloatingTransform`): both map a point in an
+/// object's own local (untransformed, centered-on-origin) space into the overlay's coordinate space
+/// by applying scale, rotation, and position —
 /// `effectiveScaleX`/`effectiveScaleY` fold in `FloatingTransform`'s independent axes and flip
 /// flags, and collapse to the same uniform `scale` on both axes for `LayerTransform`.
 protocol OverlayTransformProjecting {
@@ -36,6 +36,15 @@ extension FloatingTransform: OverlayTransformProjecting {
 /// A move/scale/rotate handle shown on an on-canvas transform overlay: a small circular or
 /// rounded-square knob. `cornerRadius` defaults to a full circle (12, matching the 24pt frame);
 /// pass an explicit value for a squarer knob (e.g. `FloatingPieceOverlayView`'s scale handles).
+///
+/// **`FloatingPieceOverlayView` is the last user, and this class still carries the defect that
+/// removed the other one.** The 24×24 below is in *canvas* points and this view lives inside the
+/// transformed `container`, so a handle shrinks with the artwork as the artist zooms out and its
+/// touch target shrinks with it — "faint blue line, does not have nodes in it", and the owner's
+/// 2026-08-21 report that the Move box's nodes "don't seem to respond to touch". The Move overlay
+/// was converted to `TextTransformOverlayView`'s screen-point pattern
+/// (`ObjectTransformOverlayView`, `ObjectTransformFrame`); the floating-piece overlay has not been,
+/// and [BUGS.md](BUGS.md) carries it. Do not add a third user.
 final class TransformHandleView: UIView {
     enum Kind { case scale, rotate }
 
@@ -50,8 +59,10 @@ final class TransformHandleView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-/// Shared base for the two on-canvas transform-handle overlays (`ObjectTransformOverlayView`,
-/// `FloatingPieceOverlayView`).
+/// Base for `FloatingPieceOverlayView`, the one on-canvas transform overlay still built this way.
+/// `ObjectTransformOverlayView` no longer inherits from it: it hit-tests through
+/// `ObjectTransformFrame` instead, which is what lets it decline the touches it has no target for
+/// rather than swallowing every touch on the canvas the way `point(inside:)` below makes this one.
 class TransformOverlayView: UIView {
     /// Handles can end up positioned outside this view's own bounds (e.g. the rotate handle, or a
     /// corner/edge handle, when the object sits near the edge of the canvas) — without this

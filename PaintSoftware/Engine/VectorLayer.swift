@@ -337,6 +337,16 @@ final class VectorCanvas {
     }
 
     private(set) var version: Int = 0
+
+    /// Bumped by every change to `_elements` (and to `editingElementID`, which filters them), and
+    /// **deliberately not by `setTransform`**: an overall transform moves the layer's content in
+    /// canvas space and leaves it exactly where it was in the layer's own local space. Anything
+    /// derived from the *local* content can therefore be memoized across a transform, which is what
+    /// `localContentBounds()` does and what takes the two canvas-sized rasterizations out of a Move
+    /// drag's per-touch-move cost. `version` still moves on a transform, because the display really
+    /// is stale.
+    private(set) var contentVersion: Int = 0
+
     private var cachedImage: UIImage?
 
     /// The `.preview` render, memoized separately from `cachedImage` — releasing the slider renders
@@ -454,6 +464,14 @@ final class VectorCanvas {
 
     /// Caller must hold `lock`.
     private func invalidate() {
+        contentVersion += 1
+        invalidateRenderOnly()
+    }
+
+    /// Drops the memoized renders and moves the display's staleness key, **without** claiming the
+    /// layer's own content changed. `setTransform` is the only caller and the only mutation for
+    /// which that distinction is true. Caller must hold `lock`.
+    private func invalidateRenderOnly() {
         version += 1
         cachedImage = nil
         cachedPreviewImage = nil
@@ -705,7 +723,9 @@ final class VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
         _transform = t
-        invalidate()
+        // `invalidateRenderOnly`, not `invalidate`: the display is stale, the local content is not.
+        // See `contentVersion`.
+        invalidateRenderOnly()
     }
 
     /// The overall transform expressed as a `LayerTransform` (position/uniform-scale/rotation) about
@@ -736,11 +756,40 @@ final class VectorCanvas {
     /// coordinate space — i.e. where it sits before `transform` is applied. Nil if there's no
     /// visible content. Used to size/pivot the Move tool's on-canvas box to the actual content
     /// rather than the whole canvas.
+    ///
+    /// **Memoized on `contentVersion`, which is what makes it usable on a per-touch-move path.** The
+    /// answer costs a canvas-sized rasterize of every element plus a several-million-pixel alpha
+    /// scan, and the Move tool asked for it on every delta of a drag — once in
+    /// `CanvasView.Coordinator.objectTransformChanged` and again in `updateTransformOverlay` — to
+    /// recompute a value that a transform cannot change. Unlike the render memo this costs no
+    /// pixels to hold (one `CGRect?`), so it is invisible to `hasCachedImage` and to eviction, which
+    /// is correct rather than an oversight: there is nothing here to evict.
     func localContentBounds() -> CGRect? {
         lock.lock()
         defer { lock.unlock() }
-        return PixelOps.opaqueContentBounds(renderLocalContent())
+        if cachedLocalContentBoundsVersion == contentVersion, let cached = cachedLocalContentBounds {
+            return cached
+        }
+        localContentBoundsRasterizations += 1
+        let bounds = PixelOps.opaqueContentBounds(renderLocalContent())
+        cachedLocalContentBounds = .some(bounds)
+        cachedLocalContentBoundsVersion = contentVersion
+        return bounds
     }
+
+    /// The memo behind `localContentBounds()`. Doubly optional on purpose: the outer level is "has an
+    /// answer been computed", the inner is the answer itself, and an empty layer's legitimate `nil`
+    /// must not read as a cache miss and re-rasterize on every call.
+    private var cachedLocalContentBounds: CGRect??
+    private var cachedLocalContentBoundsVersion: Int = -1
+
+    /// How many times `localContentBounds()` has actually rasterized, as against resolving from the
+    /// memo above. The test seam `ObjectTransformLogicTests` reads, in `lastRenderDabCount`'s
+    /// idiom: whether the memo is live is a **countable** property, and asserting it in milliseconds
+    /// on this machine would be asserting on the machine. A counter of its own rather than
+    /// `lastRenderDabCount` because `render()` leaves that value standing on a cache hit rather than
+    /// zeroing it, so it cannot distinguish "rasterized again" from "did not".
+    private(set) var localContentBoundsRasterizations: Int = 0
 
     // MARK: - Erasing
     //

@@ -128,6 +128,8 @@
 		DEC0DE00000000000000003D /* PaintSoftware/Models/LayerKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000003C /* PaintSoftware/Models/LayerKind.swift */; };
 		DEC0DE00000000000000003F /* PaintSoftware/Models/Layer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000003E /* PaintSoftware/Models/Layer.swift */; };
 		DEC0DE000000000000000041 /* PaintSoftware/Models/LayerTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000040 /* PaintSoftware/Models/LayerTransform.swift */; };
+		BB993A02114E685AFB894AD9 /* PaintSoftware/Views/ObjectTransformOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E17EB45B4B517284BD5AC6 /* PaintSoftware/Views/ObjectTransformOverlayView.swift */; };
+		6BE64D8ECF9CA7BB2B01663E /* PaintSoftware/Models/ObjectTransformFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A628458EBF2F2ED83884D70B /* PaintSoftware/Models/ObjectTransformFrame.swift */; };
 		DEC0DE000000000000000044 /* PaintSoftware/Views/OnionSkinSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000043 /* PaintSoftware/Views/OnionSkinSource.swift */; };
 		DEC0DE000000000000000046 /* OnionSkinLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000045 /* OnionSkinLogicTests.swift */; };
 		DEC0DE0000000000000000A1 /* InterpolationEngineDiagnosticsLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000A0 /* InterpolationEngineDiagnosticsLogicTests.swift */; };
@@ -160,6 +162,7 @@
 		DE3AE27EAF6238664BA62702 /* VectorTransformUndoLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3AE27EAF6238664BA62701 /* VectorTransformUndoLogicTests.swift */; };
 		23646AF05A85FB19D06D7B02 /* TextHitTestLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */; };
 		0789BD4706C24D697B17B585 /* TextTransformLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0935736759FEE47DC1C2146C /* TextTransformLogicTests.swift */; };
+		F07C2B782428CEB32ACA255F /* ObjectTransformLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */; };
 		0997C0EA936D7E159238B002 /* FontResolveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */; };
 		7F1EC86AAE98AC9EBE2C6C02 /* TextBakeCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */; };
 		D5F38D4131EF5A758BC466D8 /* PaintSoftware/Views/GalleryOpenState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */; };
@@ -303,6 +306,8 @@
 		DEC0DE00000000000000003C /* PaintSoftware/Models/LayerKind.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LayerKind.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000003E /* PaintSoftware/Models/Layer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Layer.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000040 /* PaintSoftware/Models/LayerTransform.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LayerTransform.swift; sourceTree = "<group>"; };
+		29E17EB45B4B517284BD5AC6 /* PaintSoftware/Views/ObjectTransformOverlayView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/ObjectTransformOverlayView.swift; sourceTree = "<group>"; };
+		A628458EBF2F2ED83884D70B /* PaintSoftware/Models/ObjectTransformFrame.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ObjectTransformFrame.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000043 /* PaintSoftware/Views/OnionSkinSource.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/OnionSkinSource.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000045 /* OnionSkinLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OnionSkinLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000A0 /* InterpolationEngineDiagnosticsLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolationEngineDiagnosticsLogicTests.swift; sourceTree = "<group>"; };
@@ -335,6 +340,7 @@
 		DE3AE27EAF6238664BA62701 /* VectorTransformUndoLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorTransformUndoLogicTests.swift; sourceTree = "<group>"; };
 		23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextHitTestLogicTests.swift; sourceTree = "<group>"; };
 		0935736759FEE47DC1C2146C /* TextTransformLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextTransformLogicTests.swift; sourceTree = "<group>"; };
+		75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ObjectTransformLogicTests.swift; sourceTree = "<group>"; };
 		0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FontResolveLogicTests.swift; sourceTree = "<group>"; };
 		7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextBakeCharacterizationTests.swift; sourceTree = "<group>"; };
 		3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/GalleryOpenState.swift; sourceTree = "<group>"; };
@@ -416,6 +422,7 @@
 				DE3AE27EAF6238664BA62701 /* VectorTransformUndoLogicTests.swift */,
 				23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */,
 				0935736759FEE47DC1C2146C /* TextTransformLogicTests.swift */,
+				75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */,
 				0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */,
 				7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */,
 				B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */,
@@ -548,6 +555,8 @@
 				DEC0DE6A0000000000000001 /* PaintSoftware/Models/AlphaMask.swift */,
 				DEC0DE6A0000000000000003 /* PaintSoftware/Engine/MaskResolver.swift */,
 				DEC0DE000000000000000040 /* PaintSoftware/Models/LayerTransform.swift */,
+				29E17EB45B4B517284BD5AC6 /* PaintSoftware/Views/ObjectTransformOverlayView.swift */,
+				A628458EBF2F2ED83884D70B /* PaintSoftware/Models/ObjectTransformFrame.swift */,
 				DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */,
 				DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */,
 				DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */,
@@ -695,6 +704,7 @@
 				DE3AE27EAF6238664BA62702 /* VectorTransformUndoLogicTests.swift in Sources */,
 				23646AF05A85FB19D06D7B02 /* TextHitTestLogicTests.swift in Sources */,
 				0789BD4706C24D697B17B585 /* TextTransformLogicTests.swift in Sources */,
+				F07C2B782428CEB32ACA255F /* ObjectTransformLogicTests.swift in Sources */,
 				0997C0EA936D7E159238B002 /* FontResolveLogicTests.swift in Sources */,
 				7F1EC86AAE98AC9EBE2C6C02 /* TextBakeCharacterizationTests.swift in Sources */,
 				5B37DD56067E721840FE9C66 /* PaintSoftware/Models/CanvasPresentation.swift in Sources */,
@@ -806,6 +816,8 @@
 				DEC0DE00000000000000003D /* PaintSoftware/Models/LayerKind.swift in Sources */,
 				DEC0DE00000000000000003F /* PaintSoftware/Models/Layer.swift in Sources */,
 				DEC0DE000000000000000041 /* PaintSoftware/Models/LayerTransform.swift in Sources */,
+				BB993A02114E685AFB894AD9 /* PaintSoftware/Views/ObjectTransformOverlayView.swift in Sources */,
+				6BE64D8ECF9CA7BB2B01663E /* PaintSoftware/Models/ObjectTransformFrame.swift in Sources */,
 				DEC0DE000000000000000018 /* PaintSoftware/Models/Palette.swift in Sources */,
 				DEC0DE00000000000000001A /* PaintSoftware/Models/ProjectManifest.swift in Sources */,
 				DEC0DE00000000000000001C /* PaintSoftware/Models/SelectionModels.swift in Sources */,

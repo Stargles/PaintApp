@@ -409,6 +409,16 @@ simulator. The before-figures happen to agree with the device closely on this pa
 too. **Needs the owner's iPad**: a Release build of this on their 4096² document, and their answer to
 "does it still feel like 17 fps?" If it does, the remaining cost is somewhere nobody has looked yet.
 
+**The same trap was on a second path and nobody had looked there either — found by the owner, not by
+us, 2026-08-21.** *"Move is extremely slow, reducing FPS to 5fps."* A Move drag on a vector layer was
+paying **two** canvas-sized rasterizations plus a multi-megapixel alpha scan per touch-move: 96–108 ms
+a sample at the owner's 2048×1024 (MEASURED, Debug simulator), fixed the same way — the live drag now
+assigns an affine to the already-rendered layer and rasterizes once on lift. Full provenance in
+[PERFORMANCE.md](PERFORMANCE.md) item 16. **The lesson worth carrying is the search, not the fix**:
+"canvas-sized allocation per input event" is a *shape*, and it was hiding on a second path that every
+area-scaled benchmark in the repo walked straight past. Anything driven by `touchesMoved` on a vector
+layer is worth grepping for `render()` before the next owner report arrives.
+
 ## The Metal composite hands Core Animation a non-native pixel format (2026-08-16)
 
 `CompositorMetalEngine.readBack` builds its `CGImage` as `premultipliedLast` RGBA in device RGB;
@@ -619,15 +629,18 @@ product call, not just a fix.
 
 ## Cleanup opportunities
 
-- **Duplicated transform-overlay code** — `ObjectTransformOverlayView` and `FloatingPieceOverlayView`
-  each define their own `HandleView` and near-identical project/rotate/resize logic. **A third,
-  correct implementation now exists to converge on**: Add Text Stage 4's
-  `Views/TextTransformOverlayView.swift` (`442dc16`, 2026-08-21) is a non-warped sibling view pinned
-  to `CanvasView`'s `container`, with every handle dimension `screenPoints / canvasScale` pushed from
-  the coordinator — the shape `ObjectTransformOverlayView` needs anyway, since its own handles are the
-  live bug in TODO.md's move-tool item (d): they neither hold a constant screen size across zoom nor
-  respond to touch, on the owner's own iPad. Port onto the Stage 4 pattern rather than fixing the
-  duplication in place.
+- **Duplicated transform-overlay code — half converged, 2026-08-21.** `ObjectTransformOverlayView` is
+  now `TextTransformOverlayView`'s pattern: screen-point chrome divided by `canvasScale`, raw touches,
+  nearest-within-reach hit testing, and its geometry on a model type (`ObjectTransformFrame`) where
+  `ObjectTransformLogicTests` can reach it. **`FloatingPieceOverlayView` is the last user of
+  `TransformHandleView`/`TransformOverlayView` and still carries the fixed 24×24**, which is the same
+  defect the owner reported on the Move box on 2026-08-21 — "the move nodes' size doesn't stay
+  constant to the screen, and right now they don't seem to respond to touch". It is the raster Move
+  tool's floating piece, so it is a different gesture on a different tier and was deliberately left
+  for its own branch rather than converted alongside; one gesture-sensitive overlay at a time.
+  `ObjectTransformFrame`/`ObjectTransformDrag` are the shape to copy, and the drag arithmetic is
+  nearly the same — `FloatingTransform` adds independent axes and flip flags, which is the one real
+  difference.
 - **Duplicated canvas-flip geometry** — `CanvasManager.flippedImage` and `RasterLayerTexture.flipped`
   implement the same mirror-about-centre draw twice.
 - **`ContentView.saveIfNeeded`** fires only on scene-phase change and Return-to-Gallery, so a direct

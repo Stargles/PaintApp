@@ -3502,4 +3502,144 @@ final class PerfBaselineTests: XCTestCase {
                              "Per-cel residency must be flat across the two halves, or this is measuring page faults")
         XCTAssertGreaterThan(cels.count, halfCount * 2, "the warm-up cel must be retained too")
     }
+    // MARK: - What one sample of a Move drag costs
+
+    /// The owner's 2048×1024 with real ink on it — a plausible drawn cel rather than the 2048² stress
+    /// canvas the rest of this file uses, because the Move drag's cost is per touch-move and
+    /// [TODO.md](TODO.md) is emphatic that 4096² is the stress case and not the baseline.
+    private static func movingSceneStrokes(size: CGSize) -> [VectorStroke] {
+        var strokes: [VectorStroke] = []
+        for row in 0..<12 {
+            let y = 40 + CGFloat(row) * 80
+            var samples: [VectorSample] = []
+            for step in 0..<80 {
+                let t = CGFloat(step) / 79
+                samples.append(VectorSample(x: 60 + t * (size.width - 120),
+                                            y: y + sin(t * .pi * 3) * 20,
+                                            pressure: 0.3 + 0.7 * sin(t * .pi)))
+            }
+            strokes.append(VectorStroke(brush: Brush(name: "Move", shape: .softRound, size: 20),
+                                        color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                        size: 20, opacity: 1, samples: samples))
+        }
+        return strokes
+    }
+
+    /// **The measurement behind the owner's "Move is extremely slow, reducing FPS to 5fps"** (iPad 9,
+    /// Release, 2026-08-21), and the answer to whether the fix is worth its risk.
+    ///
+    /// The two arms are the *model* work one touch-move of a whole-layer Move drag did before this
+    /// branch and does after it, and they are **alternated inside one run** so the ratio is immune to
+    /// the machine drifting between them — CLAUDE.md and PERFORMANCE.md §6 both record that
+    /// contention on this Mac changes the answer rather than widening the error bar.
+    ///
+    ///  * *before* — `localContentBounds()` (a canvas-sized rasterize of every element plus a
+    ///    multi-megapixel alpha scan), `setTransform`, then `render()` (a second canvas-sized
+    ///    rasterize, because `setTransform` had just dropped the memo). Reproduced rather than
+    ///    checked out: `bumpVersion()` stands in for the fact that the pre-branch code had no bounds
+    ///    memo to hit, and costs one integer increment and two nils against the two rasterizes it
+    ///    restores.
+    ///  * *after* — `localContentBounds()` (a memo hit, on `contentVersion`, which a transform does
+    ///    not move), `setTransform`, and **no render at all**: the live drag is shown by assigning an
+    ///    affine to the already-rendered layer, and rasterizes once on lift. The overlay's own
+    ///    per-sample geometry is included so the arm is not flattered by leaving it out.
+    ///
+    /// **The control is a phase neither arm changed** — a cold `render()` of a second, untouched
+    /// canvas — measured in every round. If the two arms disagree because the machine moved rather
+    /// than because the code did, the control moves with them.
+    func testWhatOneSampleOfAMoveDragCosts() {
+        let canvasSize = CGSize(width: 2048, height: 1024)
+        let strokes = Self.movingSceneStrokes(size: canvasSize)
+        let canvas = VectorCanvas(size: canvasSize, strokes: strokes)
+        let control = VectorCanvas(size: canvasSize, strokes: strokes)
+
+        // Warm-up: faults in the first canvas-sized bitmap so round 0 is not charged a one-time cost
+        // that has nothing to do with the per-sample question this test asks.
+        _ = autoreleasepool { canvas.render() }
+        _ = autoreleasepool { control.render() }
+        _ = autoreleasepool { canvas.localContentBounds() }
+
+        let localBounds = canvas.localContentBounds() ?? CGRect(origin: .zero, size: canvasSize)
+        let pivot = CGPoint(x: localBounds.midX, y: localBounds.midY)
+        let frame = ObjectTransformFrame(transform: canvas.layerTransform(pivot: pivot),
+                                         contentSize: localBounds.size)
+        let start = frame.centre
+        let drag = ObjectTransformDrag(frame: frame, handle: .body, at: start)
+        /// A dense drag: 60 samples is a second of touch-moves at 60 Hz.
+        let samples = (0..<60).map { CGPoint(x: start.x + CGFloat($0) * 3, y: start.y + CGFloat($0) * 2) }
+
+        func time(_ body: () -> Void) -> Double {
+            let began = CFAbsoluteTimeGetCurrent()
+            body()
+            return CFAbsoluteTimeGetCurrent() - began
+        }
+
+        var beforeTotal = 0.0, afterTotal = 0.0
+        var controlTimes: [Double] = []
+        let rounds = 3
+        for _ in 0..<rounds {
+            beforeTotal += time {
+                for point in samples {
+                    autoreleasepool {
+                        let transform = drag.transform(draggedTo: point)
+                        // The pre-branch shape: no bounds memo, so every sample re-measured it.
+                        canvas.bumpVersion()
+                        _ = canvas.localContentBounds()
+                        canvas.setTransform(VectorCanvas.affine(from: transform, pivot: pivot))
+                        _ = canvas.render()
+                    }
+                }
+            }
+            afterTotal += time {
+                for point in samples {
+                    autoreleasepool {
+                        let transform = drag.transform(draggedTo: point)
+                        _ = canvas.localContentBounds()
+                        canvas.setTransform(VectorCanvas.affine(from: transform, pivot: pivot))
+                        // No render: `StrokeCanvasView.updateLiveLayerTransform` assigns an affine.
+                        let box = ObjectTransformFrame(transform: transform, contentSize: localBounds.size)
+                        _ = box.handleLayout(rotationOffset: 36)
+                    }
+                }
+            }
+            controlTimes.append(time {
+                autoreleasepool {
+                    control.bumpVersion()
+                    _ = control.render()
+                }
+            })
+        }
+
+        let sampleCount = Double(rounds * samples.count)
+        let beforePerSample = beforeTotal / sampleCount
+        let afterPerSample = afterTotal / sampleCount
+        let controlMean = controlTimes.reduce(0, +) / Double(controlTimes.count)
+        let controlSpread = (controlTimes.max()! - controlTimes.min()!) / controlMean
+
+        report("One Move-drag sample at the owner's canvas", [
+            ("canvas", "\(Int(canvasSize.width))x\(Int(canvasSize.height))"),
+            ("strokes", "\(strokes.count)"),
+            ("samplesPerRound", "\(samples.count)"),
+            ("rounds", "\(rounds)"),
+            ("beforePerSample", milliseconds(beforePerSample)),
+            ("afterPerSample", String(format: "%.3f ms", afterPerSample * 1000)),
+            ("speedup", String(format: "%.0fx", beforePerSample / Swift.max(afterPerSample, 1e-9))),
+            ("beforeFpsCeiling", String(format: "%.0f", 1 / Swift.max(beforePerSample, 1e-9))),
+            ("controlColdRender", milliseconds(controlMean)),
+            ("controlSpread", String(format: "%.0f%%", controlSpread * 100)),
+        ])
+
+        // The claim, with a wide margin: two canvas-sized rasterizes and an alpha scan against an
+        // affine assignment is orders of magnitude, so a 10x bound cannot be met by noise and cannot
+        // be met by a fix that only made the re-render faster.
+        XCTAssertLessThan(afterPerSample * 10, beforePerSample,
+                          "A live Move sample must cost a small fraction of what it did, or the "
+                          + "rasterize is still on the per-touch-move path")
+        XCTAssertGreaterThan(beforePerSample, 0.001,
+                             "This only measures what it claims to if the before arm is a real cost")
+        // The control says the two arms are about the code and not about the machine.
+        XCTAssertLessThan(controlSpread, 1.5,
+                          "The unchanged control phase moved by more than the arms are worth; take "
+                          + "this run again on a quiet machine (see PERFORMANCE.md §6)")
+    }
 }

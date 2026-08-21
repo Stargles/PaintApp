@@ -256,18 +256,18 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.floatingOverlay = floatingOverlay
         context.coordinator.setUpGestures(on: container)
 
-        transformOverlay.onTransformChange = { [weak coordinator = context.coordinator] transform in
-            coordinator?.objectTransformChanged(transform)
-        }
         // One undo step per whole move/scale/rotate drag, not per intermediate value — see
         // `CanvasManager.beginStructureGesture`'s doc comment. (Covers object-layer transforms;
         // vector-layer whole-layer transforms mutate `VectorCanvas` in place and aren't captured
         // by this value-based snapshot — pre-existing gap, not introduced here.)
-        transformOverlay.onGestureBegan = { [weak coordinator = context.coordinator] in
-            coordinator?.canvasManager.beginStructureGesture()
+        transformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle, point in
+            coordinator?.beginObjectTransformDrag(handle, at: point)
         }
-        transformOverlay.onGestureEnded = { [weak coordinator = context.coordinator] in
-            coordinator?.canvasManager.commitStructureGesture(label: .transform)
+        transformOverlay.onHandleDragged = { [weak coordinator = context.coordinator] point in
+            coordinator?.objectTransformDragged(to: point)
+        }
+        transformOverlay.onHandleDragEnded = { [weak coordinator = context.coordinator] in
+            coordinator?.endObjectTransformDrag()
         }
         // One lasso gesture, two destinations. `SelectionOverlayView` already captures a lasso with
         // the right touch-type gating, the right coordinate space and a live preview, so the fill
@@ -1418,7 +1418,7 @@ struct CanvasView: UIViewRepresentable {
         func updateTransformOverlay() {
             guard let overlay = transformOverlay, let container = containerView else { return }
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else {
-                overlay.isHidden = true
+                deactivateTransformOverlay()
                 return
             }
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
@@ -1436,30 +1436,100 @@ struct CanvasView: UIViewRepresentable {
                let vector = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].vector {
                 let localBounds = vector.localContentBounds() ?? CGRect(origin: .zero, size: canvasSize)
                 let pivot = CGPoint(x: localBounds.midX, y: localBounds.midY)
-                overlay.update(transform: vector.layerTransform(pivot: pivot), imageSize: localBounds.size)
+                let frame = ObjectTransformFrame(transform: vector.layerTransform(pivot: pivot),
+                                                 contentSize: localBounds.size)
+                overlay.update(isActive: true, frame: frame, canvasScale: canvasContentScale)
                 container.bringSubviewToFront(overlay)
                 return
             }
 
-            overlay.isHidden = true
+            deactivateTransformOverlay()
         }
 
-        func objectTransformChanged(_ transform: LayerTransform) {
-            guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
+        /// Hides the box, and ends any drag it was in the middle of.
+        ///
+        /// The second half is not belt and braces. `isVectorTransforming` can go false under the
+        /// artist's own finger — `rasterizeLayer` and `handleActiveContextChanged` both do it, which
+        /// is the leak `CanvasManager.vectorTransformBracket` exists to close — and a live transform
+        /// left latched on the stroke view would leave the layer showing a Core Animation transform
+        /// nothing ever clears.
+        private func deactivateTransformOverlay() {
+            endObjectTransformDrag()
+            transformOverlay?.deactivate()
+        }
+
+        // MARK: - One Move drag
+
+        /// The Move tool's drag in flight. Everything expensive about a whole-layer transform is
+        /// resolved **once**, here, rather than on every delta.
+        private struct ActiveObjectTransform {
+            let drag: ObjectTransformDrag
+            let layerIndex: Int
+            let layerID: UUID
+            /// The pivot and the box's size, latched with the rest. Both come from
+            /// `localContentBounds()`, which is *invariant* under the transform being applied — the
+            /// content does not move in its own local space — so recomputing them per delta bought
+            /// nothing and cost a canvas-sized rasterize plus an alpha scan each time.
+            let pivot: CGPoint
+            let contentSize: CGSize
+        }
+        private var activeObjectTransform: ActiveObjectTransform?
+
+        func beginObjectTransformDrag(_ handle: ObjectTransformFrame.Handle, at point: CGPoint) {
+            guard let resolved = resolveVectorTransformTarget() else { return }
+            let frame = ObjectTransformFrame(transform: resolved.vector.layerTransform(pivot: resolved.pivot),
+                                             contentSize: resolved.contentSize)
+            activeObjectTransform = ActiveObjectTransform(
+                drag: ObjectTransformDrag(frame: frame, handle: handle, at: point),
+                layerIndex: resolved.index, layerID: resolved.layerID,
+                pivot: resolved.pivot, contentSize: resolved.contentSize)
+            canvasManager.beginStructureGesture()
+            // From here until lift the layer is shown through Core Animation and rasterizes nothing
+            // — see `StrokeCanvasView.beginLiveLayerTransform`.
+            layerHosts[resolved.layerID]?.strokeView.beginLiveLayerTransform(base: resolved.vector.transform)
+        }
+
+        /// One delta. **The whole per-touch-move cost of a Move drag is this function**, so what is
+        /// not in it matters as much as what is: no `localContentBounds()`, no `render()`, no
+        /// canvas-sized allocation. The model write is an affine assignment, the display is a
+        /// `UIView.transform`, and the box redraws five `CALayer`s.
+        func objectTransformDragged(to point: CGPoint) {
+            guard let active = activeObjectTransform,
+                  canvasManager.layers.indices.contains(active.layerIndex),
+                  canvasManager.isVectorTransforming, !canvasManager.activeCelIsInBetween,
+                  let celIdx = canvasManager.activeCelIndex(inLayer: active.layerIndex, atFrame: canvasManager.currentFrame),
+                  let vector = canvasManager.layers[active.layerIndex].cels[celIdx].vector else { return }
+            let transform = active.drag.transform(draggedTo: point)
+            canvasManager.setVectorTransform(transform, layerIndex: active.layerIndex, pivot: active.pivot)
+            layerHosts[active.layerID]?.strokeView.updateLiveLayerTransform(vector.transform)
+            transformOverlay?.update(isActive: true,
+                                     frame: ObjectTransformFrame(transform: transform,
+                                                                 contentSize: active.contentSize),
+                                     canvasScale: canvasContentScale)
+        }
+
+        func endObjectTransformDrag() {
+            guard let active = activeObjectTransform else { return }
+            activeObjectTransform = nil
+            // The one rasterize of the whole gesture.
+            layerHosts[active.layerID]?.strokeView.endLiveLayerTransform()
+            canvasManager.commitStructureGesture(label: .transform)
+        }
+
+        /// The active vector cel a whole-layer transform would act on, with the box's pivot and size
+        /// — the guards `updateTransformOverlay` applies, in one place both it and the drag can use.
+        private func resolveVectorTransformTarget()
+            -> (index: Int, layerID: UUID, vector: VectorCanvas, pivot: CGPoint, contentSize: CGSize)? {
             let index = canvasManager.currentLayerIndex
-            guard canvasManager.isVectorTransforming, canvasManager.layers[index].kind == .vector,
+            guard canvasManager.layers.indices.contains(index),
+                  canvasManager.isVectorTransforming, canvasManager.layers[index].kind == .vector,
                   !canvasManager.activeCelIsInBetween,
                   let canvasSize = canvasManager.canvasSize,
                   let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame),
-                  let vector = canvasManager.layers[index].cels[celIdx].vector else { return }
-            // Same pivot `updateTransformOverlay` handed the overlay: the content's local bounding
-            // box center, fixed for the gesture.
+                  let vector = canvasManager.layers[index].cels[celIdx].vector else { return nil }
             let localBounds = vector.localContentBounds() ?? CGRect(origin: .zero, size: canvasSize)
-            let pivot = CGPoint(x: localBounds.midX, y: localBounds.midY)
-            canvasManager.setVectorTransform(transform, layerIndex: index, pivot: pivot)
-            // VectorCanvas is a reference type mutated in place, so refresh its host directly.
-            let layerID = canvasManager.layers[index].id
-            layerHosts[layerID]?.strokeView.refreshDisplay()
+            return (index, canvasManager.layers[index].id, vector,
+                    CGPoint(x: localBounds.midX, y: localBounds.midY), localBounds.size)
         }
 
         /// Spawns a block on the active layer when the stroke that is *just now beginning* landed on
@@ -2250,6 +2320,9 @@ struct CanvasView: UIViewRepresentable {
             // `TransformHandleView`'s fixed 24×24: this is the push that keeps a handle 14 pt at
             // 0.3× zoom instead of 14 canvas points.
             textTransformOverlay?.canvasScale = canvasContentScale
+            // And the Move tool's box, which carried the same defect until 2026-08-21 and is the
+            // overlay ADD_TEXT.md §1 was pointing *at* when it said not to copy the fixed 24×24.
+            transformOverlay?.canvasScale = canvasContentScale
             guard let container = containerView, let baseCenter else { return }
             let scale = fitScale * committedScale * liveScale
             let rotation = effectiveRotation()

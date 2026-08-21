@@ -200,6 +200,18 @@ programme — item 11's simulator figures predicted exactly this, and the device
 ceiling sits above the display's 60 Hz. This was one term of a frame, and items 4, 5 and 9(b) are the
 others, but the artist's own report is now in, and it closes this entry.
 
+**7. Moving a whole vector layer. — MEASURED and FIXED 2026-08-21 (item 16), on the owner's report
+rather than on this programme's ranking.** *"Move is extremely slow, reducing FPS to 5fps."* It is
+item 11's trap on the other per-input-event path: every touch-move of a Move drag paid **two**
+canvas-sized rasterizations of every element in the layer plus a multi-megapixel alpha scan, one of
+them to recompute a bounding box a transform cannot change. **96.1–107.8 ms a sample at 2048×1024**
+— a 9–10 fps ceiling in Debug on the simulator against the owner's 5 fps in Release on their iPad. It
+is now **0.002 ms**: the live drag rasterizes nothing and Core Animation shows every delta. **The
+report came off the same device pass, and the same build `38e22c6`, that confirmed painting at 60 fps
+(entry 6 above)** — so a programme that had just declared itself closed on hardware was carrying a
+9-fps path the whole time, on a tool the owner uses constantly. The device has not confirmed the fix;
+see §6.
+
 ---
 
 ## 3. The programme
@@ -655,6 +667,14 @@ by the owner's answer on what a real document is meant to hold, then re-scoped b
 the owner's actual device data** — its own entry below is rewritten in full; the cheap half it turned
 up is the one thing left queued from this whole programme.
 
+**Item 16 was added afterwards and did not come from this ranking at all** — the owner reported it
+off their own iPad on 2026-08-21, on a path nothing here had ever looked at. That is worth recording
+next to a programme that closed itself: the ranking above was built by reading code and reasoning
+about canvas area, and a ~100 ms per-touch-move path on a tool the artist uses constantly was
+invisible to all fifteen items — then found in four seconds by someone dragging something. Item 10
+already says why an O(elements) cost on a per-input-event path is invisible to every area-scaled
+benchmark in this repo. This is the second time that sentence has turned out to be true.
+
 **11. Give the `.overlay` vector scratch its own layer. — SHIPPED 2026-08-20** (`VectorPreviewPlan`,
 `StrokeCanvasView.scratchView`). The `.overlay` branch flattened the committed render and the live
 scratch into a fresh canvas-sized bitmap on every touch-move; `scratchView` is a sibling
@@ -958,6 +978,96 @@ intends it is most of item 14's own number.
 *Shipped from this item so far*: the instrument, item 9(a)'s pattern — measure, record, then decide —
 plus the three corrections and the device read above. The contract flip is still not one of them.
 
+**16. The Move tool's live drag on a vector layer. — MEASURED and FIXED 2026-08-21.** Not from this
+programme's ranking: the owner reported it off their own iPad, *"Move is extremely slow, reducing FPS
+to 5fps"*, Release build, 2026-08-21.
+
+**It is item 11's trap on the other per-input-event path, and it was worse.** `objectTransformChanged`
+fired on every touch-move and did four canvas-sized things per sample:
+
+1. `VectorCanvas.localContentBounds()` — a full rasterize of every element in the layer via
+   `renderLocalContent()` (explicitly "not cached"), then `PixelOps.opaqueContentBounds`, a
+   several-million-pixel alpha scan. To recompute the box's pivot and size.
+2. `setVectorTransform` → `VectorCanvas.setTransform` → `invalidate()`, dropping the render memo.
+3. `strokeView.refreshDisplay()` → `render()`, which missed the memo step 2 had just cleared and
+   **rasterized every element a second time**,
+4. then, because the transform is not the identity, blitted the result through it into a *second*
+   canvas-sized context.
+
+`updateTransformOverlay` asked for (1) again on any SwiftUI pass that happened to land mid-drag.
+
+**The number.** `PerfBaselineTests.testWhatOneSampleOfAMoveDragCosts` drives 60 samples — one second
+of touch-moves at 60 Hz — over a 12-stroke layer at the owner's **2048×1024**, with the two arms
+**alternated inside one run** so the ratio cannot be an artefact of the machine drifting between them,
+and a cold `render()` of a second untouched canvas as the **control**. MEASURED on `move-overlay-1`
+(iOS 26.5 simulator, iPad Pro 13-inch M4, **Debug**, CoreGraphics — `VectorCanvas.render()` has no
+Metal variant), two isolated runs with no other `xcodebuild` alive:
+
+| per touch-move sample, 2048×1024 | run 1 (alone) | run 2 (alone) | run 3 (whole fast tier) |
+|---|---|---|---|
+| **before** — bounds, transform, render | **107.8 ms** | **96.1 ms** | **99.9 ms** |
+| **after** — bounds (memo hit), transform, box layout | **~0.000 ms** | **0.002 ms** | **0.003 ms** |
+| implied fps ceiling, before | 9 | 10 | 10 |
+| *control*: cold `render()`, untouched code | 41.7 ms | 39.3 ms | 40.0 ms |
+
+**Three readings, and the control spans 6% across all three** while the before arm spans 12% — which
+is what says the ratio is about the code and not about the machine. Run 2 was taken at 66% idle with
+this branch's own build still ramping and run 3 inside the whole fast tier rather than alone; neither
+moved the answer. Recorded as three because this repo has been burned by single readings, and a
+figure that survives three different loads is a different kind of claim from one that has not.
+
+**A Debug simulator reading 9–10 fps against the owner's 5 fps in Release on an A13 agrees within a
+factor of two**, which is not the 2–14% item 11's before-column managed against the device but is as
+much as a *frame rate* has any right to claim: item 11 was comparing one term of a frame, and this is
+a whole frame with the overlay, the thumbnail debounce and Core Animation in it. Item 11 explains why
+even that much agreement should be expected — this path is entirely CPU-side, allocations and
+stamping and a blit with no GPU in it, which is the condition §5's "the simulator misreports GPU cost
+by more than 10×" does not cover — and the residual is an A13 against an M4, in the direction that
+makes the device slower. **Do not read the factor of two as a device multiplier**; §1's ~1.3× still
+governs compositing, and one coincidence is not a calibration.
+
+**The finding worth carrying is not the number.** This path was found by an artist dragging
+something, on the same build and the same afternoon that confirmed the fifteen-item programme on
+hardware. The programme ranked by reading code and reasoning about canvas area, and an O(elements)
+cost on a per-input-event path is invisible to both — exactly as item 10 says of the Mode 3 eraser,
+and this is the second instance of that sentence being true.
+
+**The fix is two halves, and the second is item 11's lesson rather than a new idea.**
+
+*(a) The bounding box is memoized on content, not on the render.* `VectorCanvas` grows a
+`contentVersion` that every mutation of `_elements` bumps and `setTransform` deliberately does not —
+an overall transform moves the layer in canvas space and leaves it exactly where it was in its own
+local space, so anything derived from local content survives it. `localContentBounds()` memoizes on
+that. It costs one `CGRect?` to hold, so unlike the render memo it is invisible to `hasCachedImage`
+and to eviction, which is correct rather than an oversight: there is nothing there to evict.
+`ObjectTransformLogicTests.testTheLocalContentBoundsMemoSurvivesATransform` drives sixty samples of a
+drag and asserts **one** rasterize, on a counter rather than on a millisecond.
+
+*(b) The live drag rasterizes nothing.* Item 11's finding was that the fix is not a faster re-render
+but no re-render, because Core Animation was compositing the result anyway — and a layer transform is
+the most Core-Animation-friendly operation there is, since the pixels do not change at all, only
+where they land. `StrokeCanvasView.beginLiveLayerTransform(base:)` latches the affine the displayed
+image was rendered at and suppresses `refreshDisplay`; `updateLiveLayerTransform(_:)` assigns
+`current · base⁻¹`, conjugated for `UIView.transform`'s centre anchor, to the image layer;
+`endLiveLayerTransform()` clears both and rasterizes **once**. It is `TextTransformOverlayView`'s §4
+rule 2 — "a 60 Hz corner drag rasterizes nothing" — arriving on the overlay ADD_TEXT.md was pointing
+at.
+
+*Risk, and how it was discharged.* The conjugation is the whole correctness of (b) and it is silently
+right for a pure translation and wrong for every scale and rotation — the first draft had it
+backwards. `testTheLiveViewTransformShowsWhatARerenderWouldHave` asserts the **mapping** over three
+bases × four currents × five probe points, not the matrix, and it caught it. What is left unproven
+headlessly is the *appearance* during the hold: the UI suite asserts where the layer lands after lift
+(`VectorShapeAndRecoveryUITests.testContentDrawnOnAMovedVectorLayerLandsWhereItWasDrawn`), which
+exercises the rasterize-on-lift path but not the frames before it.
+
+*What this does not say.* It is not a frame rate on the owner's device, and it is not the whole
+frame: a Move drag also runs `scheduleThumbnailRegen` (debounced) and `refreshUndoRedoState` (six
+comparisons) per sample, both left alone. Whether Move now feels like Move on their iPad is open in
+§6.
+*Verified*: `testWhatOneSampleOfAMoveDragCosts` (`PerfBaselineTests`), and the memo's countable half
+in `ObjectTransformLogicTests`.
+
 ---
 
 ## 4. The onion-skin device re-run (2026-08-18)
@@ -1159,6 +1269,14 @@ number about a different thing. `pgrep -fl xcodebuild` and `top -l 2 -n 0 -s 2` 
 what they said.
 
 ### Still open
+
+**Does a Move drag on the owner's iPad now run at frame rate?** Item 16 took the per-sample model
+cost from 96–108 ms to 0.002 ms at their canvas, but every one of those figures is a Debug simulator
+and their 5 fps was a Release build on an A13. The shape transfers; the multiplier does not.
+*The measurement*: they drag a vector layer with the Move tool on a real document and say — and, for
+a figure rather than an impression, a Release build of `main` on that iPad. **The same run answers
+the handle question**: whether the grips are now findable with a fingertip at the zoom they actually
+work at is a thing only a finger can report.
 
 **Does Core Animation actually pay for the non-native pixel format, and where?** Whether the mismatch
 is a background IOSurface conversion, a lazy decode at commit-prepare on the calling thread, or

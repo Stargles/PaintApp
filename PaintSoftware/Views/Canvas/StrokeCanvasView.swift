@@ -337,6 +337,12 @@ final class StrokeCanvasView: UIView {
     /// headlessly across all twelve inputs, because this file is not in the UI-test target and the
     /// only other way to check the three roles is a 22-minute suite.
     func refreshDisplay() {
+        // While the Move tool is dragging this whole layer, Core Animation is already showing every
+        // delta (see `beginLiveLayerTransform`) and a rasterize here would be the redundant work
+        // item 11 removed from the stroke path. `displayedVectorVersion` is deliberately left stale,
+        // so the first `refreshDisplayIfStale` after the drag repaints even if `endLiveLayerTransform`
+        // were never reached.
+        guard liveLayerTransformBase == nil else { return }
         displayedRasterVersion = raster?.version ?? -1
         guard let vectorCanvas else {
             showScratch(nil)
@@ -363,6 +369,60 @@ final class StrokeCanvasView: UIView {
         if imageView.image !== base { imageView.image = base }
         showScratch(plan.showsScratchLayer ? vectorScratch?.renderToUIImage() : nil)
         if plan.publishesLivePreviewFrame { livePreviewFrames += 1 }
+    }
+
+    // MARK: - The Move tool's live whole-layer transform
+
+    /// The layer transform this view's rasterized image was rendered at, latched while the Move
+    /// tool's box is being dragged. Nil at all other times, and its nil-ness is the whole switch:
+    /// `refreshDisplay` is suppressed while it is set.
+    private var liveLayerTransformBase: CGAffineTransform?
+
+    /// Start showing whole-layer transform deltas through Core Animation instead of through the
+    /// rasterizer.
+    ///
+    /// **This is [PERFORMANCE.md](PERFORMANCE.md) item 11's lesson applied to the other
+    /// per-input-event path on a vector layer.** A move drag used to spend, per touch-move, two
+    /// full-canvas rasterizations of every stroke in the layer plus a canvas-sized alpha scan — one
+    /// inside `VectorCanvas.localContentBounds()` and one inside `render()`, whose memo
+    /// `setTransform` had just invalidated. The owner measured the result at 5 fps on their iPad on
+    /// 2026-08-21. Item 11's fix was not a faster re-render but *no* re-render, because Core
+    /// Animation was compositing the result anyway; a layer transform is the most
+    /// Core-Animation-friendly operation there is, since the pixels do not change at all — only
+    /// where they land.
+    ///
+    /// `base` is the affine the currently displayed image was rendered at. Every later delta is
+    /// expressed relative to it, so the drag needs no transform-free render to work from.
+    func beginLiveLayerTransform(base: CGAffineTransform) {
+        // Before the latch, or a stale image would be the one the whole drag is expressed against.
+        refreshDisplayIfStale()
+        liveLayerTransformBase = base
+        imageView.transform = .identity
+    }
+
+    /// Shows the layer at `current` without rasterizing anything. Costs one `UIView.transform`
+    /// assignment.
+    func updateLiveLayerTransform(_ current: CGAffineTransform) {
+        guard let base = liveLayerTransformBase else { return }
+        // `UIView.transform` is applied about the view's centre, so the size is load-bearing rather
+        // than incidental: taken as zero it would conjugate about the origin and put a visible
+        // offset in every scale and every rotation. `bounds` is the canvas rect once the host has
+        // been laid out; the canvas's own size is the same number, and is the answer before then.
+        let size = bounds.width > 0 && bounds.height > 0 ? bounds.size : (vectorCanvas?.size ?? .zero)
+        imageView.transform = LiveLayerTransform.viewTransform(from: base, to: current,
+                                                              inBoundsOfSize: size)
+    }
+
+    /// Ends the drag and rasterizes **once**, at whatever transform the layer finished on.
+    ///
+    /// Idempotent, and it has to be: the drag can end by lift, by cancellation, or by the artist
+    /// leaving the layer mid-gesture, and a view left holding a Core Animation transform with no
+    /// matching latch would show the layer permanently doubly-transformed.
+    func endLiveLayerTransform() {
+        guard liveLayerTransformBase != nil else { return }
+        liveLayerTransformBase = nil
+        imageView.transform = .identity
+        refreshDisplay()
     }
 
     /// Puts `image` in the scratch layer, or empties and hides it when nil.
