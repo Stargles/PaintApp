@@ -20,7 +20,18 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-*Nothing. The next owner ask starts here.*
+Three branches, started 2026-08-21 after the device pass. All three are the new owner asks below.
+
+- **(c) + (d) — the move overlay's speed and its handles.** One branch, because they are likely one
+  root cause: a handle that renders at a fraction of its size under zoom has a hit target that shrank
+  with it. Porting `Views/ObjectTransformOverlayView.swift` onto Stage 4's
+  `Views/TextTransformOverlayView.swift` pattern, and measuring the ~5 fps before fixing it rather
+  than guessing.
+- **(b) — the lasso icon staying blue across a tool change.** The branch's first job is to establish
+  whether the selection actually *survives* picking the brush today. If it does, this is a binding
+  fix; if it does not, the ask is a behaviour change as well as a visual one.
+- **(a) — a spec, not the build.** `LASSO_MOVE.md`, scoping split-and-move against the vector
+  eraser's existing split/punch machinery. Read-only, no simulator.
 
 ## Queued
 
