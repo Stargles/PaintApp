@@ -632,6 +632,32 @@ for its library by `Bundle(for:)`, so `FillBoundaryLogicTests` drives the real k
 under a second. Telling a genuine leak from a test-probe bug is now a `MetalFillSession.fill` call on
 hand-built reference bytes, not a 26-minute run.
 
+## Duplicate rasterizes a vector layer, silently (2026-08-21)
+
+Lasso a region on a **vector** layer, tap Select → Duplicate, and the copy arrives as **pixels on a
+new raster layer**. No notice, no confirmation, and the original stays vector so nothing on screen
+says what happened until the artist tries to erase or re-cut the copy.
+
+`SelectPanel`'s row calls `canvasManager.beginDuplicate()` directly
+(`PaintSoftware/Views/SelectPanel.swift:38`), bypassing `TopToolbar.toggleMove()`'s
+`activeLayerIsVector` branch entirely. `beginDuplicate()`
+(`PaintSoftware/Models/SelectionModels.swift:261-295`) has no layer-kind check: it runs
+`PixelOps.rasterize(cel:canvasSize:)` and `PixelOps.maskedPiece`, then inserts a `Layer` whose cel is
+`.empty(size:)` raster (`:279-282`), and `commitFloatingPieceIfNeeded`'s `.duplicate` arm lands the
+result through `registerUndoableLayerInsertion` (`:346-348`).
+
+Its two neighbours in the same file already branch correctly — `fillSelection` at `:363` and
+`clearSelectionPixels` at `:393` both check `layers[currentLayerIndex].kind == .vector` and keep the
+result vector. Duplicate and Move are the two that do not; **Move is being addressed by
+[LASSO_MOVE.md](LASSO_MOVE.md) and Duplicate deliberately is not**, so this entry is where it lives.
+
+Found while scoping LASSO_MOVE.md, not by a test — no test draws on a vector layer and then taps
+Duplicate, which is also why it has survived. The fix is either a vector arm that copies the lassoed
+*elements* onto a new vector layer (LASSO_MOVE.md §1 already specifies how to partition strokes and
+fills against a lasso, so most of the design is written), or — at minimum — the same
+`.needsRasterization` warning `CanvasManager+BlockDrag`'s cel-drop verdict already raises for the
+equivalent timeline case. Guessing between them is a product call.
+
 ## Duplicate is a silent no-op against an adjacent neighbour (2026-07-28)
 
 The overlap bug behind this is fixed (the shared frame-length clamp filters `>= startFrame`), but
