@@ -40,6 +40,10 @@ nonisolated enum ProjectBackupManager {
 
     nonisolated(unsafe) static var maxAutosaveBackupsPerProject = 5
     nonisolated(unsafe) static var maxPreUpdateBackupsPerProject = 3
+    /// How many "saved without touching the project file" slots to keep — see
+    /// `unsavedChangesSlotURL`. Rotated like the others so a project the artist keeps backgrounding
+    /// without ever answering the damaged-save banner cannot grow its history without bound.
+    nonisolated(unsafe) static var maxUnsavedBackupsPerProject = 5
     nonisolated(unsafe) static var trashRetentionInterval: TimeInterval = 7 * 24 * 60 * 60
     nonisolated(unsafe) static var maxTotalBackupBytes: UInt64 = 1_000_000_000
 
@@ -205,11 +209,31 @@ nonisolated enum ProjectBackupManager {
         directory.appendingPathComponent("latest.paintproj")
     }
 
-    /// Count-rotation for one project's autosave + pre-update slots (`latest` is never rotated).
+    /// A fresh slot for a save that must **not** touch the live project package.
+    ///
+    /// The one caller is `ProjectStore`'s `.writeAside` path (see `SaveDamageGate`): a project that
+    /// loaded with something unreadable, whose artist has not yet said whether the damaged original
+    /// may be overwritten. Their edits still have to land somewhere — a background save that wrote
+    /// nothing would lose them to the next jetsam kill — so a complete package goes here instead, and
+    /// the project file is left exactly as it was.
+    ///
+    /// **It is an ordinary slot in the project's own backup folder, on purpose.** `listBackups` picks
+    /// up any `.paintproj` in that directory, so it appears in the gallery's Versions sheet beside
+    /// "Last saved state" and "Before save" with no new UI at all, and `restoreNewestValidBackup`
+    /// will reach for it during launch repair exactly as it would any other restore point.
+    static func unsavedChangesSlotURL(projectURL: URL, projectID: UUID) -> URL {
+        let dir = backupsDirectory(projectID: projectID)
+        writeOriginMarker(directory: dir, projectFileName: projectURL.lastPathComponent)
+        return uniqueSlotURL(directory: dir, prefix: "unsaved")
+    }
+
+    /// Count-rotation for one project's autosave, pre-update and unsaved-changes slots (`latest` is
+    /// never rotated).
     static func pruneBackups(forProjectID id: UUID) {
         let dir = backupsDirectory(projectID: id)
         pruneSlots(directory: dir, prefix: "auto-", keep: maxAutosaveBackupsPerProject)
         pruneSlots(directory: dir, prefix: "preupdate-", keep: maxPreUpdateBackupsPerProject)
+        pruneSlots(directory: dir, prefix: "unsaved-", keep: maxUnsavedBackupsPerProject)
     }
 
     private static func pruneSlots(directory: URL, prefix: String, keep: Int) {
@@ -297,6 +321,10 @@ nonisolated enum ProjectBackupManager {
             label = "Last saved state"
         } else if name.hasPrefix("preupdate-") {
             label = "Before app update"
+        } else if name.hasPrefix("unsaved-") {
+            // Said from the artist's side: these are their edits, kept because the project file was
+            // left alone rather than overwritten. See `unsavedChangesSlotURL`.
+            label = "Unsaved changes"
         } else {
             label = "Before save"
         }

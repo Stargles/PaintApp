@@ -33,6 +33,24 @@ final class CanvasManager: ObservableObject {
     var projectID: UUID = UUID()
     var projectURL: URL?
 
+    /// What the load of this document could not read, or empty for the ordinary case — a new project,
+    /// or one that opened whole. Set once by `ProjectStore.assemble` and never mutated after.
+    ///
+    /// Not `@Published`: nothing observes it. The banner is raised by `ContentView` at the moment a
+    /// save is attempted rather than by a view watching this, because the artist should be asked when
+    /// there is a decision to make, not the instant a damaged project appears on screen — at which
+    /// point there is nothing to decide and nothing at risk.
+    var loadDamage = ProjectLoadDamage()
+
+    /// Whether the artist has already answered the damaged-save banner for this document.
+    ///
+    /// **In memory, for the life of this `CanvasManager`, and deliberately not persisted.** Save
+    /// Anyway rewrites the package without the unreadable entries, so the *next* load of this project
+    /// reports clean and there is nothing left to ask — the document heals itself and a stored flag
+    /// would have nothing to do. Cancel leaves the damage on disk, and asking again next time is
+    /// correct, because the artist declined to decide. See `SaveDamageGate`.
+    var damagedSaveAnswered = false
+
     @Published var layers: [Layer] = []
     @Published var folders: [LayerFolder] = []
     @Published var viewPresets: [ViewPreset] = []

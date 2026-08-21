@@ -422,8 +422,24 @@ enum ProjectStore {
     /// read the package back immediately must wait for it instead of racing the write: the gallery
     /// re-lists projects from disk in a one-shot `onAppear`, so navigating there before the rename
     /// lands would show the project as missing or stale.
+    /// `intent` defaults to `.artist` because that is the direction it is safe to be wrong in. A new
+    /// call site that forgets it gets the visible behaviour — a banner the artist can answer — rather
+    /// than the quiet one, where the project file is left alone and the work goes to a version slot
+    /// nobody was told about. The two real call sites in `ContentView` both pass it explicitly.
+    ///
+    /// The return value says what the save *did*, and `.ask` is the case worth reading: nothing was
+    /// written and `completion` did **not** run, because the caller's completion is "now show the
+    /// gallery" and the artist has not finished answering yet.
     @MainActor
-    static func save(_ canvasManager: CanvasManager, to url: URL, completion: (@MainActor () -> Void)? = nil) {
+    @discardableResult
+    static func save(_ canvasManager: CanvasManager, to url: URL,
+                     intent: SaveIntent = .artist,
+                     completion: (@MainActor () -> Void)? = nil) -> SaveDecision {
+        let decision = SaveDamageGate.decide(damage: canvasManager.loadDamage,
+                                             answered: canvasManager.damagedSaveAnswered,
+                                             intent: intent)
+        guard decision != .ask else { return .ask }
+
         // The clock starts here rather than on `saveQueue`, because the question this instrument
         // exists to answer — "how long does leaving to the gallery take" — is about the wait
         // `returnToGallery` imposes, and the snapshot below is part of that wait *and* the only part
@@ -441,7 +457,8 @@ enum ProjectStore {
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ProjectStore.save")
 
         saveQueue.async {
-            writeAtomically(snapshot, to: url, startedAt: saveStarted, snapshotSeconds: snapshotSeconds)
+            writeAtomically(snapshot, to: url, destination: decision == .writeAside ? .versionSlot : .liveProject,
+                            startedAt: saveStarted, snapshotSeconds: snapshotSeconds)
             Task { @MainActor in
                 completion?()
                 if backgroundTask != .invalid {
@@ -449,6 +466,24 @@ enum ProjectStore {
                 }
             }
         }
+        return decision
+    }
+
+    /// Where a save lands.
+    ///
+    /// **The whole difference is what else the write is allowed to touch**, which is why it is one
+    /// enum rather than two entry points: a version slot is written by exactly the same stage,
+    /// validate, rename sequence, and only the three steps that reach *outside* the destination —
+    /// stashing the live package, refreshing `latest`, and putting the stash back if the swap fails —
+    /// are conditional on it. Duplicating the sequence to omit three lines would put the atomic-save
+    /// guarantee in two places, and session 34's comment on `writeAtomically` is explicit that its
+    /// step order must not be rearranged.
+    private enum WriteDestination {
+        /// The project package itself: the ordinary save.
+        case liveProject
+        /// A fresh slot in the project's version history, leaving the project package untouched. See
+        /// `SaveDamageGate` for when and `ProjectBackupManager.unsavedChangesSlotURL` for where.
+        case versionSlot
     }
 
     /// The staged-write-then-atomic-swap half of `save`, run off the main thread on `saveQueue` and
@@ -461,9 +496,18 @@ enum ProjectStore {
     /// character — a crash or kill at any point still leaves either the complete old package or the
     /// complete new one on disk, never a partial one.
     private static func writeAtomically(_ snapshot: SaveSnapshot, to url: URL,
+                                        destination: WriteDestination = .liveProject,
                                         startedAt saveStarted: CFAbsoluteTime,
                                         snapshotSeconds: Double) {
         let fm = FileManager.default
+        // Minted here rather than by the caller so it is chosen on `saveQueue` — it lists a directory
+        // to pick a free name, and the caller is the artist's own thread.
+        let target: URL
+        switch destination {
+        case .liveProject: target = url
+        case .versionSlot: target = ProjectBackupManager.unsavedChangesSlotURL(projectURL: url,
+                                                                              projectID: snapshot.projectID)
+        }
         // Read here rather than inside the walk, for `decodeCels`' reason one direction over: the
         // walk may recruit its caller as a worker, so asking inside an iteration would sometimes
         // answer for a pool thread, and the question is about the caller.
@@ -508,22 +552,36 @@ enum ProjectStore {
             return
         }
 
-        // Stash the live package as an autosave restore point, then swap in the new one.
-        guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: snapshot.projectID) else {
-            try? fm.removeItem(at: stageURL)
-            return
+        // Stash the live package as an autosave restore point, then swap in the new one. A version
+        // slot skips the stash: it is a name nothing occupies, and the live package — which is the
+        // damaged original the artist has not yet ruled on — is precisely what this write exists not
+        // to touch.
+        if destination == .liveProject {
+            guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: snapshot.projectID) else {
+                try? fm.removeItem(at: stageURL)
+                return
+            }
         }
         do {
-            try fm.moveItem(at: stageURL, to: url)
+            try fm.moveItem(at: stageURL, to: target)
         } catch {
-            // Swap failed: put the stashed package back so the project is never missing.
-            _ = ProjectBackupManager.restoreNewestValidBackup(forProjectAt: url, trashTag: "corrupt")
+            // Swap failed: put the stashed package back so the project is never missing. Nothing was
+            // stashed for a version slot, and the project package was never moved out of the way, so
+            // there is nothing to undo — restoring here would move a *backup* over a live project
+            // that is perfectly fine.
+            if destination == .liveProject {
+                _ = ProjectBackupManager.restoreNewestValidBackup(forProjectAt: url, trashTag: "corrupt")
+            }
             try? fm.removeItem(at: stageURL)
             return
         }
 
-        // Restore points: `latest` = exact copy of this save; autos rotated by count.
-        ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: snapshot.projectID)
+        // Restore points: `latest` = exact copy of this save; autos rotated by count. `latest` means
+        // "the last state the project file was actually in", so a version slot must not refresh it —
+        // the project file did not change.
+        if destination == .liveProject {
+            ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: snapshot.projectID)
+        }
         ProjectBackupManager.pruneBackups(forProjectID: snapshot.projectID)
     }
 
@@ -747,8 +805,15 @@ enum ProjectStore {
     ///
     /// What actually protects the artwork is already here: `ProjectBackupManager` stashes the pre-save
     /// package on **every** save, so the intact original survives a load that dropped something and is
-    /// restorable. Whether a partial load should go further and *refuse to overwrite*, or prompt
-    /// before it does, is a decision about save semantics and belongs to the owner, not to this fix.
+    /// restorable.
+    ///
+    /// **The save-semantics question this comment used to leave open has been answered.** The owner
+    /// ruled on 2026-08-21: prompt once, then remember. The log lines below still say everything they
+    /// said before — they are the diagnostic record, and they cover the benign unknown-`kind` case the
+    /// artist is deliberately never asked about — while the *artist-facing* half now travels as
+    /// `ProjectLoadDamage` to `SaveDamageGate`, which is where the "should this overwrite" decision
+    /// lives. Nothing here decides anything; that was the right half of the old reasoning and it
+    /// stands.
     private static let log = Logger(subsystem: "Starg.PaintSoftware", category: "ProjectLoad")
 
     /// Says what a per-element decode dropped, keeping the two kinds apart — an unknown discriminator
@@ -925,16 +990,43 @@ enum ProjectStore {
                       imagesDir: imagesDir, canvasSize: canvasSize)
         }
         var celsByLayer = [[Cel]](repeating: [], count: manifest.layers.count)
-        for (index, cel) in decoded.enumerated() {
-            celsByLayer[jobs[index].layerIndex].append(cel)
+        // **The layer's name is attached here, not in `decodeCel`.** A cel does not know which layer
+        // it belongs to — that is the manifest's structure, and this is the loop that already walks
+        // it. Attaching it downstream would mean either passing a name into a function that has no
+        // other use for one, or asking the assembled `CanvasManager` afterwards, by which point the
+        // per-cel reports have already been merged and the association is gone.
+        var damageByLayer = [ProjectLoadDamage.LayerDamage](repeating: .init(), count: manifest.layers.count)
+        for (index, result) in decoded.enumerated() {
+            let layerIndex = jobs[index].layerIndex
+            celsByLayer[layerIndex].append(result.cel)
+            damageByLayer[layerIndex].merge(result.damage)
         }
-        return DecodedCels(celsByLayer: celsByLayer, startedOnMainThread: startedOnMainThread)
+        var damage = ProjectLoadDamage()
+        for (layerIndex, layerManifest) in manifest.layers.enumerated() {
+            var layerDamage = damageByLayer[layerIndex]
+            layerDamage.layerName = layerManifest.name
+            damage.add(layerDamage)
+        }
+        return DecodedCels(celsByLayer: celsByLayer, damage: damage, startedOnMainThread: startedOnMainThread)
     }
 
-    /// What `decodeCels` hands back: the cels, and which thread asked for them.
+    /// What `decodeCels` hands back: the cels, what the decode could not read, and which thread asked
+    /// for them.
     private struct DecodedCels {
         let celsByLayer: [[Cel]]
+        /// The load's own account of what it dropped, per layer. Empty on every ordinary open. This is
+        /// the value that used to die in `report(_:cel:file:)` as a log line — see `ProjectLoadDamage`
+        /// for why it now travels.
+        let damage: ProjectLoadDamage
         let startedOnMainThread: Bool
+    }
+
+    /// One decoded cel and what decoding it cost. A pair rather than two parallel returns because the
+    /// fan-out below hands back one array, and the damage has to stay beside the cel it came from long
+    /// enough for `decodeCels` to know which layer that was.
+    private struct DecodedCel {
+        let cel: Cel
+        let damage: ProjectLoadDamage.LayerDamage
     }
 
     /// One cel's pixels and geometry, off any particular thread.
@@ -943,7 +1035,8 @@ enum ProjectStore {
     /// another iteration can see. That is what makes `decodeCels` safe to fan out, and it is why this
     /// is a free function over a manifest entry rather than a method on anything.
     private static func decodeCel(_ celManifest: CelManifest, layerKind: LayerKind,
-                                  imagesDir: URL, canvasSize: CGSize) -> Cel {
+                                  imagesDir: URL, canvasSize: CGSize) -> DecodedCel {
+        var damage = ProjectLoadDamage.LayerDamage()
         let rasterURL = imagesDir.appendingPathComponent(celManifest.rasterFileName)
         let raster = UIImage(contentsOfFile: rasterURL.path).map { RasterLayerTexture.load(from: $0, size: canvasSize) }
             ?? .empty(size: canvasSize)
@@ -978,12 +1071,38 @@ enum ProjectStore {
             if let data = try? Data(contentsOf: vectorURL) {
                 do {
                     let payload = try JSONDecoder().decode(VectorCanvasData.self, from: data)
+                    // A placed image whose PNG is not in the package is dropped by
+                    // `elements(resolvingImages:)` and always has been. It is counted here rather than
+                    // there because the resolver is the one place that knows a ref failed, and because
+                    // `VectorCanvasData` is deliberately free of any notion of a project directory.
+                    // **`validateProject` cannot catch this one**: image refs live inside the vector
+                    // JSON, not in the manifest, so the integrity check never sees their file names.
                     let elements = payload.elements { ref in
-                        UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path)
+                        guard let image = UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path) else {
+                            damage.images += 1
+                            log.error("""
+                                Placed image \(ref.fileName, privacy: .public) for cel \
+                                \(celManifest.id.uuidString, privacy: .public) is missing from the package — \
+                                the image is dropped and the rest of the cel loaded
+                                """)
+                            return nil
+                        }
+                        return image
                     }
                     vector = VectorCanvas(size: canvasSize, elements: elements, transform: payload.affineTransform)
                     report(payload.decodeReport, cel: celManifest.id, file: vectorFileName)
+                    // Only the malformed half is damage. An unknown `kind` is a newer build's element
+                    // in an older binary — see `ProjectLoadDamage` for why that is deliberately not
+                    // counted, and where the thing that protects it actually lives.
+                    var named = payload.decodeReport.malformedKinds.makeIterator()
+                    for _ in 0..<payload.decodeReport.malformedCount {
+                        damage.countMalformed(kind: named.next())
+                    }
                 } catch {
+                    // The whole cel's vector content, gone: the file is present (so `validateProject`
+                    // passed it) but is not a payload at all. The largest of the three losses, and the
+                    // one the artist is most owed a sentence about.
+                    damage.drawings += 1
                     log.error("""
                         Vector payload \(vectorFileName, privacy: .public) for cel \
                         \(celManifest.id.uuidString, privacy: .public) is not readable as a payload — \
@@ -991,6 +1110,7 @@ enum ProjectStore {
                         """)
                 }
             } else {
+                damage.drawings += 1
                 log.error("""
                     Vector payload \(vectorFileName, privacy: .public) for cel \
                     \(celManifest.id.uuidString, privacy: .public) is missing or unreadable on disk — \
@@ -1011,9 +1131,11 @@ enum ProjectStore {
             interpolation = try? JSONDecoder().decode(InterpolationRecipe.self, from: data)
         }
 
-        return Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
-                   raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector,
-                   interpolation: interpolation)
+        return DecodedCel(
+            cel: Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
+                     raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector,
+                     interpolation: interpolation),
+            damage: damage)
     }
 
     /// The main-actor half: everything that touches `@Published` state, given cels somebody else
@@ -1104,6 +1226,10 @@ enum ProjectStore {
         manager.layers = layers
         migrateGroupVisibility(manager, folders: manifest.folders)
         manager.currentLayerIndex = 0
+        // What this open could not read, carried on the document rather than logged and forgotten.
+        // `SaveDamageGate` is the only thing that reads it; `CanvasManager` merely holds it, which is
+        // the smallest seam that gets a value produced in the vector decode to the save path.
+        manager.loadDamage = decoded.damage
         let decodeFinished = CFAbsoluteTimeGetCurrent()
         if generatingThumbnails { manager.regenerateAllThumbnails() }
         let loadFinished = CFAbsoluteTimeGetCurrent()

@@ -4,6 +4,14 @@ struct DrawingView: View {
     @ObservedObject var canvasManager: CanvasManager
     var onOpenGallery: () -> Void = {}
 
+    /// Non-nil while the damaged-save banner is up — see `SaveDamageGate` and `DamagedSaveBanner`.
+    /// Owned by `ContentView`, because the thing being decided is what the *save* does and
+    /// `ContentView` is where both save call sites live; this view only draws it, and draws it here so
+    /// it lands in the same place as the notice pill rather than at a magic top inset of its own.
+    var damagedSave: ProjectLoadDamage?
+    var onSaveAnyway: () -> Void = {}
+    var onCancelDamagedSave: () -> Void = {}
+
     @State private var activePanel: ActivePanel = .none
     /// Layer whose options menu is open, shown to the left of the layer panel.
     @State private var layerOptionsID: UUID?
@@ -55,6 +63,20 @@ struct DrawingView: View {
                             .padding(.leading, 12)
                             .padding(.trailing, 12 + layerRailClearance(canvasWidth: proxy.size.width))
                             .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+
+                        // The damaged-save question, in the same slot and with the same insets as the
+                        // notice above it. The two cannot sensibly be up at once — this one is raised
+                        // by a tap on the gallery button, which is not a gesture that raises a notice
+                        // — and if they ever were, they stack rather than overlap.
+                        if let damagedSave {
+                            DamagedSaveBanner(damage: damagedSave,
+                                              onSaveAnyway: onSaveAnyway,
+                                              onCancel: onCancelDamagedSave)
+                                .padding(.top, 8)
+                                .padding(.leading, 12)
+                                .padding(.trailing, 12 + layerRailClearance(canvasWidth: proxy.size.width))
+                                .transition(.move(edge: .top).combined(with: .opacity))
                         }
 
                         Spacer()

@@ -109,14 +109,26 @@ a magic-number check — decode the vector JSON and the interpolation recipe rat
 costs a full parse of every payload in every project at launch, which is why it is written down here
 rather than done: it is a real cost/benefit call against a rare failure, not an oversight.
 
-**The product call this leaves open, which is the owner's and not an engineering one.** A load that
-dropped something now continues and saves normally, so the next save writes the degraded document over
-the good one. `ProjectBackupManager` stashes the pre-save package on **every** save
-(`ProjectStore.writeAtomically` → `stashLiveProjectForSave`), so the intact original does survive and
-is restorable — the loss is recoverable, not final. The question is whether that is enough, or whether
-a partial load should refuse to overwrite, save under a new name, or prompt before the first save.
-Each of those changes save semantics for every project, not just damaged ones, which is why the fix
-deliberately stopped at recording the counts (`VectorCanvasData.DecodeReport`) and logging them.
+**The product call this left open was answered on 2026-08-21 and is built** — the owner chose *prompt
+once, then remember*, and `Services/SaveDamageGate.swift` carries the decision and the reasoning. What
+that changes about the entry above: the counts no longer stop at a log line. They travel out of the
+decode as `ProjectLoadDamage` on the `CanvasManager`, and the first save the *artist* starts on a
+document that lost something raises a banner naming it, with Save Anyway / Cancel. An automatic save
+never blocks — it writes a complete package into the project's version history and leaves the project
+file untouched — so an unanswered damaged document cannot be overwritten by a backgrounding.
+
+The paragraph this replaces said the loss was "recoverable, not final" because the pre-save stash
+keeps the intact original. That is true for five saves. `pruneBackups` keeps
+`maxAutosaveBackupsPerProject` (5) `auto-` slots and `refreshLatestSnapshot` overwrites
+`latest.paintproj` with the just-saved *degraded* package on every save — so a damaged project opened
+and saved six times has no intact copy left anywhere, silently. Surfacing the existing net was
+therefore not enough on its own, and the ruling asks while the good copy is still there.
+
+**The blind spot itself is still open and this does not close it.** `validateProject` still cannot see
+a payload that is intact-but-unreadable, so auto-repair still never fires on one and the gallery still
+shows the project as healthy. The difference is that the *save* no longer proceeds in silence, which
+was the half that could destroy work; the shape of a real fix (a content probe per file type) is
+unchanged and still costs a full parse of every payload at launch.
 
 
 ## One malformed layer or cel entry fails the whole project open (2026-08-17)

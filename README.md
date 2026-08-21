@@ -85,6 +85,8 @@ PaintSoftware/
 │   └── ProjectManifest.swift    # On-disk project schema
 ├── Services/
 │   ├── ProjectStore.swift       # Save/load a project package
+│   ├── ProjectBackupManager.swift # Atomic saves, version history, trash, launch repair
+│   ├── SaveDamageGate.swift     # What a save may do when the project loaded with something unreadable
 │   └── PixelOps.swift           # Image compositing helpers
 ├── Utilities/
 │   ├── ColorConversion.swift / ColorMath.swift
@@ -101,6 +103,7 @@ PaintSoftware/
     ├── ColorPickerPanel.swift, BrushSettingsPanel.swift, EraserSettingsPanel.swift,
     │   FillSettingsPanel.swift, SelectPanel.swift
     ├── ObjectTransformOverlayView.swift, FloatingPieceOverlayView.swift, SelectionOverlayView.swift
+    ├── CanvasNoticeBanner.swift, DamagedSaveBanner.swift
     ├── GalleryView.swift, GalleryTileView.swift, CanvasSizePickerView.swift, ActionsMenu.swift
     └── ActionRecorderControls.swift
 tools/
@@ -228,6 +231,26 @@ finger — that gates fill as well as strokes, and is deliberately silent.
 
 **UI tests failing on iPhone** — this app's layout assumes an iPad; run the test suite against an
 iPad simulator destination.
+
+### A project that opened with something unreadable
+
+Vector content is decoded one element at a time, so a damaged file costs the marks it cannot read
+rather than the whole drawing. The first time you then leave to the gallery, a banner says what was
+lost — *"2 brush strokes on the Ink layer could not be read when this project opened"* — and offers
+**Save Anyway** or **Cancel**. It is asked once per open and not again.
+
+- **Save Anyway** rewrites the project without them. The next time you open it there is nothing left
+  to ask about, which is why the answer is not remembered anywhere on disk.
+- **Cancel** leaves the project file exactly as it was and writes your changes into the project's
+  version history instead, as **Unsaved changes** in the gallery's Versions sheet.
+
+**Backgrounding the app never asks.** An automatic save on a project you have not answered for takes
+the Cancel path on its own: your work is written to the version history and the damaged original is
+left alone, so nothing is lost and nothing is decided behind your back.
+
+An element written by a *newer* build of the app is not counted as damage and never raises the
+banner — nothing is wrong with the file, this build simply has no feature to draw it with. The
+reasoning for all of it is in `Services/SaveDamageGate.swift`.
 
 ## Known limitations / open work
 

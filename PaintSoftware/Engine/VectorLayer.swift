@@ -1790,6 +1790,17 @@ struct VectorCanvasData: Codable {
         /// discriminator, so "unknown kind" is not a thing they can express). A real defect: a bug or
         /// a damaged file, not a version gap.
         var malformedCount: Int = 0
+        /// What each malformed entry *was*, in file order, for the ones whose discriminator was itself
+        /// still readable — `"stroke"`, `"fill"`, `"image"`, `"text"`.
+        ///
+        /// **Shorter than `malformedCount` whenever an entry was broken at the discriminator**, which
+        /// is why the two are separate rather than one array with a count. The count is the number the
+        /// artist is owed; this is only how much of it can be named. A legacy payload names nothing at
+        /// all, since those files have no discriminator to read.
+        ///
+        /// It exists so the save prompt can say "2 brush strokes and 1 fill on the Ink layer" rather
+        /// than "3 elements failed to decode" — the artist judges the sentence, not the decoder.
+        var malformedKinds: [String] = []
 
         var droppedCount: Int { unknownKinds.count + malformedCount }
         var isClean: Bool { droppedCount == 0 }
@@ -1809,9 +1820,18 @@ struct VectorCanvasData: Codable {
         enum Outcome {
             case decoded(ElementData)
             case unknownKind(String)
-            case malformed
+            /// The discriminator, when it was readable — see `DecodeReport.malformedKinds`. Nil when
+            /// the entry was broken at the `kind` key itself, or is not an object at all.
+            case malformed(String?)
         }
         let outcome: Outcome
+
+        /// Just the discriminator, re-read on its own after a failed decode. A second, one-key pass
+        /// over the same slot rather than a value threaded out of the first: `ElementData.init(from:)`
+        /// throws from wherever it got to, and the *payload* it was decoding is what failed, so the
+        /// `kind` beside it is usually still perfectly good. Reading it costs one `String` on a path
+        /// that is already the failure path.
+        private enum KindProbe: String, CodingKey { case kind }
 
         init(from decoder: Decoder) throws {
             do {
@@ -1819,7 +1839,8 @@ struct VectorCanvasData: Codable {
             } catch ElementData.Failure.unknownKind(let raw) {
                 outcome = .unknownKind(raw)
             } catch {
-                outcome = .malformed
+                let kind = try? decoder.container(keyedBy: KindProbe.self).decode(String.self, forKey: .kind)
+                outcome = .malformed(kind)
             }
         }
     }
@@ -1898,7 +1919,9 @@ struct VectorCanvasData: Codable {
                 switch slot.outcome {
                 case .decoded(let element): decoded.append(element)
                 case .unknownKind(let raw): report.unknownKinds.append(raw)
-                case .malformed: report.malformedCount += 1
+                case .malformed(let kind):
+                    report.malformedCount += 1
+                    if let kind { report.malformedKinds.append(kind) }
                 }
             }
             elements = decoded
