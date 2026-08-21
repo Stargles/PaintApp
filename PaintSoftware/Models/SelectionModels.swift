@@ -162,7 +162,10 @@ extension CanvasManager {
         if let sel = selection, !(sel.layerID == activeLayerID && sel.celID == activeCelID) {
             selection = nil
         }
-        // Leaving the layer/frame ends any in-progress vector-layer transform.
+        // Leaving the layer/frame ends any in-progress vector-layer transform — and, through the
+        // `didSet` on that flag, closes its undo bracket and records the step. This runs *after*
+        // `currentLayerIndex`/`currentFrame` have already moved, which is exactly why the bracket
+        // holds the cel it opened on by reference rather than re-resolving an index at close time.
         if isVectorTransforming { isVectorTransforming = false }
         // The working set of vector cels has just moved, so this is the moment the ones left behind
         // stop being worth a cached render. See `evictDistantVectorRenderCaches`.

@@ -170,7 +170,58 @@ final class CanvasManager: ObservableObject {
     /// transform box (the vector-layer analogue of the raster Move tool's floating piece — but it
     /// transforms the layer's vector geometry losslessly instead of baking pixels). Only meaningful
     /// when the active layer is a vector layer.
-    @Published var isVectorTransforming: Bool = false
+    ///
+    /// **The `didSet` is the undo bracket, and it is here rather than on the coordinator on purpose.**
+    /// The transform is written by `setVectorTransform` on every gesture-`.changed` event, so a
+    /// `recordUndo` in there would push hundreds of steps for one drag — the failure
+    /// `beginStructureGesture`/`commitStructureGesture` exist to prevent. What is wanted is one step
+    /// per gesture, which means a bracket, which means a close that "runs however it ends".
+    ///
+    /// Two paths turn this off with no gesture ending: `rasterizeLayer` below, and
+    /// `handleActiveContextChanged` when the artist leaves the layer or the frame. A bracket the
+    /// *coordinator* owned would need both of them to remember to close it — and a bracket that leaks
+    /// is worse than none, since it either drops the step or attributes the artist's next drag to this
+    /// one. Hanging it off this property's `didSet` makes every writer close it **by construction**:
+    /// the flag cannot go false without the bracket closing, because going false *is* the close. Same
+    /// shape as `CanvasPresentationModifier`'s `.onDisappear`/`.onChange` interlock, with the property
+    /// observer playing the part the modifier plays there.
+    @Published var isVectorTransforming: Bool = false {
+        didSet {
+            guard oldValue != isVectorTransforming else { return }
+            if !isVectorTransforming { closeVectorTransformBracket() }
+            // The bracket deliberately does *not* open here — see `vectorTransformBracket`.
+            ActionRecorder.ifRecording { $0.model("isVectorTransforming", isVectorTransforming ? "true" : "false") }
+        }
+    }
+
+    /// The open half of the undo bracket above: what the active vector cel's transform was before
+    /// this gesture's first write, and which cel that was.
+    ///
+    /// **Opened on the first `setVectorTransform`, not when the flag turns on**, which is what makes
+    /// three otherwise separate cases fall out for free:
+    ///
+    ///  * *A tap that moves nothing records nothing* — no write, no bracket, no step. (The value
+    ///    check in `closeVectorTransformBracket` is still needed for a drag that returns to where it
+    ///    started, and for the round-trip through `layerTransform`/`affine` that a bare tap on a
+    ///    handle can produce.)
+    ///  * *An in-between cel is excluded without a second guard.* `objectTransformChanged` already
+    ///    refuses to write on one (`activeCelIsInBetween`), so nothing opens there either.
+    ///  * *Undo mid-gesture re-baselines.* `finalizePendingGesturesForHistoryAction` closes the
+    ///    bracket so the undo has a real step to revert; the flag is still on, so the artist's next
+    ///    drag opens a fresh bracket against wherever undo left the layer.
+    ///
+    /// The cel is held **by reference plus IDs**, never by index: the two leak paths close this after
+    /// `currentLayerIndex`/`currentFrame` have already moved (`handleActiveContextChanged`) or after
+    /// the cel has dropped its `vector` entirely (`rasterizeLayer`), and an index re-resolved at close
+    /// time would name the wrong cel or none.
+    private var vectorTransformBracket: VectorTransformBracket?
+
+    struct VectorTransformBracket {
+        let vector: VectorCanvas
+        let layerID: UUID
+        let celID: UUID
+        let before: CGAffineTransform
+    }
 
     /// The node whose mask is being edited (§6.5), or nil outside mask-edit mode.
     ///
@@ -261,11 +312,91 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex),
               let celIdx = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame),
               let vector = layers[layerIndex].cels[celIdx].vector else { return }
+        // Open the undo bracket on this gesture's *first* write, capturing the transform as it stood
+        // before it. Gated on the flag rather than unconditional: a bracket opened by a caller no
+        // flag-clear ever follows would never close, which is the leak this whole design is about.
+        if isVectorTransforming, vectorTransformBracket == nil {
+            vectorTransformBracket = VectorTransformBracket(vector: vector,
+                                                            layerID: layers[layerIndex].id,
+                                                            celID: layers[layerIndex].cels[celIdx].id,
+                                                            before: vector.transform)
+        }
         vector.setTransform(VectorCanvas.affine(from: transform, pivot: pivot))
+        if vectorTransformBracket != nil {
+            // The step does not exist yet, but the artist can already revert this drag — `undo()`
+            // closes the bracket first (`finalizePendingGesturesForHistoryAction`), exactly as it
+            // does for a lifted fill or shape. So the affordance has to be live now, not at close.
+            // *After* the write, not at open: at open the layer has not moved yet and the answer is
+            // still "nothing to undo". Cheap enough to run per gesture event — it is six comparisons,
+            // and it only republishes on the one event that flips the answer.
+            refreshUndoRedoState()
+        }
         // VectorCanvas is a reference type, so mutating it doesn't trip the @Published layers
         // republish; the coordinator refreshes the canvas view directly, and this debounced regen
         // updates the layer-panel thumbnail.
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIdx)
+    }
+
+    /// Closes the vector-transform bracket, recording **exactly one** undo step for the whole gesture
+    /// — or none, when the layer ended up where it started.
+    ///
+    /// **What the step restores is the cel's `VectorCanvas.transform`, both ways, and that is
+    /// lossless.** `setTransform` *replaces* the affine outright rather than composing onto it (see
+    /// `VectorCanvas.setTransform`), so the value read at open time is the complete state the gesture
+    /// is about; putting it back reconstructs the layer exactly, at full resolution, with no
+    /// re-rasterization anywhere. Redo is the mirror image for the same reason. Nothing else in the
+    /// cel is touched by a transform, so nothing else needs capturing.
+    ///
+    /// **One cel, matching `setVectorTransform`.** That function resolves `activeCelIndex(...)` and
+    /// writes one cel's canvas, so a multi-cel vector layer transformed on frame 3 and again on frame
+    /// 20 has genuinely had two different `VectorCanvas` objects changed — and two undo steps, each
+    /// naming its own, is what reverts them independently. A step that reached across every cel of the
+    /// layer would undo a transform the artist never made on the other frames.
+    private func closeVectorTransformBracket() {
+        guard let bracket = vectorTransformBracket else { return }
+        vectorTransformBracket = nil
+        // Runs on both exits: the recording one refreshes anyway via `recordUndo`, and the no-op one
+        // has to put `canUndo` back to whatever the committed stack says after the open lit it.
+        defer { refreshUndoRedoState() }
+        let after = bracket.vector.transform
+        // A drag that ended where it began must not push a no-op step. Compared with a tolerance
+        // rather than `==` because the overlay round-trips through `layerTransform(pivot:)` and
+        // `affine(from:pivot:)` — atan2 out, sin/cos back — so even a bare tap on a handle returns a
+        // transform that is equal to the artist's eye and not bit-equal to the one it came from.
+        guard !Self.vectorTransformsAreIndistinguishable(bracket.before, after) else { return }
+        let vector = bracket.vector, layerID = bracket.layerID, celID = bracket.celID
+        let before = bracket.before
+        // Nominal cost, the figure `recordStructureChange` uses: what is actually retained is two
+        // affines, plus a reference to a `VectorCanvas` that the structure snapshots on the same
+        // stack are already holding.
+        recordUndo(label: .transform, cost: 4096, undo: { [weak self] in
+            vector.setTransform(before)
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        }, redo: { [weak self] in
+            vector.setTransform(after)
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        })
+    }
+
+    /// Whether two layer transforms are the same drawing on screen. See `closeVectorTransformBracket`
+    /// for why the overlay makes an exact comparison the wrong test. The linear part is unitless and
+    /// near 1, the translation is in canvas points, so they get separate tolerances; both are orders
+    /// of magnitude below one pixel at any canvas this app opens, and orders of magnitude above the
+    /// double-precision round-trip error they exist to absorb.
+    static func vectorTransformsAreIndistinguishable(_ a: CGAffineTransform, _ b: CGAffineTransform) -> Bool {
+        let linear: CGFloat = 1e-6
+        let translation: CGFloat = 1e-4
+        return abs(a.a - b.a) <= linear && abs(a.b - b.b) <= linear
+            && abs(a.c - b.c) <= linear && abs(a.d - b.d) <= linear
+            && abs(a.tx - b.tx) <= translation && abs(a.ty - b.ty) <= translation
+    }
+
+    /// Whether a vector-layer transform gesture is mid-flight with something to revert — what makes
+    /// the Undo affordance live before the bracket has closed. `refreshUndoRedoState`'s counterpart to
+    /// `fillGestureActive`/`shapeGestureActive`.
+    var vectorTransformGestureHasChange: Bool {
+        guard let bracket = vectorTransformBracket else { return false }
+        return !Self.vectorTransformsAreIndistinguishable(bracket.before, bracket.vector.transform)
     }
 
     /// Converts a vector layer to raster in place: each cel's full content is folded into `raster`
@@ -278,6 +409,12 @@ final class CanvasManager: ObservableObject {
     func rasterizeLayer(layerIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .vector,
               let canvasSize else { return }
+        // **This line must stay above `withStructureUndo`, and now it is load-bearing rather than
+        // tidy.** Clearing the flag closes the transform's undo bracket synchronously (see
+        // `isVectorTransforming`'s `didSet`), so the transform step is pushed *before* the rasterize
+        // step. Undo pops last-first, which walks back through the rasterize and then the transform —
+        // the order the artist performed them in. Moved inside or below the scope, the two steps swap
+        // and undo would try to un-transform a cel whose `vector` it has not put back yet.
         if isVectorTransforming && currentLayerIndex == layerIndex { isVectorTransforming = false }
         withStructureUndo(label: .rasterize) {
             for celIndex in layers[layerIndex].cels.indices {
@@ -2141,6 +2278,12 @@ final class CanvasManager: ObservableObject {
         } else if textGestureActive {
             commitInteractiveText()
         }
+        // The vector-layer transform's version of the same rule, and the reason it needs stating: the
+        // artist stays in Move mode across an undo (there is no gesture end to hang a commit on), so
+        // without this the open bracket holds the only record of the drag and undo reaches past it —
+        // which is the whole bug. Closing here pushes the step; `isVectorTransforming` stays on and
+        // the next drag opens a fresh bracket against whatever the undo left behind.
+        closeVectorTransformBracket()
     }
 
     func refreshUndoRedoState() {
@@ -2149,7 +2292,13 @@ final class CanvasManager: ObservableObject {
         // A live text session joins the fill and the shape: it is an undoable action in its own
         // right (undo finalizes it, then reverts it), so the affordance must be live even on an
         // empty committed stack.
-        let newCanUndo = fillGestureActive || shapeGestureActive || textGestureActive || history.canUndo
+        // A vector-layer transform mid-gesture joins them: the drag has already changed the document
+        // and `finalizePendingGesturesForHistoryAction` will turn it into a step the moment undo is
+        // pressed, so the affordance must be live even on an empty committed stack. Asks whether the
+        // layer has actually *moved*, not merely whether a bracket is open — a drag that returned to
+        // where it started records nothing, and an Undo button lit for it would be lying.
+        let newCanUndo = fillGestureActive || shapeGestureActive || textGestureActive
+            || vectorTransformGestureHasChange || history.canUndo
         let newCanRedo = !fillGestureActive && !shapeGestureActive && !textGestureActive && history.canRedo
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }

@@ -77,7 +77,7 @@ Three places cannot simply alias to it:
 
 Vector commit is an upsert into `_elements` at the same index (preserving z-order), plus `registerVectorTextUndo` — a copy of `registerVectorFillUndo` (`CanvasManager+Fill.swift:350`): whole-array before/after swap, `bumpVersion()`, `celContentChangedOutsideStroke`. Coarse-grained whole-array swap is what every other element kind already does; no new undo machinery. One undo step per session, named "Add Text" or "Edit Text" — not one per keystroke, which would flood `UndoHistory` with entries whose `cost` accounting was never sized for it.
 
-`setVectorTransform` (`CanvasManager.swift:260-269`) is explicitly **not** the pattern to copy: it contains no `recordUndo` call and its caller has no begin/end bracket. A text move/rotate/distort drag registers exactly one step on lift. (That existing gap is worth its own [BUGS.md](BUGS.md) line; it is adjacent to this work, not part of it.)
+`setVectorTransform` used to be the counter-example here — no `recordUndo`, no bracket at its caller, a vector layer's whole move/scale/rotate simply not undoable. **That gap is closed** (2026-08-21): the bracket now hangs off `CanvasManager.isVectorTransforming`'s own `didSet`, so it opens on the gesture's first write and closes however the gesture ends, including the two paths that clear the flag with no gesture ending. `VectorTransformUndoLogicTests` is the pin. A text move/rotate/distort drag registers exactly one step on lift for the same reason, and may now copy that shape rather than avoid it.
 
 ### The distort is a real homography, and the maths is twenty lines
 
