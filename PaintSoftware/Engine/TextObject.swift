@@ -322,13 +322,22 @@ struct TextFrame: Codable, Equatable {
     }
 
     /// The frame re-sized about its top-left corner — what `autoSize` does as the artist types.
-    /// Only meaningful while `isUprightTranslation`, which is every Stage 1 frame; a rotated or
-    /// distorted box re-derives its corners by projecting the new box through its own homography,
-    /// and that is Stage 4/5's to write.
+    ///
+    /// **Stage 4 made this rotation-preserving**, and that was not cosmetic: it used to rebuild
+    /// `corners` through `uprightCorners`, so a box the artist had rotated snapped back to
+    /// axis-aligned on the very next keystroke. The new corners run along the frame's *own* axes
+    /// (`basis`), which is the same statement as before for an upright frame and the right one for a
+    /// turned box. A frame too degenerate to have axes falls back to the upright rebuild, because a
+    /// collapsed quad has no direction to preserve.
     func resized(to newSize: CGSize) -> TextFrame {
         var resized = self
         resized.size = newSize
-        resized.corners = TextFrame.uprightCorners(origin: corners.first ?? .zero, size: newSize)
+        if let basis {
+            resized.corners = TextFrame.corners(origin: basis.origin, u: basis.u, v: basis.v,
+                                                width: newSize.width, height: newSize.height)
+        } else {
+            resized.corners = TextFrame.uprightCorners(origin: corners.first ?? .zero, size: newSize)
+        }
         return resized
     }
 
@@ -346,6 +355,359 @@ struct TextFrame: Codable, Equatable {
         corners = (decoded?.count == 4 ? decoded! : TextFrame.uprightCorners(origin: .zero, size: size))
         mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? .affine
         autoSize = try c.decodeIfPresent(Bool.self, forKey: .autoSize) ?? true
+    }
+}
+
+// MARK: - Where it sits, as a map
+
+// ADD_TEXT.md §3 stage 4, "rotate, scale, and handles that are the right size", in code.
+//
+// **The math lives here rather than in the overlay view, and that is the whole reason it is
+// testable.** `ShapeOverlayView`'s own header records why: the corner/edge drag arithmetic used to
+// be written out inline in `CanvasView`'s callbacks, "where nothing could unit-test it", and moving
+// it onto `ShapeGeometry` is what fixed that. `TextTransformOverlayView` is therefore layers and
+// touches and nothing else; every position, every anchor and every new quad comes from below.
+//
+// Stage 4 writes **rotation and independent-axis scale** and nothing more. The four corners moving
+// independently — a real projective warp — is stage 5, and it is what `Engine/Deform/Homography`
+// will be for. Everything here consequently assumes the quad is a *parallelogram with perpendicular
+// axes*, i.e. a rectangle that has been turned and had its two sides sized: `u` and `v` below are
+// unit vectors and the decomposition of a drag onto them is a pair of dot products. A quad that is
+// not (only stage 5 can make one, or a hand-edited document) is un-sheared by the first drag rather
+// than being refused, which is the honest half to keep — the alternative is a handle that silently
+// does nothing.
+
+extension TextFrame {
+
+    /// The frame's own axes in canvas space: where its top-left sits, the unit vectors its local
+    /// +x and +y run along, and how far it runs along each.
+    ///
+    /// This is the affine map written as geometry rather than as a matrix, and it is what every
+    /// drag, every handle position and every rotation-preserving resize reads. Nil when the quad has
+    /// collapsed far enough that "which way is along the text" has no answer.
+    struct Basis: Equatable {
+        var origin: CGPoint
+        /// Unit vector along the box's local +x (left to right along a line of type).
+        var u: CGVector
+        /// Unit vector along the box's local +y (down the page).
+        var v: CGVector
+        /// How far the quad runs along `u` and along `v`. Equal to `size` for every frame this
+        /// project writes — `VectorCanvas.mappingText` scales `size` and `corners` together — so the
+        /// two are stated separately only so a decoded document cannot make one lie about the other.
+        var width: CGFloat
+        var height: CGFloat
+    }
+
+    var basis: Basis? {
+        guard corners.count == 4 else { return nil }
+        let o = corners[0]
+        let ux = corners[1].x - o.x, uy = corners[1].y - o.y
+        let vx = corners[3].x - o.x, vy = corners[3].y - o.y
+        let w = (ux * ux + uy * uy).squareRoot()
+        let h = (vx * vx + vy * vy).squareRoot()
+        guard w > TextFrame.degenerateExtent, h > TextFrame.degenerateExtent else { return nil }
+        return Basis(origin: o, u: CGVector(dx: ux / w, dy: uy / w),
+                     v: CGVector(dx: vx / h, dy: vy / h), width: w, height: h)
+    }
+
+    /// The quad's centre — the average of its four corners, which is the centroid for any
+    /// parallelogram and therefore the point a rotation turns about.
+    var centre: CGPoint {
+        guard corners.count == 4 else { return .zero }
+        let sx = corners.reduce(CGFloat(0)) { $0 + $1.x }
+        let sy = corners.reduce(CGFloat(0)) { $0 + $1.y }
+        return CGPoint(x: sx / 4, y: sy / 4)
+    }
+
+    /// The angle the box's baseline direction makes with the canvas's +x axis, in radians. Zero for
+    /// an upright box.
+    var rotation: CGFloat {
+        guard let basis else { return 0 }
+        return atan2(basis.u.dy, basis.u.dx)
+    }
+
+    /// The map from the layout box's own coordinates — origin at its top-left, `size` across — into
+    /// canvas space. Nil when the frame is degenerate or its quad is not a parallelogram.
+    ///
+    /// **This is the affine half of ADD_TEXT.md §1's homography, and it is all stage 4 needs.** The
+    /// three places that draw a text object — the raster bake (`TextLayout.render`), the vector
+    /// flatten (`VectorCanvas.draw(text:…)`) and the live overlay (`TextOverlayView`) — concatenate
+    /// exactly this and then draw the glyphs at `size`, which is why a rotated box draws with no
+    /// bitmap and no resampling at all on the two CoreGraphics paths. Stage 5 replaces it with the
+    /// full 3×3 for `.projective`; `affine()` there is expected to return this same matrix for every
+    /// quad that is a parallelogram, which is every quad stage 4 can make.
+    var affineTransform: CGAffineTransform? {
+        guard mode == .affine, corners.count == 4,
+              size.width > TextFrame.degenerateExtent, size.height > TextFrame.degenerateExtent else { return nil }
+        let o = corners[0]
+        // The fourth corner is implied by the other three for a parallelogram. A quad that does not
+        // satisfy that has no affine map onto it, and saying so is what keeps stage 5's `.projective`
+        // an additive case rather than a silent approximation.
+        let implied = CGPoint(x: corners[1].x + corners[3].x - o.x, y: corners[1].y + corners[3].y - o.y)
+        let extent = max(size.width, size.height)
+        let eps = max(1e-6, 1e-6 * extent)
+        guard abs(implied.x - corners[2].x) <= eps, abs(implied.y - corners[2].y) <= eps else { return nil }
+        let t = CGAffineTransform(a: (corners[1].x - o.x) / size.width,
+                                  b: (corners[1].y - o.y) / size.width,
+                                  c: (corners[3].x - o.x) / size.height,
+                                  d: (corners[3].y - o.y) / size.height,
+                                  tx: o.x, ty: o.y)
+        // A zero determinant is a box collapsed onto a line; drawing through it produces nothing
+        // useful and CoreGraphics will not invert it.
+        guard abs(t.a * t.d - t.b * t.c) > 1e-9 else { return nil }
+        return t
+    }
+
+    /// Point-in-quad with a slop collar, in the frame's own space.
+    ///
+    /// `VectorCanvas.frame(_:contains:slop:)` is this — it delegates here — so the display list's
+    /// re-open query and the live overlay's hit test cannot come to disagree about what "inside the
+    /// text" means. Space-agnostic: `point` and `corners` must simply be in the same space.
+    func contains(_ point: CGPoint, slop: CGFloat = 0) -> Bool {
+        guard corners.count == 4 else { return false }
+        // Winding sign, taken from the whole quad rather than per edge: a degenerate (zero-area) quad
+        // has no inside at all, and the per-edge signs of one are noise.
+        var area: CGFloat = 0
+        for i in 0..<4 {
+            let a = corners[i], b = corners[(i + 1) % 4]
+            area += a.x * b.y - b.x * a.y
+        }
+        if abs(area) > 1e-9 {
+            let sign: CGFloat = area > 0 ? 1 : -1
+            var inside = true
+            for i in 0..<4 {
+                let a = corners[i], b = corners[(i + 1) % 4]
+                let cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+                if cross * sign < 0 { inside = false; break }
+            }
+            if inside { return true }
+        }
+        guard slop > 0 else { return false }
+        for i in 0..<4 {
+            let a = corners[i], b = corners[(i + 1) % 4]
+            if StrokeGeometry.distanceSquared(from: point, toSegment: a, b) <= slop * slop { return true }
+        }
+        return false
+    }
+
+    /// The four corners of a `width × height` box whose top-left is `origin` and whose axes are `u`
+    /// and `v`, in `Corner` order. The one place a quad is built from a basis, so the corner order
+    /// cannot drift between the resize, the rotate and the auto-size regrow.
+    static func corners(origin: CGPoint, u: CGVector, v: CGVector,
+                        width: CGFloat, height: CGFloat) -> [CGPoint] {
+        let ux = u.dx * width, uy = u.dy * width
+        let vx = v.dx * height, vy = v.dy * height
+        return [origin,
+                CGPoint(x: origin.x + ux, y: origin.y + uy),
+                CGPoint(x: origin.x + ux + vx, y: origin.y + uy + vy),
+                CGPoint(x: origin.x + vx, y: origin.y + vy)]
+    }
+
+    /// Below this, an extent is not a box. Shared by `basis` and `affineTransform` so "degenerate"
+    /// means one thing.
+    static let degenerateExtent: CGFloat = 1e-6
+
+    /// The smallest a handle drag may make either axis, in canvas points.
+    ///
+    /// The same number `TextLayout.minimumBoxWidth` is — that constant is defined as this one — so
+    /// the smallest box a drag can make and the smallest box auto-size can make are one figure. A
+    /// drag that would take an axis below it, or through the anchor and out the other side, clamps
+    /// here rather than mirroring the box: a text object that reads backwards is never what the
+    /// artist meant by dragging past the far corner.
+    static let minimumExtent: CGFloat = 24
+
+    // MARK: Handles
+
+    /// The nine grips ADD_TEXT.md §3 stage 4 puts on a text box: four corners, four edge midpoints,
+    /// and the rotation knob standing off above the top edge.
+    ///
+    /// Corners size both axes at once; an edge sizes one and freezes the other, which is what makes
+    /// the scale genuinely **independent-axis** — for type, "set the wrap width and leave the height
+    /// alone" is the common ask, and a corner-only box cannot express it.
+    enum Handle: CaseIterable, Equatable {
+        case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left, rotation
+
+        /// True for the eight that size the box. The rotation knob is the exception everywhere.
+        var isResize: Bool { self != .rotation }
+
+        /// How the box's width responds: nil freezes it.
+        fileprivate var widthSign: CGFloat? {
+            switch self {
+            case .topLeft, .bottomLeft, .left: return -1
+            case .topRight, .bottomRight, .right: return 1
+            case .top, .bottom, .rotation: return nil
+            }
+        }
+
+        /// How the box's height responds: nil freezes it.
+        fileprivate var heightSign: CGFloat? {
+            switch self {
+            case .topLeft, .topRight, .top: return -1
+            case .bottomLeft, .bottomRight, .bottom: return 1
+            case .left, .right, .rotation: return nil
+            }
+        }
+
+        /// Where the drag's anchor sits inside a `width × height` box, in the box's own coordinates.
+        /// The anchor is the point diametrically opposite the grip, which is what "the opposite
+        /// corner does not move" means once edges are in the set too.
+        fileprivate func anchorLocal(width: CGFloat, height: CGFloat) -> CGPoint {
+            switch self {
+            case .topLeft: return CGPoint(x: width, y: height)
+            case .topRight: return CGPoint(x: 0, y: height)
+            case .bottomRight: return CGPoint(x: 0, y: 0)
+            case .bottomLeft: return CGPoint(x: width, y: 0)
+            case .top: return CGPoint(x: width / 2, y: height)
+            case .bottom: return CGPoint(x: width / 2, y: 0)
+            case .left: return CGPoint(x: width, y: height / 2)
+            case .right: return CGPoint(x: 0, y: height / 2)
+            case .rotation: return CGPoint(x: width / 2, y: height / 2)
+            }
+        }
+    }
+
+    /// Where every handle sits in canvas space — **the single source of truth both the overlay's
+    /// rebuild and its reposition read**, which is `ShapeOverlayView.handleLayout(for:)`'s first
+    /// discipline and the reason the two cannot drift apart.
+    ///
+    /// `rotationOffset` is how far the rotation knob stands off the top edge. It arrives already
+    /// divided by `canvasScale`, because it is a *screen*-point figure and this function works in
+    /// canvas points — a handle is chrome and belongs to the screen, so the view owns the constant
+    /// and the geometry owns the direction.
+    ///
+    /// Positions come off the quad directly rather than out of `size`, so a frame whose stored size
+    /// has drifted from its corners still puts its handles on the corners the artist can see.
+    func handleLayout(rotationOffset: CGFloat) -> [(handle: Handle, position: CGPoint)] {
+        guard corners.count == 4 else { return [] }
+        let c = corners
+        func mid(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
+        let topMid = mid(c[0], c[1])
+        var layout: [(handle: Handle, position: CGPoint)] = [
+            (.topLeft, c[0]), (.top, topMid), (.topRight, c[1]),
+            (.right, mid(c[1], c[2])), (.bottomRight, c[2]),
+            (.bottom, mid(c[2], c[3])), (.bottomLeft, c[3]), (.left, mid(c[3], c[0]))
+        ]
+        // Along the box's own "up", so the knob stays over the top edge at any rotation instead of
+        // swinging into the artwork.
+        if let basis, rotationOffset != 0 {
+            layout.append((.rotation, CGPoint(x: topMid.x - basis.v.dx * rotationOffset,
+                                              y: topMid.y - basis.v.dy * rotationOffset)))
+        }
+        return layout
+    }
+
+    /// The handle **nearest** `point` within `reach`, not merely the first whose target contains it.
+    ///
+    /// `ShapeOverlayView`'s second discipline, and it is more load-bearing here than there: a text
+    /// box carries nine grips rather than five, and on a box smaller than the 44 pt target a corner,
+    /// its two neighbouring edges and the rotation knob all overlap. First-match would cost such a
+    /// box most of its handles outright.
+    func handle(nearest point: CGPoint, reach: CGFloat, rotationOffset: CGFloat) -> Handle? {
+        var best: (handle: Handle, distance: CGFloat)?
+        for entry in handleLayout(rotationOffset: rotationOffset) {
+            let distance = hypot(point.x - entry.position.x, point.y - entry.position.y)
+            guard distance <= reach else { continue }
+            if best == nil || distance < best!.distance { best = (entry.handle, distance) }
+        }
+        return best?.handle
+    }
+
+    /// The canvas point a drag on `handle` must hold still. The rotation knob's is the centre, which
+    /// does not move either.
+    func anchor(for handle: Handle) -> CGPoint? {
+        guard let basis else { return nil }
+        let local = handle.anchorLocal(width: basis.width, height: basis.height)
+        return CGPoint(x: basis.origin.x + basis.u.dx * local.x + basis.v.dx * local.y,
+                       y: basis.origin.y + basis.u.dy * local.x + basis.v.dy * local.y)
+    }
+}
+
+// MARK: - One drag
+
+/// A handle drag in flight: **the whole starting quad and the anchor, latched at touch-down**.
+///
+/// ADD_TEXT.md §1 says why the latch rather than a per-frame recomputation, and it is not the
+/// obvious reason. Recomputing the anchor from the live frame is stable while the drag stays on one
+/// side of it and jumps at the instant it crosses — but the *decisive* case is a mid-drag
+/// pinch-zoom: with the reference frame recomputed, the artist's second finger moves the thing the
+/// first finger is measuring against, and the box lurches. One latched value removes both, and it is
+/// `ShapeOverlayView.activeAnchor`'s argument with one more term.
+///
+/// **Deliberately no `recordUndo` anywhere in here, and none on lift either.** See
+/// `CanvasManager.endTextHandleDrag` for the reasoning; the short version is that a text session
+/// already registers exactly one step for everything that happened inside it, and a second step for
+/// the drag would be a dead entry the artist has to press through.
+struct TextFrameDrag: Equatable {
+
+    /// The frame as it was when the finger went down. Every delta is measured against this and never
+    /// against the frame the previous delta produced, so a drag cannot accumulate rounding and cannot
+    /// be re-based by anything that happens mid-gesture.
+    let start: TextFrame
+    let handle: TextFrame.Handle
+    /// The canvas point this drag holds still, latched with the quad.
+    let anchor: CGPoint
+
+    private let basis: TextFrame.Basis
+
+    init?(frame: TextFrame, handle: TextFrame.Handle) {
+        guard let basis = frame.basis, let anchor = frame.anchor(for: handle) else { return nil }
+        self.start = frame
+        self.handle = handle
+        self.anchor = anchor
+        self.basis = basis
+    }
+
+    /// The frame this drag produces with the finger at `point`.
+    ///
+    /// Pure, and a function of the *latched* frame alone — driving one delta or sixty produces the
+    /// same answer for the same final point, which is the property `TextTransformLogicTests` pins.
+    func frame(draggedTo point: CGPoint, minimumExtent: CGFloat = TextFrame.minimumExtent) -> TextFrame {
+        handle == .rotation ? rotated(towards: point) : resized(towards: point, minimumExtent: minimumExtent)
+    }
+
+    /// Turns the box about its own centre. Neither `size` nor `autoSize` moves: a rotation is not a
+    /// resize, and freezing a pristine box's growth because it was turned would clip the artist's
+    /// next keystroke for no reason they could name. See `CanvasManager.dragTextHandle`.
+    private func rotated(towards point: CGPoint) -> TextFrame {
+        let c = start.centre
+        // `+ π/2` because the knob stands off the *top* edge: dragging it straight up from the centre
+        // is the box upright, which is angle zero. `ShapeOverlayView.report`'s rotation arm, verbatim.
+        let angle = atan2(point.y - c.y, point.x - c.x) + .pi / 2
+        let cosA = cos(angle), sinA = sin(angle)
+        let u = CGVector(dx: cosA, dy: sinA)
+        let v = CGVector(dx: -sinA, dy: cosA)
+        let origin = CGPoint(x: c.x - u.dx * basis.width / 2 - v.dx * basis.height / 2,
+                             y: c.y - u.dy * basis.width / 2 - v.dy * basis.height / 2)
+        var turned = start
+        turned.corners = TextFrame.corners(origin: origin, u: u, v: v,
+                                           width: basis.width, height: basis.height)
+        return turned
+    }
+
+    /// Sizes the box along its own axes with the anchor pinned, and **clears `autoSize`**.
+    ///
+    /// ADD_TEXT.md §1 "Point text grows; a box you sized wraps": this is Illustrator's
+    /// point-text-becomes-area-text moment, and the document is explicit that it feels broken left
+    /// implicit. From here `size` is authoritative, the text wraps and clips into it, and the
+    /// overlay draws a solid outline where a pristine box draws a dashed one.
+    private func resized(towards point: CGPoint, minimumExtent: CGFloat) -> TextFrame {
+        let d = CGVector(dx: point.x - anchor.x, dy: point.y - anchor.y)
+        // Dot products rather than a 2×2 solve because `u ⟂ v` for every quad stage 4 writes; see
+        // this file's stage-4 header for what happens to one that is not.
+        let alongU = d.dx * basis.u.dx + d.dy * basis.u.dy
+        let alongV = d.dx * basis.v.dx + d.dy * basis.v.dy
+        let width = handle.widthSign.map { max(minimumExtent, $0 * alongU) } ?? basis.width
+        let height = handle.heightSign.map { max(minimumExtent, $0 * alongV) } ?? basis.height
+
+        let local = handle.anchorLocal(width: width, height: height)
+        let origin = CGPoint(x: anchor.x - basis.u.dx * local.x - basis.v.dx * local.y,
+                             y: anchor.y - basis.u.dy * local.x - basis.v.dy * local.y)
+        var sized = start
+        sized.size = CGSize(width: width, height: height)
+        sized.corners = TextFrame.corners(origin: origin, u: basis.u, v: basis.v,
+                                          width: width, height: height)
+        sized.autoSize = false
+        return sized
     }
 }
 

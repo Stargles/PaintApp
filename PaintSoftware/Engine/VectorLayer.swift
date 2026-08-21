@@ -1364,32 +1364,12 @@ final class VectorCanvas {
     /// in the *same* space — `topmostText(atCanvasPoint:)` maps the tap into local space first,
     /// because that is where a `VectorCanvas` stores its geometry. See there for why this is the
     /// `H⁻¹` test and not an approximation of one.
+    /// **Stage 4 moved the body onto `TextFrame.contains(_:slop:)`** and left this as the name the
+    /// display list calls it by. The live overlay needs the identical predicate for its own hit test
+    /// (`TextOverlayView.hitTest`), and two copies of a point-in-quad test are two chances for the
+    /// re-open query and the editor to disagree about where the text is.
     static func frame(_ frame: TextFrame, contains point: CGPoint, slop: CGFloat = 0) -> Bool {
-        let corners = frame.corners
-        guard corners.count == 4 else { return false }
-        // Winding sign, taken from the whole quad rather than per edge: a degenerate (zero-area) quad
-        // has no inside at all, and the per-edge signs of one are noise.
-        var area: CGFloat = 0
-        for i in 0..<4 {
-            let a = corners[i], b = corners[(i + 1) % 4]
-            area += a.x * b.y - b.x * a.y
-        }
-        if abs(area) > 1e-9 {
-            let sign: CGFloat = area > 0 ? 1 : -1
-            var inside = true
-            for i in 0..<4 {
-                let a = corners[i], b = corners[(i + 1) % 4]
-                let cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
-                if cross * sign < 0 { inside = false; break }
-            }
-            if inside { return true }
-        }
-        guard slop > 0 else { return false }
-        for i in 0..<4 {
-            let a = corners[i], b = corners[(i + 1) % 4]
-            if StrokeGeometry.distanceSquared(from: point, toSegment: a, b) <= slop * slop { return true }
-        }
-        return false
+        frame.contains(point, slop: slop)
     }
 
     // MARK: - Rendering
