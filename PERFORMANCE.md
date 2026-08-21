@@ -39,8 +39,12 @@ the full 4K canvas. At 2048×1024 the thumbnail's over-render extrapolates to te
 *Confirmed 2026-08-20 by item 15, which is the first time either half was measured.* The re-encode is
 **95% of the wait** (455 ms of 480 on a 32-cel document) and the cost is flat at **15.0 ms a cel**
 across a 4× range of documents, so the scaling claim holds as written. The snapshot the thumbnail
-lives in is **2.5 ms**. Item 15 then took the wait to 117 ms; ~3 s on the owner's iPad is a ~150-cel
-document at the old rate (INFERRED).
+lives in is **2.5 ms**. Item 15 then took the wait to 117 ms; ~3 s on the owner's iPad was inferred to
+be a ~150-cel document at the old rate.
+*Correction, 2026-08-21*: that inference is **refuted**. The owner's real projects were read directly
+off the device (item 14) — **1–4 cels each**, not ~150 — so the ~3 s report has no cel-count
+explanation and whatever caused it is unexplained. It no longer matters in practice: a Release build
+of the fan-out (item 15) is on the owner's iPad now, and they report leaving the gallery **instant**.
 
 **`CompositorBudget` is inert at this size.** Six canvas-sized textures are 48 MiB at 2048×1024
 against a 192 MiB device-derived budget (`Compositor.swift:167-170`, `physicalMemory / 16` on a 3 GB
@@ -135,8 +139,10 @@ diagnosis rather than as a live defect.** MEASURED: a 32-cel document at 2048×1
 project" was high by roughly 2-3×, and the real figure is **~0.95 s at a hundred cels** (INFERRED,
 linear in cel count). It is now **53.5 ms** for the same document and **~0.17 s** at a hundred cels:
 the decode fans out over cores and off the main thread, and the thumbnails happen after the canvas is
-up. Full provenance in item 9. **What is still unknown is the same thing as everywhere else here** —
-these are simulator figures on an 8-core Mac, and an A13's 2+4 cores will not divide by four.
+up. Full provenance in item 9.
+**Confirmed on the owner's iPad 9, 2026-08-21, Release build `38e22c6`: "no issues."** The visible
+behaviour change — cel blocks arriving blank and filling in a fraction of a second later — reads as
+loading rather than as broken (item 9(c)), which was the open question this paragraph used to carry.
 
 **3. Leaving to the gallery. — MEASURED and shortened 2026-08-20 (item 15); this paragraph is now
 the diagnosis rather than a live defect.** Navigation waits on the full write
@@ -146,11 +152,15 @@ Encoding is correctly off-main on `saveQueue`, so nothing freezes — the artist
 **It was 480.3 ms for a 32-cel document at 2048×1024**, of which **455.2 ms was `pngData()`**, 11.7 ms
 was the file I/O and 2.5 ms was the snapshot the thumbnail lives in — so **15.0 ms a cel**, flat from
 8 cels to 32, or **~1.50 s at a hundred cels** and **~1.95 s on the owner's iPad 9** (INFERRED). The
-owner's "~3 s" is a ~150-cel document at that rate; it needed no other explanation.
+owner's "~3 s" was inferred at the time to be a ~150-cel document at that rate.
 **It is now 117.1 ms for the same document, ~0.37 s at a hundred cels**: the per-cel encode runs
 across cores. Full provenance, the alternated-in-one-run proof and the two unchanged control phases
-are in item 15. **What is still unknown is the device multiplier** — an A13's 2+4 cores will not
-divide by four.
+are in item 15.
+*Correction, 2026-08-21*: item 14's direct read of the owner's device found **1–4 cels a project, not
+~150**, so the ~150-cel inference above is refuted and the ~3 s report is not explained by cel count
+after all — see item 15 for what that leaves open. **The device multiplier no longer matters for this
+one**: the owner has since run this fan-out in Release on their iPad 9 and reports leaving the gallery
+**instant**.
 
 **4. Scrubbing the timeline, and playback dropping frames. — both gates now exist.** Two ungated
 main-thread costs used to fire on the same `currentFrame` write. `relayout()` ran on every SwiftUI
@@ -184,9 +194,11 @@ device has not confirmed it.** It was ~10.2 ms vs ~2.8 ms per touch-move at 2048
 the two MEASURED points in §1); item 8 then measured the real thing at 8.0 ms, and item 11 took it to
 2.2 ms against the raster path's 2.1 ms — MEASURED, simulator/CoreGraphics, machine idle, table in
 item 11. The gap this entry is about is gone on the simulator at all three canvas sizes.
-**What is not established is the artist's experience of it.** This was one term of a frame, and items
-4, 5 and 9(b) are the others; whether the owner's 4096² document now draws at something other than 17
-fps is a question only their iPad answers, and it is open in §6.
+**Confirmed on the owner's iPad 9, 2026-08-21, Release build `38e22c6`: "17fps is gone, good job. 4k
+screen displays full 60fps when painting."** This is the headline result of the whole performance
+programme — item 11's simulator figures predicted exactly this, and the device now confirms the
+ceiling sits above the display's 60 Hz. This was one term of a frame, and items 4, 5 and 9(b) are the
+others, but the artist's own report is now in, and it closes this entry.
 
 ---
 
@@ -486,6 +498,10 @@ missing one: missing is loud, stale is a picture of the drawing as it was before
 install re-resolves layer and cel by id and compares a `LayerContentVersion` captured *before* the
 render against the live one.
 
+**Confirmed on the owner's iPad 9, 2026-08-21, Release build `38e22c6`: "no issues."** Both the
+opening wait and (c)'s deliberate behaviour change — cel blocks arriving blank and filling in —
+were checked together and read as loading rather than as broken. Accepted as designed.
+
 **10. Measure the Mode 3 eraser (`cutToIntersection`) live-drag cost. — MEASURED, 2026-08-20.**
 `recordVectorSample` calls `resolveIntersectionCut` on **every** sample
 (`StrokeCanvasView.swift:905-923`, the call at `:921` — line numbers moved since this item was
@@ -571,10 +587,13 @@ everyone assumes a save is bounded by is **2%**, and the whole atomic-save machi
 rearrange is **1.6%**. The main-actor snapshot after item 5 made the tile 320×160 is **2.5 ms** —
 the thumbnail half really is finished.
 
-**So the owner's "~3 s" is arithmetic, not a mystery**: 15.0 ms a cel is **~1.50 s at a hundred
-cels** and **~1.95 s on their iPad 9** at §1's ~1.3× (both INFERRED, linear in cel count). Three
-seconds is a **~150-cel document** on that device — well inside what an animator has. Nothing else on
-this path is big enough to be the complaint.
+**So the owner's "~3 s" looked like arithmetic, not a mystery**: 15.0 ms a cel is **~1.50 s at a
+hundred cels** and **~1.95 s on their iPad 9** at §1's ~1.3× (both INFERRED, linear in cel count).
+Three seconds looked like a ~150-cel document on that device.
+**Refuted, 2026-08-21 — item 14's direct read of the owner's device found 1–4 cels a project, not
+~150.** So the ~3 s report is *not* explained by cel count after all, and whatever caused it is
+unexplained. It is moot in practice: the fan-out below has since shipped in Release on the owner's
+iPad, and they report leaving the gallery **instant**.
 
 **(b) The fan-out.** It is `decodeCels`' problem pointing the other way, and it takes the same fix:
 `writePackage` flattens the cel tree across layers, runs `writeCel` through `PixelOps.parallelMap`,
@@ -621,14 +640,20 @@ identity scheme in `ProjectStore`, and `SaveProfile.pngsReused` exists as the co
 *Verified*: `testWhatLeavingToTheGalleryCosts`, `testSavePngEncodeFanOutIsWorthIt`
 (`PerfBaselineTests.swift`), `testEveryCelsPixelsAndOrderSurviveTheParallelWrite`
 (`ProjectSaveLogicTests.swift`).
+**And it stays unbuilt for good.** The handoff after this item shipped said exactly what would settle
+it: *"if it feels instant, §5's dirty-tracking memo stays unbuilt for good."* Owner, 2026-08-21,
+Release build `38e22c6`, iPad 9: *"leaving the gallery is instant."* It does; retire the memo.
 
 ### Tier C — real, recorded, not urgent
 
-**All four are now closed — 11 and 12 shipped, 13 shipped, 14 measured and declined — and with
-them the whole programme.** Fifteen items: thirteen built, item 10 measured and deliberately
-left alone until the eraser rewrite settles, item 14 measured and declined. **What none of it
-has is the owner's iPad**: every after-figure in this document is a Debug simulator, so each
-result's shape transfers and its multiplier does not (§6).
+**All four were closed 2026-08-20 — 11 and 12 shipped, 13 shipped, 14 measured and declined — and
+with them the whole programme.** Fifteen items: thirteen built, item 10 measured and deliberately
+left alone until the eraser rewrite settles, item 14 measured and declined at the time.
+**The device pass landed 2026-08-21** — items 9, 11, 13 and 15 are now confirmed on the owner's own
+iPad 9 in Release, not merely on the simulator; see each item and §6. **Item 14 alone was re-opened
+by the owner's answer on what a real document is meant to hold, then re-scoped by a direct read of
+the owner's actual device data** — its own entry below is rewritten in full; the cheap half it turned
+up is the one thing left queued from this whole programme.
 
 **11. Give the `.overlay` vector scratch its own layer. — SHIPPED 2026-08-20** (`VectorPreviewPlan`,
 `StrokeCanvasView.scratchView`). The `.overlay` branch flattened the committed render and the live
@@ -657,9 +682,12 @@ device at 96.7% idle: 7.4 → 2.2, 14.3 → 2.4, 44.2 → 3.2 ms, ceiling 23 →
 by single readings, and because a ratio that survives being measured twice under different loads is a
 different kind of claim from one that has not been.
 
-*Two things this does not say.* It is not a device figure — see §5 and the still-open question in §6;
-a Release run on the owner's iPad is what closes it, and it is the one thing this item still owes.
-And it is not a frame rate: it is one term of a frame, and items 4, 5 and 9(b) are the others.
+*Two things this did not say, and the first is now closed.* It was not a device figure — **a Release
+run on the owner's iPad is what closes it, and it was the one thing this item still owed; it is now
+paid, 2026-08-21.** The owner, on their iPad 9, Release build `38e22c6`: *"17fps is gone, good job. 4k
+screen displays full 60fps when painting."* Item 11's simulator ceiling at 4096² was 21 → 253 fps; the
+device confirms the ceiling now sits above the display's 60 Hz. And it is still not a frame rate on
+its own: it is one term of a frame, and items 4, 5 and 9(b) are the others.
 
 *What the simulator turned out to be worth here, which is more than §5 would lead you to expect.* The
 before column is measurable against [BUGS.md](BUGS.md)'s device numbers, because it is the same code
@@ -763,12 +791,15 @@ neither becomes a different question on a bigger iPad. What changed is that undo
 **largest single budget in the app** — 300 MiB against 192 apiece for two caches sized from a measured
 crash table — with nothing behind the difference but the literal somebody typed.
 
-**Two honest qualifications on the ~700 MiB arithmetic this item was built on.** It is five *ceilings*
-added together and nothing has ever observed them full at once (item 12 makes the same point about its
-own 384 MiB, and §6 still lists real occupancy as open). And it is not the app's memory story anyway:
-item 14 measures a drawn raster cel at **6.6 MiB resident**, so a 120-cel scene is ~787 MB —
-**more than all five budgets together, and unbudgeted**. The reconciliation's real finding is that the
-budgeted half of the app is the smaller half.
+**Two honest qualifications on the ~700 MiB arithmetic this item was built on, and the second is now
+corrected rather than merely a caveat.** It is five *ceilings* added together and nothing has ever
+observed them full at once — item 14's rewrite finds four of the five cannot be reached at all at
+2048×1024, so a defensible steady state is **~250–450 MiB**, not 656, and adding the full sum to a
+cel-residency figure double-counts headroom that was never gone. And this was never the app's whole
+memory story anyway: a drawn raster cel is **6.558 MiB resident, measured** (not 6.6, not "MB" —
+see item 14), so a document large enough to matter is **more than these five budgets together, and
+unbudgeted regardless of which of the two totals above is used.** The reconciliation's real finding
+stands: the budgeted half of the app is the smaller half.
 
 *What the cut costs the iPad 9, stated rather than glossed, because a regression in undo is one the
 owner feels the same day.* It is 300 → 192 MiB there. In the two units that matter, MEASURED
@@ -794,8 +825,11 @@ turn one transient warning into a permanently shallow history. It trims the **ol
 clears, because a cache entry costs one recomputation and an undo step costs work the artist cannot
 get back. On the iPad 9 that is 96 MiB retained — six whole-cel operations — against 300 MiB that
 previously could not give back a byte.
-*The one judgement here that wants the owner rather than an argument is that fraction.* Half is a
-guess dressed as a constant; §6 carries the measurement that would replace it.
+**Ruled by the owner, 2026-08-21: both constants are right.** 192 MiB of budget (~12 whole-cel
+operations) and trimming to half on a memory warning (~6) are no longer guesses dressed as constants
+— they are OWNER-STATED decisions, and the open question in §6 that asked for this is closed. A real
+session's actual `currentCost` is still unsampled, but the ruling does not wait on it: the owner has
+judged the sizing adequate directly rather than by having it measured and shown to them.
 *Safety*: pure logic, fully headless, plus one Combine subscription. The subscription is `cancellables`
 rather than the caches' `addObserver` block on purpose — those three are process-lifetime singletons,
 but a `CanvasManager` is per-document and the test target builds dozens, so an unremoved observer
@@ -810,20 +844,16 @@ notification and `canUndo` must still be right afterwards.
 (`StrokeCanvasView.swift:528-555`), which is why the small-stroke row above is 17 kB and not 16 MiB.
 Whether a real session reaches any cap is **still unmeasured** — see §6.
 
-**14. Bound raster-cel residency. — MEASURED 2026-08-20, and the build DECLINED on what the
-measurement found.** The item's own closing line was *"Do not build this on inference."* The
-inference has been replaced; the conclusion is that the cheap version of this does not exist and the
-expensive version has no confirmed harm to prevent.
+**14. Bound raster-cel residency. — RE-OPENED 2026-08-21 on the owner's answer, then RE-SCOPED
+2026-08-21 on a direct read of the owner's device. The expensive half stays DECLINED; a cheap half is
+now justified and queued.**
 
 `RasterLayerTexture.init` allocates a full canvas-sized `CGContext` and draws the decoded PNG in
 whenever an image is passed (`:196-203` → `:235-247` → `:218-231`), and `load` does this for every cel
 of every layer. There is no eviction of any kind — unlike the vector tier's
 `evictDistantVectorRenderCaches` (`CanvasManager+Interpolation.swift:489-511`, capped at 12 cels).
-**The asymmetry is principled**: a vector render is re-derivable from retained geometry; a raster
-cel's pixels are the primary data. So the fix is different in kind — hold compressed `Data` for cels
-outside a playhead window and rehydrate on demand.
 
-**The number.** `PerfBaselineTests.testWhatOneDrawnRasterCelCostsResidentAtTheOwnersCanvas` (new)
+**The number, still standing.** `PerfBaselineTests.testWhatOneDrawnRasterCelCostsResidentAtTheOwnersCanvas`
 builds inked cels one at a time and differences `phys_footprint`, in two equal halves so the slope can
 be checked for flatness rather than assumed. **MEASURED on `tierc-1` (iOS 26.5 simulator, iPad Pro
 13-inch M4, Debug), 24 cels at the owner's 2048×1024:**
@@ -833,58 +863,100 @@ be checked for flatness rather than assumed. **MEASURED on `tierc-1` (iOS 26.5 s
 | per drawn cel, first half / second half | **6.6 / 6.6 MiB** |
 | the arithmetic this item was sized on (`w·h·4`) | 8.0 MiB |
 | `renderToUIImage()`'s memo, per cel | **0.0 MiB** |
-| 120 cels | **787 MB** (INFERRED, linear in cel count) |
 
 **Taken twice under deliberately different host load and it did not move** — once at 3.7% idle and
 once at 95.9% idle, no other `xcodebuild` either time, 6.6 MiB both times. A footprint *difference*
-between two readings seconds apart cancels the host noise that makes milliseconds untrustworthy here,
-which is why this is one of the few figures in this document that did not need a quiet machine.
+between two readings seconds apart cancels the host noise that makes milliseconds untrustworthy here.
 
-**So the premise holds and the estimate was ~20% high**: every drawn cel is resident, residency is
-linear in cel count, nothing bounds it, and 120 cels is 787 MB rather than ~960 MiB — against the
-~1.4 GB pre-jetsam ceiling and on top of item 13's 656 MiB of budget ceilings. At 4096² the same slope
-is ~53 MiB a cel (INFERRED, at the measured 82% of arithmetic), so **22 drawn cels would exhaust the
-device on their own** — a fact about the stress canvas rather than about the document the owner
-animates.
+**Three corrections to the arithmetic built on that number, verified against the tree, and they do not
+all point the same way.**
 
-**Three findings, and the second and third are why this is declined rather than deferred.**
+*The unit label was wrong and the slope understates the path that matters.* "787 MB" and "6.6 MiB"
+are only mutually consistent at **6.558 MiB** (787 ÷ 120), and both are **MiB**, not MB — the test's
+own `megabytes()` helper divides by `1_048_576` and prints the literal string `"MB"`. And 6.558 MiB is
+the *stamping* path: `inkOneCel` (`PerfBaselineTests.swift:2800-2814`) draws three sine strokes that
+touch roughly 82% of a cel's rows. **The *load* path has never been measured, and it touches every
+row**: `RasterLayerTexture.setContents` (`RasterLayerTexture.swift:231-247`) runs `ctx.clear(full)`
+then `image.draw(in: CGRect(origin: .zero, size: size))` over the whole canvas rect, so a cel arriving
+from a package is the full **8.0 MiB (INFERRED, `w·h·4`, still never measured directly)** — the number
+this item was sized on all along, not the smaller one this section reported.
 
-*The estimate was high but the shape was right.* Nothing here rescues the item; it is a real unbounded
-cost, and it is the largest single memory number in this document.
+*Item 13's 656 MiB, which this item was weighed against, double-counts headroom that is not gone.*
+It is a sum of five *ceilings*, and four of the five cannot be reached at 2048×1024: the compositor's
+real occupancy at six layers is 48 MiB against its 192 MiB ceiling (§2 item 1), the onion skin at its
+shipped `previousCount = nextCount = 1` holds ~6 MiB against 64, and the mask cache is near 0 without
+alpha masks in the frame. **A defensible steady state is ~250–450 MiB**, not 656 (INFERRED, and every
+term in it is a ceiling nobody has observed full). Adding the full 656 to a cel-residency figure
+overstates what is actually spoken for.
 
-*There is no cheap half to ship.* The obvious low-risk subset was to evict the **derived** buffer and
-leave the primary data alone — the exact shape of `evictDistantVectorRenderCaches`, and
-correctness-neutral by construction. It is worth **zero bytes**: `CGContext.makeImage()` on a
-CG-allocated bitmap returns an image sharing the context's buffer copy-on-write, so the memo costs
-nothing until the cel is drawn into again. That was measured at 0.0 MiB a cel rather than assumed in
-either direction, because "second allocation or view of the first?" is not answerable from
-CoreGraphics' documentation and it decides the whole question. **The only thing left to evict is the
-primary data**, which is precisely the high-risk contract flip.
+*The owner's real documents were read directly, and they are nothing like the size this item feared.*
+An 11-agent scoping pass re-opened this item on the strength of the owner's stated intent (below);
+before any of it was built, **the owner's own iPad container was read over `devicectl`.** Across all
+25 project packages on the device — live, `Documents/Backups`, and `Documents/Trash` — **the largest
+has 4 cels.** The two live projects (`Documents/Projects/Untitled.paintproj`, `Untitled 2.paintproj`)
+have **1 cel each**. `Untitled.paintproj`'s own `manifest.json`, pulled off the device: 1 layer,
+`'Vector 1'`, `kind=vector`, 1 cel, `startFrame 0`, `frameCount 12` — one drawing held across twelve
+frames.
 
-*And item 9(c), merged the same day, forecloses the lazy variants.*
-`CanvasManager.backfillMissingThumbnails` renders a thumbnail for **every cel with `thumbnail == nil`**
-immediately after an open, and thumbnails are not persisted in the package — so every cel is
-materialised within a second of opening the document however lazily it was loaded. Any residency bound
-must therefore either run *after* the backfill, evicting what the backfill just built, or be preceded
-by persisting thumbnails so that walk stops needing the pixels. **That is the precondition, and
-whoever picks this up should do it first.**
+**What the owner actually asked for, and why that does not make the fear real today.** Asked directly
+what a real document looks like, the owner's answer, in substance: **100–200 frames on 3–5 layers they
+actually draw on — 300–1000 drawn cels.** Label this **OWNER-STATED**, and note plainly that it is an
+**intention about the work they mean to do, not a count of cels in any package that exists** — the
+device measurement above is what settles which of the two this item should be scoped against. The app
+has never once been asked to hold more than 4 cels. This is a *forward* requirement, not a fire, and
+item 15's "~3 s gallery-leave" inference of a ~150-cel document is refuted by the same read (§1, §2
+item 3) — whatever caused that report, it was not cel count, and the report is moot now that the save
+fan-out shipped and reads as instant.
 
-*Risk, unchanged and now the deciding term*: **high, and this is a project not a patch.** It flips the
-contract from "always-resident bitmap is the source of truth" to "possibly evicted, rehydrated on
-demand", and every call site assuming synchronous availability — drawing, undo restore, thumbnail
-regen, compositing, save — must tolerate rehydration or be proven never to hit an evicted cel. Item
-9(c)'s backfill is now among them: it compares a `LayerContentVersion` captured *before* the render,
-and a buffer evicted between capture and read is a failure mode that did not exist when this item was
-written.
-*Why it is declined and not merely deferred*: jetsam is disconfirmed (§6), so there is no kill to
-prevent; the derived-cache subset is worth nothing; and the full version needs a prerequisite nobody
-has scoped. **What would change the answer is one number nobody has: how many drawn cels the owner's
-real documents carry.** 787 MB is 120 cels; at 30 cels it is ~200 MB and this item does not exist.
-*The measurement*: ask them, or count the cels in a real package.
-*If it is ever built*, the verification the original entry asked for still stands: assert residency
-stays bounded as N grows past the window, and — separately — that a scrub to an evicted cel
-round-trips pixel-exact against an `alphaFingerprint` taken before eviction.
-*Shipped from this item*: the instrument, which is item 9(a)'s pattern — measure, record, then decide.
+**The expensive half — evicting the primary data, in any form — stays DECLINED, and the reason has
+sharpened rather than weakened.** It was declined on 2026-08-20 because the harm to prevent was
+unconfirmed; it stays declined now because three independently-scoped designs for the evict-and-
+rehydrate contract flip — a frame-distance eviction window backed by the saved package, a sixth
+byte-budget with write-back LRU on `CompositorBudget`'s own rule, and deferred ("never-decode")
+materialisation — were each traced by adversarial review to a **silent-artwork-loss path in code that
+already exists**, independent of whether the owner's future document ever gets built:
+- The windowed design's `hasContent` door (`RasterLayerTexture.swift:188-192`) is consulted by
+  `flipCanvas` and `setCanvasPadding`, both of which call `history.removeAll()` one line later and
+  both of which would, under deferral, read every off-window cel as blank and silently discard it —
+  a whole-document loss from one menu tap, invisible until the next autosave rotates the good package
+  out of the backup slots.
+- The write-back design keys eviction-safety by cel UUID while `applyCelChange`
+  (`SelectionModels.swift:487-491`) rebinds cel→texture by version, so a displaced undo texture can
+  stay marked "clean" while the file it is meant to be backed by has already been overwritten.
+- None of the three is justified by a document that has never existed on this device; none passed its
+  own adversarial review even against the document the owner says they intend.
+
+**The cheap half is now justified on real data and should be queued: stop writing and loading a raster
+tier for cels that carry no raster content.** It is correctness-clean — it removes data that was never
+used, not data anyone might still want — it is the largest single term this item can affect for the
+document the owner intends, and unlike the contract flip it does not need the thumbnail-persistence
+precondition item 9(c) left owed. Confirmed against the owner's own package: `Untitled.paintproj`'s
+single **vector** cel carries a `_raster.png` of 161 KB it has no use for. The mechanism, verified in
+the tree: `ProjectStore.writeCel` (`:735-736`) writes `cel.rasterImage` for **every** cel
+unconditionally; `cel.rasterImage` is `cel.raster.renderToUIImage()` (`:250`), and
+`RasterLayerTexture.renderToUIImage()` (`RasterLayerTexture.swift:254-266`) has a non-optional return
+— when there is no backing context it mints a transparent canvas-sized image (`:262`) rather than
+returning nil — so a vector-only or never-touched raster tier is PNG-encoded and written to disk every
+save all the same, and read back into a full canvas-sized resident buffer on every load
+(`ProjectStore.swift`'s `?? .empty(size:)` fallback near `:1042` is effectively unreachable for any
+package this build has ever written). On a 1-cel document this is invisible; on the document the owner
+intends it is most of item 14's own number.
+
+**What is still unmeasured, so nothing above reads as more settled than it is:**
+- **The real pre-jetsam ceiling on the iPad 9.** The ~1.4 GB figure this item has leaned on traces to
+  the word *"perhaps"* in a doc comment (`Compositor.swift:102-103`, *"a device where the whole app
+  has perhaps 1.4 GB before jetsam"*), hard-coded once as `1400 * mib` in
+  `MemoryBudgetLogicTests.swift:103`. It has never been read off the device.
+- **The residency slope on the load path** — see the first correction above; 6.558 MiB is stamping,
+  not loading, and the two may not agree.
+- **Whether iOS's memory compressor absorbs cold cel residency.** `phys_footprint` counts compressed
+  pages at their *compressed* size, and a mostly-transparent RGBA cel is long runs of zeros — exactly
+  what a compressor eats first. Every figure in this document was taken on a Mac under no memory
+  pressure, where nothing was ever compressed. **This is the one term that can move the whole answer
+  by a factor, not a percentage**, and it is untouched by anything in this item.
+
+*Shipped from this item so far*: the instrument, item 9(a)'s pattern — measure, record, then decide —
+plus the three corrections and the device read above. The contract flip is still not one of them.
 
 ---
 
@@ -990,12 +1062,14 @@ listing, and startup. `runStartupMaintenance` is already `Task.detached` off-mai
 COW clones; `validateProject` reads an 8-byte PNG magic, not a decode; backup rotation uses
 same-volume renames. None is a multi-second stall at any realistic scale.
 
-**Do not build a dirty-tracking save.** *(Both preconditions this entry named are now met — item 1
-landed 2026-08-18 and item 9's instrumentation landed 2026-08-20 — so what follows is the whole of
-the argument rather than a wait. **Item 15 then measured this path and took the safe 4× off it
-without touching what gets written**, which lowers the pressure on this entry rather than raising
-it: the encode is now spread over cores, so the memo below is worth a further ~3.7 ms a cel on the
-cels that did not change, not the whole 15.)*
+**Do not build a dirty-tracking save — settled for good, 2026-08-21.** *(Both preconditions this entry
+named are now met — item 1 landed 2026-08-18 and item 9's instrumentation landed 2026-08-20 — so what
+follows was the whole of the argument rather than a wait. **Item 15 then measured this path and took
+the safe 4× off it without touching what gets written**, which lowered the pressure on this entry
+rather than raising it: the encode is now spread over cores, so the memo below was worth a further
+~3.7 ms a cel on the cels that did not change, not the whole 15. **The question §6 asked before
+building anything further here came back "instant"** — the owner, Release build `38e22c6`, iPad 9:
+*"leaving the gallery is instant."* The memo stays unbuilt for good.)*
 Skipping unchanged PNGs is the right eventual answer to the gallery-exit wait, but it is the
 data-loss class of risk: a dirty check that is wrong once silently drops artwork, which is worse than
 any stall — and this repo already carries `ProjectBackupManager` and `validateProject` precisely
@@ -1008,8 +1082,9 @@ written. If the full version is ever built, it must fail closed — re-encode wh
 
 ## 6. Open questions
 
-Two of these were put to the owner on 2026-08-18 and are answered. The rest are open, and each is
-recorded with the measurement that would close it rather than as a topic.
+Several of these were put to the owner, on 2026-08-18 and again on 2026-08-21 once a Release build
+of `38e22c6` was on their iPad 9, and are answered below. The rest are open, and each is recorded
+with the measurement that would close it rather than as a topic.
 
 ### Answered
 
@@ -1037,10 +1112,44 @@ labels.
 **What does one cel's PNG encode cost at 2048×1024? — ANSWERED 2026-08-20 by item 15: 14.2 ms**, and
 it is **95% of the whole gallery-exit wait** (455.2 ms of 480.3 on a 32-cel document; the file I/O is
 11.7 ms and the atomic-swap machinery 7.8). The wait is **15.0 ms a cel**, flat from 8 cels to 32 —
-so §1's "scales with cel count, not with area" is confirmed rather than assumed, and the owner's
-"~3 s" is simply a ~150-cel document on their iPad (INFERRED). It is now 117.1 ms for that document.
+so §1's "scales with cel count, not with area" is confirmed rather than assumed. The owner's "~3 s"
+was inferred at the time to be a ~150-cel document, which the device read of the owner's actual
+projects (item 14) has since refuted — 1–4 cels each, not ~150. It is now 117.1 ms for a 32-cel
+document, and **the owner reports leaving the gallery instant on the device** (below).
 **The surprise was the ratio, not the total**: the entire ranking of this path had assumed the file
 write mattered, and it is 2%.
+
+**Does their 4096² document still draw at 17 fps? — ANSWERED 2026-08-21: no.** Item 11 deleted ~43 ms
+of per-dab CPU work at that size on the simulator; the owner's own words on a Release build of
+`38e22c6` on their iPad 9: *"17fps is gone, good job. 4k screen displays full 60fps when painting."*
+This closes the live question item 8/11 left open — the ceiling now sits above the display's 60 Hz —
+and it is the headline result of the whole performance programme.
+
+**Does leaving to the gallery still feel like ~3 s? — ANSWERED 2026-08-21: no, it is instant.** Item
+15 measured the wait for the first time and made it 4× shorter on the simulator; the owner's own
+words on the same Release build: *"leaving the gallery is instant."* **§5's dirty-tracking memo stays
+unbuilt for good** — the handoff that carried this question said exactly that would follow if the
+answer came back this way.
+
+**Is opening a project any better, and does the timeline's cel-blocks-arriving-blank behaviour read
+as loading rather than broken? — ANSWERED 2026-08-21: "no issues."** Item 9(c)'s deliberate behaviour
+change is accepted as designed.
+
+**The lasso, on the two named device scenes (a shape with a gap in its outline, and a loop drawn well
+outside the shape) — ANSWERED 2026-08-21: "lasso fill works."** All seven of the device checks run
+this pass now have an answer, and all four of the owner's originally reported bugs are confirmed
+fixed on hardware rather than only headlessly. This is the named lasso check only — it does not touch
+[BUGS.md](BUGS.md)'s separate, more specific same-layer paint-over entries, which were not part of
+what was run.
+
+**How many drawn cels does a real document of the owner's actually carry? — ANSWERED 2026-08-21, and
+the answer has two parts that do not agree.** OWNER-STATED intent: 100–200 frames on 3–5 drawn layers,
+300–1000 drawn cels — a description of the work they mean to do. MEASURED, direct read of the iPad
+container over `devicectl`: the largest of all 25 packages on the device (live, `Backups`, `Trash`)
+has **4 cels**; the two live projects have **1 cel each**. The app has never been asked to hold more
+than 4. See item 14's rewrite for what this changes and does not change — the forward intent keeps the
+question open for design purposes even though the immediate alarm it raised does not describe anything
+that exists yet.
 
 **How much does a machine under load change a figure here? — ANSWERED, and it is worse than "slower".**
 The same test, same binary, same day: `saveForReference` read 863 ms on an idle Mac, 988 ms with two
@@ -1051,56 +1160,34 @@ what they said.
 
 ### Still open
 
-**What is the true per-touch-move cost at 2048×1024? — ANSWERED on the simulator 2026-08-20 (item 8),
-and the question that replaced it is better.** The fit said ~10.2 ms; the reading is 8.0 ms before
-item 11 and 2.2 ms after, simulator/CoreGraphics. The "simulator numbers are worthless here" this
-entry used to carry was wrong for this path and item 11 says why.
-**The live question is now the owner's, not a run's: does their 4096² document still draw at 17 fps?**
-Item 11 deleted ~43 ms of per-dab CPU work at that size on the simulator, and 53.8 ms of it was
-MEASURED on their own iPad in Release. If the number has not moved on the device, the remaining cost
-is somewhere this document has not looked. *The measurement*: they draw on the stress canvas and say
-— and, for a figure rather than an impression, a Release build of this branch on that iPad.
-
 **Does Core Animation actually pay for the non-native pixel format, and where?** Whether the mismatch
 is a background IOSurface conversion, a lazy decode at commit-prepare on the calling thread, or
 nothing meaningful is not answerable by reading code. *The measurement*: one Instruments Core
 Animation "Color Copied Images" pass on the device. Until it comes back, see §5.
 
-**Does undo history ever approach its cap in real use? — still open, and item 13 made it cheap to
-answer.** The cap is now `physical / 16` — **192 MiB on the owner's iPad 9**, down from the 300 MiB
-literal — and `UndoHistory.currentCost` exists precisely so this can be sampled rather than argued
-about. Item 13's table says 192 MiB is ~11,400 cropped freehand strokes or 12 whole-cel operations, so
-the question is really "does a session do a dozen fills, clears, inserts or selection bakes without
-closing the document?" *The measurement*: sample `currentCost` at the end of a real session on the
-device, or after a scripted sequence of Select/Move/Fill-selection operations.
-**And the fraction the pressure valve trims to — half — is a guess wearing a constant's clothes.**
-It leaves six whole-cel operations on a memory warning. Whether that is generous or stingy is the
-owner's call and nothing here can make it: *the measurement* is the same sample, plus asking them how
-far back they ever reach.
-
-**How many drawn cels does a real document of the owner's actually carry? — this is now the largest
-open question in the document, and it is one sentence to the owner rather than a run.** Item 14
-measures a drawn raster cel at 6.6 MiB resident at 2048×1024 and nothing bounds the count, so the
-answer decides whether unbounded residency is the app's biggest memory number (787 MB at 120 cels,
-more than every budget in item 13 put together) or does not exist (~200 MB at 30). Every other
-consumer in this app has a ceiling; the document does not. *The measurement*: ask them, or count the
-cels in a real package.
+**Does undo history ever approach its cap in real use in a session? — still technically open, but the
+owner has ruled on the sizing directly rather than waiting for the sample.** `UndoHistory.currentCost`
+exists precisely so this can be sampled, and nobody has yet. **The two questions the sample would have
+answered are answered anyway, 2026-08-21, OWNER-STATED**: 192 MiB (~12 whole-cel operations) is the
+right budget, and trimming to half (~6) on a memory warning is the right response. Both are decisions
+now, not guesses wearing constants' clothes — see item 13. What is left open is only the empirical
+question of whether a real session ever gets near either number, which no longer gates anything.
 
 **What is the real cache occupancy at background time?** Item 12's ~384 MiB is a budget ceiling, not
 an observation. *The measurement*: sample `residentBytes()` and the upload-cache counters immediately
 before backgrounding, on the device.
 
-**Does leaving to the gallery still feel like ~3 s?** Item 15 measured the wait for the first time and
-made it 4× shorter, but every figure is a Debug simulator on 8 cores and the owner's report is a
-Release build on an A13 with 2+4. Both the before and the after transfer in *shape* and neither
-transfers in *multiplier*. *The measurement*: the owner leaves a real document to the gallery on their
-iPad and says — and, for a figure rather than an impression, a Release build of `main` on that iPad
-with `SaveProfile` read out. **Ask before building anything further here**: if it now feels instant,
-§5's memo stays unbuilt for good, and if it still feels like seconds the interesting question is what
-their cel count actually is.
-
 **Is one save on the way out still a felt pause?** Tier A cut the app switch from three full saves to
 one, and made that one composite a 320×160 tile instead of the whole canvas. Whether the freeze the
-owner reported is *gone* or merely *smaller* is not answerable from here. *The measurement*: the
-owner switching away from a real document on their iPad and saying. This is the one Tier A result
-that wants them rather than a run.
+owner reported is *gone* or merely *smaller* is not answerable from here, and it was not one of the
+seven checks run on the device 2026-08-21. *The measurement*: the owner switching away from a real
+document on their iPad and saying.
+
+**Item 14's three still-unmeasured terms, carried from its 2026-08-21 rewrite.** The real pre-jetsam
+ceiling on the iPad 9 — the ~1.4 GB figure traces to the word "perhaps" in a `Compositor.swift` doc
+comment, hard-coded once in `MemoryBudgetLogicTests`, and has never been read off the device. The
+residency slope on the *load* path, as opposed to the *stamping* path item 14 actually measured.
+And whether iOS's memory compressor absorbs cold cel residency — a mostly-transparent RGBA cel is
+long runs of zeros, every figure in this document was taken where nothing was ever compressed, and
+this is the one term that could move the answer by a factor rather than a percentage.
+

@@ -668,7 +668,14 @@ product call, not just a fix.
 ## Cleanup opportunities
 
 - **Duplicated transform-overlay code** — `ObjectTransformOverlayView` and `FloatingPieceOverlayView`
-  each define their own `HandleView` and near-identical project/rotate/resize logic.
+  each define their own `HandleView` and near-identical project/rotate/resize logic. **A third,
+  correct implementation now exists to converge on**: Add Text Stage 4's
+  `Views/TextTransformOverlayView.swift` (`442dc16`, 2026-08-21) is a non-warped sibling view pinned
+  to `CanvasView`'s `container`, with every handle dimension `screenPoints / canvasScale` pushed from
+  the coordinator — the shape `ObjectTransformOverlayView` needs anyway, since its own handles are the
+  live bug in TODO.md's move-tool item (d): they neither hold a constant screen size across zoom nor
+  respond to touch, on the owner's own iPad. Port onto the Stage 4 pattern rather than fixing the
+  duplication in place.
 - **Duplicated canvas-flip geometry** — `CanvasManager.flippedImage` and `RasterLayerTexture.flipped`
   implement the same mirror-about-centre draw twice.
 - **`ContentView.saveIfNeeded`** fires only on scene-phase change and Return-to-Gallery, so a direct

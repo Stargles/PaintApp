@@ -1,165 +1,153 @@
-# Handoff — 2026-08-20
+# Handoff — 2026-08-21
 
-**`TODO.md`'s "In flight" is empty and the performance programme is finished.** Thirteen branches
-landed overnight. `main` is at **1426 fast-tier tests, 1423 passing, 0 failing, 3 skipped**, verified
-on a fresh simulator *after* the merges rather than only on each branch's own base. No worktrees, no
-`tmp/*` branches, no simulator debris.
+**The performance programme is confirmed on hardware, not just the simulator.** The owner ran a
+Release build of `38e22c6` on their iPad 9 and answered all seven checks this session's device pass
+asked for. Every one came back clean: *"17fps is gone, good job. 4k screen displays full 60fps when
+painting"* — the headline result of the whole programme — plus *"leaving the gallery is instant,"*
+*"no issues"* opening a project, *"lasso fill works,"* *"cross eraser works as intended, very nice,"*
+*"text handles are good,"* and *"not much of a problem"* for Add Text with the keyboard up. All four
+of the owner's originally reported bugs are now confirmed fixed on hardware, not only headlessly.
+`main` is at **1478 fast-tier tests passing, 0 failing, 3 skipped** (1481 total), up from 1423 at the
+start of the day. No worktrees, no `tmp/*` branches, no simulator debris.
 
-**The one thing blocking everything now is the iPad.** It read `unavailable` all night, so nothing
-below has been seen on hardware — every after-figure in `PERFORMANCE.md` is a Debug simulator, where
-the *shape* of a result transfers and the multiplier does not.
+**One item moved anyway.** [PERFORMANCE.md](PERFORMANCE.md) item 14 (raster-cel residency) was
+re-opened by the owner's stated intent for a real document, then re-scoped by reading their actual
+iPad container directly — the largest of 25 real packages has 4 cels, so the alarm the intent raised
+describes a document that has never existed. The expensive fix stays declined; a cheap, correctness-
+clean half is newly justified and queued (see below).
+
+**And four new owner asks arrived after the device pass**, about the lasso and move tools on a
+vector layer — see "What is worth doing next."
 
 ## What shipped
 
-**The owner's four reported bugs**
+**Confirmed on the owner's iPad, Release build `38e22c6`, 2026-08-21**
+
+| check | the owner's words |
+|---|---|
+| Drawing on the 4096² stress canvas | *"17fps is gone, good job. 4k screen displays full 60fps when painting."* |
+| Leaving to the gallery | *"leaving the gallery is instant."* |
+| Opening a project | *"no issues."* |
+| The lasso (gap-in-outline and loop-outside-shape scenes) | *"lasso fill works."* |
+| The cross eraser | *"cross eraser works as intended, very nice."* |
+| Add Text with the keyboard up | *"not much of a problem, text seems to be working properly enough."* |
+| The text transform handles (Stage 4) | *"text handles are good."* |
+
+This closes the standing debt every item in `PERFORMANCE.md` had carried since 2026-08-20 — every
+after-figure in that document was a Debug simulator, where the shape of a result transfers and the
+multiplier does not. The multiplier is now known: it transferred. Full per-check writeups, with the
+figures each confirms, are in `PERFORMANCE.md` items 9, 11, 13 and 15, and in `ADD_TEXT.md` §3.
+
+**Branches merged today**
 
 | what | the fix, in one line |
 |---|---|
-| Canvas border ignored padding | "The canvas edge" is the *artwork rect*, inset from the buffer by `canvasPadding`; the edge is now an unconditional barrier between pixels, not a gap-closing bridge conditional on nearby ink. |
-| Lasso filled the whole canvas | Morphological hole filling per `LASSO_FILL.md`. Circling a closed box paints **0.4004** of the canvas — its exact footprint — against **1.000** before. |
-| Cross eraser stubs, and its size doing nothing | `StrokeGeometry.intersections` clustered in *sample-index* units against a physical-distance tolerance, so one crossing arrived as 25–109 entries. Stub **10.0 pt → 0.0000 pt**. The footprint now selects every stroke whose centreline it covers. |
-| A second fill broke the first | Each gesture claims a `fillGeneration` and the worker carries an immutable context snapshot, so pairing a new seed with an old session is *unrepresentable* rather than merely documented against. |
+| A vector layer's transform was not undoable | Bracket hangs off `CanvasManager.isVectorTransforming`'s own `didSet`, not the gesture callback that fires on every touch-move, so it cannot leak through the two paths that clear the flag without a gesture ending (`b100d65`). |
+| Add Text Stage 4 | Nine grips in a non-warped sibling view, every dimension `screenPoints / canvasScale`; `.affine` gains rotation and independent-axis scale; Stage 1's canvas-edge growth cap is gone (`442dc16` and follow-ups). |
+| Save semantics on a damaged project | Ruled: **prompt once, then remember.** An artist save on an unanswered damaged document asks and writes nothing; an automatic save never blocks and writes into version history instead (`cfdddb5`). |
 
-**Everything else**
+**Two owner rulings, closing standing questions**
 
-- **The menu-interrupted stroke.** One closed set (`CanvasPresentation`), one central rule, and
-  `StrokeGiveUp.interrupted` so an interrupted stroke keeps its ink. The census is settled at
-  **BROKEN 7 · SAFE 56** — `Menu` absorbs the whole touch sequence, so the 12 unknowns are safe.
-- **Add Text stages 1 and 3.** Place, type, style, move, bake on a raster layer; on a vector layer it
-  stays a real editable element across save and load. Stages 4–6 (rotate/scale, projective distort,
-  font packs) remain.
-- **The performance programme, all fifteen items resolved** — thirteen built, item 10 measured and
-  deliberately left alone, item 14 declined on a measurement.
+1. **192 MiB of undo (~12 whole-cel operations) is right, and trimming to half on a memory warning is
+   right.** Both are decisions now, not guesses wearing constants' clothes — `PERFORMANCE.md` item 13.
+2. **The font favourites strip ships with sensible defaults the owner can edit later.** Already
+   recorded in `ADD_TEXT.md` §5 item 5 by the Stage 4 branch.
 
-## The numbers worth knowing
+## What just got re-scoped: PERFORMANCE.md item 14
 
-All MEASURED on a Debug simulator at **2048×1024**, machine idle unless noted.
+**The owner's stated intent for a real document**: 100–200 frames on 3–5 drawn layers, 300–1000 drawn
+cels — OWNER-STATED, and an intention about the work they mean to do, not a count of cels in a package
+that exists. **A direct read of the owner's iPad container over `devicectl` found the largest of 25
+real packages — live, `Backups`, `Trash` — has 4 cels; both live projects have 1.** The app has never
+once been asked to hold more than 4. This is forward work, not a fire.
 
-| | before | after |
-|---|---|---|
-| **Live vector stroke, per dab** @2048×1024 | 8.0 ms | **2.2 ms** |
-| — the same @4096², the owner's stress canvas | 47.1 ms | **3.9 ms** (21 → 253 fps ceiling) |
-| **Project open**, 32 cels | 303.6 ms | **53.5 ms** |
-| **`renderSources`**, the main-thread term on a playback tick | 78.2 ms | **23.9 ms** |
-| **Leaving to the gallery**, 32 cels | 480.3 ms | **117.1 ms** |
-| Undo budget | 300 MiB flat | 192 MiB, `physical/16` |
+The expensive half (evict-and-rehydrate the primary pixel data) **stays declined**: three
+independently-scoped designs for it were each traced by adversarial review to a silent-artwork-loss
+path in code that already exists (a `flipCanvas`/`setCanvasPadding` path that would blank the whole
+document under a windowed scheme; an undo-restore path that would let a write-back LRU serve stale
+pixels). None of the three is justified even against the document the owner intends.
 
-Two of these answer standing questions rather than just improving a number:
+**A cheap half is newly justified and queued**: stop writing and loading a raster tier for cels that
+carry no raster content. `ProjectStore.writeCel` writes `cel.rasterImage` for every cel unconditionally
+because `RasterLayerTexture.renderToUIImage()` has a non-optional return and mints a transparent
+canvas-sized image rather than returning nil. Confirmed against the owner's own package —
+`Untitled.paintproj`'s one **vector** cel carries a `_raster.png` of 161 KB it has no use for. It is
+correctness-clean and does not need item 9(c)'s thumbnail-persistence precondition the expensive half
+does. Full mechanism, citations and three corrected figures (787 MB → 6.558 MiB, MiB not MB; the
+measured number is the *stamping* path, the *load* path is a never-measured 8.0 MiB; item 13's 656 MiB
+double-counts headroom that isn't gone) are in `PERFORMANCE.md` item 14.
 
-- **"Leaving to the gallery takes ~3 s" is arithmetic, not a mystery.** 95% of the wait was one call,
-  `pngData()`. File I/O was 2%; the whole atomic-save machinery 1.6%. At 15.0 ms/cel, three seconds
-  is a **~150-cel document** on the iPad 9.
-- **Project open was ~3× cheaper than the standing guess** — 303.6 ms for 32 cels, so ~0.95 s at a
-  hundred, not the "1–3 s" everyone assumed.
-
-## What needs the owner's iPad
-
-**Deploy is blocked, not skipped.** `~/.config/paintapp/.env` is present and the steps in `CLAUDE.md`
-are ready — run them from the repo, not `deploy/deploy.sh`, which pulls `main` and so cannot ship
-branch work.
-
-**1. Add Text, keyboard-over-canvas. Still the priority** — nothing headless reaches it, and it is
-the likeliest place a real defect is hiding.
-   1. **Place a box near the bottom of the screen.** There is no `keyboardLayoutGuide` handling at
-      all, so the box may sit under the keyboard. Most likely visible defect on `main`.
-   2. Tap into a box, then open and close the text and colour panels.
-   3. Zoom to ~0.3× and type.
-   4. Scribble into the box with the Pencil, and drag-select inside it.
-   5. **New from stage 3**: tap an *existing* label to re-open it. The target is the box, not the
-      glyphs, with 6 pt of slop — and the same tap is also the place-a-new-box gesture, so only a
-      finger can judge it.
-   6. **Record one `ActionRecorder` session covering 1–5** and hand over the JSONL.
-
-**2. Is the 17 fps gone?** A Release build on the 4096² document, and one sentence. If it still feels
-like 17 fps, **treat item 11 as ruled out rather than suspect** — frame rate is not one cost, and the
-remaining terms would then be somewhere nobody has looked.
-
-**3. Does leaving to the gallery still feel like ~3 s?** If it feels instant, §5's dirty-tracking memo
-stays unbuilt for good.
-
-**4. Does opening a project feel faster,** and — the visible behaviour change — do the timeline's cel
-blocks arriving blank and filling in over the next fraction of a second read as *loading* rather than
-*broken*? That is item 9(c) working as designed.
-
-**5. The lasso**, on the two scenes named: a shape with a gap in its outline, and a loop drawn well
-outside the shape.
-
-**6. The cross eraser's feel**, for both rulings.
-
-**7. The app-switch freeze should already be gone** — fixed 2026-08-18, before this pass. If it isn't,
-that is new information.
-
-## What the owner owes a ruling on
-
-**Answer these first — they change what gets built next**
-
-1. **How many drawn cels does a real document carry?** A drawn raster cel costs **6.6 MiB resident**,
-   measured. At 120 cels that is **787 MB, unbounded — more than all five budgets combined**, and
-   item 14 becomes urgent. At 30 cels it is ~200 MB and the item does not exist. This is the largest
-   open question in `PERFORMANCE.md`.
-2. **Is 192 MiB of undo — about 12 whole-cel operations — enough?** And is trimming to *half* on a
-   memory warning generous or stingy? Both are guesses wearing constants' clothes;
-   `UndoHistory.currentCost` now exists so a real session can be sampled instead of argued about.
-
-**New consequences of what shipped**
-
-3. **The cross eraser deletes a covered line that crosses nothing, whole.** Always the rule, but the
-   circle used to be a pinpoint and can now be 50 pt across, so one tap near a busy corner can wipe a
-   stray line entirely.
-4. **The cross eraser takes a stroke by its centreline, not its ink** — clipping only the edge of a
-   thick line leaves it alone.
-5. **A superseded lasso no longer says "nothing enclosed".** Draw a loop enclosing nothing, then fill
-   elsewhere, and you get silence rather than a banner about the loop you abandoned.
-6. **With the text tool selected, tapping an existing label always edits it** and never places a new
-   box beside it. Illustrator's behaviour, chosen deliberately — but you cannot start a second label
-   overlapping an existing one without moving the first.
-7. **The toolbar colour swatch changes meaning while a text session is live** — it edits the text's
-   colour, not the brush's.
-8. **Add Text `autoSize` caps at the canvas edge and wraps** rather than growing forever, because
-   there are no handles until Stage 4 to drag a runaway box back.
-9. **Which five or six faces belong in the font favourites strip.** Shipped with all ~60–80 families
-   grouped and no strip, because inventing a shortlist makes it the answer by default.
-10. **Should a lasso leak get its own signal?** The collar tint cannot show one — a leak still paints
-    the outline, so it is not an empty result and the signal never fires.
-
-**Carried, still unruled**
-
-- **Save semantics when a project loaded with something unreadable**: overwrite, refuse, or prompt?
-- **A double-traced ellipse detects as a rectangle.** Pre-existing, verified, not a regression.
-- **The smart oval has no arc-end handles.**
+Three things are still unmeasured and listed there rather than assumed: the real pre-jetsam ceiling on
+the iPad 9 (the 1.4 GB figure traces to the word "perhaps" in a doc comment), the residency slope on
+the load path, and whether iOS's memory compressor absorbs cold cel residency — the one term that
+could move the whole answer by a factor rather than a percentage.
 
 ## What is worth doing next
 
-Nothing in `PERFORMANCE.md` is left to build. The queue is:
+**Four new owner asks, given 2026-08-21 after the device pass — about the lasso and move tools on a
+vector layer.** Full text and citations in `TODO.md`'s Queued section; in brief:
 
-1. **Add Text stages 4 and 5** — rotate/scale with handles, then the projective distort. Stage 5
-   wants a Release build on the iPad 9 before merge, per `ADD_TEXT.md` §4 rule 9.
-2. **A vector layer's transform is not undoable** — new in `BUGS.md`, and it wants its own branch. The
-   obvious fix is wrong: the call site fires continuously during the drag, so per-call undo would
-   push hundreds of steps for one gesture. It wants a bracket, and the two paths where
-   `isVectorTransforming` turns off *without* a gesture ending are where a bracket would leak.
-3. **Item 14, if the cel-count answer says so** — and it needs thumbnails persisted first, which item
-   9(c) made a precondition.
-4. **The Mode 3 eraser's ~95 ms per cutting sample** — measured, deliberately unfixed until the
-   eraser rewrite settles. Note it compounds with the new footprint eraser, which cuts every stroke
-   it covers rather than one.
+1. **A lasso selection should move only the selected part, not the whole drawing.** The owner's own
+   ruling: move is currently correct for the whole-layer case and should stay that way; a lassoed move
+   should split `VectorStroke` geometry at the selection boundary and cut a region out of a fill — the
+   vector eraser's split/punch shape, pointed at a new gesture. **Text is explicitly excepted**: moving
+   it whole is fine, since splitting a `TextFrame` mid-glyph is not sane.
+2. **The lasso toolbar icon should stay highlighted while another tool is briefly in use.** A toolbar
+   state question, not a canvas one.
+3. **Move is extremely slow on a vector layer — down to ~5 fps, per the owner.**
+4. **The move tool's handles don't hold a constant screen size across zoom and don't respond to
+   touch.** This is the exact bug `ADD_TEXT.md` §1 predicted and told the text-tool build not to copy
+   (`TransformHandleView`'s fixed `24×24` lives inside the transformed `container`). **Add Text Stage 4
+   shipped the fix's pattern today** — `TextTransformOverlayView`, a non-warped sibling view with every
+   dimension pushed from the coordinator. Port `ObjectTransformOverlayView` onto that pattern rather
+   than designing a new one; it is likely also the fix for (3), and `BUGS.md`'s cleanup note on the
+   duplicated transform-overlay code should converge on it too.
+
+**Then, in rough order of value:**
+
+5. **`PERFORMANCE.md` item 14's cheap half** — stop writing/loading a raster tier for cels with no
+   raster content. See above; it is correctness-clean and ready to scope.
+6. **Add Text Stage 5** — the projective distort. `ADD_TEXT.md` §3/§4 rule 9 requires a Release build
+   on the iPad 9 before merge, same as every warp-touching stage.
+7. **The Mode 3 eraser's ~95 ms per cutting sample** — measured, deliberately unfixed until the eraser
+   rewrite settles. Compounds with the new footprint eraser, which cuts every stroke it covers rather
+   than one.
+
+## What the owner still owes a ruling on
+
+**Carried, still unruled**
+
+- **A double-traced ellipse detects as a rectangle.** Pre-existing, verified, not a regression.
+- **The smart oval has no arc-end handles.**
+- **Should a lasso leak get its own signal?** The collar tint cannot show one — a leak still paints the
+  outline, so it is not an empty result and the signal never fires.
+- **A superseded lasso no longer says "nothing enclosed."** Draw a loop enclosing nothing, then fill
+  elsewhere, and you get silence rather than a banner about the loop you abandoned.
+- **With the text tool selected, tapping an existing label always edits it** and never places a new box
+  beside it — Illustrator's behaviour, chosen deliberately, but you cannot start a second label
+  overlapping an existing one without moving the first.
+- **The toolbar colour swatch changes meaning while a text session is live** — it edits the text's
+  colour, not the brush's.
 
 ## Five things this pass learned the hard way
 
-- **The docs can be two days stale and read as authoritative.** `PERFORMANCE.md` and `BUGS.md` both
-  described the `scenePhase` triple-save as outstanding for two days after it was fixed. Check
-  `git log` for the file before building what a document says is outstanding.
-- **Contention does not widen the error bar, it changes the answer.** The same test read 303 / 448 /
-  527 ms for identical work depending on what other agents were doing. Measure both arms
-  *alternately in one run* so the ratio is contention-proof by construction, and name an unchanged
-  phase as a control.
-- **A control test earns its keep on the first run.** The `Menu` measurement's first draft counted
-  *raster* strokes on a vector-by-default layer — right answer, impossible reason. Its paired control
-  caught it. Conversely, two of three earlier cross-eraser agents declared the stub hypothesis
-  *refuted*; both were wrong, because every test they cited spaced samples wider than the tolerance
-  it tested, which no real stroke does.
-- **Concurrent agents share one scratchpad directory.** A fixed filename is silently overwritten, and
-  one agent ran a whole suite on another's simulator. The xcresult's `deviceName` is what caught it.
-- **`.git/hooks/post-checkout` regenerates the tracked `GRAPH_REPORT.md` on every branch switch.** So
-  a branch switch inside the main worktree dirties the tree and can block another session's
-  `--ff-only` merge. Use a separate worktree, per the protocol at the top of `CLAUDE.md`.
+- **A document can carry an intention and a measurement that disagree, and both are worth recording.**
+  The owner's "a real document is 300–1000 cels" is real and forward-looking; the device's "the largest
+  package on it has 4" is also real and describes today. Neither should overwrite the other — item 14
+  needed both to reach the right scope.
+- **Reading the device directly settled in thirty seconds what an 11-agent scoping pass could not settle
+  from code.** `devicectl` pulling the owner's actual package and manifest is what refuted the ~150-cel
+  inference item 15 had stood on since 2026-08-20 — the same shape as §6's earlier lesson that a
+  behavioural question is the owner's to answer, not a run's to infer.
+- **A number can be right and its unit label wrong at the same time.** `PERFORMANCE.md` item 14's
+  "787 MB" and "6.6 MiB" were only mutually consistent at 6.558 MiB, and both were MiB — a test helper
+  divided by `1_048_576` and printed the literal string `"MB"`. Caught only by doing the division back
+  from the reported total.
+- **A budget that is a sum of ceilings is not a sum of occupancies.** Item 13's 656 MiB looked like
+  headroom actually spoken for; four of its five terms cannot be reached at the owner's canvas size, so
+  the real steady state is a third of the sum. Adding a new cost against the sum rather than the steady
+  state double-counts.
+- **Two stale pointers were caught before they cost a session.** Both this file and `nextprompt.md` had
+  carried "a vector layer's transform is not undoable" as outstanding after it shipped this same day —
+  the same class of staleness `CLAUDE.md`'s own notes warn about, just inside a single day rather than
+  across two.

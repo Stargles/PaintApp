@@ -6,26 +6,31 @@ Paste the block below.
 
 Read HANDOFF.md, then CLAUDE.md and TODO.md.
 
-**Nothing is in flight, and the performance programme is finished.** Thirteen branches landed
-2026-08-19/20; `TODO.md`'s "In flight" is empty; `main` is at 1426 fast-tier tests, 1423 passing, 0
-failing, verified on a fresh simulator *after* the merges rather than only on each branch's own base.
-No worktrees, no `tmp/*` branches, no simulator debris.
+**The performance programme is confirmed on hardware.** The owner ran a Release build of `38e22c6` on
+their iPad 9 and all seven device checks came back clean — *"17fps is gone, good job. 4k screen
+displays full 60fps when painting,"* *"leaving the gallery is instant,"* *"no issues"* opening a
+project, *"lasso fill works,"* *"cross eraser works as intended, very nice,"* *"text handles are
+good,"* and Add Text with the keyboard up read as "not much of a problem." All four of the owner's
+originally reported bugs are confirmed fixed on hardware. `main` is at 1478 fast-tier tests passing, 0
+failing, 3 skipped (1481 total). No worktrees, no `tmp/*` branches, no simulator debris.
 
-**The binding constraint is now the owner, not the code.** The iPad read `unavailable` all night, so
-none of this has been seen on hardware — every after-figure in `PERFORMANCE.md` is a Debug simulator,
-where the shape of a result transfers and the multiplier does not. **Deploy first, then ask.**
-HANDOFF.md lists seven on-device checks in priority order; run the deploy steps from `CLAUDE.md` out
-of the repo, because `deploy/deploy.sh` pulls `main` and cannot ship branch work.
+**One item moved anyway**: `PERFORMANCE.md` item 14 (raster-cel residency) was re-opened by the
+owner's stated intent for a real document (300–1000 drawn cels), then re-scoped by reading their
+actual iPad container — the largest of 25 real packages has 4 cels, so that intent describes forward
+work rather than a fire. The expensive fix stays declined; a cheap, correctness-clean half (stop
+writing/loading a raster tier for cels with no raster content) is newly justified and queued.
 
-**Two questions gate real work and are worth asking before anything else:**
-1. **How many drawn cels does a real document carry?** A drawn raster cel costs 6.6 MiB resident,
-   measured. At 120 cels that is 787 MB unbounded — more than all five budgets combined — and
-   `PERFORMANCE.md` item 14 becomes urgent. At 30 it is ~200 MB and the item does not exist.
-2. **Is 192 MiB of undo (about 12 whole-cel operations) enough**, and is trimming to half on a memory
-   warning generous or stingy? `UndoHistory.currentCost` now exists so a session can be sampled
-   rather than argued about.
+**Four new owner asks arrived after the device pass, about the lasso and move tools on a vector
+layer** — full text in `TODO.md`'s Queued section:
+1. A lassoed move should move only the selected part (splitting stroke geometry, cutting fill regions)
+   — text excepted, which the owner has already ruled is fine to move whole.
+2. The lasso toolbar icon should stay highlighted while another tool is briefly in use.
+3. Move is extremely slow on a vector layer — down to ~5 fps.
+4. The move tool's handles don't hold a constant screen size across zoom and don't respond to touch —
+   the exact bug `ADD_TEXT.md` §1 predicted, and Add Text Stage 4 shipped the fix's pattern today
+   (`TextTransformOverlayView`). Port `ObjectTransformOverlayView` onto it rather than redesigning.
 
-Eight more rulings are listed at the end of HANDOFF.md; several are one-line answers.
+Eight rulings the owner still owes are listed at the end of `HANDOFF.md`; none of them gate anything.
 
 **Delegate.** The owner's standing instruction is that this session is an orchestrator: *"save your
 context by smartly delegating tasks to sonnet and opus agents"*, and *"if there was a restriction of
@@ -37,35 +42,35 @@ an agent stalled overnight by ending its turn to wait for one, and had to be res
 
 Then, in rough order of value:
 
-1. **Add Text stages 4 and 5** — rotate/scale with handles, then the projective distort. `ADD_TEXT.md`
-   §3 has the file-by-file scope; §4 rule 9 requires a Release build on the iPad 9 before Stage 5
-   merges. Stages 1 and 3 are done; **stage 2 is on `main` and must not be rebuilt.**
-2. **A vector layer's transform is not undoable** — new in `BUGS.md`, wants its own branch. The
-   obvious fix is wrong: `objectTransformChanged` fires continuously during the drag, so per-call
-   undo would push hundreds of steps for one gesture. It wants a bracket, and the two paths where
-   `isVectorTransforming` turns off without a gesture ending are where a bracket would leak.
-3. **Item 14, only if the cel-count answer says so** — and thumbnails must be persisted first, which
-   item 9(c) made a precondition.
-4. **The Mode 3 eraser's ~95 ms per cutting sample.** Measured, deliberately unfixed. It compounds
-   with the new footprint eraser, which cuts every stroke it covers rather than one.
+1. **The four new owner asks above**, especially (4) — it has a working reference implementation in
+   the tree already (`Views/TextTransformOverlayView.swift`, `442dc16`) and is a port, not a design.
+2. **`PERFORMANCE.md` item 14's cheap half** — stop writing/loading a raster tier for blank-raster
+   cels. Correctness-clean, ready to scope, does not need item 9(c)'s thumbnail precondition.
+3. **Add Text Stage 5** — the projective distort. `ADD_TEXT.md` §4 rule 9 requires a Release build on
+   the iPad 9 before merge, same as every stage touching the warp path.
+4. **The Mode 3 eraser's ~95 ms per cutting sample** — measured, deliberately unfixed. Compounds with
+   the new footprint eraser, which cuts every stroke it covers rather than one.
 
 ---
 
 ## Notes for whoever writes the next prompt
 
-**Check `git log` for a file before building what a document says is outstanding.** `PERFORMANCE.md`
-and `BUGS.md` both described the `scenePhase` triple-save as to-do for two days after it was fixed;
-an agent went to build it and found it already there.
+**Reading the device directly can settle in thirty seconds what a code-tracing pass cannot settle at
+all.** `devicectl` pulling the owner's actual package and manifest is what refuted a standing ~150-cel
+inference this pass — the third or fourth time now that the owner's own hardware has beaten an agent
+reading code. Reach for it before a multi-agent scoping pass, not only after one.
 
-**Tell agents how to measure, not just what to measure.** The three best results of this pass all came
-from the same discipline: measure both arms *alternately in one run* so the ratio is contention-proof,
-and name an unchanged phase as a control. Contention on this Mac does not widen the error bar — it
-changes the answer, 303 vs 527 ms for identical work.
+**A number can be right and its unit label wrong at the same time.** `PERFORMANCE.md` item 14's
+"787 MB" and "6.6 MiB" were only mutually consistent at 6.558 MiB, and both were MiB, not MB — caught
+by dividing the reported total back apart, not by rereading the code that produced it.
 
-**A decline on a measurement is a good outcome, and saying so up front gets better work.** Item 4b and
-item 14 were both declined on numbers, and item 14's decline turned up the more interesting fact —
-that the low-risk half of it is worth exactly zero bytes, because `CGContext.makeImage()` shares its
-buffer copy-on-write.
+**A budget that is a sum of ceilings is not a sum of occupancies.** Before costing a new consumer
+against a budget total, check how many of that budget's own terms are actually reachable at the
+canvas size in question — item 13's 656 MiB looked fully spoken for and a third of it was.
+
+**Check `git log` for a file before building what a document says is outstanding — including within
+the same day.** Both `HANDOFF.md` and this file carried "a vector layer's transform is not undoable"
+as open after it shipped a few hours earlier in the same session's own history.
 
 **Do not tell an agent to cache a UDID in the scratchpad.** Subagents share the parent session's
 scratchpad directory, so a fixed filename is silently overwritten — one agent ran a full suite on
@@ -73,4 +78,4 @@ another's simulator, and only the xcresult's `deviceName` caught it.
 
 **Do branch work in a worktree, not by switching branches in the main one.** `.git/hooks/post-checkout`
 regenerates the *tracked* `graphify-out/GRAPH_REPORT.md` on every switch, which dirties the tree and
-blocked a concurrent agent's `--ff-only` merge this pass.
+can block a concurrent agent's `--ff-only` merge.
