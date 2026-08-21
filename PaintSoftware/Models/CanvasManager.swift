@@ -2165,6 +2165,14 @@ final class CanvasManager: ObservableObject {
     /// array positions before it commits (`shapeGestureLayerID`'s reasoning).
     var textGestureLayerID: UUID?
     var textGestureCelID: UUID?
+    /// The handle drag in flight, or nil. Holds the **whole starting quad and the anchor**, latched
+    /// at touch-down, so a mid-drag pinch-zoom cannot move the reference frame under the gesture
+    /// (`ADD_TEXT.md` §1, and `TextFrameDrag`'s own doc for the second half of the argument).
+    ///
+    /// Here rather than on the overlay view for the reason the draft tier itself is here: the model
+    /// owns the session, and a reference frame living in a view is a reference frame that dies when
+    /// SwiftUI decides to rebuild one.
+    var textHandleDrag: TextFrameDrag?
     /// The id of the **already-committed vector element** this session re-opened, or nil for a box
     /// that does not exist in any display list yet (a fresh placement, or any raster session).
     ///

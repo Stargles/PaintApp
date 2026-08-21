@@ -262,34 +262,55 @@ final class TextLayoutLogicTests: XCTestCase {
 
     // MARK: - Auto-size
 
-    /// `autoSize` grows the box to fit — capped at the canvas's right edge, which is a Stage 1
-    /// decision `TextLayout.autoSize` names: with no handles yet there is no way to drag a runaway
-    /// box back, so the overflow becomes a wrap rather than a disappearance.
+    /// `autoSize` grows the box to exactly what the string measures.
     func testAutoSizeGrowsToFitAShortString() {
-        let canvas = CGSize(width: 2048, height: 2048)
-        let size = TextLayout.autoSize(for: recipe("Title"), font: font(), originX: 100, canvasSize: canvas)
+        let size = TextLayout.autoSize(for: recipe("Title"), font: font())
         let measured = TextLayout.measure(recipe("Title"), font: font()).size
         XCTAssertEqual(size.width, measured.width, accuracy: 0.5)
         XCTAssertGreaterThan(size.height, 0)
     }
 
-    func testAutoSizeStopsAtTheCanvasEdgeAndWrapsInstead() {
-        let canvas = CGSize(width: 800, height: 800)
+    /// **Stage 4 removed Stage 1's cap at the canvas's right edge**, and this is the test that used
+    /// to assert it. Stage 1 wrapped a runaway box there because with no handles there was no way to
+    /// drag one back; stage 4 builds the handles, so the reason expired.
+    ///
+    /// Asserted as an identity rather than as a width: the box is *one line tall* and *as wide as
+    /// the unwrapped measurement*, whatever that measurement happens to be in this year's system
+    /// font. A cap of any kind would show up as a second line.
+    func testAutoSizeGrowsPastTheCanvasEdgeNowThatHandlesExist() {
         let long = String(repeating: "wide ", count: 60)
-        let size = TextLayout.autoSize(for: recipe(long), font: font(40), originX: 300, canvasSize: canvas)
-        XCTAssertEqual(size.width, 500, accuracy: 0.5,
-                       "A box placed 300 into an 800-wide canvas has 500 to grow into.")
-        XCTAssertGreaterThan(size.height, font(40).lineHeight,
-                             "Having run out of width it wrapped, so it is more than one line tall.")
+        let size = TextLayout.autoSize(for: recipe(long), font: font(40))
+        let unwrapped = TextLayout.measure(recipe(long), font: font(40), maxWidth: nil)
+        XCTAssertEqual(unwrapped.lines.count, 1, "Fixture check — the string has no newline to break on.")
+        XCTAssertEqual(size.width, unwrapped.size.width, accuracy: 0.5,
+                       "A point-text box grows rightward forever; stage 4's handles are how it comes back.")
+        XCTAssertGreaterThan(size.width, 2048,
+                             "Fixture check — the string is wider than any canvas this app defaults to, "
+                             + "so a surviving canvas-edge cap would fail the assertion above.")
+        XCTAssertEqual(size.height, unwrapped.size.height, accuracy: 0.5,
+                       "Having grown rather than wrapped, it is still one line tall.")
     }
 
     func testAnEmptyBoxIsStillTallEnoughToShowACaret() {
-        let canvas = CGSize(width: 1000, height: 1000)
-        let size = TextLayout.autoSize(for: recipe(""), font: font(60), originX: 0, canvasSize: canvas)
+        let size = TextLayout.autoSize(for: recipe(""), font: font(60))
         XCTAssertGreaterThanOrEqual(size.height, font(60).lineHeight - 0.5,
                                     "A box with nothing typed into it yet has to be tall enough to "
                                     + "hold the caret, or the artist places one and sees a hairline.")
         XCTAssertGreaterThanOrEqual(size.width, TextLayout.minimumBoxWidth)
+    }
+
+    /// The cap that replaced the canvas-edge one, and the reason removing it is safe: the *live*
+    /// cost of a very wide box is its glyph bitmap, and `renderBox` is asked for that bitmap in
+    /// texels rather than in points. A scale below 1 has to be honoured or the caller cannot express
+    /// the cap at all — it was floored at 1 until stage 4, which was invisible only while `autoSize`
+    /// bounded the box in points.
+    func testRenderBoxHonoursABackingScaleBelowOne() throws {
+        let box = CGSize(width: 800, height: 200)
+        let image = try XCTUnwrap(TextLayout.renderBox(recipe: recipe("Title"), boxSize: box,
+                                                       clip: false, scale: 0.25))
+        let cg = try XCTUnwrap(image.cgImage)
+        XCTAssertEqual(cg.width, 200, "800 points at 0.25 backing pixels per point.")
+        XCTAssertEqual(cg.height, 50)
     }
 
     // MARK: - Resolution

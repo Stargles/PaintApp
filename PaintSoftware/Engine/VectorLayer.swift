@@ -649,10 +649,12 @@ final class VectorCanvas {
     /// different scalar, and leaving `pointSize` in canvas points would re-lay the glyphs out at the
     /// wrong size inside a box that had been scaled.
     ///
-    /// **Rotation is the one part stage 3 does not carry.** A rotated layer transform gives the
-    /// mapped frame a rotated quad, which `VectorCanvas.draw(text:…)` then draws through its bounding
-    /// box — stage 5's homography is what makes that exact, and this is one of the two places it
-    /// lands (the other being a frame the artist rotated themselves).
+    /// **Rotation used to be the one part this did not carry, and stage 4 closed it.** A rotated
+    /// layer transform gives the mapped frame a rotated quad, which stage 3's
+    /// `VectorCanvas.draw(text:…)` then drew through its bounding box; it now draws through the
+    /// frame's own affine map, so the mapped quad renders turned. What remains for stage 5 is the
+    /// case no affine map covers — a layer transform that is not a similarity, or a frame the artist
+    /// has warped into a non-parallelogram.
     func localText(fromCanvas element: VectorTextElement) -> VectorTextElement {
         lock.lock()
         defer { lock.unlock() }
@@ -1567,19 +1569,29 @@ final class VectorCanvas {
     /// *does* want a cheaper text — a grey bar while scrubbing, say — has somewhere to go, and so the
     /// reader is told the omission was decided rather than overlooked.
     ///
-    /// Stage 3 draws through the frame's bounding box with a translate and no resampling, which is
-    /// exact for every frame stage 3 can make (upright, `.affine`). A rotated or distorted frame is
-    /// stages 4-5', and this is the branch `warpHomography` replaces.
+    /// **Stage 4 draws through `TextFrame.affineTransform`**, so a rotated or independently-scaled
+    /// box flattens turned rather than through its bounding box — one concatenated matrix, no
+    /// bitmap, no resampling, and byte-identical to stage 3 for an upright frame because there that
+    /// matrix *is* the translate stage 3 wrote. A frame with no affine map (a collapsed quad, or the
+    /// non-parallelogram only stage 5 can make) keeps the bounding-box fallback, and that is the
+    /// branch `warpHomography` replaces.
     private static func draw(text element: VectorTextElement, into cg: CGContext, quality: RenderQuality) {
         _ = quality
-        let box = element.frame.boundingBox
+        let frame = element.frame
+        let box = frame.boundingBox
         guard !element.recipe.string.isEmpty, box.width > 0, box.height > 0 else { return }
         let font = FontLibrary.shared.resolve(element.recipe.font,
                                               size: element.recipe.typography.clamped.pointSize).font
         cg.saveGState()
-        cg.translateBy(x: box.minX, y: box.minY)
-        TextLayout.draw(element.recipe, font: font, boxSize: box.size,
-                        clip: !element.frame.autoSize, into: cg)
+        if let transform = frame.affineTransform {
+            cg.concatenate(transform)
+            TextLayout.draw(element.recipe, font: font, boxSize: frame.size,
+                            clip: !frame.autoSize, into: cg)
+        } else {
+            cg.translateBy(x: box.minX, y: box.minY)
+            TextLayout.draw(element.recipe, font: font, boxSize: box.size,
+                            clip: !frame.autoSize, into: cg)
+        }
         cg.restoreGState()
     }
 

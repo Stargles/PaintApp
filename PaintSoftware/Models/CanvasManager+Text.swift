@@ -73,6 +73,7 @@ extension CanvasManager {
         textGestureLayerID = layerID
         textGestureCelID = celID
         textEditingElementID = nil
+        textHandleDrag = nil
 
         // **The whole point of stage 3**: on a vector layer the object is still there, so a tap on it
         // reopens the same object rather than dropping a second one on top. `topmostText` hits the
@@ -119,9 +120,9 @@ extension CanvasManager {
     ///
     /// Re-measures and regrows the box while `autoSize` is set. A box the artist has sized is
     /// authoritative and keeps its size: text wraps inside it and anything past the bottom is hidden
-    /// until they enlarge it (§5.3, "overflow clips"). Stage 1 has no handles, so nothing clears
-    /// `autoSize` yet and every Stage 1 box grows — the branch is here because Stage 4 turns it on,
-    /// not because Stage 1 exercises it.
+    /// until they enlarge it (§5.3, "overflow clips"). **Stage 4 is what turns the second branch
+    /// on**: the first drag of a resize handle clears `autoSize`, and from that keystroke onwards the
+    /// box the artist set is the box the text wraps into.
     func updateTextString(_ string: String) {
         guard textGestureActive, textRecipe.string != string else { return }
         textRecipe.string = string
@@ -144,13 +145,18 @@ extension CanvasManager {
         objectWillChange.send()
     }
 
+    /// **No canvas size, and no cap.** Stage 1 measured the room left to the canvas's right edge and
+    /// wrapped there, because with no handles a box that grew off-canvas could not be dragged back.
+    /// Stage 4 builds the handles, so the box grows to whatever the string measures and the artist
+    /// can size it by hand — `TextLayout.autoSize` carries the reasoning.
+    ///
+    /// `resized(to:)` is rotation-preserving as of stage 4, which is what lets a *turned* pristine
+    /// box keep growing as the artist types instead of snapping back to axis-aligned on the next
+    /// keystroke.
     private func regrowTextFrameIfAutoSizing() {
-        guard textFrame.autoSize, let canvasSize else { return }
+        guard textFrame.autoSize else { return }
         let font = TextLayout.resolvedFont(for: textRecipe).font
-        let origin = textFrame[.topLeft]
-        let measured = TextLayout.autoSize(for: textRecipe, font: font, originX: origin.x,
-                                           canvasSize: canvasSize)
-        textFrame = textFrame.resized(to: measured)
+        textFrame = textFrame.resized(to: TextLayout.autoSize(for: textRecipe, font: font))
     }
 
     // MARK: Moving the box
@@ -174,11 +180,68 @@ extension CanvasManager {
 
     /// The finger came off the box. Stays adjustable — this is not a commit, for the same reason
     /// `endInteractiveShape` is not one.
-    ///
-    /// Re-runs the auto-size measurement, because the cap `TextLayout.autoSize` applies is measured
-    /// from the box's *origin*: dragging a wide box left gives it more room, and it should take it.
     func endTextFrameDrag() {
         guard textGestureActive, textFingerDown else { return }
+        textFingerDown = false
+        objectWillChange.send()
+        refreshUndoRedoState()
+    }
+
+    // MARK: Rotating and sizing the box
+
+    /// Touch-down on one of the nine grips (`ADD_TEXT.md` §3 stage 4).
+    ///
+    /// **The latch is the whole of this method.** `TextFrameDrag` captures the starting quad and the
+    /// anchor now, and every delta that follows is measured against *that* — never against the frame
+    /// the previous delta produced. Two things fall out, and only the first is obvious: a drag cannot
+    /// accumulate rounding, and a second finger arriving mid-drag to pinch-zoom cannot move the
+    /// reference frame under the first (§1's stated reason for the latch).
+    ///
+    /// Returns silently on a frame too degenerate to have axes — a zero-size box has no direction to
+    /// size along, and a handle that quietly did nothing would be better than one that produced
+    /// NaNs.
+    func beginTextHandleDrag(_ handle: TextFrame.Handle) {
+        guard textGestureActive, let drag = TextFrameDrag(frame: textFrame, handle: handle) else { return }
+        textHandleDrag = drag
+        textFingerDown = true
+        refreshUndoRedoState()
+    }
+
+    /// A grip moved to `canvasPoint`.
+    ///
+    /// **No `recordUndo` here, and none per delta** — that is what `ADD_TEXT.md` §1 means by
+    /// "`setVectorTransform` is explicitly not the pattern to copy". The frame is a pure function of
+    /// the latched drag and this one point, so sixty deltas cost sixty struct assignments and
+    /// produce exactly the answer one delta to the same place would have.
+    func dragTextHandle(to canvasPoint: CGPoint) {
+        guard textGestureActive, let drag = textHandleDrag else { return }
+        textFrame = drag.frame(draggedTo: canvasPoint)
+        objectWillChange.send()
+    }
+
+    /// The finger came off a grip.
+    ///
+    /// **And it registers nothing on the history stack, which is a departure from stage 4's sketch
+    /// and is deliberate.** The sketch said "one `recordUndo` per drag"; a text session already
+    /// registers exactly one step for everything that happened inside it — `commitTextToVector`'s own
+    /// doc lists "dragging the box" among them — and a second step for the drag would be a *dead*
+    /// entry. The path is short enough to state: undo mid-session runs
+    /// `finalizePendingGesturesForHistoryAction`, which commits the session and pushes its step, and
+    /// `history.undo()` then reverts that. A per-drag step would be left sitting underneath it, and
+    /// the next undo would restore a frame into a session that no longer exists — the artist presses
+    /// undo and nothing they can see happens. `ADD_TEXT.md` §2's "an undo step that removes nothing
+    /// is a step the artist has to press through" is the same objection one level down.
+    ///
+    /// What the sketch was actually guarding against — a drag spraying a step per delta, the way
+    /// `setVectorTransform`'s caller would — is guarded: `dragTextHandle` records nothing at all, and
+    /// `TextTransformLogicTests` pins that sixty deltas and one delta leave the same history depth.
+    ///
+    /// Re-runs the auto-size measurement, which matters only after a *rotation*: a resize clears
+    /// `autoSize`, so the regrow is a no-op there, while a turned pristine box has to go on growing
+    /// to fit along its new axes.
+    func endTextHandleDrag() {
+        guard textHandleDrag != nil else { return }
+        textHandleDrag = nil
         textFingerDown = false
         regrowTextFrameIfAutoSizing()
         objectWillChange.send()
@@ -208,6 +271,7 @@ extension CanvasManager {
         textGestureActive = false
         textFingerDown = false
         textIsFocused = false
+        textHandleDrag = nil
         let recipe = textRecipe
         let frame = textFrame
         let layerID = textGestureLayerID
@@ -329,6 +393,7 @@ extension CanvasManager {
         textGestureActive = false
         textFingerDown = false
         textIsFocused = false
+        textHandleDrag = nil
         if let layerID = textGestureLayerID, let celID = textGestureCelID,
            textEditingElementID != nil,
            let layerIndex = layers.firstIndex(where: { $0.id == layerID }),

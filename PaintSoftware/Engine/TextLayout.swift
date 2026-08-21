@@ -146,26 +146,38 @@ enum TextLayout {
         return Metrics(size: size, lines: lines)
     }
 
-    /// The size `autoSize` should give the box for this recipe, bounded so a very long line cannot
-    /// run off the canvas and out of reach.
+    /// The size `autoSize` should give the box for this recipe: exactly what the string measures,
+    /// never wrapped, floored so an empty box is still a visible target and still tall enough to
+    /// hold a caret.
     ///
-    /// **The bound is a Stage 1 pragmatic one, and it is a decision worth naming**: a point-text box
-    /// is supposed to grow rightward forever, but with no handles yet (Stage 4) there is no way to
-    /// bring one back once it has left the canvas. Capping at the canvas's right edge turns the
-    /// runaway into a wrap, which is visible and recoverable. Once handles exist the cap can go.
-    static func autoSize(for recipe: TextRecipe, font: UIFont, originX: CGFloat,
-                         canvasSize: CGSize) -> CGSize {
-        let available = max(minimumBoxWidth, canvasSize.width - originX)
+    /// **Stage 1's cap at the canvas's right edge is gone, and its removal is the point.** A
+    /// point-text box is supposed to grow rightward forever; stage 1 capped it because with no
+    /// handles there was no way to drag a runaway box back, so the overflow became a wrap. Stage 4
+    /// builds the handles, so the reason expired and the cap went with it — a title laid across a
+    /// canvas and beyond it is a normal thing to type, and re-wrapping it at an edge the artist
+    /// cannot see reads as the app rewriting their layout.
+    ///
+    /// Nothing bounds the returned width now, and nothing needs to: the only cost that scales with
+    /// it is the live overlay's glyph bitmap, and `TextOverlayView.glyphContentsScale` caps that in
+    /// *texels* rather than in points (ADD_TEXT.md §4 rule 1) — which is the bound that actually
+    /// holds, since it survives a zoom as well as a long string.
+    static func autoSize(for recipe: TextRecipe, font: UIFont) -> CGSize {
         let unwrapped = measure(recipe, font: font, maxWidth: nil).size
-        if unwrapped.width <= available {
-            return CGSize(width: max(unwrapped.width, minimumBoxWidth), height: max(unwrapped.height, font.lineHeight))
-        }
-        let wrapped = measure(recipe, font: font, maxWidth: available).size
-        return CGSize(width: available, height: max(wrapped.height, font.lineHeight))
+        return CGSize(width: max(unwrapped.width, minimumBoxWidth),
+                      height: max(unwrapped.height, font.lineHeight))
     }
 
     /// Wide enough that an empty box is a visible target rather than a hairline, in canvas points.
-    static let minimumBoxWidth: CGFloat = 24
+    ///
+    /// Defined as `TextFrame.minimumExtent` rather than beside it as a second literal: the smallest
+    /// box auto-size can make and the smallest a handle drag can make are one figure, and two spellings
+    /// of one number is the kind of thing that drifts.
+    static let minimumBoxWidth: CGFloat = TextFrame.minimumExtent
+
+    /// The floor under `renderBox`'s backing scale. Not zero — a zero-scale renderer produces an
+    /// empty image and a caller that divided by it would produce a NaN — and low enough that the
+    /// texel cap, not this, is what a very wide box actually meets.
+    static let minimumRenderScale: CGFloat = 0.05
 
     // MARK: - Rasterizing
 
@@ -176,11 +188,16 @@ enum TextLayout {
     /// shape and cost to a fill commit, which is already accepted. Nothing in the *live* path calls
     /// this: the live overlay is a `UITextView` at text-box size, which is rule 1.
     ///
-    /// Stage 1 draws with a translate and no resampling at all, because every Stage 1 frame is
-    /// `isUprightTranslation`. A frame that is not — which only Stages 4-5 can produce — is drawn
-    /// through its own bounding box for now, so the code is honest about being Stage 1 rather than
-    /// silently drawing the wrong thing; Stage 5 replaces this branch with the `warpHomography`
-    /// kernel and its scalar Swift twin.
+    /// **Stage 4 draws through `TextFrame.affineTransform`**, so a box the artist has rotated or
+    /// sized bakes turned, with no bitmap and no resampling anywhere — CoreText lays the glyphs out
+    /// in the box's own coordinates and CoreGraphics carries them through one concatenated matrix.
+    /// For an upright frame that matrix *is* the translate stage 1 wrote, which is why this
+    /// generalisation changed no stage-1 pixel.
+    ///
+    /// A frame with no affine map — a collapsed quad, or the non-parallelogram only stage 5 can make
+    /// — falls back to drawing through its bounding box, the stage 1 branch kept as the honest
+    /// approximation rather than nothing at all. Stage 5 replaces *that* branch with the
+    /// `warpHomography` kernel and its scalar Swift twin.
     static func render(recipe: TextRecipe, frame: TextFrame, canvasSize: CGSize,
                        library: FontLibrary = .shared) -> UIImage? {
         guard !recipe.string.isEmpty, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
@@ -199,8 +216,13 @@ enum TextLayout {
         return renderer.image { context in
             let cg = context.cgContext
             cg.saveGState()
-            cg.translateBy(x: box.minX, y: box.minY)
-            draw(recipe, font: font, boxSize: box.size, clip: !frame.autoSize, into: cg)
+            if let transform = frame.affineTransform {
+                cg.concatenate(transform)
+                draw(recipe, font: font, boxSize: frame.size, clip: !frame.autoSize, into: cg)
+            } else {
+                cg.translateBy(x: box.minX, y: box.minY)
+                draw(recipe, font: font, boxSize: box.size, clip: !frame.autoSize, into: cg)
+            }
             cg.restoreGState()
         }
     }
@@ -216,13 +238,21 @@ enum TextLayout {
     ///
     /// `scale` is backing pixels per canvas point. The caller caps it; see
     /// `TextOverlayView.glyphContentsScale`.
+    ///
+    /// **A `scale` below 1 is honoured, and stage 4 is what made that matter.** It used to be
+    /// floored at 1, which was harmless while `autoSize` capped a box at the canvas's right edge and
+    /// silently stopped bounding anything the moment that cap was removed: a point-text box now
+    /// grows as wide as the string, and a floor of 1 would turn a very long title into a bitmap as
+    /// many pixels across as it is points. The caller's cap is expressed in *texels* precisely so it
+    /// can ask for less than one pixel per point, which is ADD_TEXT.md §4 rule 1 — "capped absolutely
+    /// at 4096×4096 texels even fully supersampled" — and a floor at 1 defeated it.
     static func renderBox(recipe: TextRecipe, boxSize: CGSize, clip: Bool, scale: CGFloat,
                           library: FontLibrary = .shared) -> UIImage? {
         guard !recipe.string.isEmpty, boxSize.width > 0, boxSize.height > 0 else { return nil }
         let font = library.resolve(recipe.font, size: recipe.typography.clamped.pointSize).font
         let format = UIGraphicsImageRendererFormat.preferred()
         format.opaque = false
-        format.scale = max(1, scale)
+        format.scale = max(minimumRenderScale, scale)
         let renderer = UIGraphicsImageRenderer(bounds: CGRect(origin: .zero, size: boxSize), format: format)
         return renderer.image { context in
             draw(recipe, font: font, boxSize: boxSize, clip: clip, into: context.cgContext)

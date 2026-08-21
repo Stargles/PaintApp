@@ -120,6 +120,25 @@ struct CanvasView: UIViewRepresentable {
             textOverlay?.handleEditUndo(isRedo: isRedo) ?? false
         }
 
+        // The text box's nine grips (`ADD_TEXT.md` §3 stage 4). A **sibling** of the editor rather
+        // than a child of it — §1 "Handles live outside the warped layer" — and above it, so a touch
+        // on a corner is a resize rather than a move: the grips' 44 pt targets overlap the editor's
+        // move band by construction, and the more specific gesture has to win. It claims only those
+        // targets, so the band and the canvas keep everything else.
+        let textTransformOverlay = TextTransformOverlayView()
+        textTransformOverlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(textTransformOverlay)
+        context.coordinator.textTransformOverlay = textTransformOverlay
+        textTransformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle in
+            coordinator?.canvasManager.beginTextHandleDrag(handle)
+        }
+        textTransformOverlay.onHandleDragged = { [weak coordinator = context.coordinator] point in
+            coordinator?.canvasManager.dragTextHandle(to: point)
+        }
+        textTransformOverlay.onHandleDragEnded = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.endTextHandleDrag()
+        }
+
         // Above everything, including the shape overlay: a guide annotates the whole frame. It
         // claims only its own handle hitboxes, so being topmost costs a shape handle only where
         // the two coincide — and the two are never both live, since guides need interpolate mode.
@@ -217,6 +236,10 @@ struct CanvasView: UIViewRepresentable {
             textOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             textOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             textOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            textTransformOverlay.topAnchor.constraint(equalTo: container.topAnchor),
+            textTransformOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            textTransformOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            textTransformOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             guideOverlay.topAnchor.constraint(equalTo: container.topAnchor),
             guideOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             guideOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -399,6 +422,8 @@ struct CanvasView: UIViewRepresentable {
         weak var shapeOverlay: ShapeOverlayView?
         /// The live text editor. `ADD_TEXT.md` stage 1.
         weak var textOverlay: TextOverlayView?
+        /// Its nine grips, in a sibling view above it. `ADD_TEXT.md` stage 4.
+        weak var textTransformOverlay: TextTransformOverlayView?
         /// The text tool's placement tap. A fourth `TouchTypePressRecognizer`, not a fourth
         /// mechanism — see `setUpGestures`.
         weak var textTapRecognizer: TouchTypePressRecognizer?
@@ -1578,11 +1603,20 @@ struct CanvasView: UIViewRepresentable {
                            frame: canvasManager.textFrame,
                            recipe: canvasManager.textRecipe,
                            canvasScale: canvasContentScale)
+            // Fed the same frame on the same pass, so the grips and the outline they grip cannot be
+            // a frame apart. Handles stay up for the whole session, keyboard or not — an artist
+            // sizing a wrap width does it while reading the text.
+            textTransformOverlay?.update(isActive: active, frame: canvasManager.textFrame,
+                                         canvasScale: canvasContentScale)
             guard active else { return }
             // Above every layer host so the box is visible and its band hit-testable. It claims only
             // the box and the band (`TextOverlayView.hitTest`), so everything else still falls
             // through to whatever is underneath.
             container.bringSubviewToFront(overlay)
+            // And the grips above the editor, for the reason `makeUIView` states where they are
+            // added: a corner's target overlaps the move band, and the resize is the more specific
+            // gesture.
+            if let textTransformOverlay { container.bringSubviewToFront(textTransformOverlay) }
         }
 
         /// Coalesces preview re-renders to one per run-loop turn — a Pencil delivers several coalesced
@@ -2212,6 +2246,10 @@ struct CanvasView: UIViewRepresentable {
             // The text box's outline and its move band are screen-point chrome for the same reason
             // the shape handles are, so the scale has to reach it on the same passes.
             textOverlay?.canvasScale = canvasContentScale
+            // And its grips, which are the reason ADD_TEXT.md §1 forbids copying
+            // `TransformHandleView`'s fixed 24×24: this is the push that keeps a handle 14 pt at
+            // 0.3× zoom instead of 14 canvas points.
+            textTransformOverlay?.canvasScale = canvasContentScale
             guard let container = containerView, let baseCenter else { return }
             let scale = fitScale * committedScale * liveScale
             let rotation = effectiveRotation()
@@ -2433,8 +2471,12 @@ struct CanvasView: UIViewRepresentable {
             // container's bounds equal canvasSize, so `location(in:)` there is canvas-pixel space —
             // the same mapping `handleFillPress` uses.
             let canvasPoint = recognizer.location(in: container)
+            // Both text overlays, not just the editor. A grip sits *outside* the box, so without the
+            // second test grabbing a corner handle would fall through to here and commit the very
+            // session the artist was resizing — then open an empty box under their finger.
             if canvasManager.textGestureActive,
-               let overlay = textOverlay, overlay.hitTest(canvasPoint, with: nil) != nil {
+               textOverlay?.hitTest(canvasPoint, with: nil) != nil
+                || textTransformOverlay?.hitTest(canvasPoint, with: nil) != nil {
                 return
             }
             canvasManager.beginTextSession(at: canvasPoint)

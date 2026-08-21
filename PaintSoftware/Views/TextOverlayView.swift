@@ -157,9 +157,7 @@ final class TextOverlayView: UIView, UITextViewDelegate {
         self.frameModel = frameModel
         self.recipe = recipe
 
-        let box = frameModel.boundingBox
-        textView.frame = box
-        glyphLayer.frame = box
+        applyFrameGeometry()
         applyOutlineStyle()
 
         if appliedStyle != recipe.styleOnly {
@@ -228,6 +226,51 @@ final class TextOverlayView: UIView, UITextViewDelegate {
         return true
     }
 
+    // MARK: - Geometry
+
+    /// Places the glyph bitmap and the caret's text view on the frame's quad.
+    ///
+    /// **Both are sized to the *layout box* and carried by the frame's own affine map**, rather than
+    /// laid out in the frame's bounding rectangle. That is stage 4's whole visual change: a box the
+    /// artist has turned shows its type turned, and it shows it through the same matrix
+    /// `TextLayout.render` bakes with, so what is on screen is what lands.
+    ///
+    /// ADD_TEXT.md §1 "Typing in a distorted box happens unwarped" is the rule this obeys: while
+    /// `mode == .affine` — every frame stage 4 can make — you edit *in place under the affine
+    /// transform*, caret and all. Only `.projective` springs back to flat for typing, and that is
+    /// stage 5's.
+    ///
+    /// A `UIView`'s `transform` is applied about its centre, so the text view is placed by
+    /// `bounds`/`center`/`transform` and never by `frame` — assigning `frame` to a transformed view
+    /// is undefined, and the caret would land somewhere unrelated to the words. The centre is the
+    /// box's own middle carried through the map, which is exactly what cancels the recentring.
+    private func applyFrameGeometry() {
+        let box = frameModel.boundingBox
+        let transform = frameModel.affineTransform
+        let boxSize = transform == nil ? box.size : frameModel.size
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        glyphLayer.bounds = CGRect(origin: .zero, size: boxSize)
+        // `anchorPoint` and `position` are both zero, so the layer-to-superlayer map *is* the
+        // transform and local (0,0) lands on the frame's top-left corner.
+        glyphLayer.setAffineTransform(transform ?? CGAffineTransform(translationX: box.minX, y: box.minY))
+        CATransaction.commit()
+
+        textView.transform = .identity
+        textView.bounds = CGRect(origin: .zero, size: boxSize)
+        if let transform {
+            let middle = CGPoint(x: boxSize.width / 2, y: boxSize.height / 2).applying(transform)
+            // The linear part only: the translation is carried by `center`, and applying it twice
+            // would put the caret one box-width away from the glyphs.
+            textView.transform = CGAffineTransform(a: transform.a, b: transform.b,
+                                                   c: transform.c, d: transform.d, tx: 0, ty: 0)
+            textView.center = middle
+        } else {
+            textView.center = CGPoint(x: box.midX, y: box.midY)
+        }
+    }
+
     // MARK: - Style
 
     private func applyTypingAttributes() {
@@ -255,9 +298,10 @@ final class TextOverlayView: UIView, UITextViewDelegate {
     /// the artist's only signal that the box has stopped growing and started clipping.
     private func applyOutlineStyle() {
         guard isActive else { return }
-        let box = frameModel.boundingBox
         outlineLayer.frame = bounds
-        outlineLayer.path = CGPath(rect: box, transform: nil)
+        // The quad, not the bounding rectangle — stage 4 turns boxes, and an axis-aligned outline
+        // around a turned one is a rectangle drawn where the text is not.
+        outlineLayer.path = Self.outlinePath(for: frameModel)
         outlineLayer.lineWidth = Self.outlineScreenWidth / max(canvasScale, 0.01)
         if frameModel.autoSize {
             let dash = Self.dashScreenLength / max(canvasScale, 0.01)
@@ -267,21 +311,48 @@ final class TextOverlayView: UIView, UITextViewDelegate {
         }
     }
 
+    private static func outlinePath(for frame: TextFrame) -> CGPath {
+        let corners = frame.corners
+        guard corners.count == 4 else { return CGPath(rect: frame.boundingBox, transform: nil) }
+        let path = CGMutablePath()
+        path.move(to: corners[0])
+        path.addLine(to: corners[1])
+        path.addLine(to: corners[2])
+        path.addLine(to: corners[3])
+        path.closeSubpath()
+        return path
+    }
+
     // MARK: - Glyphs
 
     /// Backing pixels per canvas point for the glyph bitmap, capped twice.
     ///
     /// Capped at 3× because past that the artist cannot see the difference and the backing store is
-    /// the square of it, and capped again so the store cannot exceed 4096×4096 texels however far
-    /// they zoom — ADD_TEXT.md §4's rule that nothing in the live path is canvas-sized only holds if
-    /// the box's own store is bounded too.
+    /// the square of it, and capped again so the store cannot exceed `maximumGlyphTexels` on its
+    /// longest side however far they zoom — ADD_TEXT.md §4's rule that nothing in the live path is
+    /// canvas-sized only holds if the box's own store is bounded too.
+    ///
+    /// **The texel cap is applied last and is allowed to take the answer below 1**, which stage 4
+    /// changed. It used to be floored at 1, and that floor was invisible only because stage 1's
+    /// `autoSize` capped a box at the canvas's right edge. Stage 4 removed that cap — a point-text
+    /// box now grows as wide as the string — so a floor of 1 would let a long title mint a bitmap as
+    /// many pixels across as it is canvas points. `TextLayout.renderBox` honours a sub-1 scale for
+    /// exactly this.
     private var glyphContentsScale: CGFloat {
         let display = max(traitCollection.displayScale, 1)
-        let wanted = min(canvasScale * display, 3 * display)
-        let box = frameModel.boundingBox
-        let longest = max(box.width, box.height, 1)
-        return max(1, min(wanted, 4096 / longest))
+        let wanted = max(1, min(canvasScale * display, 3 * display))
+        let longest = max(glyphBoxSize.width, glyphBoxSize.height, 1)
+        return max(TextLayout.minimumRenderScale, min(wanted, Self.maximumGlyphTexels / longest))
     }
+
+    /// The bitmap is the *layout box*, not the frame's bounding rectangle: the rotation is carried
+    /// by the layer's transform, so rendering the bounding box would rasterize the box's own
+    /// diagonal and then rotate that.
+    private var glyphBoxSize: CGSize {
+        frameModel.affineTransform == nil ? frameModel.boundingBox.size : frameModel.size
+    }
+
+    private static let maximumGlyphTexels: CGFloat = 4096
 
     /// Coalesces glyph re-renders to one per run-loop turn. A fast typist delivers several
     /// keystrokes per frame and each would otherwise cost a CoreText pass and a bitmap — ADD_TEXT.md
@@ -298,8 +369,7 @@ final class TextOverlayView: UIView, UITextViewDelegate {
 
     private func renderGlyphsIfNeeded() {
         guard isActive else { return }
-        let box = frameModel.boundingBox
-        let key = RenderKey(recipe: recipe, boxSize: box.size, clip: !frameModel.autoSize,
+        let key = RenderKey(recipe: recipe, boxSize: glyphBoxSize, clip: !frameModel.autoSize,
                             scale: glyphContentsScale)
         guard key != renderedKey else { return }
         renderedKey = key
@@ -326,8 +396,10 @@ final class TextOverlayView: UIView, UITextViewDelegate {
     /// `ShapeOverlayView` makes itself transparent for the same reason.
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard isActive, !isHidden, isUserInteractionEnabled else { return nil }
-        let box = frameModel.boundingBox
-        if box.contains(point) {
+        // The quad and a collar around it, not the bounding rectangle — the same predicate the
+        // display list's re-open query uses (`TextFrame.contains`), so tapping the empty corner of a
+        // turned box is tapping the canvas, exactly as it is when the object is committed.
+        if frameModel.contains(point) {
             // Inside the box is the text view's: tap to place the caret, and Scribble to write into
             // it. The band is what moves the box.
             //
@@ -338,7 +410,7 @@ final class TextOverlayView: UIView, UITextViewDelegate {
             // view itself covers the case where it declines its own bounds.
             return textView.hitTest(convert(point, to: textView), with: event) ?? textView
         }
-        if box.insetBy(dx: -moveBand, dy: -moveBand).contains(point) { return self }
+        if frameModel.contains(point, slop: moveBand) { return self }
         return nil
     }
 
