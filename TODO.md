@@ -20,18 +20,40 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-Three branches, started 2026-08-21 after the device pass. All three are the new owner asks below.
+**Session 61 halted at 97% usage. Three branches are committed but NOT merged — none finished its
+final verification run, and this repo does not merge a count nobody read.** Each has its own worktree
+and branch; `git log --oneline origin/main..tmp/<name>` shows the work.
 
-- **(c) + (d) — the move overlay's speed and its handles.** One branch, because they are likely one
-  root cause: a handle that renders at a fraction of its size under zoom has a hit target that shrank
-  with it. Porting `Views/ObjectTransformOverlayView.swift` onto Stage 4's
-  `Views/TextTransformOverlayView.swift` pattern, and measuring the ~5 fps before fixing it rather
-  than guessing.
-- **(b) — the lasso icon staying blue across a tool change.** The branch's first job is to establish
-  whether the selection actually *survives* picking the brush today. If it does, this is a binding
-  fix; if it does not, the ask is a behaviour change as well as a visual one.
-- **(a) — a spec, not the build.** `LASSO_MOVE.md`, scoping split-and-move against the vector
-  eraser's existing split/punch machinery. Read-only, no simulator.
+- **`tmp/move-overlay` — owner asks (c) and (d), 2 commits, rebased onto `b109aa0`.**
+  Commits: "The Move box gets the screen's units, and its drag stops rasterizing" and a SESSION_LOG
+  line. **(c) is measured**: the Move drag cost **96.1 / 99.9 / 107.8 ms per touch-move sample** at
+  2048x1024, three runs, control within 6% — which is the owner's reported ~5 fps, found rather than
+  guessed. Fast tier read **1513 total / 1510 passed / 0 failed / 3 skipped** (+32 over the 1481
+  baseline) *before* the rebase; the post-rebase run had not reported when the session stopped.
+  **To finish**: rebase onto `origin/main`, re-run the pbxproj duplicate-id check, run the fast tier
+  and read the count from the xcresult, run the move/selection UI suites in isolation, then merge.
+- **`tmp/lasso-active` — owner ask (b), 1 commit**, "Keep the toolbar's Select/lasso icon blue while
+  a selection is live". Was on its final post-rebase confirmation run when the session stopped.
+  **To finish**: same close-out. Its report never landed, so **read the branch to learn whether the
+  selection already survived a tool change or had to be made to** — that distinction was the whole
+  question and the answer is in the diff, not in any document.
+- **`tmp/lassomove-rulings` — docs only, 1 commit (a WIP commit made by the halt).** Folds the
+  owner's three rulings of 2026-08-21 into `LASSO_MOVE.md`: **centreline selection** (confirmed
+  knowingly, with the "a 40pt stroke whose spine is outside the loop will not move" consequence
+  stated to them); **one undo step per nudge** (matching what session 56 gave the whole-layer
+  transform); and the third, which is richer than the question asked and reshapes stage 1 —
+
+  > *"when you lasso and move, the part that is lassoed should be in a temporal non commit stage with
+  > move nodes. You can move it freely, and when it bakes it should clear on commit"*
+
+  That is the **existing floating-piece lifecycle** (`Views/FloatingPieceOverlayView.swift`,
+  `commitFloatingPieceIfNeeded` in `SelectionModels.swift`), so the vector path should adopt it
+  rather than grow a parallel one. Two things were left open for whoever finishes it: the undo ruling
+  and the floating model are in tension (the **split must belong to the first nudge's undo step**, or
+  undoing past it leaves a stroke cut in half with nothing moved), and `FloatingPieceOverlayView` is
+  the *other* half of `BUGS.md`'s duplicated-overlay entry — it must converge on Stage 4's
+  `TextTransformOverlayView` pattern or the new feature ships with the very shrink-with-zoom bug the
+  owner reported today.
 
 ## Queued
 
