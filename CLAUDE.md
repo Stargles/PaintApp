@@ -309,6 +309,7 @@ simulator; the cap is about the machine, not the plan (see `tools/simlock.sh` an
 runs did to this Mac).
 
 [LASSO_FILL.md](LASSO_FILL.md) is the lasso fill specification — the algorithm, its name in the literature, the edge cases decided, and what shipped applications do.
+[LASSO_MOVE.md](LASSO_MOVE.md) is the lasso *move* specification — splitting strokes and fills at the selection boundary so only what is inside travels, and how much of it the vector eraser already built. Two owner rulings settled 2026-08-21 and not to be re-litigated: **a lasso move moves only what is inside the loop** (Move with no selection still moves the whole cel, which is correct as it stands), and **a split stroke becomes two independent strokes**, either of which can later be moved or erased on its own.
 [README.md](README.md) is the app and its architecture. [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md)
 is the interpolation feature — settled decisions and the future-upgrade list. [BUGS.md](BUGS.md) is
 open issues only. [PERFORMANCE.md](PERFORMANCE.md) is the ranked optimisation programme, the work
