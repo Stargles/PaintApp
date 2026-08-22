@@ -238,6 +238,30 @@ final class SelectionOverlayView: UIView {
         refreshHatchPath()
     }
 
+    /// **The ants travel with a floating piece** (LASSO_MOVE.md §5.6 and its prior art: Photoshop and
+    /// Illustrator both move the outline with the content), and this is how they do it while the
+    /// finger is still down.
+    ///
+    /// A drag writes nothing to the model — that is the whole design of the float — so writing a
+    /// moved `selection.path` per touch-move would put a `@Published` change, and therefore a whole
+    /// SwiftUI pass, on every delta of a gesture built specifically not to have one. Two `CALayer`
+    /// transforms cost nothing and land on the same frame the piece does. At the gesture's end the
+    /// model catches up with the real path and this goes back to the identity, so the value on screen
+    /// and the value in the document are the same thing at every rest state.
+    ///
+    /// The exterior hatch is hidden rather than transformed: it is "the view's bounds minus the
+    /// selection", so moving it would drag its own outer edge into the canvas and leave an unhatched
+    /// margin. It comes back, correct, when the moved path is written.
+    func setLiveSelectionTransform(_ transform: CGAffineTransform) {
+        let isIdentity = transform.isIdentity
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        antsLayer.setAffineTransform(transform)
+        antsShadowLayer.setAffineTransform(transform)
+        hatchLayer.isHidden = !isIdentity || !hatchIsEnabled || hatchLayer.path == nil
+        CATransaction.commit()
+    }
+
     private func refreshHatchPath() {
         guard hatchIsEnabled, let selectionPath = currentSelectionPath, bounds.width > 0, bounds.height > 0 else {
             hatchLayer.isHidden = true

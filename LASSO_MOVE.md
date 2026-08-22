@@ -1,76 +1,57 @@
-<!-- Written 2026-08-21 as a scoping-and-specification pass over TODO.md's queued item (a), after the
-owner reported that "the lasso and move tool ... on the vector layer the behaviour isn't inline".
-Revised the same day, once they ruled on all three open questions — §5.4, §5.5 and §5.6, the last of
-which changed the shape of stage 1. Nothing here is built. The owner's asks live in TODO.md; what we
-find lives in BUGS.md; this is the design, in the idiom of ADD_TEXT.md and LASSO_FILL.md. -->
+<!-- Written 2026-08-21 as a scoping-and-specification pass over TODO.md's queued item (a). Built
+2026-08-22; §0 records what shipped and where it lives, and the rest of the document is the design it
+was built from, kept because the reasoning is what a later session needs. The owner's asks live in
+TODO.md; what we find lives in BUGS.md. -->
 
 # Lasso Move — Specification
 
 Lasso a region on a vector layer, then Move, and **only what is inside the loop moves**. A brush
 stroke that crosses the loop is cut at the boundary into two strokes: the piece inside travels, the
 piece outside stays, and from then on either can be moved, erased or re-cut on its own. A filled
-region loses the chunk that was inside and that chunk travels as its own fill. Text moves whole or
-not at all.
+region loses the chunk that was inside and that chunk travels as its own fill. Text and placed images
+move whole or not at all. An eraser mark is an ordinary element and does all of the above.
 
-The lassoed part **floats** while you work it — uncommitted, with transform handles, freely
-movable — and bakes into the drawing when you tap away, clearing the selection as it goes. Each nudge
-is its own undo step.
+The lassoed part **floats** while you work it — uncommitted, with a move band, freely movable, the
+marching ants travelling with it — and bakes into the drawing when you tap away, clearing the
+selection as it goes. Each nudge is its own undo step.
 
 ---
 
-## 0. How much of this already exists
+## 0. What shipped, and where it lives
 
-**Most of it, and the honest headline is that this is a small feature wearing a large feature's
-clothes.** The three hard problems — cutting a polyline at a boundary with the cut landing where the
-artist drew it, cutting a region out of a filled area, and keeping a cut piece's ink bit-identical to
-what it was before the cut — are all solved, shipped, and pinned by tests. What is missing is a
-*caller*.
+**Shipped 2026-08-22, for strokes, fills, images and text together** — the design below planned three
+stages and they collapsed into one, because once the display list is being split at all, the
+remaining kinds are a `CGPath` boolean and a centre-point test.
 
-**The owner's §5.6 ruling made that more true, not less.** *"a temporal non commit stage with move
-nodes … when it bakes it should clear on commit"* is a description of `FloatingPiece` — a shipped
-subsystem with a lifecycle, an overlay, a commit chokepoint and a dozen call sites that already
-defer to it — written by someone who had not seen the code. Adopting it instead of building a
-parallel session is what took stage 1 down to **one new file**.
+| what | where |
+|---|---|
+| both halves of a membership walk, from **one** pass, sharing each crossing bit for bit | `StrokeGeometry.membershipRuns(_:inside:)`. `splitRuns` is now this filtered to the inside runs, so the live selection clip and the lasso move can never disagree about where a stroke leaves a loop |
+| the split itself — strokes (paint *and* erase), fills, images, text | `VectorCanvas.splitForLassoMove(insideLocalPath:)` |
+| one element moved by an affine, geometry **and** dab lattice together | `VectorCanvas.mapping(_:through:)` |
+| the elements a float has lifted, skipped by the flatten | `VectorCanvas.suppressedElementIDs` — `editingElementID` is now a one-element view over it |
+| the float's own picture | `VectorCanvas.renderIsolated(ids:)`, sharing `renderLocalContent(elements:quality:)` with the display so the isolation rules cannot fork |
+| the lifecycle: lift, nudge, bake, cancel, undo | `CanvasManager+LassoMove.swift`, and `VectorFloat` |
+| the piece on screen under a Core Animation transform | `StrokeCanvasView.beginVectorFloat` / `updateVectorFloat` / `endVectorFloat`, modelled line for line on the whole-layer `beginLiveLayerTransform` trio |
+| travelling marching ants | `SelectionOverlayView.setLiveSelectionTransform` during a drag; `CanvasManager.moving(_:by:)` writes the real path at each gesture end |
+| a box that offers its move band only | `ObjectTransformFrame.allowedHandles` |
+| the way in | `TopToolbar.toggleMove()` — with a selection on a vector cel, `beginVectorLassoMove()` |
 
-| the feature needs | it already exists as | status |
-|---|---|---|
-| a closed lasso polygon in canvas space | `SelectionOverlayView.handleLassoPan` → `CGMutablePath` + `closeSubpath()`, `Selection{path,bounds,layerID,celID}` | shipped; `SelectionOverlayView.swift:281-305`, `SelectionModels.swift:54-59` |
-| "cut a stroke where it crosses a closed path" | `StrokeGeometry.splitRuns(_:inside:)` — maximal runs where a membership predicate holds, each crossing bisected 40× | shipped and **already used for selections**; `StrokeGeometry.swift:898-923` |
-| "cut a stroke into pieces and splice them into the display list" | `VectorCanvas.cutAlongFootprint` (eraser Mode 2), `cutToIntersection` (Mode 3) | shipped; `VectorLayer.swift:1126-1155`, `:1243-1248` |
-| "a cut piece's dabs land exactly where the parent's did" | `DabLattice` + `BrushStamper.stampStroke(visibleRange:)` | shipped; `VectorLayer.swift:62-91`, `BrushStamper.swift:144-165` |
-| "cut a chunk out of a fill" | `CGPath.intersection` / `.subtracting` — Core Graphics, iOS 16+, deployment target here is **26.5** | shipped by Apple; measured in §1 |
-| one undo step for a whole display-list edit | `registerVectorFillUndo`'s whole-array before/after swap | shipped; `CanvasManager+Fill.swift:557-570` |
-| a lasso that clips vector drawing | `StrokeCanvasView.selectionClipPath` → `splitRuns` | shipped; `StrokeCanvasView.swift:51, 810-820` |
-| **"a floating, uncommitted thing with move nodes that bakes on commit"** — the owner's §5.3 ruling, word for word | `FloatingPiece` + `FloatingPieceOverlayView` + `commitFloatingPieceIfNeeded`, and the dozen call sites that already consult `floatingPiece != nil` | shipped for **raster**; `SelectionModels.swift:98-129, 322-351`, `FloatingPieceOverlayView.swift` |
-| one undo step per drag rather than per intermediate value | `onGestureBegan`/`onGestureEnded` on `ObjectTransformOverlayView`, wired to `beginStructureGesture`/`commitStructureGesture` | shipped; `CanvasView.swift:266-272`, `CanvasManager+Undo.swift:106-122` |
+**The whole move costs three canvas renders** — the hole, the float, the bake — and that does not
+grow with the number of nudges, because the moved ids stay suppressed for the float's life so the
+source's pixels genuinely do not change between drags.
+`LassoMoveLogicTests.testTheRenderCountForAWholeMoveDoesNotGrowWithTheNumberOfNudges` counts it
+rather than timing it. The one exception is a float whose bitmap cannot be exact — a moved eraser
+mark, a moved blend mode, or a punch left sitting above it (`VectorCanvas.mayDiverge`) — which drops
+its latch at each gesture end and re-renders the layer whole, so what the artist is looking at
+between drags is always the truth. It re-arms on the next touch.
 
-**The gap is fourteen lines of `TopToolbar`.** `toggleMove()` checks the layer kind *before* it
-looks at anything else, and on a vector layer it never reads `canvasManager.selection` at all
-(`TopToolbar.swift:136-145`):
+**Move with no selection is unchanged**: it still transforms the whole cel, which is the owner's
+*"This is currently correct, nothing needs to change"*, honoured literally.
 
-```swift
-if canvasManager.activeLayerIsVector {
-    guard !canvasManager.activeCelIsInBetween else { return }
-    canvasManager.isVectorTransforming.toggle()
-    return
-}
-```
-
-`isVectorTransforming` drives `setVectorTransform`, which writes **the cel's whole
-`VectorCanvas.transform`** (`CanvasManager.swift:329-356`) — every stroke, fill, image and text
-object together. So the lasso the artist drew is still live, the marching ants are still on screen,
-and the Move drag moves everything. That is exactly the report.
-
-Nothing gates the lasso itself: `finishSelection(path:)` has no layer-kind check
-(`SelectionModels.swift:182-193`), and `SelectPanel` shows the same controls on both kinds. Two of
-its four buttons already branch correctly for vector — `fillSelection` at `SelectionModels.swift:363`
-and `clearSelectionPixels` at `:393`. Move and Duplicate are the two that do not.
-
-**A second, separate defect found while scoping, worth its own fix and not part of this plan.**
-`SelectPanel`'s Duplicate button calls `beginDuplicate()` directly (`SelectPanel.swift:38`), which
-has no vector branch and always runs `PixelOps.rasterize` (`SelectionModels.swift:261-295`) onto a
-brand-new **raster** layer. Lasso a region on a vector layer, tap Duplicate, and the copy is pixels.
-That is reachable today and is not what this document is about.
+**A second, separate defect found while scoping and still open.** `SelectPanel`'s Duplicate button
+calls `beginDuplicate()`, which has no vector branch and always rasterizes onto a brand-new raster
+layer. Lasso a region on a vector layer, tap Duplicate, and the copy is pixels. Filed in
+[BUGS.md](BUGS.md); not part of this feature.
 
 ---
 
@@ -725,97 +706,37 @@ after any rebase that touches that file.
 The spine is: **strokes first** (the owner's core ask, and the part with existing machinery), **fills
 second** (small, and independently useful), **the whole objects third**, **polish fourth**.
 
-**Stage 1 — a lasso move floats, nudges and bakes, for strokes, by translation.**
+**Stages 1–3 — shipped 2026-08-22, in one branch.** The plan below split them by element kind;
+they merged, because the expensive part is splitting the display list at all and the rest is a
+`CGPath` boolean and a centre-point test. §0 is the inventory of what landed. Six things came out
+different from the plan, and each is worth naming:
 
-**Stage 1 got materially smaller once the owner's §5.3 ruling was traced to the code**: it adds
-**one** new file, and every other change is an arm on something that already exists. There is no new
-session type, no new published state, no new commit chokepoint, and no new overlay.
+- **No `Engine/LassoSelectionGeometry.swift`.** The split lives on `VectorCanvas` beside
+  `cutAlongFootprint`, because it is a display-list operation and every piece of geometry it needed
+  was already in `StrokeGeometry`. The one genuinely new primitive is `membershipRuns`, and it
+  belongs beside `splitRuns` — which is now written in terms of it.
+- **No `content` enum on `FloatingPiece`.** A vector float is a different animal: it holds ids, not
+  a bitmap, and its geometry is already in the cel. It got its own `VectorFloat`, and the raster
+  piece was left alone.
+- **The box is `ObjectTransformOverlayView`, not `FloatingPieceOverlayView`.** The vector float
+  wants exactly the whole-layer Move box, which is already model-side and already tested; borrowing
+  it needed only `allowedHandles`.
+- **A drag writes nothing at all** — not even the live transform. The plan had
+  `updateFloatingTransform` writing per delta; a `@Published` write per touch-move is a whole SwiftUI
+  pass on a gesture built specifically not to have one, so the live value is held in the coordinator
+  and the model learns it once, at the gesture's end.
+- **Every nudge maps the elements as the *lift* produced them**, not the ones currently in the list.
+  Absolute rather than incremental: it cannot accumulate rounding over a hundred small drags, and it
+  makes a nudge idempotent, which is what lets the undo step be a plain whole-array swap.
+- **`collectResidueGarbage()` is not run by a nudge.** The plan wanted it inside each step. It would
+  delete a punch the artist can still put back with one more drag, so it is left to the eraser's own
+  commit path, where it already runs.
 
-- **New: `Engine/LassoSelectionGeometry.swift`.** `CoreGraphics`/`Foundation` only, like
-  `StrokeGeometry` and `VectorEraser`, so it compiles a second time into `PaintSoftwareUITests` and
-  every decision above is testable headlessly. It holds the membership predicate, the inside/outside
-  partition built on `StrokeGeometry.splitRuns`, the whole-in / whole-out fast paths, the piece
-  constructor (fresh id, inherited `motionGroupID`, the lattice rule), and the centre-inside test for
-  whole objects. It holds no `VectorCanvas` and takes no lock, so `VectorCanvas.splitForLassoMove(...)`
-  is a thin adapter that queries the spatial index, calls in here, and splices — the arrangement
-  `VectorEraser`'s own header argues for (`VectorEraser.swift:4-17`).
-- **`FloatingPiece` gains a `content` enum** (§1), and `FloatingPieceKind`, `FloatingTransform`,
-  `TransformMode`, `transformedBounds` and every call site that reads `floatingPiece != nil` are
-  untouched.
-- **`beginLassoMove()` beside `beginMove()`** in `SelectionModels.swift`: split, suppress, render the
-  bbox preview once, build the piece. `commitFloatingPieceIfNeeded()` gains a vector arm that tears
-  the float down and **registers nothing**.
-- **`FloatingPieceOverlayView` gains `onGestureBegan`/`onGestureEnded`**, the pair
-  `ObjectTransformOverlayView` already has (`CanvasView.swift:266-272`). `updateFloatingTransform`
-  keeps writing the live transform; the new end-callback writes the model and registers the nudge's
-  step. No new handles, no new geometry, no third overlay.
-- **`VectorCanvas.editingElementID` widens to `editingElementIDs: Set<UUID>`.**
-- **`TopToolbar.toggleMove()`'s vector branch gains one condition**: with a selection on this cel,
-  `beginLassoMove()`; without one, the existing whole-layer transform, **unchanged** — the owner's
-  *"This is currently correct, nothing needs to change"*, honoured literally.
-- **`finalizePendingGesturesForHistoryAction` gains the float's arm** (§1).
-- `.erase` strokes move with paint strokes; `collectResidueGarbage()` runs **inside each nudge's
-  step**, not at bake, so undo restores a punch the move stranded.
-- **The marching ants follow the pieces and clear at bake.** Clearing at bake is the ruling; that the
-  ants *travel* during the float is this document's reading of it rather than part of it — it is what
-  Photoshop's and Illustrator's move-with-selection do, and it is `selection.path` under the same
-  transform. Note that raster `beginMove()` clears the selection at **lift**
-  (`SelectionModels.swift:255`), so the two kinds deliberately differ here until someone aligns them.
-
-**Explicitly not yet:** fills, images and text are left where they are; rotate and scale (the lattice
-question §1 defers); ink selection; the handle-size port; bringing `setVectorTransform` onto
-per-nudge undo.
-
-**Tests** (headless, asserting identities and invariants — never screenshots):
-
-`LassoSplitLogicTests` — a stroke crossing once yields exactly two strokes with the parent's tag and
-two fresh ids; crossing three times yields four, alternating, and their sample counts sum to the
-parent's plus the crossings; a stroke wholly inside is moved with **the same id and no split**; a
-stroke wholly outside is untouched **by identity**; a graze yields a one-sample run; the cut point
-lies on the loop to within `StrokeGeometry.epsilon`; the stationary piece's `lattice` is the
-parent's **by value** and the moved piece's `lattice.samples` are the parent's plus the delta, with
-`parameters` and `seedID` equal; an `.erase` punch inside the loop moves and one outside does not; a
-`motionGroupID` survives to both pieces.
-
-`LassoMoveUndoLogicTests` — **the ruling is what this file exists to pin.** Four nudges leave
-**exactly four** steps and four presses walk back four nudges, each to the position the one before
-left; sixty `.changed` events inside one nudge leave **one** step, so per-delta cannot creep back in;
-the **bake registers nothing**, asserted as history depth unchanged across the commit; **undo of the
-first nudge restores the pre-split array element for element and id for id**, which is the "never a
-half-cut stroke" invariant stated as a test rather than as a hope; a float abandoned with zero
-nudges leaves `elements` equal to the snapshot and the history depth unchanged; a layer switch
-mid-float bakes rather than strands; a nudge with the finger still down is discarded by
-`finalizePendingGesturesForHistoryAction` and the press then reverts the *previous* nudge; redo
-after four undos rebuilds all four.
-
-**Needs the device before merge**, and the reasons are specific: whether the box, the ants and the
-moving pieces read as one gesture; whether the split lands where the artist's finger thought it did
-at 0.3× zoom; and whether four presses to undo four nudges feels right in the hand rather than
-merely on the stack. None is reachable headlessly. Use `ActionRecorder` if it does not reproduce.
-
-**Stage 2 — fills split too.**
-The two `CGPath` boolean calls, plus the archive round trip, plus the empty-side fast paths. Small
-enough to be its own branch and worth being one, because it is the stage most likely to surprise on
-real artwork (a traced fill contour has thousands of points).
-**Explicitly not yet:** migrating `clearSelectionPixels` off `clipPath(_:excluding:)`. Welcome, and
-separate.
-**Tests:** `LassoFillSplitLogicTests` — the two halves' rendered coverage **sums to the source's**
-(the area-conservation identity §1 measures); each half renders identically under winding and
-even-odd (the normalisation identity); a hole in the source survives into whichever half contains
-it; a grazing loop leaves the fill **by identity**; a containing loop moves it whole with no boolean
-call made; a translated chunk's bbox is the source chunk's bbox plus the delta; a fill with two
-disjoint components stays one element with two subpaths.
-**No device check owed** beyond stage 1's, unless the owner's own drawings show a fill contour large
-enough to make §4 rule 8's budget bite — which stage 1's device pass is the moment to look for.
-
-**Stage 3 — whole objects: text and placed images.**
-Centre-inside, translate `frame.corners` / add to `LayerTransform.position`. Genuinely small; it is
-last only because it is the least of the ask.
-**Tests:** `LassoWholeObjectLogicTests` — a box whose centre is inside moves and one whose centre is
-outside does not, *with a fixture assertion that the second box really does overlap the loop*, so the
-test fails loudly if the rule is ever quietly swapped for "intersects"; a rotated frame's four
-corners each move by exactly the delta and the frame's `size` and `pointSize` are unchanged; a text
-element is never split under any loop.
+**Explicitly still not done:** rotate and scale (the lattice question §1 defers — the box offers its
+move band alone, and `ObjectTransformFrame.allowedHandles` is where that is enforced); ink-based
+membership; the handle-size port; bringing `setVectorTransform` onto per-nudge undo; and per-nudge
+undo for the **raster** Move — see stage 4, where it is now the largest remaining item rather than a
+footnote.
 
 **Stage 4 — the follow-ups, independent small branches.** Each stands alone; none blocks the others.
 
@@ -828,9 +749,17 @@ element is never split under any loop.
   transform too, and session 56 shipped one-step-per-*session*. It is a gesture-state argument on
   `objectTransformChanged` (`CanvasView.swift:1447-1463`) and a close-and-reopen of session 56's
   bracket. **Belongs to whoever owns that code, not to this feature.**
-- **Give the raster floating piece the same undo granularity**, and give
-  `finalizePendingGesturesForHistoryAction` its float arm, which it lacks today for raster as well
-  (§1). Same ruling, same seam, different tool.
+- **Give the raster floating piece the same undo granularity** — one step per nudge — and give
+  `finalizePendingGesturesForHistoryAction` its float arm, which it still lacks for raster. The
+  owner ruled on 2026-08-22 that raster Move inherits both new rules; **the selection half shipped
+  and this half did not**, and the reason is worth stating rather than leaving as an omission. A
+  raster nudge changes only `FloatingPiece.transform`, which is transient UI state and not in the
+  document, so a step per nudge means transient steps — and the moment the piece bakes, the bake step
+  sits on top of them and its undo restores the pre-move cel, leaving every step beneath it dead
+  (§1's own argument against a preview design, in a new costume). Making it work means the bake
+  step's undo **re-creating the float** at its last transform, which is a second feature: it changes
+  what a raster Move retains in history from one canvas-sized pair of images to two, on a stack whose
+  budget is already device-derived. It wants its own branch and its own measurement.
 - **Migrate `clearSelectionPixels` onto the `CGPath` boolean**, off `clipPath(_:excluding:)`.
 - **Fix `beginDuplicate()`'s rasterize-on-a-vector-layer** (§0) — a bug, not a stage of this. Filed
   in [BUGS.md](BUGS.md) so it does not live only inside a spec.
@@ -939,19 +868,40 @@ Settled by the owner on **2026-08-21**, across two conversations the same day. D
    the marching ants *travel with* the pieces during the float, which is what Photoshop and
    Illustrator do and is one transform on `selection.path`.
 
-### Still needs a ruling, and stage 1 can start without any of it
+Five more were settled on **2026-08-22**, while the feature was being built. The first overrules a
+design proposal rather than a previous ruling; the rest confirm defaults.
 
-- **Should the marching ants travel with the float, or stay where the content came from?** §5.6's
-  ruling settles when they clear, not where they sit meanwhile. Stage 1 makes them travel, on prior
-  art; it is a one-line difference either way and worth a glance on the device.
+7. **An eraser mark is an ordinary element for lasso-move purposes.** Verbatim: *"The lasso will only
+   pick up and move whatever is inside of it. If the hole is fully inside, it moves it. If its
+   outside, it wont."* Same centre-line containment test as a paint stroke, same split into two
+   independent erase strokes at the parent's index. The design pass had proposed that `.erase`
+   elements never move and never split; that is overruled, and the ruling is also what §1's own
+   *"An erase punch is a stroke and moves like one"* already argued. Two consequences are handled
+   rather than discovered: a float made only of punches **renders blank** while it is dragged, which
+   is correct and must never be read as "nothing was selected"; and z-order is preserved on bake, so
+   a moved punch still bites what it should where it lands.
+8. **Undoing past the move rejoins the split line.** The cut was something the move did to make
+   itself possible, not an edit the artist asked for. The first nudge's undo step carries the
+   pre-split display list.
+9. **An empty lasso plus Move does nothing.** It does **not** fall back to moving the whole cel —
+   drawing a loop expresses an intent about a region, and dragging the artist's entire drawing
+   instead is the destructive surprise. The loop stays on screen, ready to be redrawn.
+10. **The raster Move inherits the new rules**: one undo step per nudge, and the selection clearing
+    at bake rather than at lift. The selection half shipped on 2026-08-22 and the two tools now feel
+    the same on the same gesture; the undo half did not, and §3 stage 4 records why and what it
+    costs.
+11. **The marching ants travel with the floating piece**, as one transform on `selection.path` —
+    confirmed rather than newly decided: §5.6's neighbouring text already inferred it from Photoshop
+    and Illustrator, and this moves it out of the open list. During a drag it is two `CALayer`
+    transforms, so it costs nothing and lands on the same frame the piece does; at each gesture end
+    the model's own path catches up.
+
+### Still needs a ruling
+
 - **Should a fill chunk that lands on nothing still be a fill?** Moving a chunk of flat colour out
   from between two lines and dropping it on blank paper leaves a floating coloured shape. That is
   literally what was asked for, and it may still read as a mistake on real artwork. Device question,
-  not a code question.
-- **Should the raster Move inherit §5.2 and §5.6's consequences?** Raster clears the selection at
-  lift rather than at bake, records nothing per nudge, and is not finalized by
-  `finalizePendingGesturesForHistoryAction` at all. Aligning it is §3 stage 4 work and wants the
-  owner to say whether the two kinds should feel identical.
+  not a code question. Shipped behaviour: it stays a fill.
 
 ---
 
@@ -972,8 +922,8 @@ Settled by the owner on **2026-08-21**, across two conversations the same day. D
   history depth. Watch for the case the ruling was not asked about: a long drag the artist made in
   four small movements *without lifting* is one nudge, correctly, and may still surprise.
 - **Whether the move nodes are usable at zoom.** They are `TransformHandleView`'s fixed 24×24 inside
-  a transformed container until the [BUGS.md](BUGS.md) convergence reaches this overlay, so stage 1
-  will show the owner's own item-(d) symptom on a second tool. **Expected, already filed, not a new
+  a transformed container until the [BUGS.md](BUGS.md) convergence reaches this overlay, so this
+  shows the owner's own item-(d) symptom on a second tool. **Expected, already filed, not a new
   bug** — report it as an observation rather than fixing it here.
 
 **Engineering risks:**
@@ -983,7 +933,9 @@ Settled by the owner on **2026-08-21**, across two conversations the same day. D
   missed. It is already the accepted behaviour for drawing inside a selection; adopting the same
   primitive keeps the two consistent rather than adding a second, different approximation.
 - **The abutting boundary dab** (§1) is deterministic, visible only for a translucent brush at zero
-  delta, and unfixed in stage 1 by choice.
+  delta, and unfixed by choice. The two halves share their cut sample exactly and a `DabLattice`'s
+  range is closed, so the dab at the cut is drawn twice. Do not apply the named half-open-range fix
+  blind: it risks a one-dab *gap* instead, which is worse.
 - **Four whole-array undo steps instead of one** is the memory cost of §5.5, in the same currency
   every vector edit already spends. `UndoHistory`'s budget is device-derived with a pressure trim
   (session 55), so the failure mode is graceful; the cheap fix if it ever bites is in §1 and should
@@ -993,13 +945,18 @@ Settled by the owner on **2026-08-21**, across two conversations the same day. D
   boolean cost measured in §4 rule 8 used 8000 points precisely to bound this, but the owner's own
   fills are the only honest test, and there is no simplification pass anywhere in the pipeline
   today.
-- **Widening `editingElementID` to a set touches text.** It is one field, one comparison, and
-  `ADD_TEXT.md` §4 rule 5's `isTextEditLive` reads it — so the text suite is part of stage 1's
-  regression surface, not a bystander.
-- **Adding a `content` enum to `FloatingPiece` touches the raster Move.** Every field it keeps is
-  unchanged, but `commitFloatingPieceIfNeeded`, `bakedImageToDisplay` and `PixelOps.render(floatingPiece:)`
-  all destructure the payload, so `SelectionAndMoveUITests` is part of stage 1's regression surface
-  too. That is the price of not growing a parallel float, and it is the right price.
+- **A suppression that is never cleared is silent artwork loss**, and it is the failure mode of this
+  design that produces no crash, no warning and no red test unless one is written for it: the
+  elements are in the saved document, count towards every memory bound, and render nowhere, so the
+  artist sees a hole they cannot fill, cannot undo, and get back only on relaunch.
+  `LassoMoveLogicTests.testEveryTeardownPathLeavesNothingSuppressedAndNothingDropped` enumerates all
+  six doors — commit, cancel, tool switch, layer change, frame change, undo-before-nudging — and it
+  is the first test in the file for that reason. It was watched failing with the commit's clear
+  removed, and four of the six went red at once.
+- **`editingElementID` is now a one-element view over `suppressedElementIDs`**, so the text suite is
+  part of this feature's regression surface rather than a bystander (`ADD_TEXT.md` §4 rule 5's
+  `isTextEditLive` reads it). It stays correct because a text session and a lasso move cannot be open
+  at once: `beginVectorLassoMove` calls `commitAllInteractiveState()` first.
 - **`beginDuplicate()` rasterizes a vector layer** (§0). Not caused by this work and not fixed by
   it, but the same lasso reaches it, so an artist exercising stage 1 is one button away from it.
   Filed in [BUGS.md](BUGS.md) rather than left inside this document.

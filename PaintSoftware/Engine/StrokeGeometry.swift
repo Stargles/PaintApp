@@ -896,50 +896,82 @@ enum StrokeGeometry {
     /// Runs of a single sample are kept, same as `splitStroke`: a lone dab inside the selection is
     /// legitimate ink. An empty `samples` returns `[]`.
     static func splitRuns(_ samples: [VectorSample], inside: (CGPoint) -> Bool) -> [[VectorSample]] {
+        membershipRuns(samples, inside: inside).filter(\.isInside).map(\.samples)
+    }
+
+    /// One maximal run of a membership walk: its samples, where each sits in the **input's**
+    /// parametric domain, and which side of the predicate the whole run is on.
+    ///
+    /// `SplitRun` plus the side, and the side is the point: the lasso move needs the half that stays
+    /// behind as much as the half that travels, and paying for two walks would mean evaluating the
+    /// containment test twice *and* landing each crossing twice — two bisections of the same segment
+    /// that are only equal to within their own tolerance, so the two halves would not share a cut
+    /// point and a zero-distance move would not be lossless.
+    typealias MembershipRun = (samples: [VectorSample], parameters: [CGFloat], isInside: Bool)
+
+    /// `samples` partitioned into the maximal runs where `inside` holds and the maximal runs where it
+    /// does not, **from one walk**, in order, alternating.
+    ///
+    /// Every crossing is landed once, by `bisectCrossing`, and the resulting boundary sample is
+    /// emitted as the *last* sample of the closing run and the *first* sample of the opening one —
+    /// bit for bit the same value, at bit for bit the same parameter. That shared boundary is what
+    /// makes the split conserve ink: rejoin the two runs and you have the original polyline back.
+    ///
+    /// `splitRuns` is this filtered to the inside runs, so the shipped live-selection clip and the
+    /// lasso move take the same walk and can never disagree about where a stroke leaves a loop.
+    ///
+    /// Runs of a single sample are kept, same as `splitStroke`: a lone dab inside the selection is
+    /// legitimate ink. An empty `samples` returns `[]`; a single sample returns one run.
+    static func membershipRuns(_ samples: [VectorSample], inside: (CGPoint) -> Bool) -> [MembershipRun] {
         guard !samples.isEmpty else { return [] }
         guard samples.count > 1 else {
-            return inside(samples[0].point) ? [samples] : []
+            return [(samples, [0], inside(samples[0].point))]
         }
-        var runs: [[VectorSample]] = []
-        var current: [VectorSample] = []
+        var runs: [MembershipRun] = []
+        var current: [VectorSample] = [samples[0]]
+        var currentParameters: [CGFloat] = [0]
         var previousInside = inside(samples[0].point)
-        if previousInside { current.append(samples[0]) }
         for i in 1..<samples.count {
             let a = samples[i - 1], b = samples[i]
             let bInside = inside(b.point)
             if bInside != previousInside {
-                let boundary = bisectCrossing(from: a, aInside: previousInside, to: b, inside: inside)
-                if previousInside {
-                    current.append(boundary)
-                    runs.append(current)
-                    current = []
-                } else {
-                    current = [boundary]
-                }
+                let crossing = bisectCrossing(from: a, aInside: previousInside, to: b, inside: inside)
+                let parameter = CGFloat(i - 1) + crossing.t
+                current.append(crossing.sample)
+                currentParameters.append(parameter)
+                runs.append((current, currentParameters, previousInside))
+                current = [crossing.sample]
+                currentParameters = [parameter]
             }
-            if bInside { current.append(b) }
+            current.append(b)
+            currentParameters.append(CGFloat(i))
             previousInside = bInside
         }
-        if !current.isEmpty { runs.append(current) }
+        runs.append((current, currentParameters, previousInside))
         return runs
     }
 
     /// Binary-searches the segment `from`→`to` for the parametric `t` where `inside` flips, assuming
-    /// (as `splitRuns` does) that it flips exactly once. 40 iterations halves the segment down to a
-    /// fraction of ~9e-13 of its length — with 20 (the first cut of this) a 10pt segment measured
+    /// (as `membershipRuns` does) that it flips exactly once. 40 iterations halves the segment down to
+    /// a fraction of ~9e-13 of its length — with 20 (the first cut of this) a 10pt segment measured
     /// `testSplitRunsWithMultipleGapsYieldsARunPerSurvivingSpan` off by ~5e-6, comfortably past a
     /// canvas pixel and well past `assertXs`'s tolerance; 40 iterations costs nothing extra worth
     /// naming (it's a fixed unrolled loop, no allocation) and leaves headroom `CGFloat` itself can't
     /// resolve.
+    ///
+    /// Returns `t` as well as the sample, because a piece that is to keep drawing on its parent's dab
+    /// lattice needs to say where in the parent's walk it came from, and a fractional crossing is
+    /// unrecoverable from the interpolated point alone.
     private static func bisectCrossing(from: VectorSample, aInside: Bool, to: VectorSample,
-                                       inside: (CGPoint) -> Bool) -> VectorSample {
+                                       inside: (CGPoint) -> Bool) -> (sample: VectorSample, t: CGFloat) {
         var low: CGFloat = 0, high: CGFloat = 1
         for _ in 0..<40 {
             let mid = (low + high) / 2
             let point = lerp(from, to, mid).point
             if inside(point) == aInside { low = mid } else { high = mid }
         }
-        return lerp(from, to, (low + high) / 2)
+        let t = (low + high) / 2
+        return (lerp(from, to, t), t)
     }
 
     /// `cuts` clamped to `domain`, sorted, and merged where they overlap or abut — so the split walk

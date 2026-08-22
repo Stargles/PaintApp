@@ -48,7 +48,7 @@ struct TopToolbar: View {
                 .accessibilityIdentifier("toolbar.actionsButton")
             iconButton(system: "lasso", isActive: CanvasManager.selectIconIsActive(selectPanelOpen: activePanel == .select, selection: canvasManager.selection)) { toggle(.select) }
                 .accessibilityIdentifier("toolbar.selectButton")
-            iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.isVectorTransforming) { toggleMove() }
+            iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil || canvasManager.isVectorTransforming) { toggleMove() }
                 .accessibilityIdentifier("toolbar.moveButton")
 
             Spacer()
@@ -103,7 +103,8 @@ struct TopToolbar: View {
     /// selection keeps Select's own highlight on right alongside whichever paint tool is now current,
     /// which is a second instance of that same exception rather than a new one.
     private var isToolHighlightSuppressed: Bool {
-        activePanel == .select || canvasManager.floatingPiece != nil || canvasManager.isVectorTransforming
+        activePanel == .select || canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil
+            || canvasManager.isVectorTransforming
     }
 
     private func toggle(_ panel: ActivePanel) {
@@ -130,6 +131,14 @@ struct TopToolbar: View {
     /// Tapping Move toggles between lifting the current selection (or, if there is none, the whole
     /// current layer) into a floating piece, and committing whatever's currently floating.
     private func toggleMove() {
+        // **Before the bake below, not after.** A lassoed piece is settled by
+        // `commitAllInteractiveState()` like everything else, so asking afterwards whether one was
+        // floating always answers no — and the second tap of Move would read as a fresh one and lift
+        // again (or, with the selection already cleared at bake, start transforming the whole cel).
+        if canvasManager.vectorFloat != nil {
+            canvasManager.commitVectorFloatIfNeeded()
+            return
+        }
         // A still-adjustable shape or fill must bake before Move can act on it — otherwise Move
         // would engage against stale committed content while the shape/fill sits in its own
         // transient tier, then get silently re-baked (at its *original*, undragged geometry) the
@@ -143,6 +152,14 @@ struct TopToolbar: View {
             // transform would be written onto a `VectorCanvas` the displayed image does not come
             // from. See `CanvasManager.activeCelIsInBetween`.
             guard !canvasManager.activeCelIsInBetween else { return }
+            // With a loop drawn, Move is about the region inside it (LASSO_MOVE.md §5.1). Note the
+            // unconditional return: a lasso that caught nothing does **nothing**, and deliberately
+            // does not fall through to moving the artist's whole drawing — that is the destructive
+            // surprise, and the loop stays on screen to be redrawn (owner, 2026-08-22).
+            if canvasManager.selection != nil {
+                canvasManager.beginVectorLassoMove()
+                return
+            }
             canvasManager.isVectorTransforming.toggle()
             return
         }

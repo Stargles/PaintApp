@@ -244,8 +244,8 @@ final class VectorCanvas {
     /// parallel arrays, and `renderLocalContent()` for how it is walked.
     private var _elements: [VectorElement]
     private var _transform: CGAffineTransform
-    /// Backing store for `editingElementID`; see there.
-    private var _editingElementID: UUID?
+    /// Backing store for `suppressedElementIDs`/`editingElementID`; see there.
+    private var _suppressedElementIDs: Set<UUID> = []
 
     /// The display list itself. Existing code keeps using the three kind-filtered accessors below.
     var elements: [VectorElement] {
@@ -304,9 +304,10 @@ final class VectorCanvas {
         }
     }
 
-    /// The one element suppressed from the flatten while its own editor is open, or nil.
+    /// The elements skipped by the flatten while something else is drawing them: the one text object
+    /// whose editor is open, or the set a lasso move has lifted into a floating piece.
     ///
-    /// **The committed element is never lifted out of `_elements`** — `ADD_TEXT.md` §1 and §2 both
+    /// **The committed elements are never lifted out of `_elements`** — `ADD_TEXT.md` §1 and §2 both
     /// argue that at length. Lifting makes the persisted source of truth momentarily not contain an
     /// object the artist already committed, on the one device whose `Compositor` header documents
     /// jetsam killing the process rather than `makeTexture` failing gracefully, and it also removes
@@ -318,15 +319,33 @@ final class VectorCanvas {
     /// invalidates, which is precisely the **two `invalidate()` calls per session** §4 rule 4 allows —
     /// one as the session opens, one as it commits — and no more, because nothing else during a
     /// session touches this canvas at all.
-    var editingElementID: UUID? {
-        get { lock.lock(); defer { lock.unlock() }; return _editingElementID }
+    ///
+    /// **A set rather than one id, because the lasso move suppresses many at once.** A float holds a
+    /// whole region's worth of split pieces, and the alternative — the raster path's canvas-sized
+    /// `remainderPreview` (`SelectionModels.swift`) — is a full bitmap per lift where this is a
+    /// `Set<UUID>`. A leaked entry is artwork that is in the saved document, counts toward every
+    /// bound, and renders nowhere, so every teardown path clears it and
+    /// `LassoMoveLogicTests.testEveryTeardownPathLeavesNothingSuppressedAndNothingDropped` enumerates
+    /// them.
+    var suppressedElementIDs: Set<UUID> {
+        get { lock.lock(); defer { lock.unlock() }; return _suppressedElementIDs }
         set {
             lock.lock()
             defer { lock.unlock() }
-            guard _editingElementID != newValue else { return }
-            _editingElementID = newValue
+            guard _suppressedElementIDs != newValue else { return }
+            _suppressedElementIDs = newValue
             invalidate()
         }
+    }
+
+    /// The text editor's half of `suppressedElementIDs`, kept as a one-element view over it so
+    /// `CanvasManager+Text`'s assignments read as they always did. Setting it replaces the whole set,
+    /// which is correct because a text edit session and a lasso move cannot be open at once —
+    /// `beginVectorLassoMove` calls `commitAllInteractiveState()` first, and the text overlay's own
+    /// session commits there.
+    var editingElementID: UUID? {
+        get { suppressedElementIDs.first }
+        set { suppressedElementIDs = newValue.map { [$0] } ?? [] }
     }
 
     /// Move/rotate/scale of the entire layer's content, applied at render time so it stays crisp.
@@ -361,6 +380,15 @@ final class VectorCanvas {
     /// `testPreviewIsSubstantiallyCheaperThanFull`, which asserts on this countable difference instead
     /// of wall-clock time.
     private(set) var lastRenderDabCount: Int = 0
+
+    /// How many canvas-sized rasterizations this canvas has actually performed — `render()` calls that
+    /// missed both memos, plus every `renderIsolated(ids:)`, which is never memoized.
+    ///
+    /// A test seam, in `localContentBoundsRasterizations`' idiom and for its reason: **the lasso
+    /// move's cost model is a claim about the design, not about the machine.** "Three renders for the
+    /// whole move, however many times the artist nudges it" is countable; the milliseconds it takes
+    /// are the laptop's business and would assert nothing about whether the latch is working.
+    private(set) var rasterizations: Int = 0
 
     /// Broad phase for every geometric query against this canvas's strokes, rebuilt lazily — see
     /// `strokeIndex()`. Version-keyed rather than cleared by `invalidate()`, since `version` only
@@ -689,8 +717,8 @@ final class VectorCanvas {
         } else if let editingID, removeTextLocked(id: editingID) {
             listChanged = true
         }
-        let wasSuppressing = _editingElementID != nil
-        _editingElementID = nil
+        let wasSuppressing = !_suppressedElementIDs.isEmpty
+        _suppressedElementIDs = []
         if listChanged || wasSuppressing { invalidate() }
         return listChanged
     }
@@ -829,7 +857,8 @@ final class VectorCanvas {
             return cached
         }
         localContentBoundsRasterizations += 1
-        let bounds = PixelOps.opaqueContentBounds(renderLocalContent())
+        let bounds = PixelOps.opaqueContentBounds(
+            renderLocalContent(elements: Self.visible(_elements, suppressing: _suppressedElementIDs)))
         cachedLocalContentBounds = .some(bounds)
         cachedLocalContentBoundsVersion = contentVersion
         return bounds
@@ -1093,19 +1122,51 @@ final class VectorCanvas {
     /// original ancestor's samples directly.
     private static func splitPreservingLattice(_ stroke: VectorStroke,
                                                removing cuts: [ClosedRange<CGFloat>]) -> [VectorStroke] {
-        let parentSamples = stroke.lattice?.samples ?? stroke.samples
-        let seedID = stroke.lattice?.seedID ?? stroke.id
-        return StrokeGeometry.splitStrokeRuns(stroke.samples, removing: cuts).map { run in
-            var piece = stroke
-            // Fresh id: two pieces cannot share one. The dab seed travels via `DabLattice.seedID`
-            // instead.
-            piece.id = UUID()
-            piece.samples = run.samples
-            let parameters = stroke.lattice.map { run.parameters.map($0.parentParameter(of:)) }
-                ?? run.parameters
-            piece.lattice = DabLattice(samples: parentSamples, parameters: parameters, seedID: seedID)
-            return piece
+        StrokeGeometry.splitStrokeRuns(stroke.samples, removing: cuts)
+            .map { piece(of: stroke, samples: $0.samples, parameters: $0.parameters) }
+    }
+
+    /// One piece of a split stroke: its own geometry, rendering on its parent's dab lattice.
+    ///
+    /// Shared by every cutter — the eraser's three modes and the lasso move — so a piece cut one way
+    /// is bit-identical to a piece cut the other way from the same run, and so the two cannot come to
+    /// disagree about what a child inherits. Static, so it cannot re-enter `lock`.
+    ///
+    /// `parameters` are positions in **this stroke's** domain; they are mapped back through the
+    /// stroke's own lattice, so a grandchild points at the original ancestor's samples directly
+    /// rather than at a chain.
+    private static func piece(of stroke: VectorStroke, samples: [VectorSample],
+                              parameters: [CGFloat]) -> VectorStroke {
+        var piece = stroke
+        // Fresh id: two pieces cannot share one. The dab seed travels via `DabLattice.seedID`
+        // instead.
+        piece.id = UUID()
+        piece.samples = samples
+        let mapped = stroke.lattice.map { parameters.map($0.parentParameter(of:)) } ?? parameters
+        piece.lattice = DabLattice(samples: stroke.lattice?.samples ?? stroke.samples,
+                                   parameters: mapped,
+                                   seedID: stroke.lattice?.seedID ?? stroke.id)
+        piece.sampleVisibilityThresholds = remapped(stroke.sampleVisibilityThresholds, onto: parameters)
+        return piece
+    }
+
+    /// `sampleVisibilityThresholds` — an `[Int: CGFloat]` keyed by index into the *parent's* samples —
+    /// re-keyed onto a piece's own indices.
+    ///
+    /// A cut renumbers samples, so carrying the dictionary across unchanged points every threshold at
+    /// a different sample than the one it was recorded for. Latent rather than live today (nothing in
+    /// the app populates it; the interpolation tests do), which is exactly why it is worth one
+    /// function here instead of a corrupted in-between later. A boundary sample sits at a fractional
+    /// parameter and so inherits nothing — it is a new sample, not one of the parent's.
+    private static func remapped(_ thresholds: [Int: CGFloat]?, onto parameters: [CGFloat]) -> [Int: CGFloat]? {
+        guard let thresholds, !thresholds.isEmpty else { return thresholds }
+        var result: [Int: CGFloat] = [:]
+        for (index, parameter) in parameters.enumerated() {
+            let rounded = Int(parameter.rounded())
+            guard abs(parameter - CGFloat(rounded)) < 1e-9, let value = thresholds[rounded] else { continue }
+            result[index] = value
         }
+        return result.isEmpty ? nil : result
     }
 
     /// Whether the eraser's dab at a parametric position along the gesture still has anything under it
@@ -1260,6 +1321,224 @@ final class VectorCanvas {
         }
         if changed { _elements = result }
         return changed
+    }
+
+    // MARK: - Lasso move
+    //
+    // LASSO_MOVE.md. A lasso move splits the display list **once**, at lift, and from that moment the
+    // piece that travels is real geometry rather than a preview: every later nudge maps it and lands
+    // as one undo step. What the artist drags is a Core Animation transform on a latched bitmap, so
+    // the whole move costs three canvas renders — the hole, the float, and the bake — however many
+    // times they nudge it.
+
+    /// Which side of the loop a point is on. **Winding, matching `PixelOps.maskedPiece`'s `clip()`**,
+    /// so a lasso means the same region on a vector layer as it does on a raster one. The loop is
+    /// normalized before it gets here (`CanvasManager.beginVectorLassoMove`), which makes the two
+    /// rules agree on it anyway; this is the rule the *fills* are also cut with when a fill does not
+    /// carry `evenOddFill`.
+    static let lassoFillRule: CGPathFillRule = .winding
+
+    /// The display list split along `loop`, so that everything inside it can move on its own.
+    ///
+    /// Returns the new list, the ids of the elements that are inside — the ones a float carries — and
+    /// whether an isolated render of those ids composited over the rest can differ from a render of
+    /// the whole list (see `mayDiverge` below). **Nil when the loop catches nothing**, which is
+    /// LASSO_MOVE.md §5's ruling that an empty lasso plus Move does nothing; answering it here rather
+    /// than at the call site is what stops a caller inventing a fallback to moving the whole cel.
+    ///
+    /// `loop` is in this canvas's **local** space, and must already be normalized — see
+    /// `localPath(fromCanvas:)` for the first and `CGPath.normalized(using:)` for the second. Neither
+    /// is optional: stored geometry is local, so an unmapped canvas-space loop is correct on an
+    /// untransformed layer and silently wrong on every layer Move has already touched; and Core
+    /// Graphics leaves `intersection`/`subtracting` **undefined** for a non-simple path, which a raw
+    /// lasso becomes the moment the artist loops back over their own line.
+    ///
+    /// **Membership is by the centre line, and that is not something this function does — it is what
+    /// `StrokeGeometry.membershipRuns` already does.** The walk tests stored sample positions, which
+    /// are the spine, and lands each crossing on the segment between two of them; nothing in it
+    /// consults `size` or `pressure`. So applying LASSO_MOVE.md §5.4 means *not* adding a width term,
+    /// and its consequence — a 40 pt stroke whose spine lies outside the loop does not move, even
+    /// though its ink is inside — is the owner's ruling of 2026-08-21 rather than a defect.
+    ///
+    /// **An eraser mark is an ordinary element here** (owner, 2026-08-22): it takes the same
+    /// containment test and the same split as a paint stroke, so a hole wholly inside the loop travels
+    /// with the ink and a hole outside it stays. That is simpler than a special case and it is this
+    /// app's own "the eraser is a stroke" decision applied once more. Its consequence is that a float
+    /// made only of punches renders blank while it is dragged and lands when it bakes — see
+    /// `renderIsolated(ids:)`.
+    func splitForLassoMove(insideLocalPath loop: CGPath)
+        -> (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !_elements.isEmpty else { return nil }
+        let box = loop.boundingBoxOfPath
+        guard !box.isNull, !box.isEmpty else { return nil }
+        // The same broad phase `cutAlongFootprint` uses, and with the same limitation: the index holds
+        // strokes only, so fills, images and text take a linear scan against their own bounds below.
+        let strokeCandidates = Set(strokeIndex().segments(near: box).map(\.elementIndex))
+        let rule = Self.lassoFillRule
+
+        var result: [VectorElement] = []
+        result.reserveCapacity(_elements.count + 2)
+        var insideIDs: Set<UUID> = []
+
+        for (index, element) in _elements.enumerated() {
+            switch element {
+            case .stroke(let stroke):
+                guard strokeCandidates.contains(index), !stroke.samples.isEmpty else {
+                    result.append(element)
+                    continue
+                }
+                let runs = StrokeGeometry.membershipRuns(stroke.samples) { loop.contains($0, using: rule) }
+                // **The fast path, and it is the common case.** One run back means the stroke is
+                // wholly in or wholly out, and it travels or stays *untouched* — same id, same
+                // lattice, same dab phase. That is what stops a lasso re-rolling a scattering brush's
+                // pattern just by picking it up.
+                guard runs.count > 1 else {
+                    if runs.first?.isInside == true { insideIDs.insert(stroke.id) }
+                    result.append(element)
+                    continue
+                }
+                // Both halves replace the parent **at the parent's index**, outside first
+                // (LASSO_MOVE.md §5.2): appending instead would hoist a moved half above every
+                // `.erase` punch in the list, and a punch masks only what is beneath it.
+                for run in runs where !run.isInside {
+                    result.append(.stroke(Self.piece(of: stroke, samples: run.samples, parameters: run.parameters)))
+                }
+                for run in runs where run.isInside {
+                    let piece = Self.piece(of: stroke, samples: run.samples, parameters: run.parameters)
+                    insideIDs.insert(piece.id)
+                    result.append(.stroke(piece))
+                }
+
+            case .fill(let fill):
+                guard let path = fill.cgPath, path.boundingBoxOfPath.intersects(box) else {
+                    result.append(element)
+                    continue
+                }
+                // Each fill is cut with **its own** rule, carried through to both halves — a
+                // clear-selection hole is stored `evenOddFill` and cutting it as a winding path would
+                // fill in the very hole it exists to make. `CanvasManager.clipPath` is deliberately
+                // not used: it concatenates two paths and leans on even-odd at render time, so it is
+                // not a set operation and cannot answer whether a half is empty.
+                let fillRule: CGPathFillRule = fill.evenOddFill ? .evenOdd : .winding
+                let insidePart = path.intersection(loop, using: fillRule)
+                guard !insidePart.isEmpty else { result.append(element); continue }
+                let outsidePart = path.subtracting(loop, using: fillRule)
+                guard !outsidePart.isEmpty else {
+                    insideIDs.insert(fill.id)
+                    result.append(element)
+                    continue
+                }
+                // Both halves mint fresh ids, exactly as a split stroke's do: keeping the parent's on
+                // one of them would make "which is the original" a coin flip the first time a lasso
+                // cuts one fill into three.
+                let insideFill = VectorFillElement(path: insidePart, color: fill.color,
+                                                   opacity: fill.opacity, evenOddFill: fill.evenOddFill)
+                let outsideFill = VectorFillElement(path: outsidePart, color: fill.color,
+                                                    opacity: fill.opacity, evenOddFill: fill.evenOddFill)
+                insideIDs.insert(insideFill.id)
+                result.append(.fill(outsideFill))
+                result.append(.fill(insideFill))
+
+            case .image(let image):
+                // A centre point rather than a centre line, which is the same principle for a kind
+                // that has no spine.
+                if loop.contains(image.transform.position, using: rule) { insideIDs.insert(image.id) }
+                result.append(element)
+
+            case .text(let text):
+                // **Text moves whole** (LASSO_MOVE.md §5.3) — a lasso never cuts a letterform, the
+                // same ruling `ADD_TEXT.md` §5.4 settled for the eraser.
+                let boundingBox = text.frame.boundingBox
+                if loop.contains(CGPoint(x: boundingBox.midX, y: boundingBox.midY), using: rule) {
+                    insideIDs.insert(text.id)
+                }
+                result.append(element)
+            }
+        }
+
+        guard !insideIDs.isEmpty else { return nil }
+        return (result, insideIDs, Self.mayDiverge(result, movedIDs: insideIDs))
+    }
+
+    /// Whether "render the moved ids alone, composite over the rest" can differ from "render the whole
+    /// list" — i.e. whether the latched float is an approximation rather than the truth.
+    ///
+    /// Three ways it can be, and each is a case where an element's pixels depend on what is beneath it
+    /// in the *same* display list, which Core Animation's source-over of two bitmaps cannot reproduce:
+    /// a moved eraser mark has nothing under it in the float and so draws nothing at all; a moved
+    /// stroke with a blend mode blends against the float's own transparency instead of the artwork;
+    /// and a punch that stays behind, sitting above the lowest moved element, no longer has that
+    /// element beneath it to bite.
+    ///
+    /// The common case is false, and the caller keeps its latch across every nudge for three renders
+    /// in the whole move. When it is true the latch is dropped at each gesture end and the layer
+    /// re-rendered, so what the artist is looking at between drags is always the truth.
+    private static func mayDiverge(_ elements: [VectorElement], movedIDs: Set<UUID>) -> Bool {
+        var lowestMoved = Int.max
+        for (index, element) in elements.enumerated() where movedIDs.contains(element.id) {
+            lowestMoved = min(lowestMoved, index)
+            guard let stroke = element.stroke else { continue }
+            if stroke.composite == .erase || stroke.brush.blendMode != .normal { return true }
+        }
+        guard lowestMoved < elements.count else { return false }
+        for index in (lowestMoved + 1)..<elements.count {
+            let element = elements[index]
+            if element.stroke?.composite == .erase, !movedIDs.contains(element.id) { return true }
+        }
+        return false
+    }
+
+    /// One element moved by `t`, in this canvas's local space.
+    ///
+    /// **One function for every kind, so no call site can carry one half of an element and not the
+    /// other.** The half that is easiest to miss is a stroke's `DabLattice`: `stamp` draws from
+    /// `lattice?.samples ?? stroke.samples`, so mapping `samples` alone moves the geometry and not one
+    /// pixel of the ink. The eraser's Modes 2 and 3 dodge that by dropping the lattice, and that
+    /// escape is not available here — a lasso removes no geometry, and dropping the lattice would
+    /// re-phase every dab and visibly re-roll a scattering brush the instant the artist nudged.
+    ///
+    /// Stage 1's `t` is a pure translation — the float's box offers only its move band
+    /// (`ObjectTransformFrame.allowedHandles`) — so `VectorStroke.size` and `TextFrame.size` are
+    /// deliberately left alone. A scale would need both, and the lattice re-walked; that is stage 3.
+    static func mapping(_ element: VectorElement, through t: CGAffineTransform) -> VectorElement {
+        guard !t.isIdentity else { return element }
+        var transform = t
+        switch element {
+        case .stroke(var stroke):
+            stroke.samples = stroke.samples.map {
+                let p = $0.point.applying(t)
+                return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
+            }
+            if var lattice = stroke.lattice {
+                lattice.samples = lattice.samples.map {
+                    let p = $0.point.applying(t)
+                    return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
+                }
+                stroke.lattice = lattice
+            }
+            return .stroke(stroke)
+        case .fill(let fill):
+            guard let path = fill.cgPath, let moved = path.copy(using: &transform) else { return element }
+            var mapped = VectorFillElement(path: moved, color: fill.color, opacity: fill.opacity,
+                                           evenOddFill: fill.evenOddFill)
+            // The id is identity, not geometry: a nudge moves an element, it does not mint a new one,
+            // and the float tracks its pieces by id.
+            mapped.id = fill.id
+            return .fill(mapped)
+        case .image(var image):
+            image.transform.position = image.transform.position.applying(t)
+            return .image(image)
+        case .text(var text):
+            // Stored **local**, despite `TextFrame.corners`' own doc saying canvas space — that
+            // comment is written from the authoring perspective, and `localText(fromCanvas:)` maps
+            // every incoming frame through `_transform.inverted()` before it is stored. Translating
+            // stored corners by a canvas-space delta on a transformed layer sends the text somewhere
+            // else entirely.
+            text.frame.corners = text.frame.corners.map { $0.applying(t) }
+            return .text(text)
+        }
     }
 
     /// One stroke's worth of what a Mode 2 gesture is about to do, described so a caller can show it
@@ -1767,11 +2046,14 @@ final class VectorCanvas {
         case .full: if let cachedImage { return cachedImage }
         case .preview: if let cachedPreviewImage { return cachedPreviewImage }
         }
+        rasterizations += 1
         let bounds = CGRect(origin: .zero, size: size)
         let format = PixelOps.transparentFormat()
 
-        // 1. Content in local (untransformed) space.
-        let content = renderLocalContent(quality: quality)
+        // 1. Content in local (untransformed) space. The suppressed elements are skipped, not removed
+        //    — see `suppressedElementIDs`.
+        let content = renderLocalContent(elements: Self.visible(_elements, suppressing: _suppressedElementIDs),
+                                         quality: quality)
 
         // 2. Apply the overall transform (identity → skip the extra pass).
         let final: UIImage
@@ -1798,6 +2080,43 @@ final class VectorCanvas {
         isEmpty ? nil : render(quality: quality)
     }
 
+    /// `_elements` minus the suppressed ones. A free identity return when nothing is suppressed,
+    /// which is every render outside a text edit or a lasso move.
+    private static func visible(_ elements: [VectorElement], suppressing ids: Set<UUID>) -> [VectorElement] {
+        ids.isEmpty ? elements : elements.filter { !ids.contains($0.id) }
+    }
+
+    /// **Only** the elements named by `ids`, drawn through the same walk and the same isolation rules
+    /// the whole layer uses, in canvas space — the picture a lasso move's floating piece shows while
+    /// the artist drags it, exactly complementary to what `render()` shows with the same ids
+    /// suppressed.
+    ///
+    /// Nil when nothing matches, so a caller cannot mistake an empty float for a working one.
+    ///
+    /// **A float of nothing but eraser marks legitimately renders blank, and that is not a failure.**
+    /// A punch has no ink of its own — it lowers the alpha of what is beneath it *in the same display
+    /// list* (rule 3 above) — so drawn alone into a transparent bitmap it draws nothing. The hole it
+    /// makes reappears where it lands, when the move bakes. Nothing here or in
+    /// `CanvasManager.beginVectorLassoMove` may read a blank image as "the lasso caught nothing".
+    ///
+    /// **Deliberately not memoized**, for `render()`'s own stated reason: it is called once per latch,
+    /// and caching it would make `hasCachedImage` report a claim on memory the canvas is not making,
+    /// so eviction would spend its budget on an image nothing is holding.
+    func renderIsolated(ids: Set<UUID>) -> UIImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        let isolated = _elements.filter { ids.contains($0.id) }
+        guard !isolated.isEmpty else { return nil }
+        rasterizations += 1
+        let content = renderLocalContent(elements: isolated)
+        guard !_transform.isIdentity else { return content }
+        let bounds = CGRect(origin: .zero, size: size)
+        return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+            ctx.cgContext.concatenate(_transform)
+            content.draw(in: bounds)
+        }
+    }
+
     /// Step 1 of `render()`: the layer's own content stamped at native resolution, before the overall
     /// `transform` is applied. Not cached — only called from `render()` and `localContentBounds()`.
     /// Caller must hold `lock` for the whole rasterization. Strokes stamp straight into this
@@ -1820,11 +2139,13 @@ final class VectorCanvas {
     /// `insertionIndex(forKind:in:)` keeps fills/images ahead of strokes, so ordinary content has
     /// exactly one paint run. `quality` doesn't reach this logic — only `Self.draw(stroke:…)` branches
     /// on it — since the isolation rules must hold for a preview too.
-    private func renderLocalContent(quality: RenderQuality = .full) -> UIImage {
-        // The one element whose editor is open is skipped, not removed — see `editingElementID`. The
-        // filter runs only while a session is live, and a session costs exactly one flatten at open
-        // and one at commit (§4 rule 4), so this is twice per session rather than per frame.
-        let elements = _editingElementID.map { id in _elements.filter { $0.id != id } } ?? _elements
+    ///
+    /// **`elements` is a parameter rather than `_elements` filtered in here, and that is deliberate.**
+    /// Two callers want different subsets — the display wants everything except what is suppressed,
+    /// a lasso move's floating piece wants only the suppressed ones — and giving the second its own
+    /// renderer would fork the three rules above, so that the float and the layer it was lifted out
+    /// of could come to disagree about isolation. One walk, two lists.
+    private func renderLocalContent(elements: [VectorElement], quality: RenderQuality = .full) -> UIImage {
         // `render()` has already returned by the time an empty canvas would reach here, so this
         // guard is for `localContentBounds()`: it spares the Move tool a canvas-sized rasterize plus
         // a several-million-pixel alpha scan to conclude what emptiness already said. Asked of the

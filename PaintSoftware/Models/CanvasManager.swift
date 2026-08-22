@@ -462,6 +462,14 @@ final class CanvasManager: ObservableObject {
             ActionRecorder.ifRecording { $0.model("floatingPiece", floatingPiece == nil ? "nil" : "active") }
         }
     }
+    /// The vector layers' answer to `floatingPiece`: a lassoed region split out of the display list
+    /// and moving under the artist's finger. See `CanvasManager+LassoMove.swift`.
+    @Published var vectorFloat: VectorFloat? {
+        didSet {
+            guard (oldValue == nil) != (vectorFloat == nil) else { return }
+            ActionRecorder.ifRecording { $0.model("vectorFloat", vectorFloat == nil ? "nil" : "active") }
+        }
+    }
     /// Single-slot clipboard for the timeline's Copy/Paste block menu — holds a cel's content (not
     /// its position), set by `copyCel` and consumed non-destructively by `pasteCel`.
     @Published var copiedCel: CopiedCel?
@@ -838,6 +846,10 @@ final class CanvasManager: ObservableObject {
     func commitAllInteractiveState() {
         beginCanvasEdit()
         commitFloatingPieceIfNeeded()
+        // A lasso move's float joins the raster piece at the same chokepoint, and that one line is
+        // what covers tool switch, panel switch, save and backgrounding. Missing one of those is how
+        // a float gets stranded — suppressed artwork in the saved document, rendering nowhere.
+        commitVectorFloatIfNeeded()
     }
 
     /// Enters the text tool — the Actions menu's "Add Text" row, and the only way in.
@@ -2298,6 +2310,14 @@ final class CanvasManager: ObservableObject {
         // chose that). Returning here is the whole of it — the drawing history is untouched, so the
         // next undo after tapping away still finds the text object waiting on it.
         if textEditUndoHandler?(false) == true { return }
+        // **A lift nobody dragged is undone by putting it back, and that press is spent.** The split
+        // is the only thing that has happened since, and it carries no step of its own — so falling
+        // through to `history.undo()` here would leave the artist's own drawing intact but revert
+        // whatever they did *before* they drew the loop, which is not what they asked for.
+        if vectorFloat?.nudges == 0 {
+            cancelVectorFloat()
+            return
+        }
         finalizePendingGesturesForHistoryAction()
         // `history.undo()` returns nil (and does nothing) on an empty stack — that is the "silent
         // when nothing happened" case `raise` must not be called for. `finalizePendingGesturesFor-
@@ -2359,6 +2379,10 @@ final class CanvasManager: ObservableObject {
         // which is the whole bug. Closing here pushes the step; `isVectorTransforming` stays on and
         // the next drag opens a fresh bracket against whatever the undo left behind.
         closeVectorTransformBracket()
+        // The lasso move's version of the same three-way rule — see
+        // `finalizeVectorFloatForHistoryAction`, where the zero-nudge case is the one that has to be
+        // un-happened rather than stepped back from.
+        finalizeVectorFloatForHistoryAction()
     }
 
     func refreshUndoRedoState() {
@@ -2372,8 +2396,11 @@ final class CanvasManager: ObservableObject {
         // pressed, so the affordance must be live even on an empty committed stack. Asks whether the
         // layer has actually *moved*, not merely whether a bracket is open — a drag that returned to
         // where it started records nothing, and an Undo button lit for it would be lying.
+        // A lasso move's float is one too, and it is live from the moment of the lift rather than
+        // from the first nudge: with zero nudges, undo closes a hole the artist can see, so the
+        // affordance must be lit even on an empty committed stack.
         let newCanUndo = fillGestureActive || shapeGestureActive || textGestureActive
-            || vectorTransformGestureHasChange || history.canUndo
+            || vectorTransformGestureHasChange || vectorFloat != nil || history.canUndo
         let newCanRedo = !fillGestureActive && !shapeGestureActive && !textGestureActive && history.canRedo
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }

@@ -660,6 +660,77 @@ final class StrokeGeometryLogicTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(runs[1].first?.x ?? -.infinity, 32 - 1e-6)
     }
 
+    // MARK: - membershipRuns (both halves, one walk)
+    //
+    // The lasso move needs the half that stays behind as much as the half that travels, and the two
+    // have to share their cut point *exactly* or a move of zero distance is not lossless. One walk is
+    // what guarantees that; two would land the same crossing twice, each to within its own tolerance.
+
+    func testMembershipRunsPartitionsIntoAlternatingRunsCoveringTheWholeStroke() {
+        let runs = StrokeGeometry.membershipRuns(ramp) { $0.x < 5 || (15 < $0.x && $0.x < 25) || $0.x > 35 }
+        XCTAssertEqual(runs.map(\.isInside), [true, false, true, false, true],
+                       "in, out, in, out, in — every part of the stroke is in exactly one run")
+        XCTAssertEqual(runs.first?.samples.first?.x ?? -1, 0, accuracy: 1e-9, "starts at the stroke's start")
+        XCTAssertEqual(runs.last?.samples.last?.x ?? -1, 40, accuracy: 1e-9, "ends at its end")
+    }
+
+    /// **The shared boundary is bit-identical between the closing run and the opening one.** Rejoin
+    /// the two and the original polyline is back, which is what makes the split conserve ink.
+    func testMembershipRunsSharesEachBoundarySampleBitForBitBetweenNeighbouringRuns() {
+        let runs = StrokeGeometry.membershipRuns(ramp) { $0.x < 15 }
+        XCTAssertEqual(runs.count, 2)
+        let closing = runs[0].samples.last, opening = runs[1].samples.first
+        XCTAssertEqual(closing?.x, opening?.x, "not 'within a tolerance' — the same value")
+        XCTAssertEqual(closing?.y, opening?.y)
+        XCTAssertEqual(closing?.pressure, opening?.pressure)
+        XCTAssertEqual(runs[0].parameters.last, runs[1].parameters.first, "and at the same parameter")
+    }
+
+    /// Parameters ascend, and land within 1e-9 of the analytic crossing — a piece cannot keep drawing
+    /// on its parent's dab lattice without them, and a wrong one re-phases every dab it draws.
+    func testMembershipRunParametersAscendAndLandOnTheAnalyticCrossing() {
+        let runs = StrokeGeometry.membershipRuns(ramp) { $0.x < 15 }
+        for run in runs {
+            XCTAssertEqual(run.samples.count, run.parameters.count, "one parameter per sample")
+            for (a, b) in zip(run.parameters, run.parameters.dropFirst()) {
+                XCTAssertLessThan(a, b, "parameters ascend")
+            }
+        }
+        // Samples at x = 0,10,20,30,40, so x = 15 is halfway between indices 1 and 2.
+        XCTAssertEqual(runs[0].parameters.last ?? -1, 1.5, accuracy: 1e-9)
+    }
+
+    func testMembershipRunsOfAStrokeThatLeavesAndReentersYieldsFourRuns() {
+        let runs = StrokeGeometry.membershipRuns(ramp) { $0.x < 12 || $0.x > 28 }
+        XCTAssertEqual(runs.map(\.isInside), [true, false, true],
+                       "a concave loop the stroke exits and re-enters partitions into three, not two")
+    }
+
+    func testMembershipRunsOfASingleSampleIsOneRunEitherWay() {
+        let lone = samples([(5, 5)], pressures: [0.7])
+        XCTAssertEqual(StrokeGeometry.membershipRuns(lone) { _ in true }.map(\.isInside), [true])
+        XCTAssertEqual(StrokeGeometry.membershipRuns(lone) { _ in false }.map(\.isInside), [false])
+        XCTAssertTrue(StrokeGeometry.membershipRuns([]) { _ in true }.isEmpty)
+    }
+
+    /// **`splitRuns` is behaviourally unchanged**, so the shipped live-selection clip at
+    /// `StrokeCanvasView.endVectorStroke` is provably untouched by the rewrite that introduced
+    /// `membershipRuns` beneath it.
+    func testSplitRunsIsExactlyTheInsideHalfOfMembershipRuns() {
+        let predicates: [(String, (CGPoint) -> Bool)] = [
+            ("all in", { _ in true }),
+            ("all out", { _ in false }),
+            ("one gap", { $0.x < 12 || $0.x > 28 }),
+            ("three spans", { $0.x < 5 || (15 < $0.x && $0.x < 25) || $0.x > 35 }),
+            ("starts outside", { $0.x > 15 })
+        ]
+        for (name, inside) in predicates {
+            XCTAssertEqual(StrokeGeometry.splitRuns(ramp, inside: inside),
+                           StrokeGeometry.membershipRuns(ramp, inside: inside).filter(\.isInside).map(\.samples),
+                           "splitRuns disagreed with membershipRuns' inside half for \(name)")
+        }
+    }
+
     // MARK: - StrokeSpatialIndex
 
     func testSpatialIndexIsASupersetOfBruteForce() {

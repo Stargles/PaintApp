@@ -204,6 +204,56 @@ final class ToolPanelsUITests: PaintUITestCase {
 
 final class SelectionAndMoveUITests: PaintUITestCase {
 
+    /// **A lasso move moves only what is inside the loop** — the whole feature, driven the way the
+    /// artist drives it: draw a line, select part of it, tap Move, drag, tap Move again.
+    ///
+    /// In an existing class rather than a new one on purpose: `xcodebuild` distributes parallel work
+    /// per test *class*, so a new heavy class lengthens the critical path of the whole suite.
+    ///
+    /// What only a UI test can say here is that the wiring holds end to end — the toolbar reaches
+    /// `beginVectorLassoMove`, the box takes the drag instead of the canvas painting under it, and
+    /// the second Move tap bakes rather than lifting again. The geometry itself is
+    /// `LassoMoveLogicTests`' business.
+    func testLassoMoveSplitsTheStrokeAndCarriesOnlyTheLassoedHalf() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // One horizontal line across the upper canvas, on the default vector layer.
+        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: 0.26), to: CGVector(dx: 0.85, dy: 0.26))
+        app.buttons["toolbar.layersButton"].tap()   // the marker lives in the layer panel
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "one stroke to start with")
+        app.buttons["toolbar.layersButton"].tap()   // and the panel covers the canvas, so close it
+
+        // Select its right-hand half. Upper canvas, clear of the Select menu's bottom-docked bar.
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
+        rectangleMode.tap()
+        dragOnCanvas(app, from: CGVector(dx: 0.6, dy: 0.16), to: CGVector(dx: 0.95, dy: 0.36))
+
+        // Move lifts the lassoed half. Nothing visibly changes yet — the float sits exactly over the
+        // hole it came out of — so the assertions worth making are about where it *lands*.
+        app.buttons["toolbar.moveButton"].tap()
+        // Drag the box down by roughly a fifth of the canvas, then Move again to bake it.
+        dragOnCanvas(app, from: CGVector(dx: 0.75, dy: 0.26), to: CGVector(dx: 0.75, dy: 0.46))
+        app.buttons["toolbar.moveButton"].tap()
+
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.75, dy: 0.26)),
+                      "the lassoed half should have left the paper it came off bare")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.3, dy: 0.26)),
+                       "while the half outside the loop is exactly where it was drawn")
+        // A band rather than one row: XCUITest's synthetic drags undershoot by a timing-dependent
+        // amount (see `dragElement`), so the assertion is "it moved down", not "it moved 0.20".
+        let landedRow = stride(from: 0.33, through: 0.52, by: 0.01)
+            .first { !isWhitish(rgbaPixel(of: canvas, dx: 0.75, dy: $0)) }
+        XCTAssertNotNil(landedRow, "the moved half should have landed somewhere below where it started")
+        app.buttons["toolbar.layersButton"].tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 2,
+                       "the stroke the loop crossed became two independent strokes")
+    }
+
     /// Rectangle-select a region, then Fill it — the fill should land directly in the raster tier
     /// (Cel.raster), the same tier the eraser stamps into, not a separate Cel.bakedImage layer the
     /// eraser can never reach (see `CanvasManager.registerUndoableCelChange`'s doc comment).

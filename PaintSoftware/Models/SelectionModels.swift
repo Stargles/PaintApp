@@ -112,6 +112,9 @@ struct FloatingPiece {
     var remainderPreview: UIImage?
 
     var transform: FloatingTransform
+    /// `transform` as the lift produced it. Every canvas-space delta the piece has travelled is
+    /// measured from here — today, the one transform that carries the marching ants along with it.
+    var liftTransform: FloatingTransform
     var mode: TransformMode
 
     /// Bounding box of the transformed piece in canvas space — used to hit-test "tap outside to
@@ -158,6 +161,14 @@ extension CanvasManager {
             if !stillTargeted {
                 commitFloatingPieceIfNeeded()
             }
+        }
+        // The lasso move's float, on the same rule and for the same reason. Explicit rather than
+        // inherited: `beginCanvasEdit()` above deliberately does not settle floats, so a float left
+        // here would keep its ids suppressed on a cel the artist has walked away from — artwork in
+        // the document that renders nowhere.
+        if let float = vectorFloat,
+           !(float.layerID == activeLayerID && float.celID == activeCelID) {
+            commitVectorFloatIfNeeded()
         }
         if let sel = selection, !(sel.layerID == activeLayerID && sel.celID == activeCelID) {
             selection = nil
@@ -266,16 +277,22 @@ extension CanvasManager {
 
         let sourceLayerID = layers[currentLayerIndex].id
         let sourceCelID = cel.id
+        let lift = FloatingTransform(position: CGPoint(x: bounds.midX, y: bounds.midY),
+                                     scaleX: 1, scaleY: 1, rotation: 0)
         floatingPiece = FloatingPiece(
             kind: .move,
             sourceLayerID: sourceLayerID, sourceCelID: sourceCelID,
             targetLayerID: sourceLayerID, targetCelID: sourceCelID,
             pieceImage: croppedPiece, baseSize: bounds.size,
             remainderPreview: remainder,
-            transform: FloatingTransform(position: CGPoint(x: bounds.midX, y: bounds.midY), scaleX: 1, scaleY: 1, rotation: 0),
+            transform: lift, liftTransform: lift,
             mode: transformMode
         )
-        selection = nil
+        // **The selection survives the lift and clears at the bake** — owner, 2026-08-22, so the
+        // raster Move and the vector lasso move behave the same way on the same gesture
+        // (LASSO_MOVE.md §5.6). It used to clear here, which meant the outline vanished the instant
+        // the piece came up and the artist had nothing on screen saying what was travelling. The ants
+        // now travel with it; see `CanvasView.Coordinator.updateVectorFloat`.
     }
 
     /// Copies the current selection onto a brand-new layer above the current one, immediately
@@ -306,13 +323,15 @@ extension CanvasManager {
         currentLayerIndex = insertIndex // triggers handleActiveContextChanged, but floatingPiece is still nil here
 
         self.selection = nil
+        let duplicateLift = FloatingTransform(position: CGPoint(x: bounds.midX, y: bounds.midY),
+                                              scaleX: 1, scaleY: 1, rotation: 0)
         floatingPiece = FloatingPiece(
             kind: .duplicate,
             sourceLayerID: sourceLayerID, sourceCelID: sourceCelID,
             targetLayerID: newLayer.id, targetCelID: newCel.id,
             pieceImage: croppedPiece, baseSize: bounds.size,
             remainderPreview: nil,
-            transform: FloatingTransform(position: CGPoint(x: bounds.midX, y: bounds.midY), scaleX: 1, scaleY: 1, rotation: 0),
+            transform: duplicateLift, liftTransform: duplicateLift,
             mode: transformMode
         )
     }
@@ -346,6 +365,10 @@ extension CanvasManager {
     func commitFloatingPieceIfNeeded() -> Bool {
         guard let piece = floatingPiece, let canvasSize else { return false }
         floatingPiece = nil
+        // §5.6, and since 2026-08-22 the raster tool's rule as well as the vector one: the ants clear
+        // when the piece bakes, not when it lifts. `.duplicate` cleared its own at lift and is
+        // untouched — a copy is not a region the artist is still holding.
+        if piece.kind == .move { selection = nil }
         guard let targetLayerIndex = layerIndex(ofID: piece.targetLayerID),
               let targetCelIndex = layers[targetLayerIndex].cels.firstIndex(where: { $0.id == piece.targetCelID }) else { return true }
 
@@ -376,8 +399,12 @@ extension CanvasManager {
     // MARK: Fill / Clear (one-shot pixel edits on the current selection)
 
     func fillSelection() {
-        beginCanvasEdit()
-        guard let selection, let canvasSize,
+        let requested = selection
+        // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection now outlives a Move lift
+        // (see `beginMove`), so without settling the piece first this would paint into the cel that
+        // is currently showing a hole, and the piece would then bake over the top of it.
+        commitAllInteractiveState()
+        guard let selection = requested, let canvasSize,
               layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].id == selection.layerID,
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
@@ -410,8 +437,12 @@ extension CanvasManager {
     }
 
     func clearSelectionPixels() {
-        beginCanvasEdit()
-        guard let selection, let canvasSize,
+        let requested = selection
+        // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection now outlives a Move lift
+        // (see `beginMove`), so without settling the piece first this would paint into the cel that
+        // is currently showing a hole, and the piece would then bake over the top of it.
+        commitAllInteractiveState()
+        guard let selection = requested, let canvasSize,
               layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].id == selection.layerID,
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),

@@ -138,6 +138,12 @@ final class StrokeCanvasView: UIView {
     /// allocation and an autolayout pass at the worst possible moment.
     private let scratchView = UIImageView()
 
+    /// The lasso move's floating piece: the lifted ink, rendered once and shown through Core Animation
+    /// while the artist drags it. Sits **above** `scratchView` and so above this layer's own content,
+    /// and below every layer stacked on top of this one — which is z-correct by construction, and is
+    /// the thing `CanvasView.updateFloatingOverlay` has to do by hand for the raster piece.
+    private let floatView = UIImageView()
+
     /// Mode 3's reach, outlined on the canvas under the finger while the gesture is live. Created on
     /// first use, so every other tool pays nothing for it. See `updateEraserFootprint(at:)`.
     private var eraserFootprintLayer: CAShapeLayer?
@@ -299,7 +305,20 @@ final class StrokeCanvasView: UIView {
         scratchView.isHidden = true
         scratchView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scratchView)
+        // Identical to `scratchView` in every respect and for every one of its reasons — same sample
+        // grid, same crispness contract — added after it so the lifted piece floats over the hole it
+        // came out of.
+        floatView.contentMode = .scaleToFill
+        floatView.isUserInteractionEnabled = false
+        floatView.layer.magnificationFilter = .nearest
+        floatView.isHidden = true
+        floatView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(floatView)
         NSLayoutConstraint.activate([
+            floatView.topAnchor.constraint(equalTo: topAnchor),
+            floatView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            floatView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            floatView.trailingAnchor.constraint(equalTo: trailingAnchor),
             imageView.topAnchor.constraint(equalTo: topAnchor),
             imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
             imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -361,7 +380,11 @@ final class StrokeCanvasView: UIView {
         // item 11 removed from the stroke path. `displayedVectorVersion` is deliberately left stale,
         // so the first `refreshDisplayIfStale` after the drag repaints even if `endLiveLayerTransform`
         // were never reached.
-        guard liveLayerTransformBase == nil else { return }
+        //
+        // A lasso move's float is the same bargain on the same grounds: the moved ids are suppressed
+        // from the source for the float's life, so the source's pixels genuinely do not change across
+        // nudges and a rasterize here would produce the image already on screen.
+        guard liveLayerTransformBase == nil, vectorFloatBase == nil else { return }
         displayedRasterVersion = raster?.version ?? -1
         guard let vectorCanvas else {
             showScratch(nil)
@@ -441,6 +464,62 @@ final class StrokeCanvasView: UIView {
         guard liveLayerTransformBase != nil else { return }
         liveLayerTransformBase = nil
         imageView.transform = .identity
+        refreshDisplay()
+    }
+
+    // MARK: - The lasso move's floating piece
+
+    /// The layer transform the float's image was rendered at, latched for the float's life. Nil at all
+    /// other times, and its nil-ness is the switch that suppresses `refreshDisplay`, exactly as
+    /// `liveLayerTransformBase`'s is.
+    private var vectorFloatBase: CGAffineTransform?
+
+    /// Whether a lasso move's piece is currently latched over this layer — read by `CanvasView` so it
+    /// can leave the latch standing across a SwiftUI pass rather than re-arming it every frame.
+    var hasVectorFloat: Bool { vectorFloatBase != nil }
+
+    /// Start showing a lifted piece over this layer, with the source already showing the hole it came
+    /// out of. `image` is canvas-space (`VectorCanvas.renderIsolated(ids:)`), `base` the layer's own
+    /// transform at the moment of the lift.
+    ///
+    /// **This latch is the whole performance story of a lasso move.** Three canvas-sized renders for
+    /// the entire move — the hole, the float, and the bake — independent of how many times the artist
+    /// nudges it, against re-minting a preview per nudge.
+    func beginVectorFloat(image: UIImage?, base: CGAffineTransform) {
+        // Before the latch, or a stale hole would be the picture the whole drag is expressed against
+        // — `beginLiveLayerTransform`'s reason, verbatim.
+        refreshDisplayIfStale()
+        vectorFloatBase = base
+        floatView.transform = .identity
+        floatView.image = image
+        // A float made only of eraser marks renders to nothing, legitimately — see
+        // `VectorCanvas.renderIsolated(ids:)`. The view is still latched: the piece is real geometry
+        // and it lands when the move bakes.
+        floatView.isHidden = image == nil
+    }
+
+    /// Shows the piece at `current` without rasterizing anything. Costs one `UIView.transform`.
+    func updateVectorFloat(_ current: CGAffineTransform) {
+        guard let base = vectorFloatBase else { return }
+        // `UIView.transform` applies about the view's centre, so the size is load-bearing here for the
+        // reason `updateLiveLayerTransform` gives: taken as zero it would conjugate about the origin
+        // and put a visible offset in every scale and every rotation.
+        let size = bounds.width > 0 && bounds.height > 0 ? bounds.size : (vectorCanvas?.size ?? .zero)
+        floatView.transform = LiveLayerTransform.viewTransform(from: base, to: current,
+                                                               inBoundsOfSize: size)
+    }
+
+    /// Drops the latch and rasterizes once, at whatever the layer holds now.
+    ///
+    /// **Idempotent**, and it has to be, for `endLiveLayerTransform`'s reason: a float ends by commit,
+    /// by cancel, by an undo, or by the artist leaving the layer, and a view left holding a Core
+    /// Animation transform with no matching latch shows its content permanently doubly-transformed.
+    func endVectorFloat() {
+        guard vectorFloatBase != nil else { return }
+        vectorFloatBase = nil
+        floatView.transform = .identity
+        floatView.image = nil
+        floatView.isHidden = true
         refreshDisplay()
     }
 

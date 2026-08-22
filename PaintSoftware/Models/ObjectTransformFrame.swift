@@ -21,9 +21,23 @@ struct ObjectTransformFrame: Equatable {
     /// sized to the *content*, not to the canvas, so Move carries the drawing rather than the sheet.
     var contentSize: CGSize
 
-    init(transform: LayerTransform, contentSize: CGSize) {
+    /// Which grips this box offers. Everything, for a whole-layer transform — the semantics the owner
+    /// ruled correct on 2026-08-21 are unchanged, and the default is what keeps every existing call
+    /// site untouched.
+    ///
+    /// **A lasso move's floating piece hands it `[.body]` — translation only — and that is a
+    /// correctness bound rather than timidity.** `VectorStroke.size` is a scalar no geometry map can
+    /// carry, so a scaled piece would translate its spine and keep its old width; and LASSO_MOVE.md
+    /// defers the dab lattice under rotate/scale to a later stage "with a measurement, not here".
+    /// A filter is genuinely needed because `handleLayout` emits all four corners unconditionally —
+    /// only the rotation knob was ever conditional — so there was no other way to suppress scaling.
+    var allowedHandles: Set<Handle> = Set(Handle.allCases)
+
+    init(transform: LayerTransform, contentSize: CGSize,
+         allowedHandles: Set<Handle> = Set(Handle.allCases)) {
         self.transform = transform
         self.contentSize = contentSize
+        self.allowedHandles = allowedHandles
     }
 
     /// A box with no extent draws and hits nothing — the state the overlay hides itself in.
@@ -89,7 +103,9 @@ struct ObjectTransformFrame: Equatable {
         if rotationOffset != 0 {
             layout.append((.rotation, rotationHandlePosition(offset: rotationOffset)))
         }
-        return layout
+        // Filtered here, so the overlay's rebuild and the hit test below stay the one source of truth
+        // they were: a grip that is not drawn is not grabbable either, and neither can drift.
+        return layout.filter { allowedHandles.contains($0.handle) }
     }
 
     /// The knob, along the box's own "up", so it stays over the top edge at any rotation instead of
@@ -132,6 +148,7 @@ struct ObjectTransformFrame: Equatable {
         if let handle = handle(nearest: point, reach: reach, rotationOffset: rotationOffset) {
             return handle
         }
+        guard allowedHandles.contains(.body) else { return nil }
         return contains(point) ? .body : nil
     }
 

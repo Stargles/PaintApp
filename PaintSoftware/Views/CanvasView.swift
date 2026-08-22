@@ -334,6 +334,9 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.reconcileLayers()
         context.coordinator.updateTransformOverlay()
         context.coordinator.updateSelectionOverlay()
+        // After the selection overlay, which re-fronts itself: a lasso move's box has to sit above
+        // its own marching ants, and this is where it takes the front back.
+        context.coordinator.updateVectorFloat()
         context.coordinator.updateFloatingOverlay()
         context.coordinator.updateShapeOverlay()
         context.coordinator.updateTextOverlay()
@@ -356,6 +359,9 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.updateGuideOverlay()
         context.coordinator.updateTransformOverlay()
         context.coordinator.updateSelectionOverlay()
+        // After the selection overlay, which re-fronts itself: a lasso move's box has to sit above
+        // its own marching ants, and this is where it takes the front back.
+        context.coordinator.updateVectorFloat()
         context.coordinator.updateFloatingOverlay()
         context.coordinator.updateShapeOverlay()
         context.coordinator.updateTextOverlay()
@@ -836,6 +842,7 @@ struct CanvasView: UIViewRepresentable {
                 let shouldInteract = (index == canvasManager.currentLayerIndex)
                     && canvasManager.selectedTool.paintsOnCanvas
                     && activePanel != .select && canvasManager.floatingPiece == nil
+                    && canvasManager.vectorFloat == nil
                     && !(canvasManager.isVectorTransforming && layer.kind == .vector)
                     && !layer.hasNoDrawingSurface
                 if host.isUserInteractionEnabled != shouldInteract {
@@ -1430,6 +1437,20 @@ struct CanvasView: UIViewRepresentable {
         /// while `isVectorTransforming` is on — the only remaining user of this overlay.
         func updateTransformOverlay() {
             guard let overlay = transformOverlay, let container = containerView else { return }
+            // **Ahead of the whole-layer arm.** A lasso move's box is about a *region* of the cel, so
+            // it must win wherever both could be true, and it does not consult
+            // `isVectorTransforming` at all — Move with a selection never turns that flag on.
+            if let float = canvasManager.vectorFloat,
+               canvasManager.layerIndex(ofID: float.layerID) != nil {
+                let transform = liveVectorFloatTransform ?? float.frame.transform
+                overlay.update(isActive: true,
+                               frame: ObjectTransformFrame(transform: transform,
+                                                           contentSize: float.contentSize,
+                                                           allowedHandles: float.frame.allowedHandles),
+                               canvasScale: canvasContentScale)
+                container.bringSubviewToFront(overlay)
+                return
+            }
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else {
                 deactivateTransformOverlay()
                 return
@@ -1488,7 +1509,84 @@ struct CanvasView: UIViewRepresentable {
         }
         private var activeObjectTransform: ActiveObjectTransform?
 
+        // MARK: - The lasso move's floating piece
+
+        /// The float's handle drag in flight. A separate latch from `activeObjectTransform` because
+        /// the two answer different questions — one is about the whole layer, one about a region —
+        /// and folding them together would mean every branch below asking which it was.
+        private var activeVectorFloatDrag: ObjectTransformDrag?
+
+        /// Where the box is *right now*, while the finger is down.
+        ///
+        /// **Held here rather than on the model, and that is the point.** `vectorFloat` is
+        /// `@Published`, so writing the live value would put a whole SwiftUI pass on every touch-move
+        /// of a gesture built specifically not to have one. The model learns the answer once, at the
+        /// gesture's end, where it becomes one undo step.
+        private var liveVectorFloatTransform: LayerTransform?
+
+        /// Reconciles the layer host and the marching ants with `canvasManager.vectorFloat`, on every
+        /// pass, the same self-healing shape as every other `update…` here.
+        ///
+        /// The latch is *armed* here rather than by the model, because arming it renders — and the
+        /// model has no business rasterizing. `hasVectorFloat` is what keeps a pass that changes
+        /// nothing free.
+        func updateVectorFloat() {
+            guard let float = canvasManager.vectorFloat, float.wantsLatch,
+                  let host = layerHosts[float.layerID],
+                  let vector = canvasManager.vectorCanvas(ofFloat: float) else {
+                for host in layerHosts.values { host.strokeView.endVectorFloat() }
+                selectionOverlay?.setLiveSelectionTransform(rasterFloatAntsTransform())
+                return
+            }
+            if !host.strokeView.hasVectorFloat {
+                // `latchedFrameTransform`, not the lift's: a `mayDiverge` float drops its latch
+                // between gestures and re-arms against geometry that has since moved, so the bitmap
+                // and the base it is measured from have to describe the same moment.
+                host.strokeView.beginVectorFloat(
+                    image: vector.renderIsolated(ids: float.insideIDs),
+                    base: VectorCanvas.affine(from: float.latchedFrameTransform, pivot: float.pivot))
+            }
+            showVectorFloat(float, at: liveVectorFloatTransform ?? float.frame.transform)
+            if let container = containerView, let overlay = transformOverlay {
+                container.bringSubviewToFront(overlay)
+            }
+        }
+
+        /// The raster Move's version of travelling ants. Its piece writes its transform to the model
+        /// on every delta already (`updateFloatingTransform`), so unlike the vector float this needs
+        /// no live latch of its own — it is the same one transform on the outline, read off the piece.
+        private func rasterFloatAntsTransform() -> CGAffineTransform {
+            guard let piece = canvasManager.floatingPiece, piece.kind == .move else { return .identity }
+            return piece.liftTransform.affineTransform.inverted()
+                .concatenating(piece.transform.affineTransform)
+        }
+
+        /// One delta's worth of display: a `UIView.transform` on the latched piece, and one
+        /// `CALayer` transform on each of the two marching-ants layers. No allocation, no rasterize,
+        /// no model write.
+        private func showVectorFloat(_ float: VectorFloat, at transform: LayerTransform) {
+            let placement = VectorCanvas.affine(from: transform, pivot: float.pivot)
+            // The piece is measured from where its *bitmap* sits, which is the lift for an ordinary
+            // float and the last nudge for a re-armed one.
+            layerHosts[float.layerID]?.strokeView.updateVectorFloat(placement)
+            // The ants are measured from where the *model's* selection path sits, which is the last
+            // nudge. Identity between gestures, which is when the two are the same thing.
+            let written = VectorCanvas.affine(from: float.frame.transform, pivot: float.pivot)
+            selectionOverlay?.setLiveSelectionTransform(written.inverted().concatenating(placement))
+        }
+
         func beginObjectTransformDrag(_ handle: ObjectTransformFrame.Handle, at point: CGPoint) {
+            // A lasso move's float first, and **without `beginStructureGesture()`**:
+            // `StructureSnapshot` captures `layers` by value while `Cel.vector` is a class reference,
+            // so it would record a step that reverts nothing. The float writes its own step per
+            // gesture end instead.
+            if let float = canvasManager.vectorFloat {
+                activeVectorFloatDrag = ObjectTransformDrag(frame: float.frame, handle: handle, at: point)
+                canvasManager.beginVectorFloatDrag()
+                // Synchronously, not on the next SwiftUI pass: the first delta can arrive before one.
+                updateVectorFloat()
+                return
+            }
             guard let resolved = resolveVectorTransformTarget() else { return }
             let frame = ObjectTransformFrame(transform: resolved.vector.layerTransform(pivot: resolved.pivot),
                                              contentSize: resolved.contentSize)
@@ -1507,6 +1605,20 @@ struct CanvasView: UIViewRepresentable {
         /// canvas-sized allocation. The model write is an affine assignment, the display is a
         /// `UIView.transform`, and the box redraws five `CALayer`s.
         func objectTransformDragged(to point: CGPoint) {
+            // **The float's delta writes nothing to the model.** The piece is a latched bitmap under a
+            // Core Animation transform and the ants are two `CALayer` transforms; the geometry catches
+            // up once, at the gesture's end.
+            if let drag = activeVectorFloatDrag, let float = canvasManager.vectorFloat {
+                let transform = drag.transform(draggedTo: point)
+                liveVectorFloatTransform = transform
+                showVectorFloat(float, at: transform)
+                transformOverlay?.update(isActive: true,
+                                         frame: ObjectTransformFrame(transform: transform,
+                                                                     contentSize: float.contentSize,
+                                                                     allowedHandles: float.frame.allowedHandles),
+                                         canvasScale: canvasContentScale)
+                return
+            }
             guard let active = activeObjectTransform,
                   canvasManager.layers.indices.contains(active.layerIndex),
                   canvasManager.isVectorTransforming, !canvasManager.activeCelIsInBetween,
@@ -1522,6 +1634,16 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func endObjectTransformDrag() {
+            if activeVectorFloatDrag != nil {
+                let transform = liveVectorFloatTransform
+                activeVectorFloatDrag = nil
+                liveVectorFloatTransform = nil
+                // One gesture, one nudge, one undo step. No `commitStructureGesture` — see
+                // `beginObjectTransformDrag`.
+                if let transform { canvasManager.nudgeVectorFloat(to: transform) }
+                updateVectorFloat()
+                return
+            }
             guard let active = activeObjectTransform else { return }
             activeObjectTransform = nil
             // The one rasterize of the whole gesture.
@@ -1652,8 +1774,15 @@ struct CanvasView: UIViewRepresentable {
             // a lasso. It yields only while the tool is armed, so the ordinary Select case — the
             // whole reason this term exists — is untouched.
             overlay.isCapturingGestures = lassoFilling
-                || ((activePanel == .select) && (canvasManager.floatingPiece == nil) && !isEyedropperArmed)
-            overlay.updateSelection(canvasManager.selection, allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection)
+                || ((activePanel == .select) && (canvasManager.floatingPiece == nil)
+                    && (canvasManager.vectorFloat == nil) && !isEyedropperArmed)
+            // The exterior hatch says "you cannot paint out there". While a piece is floating nobody
+            // can paint anywhere — every host has declined interaction — so the stripes would be
+            // stating a restriction that is not the live one, over artwork the artist is trying to
+            // line the piece up against. The outline still shows, and travels with the piece.
+            let floating = canvasManager.vectorFloat != nil || canvasManager.floatingPiece?.kind == .move
+            overlay.updateSelection(canvasManager.selection,
+                                    allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection || floating)
             // LASSO_FILL.md §7.2/§7.4, pushed down the same way everything else here is: the overlay
             // decides whether this is new and owns the fade, so a pass that changes nothing costs a
             // UUID comparison. It is drawn here rather than over the layer stack because the tint has

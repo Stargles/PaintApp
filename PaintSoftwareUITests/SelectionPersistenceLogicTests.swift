@@ -147,12 +147,16 @@ final class SelectionPersistenceLogicTests: XCTestCase {
         XCTAssertNil(manager.selection)
     }
 
-    /// Decision: Move consumes the selection into the floating piece it lifts — `beginMove` reads
-    /// `selection` for its path/bounds and then clears it (SelectionModels.swift), because the
-    /// selection's job is done once its region is what got lifted. Not a regression to guard against;
-    /// a pre-existing rule this branch must leave alone. (Scope note: this pins that the *state*
-    /// transition is unchanged — it does not touch the move-transform overlay itself.)
-    func testBeginMoveClearsSelectionAfterLiftingIt() {
+    /// **Decision, revised 2026-08-22: Move keeps the selection until the piece bakes.**
+    ///
+    /// It used to clear at the lift, and this test pinned that. The owner overruled it when the
+    /// vector lasso move was built (LASSO_MOVE.md §5.6): the outline stays up and travels with the
+    /// piece, so the artist can see what they are holding, and it clears when the piece lands. The
+    /// two Move tools now behave the same way on the same gesture, which was the point of the ruling.
+    ///
+    /// `.duplicate` is deliberately not part of it — see the test below, unchanged: a copy is not a
+    /// region the artist is still holding.
+    func testBeginMoveKeepsTheSelectionUntilTheBake() {
         let manager = CanvasFixture.manager()
         manager.finishSelection(path: rectSelectionPath())
         XCTAssertNotNil(manager.selection, "fixture precondition")
@@ -160,7 +164,11 @@ final class SelectionPersistenceLogicTests: XCTestCase {
         manager.beginMove()
 
         XCTAssertNotNil(manager.floatingPiece, "fixture check: Move should have actually lifted something")
-        XCTAssertNil(manager.selection, "the selection's region became the floating piece; the selection itself is spent")
+        XCTAssertNotNil(manager.selection, "the outline stays up while the piece is in the air")
+
+        manager.commitFloatingPieceIfNeeded()
+
+        XCTAssertNil(manager.selection, "and is spent once the piece has landed")
     }
 
     /// Decision: Duplicate consumes the selection the same way Move does — it copies the selected
