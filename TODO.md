@@ -20,22 +20,28 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- [ ] **The second-fill race, on the lasso path only** — `tmp/lassorace`. Owner, on device
-      2026-08-21: *"remember that weird bug when you filled something and then filled another thing
-      while the previous thing was unbaked and it did the weird fill thing? that bug is present in
-      the lasso bug right now. currently I havent found the normal fill to do it though."* The
-      generation guard `2226ef0` gave the normal fill does not reach the lasso path. **The owner's
-      negative half is the lead**: whatever differs between the two paths is where it lives.
-      Carrying two more owner asks on the same branch, as separate commits:
-      **the gap-closing and edge-overlap sliders must be inverted in lasso mode**, in the sense that
-      *"moving the gap closing slider up means bigger gaps get filled, and moving the edge overlap up
-      means the fill gets bigger."* Edge overlap is currently hard-zeroed in lasso mode
-      (`CanvasManager+Fill.swift:215`) **on my instruction, which was wrong** — the owner reports the
-      fill bleeding at antialiased edges, which is the halo that control exists to close.
-      The owner has also ruled that the two modes are **not** meant to agree pixel-for-pixel, and that
-      more gap closing making the normal fill smaller while making the inverted fill bigger is
-      *intended*. So the properties to pin are single-mode and monotonic — the gap width that seals
-      grows with the slider, the filled area grows with edge overlap — not a cross-mode parity.
+**Two branches are built, green on their own, and NOT merged.** Both came out of the owner's
+2026-08-21 lasso-fill feedback. Merge order and the one collision between them are in
+[HANDOFF.md](HANDOFF.md); neither has been seen on the device.
+
+- [ ] **A fill must land on top of what is already on the layer** — `tmp/lassorefill`, worktree
+      `../PaintApp-lassorefill`, commit `da71011`. Owner: *"I cannot fill over things that already
+      have been filled. This was previously intended behaviour to stop it from bleeding over lines in
+      the same layer, but thats discarded now because I want to be able to lasso fill many times over
+      each other."* Asked directly whether that also means covering line art on the same layer, they
+      ruled: ***"The previous decision is overruled as I tested it. Cover everything."*** That
+      overrules LASSO_FILL.md §2a's ruling of the same day, which the branch rewrites rather than
+      annotates. 1537 / 1534 / 0 / 3 against a base of 1531 / 1528 / 0 / 3.
+
+- [ ] **Edge Overlap's top is the ink's outer edge; lowering it shrinks inward** — `tmp/lassoedge`,
+      worktree `../PaintApp-lassoedge`, commit `d2dd2f3`. Owner: *"edge overlap makes the fill expand
+      out, not contract inwards"*, and on being asked which way the slider should move: *"right now
+      the low setting has the fill start on the outer edge of the line and if you increase it the
+      paint goes further out. I want it so on the high setting it is on the outer edge, and when you
+      lower it, it shrinks inwards."* The slider keeps its direction — up is still more colour — and
+      the whole range moves down by its own width, so no setting can put paint on clean paper. Lasso
+      mode gets its own stored value defaulting to the top; the bucket fill is untouched.
+      1535 / 1532 / 0 / 3 against the same base.
 
 ## Queued
 
