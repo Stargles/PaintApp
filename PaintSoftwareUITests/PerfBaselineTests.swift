@@ -3260,8 +3260,16 @@ final class PerfBaselineTests: XCTestCase {
                                "The encode-and-write half runs on `saveQueue`, never on the artist's thread")
                 // **The claim §1 makes, as an integer.** The fixture is raster-only, so a save that
                 // re-encodes the whole document encodes exactly one PNG per cel — and that is what
-                // makes the cost O(cel count) rather than O(area). If a future change makes a save
-                // skip untouched cels, this is the line that notices.
+                // makes the cost O(cel count) rather than O(area).
+                //
+                // **This line used to claim it would notice a save that started skipping cels, and
+                // that claim was false.** `multiCelDocument` inks every cel, so when item 14's cheap
+                // half shipped on 2026-08-22 — a blank raster tier now writes no PNG at all — this
+                // assertion went on passing unchanged, proving nothing about it. What notices is
+                // `testWhatAVectorOnlyDocumentCostsToSaveAndLoad` below, whose document is entirely
+                // blank tiers and whose `pngsEncoded` is 0; the per-cel contract is pinned in
+                // `ProjectSaveLogicTests`. Read this one as "an inked cel still costs a PNG", which
+                // is the thing it can actually see.
                 XCTAssertEqual(profile.pngsEncoded, cels,
                                "Every save re-encodes every cel: one raster PNG each, nothing skipped")
                 XCTAssertEqual(profile.pngsReused, 0, "Nothing memoizes a cel's PNG bytes yet")

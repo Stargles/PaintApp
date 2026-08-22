@@ -32,6 +32,15 @@ import Foundation
 /// raster/fill/baked PNGs are missing or truncated, or whose vector JSON file is missing — and the
 /// launch-time repair pass restores such a package from its newest intact backup before the gallery
 /// ever lists it. A prompt for those would be a prompt for a state the app does not open in.
+///
+/// **A raster PNG that is absent because it was never written is a fourth thing, and it is not a
+/// failure at all.** Since 2026-08-22 a cel whose raster tier holds no bitmap writes no PNG and sets
+/// `CelManifest.rasterOmitted` (PERFORMANCE.md item 14). That does not weaken the paragraph above,
+/// because the two states stay distinguishable in exactly the place that matters: a cel that *names*
+/// a raster and cannot produce it still fails `validateProject`, so "lost" is still unreachable at a
+/// normal open, while "never existed" is now ordinary and correctly silent. The line that keeps those
+/// apart is the `rasterOmitted != true` guard in `validateProject`; if it is ever loosened into an
+/// unconditional skip, this comment stops being true and a lost raster becomes a silent blank cel.
 nonisolated struct ProjectLoadDamage: Equatable {
 
     /// One layer's losses. Flat counters rather than a list of element ids: the artist is owed a

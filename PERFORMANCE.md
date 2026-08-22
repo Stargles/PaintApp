@@ -865,8 +865,8 @@ notification and `canUndo` must still be right afterwards.
 Whether a real session reaches any cap is **still unmeasured** — see §6.
 
 **14. Bound raster-cel residency. — RE-OPENED 2026-08-21 on the owner's answer, then RE-SCOPED
-2026-08-21 on a direct read of the owner's device. The expensive half stays DECLINED; a cheap half is
-now justified and queued.**
+2026-08-21 on a direct read of the owner's device. The expensive half stays DECLINED; the cheap half
+SHIPPED 2026-08-22.**
 
 `RasterLayerTexture.init` allocates a full canvas-sized `CGContext` and draws the decoded PNG in
 whenever an image is passed (`:196-203` → `:235-247` → `:218-231`), and `load` does this for every cel
@@ -946,21 +946,77 @@ already exists**, independent of whether the owner's future document ever gets b
 - None of the three is justified by a document that has never existed on this device; none passed its
   own adversarial review even against the document the owner says they intend.
 
-**The cheap half is now justified on real data and should be queued: stop writing and loading a raster
-tier for cels that carry no raster content.** It is correctness-clean — it removes data that was never
-used, not data anyone might still want — it is the largest single term this item can affect for the
-document the owner intends, and unlike the contract flip it does not need the thumbnail-persistence
-precondition item 9(c) left owed. Confirmed against the owner's own package: `Untitled.paintproj`'s
-single **vector** cel carries a `_raster.png` of 161 KB it has no use for. The mechanism, verified in
-the tree: `ProjectStore.writeCel` (`:735-736`) writes `cel.rasterImage` for **every** cel
-unconditionally; `cel.rasterImage` is `cel.raster.renderToUIImage()` (`:250`), and
-`RasterLayerTexture.renderToUIImage()` (`RasterLayerTexture.swift:254-266`) has a non-optional return
-— when there is no backing context it mints a transparent canvas-sized image (`:262`) rather than
-returning nil — so a vector-only or never-touched raster tier is PNG-encoded and written to disk every
-save all the same, and read back into a full canvas-sized resident buffer on every load
-(`ProjectStore.swift`'s `?? .empty(size:)` fallback near `:1042` is effectively unreachable for any
-package this build has ever written). On a 1-cel document this is invisible; on the document the owner
-intends it is most of item 14's own number.
+**The cheap half SHIPPED 2026-08-22: a cel that carries no raster content no longer writes, loads or
+allocates one.** It is correctness-clean — it removes data that was never used, not data anyone might
+still want — it is the largest single term this item can affect for the document the owner intends,
+and unlike the contract flip it needed nothing from the thumbnail-persistence precondition item 9(c)
+left owed.
+
+*What was actually there, read off the owner's own device 2026-08-22.*
+`Documents/Projects/Untitled 2.paintproj` — 3 cels on 3 layers at **2048×2048**, two vector layers and
+one raster layer — carried a `<uuid>_raster.png` of **exactly 73,558 bytes on every one of the three**,
+and all three were **fully transparent (alpha min = max = 0), including the one on the raster layer**.
+So the document paid three canvas-sized PNG encodes per save and three 2048·2048·4 = **16 MiB**
+`CGContext`s per load for zero pixels.
+
+*The mechanism, as it was.* `ProjectStore.writeCel` wrote `cel.rasterImage` for **every** cel
+unconditionally; `cel.rasterImage` was `cel.raster.renderToUIImage()`, and
+`RasterLayerTexture.renderToUIImage()` has a non-optional return — with no backing context it **mints**
+a transparent canvas-sized image and **memoizes** it in `cachedImage`, which nothing ever drops. So
+merely *taking a save snapshot* allocated 16 MiB per blank cel on the main actor and pinned it for the
+session, before the encode this item was named after had even started.
+
+*What shipped, in four parts.*
+1. **Save.** `RasterLayerTexture.hasContent` is now internal and is the predicate; `SaveSnapshot.CelContent.rasterImage`
+   is `UIImage?`. A blank tier never calls `renderToUIImage()`, so the 16 MiB is not minted at all —
+   not merely not encoded. **The predicate is the bitmap existing, never a pixel scan and never a
+   stroke count**: `context == nil` implies "no pixels" by construction, which is the direction that
+   cannot lose artwork.
+2. **Manifest.** One new key, `CelManifest.rasterOmitted: Bool?`. `rasterFileName` **stays
+   non-optional** — its absence is what makes PencilKit-era manifests fail to decode, which is what
+   has the gallery *skip* those projects rather than open them blank, and that is not this key's
+   business to retire. An old build reading a new package ignores the unknown key, finds no file, and
+   lands on `decodeCel`'s existing `?? .empty(size:)`.
+3. **Validate.** `ProjectBackupManager.validateProject`'s skeleton learned the same key in the same
+   commit, and it had to: it gates the atomic swap, so a validator still demanding the file would have
+   moved every staged package to Trash *while the save reported success* — silent total loss of every
+   edit in an app that looked fine. A package that **names** a raster and cannot produce it is still
+   damaged; both directions are pinned by tests.
+4. **Load, and the heal.** `rasterOmitted` goes straight to `.empty(size:)`. A **legacy** package still
+   has the blank PNG on disk, so after loading one the alpha is scanned **exactly** — byte loop, early
+   exit on the first non-zero alpha, no downsampling — and the bitmap released if nothing is there,
+   with `strokeCount` back to 0. Without the heal a document that exists today would re-write its
+   transparent PNG on every save forever. The 0 also finally lets `Cel.isCertainlyBlank` answer true
+   for a reloaded blank cel, so the onion skin skips a canvas-sized draw it used to pay.
+
+*The number.* `PerfBaselineTests.testWhatAVectorOnlyDocumentCostsToSaveAndLoad` — **60 vector-only
+cels on 3 layers at the owner's real 2048×2048**, the shape of `Untitled 2.paintproj` scaled to where
+the figures read against the noise. **MEASURED 2026-08-22 on the `rasteromit` simulator (iOS 26.5,
+iPad Pro 13-inch M4, Debug), three samples each way, alternated against the same binary:**
+
+| | before | after |
+|---|---|---|
+| package on disk | 6.9 MB | **4.6 MB** |
+| of which `_raster.png` | 2.3 MB in **60 files** (34% of the package) | **0 bytes in 0 files** |
+| PNGs encoded per save (`SaveProfile.pngsEncoded`) | 60 | **0** |
+| save, awaited | 645 / 648 / 540 ms | **188 / 192 / 240 ms** |
+| per cel | 10.7 / 10.8 / 9.0 ms | **3.1 / 3.2 / 4.0 ms** |
+| `phys_footprint` after a load | 3317.1 / 3317.6 / 3319.5 MB | **1865.1 / 1865.3 / 1865.7 MB** |
+
+**~1453 MB, or ~24.2 MB a cel**, and the footprint readings are steady to under 1 MB across three
+samples each way — a memory *difference* in one process cancels the host noise that makes milliseconds
+untrustworthy here (§6). 16 MiB of the 24.2 is the `CGContext` arithmetic exactly; the rest is the
+decoded `UIImage` the load no longer holds beside it.
+
+**Load wall-clock did not move, and saying so is the point.** Before: 4579 / 4720 / 5577 ms. After:
+6183 / 6010 / 4939 ms — two overlapping ranges on a Mac that was at **5.2% idle** while the after arm
+ran. This fixture's load is dominated by rasterizing 60 vector cels for their thumbnails, which this
+change does not touch. **Read the bytes and the footprint, not the clock.**
+
+*Where it does not help.* A cel whose texture holds an allocated-but-transparent bitmap — one erased
+back to nothing, or handed a whole-canvas composite by `bakedRasterTexture` — still reports content
+and is still written. That is deliberate: `context != nil` with transparent pixels is the conservative
+direction, and the only cost of being wrong that way is one PNG.
 
 **What is still unmeasured, so nothing above reads as more settled than it is:**
 - **The real pre-jetsam ceiling on the iPad 9.** The ~1.4 GB figure this item has leaned on traces to
@@ -975,8 +1031,10 @@ intends it is most of item 14's own number.
   pressure, where nothing was ever compressed. **This is the one term that can move the whole answer
   by a factor, not a percentage**, and it is untouched by anything in this item.
 
-*Shipped from this item so far*: the instrument, item 9(a)'s pattern — measure, record, then decide —
-plus the three corrections and the device read above. The contract flip is still not one of them.
+*Shipped from this item*: the instrument, item 9(a)'s pattern — measure, record, then decide — the
+three corrections and the device read above, and, on 2026-08-22, the cheap half. The contract flip is
+still not one of them, and the three unmeasured terms above are what would have to be settled before
+it could be.
 
 **16. The Move tool's live drag on a vector layer. — MEASURED and FIXED 2026-08-21.** Not from this
 programme's ranking: the owner reported it off their own iPad, *"Move is extremely slow, reducing FPS
