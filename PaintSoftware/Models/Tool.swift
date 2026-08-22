@@ -129,12 +129,17 @@ enum FillMode: String, Codable, CaseIterable, Identifiable {
     /// treating the loop as an absolute boundary. Filling a dozen small compartments separated by
     /// hatching is one gesture instead of a dozen taps, and a face's eyes fill with the face.
     ///
-    /// **It is not the flood with a bigger seed, and the settings do not all carry over.** Gap
-    /// closing and Threshold act on the collar that decides what is *held out*; Edge Overlap is
-    /// forced to 0, because a fill that covers the line has no antialiasing seam to hide and growing
-    /// it would only push colour past the artwork onto clean paper. See
-    /// `CanvasManager.beginInteractiveLassoFill` for the mechanism, and for the cases — blank paper,
-    /// a gap wider than Gap Closing — where it deliberately fills nothing and says so.
+    /// **What it commits lands on top of everything already on the layer** — earlier fills and that
+    /// layer's own ink alike, so the same place can be filled over and over. LASSO_FILL.md §2a is the
+    /// owner's ruling and `commitInteractiveFill` is where both layer kinds implement it. That is a
+    /// property of every fill, not of this mode; it is stated here because it is what makes "paints
+    /// over every line inside the loop" true on screen and not merely true of the region.
+    ///
+    /// **It is not the flood with a bigger seed.** Gap closing and Threshold act on the collar that
+    /// decides what is *held out* rather than on a spreading front, so the same slider does a
+    /// different job in each mode. See `CanvasManager.beginInteractiveLassoFill` for the mechanism,
+    /// and for the cases — blank paper, a gap wider than Gap Closing — where it deliberately fills
+    /// nothing and says so.
     case lasso
 
     var id: String { rawValue }

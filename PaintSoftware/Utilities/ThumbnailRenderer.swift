@@ -18,8 +18,12 @@ enum ThumbnailRenderer {
         let renderer = UIGraphicsImageRenderer(size: strokesImage.size, format: PixelOps.transparentFormat(scale: strokesImage.scale))
         return renderer.image { _ in
             let rect = CGRect(origin: .zero, size: strokesImage.size)
-            fillImage.draw(in: rect)
+            // Strokes first, fill on top — the order `PixelOps.rasterizeUncached` draws in, and for
+            // the reason given there: a fill covers what is already on the cel (LASSO_FILL.md §2a).
+            // This overload only ever sees a *live* fill preview, since a committed fill is flattened
+            // into `raster`, but a thumbnail that contradicted the canvas would still be a bug.
             strokesImage.draw(in: rect)
+            fillImage.draw(in: rect)
         }
     }
 

@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 import UIKit
 import CoreGraphics
 import simd
@@ -827,6 +828,215 @@ final class LassoFillLogicTests: XCTestCase {
 
         XCTAssertEqual(manager.history.undoStack.count, before + 1, "Exactly one undo step for one fill")
         XCTAssertNil(manager.notice, "…and nothing to report")
+    }
+
+
+    // MARK: - Where a committed fill lands in the stack (§2a)
+
+    /// **The owner, 2026-08-21, after testing on device: *"I cannot fill over things that already
+    /// have been filled… I want to be able to lasso fill many times over each other."* Asked whether
+    /// a fill should also cover line art on the same layer: *"The previous decision is overruled as I
+    /// tested it. Cover everything."***
+    ///
+    /// LASSO_FILL.md §2a is the ruling and the six tests here are its whole surface: two fills over
+    /// each other, a fill over the layer's own ink, both layer kinds, and the live preview agreeing
+    /// with the commit. They are one section rather than one per file because they are one decision —
+    /// *where in the stack a committed fill goes* — and it used to be answered "underneath" in four
+    /// separate places that all had to move together.
+    ///
+    /// **A raster commit is where the reported bug lived.** `commitInteractiveFill` flattens the fill
+    /// into the cel's `raster` tier, and a *previous* fill is already in that tier, so compositing the
+    /// new one below it made the second fill invisible. That is why these scenes commit a real first
+    /// fill instead of painting one in as a fixture: painting it into `bakedImage` would sit it in the
+    /// wrong tier and the test would pass on the broken code.
+
+    /// Two lassoes, same place, different colours. The second colour is the one that shows.
+    func testASecondLassoFillCoversTheFirstOnARasterLayer() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.black, rect: CGRect(x: 20, y: 20, width: 20, height: 20)))
+        let loop = rectangleLoop(CGRect(x: 8, y: 8, width: 48, height: 48))
+
+        manager.brushColor = Self.red
+        lassoFillAndCommit(manager, loop)
+        let first = try committedPixel(manager, CGPoint(x: 30, y: 30))
+        XCTAssertGreaterThan(first.r, 200, "Fixture check: the first fill is red on the square")
+
+        manager.brushColor = Self.blue
+        lassoFillAndCommit(manager, loop)
+
+        let second = try committedPixel(manager, CGPoint(x: 30, y: 30))
+        XCTAssertGreaterThan(second.b, 200, "The second fill covers the first: blue, not red")
+        XCTAssertLessThan(second.r, 60)
+        XCTAssertEqual(second.a, 255)
+    }
+
+    /// The same thing through the bucket fill. **It is here because a test that pinned the bucket's
+    /// old order would be encoding the ruling that was just overruled** — one commit path serves both
+    /// modes, and an artist filling the same shape twice does not care which one they used.
+    func testASecondBucketFillCoversTheFirstOnARasterLayer() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.black, rect: CGRect(x: 20, y: 20, width: 20, height: 20)))
+
+        manager.brushColor = Self.red
+        bucketFillAndCommit(manager, at: CGPoint(x: 30, y: 30))
+        XCTAssertGreaterThan(try committedPixel(manager, CGPoint(x: 30, y: 30)).r, 200,
+                             "Fixture check: the first tap is red on the square")
+
+        manager.brushColor = Self.blue
+        bucketFillAndCommit(manager, at: CGPoint(x: 30, y: 30))
+
+        let second = try committedPixel(manager, CGPoint(x: 30, y: 30))
+        XCTAssertGreaterThan(second.b, 200, "The second tap covers the first")
+        XCTAssertLessThan(second.r, 60)
+    }
+
+    /// **"Cover everything" includes the layer's own ink.** The line art here is in `raster`, which is
+    /// the tier the fill used to go underneath — a fixture that painted it into `bakedImage` instead
+    /// would be covered even by the old code and would prove nothing.
+    func testALassoFillCoversTheStrokesOnItsOwnRasterLayer() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        try setStrokeContent(manager, CanvasFixture.solidImage(.black, rect: CGRect(x: 20, y: 20, width: 20, height: 20)))
+
+        manager.brushColor = Self.red
+        lassoFillAndCommit(manager, rectangleLoop(CGRect(x: 8, y: 8, width: 48, height: 48)))
+
+        let onTheInk = try committedPixel(manager, CGPoint(x: 30, y: 30))
+        XCTAssertGreaterThan(onTheInk.r, 200, "The ink the loop enclosed is painted over, not merely surrounded")
+        XCTAssertLessThan(onTheInk.g, 60)
+    }
+
+    /// **The vector half, and the risky one.** A vector fill used to be inserted by kind, which put it
+    /// below every stroke — no ordering of gestures could ever get it above the line art. `addFill`
+    /// now appends, so this asserts both halves of that: the element is last in the display list, and
+    /// the rendered canvas shows the fill's colour where the stroke is.
+    func testALassoFillOnAVectorLayerIsAppendedAboveTheStrokesItCovers() throws {
+        let (manager, canvas) = try vectorSceneManager()
+        XCTAssertEqual(canvas.elements.count, 1, "Fixture check: one stroke, no fills")
+
+        manager.brushColor = Self.red
+        lassoFillAndCommit(manager, rectangleLoop(CGRect(x: 6, y: 6, width: 52, height: 52)))
+
+        XCTAssertEqual(canvas.elements.count, 2, "The fill was added")
+        XCTAssertNotNil(canvas.elements.last?.fill, "…on top of the stroke, not under it")
+        let onTheStroke = try pixelOf(canvas.render(), at: CGPoint(x: 32, y: 32))
+        XCTAssertGreaterThan(onTheStroke.r, 200, "…so the stroke's own pixels come out the fill's colour")
+        XCTAssertLessThan(onTheStroke.g, 60)
+    }
+
+    /// **What appending costs, paid.** The kind-filtered `fills` setter cannot say "put this one back
+    /// on top", so a fills-bucket undo would have restacked an appended fill under the strokes the
+    /// next time the artist pressed Undo then Redo — a silent reordering of their artwork. The fill
+    /// commit swaps the whole element array instead (`registerVectorElementsUndo`); this is the test
+    /// that fails if anyone puts the bucket-shaped undo back.
+    func testUndoAndRedoOfAVectorFillKeepEveryElementsZPosition() throws {
+        let (manager, canvas) = try vectorSceneManager()
+        let before = canvas.elements.map(\.id)
+
+        manager.brushColor = Self.red
+        lassoFillAndCommit(manager, rectangleLoop(CGRect(x: 6, y: 6, width: 52, height: 52)))
+        let after = canvas.elements.map(\.id)
+        XCTAssertEqual(after.count, before.count + 1, "Fixture check: the fill landed")
+
+        manager.undo()
+        XCTAssertEqual(canvas.elements.map(\.id), before, "Undo puts the list back exactly as it was")
+
+        manager.redo()
+        XCTAssertEqual(canvas.elements.map(\.id), after,
+                       "…and redo restores the fill to the z-position it had, on top of the stroke")
+        XCTAssertNotNil(canvas.elements.last?.fill, "…which is the end of the list, not the fills bucket")
+    }
+
+    /// **The half a test of the engine alone would miss.** The preview lives in `Cel.fillImage` and the
+    /// commit flattens into `Cel.raster`; if those two disagree about stacking, the artist watches the
+    /// picture rearrange itself the instant they lift the pencil. Both are read here through
+    /// `PixelOps.rasterize`, which is the one flatten the canvas, the thumbnails and the compositor
+    /// all go through.
+    func testTheLivePreviewShowsTheSameStackingTheCommitProduces() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        try setStrokeContent(manager, CanvasFixture.solidImage(.black, rect: CGRect(x: 20, y: 20, width: 20, height: 20)))
+        let onTheInk = CGPoint(x: 30, y: 30)
+
+        manager.brushColor = Self.red
+        manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 8, y: 8, width: 48, height: 48)))
+        manager.endInteractiveFill()
+        settle()
+
+        let cel = try XCTUnwrap(manager.layers[0].cels.first)
+        XCTAssertNotNil(cel.fillImage, "Fixture check: the preview is installed and nothing is committed yet")
+        let previewed = try pixelOf(PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize, memoize: false),
+                                    at: onTheInk)
+        XCTAssertGreaterThan(previewed.r, 200, "The preview already shows the fill over the ink")
+
+        manager.commitInteractiveFill()
+        let committed = try committedPixel(manager, onTheInk)
+
+        XCTAssertGreaterThan(committed.r, 200, "…and so does the commit")
+        XCTAssertEqual(Int(previewed.r), Int(committed.r), accuracy: 2, "The picture does not change on lift")
+        XCTAssertEqual(Int(previewed.a), Int(committed.a), accuracy: 2)
+    }
+
+    // MARK: Fixtures for §2a
+
+    private static let red = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
+    private static let blue = Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 1)
+
+    /// Puts an image into the cel's **`raster`** tier — the live-stroke tier a fill used to be
+    /// composited underneath. `CanvasFixture.setBakedContent` writes `bakedImage`, which is the tier
+    /// below, and content there was covered by a fill even before this change.
+    private func setStrokeContent(_ manager: CanvasManager, _ image: UIImage) throws {
+        let index = try XCTUnwrap(manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame))
+        manager.layers[0].cels[index].raster = RasterLayerTexture(size: CanvasFixture.canvasSize,
+                                                                  image: image, strokeCount: 1)
+    }
+
+    /// A vector layer holding one opaque black dab at the canvas centre — the "line art" the fill has
+    /// to cover — and the `VectorCanvas` itself, since the tests read the display list back off it.
+    private func vectorSceneManager() throws -> (CanvasManager, VectorCanvas) {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.layers[0].kind = .vector
+        let brush = Brush(name: "Test", shape: .hardRound, size: 20, opacity: 1, flow: 1,
+                          spacingFraction: 0.1, hardness: 1, stabilization: 0, scatter: 0,
+                          rotationJitter: 0, dynamics: .fixed, grain: .disabled, blendMode: .normal)
+        let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                  size: 20, opacity: 1,
+                                  samples: [VectorSample(x: 32, y: 32, pressure: 1),
+                                            VectorSample(x: 32, y: 32, pressure: 1)])
+        let canvas = VectorCanvas(size: CanvasFixture.canvasSize, strokes: [stroke])
+        let index = try XCTUnwrap(manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame))
+        manager.layers[0].cels[index].vector = canvas
+        return (manager, canvas)
+    }
+
+    /// One whole lasso gesture, lifted, settled and committed — what the artist does in one stroke.
+    private func lassoFillAndCommit(_ manager: CanvasManager, _ loop: CGPath) {
+        manager.beginInteractiveLassoFill(path: loop)
+        manager.endInteractiveFill()
+        settle()
+        manager.commitInteractiveFill()
+    }
+
+    private func bucketFillAndCommit(_ manager: CanvasManager, at point: CGPoint) {
+        manager.beginInteractiveFill(at: point)
+        manager.endInteractiveFill()
+        settle()
+        manager.commitInteractiveFill()
+    }
+
+    /// The committed pixel, read out of `raster` — the one tier a raster commit is allowed to land in
+    /// (see `registerUndoableCelChange`), so reading it here is also a check that it landed there.
+    private func committedPixel(_ manager: CanvasManager,
+                                _ point: CGPoint) throws -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
+        let cel = try XCTUnwrap(manager.layers[0].cels.first)
+        return try pixelOf(cel.raster.renderToUIImage(), at: point)
+    }
+
+    private func pixelOf(_ image: UIImage, at point: CGPoint) throws -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
+        let cg = try XCTUnwrap(image.cgImage)
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
+        let i = (Int(point.y) * cg.width + Int(point.x)) * 4
+        return (bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])
     }
 
 

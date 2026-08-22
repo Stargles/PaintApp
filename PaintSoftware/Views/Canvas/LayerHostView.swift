@@ -1,14 +1,16 @@
 import UIKit
 
-/// One slot in the layer stack: a raster fill layer (bucket-fill output for the current cel, pinned
-/// edge-to-edge), and a drawable stroke canvas on top — so fill color always sits visually behind
-/// that layer's own ink strokes. (Inserted photos are vector-layer content — see `VectorCanvas` —
-/// and render as part of `strokeView`'s vector display, not a dedicated image view here.)
+/// One slot in the layer stack: baked raster content at the bottom, a drawable stroke canvas over it,
+/// and the live fill preview pinned edge-to-edge **on top** — a fill covers everything already on the
+/// layer, including that layer's own ink (LASSO_FILL.md §2a). (Inserted photos are vector-layer
+/// content — see `VectorCanvas` — and render as part of `strokeView`'s vector display, not a
+/// dedicated image view here.)
 final class LayerHostView: UIView {
     let fillImageView = UIImageView()
     /// Raster content "baked" into this layer's active cel by a select/move/fill/clear operation
     /// (see `Cel.bakedImage`), or the transient "hole" preview while that cel's content is lifted
-    /// into a floating piece. Sits above `fillImageView`, below `strokeView`'s live strokes.
+    /// into a floating piece. The **bottom** of the three, below `strokeView`'s live strokes and
+    /// below `fillImageView`'s preview.
     let bakedImageView = UIImageView()
     let strokeView = StrokeCanvasView()
 
@@ -41,12 +43,19 @@ final class LayerHostView: UIView {
         fillImageView.layer.magnificationFilter = .nearest
         bakedImageView.layer.magnificationFilter = .nearest
 
-        // `fillImageView` now shows the *live* fill-tool preview (committed fills are baked into
-        // `bakedImage`), so it sits ABOVE `bakedImageView` — a recolour preview has to draw over the
-        // existing baked content it's replacing — and below `strokeView`'s live ink.
+        // `fillImageView` shows the *live* fill-tool preview (a committed fill is flattened into the
+        // cel's `raster` tier), and it is **the topmost of the three**: LASSO_FILL.md §2a — a fill
+        // covers everything already on the layer, earlier fills and this layer's own ink alike. The
+        // preview has to stack the way `commitInteractiveFill` will, or the picture rearranges itself
+        // when the artist lifts the pencil. `PixelOps.rasterizeUncached` draws the same three tiers in
+        // this same order, which is what keeps the live canvas and every flatten of it agreeing.
+        //
+        // Being above `strokeView` costs nothing in touch handling: `UIImageView` is
+        // `isUserInteractionEnabled == false` by default, so it is invisible to hit-testing and the
+        // stroke canvas underneath still receives the first touch of every stroke.
         addSubview(bakedImageView)
-        addSubview(fillImageView)
         addSubview(strokeView)
+        addSubview(fillImageView)
         NSLayoutConstraint.activate([
             fillImageView.topAnchor.constraint(equalTo: topAnchor),
             fillImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -98,7 +107,7 @@ final class LayerHostView: UIView {
     /// The three views that hold this layer's own pixels, and therefore the three that a mask has to
     /// clip. Ordered as they are stacked, which is only for reading — `contentMasks` pairs with this
     /// by index and nothing else depends on the order.
-    private var maskedContentViews: [UIView] { [bakedImageView, fillImageView, strokeView] }
+    private var maskedContentViews: [UIView] { [bakedImageView, strokeView, fillImageView] }
 
     /// One mask layer per content view. **Three, not one shared**: `CALayer.mask` takes ownership the
     /// way a superlayer does, so assigning a single layer to three masks would move it to the third

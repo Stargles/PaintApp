@@ -276,10 +276,23 @@ enum PixelOps {
         let vectorImage = cel.vector?.render(quality: quality)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { _ in
-            cel.fillImage?.draw(in: bounds)
             cel.bakedImage?.draw(in: bounds)
             strokesImage.draw(in: bounds)
             vectorImage?.draw(in: bounds)
+            // **`fillImage` is last, and that is the whole of LASSO_FILL.md §2a on the preview side.**
+            // A fill covers everything already on the cel, so the live preview has to stack the way
+            // the commit will (`commitInteractiveFill` composites the preview over the raster tier) or
+            // the artist watches the picture rearrange itself when they lift the pencil.
+            //
+            // Only the *live* preview is ever in this tier: every commit path passes `newFill: nil`
+            // (see `registerUndoableCelChange`), so a cel at rest has `fillImage == nil` and nothing
+            // else that flattens a cel — thumbnails, onion skin, export, Move's lift, the merge — sees
+            // any difference from this line at all.
+            //
+            // It also settles a disagreement that predates the fill ruling: `LayerHostView` has stacked
+            // `fillImageView` above `bakedImageView` since the fill preview became a recolour preview,
+            // while this drew it below. The two now agree, in the one order the commit produces.
+            cel.fillImage?.draw(in: bounds)
         }
     }
 

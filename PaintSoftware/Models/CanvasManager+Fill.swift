@@ -447,24 +447,37 @@ extension CanvasManager {
                   let bytes = regionBytes, regionW > 0, regionH > 0,
                   let path = PixelOps.pathFromAlphaMask(bytes: bytes, width: regionW, height: regionH,
                                                         minimumAlpha: coverageCut) else { return }
-            let fillsBefore = vectorCanvas.fills
+            // The whole display list, not `vectorCanvas.fills`: `addFill` appends the new element on
+            // top of the strokes (LASSO_FILL.md §2a), so the list is no longer kind-sorted and a
+            // fills-bucket undo would have to invent a z-position for the fill it puts back — see
+            // `registerVectorElementsUndo`.
+            let elementsBefore = vectorCanvas.elements
             // The mask is measured against the *rendered* canvas, so it's canvas-space — this
             // overload maps it back through the layer's transform (see its doc comment).
             vectorCanvas.addFill(canvasSpacePath: path, color: fillColor)
-            registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                   layerID: layerID, celID: celID, label: label)
+            registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
+                                       newElements: vectorCanvas.elements,
+                                       layerID: layerID, celID: celID, label: label)
         } else {
             let cel = layers[layerIndex].cels[celIndex]
             guard let preview = cel.fillImage else { return }
-            // --- Raster path: flatten into `raster` directly ---
+            // --- Raster path: flatten into `raster` directly, with the fill on top ---
             // `fillGestureBaseBaked` is only the pre-gesture `bakedImage` tier (see where it's
-            // captured in `beginInteractiveFill`); the live raster strokes sit *above* both baked and
-            // fill in render order (see `PixelOps.rasterize`), so they have to be composited back on
-            // top explicitly here rather than just carried over via `newRaster: cel.raster` — leaving
-            // the fill's own pixels stuck underneath a `raster` tier the eraser stamps into but the
-            // fill itself never touched.
-            let belowStrokes = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: preview)
-            let finalImage = PixelOps.compositeOver(base: belowStrokes, overlay: cel.raster.renderToUIImage())
+            // captured in `beginInteractiveFill`), so the cel's existing content is that tier with
+            // the live raster strokes composited over it. Both are rebuilt here rather than carried
+            // over via `newRaster: cel.raster`, or the fill's own pixels would be stuck underneath a
+            // `raster` tier the eraser stamps into but the fill itself never touched.
+            //
+            // **The preview goes on last — LASSO_FILL.md §2a, and it is the owner's bug.** It used to
+            // be composited *under* the raster tier, and a committed fill is itself folded into that
+            // tier by this same line (`newRaster:` below, `newBaked: nil`), so a second fill over the
+            // first went underneath it and was invisible: *"I cannot fill over things that already
+            // have been filled."* The same ordering also kept the layer's own line art on top of the
+            // fill, which the owner overruled in the same breath — *"Cover everything."* One order,
+            // both symptoms, one fix. `PixelOps.rasterizeUncached` draws the live preview last for
+            // the same reason, so the picture does not rearrange itself when the pencil lifts.
+            let existing = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: cel.raster.renderToUIImage())
+            let finalImage = PixelOps.compositeOver(base: existing, overlay: preview)
             registerUndoableCelChange(layerID: layerID, celID: celID,
                                       oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,
                                       newRaster: bakedRasterTexture(image: finalImage, likeExisting: cel.raster),
@@ -593,25 +606,6 @@ extension CanvasManager {
     /// The smallest area, in canvas pixels of the rasterised loop, a lasso must enclose before it
     /// counts as an edit — LASSO_FILL.md §4 case 13's "under 4 px²".
     static let lassoFillMinimumArea = 4
-
-    /// Registers one undo step that swaps a vector layer's `.fills` between `oldFills`/`newFills` —
-    /// used by an adjustable-fill commit and by Fill/Clear-on-selection for vector layers (see
-    /// `SelectionModels.swift`). Resolves the cel by ID (not a captured index) when the thumbnail
-    /// regen fires, since other structural edits may have shifted indices by then.
-    func registerVectorFillUndo(vectorCanvas: VectorCanvas,
-                                oldFills: [VectorFillElement], newFills: [VectorFillElement],
-                                layerID: UUID, celID: UUID, label: HistoryActionLabel) {
-        let cost = (oldFills.count + newFills.count) * 512
-        recordUndo(label: label, cost: cost, undo: { [weak self] in
-            vectorCanvas.fills = oldFills
-            vectorCanvas.bumpVersion()
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        }, redo: { [weak self] in
-            vectorCanvas.fills = newFills
-            vectorCanvas.bumpVersion()
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        })
-    }
 
     /// Abandons the interactive fill without committing, discarding the preview. Used when an undo/redo
     /// tap takes over, or via `cancelInteractiveFillDrag` when a two-finger transform starts mid-drag.

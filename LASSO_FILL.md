@@ -28,28 +28,62 @@ Three corrections, all small:
 2. **The seeds are not "the lasso wall" but "the passable pixels just inside the lasso wall."** A stretch of loop lying on ink contributes no seed. This is not an error condition (§4, case 1).
 3. **Reject the fallback.** The obvious objection — "circling blank paper fills nothing, so fall back to filling the loop's own shape" — should be refused, and the owner has already ruled that way. Reasons in §4, case 6/11.
 
-## 2a. What "filled over" means, and what the owner ruled on 2026-08-21
+## 2a. Where a fill lands in the stack: on top of everything already on the layer
 
-The original requirement was the owner's own: *"all inner lines are filled over."* Asked directly
-whether it should hold when the line art sits on the **same layer** being filled — where a raster
-fill composites beneath that cel's own strokes, and a vector fill renders beneath strokes by kind
-order — they ruled:
+The original requirement was the owner's own: *"all inner lines are filled over."* On 2026-08-21 they
+were asked whether it should hold when the line art sits on the **same layer** being filled, and
+ruled that it need not. Later the same day, having tested it on the device, **they overruled
+themselves**:
 
-> *"if the line art is on the same layer I am filling, its okay that the lineart is not filled over,
-> in fact I'd rather keep it that way."*
+> *"after some testing, I've discovered I cannot fill over things that already have been filled. This
+> was previously intended behaviour to stop it from bleeding over lines in the same layer, but thats
+> discarded now because I want to be able to lasso fill many times over each other."*
 
-**So the shipped behaviour is correct and the two BUGS.md entries that tracked it are closed as
-not-a-defect, not deferred.** Do not "fix" this later; it is the intended result.
+and, asked directly whether a fill covering earlier content should also cover line art on the same
+layer:
 
-The distinction that still matters, and which this ruling does **not** touch: **the filled *region*
-must still extend underneath the ink.** `fill = loopMask ∧ ¬reached` includes wall pixels, and that
-is what stops a halo of unfilled paper appearing along every antialiased edge. Lines staying
-*visible* is a compositing outcome; the region stopping short of them would be a defect. Keep the
-region as it is.
+> *"The previous decision is overruled as I tested it. **Cover everything.**"*
+
+**So: a committed fill lands on top of everything already on that cel — earlier fills, and that
+layer's own line art. Both fill modes, both layer kinds.** That is the ruling; the paragraph this
+section used to carry is wrong and is gone rather than annotated.
+
+**The two halves were never separable, which is why the first ruling could not survive contact with
+the tool.** One decision — *where in the stack a committed fill goes* — produced both outcomes. A
+raster fill was flattened *underneath* the cel's whole `raster` tier, and a committed fill is itself
+folded into that tier, so fill #2 went under fill #1 and was invisible: the artist's report. A vector
+fill was inserted by kind order, below every stroke, so it could never reach the line art either.
+Keeping the half the owner had accepted (line art survives a fill) meant keeping the half they were
+reporting as a bug (a fill cannot be painted over). Filling twice over the same place is the ordinary
+way an artist works up a colour; a line that survives being deliberately painted over is a tool that
+refuses an instruction.
+
+**Where the ordering now lives** — three places, and they have to agree or the picture changes on
+lift:
+
+- **Raster commit.** `CanvasManager+Fill.commitInteractiveFill` composites the preview *last*, over
+  the baked tier and the live strokes, instead of first.
+- **Vector commit.** The fill is **appended to the end of the display list** rather than inserted at
+  its kind's index. `VectorCanvas.upsertText` already appends past the kind-sorted invariant for the
+  same reason (a new object goes on top of what is there), so the precedent and its consequences were
+  already understood. Because an appended fill breaks the assumption the kind-filtered `fills` setter
+  used to make, the fill commit's undo swaps the **whole element array** — exactly what
+  `registerVectorElementsUndo` was already doing for text — and the setter's splice is positional, so
+  a get→set round trip is the identity for a scattered list as well as a contiguous one.
+- **The live preview.** The `fillImage` tier draws *last* in `PixelOps.rasterize` and in
+  `ThumbnailRenderer`, and `fillImageView` sits above `strokeView` in `LayerHostView`. The preview and
+  the commit must show the same stacking or the artist watches the picture change when they lift the
+  pencil.
+
+The distinction this does **not** touch: **the filled *region* still extends underneath the ink.**
+`fill = loopMask ∧ ¬reached` includes wall pixels, and that is what stops a halo of unfilled paper
+appearing along every antialiased edge. Where the fill *draws* is a compositing decision; how far the
+region *reaches* is the algorithm's, and the region is unchanged.
 
 The practical consequence for the artist: a lasso spanning several compartments on one layer fills
-all of them, and the dividers stay drawn on top — which is what they want. On the ordinary workflow
-(line art on its own layer above the colour) the outcome is the same, for a different reason.
+all of them solid, dividers included, and a second lasso over the same place replaces the first. On
+the ordinary workflow (line art on its own layer above the colour) nothing visible changes at all —
+the line art is on a different layer and is composited above this one regardless.
 
 ## 3. The rule, for an artist
 
@@ -82,7 +116,7 @@ That paragraph has no branch and it is the complete rule. Every case in §4 is a
 Two deliberate divergences from Krita:
 
 - **We do not ship "All Regions."** That is Krita's "most basic option" and it is precisely the seed-inside-and-grow behaviour that produced this bug report. Offering it as a mode would re-expose the defect under a friendly name.
-- **We paint over inner lines.** Krita fills regions and leaves the line art standing. The owner's requirement is a solid paint-over, which we get by including wall pixels in the complement. This is the single biggest behavioural difference from all prior art and it is deliberate.
+- **We paint over inner lines, and over whatever else is on the layer.** Krita fills regions and leaves the line art standing. The owner's requirement is a solid paint-over, which we get in two independent steps: including wall pixels in the complement makes the *region* cover the ink (§6 step 4), and compositing the result on top of the cel makes it *draw* over the ink and over any earlier fill (§2a). This is the single biggest behavioural difference from all prior art and it is deliberate.
 
 **Clip Studio Paint** ships the tool Krita reverse-engineered. Its target-colour options are "Area surrounded by black" / "Area surrounded by transparent," and its **Close gap** setting "fills by closing gaps of up to a specified number of pixels" — an independent, orthogonal knob, exactly as here (https://help.clip-studio.com/en-us/manual_en/420_fill/Advanced_Fill.htm, https://www.clip-studio.com/site/gd_en/csp/toolguide/csp_toolguide/100_reference/Closedareafill.htm). CSP's *interior algorithm is not documented anywhere*, official or third-party — that is a real dead end, not a search failure, and Krita's design doc is the best available proxy precisely because its author derived it from testing CSP.
 
@@ -131,7 +165,7 @@ The filled shape therefore inherits the artwork's own edge softness: the outer f
 
 Both sliders therefore move the lasso fill in the artist-facing direction the bucket fill moves it: **Gap Closing up bridges wider gaps, Edge Overlap up makes the fill bigger.** They are *not* pixel-identical between the modes and are not meant to be — the owner ruled explicitly that "align with normal fill behaviour" does not mean pixel-perfect, and that gap closing growing the lasso's result while it shrinks the bucket's is intended: dilating the wall set confines a flood and confines the *collar*, and confining the collar is what leaves more to fill.
 
-**Step 8 — composite.** `fillAlpha × fillColor` onto the active layer with the tool's blend mode. One undo entry per fill.
+**Step 8 — composite, on top.** `fillAlpha × fillColor` onto the active layer with the tool's blend mode, **over everything already on that cel** — earlier fills and the layer's own line art alike (§2a). One undo entry per fill. The live preview stacks the same way, or the picture would change on lift.
 
 ## 7. When there is nothing to fill
 
@@ -161,7 +195,6 @@ A leak still announces itself, just differently: only the line gets coloured. Wh
 
 **Needs the owner's eye on the device, not a test:**
 
-- **Paint-over destroys the outline on a single-layer sketch.** Since the complement includes the silhouette's ink, filling on the *same* layer as the line art consumes the outline and the shape becomes a solid blob. That is the literal reading of "all inner lines are filled over," but the owner should see it happen on real artwork before we call it settled. The likely resolution is that this tool defaults to filling on a layer *beneath* the line art — that is a product decision, not an algorithm change, and it should not be guessed.
 - **The collar tint on failure** — whether it reads as a helpful diagnostic or as a rendering glitch is a judgement only the owner can make, on the device, with the tint colour and duration in front of them.
 - **Tolerance and Spread against the owner's actual brushes.** GIMP documents that textured brushes wreck this class of algorithm — "creates excessive keypoints… potentially slowing processing and generating spurious closed zones" (https://developer.gimp.org/core/algorithm/line-art-bucket-fill/). A clean simulator test with a hard round brush proves nothing about a textured pencil. This must be exercised with the owner's real line art.
 - **Non-zero winding on a self-crossing loop** is correct by construction but "does it feel right when I overshoot" is not unit-testable.

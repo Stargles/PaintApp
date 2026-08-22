@@ -27,8 +27,9 @@ import SwiftUI
 
 /// One leaf's pixels for one frame: already composited down to a single image, and owned outright.
 ///
-/// The flattening (fill wash → baked → live strokes → vector) is `PixelOps.rasterize(cel:)`'s job and
-/// stays there — it sits *below* the compositor (§2) and has ~10 other callers. What this type adds
+/// The flattening (baked → live strokes → vector → the live fill preview on top) is
+/// `PixelOps.rasterize(cel:)`'s job and stays there — it sits *below* the compositor (§2) and has
+/// ~10 other callers. What this type adds
 /// is the ownership guarantee: by the time a `RenderRequest` exists, every leaf is a `CGImage` that
 /// no live object can mutate.
 struct LayerRenderSource {

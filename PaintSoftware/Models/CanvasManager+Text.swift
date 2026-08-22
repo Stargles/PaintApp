@@ -346,28 +346,33 @@ extension CanvasManager {
         let changed = vectorCanvas.commitTextEdit(editingID: editingID, element: element)
         guard changed else { return }
 
-        registerVectorTextUndo(vectorCanvas: vectorCanvas, oldElements: before,
-                               newElements: vectorCanvas.elements, layerID: layerID, celID: celID,
-                               label: editingID == nil ? .addText : .editText)
+        registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: before,
+                                   newElements: vectorCanvas.elements, layerID: layerID, celID: celID,
+                                   label: editingID == nil ? .addText : .editText)
         // Committing never goes through `strokeEnded`, so the layer panel keeps showing the cel as
         // it was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.
         scheduleThumbnailRegen(layerID: layerID, celID: celID)
     }
 
-    /// `registerVectorFillUndo`'s twin, with one deliberate difference: it swaps the **whole
-    /// `elements` array** rather than one kind-filtered bucket.
+    /// One undo step that swaps a vector canvas's **whole `elements` array** between two snapshots.
     ///
-    /// The kind-filtered setters gather every element of their kind back at the first one's index, so
-    /// a get→set round trip over a list where text is interleaved with strokes is order-stable only
-    /// for the bucket as a whole. Text *is* interleaved by construction — `upsertText` appends a new
-    /// object above whatever strokes are already there — so an undo through `texts` could quietly
-    /// move an object's z-position. The whole-array swap has nothing to reconstruct.
+    /// **The kind-filtered setters cannot express what these callers do.** Text is interleaved with
+    /// strokes by construction (`upsertText` appends a new object above whatever is already there) and
+    /// since 2026-08-21 so are fills (`addFill` appends — LASSO_FILL.md §2a). `splicing` preserves the
+    /// z-position of every element that still exists, but an undo *adds* or *removes* one, and there
+    /// is no position to preserve for an element that is not in the list yet: a bucket-shaped undo has
+    /// to guess, and it guessed "at the first one's index", which would drag a fill the artist had
+    /// just put on top back underneath the line art. The whole-array swap has nothing to reconstruct.
+    ///
+    /// Used by the text commit, by both fill commits (adjustable and Fill-on-selection) and by
+    /// Clear-on-selection. Resolves the cel by ID (not a captured index) when the thumbnail regen
+    /// fires, since other structural edits may have shifted indices by then.
     ///
     /// Coarse-grained is what every other element kind already does; this adds no new undo machinery,
     /// only a wider slice of the same one.
-    func registerVectorTextUndo(vectorCanvas: VectorCanvas,
-                                oldElements: [VectorElement], newElements: [VectorElement],
-                                layerID: UUID, celID: UUID, label: HistoryActionLabel) {
+    func registerVectorElementsUndo(vectorCanvas: VectorCanvas,
+                                    oldElements: [VectorElement], newElements: [VectorElement],
+                                    layerID: UUID, celID: UUID, label: HistoryActionLabel) {
         let cost = (oldElements.count + newElements.count) * 512
         recordUndo(label: label, cost: cost, undo: { [weak self] in
             vectorCanvas.elements = oldElements

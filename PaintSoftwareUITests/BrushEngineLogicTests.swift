@@ -455,10 +455,12 @@ final class BrushEngineLogicTests: XCTestCase {
         }
     }
 
-    /// The setter contract on an empty bucket. `registerVectorFillUndo`'s redo does
-    /// `canvas.fills = newFills` on a canvas whose fills the matching undo just removed, so "there were
-    /// none of this kind" cannot mean "append at the end" — that would put a redone flood fill *above*
-    /// the strokes it originally went under.
+    /// The setter contract on an empty bucket: with no existing element of that kind there is no
+    /// position to preserve, so the positional splice falls back to `insertionIndex` and the fill goes
+    /// under the strokes. That is the right answer for the one thing still reconstructing a list this
+    /// way — a legacy project whose fills were all beneath the line art — and it is why fill *undo*
+    /// does not go through this setter at all any more: an appended fill has a z-position this cannot
+    /// recover, so `registerVectorElementsUndo` swaps the whole array instead.
     func testAssigningFillsToACanvasWithNoneKeepsThemBeneathTheStrokes() {
         let stroke = centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stroke(stroke)])
@@ -468,18 +470,21 @@ final class BrushEngineLogicTests: XCTestCase {
                        "A fill assigned back onto a canvas that currently has none belongs under the strokes, matching addFill")
     }
 
-    /// Every `add…` keeps the legacy fills→images→strokes z-order, which is what makes Phase 1 free of
-    /// visible change: flood-filling after drawing a line still puts the fill *under* the line. A naive
-    /// append into one list would cover the line up.
-    func testAddingElementsPreservesTheLegacyFillsThenImagesThenStrokesOrder() {
+    /// `addStroke` and `addImage` still insert by kind, keeping the legacy images→strokes z-order —
+    /// **`addFill` no longer does, and the change is deliberate.** It appends, so a fill lands on top
+    /// of what is already on the layer (LASSO_FILL.md §2a, the owner's *"Cover everything"* of
+    /// 2026-08-21); this used to assert `["fill", "image", "stroke", "stroke"]` on the same four calls,
+    /// from when a fill drawn after a line was required to go *under* it.
+    func testAddingElementsKeepsTheKindOrderExceptForAFillWhichGoesOnTop() {
         let canvas = VectorCanvas(size: Self.canvasSize)
         canvas.addStroke(centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1)))
         canvas.addFill(opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1)))
         canvas.addImage(placedImage(.green))
         canvas.addStroke(centreStroke(CodableColor(red: 1, green: 1, blue: 0, alpha: 1)))
 
-        XCTAssertEqual(kinds(canvas.elements), ["fill", "image", "stroke", "stroke"],
-                       "Adds are sorted by kind, so content built through the public API renders in the pre-display-list order")
+        XCTAssertEqual(kinds(canvas.elements), ["image", "stroke", "fill", "stroke"],
+                       "The fill sits where the artist put it — above the stroke that was already "
+                       + "there — while the other two adds still sort by kind")
     }
 
     // MARK: - Display list: `StrokeComposite` decoding

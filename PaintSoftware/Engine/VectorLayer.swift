@@ -255,9 +255,10 @@ final class VectorCanvas {
 
     // MARK: - Kind-filtered compatibility accessors
     //
-    // Getters filter the display list; setters splice: remove every element of that kind, then insert
-    // the new list at the index the first removed element occupied, so a get→set round trip is
-    // order-stable (undo/redo depends on this). Setters do not invalidate — callers follow with
+    // Getters filter the display list; setters splice **positionally** — the i-th element of that kind
+    // is replaced where it already sits — so a get→set round trip is the identity even for a kind that
+    // is interleaved with others, which fills and text both are (`addFill`, `upsertText`). See
+    // `splicing` for the two ragged cases. Setters do not invalidate — callers follow with
     // `bumpVersion()`.
 
     var strokes: [VectorStroke] {
@@ -289,12 +290,11 @@ final class VectorCanvas {
 
     /// The layer's text objects, back to front.
     ///
-    /// The setter obeys the same splice contract as the three above — and inherits the same caveat,
-    /// which matters more here than for fills: text elements interleaved with strokes are gathered
-    /// back at the *first* one's index, so a get→set round trip on an interleaved list is order-
-    /// stable only for the bucket as a whole. `commitInteractiveText` therefore does **not** use this
-    /// setter; it upserts through `upsertText(_:)` and undoes by swapping the whole `elements` array,
-    /// which preserves every element's exact z-position (`registerVectorTextUndo`).
+    /// The setter obeys the same splice contract as the three above. `commitInteractiveText` does
+    /// **not** use it: it upserts through `upsertText(_:)` and undoes by swapping the whole `elements`
+    /// array (`registerVectorElementsUndo`), which is what a *shorter* or *longer* list needs — the
+    /// positional splice can only preserve the z-positions of elements that already exist. Every fill
+    /// mutation goes the same way, for the same reason.
     var texts: [VectorTextElement] {
         get { lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.text) }
         set {
@@ -421,6 +421,13 @@ final class VectorCanvas {
     /// It does not mean text draws under strokes: `upsertText` appends a brand-new text object to the
     /// end of the list (see there), so text and strokes stack in the order the artist made them. The
     /// rawValue governs *insertion arithmetic*, not z-order.
+    ///
+    /// **`.fill` is in the same position as `.text`: numbered low, but appended.** `addFill` appends
+    /// too, since LASSO_FILL.md §2a — a fill covers everything already on the layer. The rawValue
+    /// still decides where a fill goes when something *reconstructs* the list without knowing the
+    /// original z-position (the `fills` setter on an empty bucket, `init(size:strokes:fills:images:)`
+    /// on a legacy project), and "under the strokes" is the right answer there because that is where
+    /// those documents' fills were.
     private enum Kind: Int {
         case fill = 0
         case image = 1
@@ -437,29 +444,51 @@ final class VectorCanvas {
         }
     }
 
-    /// Where a newly added element of `kind` belongs: after every element of the same or lower kind,
-    /// before the first of a higher one. Reproduces the legacy fills→images→strokes z-order while the
-    /// list stays capable of arbitrary z-position, which the eraser needs. Assumes the list is kind-sorted.
+    /// Where a newly added element of `kind` belongs: before the first element of a higher kind.
+    /// Reproduces the legacy images→strokes z-order while the list stays capable of arbitrary
+    /// z-position, which the eraser needs.
+    ///
+    /// **It no longer assumes the list is kind-sorted, because it is not** — `upsertText` and (since
+    /// LASSO_FILL.md §2a) `addFill` both append past this. Its two remaining callers are unaffected by
+    /// that: `.stroke` is the highest kind, so a stroke appends whatever else is in the list, and an
+    /// image goes below the first stroke, which is where an image has always gone. Read it as "below
+    /// the first higher-kind element", not as an index into a sorted list.
     private static func insertionIndex(forKind kind: Kind, in elements: [VectorElement]) -> Int {
         elements.firstIndex { Self.kind(of: $0).rawValue > kind.rawValue } ?? elements.count
     }
 
     /// The `strokes`/`fills`/`images` setter contract — see the comment above those accessors.
+    ///
+    /// **Positional, not bucketed, and that is what makes it safe now that fills are appended.** The
+    /// old version gathered every element of `kind` back at the index the *first* one occupied, which
+    /// round-tripped exactly only while each kind sat in one contiguous run. `addFill` appends
+    /// (LASSO_FILL.md §2a), so fills are interleaved with strokes by construction and that assumption
+    /// is gone: a get→set through `fills` would have dragged a fill the artist put on top back under
+    /// the line art. Replacing the i-th element of the kind with the i-th replacement, where it
+    /// already sits, is the identity for *any* arrangement.
+    ///
+    /// The two ragged cases keep the old behaviour, because there is no position to preserve: extra
+    /// replacements go after the last one written, or — when the bucket was empty — at
+    /// `insertionIndex`, which is what puts a restored fill back under the strokes on a legacy
+    /// document. A shorter list drops the trailing slots.
     private static func splicing(_ elements: [VectorElement], kind: Kind,
                                  with replacements: [VectorElement]) -> [VectorElement] {
-        var kept: [VectorElement] = []
-        kept.reserveCapacity(elements.count)
-        var firstRemoved: Int?
+        var result: [VectorElement] = []
+        result.reserveCapacity(max(elements.count, replacements.count))
+        var next = 0
+        var afterLastReplaced: Int?
         for element in elements {
-            if Self.kind(of: element) == kind {
-                if firstRemoved == nil { firstRemoved = kept.count }
-            } else {
-                kept.append(element)
-            }
+            guard Self.kind(of: element) == kind else { result.append(element); continue }
+            guard next < replacements.count else { continue }   // the new list is shorter
+            result.append(replacements[next])
+            next += 1
+            afterLastReplaced = result.count
         }
-        kept.insert(contentsOf: replacements,
-                    at: firstRemoved ?? Self.insertionIndex(forKind: kind, in: kept))
-        return kept
+        if next < replacements.count {
+            result.insert(contentsOf: replacements[next...],
+                          at: afterLastReplaced ?? Self.insertionIndex(forKind: kind, in: result))
+        }
+        return result
     }
 
     /// Caller must hold `lock`.
@@ -571,10 +600,25 @@ final class VectorCanvas {
         invalidate()
     }
 
+    /// Puts a fill **on top of everything already on this canvas** — appended to the end of the
+    /// display list, not inserted at `Kind.fill`'s index.
+    ///
+    /// **This is LASSO_FILL.md §2a, and it is the owner's ruling of 2026-08-21: *"Cover
+    /// everything."*** Inserting by kind put every fill below every stroke, so a second fill could
+    /// not cover the first (the reported bug) and no fill could ever cover the layer's own line art
+    /// (which the owner had provisionally accepted, then overruled after testing). `upsertText`
+    /// already appends past the kind order for the same reason — a new object goes above what is
+    /// there — so this is that precedent, not a new one.
+    ///
+    /// **What appending costs, and why it is paid.** The display list is no longer sorted by kind, so
+    /// the kind-filtered `fills` setter can no longer reconstruct z-positions from a bucket. Two
+    /// things answer that: `splicing` is positional (see there), and every fill mutation registers
+    /// undo through `CanvasManager.registerVectorElementsUndo`, which swaps the whole array and has
+    /// nothing to reconstruct. Do not reintroduce a fills-bucket undo on top of this.
     func addFill(_ element: VectorFillElement) {
         lock.lock()
         defer { lock.unlock() }
-        _elements.insert(.fill(element), at: Self.insertionIndex(forKind: .fill, in: _elements))
+        _elements.append(.fill(element))
         invalidate()
     }
 
@@ -702,12 +746,14 @@ final class VectorCanvas {
     /// Adds a fill whose path was captured in **canvas** space — where the flood-fill mask, the lasso,
     /// and every other on-screen path are measured — mapping it into this canvas's local space first,
     /// or it would go through `transform` twice at render time.
+    ///
+    /// On top of everything already here, for the reasons `addFill(_:)` gives.
     func addFill(canvasSpacePath path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) {
         lock.lock()
         defer { lock.unlock() }
         let fill = VectorFillElement(path: Self.localPath(path, through: _transform), color: color,
                                      opacity: opacity, evenOddFill: evenOddFill)
-        _elements.insert(.fill(fill), at: Self.insertionIndex(forKind: .fill, in: _elements))
+        _elements.append(.fill(fill))
         invalidate()
     }
 

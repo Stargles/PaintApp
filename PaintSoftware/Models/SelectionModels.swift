@@ -385,7 +385,10 @@ extension CanvasManager {
         let cel = layers[currentLayerIndex].cels[celIndex]
         let isVector = layers[currentLayerIndex].kind == .vector
         if isVector, let vectorCanvas = cel.vector {
-            let fillsBefore = vectorCanvas.fills
+            // Whole-list snapshots, because `addFill` appends on top of the strokes — LASSO_FILL.md
+            // §2a's *"cover everything"*, which is one rule for the word "Fill" whether it arrives
+            // from the fill tool or from this menu command. See `registerVectorElementsUndo`.
+            let elementsBefore = vectorCanvas.elements
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
             brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
             // `selection.path` is in canvas space, like every on-screen path — see
@@ -393,8 +396,9 @@ extension CanvasManager {
             vectorCanvas.addFill(canvasSpacePath: selection.path,
                                  color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
-            registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                   layerID: layers[currentLayerIndex].id, celID: cel.id, label: .fill)
+            registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
+                                       newElements: vectorCanvas.elements,
+                                       layerID: layers[currentLayerIndex].id, celID: cel.id, label: .fill)
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.fill(base: base, path: selection.path, color: PixelOps.uiColor(from: brushColor))
@@ -415,21 +419,26 @@ extension CanvasManager {
         let cel = layers[currentLayerIndex].cels[celIndex]
         let isVector = layers[currentLayerIndex].kind == .vector
         if isVector, let vectorCanvas = cel.vector {
-            let fillsBefore = vectorCanvas.fills
             // Stored fill paths are local-space; `selection.path` is canvas-space. Punching the hole
             // needs both in the same frame, so map the selection down rather than the fills up.
             let localExclusion = vectorCanvas.localPath(fromCanvas: selection.path)
-            var newFills: [VectorFillElement] = []
-            for fill in fillsBefore {
-                guard let path = fill.cgPath else { continue }
+            // Rewritten **in place** in the display list rather than gathered into a `fills` array and
+            // assigned back. Since `addFill` appends (LASSO_FILL.md §2a) a canvas can hold fills above
+            // and below the same stroke, and a clear must not be what silently restacks them.
+            let elementsBefore = vectorCanvas.elements
+            var newElements = elementsBefore
+            for (index, element) in elementsBefore.enumerated() {
+                guard let fill = element.fill, let path = fill.cgPath else { continue }
                 let clipped = Self.clipPath(path, excluding: localExclusion)
-                newFills.append(VectorFillElement(path: clipped, color: fill.color, opacity: fill.opacity, evenOddFill: true))
+                newElements[index] = .fill(VectorFillElement(path: clipped, color: fill.color,
+                                                             opacity: fill.opacity, evenOddFill: true))
             }
-            vectorCanvas.fills = newFills
+            vectorCanvas.elements = newElements
             vectorCanvas.bumpVersion()
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
-            registerVectorFillUndo(vectorCanvas: vectorCanvas, oldFills: fillsBefore, newFills: vectorCanvas.fills,
-                                   layerID: layers[currentLayerIndex].id, celID: cel.id, label: .clearSelection)
+            registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
+                                       newElements: vectorCanvas.elements,
+                                       layerID: layers[currentLayerIndex].id, celID: cel.id, label: .clearSelection)
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.clear(base: base, path: selection.path)
