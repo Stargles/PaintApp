@@ -54,14 +54,27 @@ tools on a **vector layer**, framed as "isn't inline" with how they should work)
 
 New this pass (owner, 2026-08-22, given while the lasso Edge Overlap rebuild was in flight):
 
-- [ ] **(e) Dragging the *line* of a smart ellipse or circle should move the whole shape**, the way
-      dragging a line's or a rectangle's body already does — only the nodes should resize it. Owner:
-      *"after you make a smartshape elipse or circle, selecting the line (not the node) of the circle
-      should move the entire shape, same as line and rectangle."* So this is an inconsistency between
-      shape kinds rather than a missing feature: find what the line and rectangle cases hit-test that
-      the ellipse case does not. `ShapeGeometry.draggingEdge(_:to:anchor:)`
-      ([ShapeGeometry.swift:438](PaintSoftware/Engine/ShapeGeometry.swift:438)) is where an edge drag
-      is interpreted; the hit test that decides *edge versus body* is the thing to look at first.
+- [ ] **(e) Dragging a smart shape's outline should move the whole shape — for every shape kind,
+      none of which can do it today.** Owner, 2026-08-22: *"after you make a smartshape elipse or
+      circle, selecting the line (not the node) of the circle should move the entire shape, same as
+      line and rectangle"* — then, correcting the reading that this was an inconsistency between
+      kinds: *"negative, a line and rectangle also dont move when the line (not node) is pressed and
+      dragged. Instead it just creates a line (pencil), or does nothing (finger). I want both to be
+      able to move."* So **no shape kind supports a body drag** and all of them should: nodes resize,
+      the outline moves.
+      **The failure mode is the lead.** A pencil drag on the outline *draws a new stroke* and a finger
+      drag does nothing, which says the touch is not being claimed by the shape at all — the shape's
+      hit test covers its nodes and everything else falls through to the canvas, where the pencil-only
+      setting then decides whether a brush stroke happens. So this is a hit-test and
+      touch-ownership question first and a geometry question second;
+      `ShapeGeometry.draggingEdge(_:to:anchor:)`
+      ([ShapeGeometry.swift:438](PaintSoftware/Engine/ShapeGeometry.swift:438)) is what an outline
+      drag would eventually call, but nothing is reaching it. Worth checking against
+      `ObjectTransformOverlayView`, which solved the same class of problem for the Move box — grips in
+      screen points, nearest-within-reach hit testing, and raw `touchesBegan/Moved/Ended` so a drag
+      bites on the first pixel — and which deliberately declines touches it has no target for. An
+      outline is a stroked path, so "within reach of the outline" wants the same reach treatment the
+      grips got, in screen points rather than canvas points.
 
 - [ ] **(f) The "cut" eraser has no live feedback — it only applies on lift.** Owner: *"the to cut
       eraser does not have live feedback like the to cross eraser, it only applies when the eraser is
