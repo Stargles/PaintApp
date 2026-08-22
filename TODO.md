@@ -20,7 +20,7 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- **(h) the pick tool is dead while the Select panel is open** — `tmp/pickselect`.
+- **(a) the lasso move** — being designed.
 
 ## Queued
 
@@ -37,6 +37,33 @@ tools on a **vector layer**, framed as "isn't inline" with how they should work)
       it out for text — "it's okay if it moves text whole," since splitting a `TextFrame` mid-glyph is
       not a sane operation.**
 ## Done this pass
+
+- **(h) The pick tool works while the Select panel is open** (`dd89769`). Owner: *"The pick tool does not work
+  when the lasso select tool is selected."* Reported first as a fill-tool problem, withdrawn as a false alarm,
+  then reproduced exactly — **the fill tool was never involved.** There is no `.select` case in `Tool`, so "the
+  lasso select tool" is a *panel*: `activePanel == .select` disabled the eyedropper's recognizer while the
+  selection overlay went on capturing, because its own gate never consulted `selectedTool`. Recognizer off,
+  overlay eating the tap, and arming the dropper does not close the panel, so nothing re-enabled it.
+
+  Fixed as **one shared `isEyedropperArmed` read by both sites**, not two edited conditions — the defect was
+  precisely that the two disagreed and left the touch owned by nobody, and separate spellings can drift back
+  into both-live (two recognizers racing one tap) or both-dead.
+
+  **A fourth edit the brief did not ask for, and the first fixed run is what found it.** The pick worked and
+  the run then failed on *"The Select panel is still open after the pick"*: picking sends `interactionBegan`,
+  which closes any open panel, and **the Select panel had been immune to that rule only by accident** — its
+  overlay ate every canvas touch, so no handler ever fired to send it. Letting the pick through exposed the
+  accident. Scoped to Select alone; a brush or fill dropdown still closes on a pick.
+
+  Floating piece: moot — `commitAllInteractiveState()` bakes it one line before the arm — pinned by a test
+  rather than by changing the guard. Text: unreachable, because `ActionsMenu.addTextRow` closes the Select
+  panel on the way in, pinned by a test since the argument would die silently if those two statements were
+  reordered. **Carried for the owner**: entering text mode *first* and then opening Select leaves the text
+  placement tap dead, the mirror of this bug. Left alone deliberately — Select is the more recent word there —
+  and it is the same one-line change if they disagree.
+
+  43 at-risk UI tests green (41 passed, 2 pre-existing skips), all four new ones verified as *executed* in the
+  xcresult. Fast tier unmoved at 1573; XCUITests do not move it.
 
 - **(f) The Cut eraser previews live, and the owner's similarity theory is refuted** (`55f002b`). Owner:
   *"the to cut eraser does not have live feedback like the to cross eraser"*, then *"refute what I said about
