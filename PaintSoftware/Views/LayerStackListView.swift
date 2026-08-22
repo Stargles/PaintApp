@@ -60,6 +60,15 @@ struct LayerStackListView: UIViewRepresentable {
         /// lands — see `gestureRecognizer(_:shouldReceive:)` and `PinchMergeGate`'s doc for why
         /// `.began` alone arrives too late to trust. Cleared whenever the pinch resets.
         private var pinchTouchStartYs: [(touch: ObjectIdentifier, y: CGFloat)] = []
+        /// The vertical distance between the two pinch touches at the instant the pair latched, in
+        /// the table's coordinate space — the baseline `.changed` measures the live gap against.
+        /// Taken from the same touch-down positions `pinchTouchStartYs` already holds for
+        /// `PinchMergeGate.pair`, so this costs no extra plumbing; it exists as its own property only
+        /// because `.began` clears that array on the way out. See
+        /// `PinchMergeGate.shouldMerge(startVerticalGap:currentVerticalGap:)` for why the *vertical*
+        /// closing, rather than `UIPinchGestureRecognizer.scale`, is what a pinch on a vertical list
+        /// means — and for the measurement showing the radial rule had no reachable success state.
+        private var pinchStartVerticalGap: CGFloat?
         /// The pure decision logic `handlePinch` defers to — see `PinchMergeGate`'s doc. A stored
         /// instance (rather than calling static helpers alone) so the merge-scale threshold is
         /// declared once, in one place, matching the constant a test asserts against.
@@ -368,6 +377,7 @@ struct LayerStackListView: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 pinchPair = nil
+                pinchStartVerticalGap = nil
                 defer { pinchTouchStartYs.removeAll() }
                 guard canvasManager.maskEditTarget == nil, gesture.numberOfTouches == 2 else { return }
                 // Prefer the y positions captured at touch-*down* (`gestureRecognizer(_:shouldReceive:)`)
@@ -394,13 +404,26 @@ struct LayerStackListView: UIViewRepresentable {
                 // of with silence.
                 guard let picked = PinchMergeGate.pair(firstY: firstY, secondY: secondY, rows: layout) else { return }
                 pinchPair = (rows[picked.upper].id, rows[picked.lower].id)
+                // The same touch-down positions the pair was picked from, kept as the baseline the
+                // merge is judged against — captured here because the `defer` above is about to
+                // clear them.
+                pinchStartVerticalGap = abs(firstY - secondY)
                 setPinchHighlight(true)
 
             case .changed:
-                guard let pair = pinchPair else { return }
-                if pinchGate.shouldMerge(scale: gesture.scale) {
+                guard let pair = pinchPair, let startGap = pinchStartVerticalGap else { return }
+                // Both touches have to still be down to have a gap at all; `location(ofTouch:in:)`
+                // traps on an index past `numberOfTouches`, and a finger lifting mid-pinch drops it
+                // to 1 before `.ended` arrives.
+                guard gesture.numberOfTouches == 2 else { return }
+                // Read live, in the table's own coordinates — the same space `startGap` is in, so a
+                // scroll in between cancels out of the difference.
+                let currentGap = abs(gesture.location(ofTouch: 0, in: tableView).y
+                                     - gesture.location(ofTouch: 1, in: tableView).y)
+                if pinchGate.shouldMerge(startVerticalGap: startGap, currentVerticalGap: currentGap) {
                     setPinchHighlight(false)
                     pinchPair = nil
+                    pinchStartVerticalGap = nil
                     // A pair with no blend mode and no `.value` layer stays lossless —
                     // `mergeLayers` is exactly what "Merge Down" already calls. One `mergeLossKind`
                     // flags (a blend mode `PixelOps.flatten` would silently reset to Normal, or a
@@ -421,6 +444,7 @@ struct LayerStackListView: UIViewRepresentable {
             default:
                 setPinchHighlight(false)
                 pinchPair = nil
+                pinchStartVerticalGap = nil
                 pinchTouchStartYs.removeAll()
             }
         }

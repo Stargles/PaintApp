@@ -434,7 +434,7 @@ byte-identical pixel *values* (Metal presents both formats to a shader as RGBA) 
 byte order, at the cost of one runtime capability check. Verify with `CompositorParityLogicTests`,
 which compares values rather than layouts and so would not itself notice the change.
 
-## Pinch-to-merge in the layer panel measures the wrong axis, and can be unreachable (2026-08-22)
+## Pinch-to-merge in the layer panel measured the wrong axis, and was unreachable (2026-08-22, fixed)
 
 **The owner recorded it on their iPad rather than describing it** — `recording-20260822-120508.jsonl`,
 5.5 s, 29 events, pulled over `devicectl`. Open the layers tab, pinch two stacked layers, nothing
@@ -468,23 +468,40 @@ merge could not have fired however hard the owner pinched.** It is not a gesture
 it is a gesture with no reachable success state, and any diagonal placement wide enough relative to the
 row height has the same property.
 
-**The fix is to gate on the vertical closure, not the radial scale** — the axis the list actually runs
-in. Two properties any replacement must have, and they are what to write the tests against:
+**Fixed by gating on the vertical closure, not the radial scale** — the axis the list actually runs in.
+`PinchMergeGate.shouldMerge(startVerticalGap:currentVerticalGap:)` replaces `shouldMerge(scale:)`, and
+`gesture.scale` is now read nowhere: `handlePinch`'s `.changed` reads the two live touch y positions via
+`location(ofTouch:in:)` and compares their gap against the gap at latch. That baseline needed no new
+plumbing — the touch-down y positions were already captured in `pinchTouchStartYs` for `pair(...)`, so
+`.began` simply keeps their difference in `pinchStartVerticalGap`. `pair(...)` is unchanged; which rows
+latch was never what failed, and the `mergeLossKind` → `pendingMergeConfirmation` route is untouched.
 
-1. **Reachable from any finger placement.** A pair of fingers that meet vertically must fire the merge
-   regardless of how far apart they are horizontally. Today's rule fails this and that is the bug.
-2. **Not firing on a static two-finger touch.** Two fingers landing on adjacent rows are *already*
-   close vertically, so an absolute "within half a row" test would fire before anyone pinched. The rule
-   has to measure *closing* — the vertical gap falling to some fraction of what it was when the pair
-   latched — with a sensible answer for a pair that latched already-touching.
+Two conditions, both stored properties so the test asserts the shipped values rather than retyping them:
 
-The recording is the regression fixture: replaying those seven samples must merge, and the same samples
-with the vertical motion removed must not. `PinchMergeGate` is already a pure, testable type with the
-threshold stored rather than inlined, so this is a change to one predicate plus what `handlePinch` feeds
-it — the gate takes y positions at latch time already (`pinchTouchStartYs`), so the starting vertical
-gap is available without new plumbing.
+* **`mergeCloseFraction = 0.45`** — the vertical gap must fall to 45% of what it was at latch. On this
+  list's 62 pt rows a pair aimed one finger per row starts 60–90 pt apart, so this asks for 33–50 pt of
+  closing: a little over half a row. On the owner's samples it fires at t=2.29, with the fingers still
+  35 pt apart — nobody has to make them touch.
+* **`minimumVerticalClosure = 20`** — and it must be at least 20 pt of real travel, so two fingers
+  merely *resting* on adjacent rows (already only ~62 pt apart) never merge anything on tremor alone.
 
-**Not yet fixed** — recorded here on 2026-08-22 with three branches already in flight.
+**Keep the argument above.** The reason a radial term was rejected is not that 0.709 missed 0.6 by a
+little, it is the unreachability — and a reader who does not know that will put `hypot` back, because
+that is exactly what `UIPinchGestureRecognizer` hands you. Below about 67 pt of horizontal separation
+(against an 89 pt starting height) the old rule *was* reachable, which is how a broken feature passed
+whatever hand-testing it got; every real hand is well past that.
+
+**The one cost, written down so it is not rediscovered as a bug:** a pair latching less than 20 pt apart
+vertically — both fingers within 20 pt of the shared row boundary — cannot fire, since bringing them
+into contact is less travel than the floor asks. That is not the same defect as the one it replaces:
+there the dead placement (fingers well apart horizontally) was the *natural* one and spreading them
+further made it worse, so there was no remedy and no signal; here the dead placement is a deliberately
+cramped one whose remedy — start further apart vertically — is what aiming at two different rows already
+means. Dropping the floor to remove it would merge layers on a two-finger rest.
+
+The seven samples are the regression fixture, as literals in `PinchMergeGateLogicTests.ownersPinch`:
+replaying them merges, replaying them with the vertical motion removed does not, and the old radial rule
+(reproduced in the test file only, so its rejection stays documented) fires on neither.
 
 ## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15)
 

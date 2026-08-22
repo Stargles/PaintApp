@@ -72,16 +72,78 @@ struct PinchMergeGate {
         return (upper, lower)
     }
 
-    /// How far `scale` must fall from 1.0 (the value at the moment a pair latches — `.began` reports
-    /// exactly 1.0 for a `UIPinchGestureRecognizer` no matter where the fingers started, since `scale`
-    /// is already normalised to the two-touch distance at recognition) before the merge fires. Kept as
-    /// a stored, overridable property — rather than a bare literal at the call site — so a test can
-    /// assert the shipped value (`0.6`) without the assertion and the production constant being the
-    /// same hard-coded number typed twice.
-    var mergeScaleThreshold: CGFloat = 0.6
+    /// How far the two fingers' **vertical** separation must fall, as a fraction of what it was at
+    /// the moment the pair latched, before the merge fires. Kept as a stored, overridable property —
+    /// rather than a bare literal at the call site — so a test can assert the shipped value without
+    /// the assertion and the production constant being the same hard-coded number typed twice.
+    ///
+    /// In finger terms on this list's 62 pt rows: a deliberate pinch of two adjacent rows starts
+    /// somewhere around 60–90 pt apart vertically, so 0.45 asks the gap to fall to roughly 27–40 pt —
+    /// a little over half a row of closing, plainly a squeeze and not a wobble. The owner's recorded
+    /// gesture went from 89 pt to 10.5 pt, so it clears this with a wide margin and fires partway in,
+    /// while the fingers are still ~35 pt apart, rather than demanding they actually touch.
+    var mergeCloseFraction: CGFloat = 0.45
 
-    /// Whether the fingers have closed far enough to commit the merge this `.changed` event.
-    func shouldMerge(scale: CGFloat) -> Bool {
-        scale < mergeScaleThreshold
+    /// The absolute vertical distance the fingers must also travel toward each other, in points.
+    ///
+    /// Without it the rule would fire on a pair that merely *landed* close together: two fingers
+    /// resting on adjacent rows are already only ~62 pt apart, and a pair that straddles a row
+    /// boundary can latch a few points apart, where "fall to 45% of the starting gap" is satisfied by
+    /// hand tremor. 20 pt is about a third of a row — travel an artist cannot produce by accident and
+    /// cannot fail to produce on purpose.
+    ///
+    /// **What it costs, stated plainly, because the bug this file was rewritten for was an
+    /// unreachable success state and this is the one place the new rule has anything like one:** a
+    /// pair that latches less than 20 pt apart vertically can never fire, since even bringing the
+    /// fingers into contact closes less than 20 pt. That needs *both* fingers within 20 pt of the
+    /// shared row boundary. It is not the same defect as the radial rule it replaced, for a reason
+    /// worth keeping: there, the placement that killed the gesture — fingers well apart
+    /// *horizontally* — was the natural one and spreading them further made it worse, so the artist
+    /// had no remedy and no signal. Here the dead placement is a deliberately cramped one, and the
+    /// remedy (start the fingers further apart vertically, which is what aiming at two different rows
+    /// already means) is the obvious thing to try. Trading it away would mean dropping the floor, and
+    /// dropping the floor merges layers on a two-finger rest.
+    var minimumVerticalClosure: CGFloat = 20
+
+    /// Whether the fingers have closed far enough *vertically* to commit the merge this `.changed`
+    /// event, given the gap they latched at. Both gaps are absolute distances in the table's own
+    /// coordinate space; the sign and the order of the two touches do not matter, and neither does a
+    /// scroll in between, since a uniform translation cancels out of a difference.
+    ///
+    /// ## Why vertical and not `UIPinchGestureRecognizer.scale`
+    ///
+    /// The shipped rule was `scale < 0.6`, where `scale` is the ratio of the two touches' **radial**
+    /// distance to what it was at recognition. The layer list runs vertically and the gesture an
+    /// artist makes is "bring these two stacked rows together", which is vertical — but `hypot`
+    /// mixes in a horizontal term that a vertical pinch never shrinks, because nobody places thumb
+    /// and forefinger in the same pixel column.
+    ///
+    /// Measured off the owner's own recording (`BUGS.md` carries the full table; the samples are the
+    /// fixture in `PinchMergeGateLogicTests`): the fingers started 137 pt apart horizontally and
+    /// 89 pt apart vertically, closed the vertical gap by 88% to 10.5 pt, stayed 115–139 pt apart
+    /// horizontally throughout — and the best `scale` reached was **0.709**, against a 0.6 threshold.
+    /// Nothing fired.
+    ///
+    /// **The decisive part is not that 0.709 missed 0.6 by a little.** Hold that 137 pt horizontal
+    /// separation and drive the vertical gap to *zero* — the fingers meeting exactly — and `scale` is
+    /// still `137 / 163.4 = 0.838`. For that hand position the merge had **no reachable success
+    /// state**, and the same is true of any placement more than ~67 pt wide horizontally relative to
+    /// a 89 pt starting height. It was not a threshold tuned too tight; it was a predicate measuring
+    /// an axis the gesture does not act on. Do not reintroduce a radial term here.
+    ///
+    /// One consequence of taking the absolute value: if the fingers cross over each other the gap
+    /// reads as re-opening. That is harmless — the condition has already fired on the way in, tens of
+    /// milliseconds earlier — and the owner's recording is itself a crossing (the upper finger ends
+    /// up 13.5 pt *below* the lower one on the last sample), fired at a gap of 35 pt two samples
+    /// before it happened.
+    func shouldMerge(startVerticalGap: CGFloat, currentVerticalGap: CGFloat) -> Bool {
+        let start = abs(startVerticalGap)
+        let current = abs(currentVerticalGap)
+        guard start > 0 else { return false }
+        // Relative: the gap must have fallen to a fraction of what it was when the pair latched, so
+        // the demand scales with how far apart the fingers actually started.
+        guard current <= mergeCloseFraction * start else { return false }
+        // Absolute: and it must be real travel, not a pair that landed nearly touching.
+        return start - current >= minimumVerticalClosure
     }
 }
