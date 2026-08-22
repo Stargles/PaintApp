@@ -20,7 +20,6 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- **(f) the cut eraser's live feedback** — `tmp/cuteraser`, opened with the owner's refutation ask.
 - **(h) the pick tool is dead while the Select panel is open** — `tmp/pickselect`.
 
 ## Queued
@@ -37,42 +36,47 @@ tools on a **vector layer**, framed as "isn't inline" with how they should work)
       strokes it crosses (see the vector eraser's split/punch decision). **The owner has already ruled
       it out for text — "it's okay if it moves text whole," since splitting a `TextFrame` mid-glyph is
       not a sane operation.**
-New this pass (owner, 2026-08-22, given while the lasso Edge Overlap rebuild was in flight):
-
-- [ ] **(f) The "cut" eraser has no live feedback — it only applies on lift.** Owner: *"the to cut
-      eraser does not have live feedback like the to cross eraser, it only applies when the eraser is
-      lifted. I wonder since the to cross eraser is so similar to the to cut except with that one
-      cross feature, if redundant code can be removed."* In code these are
-      `VectorEraserMode.cutPoints` (Mode 2) and `.cutToIntersection` (Mode 3),
-      [Tool.swift:165](PaintSoftware/Models/Tool.swift:165). The owner's second half is the more
-      valuable one and should be answered before the first: if Mode 3 is Mode 2 plus a crossing rule,
-      the live path already exists and Mode 2 should be able to use it rather than gaining a second
-      copy. **Owner, 2026-08-22, mid-pass**: *"refute what I said about to cut eraser being similar to the to
-      cross. I still would like it to be live feedback."* So the similarity question is to be **tested
-      adversarially rather than assumed**, and the answer does not gate the ask: live feedback ships
-      either way. **One thing to know before making Mode 2 live**: CLAUDE.md records Mode 3's cutting pass
-      at **~95 ms per sample**, measured and deliberately unfixed until the eraser rewrite settles —
-      so "give Mode 2 the same live path" may mean giving it the same cost, and that wants measuring
-      rather than assuming. It also compounds with the footprint eraser, which cuts every stroke it
-      covers rather than one.
-
-New this pass (owner, 2026-08-22, while testing on the iPad):
-
-- [ ] **(h) The pick tool does nothing while the lasso Select tool is up.** Owner: *"The pick tool does not
-      work when the lasso select tool is selected."* First reported as "paint dropper tool doesnt work when in
-      fill tool mode", withdrawn as a false alarm, then reproduced precisely — **the fill tool was never
-      involved**; it is the Select *panel*. There is no `.select` case in `Tool`, so "the lasso select tool" is
-      `ActivePanel.select`, and two lines conspire:
-      [CanvasView.swift:1749](PaintSoftware/Views/CanvasView.swift:1749) disables the eyedropper's recognizer
-      whenever `activePanel == .select`, while
-      [CanvasView.swift:1617](PaintSoftware/Views/CanvasView.swift:1617) leaves the selection overlay capturing
-      because it never consults `selectedTool`. Arming the dropper does not close the panel, so nothing
-      re-enables it: the recognizer is off and the overlay eats the tap as the start of a lasso. The guard has a
-      real purpose — the overlay owns single-touch gestures while it is up — it simply never considered a
-      *momentary* tool being armed on top of it, which is precisely what
-      [Tool.swift:11-20](PaintSoftware/Models/Tool.swift:11) says the eyedropper is for.
-
 ## Done this pass
+
+- **(f) The Cut eraser previews live, and the owner's similarity theory is refuted** (`55f002b`). Owner:
+  *"the to cut eraser does not have live feedback like the to cross eraser"*, then *"refute what I said about
+  to cut eraser being similar to the to cross. I still would like it to be live feedback."*
+
+  **The refutation.** The *plumbing* around the two modes is near-duplicate — Mode 3's splice even carries the
+  comment `// As in Mode 2:` — and `Sweep.mode` was a dead switch, assigned by both and read by nothing (now
+  deleted). But "To Cross is Cut plus one cross feature" is not what the app does. Cut removes the ink under
+  the eraser; To Cross removes it **and keeps going outward along each line until that line hits another**,
+  deleting the line whole if it crosses nothing. `cutRanges` has exactly one caller and `cutToIntersection`
+  exactly one; neither calls the other. **Take the cross feature out of Mode 3 and you get nothing, not Cut.**
+  ~18 lines to save, and merging would put a mode switch inside the shared body — a wash, declined.
+
+  **The finding that changed the design, and it inverted the brief.** The orchestrator briefed that a
+  footprint-shaped preview would show *less* than the cut removes, since the stroke's whole width goes. Wrong:
+  `BrushStamper` gives the two surviving pieces **round end caps that grow back into the gap by the stroke's
+  own radius**. **Cutting a 40pt line with an 8pt eraser changes zero pixels** — MEASURED, asserted at exactly
+  0, with the same test asserting a footprint punch *would* open a 250+ pixel notch, so it cannot pass against
+  a scene that fails to exercise the problem. So the preview erases the doomed spans **and draws the caps**,
+  and carries the accumulated span per stroke across the drag, because the cut boundary walks outward with the
+  finger and stale caps otherwise fill the gap back in behind the eraser. Found by watching a test fail at 99%
+  pop-back, not by reasoning.
+
+  **The cost, all three arms in one run**, 334-sample drag on the 200-stroke layer at 2048² that item 10 used
+  for Mode 3. **CONTENDED** — 25–42% idle, a standing Adobe background load, never came quiet — but three
+  isolated runs agreed to ±0.5%, which a 0.4 ms unit of work can survive where a whole suite cannot:
+
+  | per touch sample (median) | cutting | not cutting |
+  |---|---|---|
+  | Cut as it was — no preview | 0.000 ms | 0.000 ms |
+  | **exact span-and-caps preview — SHIPPED** | **0.439 ms** (p95 0.662) | 0.082 ms |
+  | plain footprint punch | 0.014 ms | ~0 |
+
+  0.439 ms is **3.7% of a 60 Hz frame and 220× cheaper than Mode 3's ~95 ms**, because the preview never
+  mutates the display list and so never pays the cold layer re-render that makes To Cross expensive. Mode 2
+  gets Mode 1's `.replacement` scratch role, not Mode 3's per-sample commit.
+
+  1581 fast-tier tests (1578 passed, 0 failed, 3 skipped) = 1573 + 8, the ninth added test being an XCUITest
+  the fast tier does not select. `VectorCutPreviewLogicTests` is a **new file**, hand-added to `project.pbxproj`
+  — verified as 7 executed cases in the xcresult rather than assumed, and the duplicate-id check prints `[]`.
 
 - **PERFORMANCE.md item 14's cheap half: a cel nobody has drawn on stops paying for a canvas-sized
   transparent PNG** (`1d7332a`, `5cd6431`). Every cel wrote a `<uuid>_raster.png` on every save whatever its
