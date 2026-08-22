@@ -113,6 +113,40 @@ extension CanvasManager {
         return generation
     }
 
+    /// Blocks until `fillQueue` has produced the live gesture's pixels, when it has produced none at
+    /// all yet. Called by `commitInteractiveFill` **before** `endFillGeneration`, because the moment
+    /// the generation is retired the worker discards its own result.
+    ///
+    /// **The commit is allowed to be late for the screen. It is not allowed to be late for the
+    /// document**, and that distinction is what the generation fix got half of. `fillRenderedRegion`
+    /// covers "rendered, hop to main not run yet"; it cannot cover *"not rendered yet"*, and that is
+    /// the wider of the two windows by orders of magnitude — it is the whole GPU pass, not one
+    /// runloop turn. A second gesture arriving inside it found no pixels anywhere and
+    /// `commitInteractiveFill` dropped the first fill in silence: no undo entry, nothing on the cel.
+    ///
+    /// **Waiting, rather than baking later, is forced by `beginCanvasEdit`'s contract.** Its entire
+    /// job is that the edit which follows reads a canvas the transient is already part of — the next
+    /// `begin*Fill` composites its wall reference two statements after this returns, and a deferred
+    /// bake would have it flood against content that is about to change, which is the reordering bug
+    /// that chokepoint exists to prevent. So the bake is synchronous or it is wrong.
+    ///
+    /// It costs nothing in the ordinary case: the queue is idle by then, and `sync` on an idle serial
+    /// queue is a hop. In the case it is for, it costs the remainder of a render the artist was
+    /// already waiting to see, once, and it is bounded by one — `fillPending` only changes on the
+    /// main thread, which is the thread parked here.
+    ///
+    /// **Which is why the test for this cannot hold `fillQueue` with a semaphore signalled from the
+    /// main thread**: this would park on it and never return. `FillGestureRestartLogicTests` signals
+    /// its gate off a background queue for exactly that reason.
+    private func awaitFillRenderIfNothingProduced() {
+        guard fillLastRegionRGBA == nil else { return }   // a published preview is already pixels
+        fillLock.lock()
+        let produced = fillRenderedRegion != nil
+        fillLock.unlock()
+        guard !produced else { return }
+        fillQueue.sync {}
+    }
+
     /// Ends the live gesture's claim on `fillQueue`: nothing in flight may publish onto the document
     /// after this. Called by both `commitInteractiveFill` and `cancelInteractiveFill`, and it returns
     /// the render the queue had already produced for the gesture being retired — the bytes the commit
@@ -345,13 +379,18 @@ extension CanvasManager {
         fillFingerDown = false
         let label: HistoryActionLabel = fillGestureIsLasso ? .lassoFill : .fill
         fillGestureIsLasso = false
-        // Retire the gesture on `fillQueue` too, and take back whatever it had already rendered.
+        // Let the queue finish this gesture if it has not started publishing yet, *then* retire it
+        // and take back whatever it rendered. The order is load-bearing both ways round: waiting
+        // after the retirement would wait for a worker that has already thrown its result away.
         //
-        // **The second half is the owner's bug.** `fillLastRegionRGBA` is written by the render's
-        // hop to main, and this method is called from `beginCanvasEdit` at the top of the *next*
-        // `begin*Fill` — so a second tap arrives here with the first fill rendered but its hop not
-        // yet run, and reading only the main-thread copy dropped it. `endFillGeneration` hands back
-        // the bytes straight off the queue's side of `fillLock` instead.
+        // **The two of these together are the owner's bug, and they are two different windows.**
+        // `fillLastRegionRGBA` is written by the render's hop to main, and this method is called
+        // from `beginCanvasEdit` at the top of the *next* `begin*Fill` — so a second gesture arrives
+        // here either with the first fill rendered but its hop not yet run (`endFillGeneration`
+        // hands back the bytes off the queue's side of `fillLock`), or with it not rendered at all
+        // (`awaitFillRenderIfNothingProduced` waits for them to exist). Reading only the
+        // main-thread copy dropped the fill in both.
+        awaitFillRenderIfNothingProduced()
         let queuedRender = endFillGeneration()
         // Capture the mask bytes before clearing — needed for the vector-path extraction below.
         var regionBytes = fillLastRegionRGBA
@@ -645,20 +684,6 @@ extension CanvasManager {
             // flag is main-thread state. The count is the session's own, read on the same queue that
             // just wrote it.
             let enclosedNothing = session.isLasso && session.lastFilledPixelCount < Self.lassoFillMinimumArea
-            let image = enclosedNothing ? nil
-                : bytes.flatMap { Self.imageFromRGBA($0, width: session.width, height: session.height) }
-            // Said once per empty *streak*, not once per render. The gesture stays adjustable, so a
-            // drag across the Threshold slider produces a burst of empty results through the
-            // coalescing loop above; re-raising on each would flicker the banner and strobe the tint
-            // under the artist's finger. Re-arms as soon as a fill lands, so losing it again is
-            // reported. Latched here rather than on the main thread because the tint below is built
-            // from this session's buffers, which only this queue may read — see the property's doc.
-            let firstEmpty = enclosedNothing && !lassoFillReportedEmpty
-            lassoFillReportedEmpty = enclosedNothing
-            // **§7.2 and §7.4: the picture that goes with the sentence.** Built only on the first
-            // empty result of a streak, so the canvas-sized tint costs nothing on the renders that
-            // fill something and nothing on the repeats that would not be shown anyway.
-            let diagnostic = firstEmpty ? lassoEmptyDiagnostic(from: session) : nil
             let regionW = session.width, regionH = session.height
             // **Publish to the commit path before publishing to the screen.** `commitInteractiveFill`
             // reads this the moment a second tap arrives, which is long before the hop below runs.
@@ -674,6 +699,29 @@ extension CanvasManager {
             // Superseded while the GPU was busy: neither the result nor the loop's next iteration
             // belongs to anybody. The gesture that replaced us has its own worker enqueued behind us.
             guard stillCurrent else { return }
+            // **Moved below the guard: a retired worker touches no live-gesture state and builds no
+            // picture nobody will see.** `lassoFillReportedEmpty` is a latch over the *live*
+            // gesture's streak of empty results and `lassoEmptyDiagnostic` reads `fillGestureLoopPath`,
+            // so both are §7's version of the thing the generation stamp exists to stop. **No
+            // reachable defect today** — `fillQueue` is FIFO, so a superseded worker always runs
+            // *ahead* of the worker that replaced it, and `beginInteractiveLassoFill` re-arms the
+            // latch from that later worker — but that is correctness by queue ordering rather than
+            // by the stamp, and the two arguments should not be different. It is also a canvas-sized
+            // tint that was being built for a gesture nobody is waiting on.
+            let image = enclosedNothing ? nil
+                : bytes.flatMap { Self.imageFromRGBA($0, width: regionW, height: regionH) }
+            // Said once per empty *streak*, not once per render. The gesture stays adjustable, so a
+            // drag across the Threshold slider produces a burst of empty results through the
+            // coalescing loop above; re-raising on each would flicker the banner and strobe the tint
+            // under the artist's finger. Re-arms as soon as a fill lands, so losing it again is
+            // reported. Latched here rather than on the main thread because the tint below is built
+            // from this session's buffers, which only this queue may read — see the property's doc.
+            let firstEmpty = enclosedNothing && !lassoFillReportedEmpty
+            lassoFillReportedEmpty = enclosedNothing
+            // **§7.2 and §7.4: the picture that goes with the sentence.** Built only on the first
+            // empty result of a streak, so the canvas-sized tint costs nothing on the renders that
+            // fill something and nothing on the repeats that would not be shown anyway.
+            let diagnostic = firstEmpty ? lassoEmptyDiagnostic(from: session) : nil
             DispatchQueue.main.async { [weak self] in
                 guard let self, context.generation == self.fillGeneration, self.fillGestureActive,
                       let layerIndex = self.layers.firstIndex(where: { $0.id == context.layerID }),

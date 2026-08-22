@@ -12,6 +12,14 @@ import CoreGraphics
 /// `DispatchQueue.main.async`. A tap that lands before that hop runs used to break three ways at
 /// once, and each of the three has a test below.
 ///
+/// **There are two windows, not one, and 2026-08-21 is when the second one surfaced.** The owner
+/// again, on the lasso: *"that bug is present in the lasso... currently I havent found the normal
+/// fill to do it though."* Everything in the first half of this file forces *"rendered, hop to main
+/// not run yet"*, which is one runloop turn wide. The tests under "one window further back" force
+/// *"not rendered at all"*, which is the entire GPU pass — and a lasso session's pass is several
+/// times a bucket tap's, which is the whole of why one mode reproduces it and the other does not.
+/// The mechanism is shared; only the exposure is the lasso's.
+///
 /// **The interleavings here are forced, not waited for.** "Sometimes" is what makes a race ship, and
 /// a test that hopes to lose a race is worth nothing in either direction — it can pass on broken
 /// code and fail on correct code. Two primitives do all the work, and both are exact:
@@ -260,5 +268,142 @@ final class FillGestureRestartLogicTests: XCTestCase {
         let onPaper = try bakedPixel(manager, Self.onThePaper)
         XCTAssertGreaterThan(onPaper.b, 200, "…and the second is blue where it was")
         XCTAssertLessThan(onPaper.r, 60)
+    }
+
+    // MARK: - (a) again, one window further back: the render that has not happened yet
+
+    /// **The second window, and the one the owner is looking at on the lasso.** Everything above
+    /// forces *"rendered, hop to main not run"*, which is a single runloop turn wide. This forces
+    /// *"not rendered at all"*, which is the whole GPU pass — and against `commitInteractiveFill` as
+    /// it stood, the first loop was dropped in silence exactly as it was before the generation fix:
+    /// `fillLastRegionRGBA` is nil because no hop has run, `fillRenderedRegion` is nil because no
+    /// worker has stored anything, so the commit had no pixels from either source and returned.
+    ///
+    /// **The owner, on device 2026-08-21: "that bug is present in the lasso... currently I havent
+    /// found the normal fill to do it though." The mechanism is shared and the exposure is not.**
+    /// `testATapWhoseFloodHasNotRunYetStillBakes` below drives the identical interleaving through
+    /// the bucket fill and fails identically without the fix, so nothing here is lasso-only. What is
+    /// lasso-only is how long the window stays open: a lasso session derives a ring mask and its
+    /// reference colours over the whole canvas on the CPU before it starts, then runs
+    /// `encodeWallsAndClose` — two JFA distance transforms — *once per reference colour*, and floods
+    /// both in lockstep. A bucket tap does one wall pass and one flood. The artist cannot out-run a
+    /// tap; drawing the next loop while the last one is still on the GPU is ordinary use.
+    ///
+    /// **The gate is signalled off a background queue, and that is not decoration.** The fix waits on
+    /// `fillQueue` from the main thread, so a gate signalled from the test body — which is the main
+    /// thread — would park there for ever. Signalling it from elsewhere keeps the interleaving just
+    /// as forced (gesture 1's worker provably has not run when gesture 2 begins) while leaving the
+    /// wait a wait rather than a deadlock.
+    func testASecondLassoBakesAFirstLoopThatHasNotRenderedYet() throws {
+        let manager = sceneManager()
+        let before = manager.history.undoStack.count
+
+        let gate = DispatchSemaphore(value: 0)
+        manager.fillQueue.async { gate.wait() }
+        manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 30, y: 30, width: 32, height: 32)))
+        manager.endInteractiveFill()
+        XCTAssertNil(manager.fillRenderedRegion,
+                     "Fixture check: the first loop's worker is still queued — nothing rendered anywhere")
+
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { gate.signal() }
+        manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 2, y: 2, width: 24, height: 24)))
+
+        XCTAssertEqual(manager.history.undoStack.count, before + 1,
+                       "The first loop baked as its own undo step rather than being dropped")
+        XCTAssertGreaterThan(try bakedPixel(manager, Self.onTheSquare).r, 200,
+                             "…and its pixels are in the cel: red over the square it enclosed")
+    }
+
+    /// The same interleaving on the bucket fill. It is here to say what the lasso test cannot: the
+    /// hole is in `commitInteractiveFill`, not on the lasso path, so the fix is one guard in one
+    /// place rather than a second mechanism that means the same thing. Both fail on the parent
+    /// commit; only the lasso one is reachable at the speeds an artist works at.
+    func testATapWhoseFloodHasNotRunYetStillBakes() throws {
+        let manager = sceneManager()
+        let before = manager.history.undoStack.count
+
+        let gate = DispatchSemaphore(value: 0)
+        manager.fillQueue.async { gate.wait() }
+        manager.beginInteractiveFill(at: Self.onTheSquare)
+        manager.endInteractiveFill()
+
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { gate.signal() }
+        manager.brushColor = Self.blue
+        manager.beginInteractiveFill(at: Self.onThePaper)
+
+        XCTAssertEqual(manager.history.undoStack.count, before + 1, "The first tap baked")
+        XCTAssertGreaterThan(try bakedPixel(manager, Self.onTheSquare).r, 200, "…where it was tapped")
+    }
+
+    /// The counterweight, and the one that keeps the wait from being bought with §7.1: a loop that
+    /// enclosed nothing still records nothing, *including* when the gesture that commits it had to
+    /// wait for its render to exist. An empty result stores no bytes, so the new wait produces the
+    /// same nil the old code read by accident — for the right reason this time.
+    func testWaitingForAnUnrenderedLoopStillDoesNotBakeAnEmptyOne() {
+        let manager = CanvasFixture.manager(layerCount: 1)   // blank paper: nothing to enclose
+        let before = manager.history.undoStack.count
+
+        let gate = DispatchSemaphore(value: 0)
+        manager.fillQueue.async { gate.wait() }
+        manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 8, y: 8, width: 24, height: 24)))
+        manager.endInteractiveFill()
+
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { gate.signal() }
+        manager.beginInteractiveFill(at: Self.onThePaper)
+
+        XCTAssertEqual(manager.history.undoStack.count, before, "Nothing was recorded for the empty loop")
+    }
+
+    /// The lasso's own version of `testTheSecondFillRendersAgainstItsOwnSessionAndSeed` — a
+    /// superseded *lasso* worker running after a *lasso* replaced it, where the existing test had a
+    /// bucket fill on at least one side of the pair. **A control: it passes on the parent commit
+    /// too**, and it is here because the owner's report named the lasso and the honest answer is
+    /// that (b) and (c) were already covered there; only (a) was not. The loops enclose different
+    /// squares, so "which session rendered this" is legible in one pixel.
+    func testASecondLassoRendersAgainstItsOwnLoop() throws {
+        let manager = twoSquareScene()
+
+        manager.beginInteractiveLassoFill(path: rectangleLoop(Self.loopA))
+        manager.endInteractiveFill()
+        manager.fillQueue.sync {}   // rendered, not yet published
+
+        let gate = DispatchSemaphore(value: 0)
+        manager.fillQueue.async { gate.wait() }
+        manager.setFillSetting(.gapClosing, 5)   // a gesture-1 worker, queued behind the gate
+
+        manager.brushColor = Self.blue
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { gate.signal() }
+        manager.beginInteractiveLassoFill(path: rectangleLoop(Self.loopB))
+        manager.endInteractiveFill()
+
+        manager.fillQueue.sync {}
+        settle()
+
+        XCTAssertGreaterThan(try previewAlpha(manager, Self.onSquare2), 0,
+                             "The square the second loop enclosed is filled")
+        XCTAssertEqual(try previewAlpha(manager, Self.onTheSquare), 0,
+                       "…and the first loop's square is not part of it")
+    }
+
+    /// A second scene, for the tests that need the two gestures to enclose *different* things:
+    /// `sceneManager`'s single square cannot distinguish "loop B rendered" from "loop A's render
+    /// installed itself". `loopA`/`loopB` are drawn on clean paper around one square each, so each
+    /// loop's collar reads paper, stops at its own square, and fills exactly that square.
+    private static let square2 = CGRect(x: 6, y: 6, width: 20, height: 20)
+    private static let onSquare2 = CGPoint(x: 16, y: 16)
+    private static let loopA = CGRect(x: 34, y: 34, width: 28, height: 28)
+    private static let loopB = CGRect(x: 2, y: 2, width: 28, height: 28)
+
+    private func twoSquareScene() -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let art = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize,
+                                          format: PixelOps.transparentFormat()).image { ctx in
+            UIColor.green.setFill()
+            ctx.cgContext.fill(Self.square)
+            ctx.cgContext.fill(Self.square2)
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, art)
+        manager.brushColor = Self.red
+        return manager
     }
 }
