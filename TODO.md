@@ -52,6 +52,40 @@ tools on a **vector layer**, framed as "isn't inline" with how they should work)
       and does not need item 9(c)'s thumbnail-persistence precondition the expensive half does.
       See PERFORMANCE.md item 14 for the full mechanism, citations and the corrected arithmetic.
 
+New this pass (owner, 2026-08-22, given while the lasso Edge Overlap rebuild was in flight):
+
+- [ ] **(e) Dragging the *line* of a smart ellipse or circle should move the whole shape**, the way
+      dragging a line's or a rectangle's body already does — only the nodes should resize it. Owner:
+      *"after you make a smartshape elipse or circle, selecting the line (not the node) of the circle
+      should move the entire shape, same as line and rectangle."* So this is an inconsistency between
+      shape kinds rather than a missing feature: find what the line and rectangle cases hit-test that
+      the ellipse case does not. `ShapeGeometry.draggingEdge(_:to:anchor:)`
+      ([ShapeGeometry.swift:438](PaintSoftware/Engine/ShapeGeometry.swift:438)) is where an edge drag
+      is interpreted; the hit test that decides *edge versus body* is the thing to look at first.
+
+- [ ] **(f) The "cut" eraser has no live feedback — it only applies on lift.** Owner: *"the to cut
+      eraser does not have live feedback like the to cross eraser, it only applies when the eraser is
+      lifted. I wonder since the to cross eraser is so similar to the to cut except with that one
+      cross feature, if redundant code can be removed."* In code these are
+      `VectorEraserMode.cutPoints` (Mode 2) and `.cutToIntersection` (Mode 3),
+      [Tool.swift:165](PaintSoftware/Models/Tool.swift:165). The owner's second half is the more
+      valuable one and should be answered before the first: if Mode 3 is Mode 2 plus a crossing rule,
+      the live path already exists and Mode 2 should be able to use it rather than gaining a second
+      copy. **One thing to know before making Mode 2 live**: CLAUDE.md records Mode 3's cutting pass
+      at **~95 ms per sample**, measured and deliberately unfixed until the eraser rewrite settles —
+      so "give Mode 2 the same live path" may mean giving it the same cost, and that wants measuring
+      rather than assuming. It also compounds with the footprint eraser, which cuts every stroke it
+      covers rather than one.
+
+- [ ] **(g) A real-size stamp preview beside the brush/eraser size slider, while it is held.** Owner:
+      *"when changing the size of a brush or eraser its hard to have a grasp of it, so when the
+      sliders are pressed down, I want a sort of preview window showing a single realsize stamp of the
+      brush pop up beside the slider."* Real-size means canvas pixels at the current zoom, not slider
+      units — a 40 px brush on a canvas shown at 0.3x is 12 screen points, and showing 40 would be the
+      same class of bug as the Move handles that scaled with the canvas. It should be the brush's own
+      stamp with its actual hardness, opacity and colour, not a grey disc: the point is judging the
+      mark it will make. Appears on touch-down of the slider, goes away on lift.
+
 ## Done this pass
 
 - **A fill lands on top of what is already on the layer** (`5936014`). Owner, after testing:
