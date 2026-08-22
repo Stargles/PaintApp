@@ -1,14 +1,148 @@
-# Handoff — 2026-08-21
+# Handoff — 2026-08-21 (second pass)
 
-**The performance programme is confirmed on hardware, not just the simulator.** The owner ran a
-Release build of `38e22c6` on their iPad 9 and answered all seven checks this session's device pass
-asked for. Every one came back clean: *"17fps is gone, good job. 4k screen displays full 60fps when
-painting"* — the headline result of the whole programme — plus *"leaving the gallery is instant,"*
-*"no issues"* opening a project, *"lasso fill works,"* *"cross eraser works as intended, very nice,"*
-*"text handles are good,"* and *"not much of a problem"* for Add Text with the keyboard up. All four
-of the owner's originally reported bugs are now confirmed fixed on hardware, not only headlessly.
-`main` is at **1478 fast-tier tests passing, 0 failing, 3 skipped** (1481 total), up from 1423 at the
-start of the day. No worktrees, no `tmp/*` branches, no simulator debris.
+<!-- This file is both the state of the repo and the prompt that starts the next session. It used to
+be two files, HANDOFF.md and nextprompt.md, and they drifted apart within a single day because the
+same state had to be written twice. One file, one copy of the truth. -->
+
+## Start here — paste this to begin the next session
+
+```
+Read HANDOFF.md, then CLAUDE.md and TODO.md. Continue the UX pass.
+
+You are the orchestrator: delegate to agents, don't do worker-level tracing yourself. Workflows and
+subagents are pre-authorized here.
+
+`main` is green at 1531 fast-tier tests and **nothing is in flight** — no worktrees, no `tmp/*`
+branches. A Release build of `09705e8` is on my iPad.
+
+Start by asking me what I found on the device, then work the queue in TODO.md. Three things I have
+just been given and have not tried yet, so ask about them specifically:
+
+1. **The lasso fill's Edge Overlap slider.** It was hard-zeroed by mistake and now works; the fill
+   should no longer leave a pale seam where it meets a soft line edge.
+2. **Filling twice in a row quickly with the lasso.** The first fill used to vanish. Try to out-race
+   it.
+3. **The Move tool on a vector layer.** It used to cost ~100 ms per touch sample and now costs
+   ~0.004 ms. The handles should also stay a constant size as you zoom — that part has never been
+   checked by a finger, only by a test.
+
+One thing I asked for that came back disagreeing with me, and I have not re-checked it: I said the
+**gap closing** slider needed inverting in lasso mode like Edge Overlap did. It was measured instead
+and found already correct — 0/2/4/8/16 seals breaks of 0/2/4/6/10 rows. If it still feels wrong when
+you try it, that measurement is what to argue with; don't just re-invert it on my say-so.
+
+Then: TODO.md's queued lasso/move asks (a), the perf programme's remaining Tier A items, and Add Text
+stage 5.
+
+Two questions I still owe you, unchanged for days — ask when they block work:
+  - Save semantics when a project loaded with something unreadable: may saving overwrite the good
+    original, refuse, or prompt?
+  - Which faces belong in the font picker's favourites strip.
+
+Two rulings you owe me, from work that merged today. Ask when you reach them, not before:
+  - A double-traced ellipse (going round twice) detects as a rectangle. Pre-existing, not a regression.
+  - The smart oval has no arc-end handles, so "I drew 100° and wanted 180°" means drawing it again.
+```
+
+### Notes on why that prompt is shaped this way
+
+**Lead with the device questions.** The owner's observations have out-performed code-tracing agents
+every single time this pass — five for five. Two of today's fixes exist only because they reported
+something an agent had reasoned was fine, and one of them (Edge Overlap) was a defect *introduced* by
+an orchestrator's armchair geometry.
+
+**Flag the gap-closing disagreement rather than hiding it.** The owner asked for a change; the
+measurement says it is unnecessary. Both could be right — the slider may be correct and still feel
+wrong. Presenting it as an open disagreement is honest and cheap; silently not doing it is not.
+
+**Do not re-open the lasso fill's design.** LASSO_FILL.md is the spec, the owner has ruled on the
+semantics twice, and §2a records a ruling that closed two bugs by deleting work. In particular do not
+build a cross-mode parity test and do not add a connected-component filter; both were orchestrator
+suggestions the owner or the research overturned.
+
+**Machine state.** Clean. No stray simulator clones in `~/Library/Developer/XCTestDevices`.
+
+**Process traps that cost this session real time**, all now in CLAUDE.md or memory:
+- `git merge --ff-only` run from inside a branch's own worktree prints "Already up to date" and merges
+  nothing. It happened **four times** in one session. Run merges from the main worktree, as their own
+  command, never chained onto a `cd`.
+- The agent scratchpad is shared between sessions despite being documented as isolated. Prefix scratch
+  files per agent.
+- A `PerfBaselineTests` failure inside a full fast tier is environmental far more often than real.
+  Confirm with a 30-second isolated re-run on a device of your own; do not re-run the suite to decide.
+- A stale brief is worse than no brief. Three agents this session were dispatched against a `main`
+  that was 65 commits old; two worked it out themselves and refused to build. **`git fetch` and read
+  the log before writing any agent prompt.**
+
+---
+
+**All four of session 61's parked branches are merged, and both lasso bugs the owner reported today
+are fixed.** `main` is at **1531 fast-tier tests, 1527 passed, 0 failed, 3 skipped**. No worktrees, no
+`tmp/*` branches, no simulator debris. A Release build of `09705e8` is on the owner's iPad.
+
+**The earlier half of this day is below and still true** — the performance programme confirmed on
+hardware, the owner's seven device checks all clean, item 14 re-scoped. What follows is what changed
+after it.
+
+## What landed in the second pass
+
+- **`tmp/move-overlay`** — owner asks (c) and (d). The Move drag cost **102.3 ms per touch-move sample
+  and now costs 0.004 ms**; the branch had been measured but never got the verification run this repo
+  requires, and that is the only reason it sat. 1513 / 1510 / 0 / 3, +32 accounted for by counting
+  test functions in the source rather than trusting the run.
+- **`tmp/lasso-active`** — owner ask (b), and the answer to the question nobody had recorded:
+  **the selection already survived a tool change; only the toolbar readout lied.** Proved from the
+  tree — the fix adds no code to any clearing path, no clearing site is a tool change, and
+  `CanvasView` already handed the stroke view `selectionClipPath` regardless of the current tool, so
+  brush, eraser and fill were clipped to the selection all along. Blast radius is the icon alone.
+- **`tmp/lassomove-rulings`** — the owner's three lasso-move rulings folded into LASSO_MOVE.md.
+- **`tmp/lassorace`** — both of today's lasso bugs, described below.
+
+## The two lasso bugs, and what they turned out to be
+
+**The second-fill race is not lasso-specific.** The owner: *"that bug is present in the lasso bug right
+now. currently I havent found the normal fill to do it though."* Only failure mode (a) reproduced — the
+first fill silently dropped — and **a bucket-fill probe of the same interleaving failed identically**,
+so the hole is in `commitInteractiveFill`, shared by both tools. The owner sees it only on the lasso
+because the *window* is far wider: a lasso session derives a ring mask and reference colours over the
+whole canvas on the CPU, then runs two distance transforms per reference colour, against one wall pass
+and one flood for a tap. `2226ef0`'s generation guard covers a fill that is rendered but not yet
+published; this is the narrower case of not rendered at all. Fixed by
+`awaitFillRenderIfNothingProduced()` before `endFillGeneration()` — waiting rather than deferring the
+bake is forced by `beginCanvasEdit`'s contract, since the next `begin*Fill` composites its wall
+reference two statements later.
+
+**The Edge Overlap halo was my error, and both of my explanations of it were wrong.** I had instructed
+that `fillExpand` be hard-zeroed in lasso mode, reasoning that inverting moved the antialiasing error
+to the far side of the line. Then, told it bled, I guessed the fix was to dilate the collar — which
+shrinks the fill and is backwards against the owner's stated semantic. **The pixels settled it**: the
+fill stops exactly at the artwork's silhouette and never reaches clean paper, which looks right and is
+the bug, because the fill composites *underneath* the line — a 64-alpha line over a 213-alpha fill
+resolves to 223 and the background shows through the drawing's own soft edge. The fix is the ordinary
+dilate, clipped to the loop mask because growing the result is the one thing that could push paint
+across the fence.
+
+**Gap Closing needed no change** and was never hidden. It already satisfied the owner's property and is
+now pinned: 0/2/4/8/16 seals breaks of 0/2/4/6/10 rows, monotonic. The owner asked for both sliders to
+be inverted; the measurement says one of them already was. **If it still feels wrong on device, that
+measurement is the thing to argue with.**
+
+The owner also ruled that the two fill modes are **not** meant to agree pixel-for-pixel, and that more
+gap closing making the normal fill smaller while making the inverted fill bigger is *intended*. So the
+properties pinned are single-mode and monotonic — the gap width that seals grows with the slider, the
+filled area grows with edge overlap — not cross-mode parity. Do not build a parity fixture; it was my
+idea and the owner rejected it.
+
+## A ruling that closed two bugs by deleting work
+
+Asked whether the lasso fill should paint over line art on the **same layer** it is filling, the owner
+said: *"if the line art is on the same layer I am filling, its okay that the lineart is not filled
+over, in fact I'd rather keep it that way."* Both BUGS.md entries tracking that since 2026-08-17 are
+closed as not-a-defect and pruned. **LASSO_FILL.md §2a records the ruling and, more importantly, the
+distinction it does not touch**: the filled *region* must still run underneath the ink, because
+`fill = loopMask ∧ ¬reached` includes wall pixels and that is what stops a halo along every
+antialiased edge. Lines staying visible is a compositing outcome; the region stopping short would be a
+real defect. Easy to conflate, expensive to get wrong.
 
 **One item moved anyway.** [PERFORMANCE.md](PERFORMANCE.md) item 14 (raster-cel residency) was
 re-opened by the owner's stated intent for a real document, then re-scoped by reading their actual

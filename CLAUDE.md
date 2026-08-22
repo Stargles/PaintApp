@@ -302,6 +302,11 @@ nudges toward it; it resolves `graphify` from PATH and fails open if missing.
 
 ## Docs
 
+[HANDOFF.md](HANDOFF.md) is **both the state of the repo and the prompt that starts the next
+session** — its first section is the block to paste. It used to be two files, HANDOFF.md and
+nextprompt.md, and they drifted apart inside a single day because the same state had to be written
+twice. Keep it one file. Rewrite the paste block when you close a pass; do not append to it.
+
 [TODO.md](TODO.md) is **the owner's asks, live** — record them there when they arrive and delete them
 when they are done and merged, not when a branch exists. It is the counterpart to [BUGS.md](BUGS.md),
 which is for what *we* find. **At most three items in flight at once**, unless the extras need no
