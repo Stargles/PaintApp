@@ -232,13 +232,18 @@ extension CanvasManager {
         return generation == fillGeneration
     }
 
-    /// **Edge Overlap is forced to 0 for a lasso gesture, and that is not a tidiness choice.**
-    /// `fillExpand` defaults to 2 px and is shared with the flood, where it exists to slip the fill
-    /// *under* a line the fill stopped at, hiding the antialiasing seam. The lasso fill has no such
-    /// seam — it covers the line (LASSO_FILL.md §6 step 4) — so a positive value here has nothing to
-    /// hide and only pushes colour 2 px past the artwork onto clean paper, which is the one thing
-    /// §3's rule promises the tool will not do. §6 step 7 says the default is 0 and to say so in the
-    /// settings; `FillSettingsPanel` hides the slider in lasso mode for the same reason.
+    /// **Edge Overlap used to be forced to 0 for a lasso gesture. It is not, and the hard zero was
+    /// the bug** — the owner, on device 2026-08-21: *"edge overlap does not work on lasso flood fill,
+    /// and thus the fill bleeds through the anti-aliased edges."*
+    ///
+    /// The reasoning it replaces was that the lasso covers the line (LASSO_FILL.md §6 step 4) so
+    /// there is no antialiasing seam to hide. There is one: the fill is composited *underneath* the
+    /// artwork, and `lassoInvert` stops its full coverage exactly at the artwork's own silhouette, so
+    /// the drawing's soft fringe sits over a fill that is already fading and the background shows
+    /// through it. Same halo as the bucket fill's, on the far side of the line. `lassoEdgeDilate` in
+    /// Fill.metal carries the measurement and the arithmetic; both modes now grow the painted region
+    /// by the same slider in the same direction, which is the owner's *"moving the edge overlap up
+    /// means the fill gets bigger"*.
     ///
     /// Internal rather than `private` so `FillBoundaryLogicTests` can assert the wiring: every other
     /// fill test builds a raw buffer and drives `MetalFillSession` directly, which would let a
@@ -246,7 +251,7 @@ extension CanvasManager {
     func currentFillKey() -> FillKey {
         FillKey(gap: Int(fillGapClosingDistance.rounded()),
                 threshold: Int((fillThreshold * 1000).rounded()),
-                edge: fillGestureIsLasso ? 0 : Int(fillExpand.rounded()),
+                edge: Int(fillExpand.rounded()),
                 edgeIsWall: fillCanvasEdgeIsBoundary,
                 inset: Int(canvasPadding.rounded()))
     }

@@ -125,7 +125,11 @@ fillAlpha(p) = 0        otherwise
 
 The filled shape therefore inherits the artwork's own edge softness: the outer fringe of the silhouette fades from fill colour to paper exactly as the original line faded.
 
-**Step 7 — grow/bleed.** Optional dilation by `G` px (Krita's *Grow Selection*, CSP's *Area scaling*). **Default `G = 0`**, and say so in the settings: because the fill covers the line rather than stopping at it, there is no seam to hide, and a positive `G` only makes the shape fatter than drawn.
+**Step 7 — grow/bleed.** Dilation of `fillAlpha` by `G` px — Edge Overlap, the same slider and the same default (2 px) as the bucket fill (Krita's *Grow Selection*, CSP's *Area scaling*). A greyscale dilate: `fillAlpha'(p) = max over the disk of radius G`, clipped to `loopMask` because §3's "shouldn't even touch the loop" is absolute. It walks the whole step-6 coverage profile outward by `G`, so full opacity lands where the ramp used to start.
+
+**`G = 0` was the specification until 2026-08-21 and it was wrong.** The claim was that a fill which covers the line has no seam to hide. It has one, on the other side: the fill composites *underneath* the artwork, and step 6 gives the artwork's own soft fringe a coverage of `k < 1`, so a pixel where the line is 25% opaque sits over a fill that is 83% opaque and the stack comes out at alpha 223. The background shows through the drawing's edge — the owner's *"the fill bleeds through the anti-aliased edges"* — and it is the identical halo Edge Overlap exists to close on a bucket fill. Measured, not argued: `testTheFillsSoftEdgeComesFromTheArtworksOwnAntialiasing` already carried the 0/213/255 table that says so.
+
+Both sliders therefore move the lasso fill in the artist-facing direction the bucket fill moves it: **Gap Closing up bridges wider gaps, Edge Overlap up makes the fill bigger.** They are *not* pixel-identical between the modes and are not meant to be — the owner ruled explicitly that "align with normal fill behaviour" does not mean pixel-perfect, and that gap closing growing the lasso's result while it shrinks the bucket's is intended: dilating the wall set confines a flood and confines the *collar*, and confining the collar is what leaves more to fill.
 
 **Step 8 — composite.** `fillAlpha × fillColor` onto the active layer with the tool's blend mode. One undo entry per fill.
 

@@ -38,6 +38,7 @@ final class MetalFillEngine {
     private let psLassoBarrier: MTLComputePipelineState
     private let psLassoInvert: MTLComputePipelineState
     private let psPaintAlpha: MTLComputePipelineState
+    private let psLassoEdgeDilate: MTLComputePipelineState
 
     /// Mirror of the Metal `FillParams` struct (must match its field order/alignment exactly).
     struct FillParams {
@@ -87,7 +88,8 @@ final class MetalFillEngine {
               let floodInitFromRing = pipeline("floodInitFromRing"),
               let lassoBarrier = pipeline("lassoBarrier"),
               let lassoInvert = pipeline("lassoInvert"),
-              let paintAlpha = pipeline("paintRegionAlpha") else { return nil }
+              let paintAlpha = pipeline("paintRegionAlpha"),
+              let lassoEdgeDilate = pipeline("lassoEdgeDilate") else { return nil }
         self.device = device
         self.queue = queue
         self.psWalls = walls
@@ -105,6 +107,7 @@ final class MetalFillEngine {
         self.psLassoBarrier = lassoBarrier
         self.psLassoInvert = lassoInvert
         self.psPaintAlpha = paintAlpha
+        self.psLassoEdgeDilate = lassoEdgeDilate
     }
 
     /// Uploads `referenceRGBA` (premultiplied-last, row-major, `width*height*4` bytes) into a session
@@ -176,9 +179,11 @@ final class MetalFillEngine {
                                 floodInitFromRing: MTLComputePipelineState,
                                 lassoBarrier: MTLComputePipelineState,
                                 lassoInvert: MTLComputePipelineState,
-                                paintAlpha: MTLComputePipelineState) {
+                                paintAlpha: MTLComputePipelineState,
+                                lassoEdgeDilate: MTLComputePipelineState) {
         (psWalls, psJfaInit, psJfaStep, psThreshold, psFloodInit, psFloodHoriz, psFloodVert, psEdgeDilate,
-         psPaint, psEdgeBridge, psUnionMask, psFloodInitFromRing, psLassoBarrier, psLassoInvert, psPaintAlpha)
+         psPaint, psEdgeBridge, psUnionMask, psFloodInitFromRing, psLassoBarrier, psLassoInvert, psPaintAlpha,
+         psLassoEdgeDilate)
     }
 }
 
@@ -386,11 +391,12 @@ final class MetalFillSession {
     /// - Parameter seedColor: the colour the flood treats as the region. **Ignored by a lasso
     ///   session**, which derives its own reference set from the ring at construction — see
     ///   `referenceColours`, and §6 2a for why the loop's whole interior is the wrong input.
-    /// - Parameter edgeOverlap: **also ignored by a lasso session**, and forced to 0 by
-    ///   `CanvasManager.currentFillKey()` besides. §6 step 7: because the lasso fill covers the line
-    ///   rather than stopping at it there is no antialiasing seam to hide, so growing the result only
-    ///   makes the shape fatter than the artist drew it — and it would push colour past the
-    ///   silhouette onto clean paper, which is the one thing the tool promises not to do.
+    /// - Parameter edgeOverlap: px to grow the painted region by, so it backs the artwork's own
+    ///   antialiasing instead of ending inside it. **Honoured by a lasso session too, as of
+    ///   2026-08-21** — it used to be ignored here and clamped to 0 by
+    ///   `CanvasManager.currentFillKey()`, on the reasoning that a fill which covers the line has no
+    ///   seam to hide. It has one; it is just on the other side. See `lassoEdgeDilate` in Fill.metal
+    ///   for the measurement, and LASSO_FILL.md §6 step 7.
     /// - Parameter canvasEdgeIsWall: make the canvas edge bound the fill. Two mechanisms, both
     ///   described at length above `edgeBridge` in Fill.metal: the artwork rect's boundary becomes a
     ///   **barrier** the flood cannot travel across (unconditional — it does not consult
@@ -522,8 +528,19 @@ final class MetalFillSession {
             enc3.setBytes(&refCount, length: MemoryLayout<UInt32>.size, index: 8)
             enc3.setBytes(&spread, length: MemoryLayout<Float>.size, index: 9)
             engine.dispatch2D(enc3, p.lassoInvert, width: width, height: height)
+            // **Edge Overlap, and it is the ordinary dilate rather than an inverted one** — see
+            // `lassoEdgeDilate` for the measurement that settles which. `regionTmpBuf` is the bucket
+            // path's scratch and is untouched on this one, so it costs no allocation; the encoder
+            // dispatches serially with barriers, so the invert has finished writing `alphaBuf`
+            // before this reads it.
+            var painted = alphaBuf
+            if Int(edgeOverlap.rounded()) >= 1 {
+                engine.encode2D(enc3, p.lassoEdgeDilate, width: width, height: height,
+                                buffers: [(alphaBuf, 0), (lassoBuf, 1), (regionTmpBuf, 2), (paramsBuf, 3)])
+                painted = regionTmpBuf
+            }
             engine.encode2D(enc3, p.paintAlpha, width: width, height: height,
-                            buffers: [(alphaBuf, 0), (outBuf, 1), (paramsBuf, 2)])
+                            buffers: [(painted, 0), (outBuf, 1), (paramsBuf, 2)])
         } else {
             let painted: MTLBuffer
             if Int(edgeOverlap.rounded()) >= 1 {

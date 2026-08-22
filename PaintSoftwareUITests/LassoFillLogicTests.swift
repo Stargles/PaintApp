@@ -588,18 +588,126 @@ final class LassoFillLogicTests: XCTestCase {
 
     // MARK: - Coverage, edge overlap and the empty check (§6 steps 5–7)
 
-    /// **§6 step 7: Edge Overlap does nothing to a lasso fill, and the engine enforces it rather than
-    /// trusting the caller.** `CanvasManager.currentFillKey()` clamps it to 0 for a lasso gesture and
-    /// `FillSettingsPanel` hides the slider, but `fillExpand` is a single shared setting that defaults
-    /// to 2, so a third path reaching this with a non-zero value must still be safe.
+    /// **§6 step 7, as of 2026-08-21: Edge Overlap up means the fill gets bigger, in this mode too.**
+    /// The owner's words, and the property this asserts literally — a monotone sweep of the whole
+    /// slider range rather than two hand-picked values, because "does it grow" is the question and a
+    /// pair cannot answer it.
     ///
-    /// Not a tidiness rule: the lasso's fill covers the line rather than stopping at it, so there is no
-    /// antialiasing seam to hide, and growing the region by 2 px would push colour past the artwork's
-    /// silhouette onto the clean paper §3 promises to leave alone.
-    func testEdgeOverlapIsIgnoredByALassoFill() throws {
-        let none = try lassoFill(box(breakInRightWall: 0), loop: loopAroundEverything, edgeOverlap: 0)
-        let maxed = try lassoFill(box(breakInRightWall: 0), loop: loopAroundEverything, edgeOverlap: 6)
-        XCTAssertEqual(none, maxed, "Byte for byte the same fill")
+    /// **This test replaces its own opposite.** `testEdgeOverlapIsIgnoredByALassoFill` asserted these
+    /// two fills were equal byte for byte, on the reasoning that a fill covering the line has no seam
+    /// to hide. That reasoning is refuted by the table in
+    /// `testTheFillsSoftEdgeComesFromTheArtworksOwnAntialiasing`, which was in the suite the whole
+    /// time: the fill's coverage at the artwork's outer fringe is 213, not 255, and the fill sits
+    /// *underneath* the artwork — so the artist's 25%-opaque fringe pixel composites over an
+    /// 83%-opaque fill and lets the background through. Growing the fill is what backs it.
+    ///
+    /// Measured 2026-08-21, filled fraction of the canvas at 0…6 px on the closed-box fixture:
+    /// 0.4005, 0.4202, 0.4402, 0.4608, 0.4815, 0.5030, 0.5245. The first is `boxFootprint` to four
+    /// places, which is the other half of the claim — at 0 px this is still exactly the shape the
+    /// artist drew, so the growth is the slider's and not a boundary that was always loose.
+    func testEdgeOverlapGrowsALassoFillMonotonically() throws {
+        let reference = box(breakInRightWall: 0)
+        var areas: [Double] = []
+        for overlap in stride(from: Float(0), through: 6, by: 1) {
+            areas.append(filledFraction(try lassoFill(reference, loop: loopAroundEverything,
+                                                      edgeOverlap: overlap)))
+        }
+        for (i, pair) in zip(areas, areas.dropFirst()).enumerated() {
+            XCTAssertGreaterThan(pair.1, pair.0,
+                                 "Edge Overlap \(i + 1) px paints more than \(i) px — \(areas)")
+        }
+        XCTAssertLessThan(areas.last ?? 1, 1.0, "…and the loop still bounds it: §3 is absolute")
+    }
+
+    /// **The halo the slider exists to close, measured on the same scanline as §6 step 6's table.**
+    /// At Edge Overlap 0 the fill's coverage runs 0, 213, 255 across x = 17, 18, 19 while the
+    /// artwork's alpha runs 0, 64, 160 — so at x = 18 the composite is 64 over 213, which is alpha
+    /// 223 and not opaque. At the shipped default of 2 px the whole profile has walked two pixels
+    /// outward: full coverage reaches x = 17, and the fill's own fade lands on paper the artwork does
+    /// not occupy, where nothing is composited over it.
+    ///
+    /// Asserted as the profile rather than as one pixel, because the failure this guards against is
+    /// the dilate being applied on the wrong side — which a single sample cannot distinguish from it
+    /// being applied at all.
+    func testTheDefaultEdgeOverlapBacksTheArtworksAntialiasedFringe() throws {
+        let reference = rampWalledBox()
+
+        let bare = try lassoFill(reference, loop: loopAroundEverything, edgeOverlap: 0)
+        XCTAssertEqual(coverage(bare, 17, 60), 0, "At 0 px the fill stops inside the artwork's fringe")
+        XCTAssertEqual(coverage(bare, 18, 60), 213, "…at 213, which the artist's 64-alpha pixel shows through")
+
+        let shipped = try lassoFill(reference, loop: loopAroundEverything, edgeOverlap: 2)
+        XCTAssertEqual(coverage(shipped, 18, 60), 255, "At 2 px the fringe is backed solid")
+        XCTAssertEqual(coverage(shipped, 17, 60), 255, "…and so is the first clean-paper pixel")
+        XCTAssertEqual(coverage(shipped, 16, 60), 213, "The fade moved out with it, onto paper")
+        XCTAssertEqual(coverage(shipped, 15, 60), 0, "…and stops two pixels out, which is what 2 px means")
+    }
+
+    /// **"Moving the gap closing slider up means bigger gaps get filled" — the owner, 2026-08-21.**
+    /// The other of the two artist-facing properties, and the one that turned out to need no change:
+    /// a lasso session runs the identical `encodeWallsAndClose` a bucket fill does, and a
+    /// morphological close is monotone in its radius by construction. Pinned anyway, because
+    /// "unchanged" is a claim about behaviour and this file's whole history is of that claim being
+    /// made from the code rather than from the pixels.
+    ///
+    /// The measure is the widest break in the box's wall that still fills, swept over the slider.
+    /// Breaks are counted in rows through a 3 px wall, where the folklore figure of `2 * radius`
+    /// badly over-states what bridges — see `box(breakInRightWall:)` for why wall *ends* are not
+    /// parallel walls.
+    ///
+    /// **Note what this does not assert**, and deliberately: that the lasso and the bucket produce
+    /// the same pixels at the same radius. They do not, and the owner has ruled that they need not —
+    /// dilating the wall set confines a flood and equally confines the *collar*, so the same slider
+    /// motion shrinks one result and grows the other. That divergence is the algorithm, not a defect.
+    ///
+    /// Measured 2026-08-21, widest break still filling at radius 0, 2, 4, 8, 16 px: 0, 2, 4, 6, 10
+    /// rows. Note how far short of `2 * radius` the last two fall — the wall-ends caveat in
+    /// `box(breakInRightWall:)` is worth more than the folklore.
+    func testGapClosingBridgesWiderBreaksAsItRises() throws {
+        func widestBreakThatFills(gapRadius: Float) throws -> Int {
+            var widest = -1
+            for rows in stride(from: 0, through: 15, by: 1) {
+                let region = try lassoFill(box(breakInRightWall: rows), loop: loopAroundEverything,
+                                           gapRadius: gapRadius, edgeOverlap: 0)
+                // A break the close cannot bridge lets the collar into the box, and the interior
+                // stops being filled — that is the leak, and it is the thing the slider buys off.
+                guard isFilled(region, 60, 60) else { break }
+                widest = rows
+            }
+            return widest
+        }
+        let sealed = try [Float(0), 2, 4, 8, 16].map { try widestBreakThatFills(gapRadius: $0) }
+        XCTAssertEqual(sealed, sealed.sorted(), "Wider breaks seal as the slider rises — \(sealed)")
+        XCTAssertGreaterThan(sealed.last ?? 0, sealed.first ?? 0, "…and it is a real range, not a plateau")
+    }
+
+    /// The §6 step 6 fixture, shared by the coverage test and the Edge Overlap one: a box whose walls
+    /// are 3 px solid with a 2 px alpha ramp (64, 160) on each side. Against the default 0.15
+    /// threshold a=160 is a wall (colour distance .314) and a=64 is not (.125), which is what makes
+    /// the outer fringe the interesting pixel.
+    private func rampWalledBox() -> [UInt8] {
+        var reference = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
+        func ink(_ x: Int, _ y: Int, _ a: UInt8) {
+            guard x >= 0, x < Self.w, y >= 0, y < Self.h else { return }
+            let o = (y * Self.w + x) * 4
+            if reference[o + 3] < a { reference[o + 3] = a }
+        }
+        let ramp: [UInt8] = [64, 160]
+        for x in 18...102 {
+            for t in 0..<3 { ink(x, 20 + t, 255); ink(x, 100 - t, 255) }
+            for (k, a) in ramp.enumerated() {
+                ink(x, 20 - 2 + k, a); ink(x, 100 + 2 - k, a)
+                ink(x, 23 + (1 - k), a); ink(x, 97 - (1 - k), a)
+            }
+        }
+        for y in 18...102 {
+            for t in 0..<3 { ink(20 + t, y, 255); ink(100 - t, y, 255) }
+            for (k, a) in ramp.enumerated() {
+                ink(20 - 2 + k, y, a); ink(100 + 2 - k, y, a)
+                ink(23 + (1 - k), y, a); ink(97 - (1 - k), y, a)
+            }
+        }
+        return reference
     }
 
     /// **§6 step 6: the filled shape inherits the artwork's own edge softness.** A box whose walls ramp
@@ -619,29 +727,10 @@ final class LassoFillLogicTests: XCTestCase {
     /// fades out across exactly the pixel the artist's line faded in across, so the silhouette keeps
     /// the softness it was drawn with instead of ending on a hard polygon edge.
     func testTheFillsSoftEdgeComesFromTheArtworksOwnAntialiasing() throws {
-        var reference = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
-        func ink(_ x: Int, _ y: Int, _ a: UInt8) {
-            guard x >= 0, x < Self.w, y >= 0, y < Self.h else { return }
-            let o = (y * Self.w + x) * 4
-            if reference[o + 3] < a { reference[o + 3] = a }
-        }
-        // A box wall 3 px solid with a 2 px alpha ramp on either side.
-        let ramp: [UInt8] = [64, 160]
-        for x in 18...102 {
-            for t in 0..<3 { ink(x, 20 + t, 255); ink(x, 100 - t, 255) }
-            for (k, a) in ramp.enumerated() {
-                ink(x, 20 - 2 + k, a); ink(x, 100 + 2 - k, a)
-                ink(x, 23 + (1 - k), a); ink(x, 97 - (1 - k), a)
-            }
-        }
-        for y in 18...102 {
-            for t in 0..<3 { ink(20 + t, y, 255); ink(100 - t, y, 255) }
-            for (k, a) in ramp.enumerated() {
-                ink(20 - 2 + k, y, a); ink(100 + 2 - k, y, a)
-                ink(23 + (1 - k), y, a); ink(97 - (1 - k), y, a)
-            }
-        }
-        let region = try lassoFill(reference, loop: loopAroundEverything)
+        // Edge Overlap 0 explicitly: the shipped default is 2 px and grows this profile outward by
+        // exactly that (`testTheDefaultEdgeOverlapBacksTheArtworksAntialiasedFringe`). This test is
+        // about where the fade comes *from*, so it reads the undilated result.
+        let region = try lassoFill(rampWalledBox(), loop: loopAroundEverything, edgeOverlap: 0)
 
         XCTAssertEqual(coverage(region, 17, 60), 0, "Clean paper outside the ramp: nothing")
         XCTAssertEqual(coverage(region, 18, 60), 213, "The outer ramp pixel: partial, from the artwork's own alpha")

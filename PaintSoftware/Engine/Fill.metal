@@ -456,6 +456,62 @@ kernel void lassoInvert(const device uchar4* reference  [[buffer(0)]],
 // `paintRegion`'s coverage-aware twin: the fill colour scaled by the 8-bit coverage `lassoInvert`
 // wrote. `fillColor` is premultiplied, so scaling all four channels by the same `k` keeps it
 // premultiplied and the result composites correctly without a second pass.
+// **Edge Overlap for the lasso, and it is the same operation as `edgeDilate` rather than its
+// opposite** (LASSO_FILL.md §6 step 7). The owner, on device 2026-08-21: *"edge overlap does not work
+// on lasso flood fill, and thus the fill bleeds through the anti-aliased edges... moving the edge
+// overlap up means the fill gets bigger."*
+//
+// **What "bleeds through" is, measured rather than reasoned about.** `lassoInvert` paints every
+// unreached pixel solid and gives the reached ones `k = d / T`, so along an outer ramp of a=64/160
+// against T=0.15 the coverage runs 0, 213, 255 while the artist's line runs 0, 64, 160 — the table in
+// `testTheFillsSoftEdgeComesFromTheArtworksOwnAntialiasing`. The fill therefore stops exactly at the
+// artwork's own silhouette and never reaches clean paper, which sounds right and is the bug: the fill
+// composites *underneath* the line, so at that fringe pixel the stack is 64 over 213 and comes out at
+// alpha 223, not 255. The background shows through the drawing's soft edge. That is the identical
+// halo Edge Overlap exists to close on a bucket fill; only the side it faces is different, because
+// this algorithm is the complement.
+//
+// So the correction is not to invert the operation. **A max over the disk is a dilate on a greyscale
+// mask exactly as `edgeDilate`'s "any neighbour set" is on a binary one**, and it walks the whole
+// coverage profile outward by `edgeOverlap` px — full opacity lands where the ramp used to start, and
+// the ramp lands on the paper beyond it. Bigger slider, bigger fill, halo gone.
+//
+// `lasso` is still consulted, and it is not belt-and-braces: growing the result is the one thing that
+// could push paint across the fence, and *"the fill shouldn't even touch the loop"* is absolute (see
+// `lassoInvert`). The dilate may spread only inside the stencil.
+//
+// The pixel count for §6 step 5 is deliberately **not** retaken here. It is `lassoInvert`'s answer to
+// "what did the loop enclose", and a max over an all-zero neighbourhood is zero, so an empty result
+// stays empty however far this is asked to grow it — §7.1's no-undo-entry rule is untouched.
+kernel void lassoEdgeDilate(const device uchar* alphaIn  [[buffer(0)]],
+                            const device uchar*  lasso    [[buffer(1)]],
+                            device uchar*        alphaOut [[buffer(2)]],
+                            constant FillParams& params   [[buffer(3)]],
+                            uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= params.width || gid.y >= params.height) return;
+    uint i = pixelIndex(gid.x, gid.y, params.width);
+    if (lasso[i] == 0) { alphaOut[i] = 0; return; }
+    uchar best = alphaIn[i];
+    int r = int(round(params.edgeOverlap));
+    if (r <= 0 || best == 255) { alphaOut[i] = best; return; }
+    float r2 = params.edgeOverlap * params.edgeOverlap;
+    // The padding rule `edgeDilate` uses, for its reason: the artwork rect's boundary is a boundary,
+    // so coverage may not be dragged across it in either direction.
+    bool onPaper = insideArtworkRect(gid.x, gid.y, params);
+    for (int dy = -r; dy <= r; dy++) {
+        for (int dx = -r; dx <= r; dx++) {
+            if (float(dx * dx + dy * dy) > r2) continue;
+            int nx = int(gid.x) + dx;
+            int ny = int(gid.y) + dy;
+            if (nx < 0 || ny < 0 || nx >= int(params.width) || ny >= int(params.height)) continue;
+            if (insideArtworkRect(uint(nx), uint(ny), params) != onPaper) continue;
+            uchar a = alphaIn[pixelIndex(uint(nx), uint(ny), params.width)];
+            if (a > best) { best = a; if (best == 255) { alphaOut[i] = 255; return; } }
+        }
+    }
+    alphaOut[i] = best;
+}
+
 kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],
                              device uchar4*       out    [[buffer(1)]],
                              constant FillParams& params [[buffer(2)]],

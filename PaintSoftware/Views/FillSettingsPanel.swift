@@ -83,27 +83,29 @@ struct FillSettingsPanel: View {
                 }
                 .padding(.horizontal)
 
-                // **Hidden rather than disabled in lasso mode.** A greyed slider invites the artist
-                // to wonder what it would do, and the honest answer is "nothing you want" — the
-                // lasso's fill already covers the line it would have grown under. Hiding it also
-                // buys back 51 pt of this panel's height, which the comment above the picker
-                // explains is a scarce resource here.
-                if canvasManager.fillMode != .lasso {
-                    VStack(alignment: .leading) {
-                        Text("Edge Overlap: \(Int(canvasManager.fillExpand)) px")
-                            .foregroundColor(.white)
-                        Slider(value: Binding(
-                            get: { canvasManager.fillExpand },
-                            set: { canvasManager.setFillSetting(.edgeOverlap, $0) }
-                        ), in: CanvasManager.fillExpandRange)
-                            .tint(tint(.edgeOverlap))
-                            .accessibilityIdentifier("fillPanel.edgeOverlapSlider")
-                        Text("Extends the fill slightly under the boundary to remove antialiasing gaps.")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                    .padding(.horizontal)
+                // **Shown in both modes as of 2026-08-21.** It used to be hidden in lasso mode,
+                // because the value was clamped to 0 there and a greyed slider invites the artist to
+                // wonder what it would do. It is not clamped any more — see `currentFillKey` — and
+                // the owner asked for it back on the device, where they were looking at the halo it
+                // closes. The caption changes with the mode because the seam it hides is on opposite
+                // sides of the line in the two, even though the slider does the same thing to the
+                // fill in both: makes it bigger.
+                VStack(alignment: .leading) {
+                    Text("Edge Overlap: \(Int(canvasManager.fillExpand)) px")
+                        .foregroundColor(.white)
+                    Slider(value: Binding(
+                        get: { canvasManager.fillExpand },
+                        set: { canvasManager.setFillSetting(.edgeOverlap, $0) }
+                    ), in: CanvasManager.fillExpandRange)
+                        .tint(tint(.edgeOverlap))
+                        .accessibilityIdentifier("fillPanel.edgeOverlapSlider")
+                    Text(canvasManager.fillMode == .lasso
+                         ? "Grows the fill past the artwork's soft edge, so the background can't show through it."
+                         : "Extends the fill slightly under the boundary to remove antialiasing gaps.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
                 }
+                .padding(.horizontal)
 
                 // **Below the three sliders, not beside Gap Closing, and the reason is the panel's
                 // height rather than its logic.** It reads as a Gap Closing modifier — it also adds
