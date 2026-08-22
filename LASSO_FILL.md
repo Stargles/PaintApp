@@ -28,6 +28,29 @@ Three corrections, all small:
 2. **The seeds are not "the lasso wall" but "the passable pixels just inside the lasso wall."** A stretch of loop lying on ink contributes no seed. This is not an error condition (§4, case 1).
 3. **Reject the fallback.** The obvious objection — "circling blank paper fills nothing, so fall back to filling the loop's own shape" — should be refused, and the owner has already ruled that way. Reasons in §4, case 6/11.
 
+## 2a. What "filled over" means, and what the owner ruled on 2026-08-21
+
+The original requirement was the owner's own: *"all inner lines are filled over."* Asked directly
+whether it should hold when the line art sits on the **same layer** being filled — where a raster
+fill composites beneath that cel's own strokes, and a vector fill renders beneath strokes by kind
+order — they ruled:
+
+> *"if the line art is on the same layer I am filling, its okay that the lineart is not filled over,
+> in fact I'd rather keep it that way."*
+
+**So the shipped behaviour is correct and the two BUGS.md entries that tracked it are closed as
+not-a-defect, not deferred.** Do not "fix" this later; it is the intended result.
+
+The distinction that still matters, and which this ruling does **not** touch: **the filled *region*
+must still extend underneath the ink.** `fill = loopMask ∧ ¬reached` includes wall pixels, and that
+is what stops a halo of unfilled paper appearing along every antialiased edge. Lines staying
+*visible* is a compositing outcome; the region stopping short of them would be a defect. Keep the
+region as it is.
+
+The practical consequence for the artist: a lasso spanning several compartments on one layer fills
+all of them, and the dividers stay drawn on top — which is what they want. On the ordinary workflow
+(line art on its own layer above the colour) the outcome is the same, for a different reason.
+
 ## 3. The rule, for an artist
 
 > **The loop is a fence, and ink is a wall. Anything inside your fence that the fence can walk to — the paper around your drawing, and anywhere it can slip into through a gap — is left untouched. Everything else inside the fence is filled solid, lines and all. So the colour lands inside your shapes and nowhere else: not on the paper between the fence and the drawing, and never on the fence itself.**
