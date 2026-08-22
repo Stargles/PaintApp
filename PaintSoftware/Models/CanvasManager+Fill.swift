@@ -232,18 +232,51 @@ extension CanvasManager {
         return generation == fillGeneration
     }
 
-    /// **Edge Overlap used to be forced to 0 for a lasso gesture. It is not, and the hard zero was
-    /// the bug** — the owner, on device 2026-08-21: *"edge overlap does not work on lasso flood fill,
-    /// and thus the fill bleeds through the anti-aliased edges."*
+    /// The Edge Overlap value the slider shows and writes: the bucket's or the lasso's, whichever mode
+    /// the artist has in front of them. Two stored settings, one control — see `fillLassoExpand` for
+    /// why they cannot share a number.
     ///
-    /// The reasoning it replaces was that the lasso covers the line (LASSO_FILL.md §6 step 4) so
-    /// there is no antialiasing seam to hide. There is one: the fill is composited *underneath* the
-    /// artwork, and `lassoInvert` stops its full coverage exactly at the artwork's own silhouette, so
-    /// the drawing's soft fringe sits over a fill that is already fading and the background shows
-    /// through it. Same halo as the bucket fill's, on the far side of the line. `lassoEdgeDilate` in
-    /// Fill.metal carries the measurement and the arithmetic; both modes now grow the painted region
-    /// by the same slider in the same direction, which is the owner's *"moving the edge overlap up
-    /// means the fill gets bigger"*.
+    /// Every UI path goes through here (`FillSettingsPanel`, `SideToolbar`, the fill tool's sideways
+    /// drag in `CanvasView`, and `setFillSetting`/`updateInteractiveFill` below), so "which mode owns
+    /// this value" is decided in exactly one place.
+    var fillEdgeOverlap: CGFloat {
+        get { fillMode == .lasso ? fillLassoExpand : fillExpand }
+        set {
+            let v = min(max(newValue, Self.fillExpandRange.lowerBound), Self.fillExpandRange.upperBound)
+            if fillMode == .lasso {
+                if fillLassoExpand != v { fillLassoExpand = v }
+            } else {
+                if fillExpand != v { fillExpand = v }
+            }
+        }
+    }
+
+    /// The disk radius the engine is handed, which is **not** the slider value for a lasso.
+    ///
+    /// *"I want it so on the high setting it is on the outer edge, and when you lower it, it shrinks
+    /// inwards"* — the owner, 2026-08-21. The slider keeps its direction (up is more colour) and its
+    /// whole range slides down by its own width: the lasso erodes by `upperBound - v`, so the top of
+    /// the slider is radius 0 — flush with the artwork's outer silhouette, byte-identical to the old
+    /// zero — and nothing below it can paint outside that silhouette. The bucket is untouched and
+    /// still dilates by `v`.
+    ///
+    /// The mapping lives here rather than in `MetalFillSession` on purpose: *where the top of a slider
+    /// sits* is a fact about `fillExpandRange`, which is a UI range, and the engine should not have to
+    /// know it to run a morphological operator. `lassoEdgeErode` in Fill.metal is the operator.
+    func fillEdgeRadius(lasso: Bool) -> CGFloat {
+        lasso ? Self.fillExpandRange.upperBound - fillLassoExpand : fillExpand
+    }
+
+    /// **Edge Overlap used to be forced to 0 for a lasso gesture, then briefly grew the fill outward,
+    /// and is now anchored at the ink's outer edge** — see `fillEdgeRadius(lasso:)` for the owner's
+    /// two rulings of 2026-08-21 and LASSO_FILL.md §6 step 7 for the specification.
+    ///
+    /// `fillGestureIsLasso` rather than `fillMode` decides which mapping the key gets, and the
+    /// difference is not academic: the key describes the *session* the worker will re-run, and a
+    /// session's algorithm is fixed at `makeSession` by whether it was handed a lasso mask. Switching
+    /// the mode picker while a fill is still adjustable would otherwise send the bucket's radius to a
+    /// lasso session, which reads it as an erosion. Both flags are main-thread state and both are set
+    /// before the `begin*Fill` that reaches here.
     ///
     /// Internal rather than `private` so `FillBoundaryLogicTests` can assert the wiring: every other
     /// fill test builds a raw buffer and drives `MetalFillSession` directly, which would let a
@@ -251,7 +284,7 @@ extension CanvasManager {
     func currentFillKey() -> FillKey {
         FillKey(gap: Int(fillGapClosingDistance.rounded()),
                 threshold: Int((fillThreshold * 1000).rounded()),
-                edge: Int(fillExpand.rounded()),
+                edge: Int(fillEdgeRadius(lasso: fillGestureIsLasso).rounded()),
                 edgeIsWall: fillCanvasEdgeIsBoundary,
                 inset: Int(canvasPadding.rounded()))
     }
@@ -286,10 +319,10 @@ extension CanvasManager {
         guard fillGestureActive else { return }
         let clampedGap = min(max(gapClosing, Self.fillGapRange.lowerBound), Self.fillGapRange.upperBound)
         let clampedThreshold = min(max(threshold, Self.fillThresholdRange.lowerBound), Self.fillThresholdRange.upperBound)
-        let clampedEdge = min(max(edgeOverlap, Self.fillExpandRange.lowerBound), Self.fillExpandRange.upperBound)
         if fillGapClosingDistance != clampedGap { fillGapClosingDistance = clampedGap }
         if fillThreshold != clampedThreshold { fillThreshold = clampedThreshold }
-        if fillExpand != clampedEdge { fillExpand = clampedEdge }
+        // Clamped by the setter, and written to whichever mode's stored value the slider is showing.
+        fillEdgeOverlap = edgeOverlap
         scheduleFillRender()
     }
 
@@ -307,8 +340,7 @@ extension CanvasManager {
             let v = min(max(value, Self.fillThresholdRange.lowerBound), Self.fillThresholdRange.upperBound)
             if fillThreshold != v { fillThreshold = v }
         case .edgeOverlap:
-            let v = min(max(value, Self.fillExpandRange.lowerBound), Self.fillExpandRange.upperBound)
-            if fillExpand != v { fillExpand = v }
+            fillEdgeOverlap = value
         }
         if fillGestureActive { scheduleFillRender() }
     }

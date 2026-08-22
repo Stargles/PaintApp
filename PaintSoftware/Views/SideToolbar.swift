@@ -37,7 +37,7 @@ struct SideToolbar: View {
                     )
                     labeledSlider(
                         title: "Edge Overlap",
-                        value: Binding(get: { Double(canvasManager.fillExpand) }, set: { canvasManager.setFillSetting(.edgeOverlap, CGFloat($0)) }),
+                        value: Binding(get: { Double(canvasManager.fillEdgeOverlap) }, set: { canvasManager.setFillSetting(.edgeOverlap, CGFloat($0)) }),
                         range: Double(CanvasManager.fillExpandRange.lowerBound)...Double(CanvasManager.fillExpandRange.upperBound),
                         identifier: "sideToolbar.edgeOverlapSlider"
                     )
@@ -187,7 +187,10 @@ struct SideToolbar: View {
     private func resetSettings() {
         if isFillMode {
             canvasManager.fillGapClosingDistance = 8
+            // Both Edge Overlaps, because the slider shows only the active mode's and a reset that
+            // left the other one where the artist dragged it is a reset the artist cannot see.
             canvasManager.fillExpand = 2
+            canvasManager.fillLassoExpand = CanvasManager.fillExpandRange.upperBound
         } else if isEraserMode {
             canvasManager.eraserSize = 20
             canvasManager.eraserOpacity = 1.0

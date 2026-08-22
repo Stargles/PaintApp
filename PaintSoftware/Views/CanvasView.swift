@@ -2950,7 +2950,7 @@ struct CanvasView: UIViewRepresentable {
                 fillDragStartHost = recognizer.location(in: host)
                 fillDragStartGap = canvasManager.fillGapClosingDistance
                 fillDragStartThreshold = canvasManager.fillThreshold
-                fillDragStartEdge = canvasManager.fillExpand
+                fillDragStartEdge = canvasManager.fillEdgeOverlap
                 let canvasPoint = recognizer.location(in: container)
                 // Pressing back inside the current adjustable fill resumes drag-adjusting it. A
                 // press elsewhere bakes it first via `beginInteractiveFill`'s `beginCanvasEdit`.

@@ -135,11 +135,15 @@ enum FillMode: String, Codable, CaseIterable, Identifiable {
     /// property of every fill, not of this mode; it is stated here because it is what makes "paints
     /// over every line inside the loop" true on screen and not merely true of the region.
     ///
-    /// **It is not the flood with a bigger seed.** Gap closing and Threshold act on the collar that
-    /// decides what is *held out* rather than on a spreading front, so the same slider does a
-    /// different job in each mode. See `CanvasManager.beginInteractiveLassoFill` for the mechanism,
-    /// and for the cases — blank paper, a gap wider than Gap Closing — where it deliberately fills
-    /// nothing and says so.
+    /// **It is not the flood with a bigger seed, and the settings do not all carry over.** Gap
+    /// closing and Threshold act on the collar that decides what is *held out*. Edge Overlap is live
+    /// here too, but it is anchored differently, because the two fills end on opposite sides of the
+    /// artist's line: the bucket stops inside the line and grows under it, while this one already
+    /// covers the line and reaches its outer edge. So on the lasso the slider's **top** is that outer
+    /// edge and lowering it tucks the colour further underneath — no setting paints on clean paper.
+    /// `CanvasManager.fillEdgeRadius(lasso:)` is the mapping and holds the owner's ruling; see
+    /// `CanvasManager.beginInteractiveLassoFill` for the mechanism, and for the cases — blank paper,
+    /// a gap wider than Gap Closing — where it deliberately fills nothing and says so.
     case lasso
 
     var id: String { rawValue }

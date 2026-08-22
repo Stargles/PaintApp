@@ -615,7 +615,22 @@ final class CanvasManager: ObservableObject {
     /// Colour-distance threshold (0..1) above which a boundary counts as a wall. Higher = the fill
     /// spreads across bigger colour differences (fewer walls); lower = subtle borders stop it.
     @Published var fillThreshold: CGFloat = 0.15
+    /// Edge Overlap for the **bucket** fill, in px: how far the finished region is grown under the
+    /// wall it stopped against. The lasso keeps its own value below; they are separate settings
+    /// wearing one slider, and `fillEdgeOverlap` is the accessor that picks between them.
     @Published var fillExpand: CGFloat = 2
+
+    /// Edge Overlap for the **lasso** fill, and it defaults to the top of the range rather than to
+    /// the bucket's 2.
+    ///
+    /// Under the anchoring the owner ruled on 2026-08-21 the lasso reads this slider as *how far out
+    /// the colour reaches, with the top being the ink's own outer edge* — `fillEdgeRadius(lasso:)`
+    /// turns it into an erosion of `upperBound - v`. Sharing the bucket's stored 2 would therefore
+    /// ship a 4 px inward retreat by default: a pale seam all round the drawing, which is a version
+    /// of the very complaint that opened the day. Per-mode storage is the smallest thing that stops
+    /// one mode's sensible default from being the other's defect, and the slider itself is unchanged
+    /// — it shows and writes whichever value belongs to the mode in front of the artist.
+    @Published var fillLassoExpand: CGFloat = CanvasManager.fillExpandRange.upperBound
     /// Whether the canvas rectangle's edge bounds the fill the way a drawn line does. On by default,
     /// at the owner's request.
     ///

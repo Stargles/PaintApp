@@ -26,10 +26,10 @@ struct FillSettingsPanel: View {
                 //
                 // Gap Closing and Threshold below stay put and stay live for both types: they
                 // decide the passability field, which the lasso's collar flood reads exactly as the
-                // bucket fill's does. **Edge Overlap does not** — it is hidden in lasso mode and
-                // clamped to 0 in `CanvasManager.currentFillKey()`, because a fill that covers the
-                // line has no antialiasing seam to hide and a positive value would only push colour
-                // past the artwork onto clean paper (LASSO_FILL.md §6 step 7).
+                // bucket fill's does. **Edge Overlap is shown in both too, but it is two settings
+                // behind one slider** — see `CanvasManager.fillEdgeOverlap`, and
+                // `fillEdgeRadius(lasso:)` for why the lasso's top of range means something different
+                // in pixels from the bucket's (LASSO_FILL.md §6 step 7).
                 HStack {
                     Text("Fill")
                         .font(.headline)
@@ -83,24 +83,25 @@ struct FillSettingsPanel: View {
                 }
                 .padding(.horizontal)
 
-                // **Shown in both modes as of 2026-08-21.** It used to be hidden in lasso mode,
-                // because the value was clamped to 0 there and a greyed slider invites the artist to
-                // wonder what it would do. It is not clamped any more — see `currentFillKey` — and
-                // the owner asked for it back on the device, where they were looking at the halo it
-                // closes. The caption changes with the mode because the seam it hides is on opposite
-                // sides of the line in the two, even though the slider does the same thing to the
-                // fill in both: makes it bigger.
+                // **Shown in both modes as of 2026-08-21**, and reading a per-mode value as of the
+                // same day. It used to be hidden in lasso mode because the value was clamped to 0
+                // there, and a greyed slider invites the artist to wonder what it would do.
+                //
+                // The slider means "more colour" as you raise it in both modes; what differs is where
+                // the top of the travel puts the paint, and the captions say that rather than naming
+                // the operator. On the lasso the top is the outer edge of the artist's own line and
+                // nothing goes past it — the owner's ruling, after a version that did.
                 VStack(alignment: .leading) {
-                    Text("Edge Overlap: \(Int(canvasManager.fillExpand)) px")
+                    Text("Edge Overlap: \(Int(canvasManager.fillEdgeOverlap)) px")
                         .foregroundColor(.white)
                     Slider(value: Binding(
-                        get: { canvasManager.fillExpand },
+                        get: { canvasManager.fillEdgeOverlap },
                         set: { canvasManager.setFillSetting(.edgeOverlap, $0) }
                     ), in: CanvasManager.fillExpandRange)
                         .tint(tint(.edgeOverlap))
                         .accessibilityIdentifier("fillPanel.edgeOverlapSlider")
                     Text(canvasManager.fillMode == .lasso
-                         ? "Grows the fill past the artwork's soft edge, so the background can't show through it."
+                         ? "At the top the colour reaches the outer edge of your line; lower it and the colour tucks further underneath."
                          : "Extends the fill slightly under the boundary to remove antialiasing gaps.")
                         .font(.caption)
                         .foregroundColor(.gray)
