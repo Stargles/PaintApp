@@ -20,7 +20,21 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-Nothing.
+- **`CanvasTouchOwner`** — [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)'s finding 1, on `tmp/touchowner`.
+  The owner ruled 2026-08-22 to do it **before** the new features, on the grounds that it pays for itself on
+  the first new tool.
+
+## Verified on the device
+
+**All five of this pass's changes were confirmed by the owner on their iPad, 2026-08-22**: *"five changes are
+behaving correctly."* That covers the lasso move, the Cut eraser's live preview, the pick tool under the Select
+panel, the raster-tier omission on save, and the raster Move's travelling ants. Nothing from this pass is
+waiting on an eye any more.
+
+Three behaviour questions are still carried, and are **not** defects — each was raised by us, not reported:
+the Cut eraser across a line thicker than the eraser (visibly does nothing, and always did); a crossing line
+that can flicker during a cut drag, under 10% of what the cut removes; and a fill chunk dropped on blank paper
+staying a fill. All three want the owner's eye on real artwork rather than another run.
 
 ## Queued
 
