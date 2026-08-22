@@ -1,7 +1,7 @@
 # Graph Report - PaintSoftware  (2026-08-22)
 
 ## Corpus Check
-- 245 files · ~793,095 words
+- 249 files · ~825,388 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `fdd2badc`
+- Built from commit: `1207af4c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -124,7 +124,7 @@
 - Distort/Warp transform modes render identically to Uniform
 - Adjust panel / ActionsMenu Cut-Copy-Paste stubs
 - BlendMode
-- BrushSettingsPanel
+- SandwichPresentation
 - CodingKeys
 - Composite.metal
 - PlaybackBoundsCharacterizationTests
@@ -249,7 +249,7 @@
 - ValueFill
 - CompositorRole
 - .relayout
-- Handoff — 2026-08-22
+- Handoff — 2026-08-22 (session 67)
 - TransformOverlaySupport.swift
 - LayerKind
 - ManifestSkeleton
@@ -426,12 +426,12 @@ Cohesion: 0.13
 Nodes (18): ActivePanel, actions, brush, color, eraser, fill, layers, move (+10 more)
 
 ### Community 34 - "Binding"
-Cohesion: 0.14
-Nodes (20): Accessory, KeyPath, .body, StrokeSettingsPanel, .body, .brush, .grainDepthBinding, .opacityBinding (+12 more)
+Cohesion: 0.06
+Nodes (40): Accessory, KeyPath, BrushSettingsPanel, .body, .importCustomBrushRow, .preview, CanvasManager, PhotosPickerItem (+32 more)
 
 ### Community 35 - "Coordinator"
 Cohesion: 0.06
-Nodes (32): LayerHostView, .maskedContentViews, Bool, CALayer, CGImage, ActiveObjectTransform, Coordinator, .canvasContentScale (+24 more)
+Nodes (29): LayerHostView, .maskedContentViews, Bool, CALayer, CGImage, ActiveObjectTransform, Coordinator, .canvasContentScale (+21 more)
 
 ### Community 36 - "FloatingPieceOverlayView"
 Cohesion: 0.10
@@ -502,7 +502,7 @@ Cohesion: 0.16
 Nodes (14): SideToolbar, .body, .eyedropperButton, .isEraserMode, .isFillMode, .sliderHeight, Bool, CanvasManager (+6 more)
 
 ### Community 53 - "ARAPLogicTests"
-Cohesion: 0.15
+Cohesion: 0.14
 Nodes (6): ARAPInterpolation, ARAPLogicTests, Int, StaticString, String, UInt
 
 ### Community 54 - "TextOverlayView"
@@ -673,9 +673,9 @@ Nodes (29): 10. Still open, 11. Build order, 1. Why these are one project, 2. Wh
 Cohesion: 0.06
 Nodes (31): BlendMode, add, clipToBelow, color, colorBurn, colorDodge, .compositedMode, darken (+23 more)
 
-### Community 110 - "BrushSettingsPanel"
-Cohesion: 0.10
-Nodes (20): BrushSettingsPanel, .body, .importCustomBrushRow, .preview, CanvasManager, PhotosPickerItem, String, .panelView (+12 more)
+### Community 110 - "SandwichPresentation"
+Cohesion: 0.50
+Nodes (4): SandwichPresentation, disengaged, midStroke, rest
 
 ### Community 111 - "CodingKeys"
 Cohesion: 0.10
@@ -694,7 +694,7 @@ Cohesion: 0.12
 Nodes (16): Editing, handles, none, spacing, Grip, Guide, GuideOverlayView, CGPath (+8 more)
 
 ### Community 115 - "DeformFactorization"
-Cohesion: 0.09
+Cohesion: 0.10
 Nodes (17): Accelerate, Interpolator, Options, Bool, DeformDataRow, DeformEdgeTerm, DeformFactorization, Matrix2x2 (+9 more)
 
 ### Community 116 - "CodingKeys"
@@ -730,7 +730,7 @@ Cohesion: 0.05
 Nodes (24): GuideHandles, GuidePath, .end, .start, GuideSet, .isEmpty, SpacingChart, .curve (+16 more)
 
 ### Community 124 - "TextTransformOverlayView"
-Cohesion: 0.11
+Cohesion: 0.12
 Nodes (16): Bool, CALayer, CGRect, NSCoder, Set, UIEvent, UITouch, Void (+8 more)
 
 ### Community 125 - "agent"
@@ -798,8 +798,8 @@ Cohesion: 0.19
 Nodes (9): CanvasManager, Entry, Bool, Cel, CGSize, UIImage, UUID, ThumbnailBatch (+1 more)
 
 ### Community 141 - ".makeUIView"
-Cohesion: 0.11
-Nodes (10): AppliedTool, CanvasView, CanvasManager, Color, Context, Coordinator, Double, UIColor (+2 more)
+Cohesion: 0.12
+Nodes (9): AppliedTool, CanvasView, Color, Context, Coordinator, Double, UIColor, UIImageView (+1 more)
 
 ### Community 142 - "CanvasNotice"
 Cohesion: 0.09
@@ -1122,7 +1122,7 @@ Cohesion: 0.25
 Nodes (8): 0. How much of this already exists, 2. Why the rejected alternatives were rejected, 3. Staged delivery, 4. Performance rules, 5. Behaviour, decided, 6. Open risks, Lasso Move — Specification, Still needs a ruling, and stage 1 can start without any of it
 
 ### Community 230 - ".setUpGestures"
-Cohesion: 0.13
+Cohesion: 0.12
 Nodes (11): Set, UIEvent, UIPanGestureRecognizer, UIPinchGestureRecognizer, UITouch, UIView, Void, TouchTypePressRecognizer (+3 more)
 
 ### Community 232 - "CanvasManager"
@@ -1141,9 +1141,9 @@ Nodes (11): CodingKeys, kind, mixMode, op, CompositorRole, node, Decoder, Encode
 Cohesion: 0.23
 Nodes (6): Context, UIPinchGestureRecognizer, TimelineScrollView, TimelineTrackView.Coordinator, UIScrollView, UIScrollViewDelegate
 
-### Community 237 - "Handoff — 2026-08-22"
+### Community 237 - "Handoff — 2026-08-22 (session 67)"
 Cohesion: 0.22
-Nodes (8): Handoff — 2026-08-22, Start here — paste this to begin the next session, State, Still true, carried forward, Three findings worth more than the fixes, Traps this pass hit, for the next one, What landed, What the owner has to decide, once they have looked
+Nodes (8): Carried work, deliberately not done, Handoff — 2026-08-22 (session 67), Start here — paste this to begin the next session, State, Still true, carried forward, Traps this pass hit, for the next one, What landed, What the owner has to decide, once they have looked
 
 ### Community 238 - "TransformOverlaySupport.swift"
 Cohesion: 0.28
@@ -1170,7 +1170,7 @@ Nodes (27): Equatable, Bloom, Blur, BrightnessContrast, ChromaticAberration, Cur
   BUGS.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1037 isolated node(s):** `graphify-guard.sh script`, `gallery`, `sizePicker`, `editor`, `.now` (+1032 more)
+- **1037 isolated node(s):** `Start here — paste this to begin the next session`, `State`, `What landed`, `What the owner has to decide, once they have looked`, `Carried work, deliberately not done` (+1032 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **22 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1179,12 +1179,12 @@ _Questions this graph is uniquely positioned to answer:_
 
 - **What is the exact relationship between `Stroke-delivery regression (pencil-only-drawing default)` and `Fill tool off-center fill vertically mirrored (regression)`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `CGFloat` connect `CGFloat` to `ShapeGeometry`, `TimelineRowView`, `CanvasManager`, `ShapeOverlayView`, `String`, `cels`, `StrokeCanvasView`, `ActionRecorder`, `BrushEngineLogicTests`, `TextRecipe`, `CGPoint`, `Brush`, `InterpolationRecipe`, `.transparentFormat`, `layers`, `CanvasManager`, `PointCloudIndex`, `VectorEraserHybridLogicTests`, `PerfBaselineTests`, `RasterLayerTexture`, `Binding`, `Coordinator`, `FloatingPieceOverlayView`, `AnimationTimeline`, `LayerStackCell`, `VectorCanvas`, `TextFrame`, `FontFace`, `WindowEventTap`, `SideToolbar`, `ARAPLogicTests`, `TextOverlayView`, `ObjectTransformOverlayView`, `XCUIApplication`, `BrushStamper`, `Lattice`, `AlphaMask`, `ProjectStore`, `StrokeStabilizer`, `SizePreviewRequest`, `.solidImage`, `CanvasManager`, `.apply`, `LayerRowModel`, `GradientStopsEditor`, `DrawingView`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `TextBakeCharacterizationTests`, `LassoFillLogicTests`, `.setBakedContent`, `InterpolationEngineDiagnosticsLogicTests`, `.evaluate`, `InterpolationRenderLogicTests`, `BrushSettingsPanel`, `CodingKeys`, `GuideOverlayView`, `DeformFactorization`, `RenderRequest`, `VectorSample`, `InterpolationGuideLogicTests`, `TextTransformOverlayView`, `FontResolveLogicTests`, `CanvasManager`, `VectorTransformUndoLogicTests`, `Typography`, `TextLayout`, `InterpolateBar`, `.launchIntoEditor`, `.draw`, `TextHitTestLogicTests`, `.backfillMissingThumbnails`, `.makeUIView`, `BrushBlendMode`, `CanvasManager`, `PinchMergeGateLogicTests`, `StrokeSpatialIndex`, `CanvasTransformFreezeUITests`, `CurveEditor`, `.compositeSize`, `JSONValue`, `.rasterize`, `.image`, `.performDrag`, `CGRect`, `.sample`, `ActionsMenu`, `TextSettingsPanel`, `TimelineLayoutKeyLogicTests`, `OnionSkinSource.swift`, `CGContextDabTarget`, `RenderQuality`, `Coordinator`, `.group`, `TimelineLayoutKey`, `.frames`, `CanvasManager`, `.relayout`, `TransformOverlaySupport.swift`?**
-  _High betweenness centrality (0.268) - this node is a cross-community bridge._
+- **Why does `CGFloat` connect `CGFloat` to `ShapeGeometry`, `TimelineRowView`, `CanvasManager`, `ShapeOverlayView`, `String`, `cels`, `StrokeCanvasView`, `ActionRecorder`, `BrushEngineLogicTests`, `TextRecipe`, `CGPoint`, `Brush`, `InterpolationRecipe`, `.transparentFormat`, `layers`, `CanvasManager`, `PointCloudIndex`, `VectorEraserHybridLogicTests`, `PerfBaselineTests`, `RasterLayerTexture`, `Binding`, `Coordinator`, `FloatingPieceOverlayView`, `AnimationTimeline`, `LayerStackCell`, `VectorCanvas`, `TextFrame`, `FontFace`, `WindowEventTap`, `SideToolbar`, `ARAPLogicTests`, `TextOverlayView`, `ObjectTransformOverlayView`, `XCUIApplication`, `BrushStamper`, `Lattice`, `AlphaMask`, `ProjectStore`, `StrokeStabilizer`, `SizePreviewRequest`, `.solidImage`, `CanvasManager`, `.apply`, `LayerRowModel`, `GradientStopsEditor`, `DrawingView`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `TextBakeCharacterizationTests`, `LassoFillLogicTests`, `.setBakedContent`, `InterpolationEngineDiagnosticsLogicTests`, `.evaluate`, `InterpolationRenderLogicTests`, `CodingKeys`, `GuideOverlayView`, `DeformFactorization`, `RenderRequest`, `VectorSample`, `InterpolationGuideLogicTests`, `TextTransformOverlayView`, `FontResolveLogicTests`, `CanvasManager`, `VectorTransformUndoLogicTests`, `Typography`, `TextLayout`, `InterpolateBar`, `.launchIntoEditor`, `.draw`, `TextHitTestLogicTests`, `.backfillMissingThumbnails`, `.makeUIView`, `BrushBlendMode`, `CanvasManager`, `PinchMergeGateLogicTests`, `StrokeSpatialIndex`, `CanvasTransformFreezeUITests`, `CurveEditor`, `.compositeSize`, `JSONValue`, `.rasterize`, `.image`, `.performDrag`, `CGRect`, `.sample`, `ActionsMenu`, `TextSettingsPanel`, `TimelineLayoutKeyLogicTests`, `OnionSkinSource.swift`, `CGContextDabTarget`, `RenderQuality`, `Coordinator`, `.group`, `TimelineLayoutKey`, `.frames`, `CanvasManager`, `.relayout`, `TransformOverlaySupport.swift`?**
+  _High betweenness centrality (0.300) - this node is a cross-community bridge._
 - **Why does `CGPoint` connect `CGPoint` to `ShapeGeometry`, `Typography`, `VectorTransformUndoLogicTests`, `EyedropperLogicTests`, `TextLayout`, `TimelineRowView`, `CanvasManager`, `VectorCanvasData`, `ShapeOverlayView`, `String`, `cels`, `StrokeCanvasView`, `.backfillMissingThumbnails`, `BrushEngineLogicTests`, `.makeUIView`, `ColorPickerPanel`, `TextHitTestLogicTests`, `Brush`, `InterpolationRecipe`, `.transparentFormat`, `layers`, `CanvasManager`, `PointCloudIndex`, `StrokeSpatialIndex`, `CanvasManager`, `.refreshUndoRedoState`, `CGRect`, `PerfBaselineTests`, `VectorEraserHybridLogicTests`, `RasterLayerTexture`, `LayerStackListView.Coordinator`, `Coordinator`, `CurveEditor`, `AnimationTimeline`, `FloatingPieceOverlayView`, `ProjectSaveLogicTests`, `VectorCanvas`, `SelectionOverlayView`, `TextFrame`, `.rasterize`, `WindowEventTap`, `ARAPLogicTests`, `TextOverlayView`, `ObjectTransformOverlayView`, `TextRecipeCodableLogicTests`, `CGRect`, `BrushStamper`, `Lattice`, `.sample`, `AlphaMask`, `StrokeStabilizer`, `SizePreviewRequest`, `CanvasManager`, `SaveDamageGateLogicTests`, `FillGestureRestartLogicTests`, `.sampledColor`, `.rasterize`, `CGFloat`, `CGContextDabTarget`, `RenderQuality`, `Coordinator`, `.group`, `TextBakeCharacterizationTests`, `InterpolationEngineDiagnosticsLogicTests`, `.frames`, `.evaluate`, `InterpolationRenderLogicTests`, `.setUpGestures`, `CanvasManager`, `TransformOverlaySupport.swift`, `GuideOverlayView`, `DeformFactorization`, `VectorSample`, `InterpolationGuideLogicTests`, `TextTransformOverlayView`?**
-  _High betweenness centrality (0.158) - this node is a cross-community bridge._
+  _High betweenness centrality (0.151) - this node is a cross-community bridge._
 - **Why does `XCTestCase` connect `XCTestCase` to `PaintUITestCase`, `ShapeGeometry`, `ProjectBackupManager`, `.manager`, `EyedropperLogicTests`, `Typography`, `VectorTransformUndoLogicTests`, `VectorCanvasData`, `cels`, `TextHitTestLogicTests`, `BrushEngineLogicTests`, `CanvasNotice`, `UIKit`, `OnionSkinLogicTests`, `CGPoint`, `InterpolationRecipe`, `Brush`, `PinchMergeGateLogicTests`, `VectorEraserHybridLogicTests`, `PerfBaselineTests`, `ShapeHoldClock`, `StrokeGestureRecognizer`, `VectorEraserMode`, `ProjectSaveLogicTests`, `VectorPreviewPlanLogicTests`, `SelectionOverlayView`, `TextFrame`, `RenderTreeCharacterizationTests`, `ARAPLogicTests`, `MaskGuardLogicTests`, `ObjectTransformOverlayView`, `TextRecipeCodableLogicTests`, `Lattice`, `AlphaMask`, `FillBoundaryLogicTests`, `.solidImage`, `UndoHistory`, `GalleryOpenState`, `SaveDamageGateLogicTests`, `FillGestureRestartLogicTests`, `TimelineLayoutKeyLogicTests`, `LayerTreeCharacterizationTests`, `CanvasPresentationLogicTests`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `TextBakeCharacterizationTests`, `LassoFillLogicTests`, `.setBakedContent`, `InterpolationEngineDiagnosticsLogicTests`, `EffectMultiPassLogicTests`, `SelectionPersistenceLogicTests`, `InterpolationRenderLogicTests`, `PlaybackBoundsCharacterizationTests`, `EffectParityLogicTests`, `BlockDragCharacterizationTests`, `VectorSample`, `InterpolationGuideLogicTests`, `FontResolveLogicTests`?**
-  _High betweenness centrality (0.107) - this node is a cross-community bridge._
+  _High betweenness centrality (0.103) - this node is a cross-community bridge._
 - **Are the 80 inferred relationships involving `CGPoint` (e.g. with `.init()` and `.finish()`) actually correct?**
   _`CGPoint` has 80 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 15 inferred relationships involving `CGFloat` (e.g. with `.draw()` and `.rasterize()`) actually correct?**
