@@ -20,7 +20,6 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- **PERFORMANCE.md item 14's cheap half** — `tmp/rasteromit`.
 - **(f) the cut eraser's live feedback** — `tmp/cuteraser`, opened with the owner's refutation ask.
 - **(h) the pick tool is dead while the Select panel is open** — `tmp/pickselect`.
 
@@ -38,25 +37,6 @@ tools on a **vector layer**, framed as "isn't inline" with how they should work)
       strokes it crosses (see the vector eraser's split/punch decision). **The owner has already ruled
       it out for text — "it's okay if it moves text whole," since splitting a `TextFrame` mid-glyph is
       not a sane operation.**
-- [ ] **[PERFORMANCE.md](PERFORMANCE.md) item 14's cheap half: stop writing and loading a raster tier
-      for cels that carry no raster content.** Re-opened by the owner's stated intent for a real
-      document (100–200 frames, 3–5 drawn layers — 300–1000 drawn cels, OWNER-STATED, and an
-      intention rather than a package that exists), then re-scoped by reading the owner's actual iPad
-      container directly: the largest of 25 real packages on the device has **4 cels**, and both live
-      projects have **1**. The app has never been asked to hold what the owner intends — this is
-      forward work, not a fire. The expensive half (evict-and-rehydrate the primary pixel data) stays
-      **declined**: three independently-scoped designs for it were each traced by adversarial review
-      to a silent-artwork-loss path in code that already exists (a `flipCanvas`/`setCanvasPadding`
-      path that would blank the whole document under a windowed scheme, and an undo-restore path that
-      would let a write-back LRU serve stale pixels). The cheap half is correctness-clean — it
-      removes data nothing ever used. **Confirmed again 2026-08-22 by pulling the owner's live package
-      off the iPad and reading the pixels**: `Untitled 2.paintproj` has 3 cels on 3 layers at
-      **2048×2048**, and all three `_raster.png` are **fully transparent** (alpha min = max = 0),
-      73,558 bytes each — including the one on the *raster* layer. So the cost is one canvas-sized PNG
-      encode per cel per save and 16 MiB of resident buffer per cel per load, for zero pixels —
-      and does not need item 9(c)'s thumbnail-persistence precondition the expensive half does.
-      See PERFORMANCE.md item 14 for the full mechanism, citations and the corrected arithmetic.
-
 New this pass (owner, 2026-08-22, given while the lasso Edge Overlap rebuild was in flight):
 
 - [ ] **(f) The "cut" eraser has no live feedback — it only applies on lift.** Owner: *"the to cut
@@ -94,4 +74,42 @@ New this pass (owner, 2026-08-22, while testing on the iPad):
 
 ## Done this pass
 
-Nothing yet — this pass opened 2026-08-22.
+- **PERFORMANCE.md item 14's cheap half: a cel nobody has drawn on stops paying for a canvas-sized
+  transparent PNG** (`1d7332a`, `5cd6431`). Every cel wrote a `<uuid>_raster.png` on every save whatever its
+  raster tier held; on the owner's live 2048×2048 project all three carry one of exactly 73,558 bytes whose
+  alpha is min = max = 0 — **including the cel on the raster layer**. The save now decides from
+  `RasterLayerTexture.hasContent`, which asks whether the *bitmap exists* and never scans pixels: `context ==
+  nil` implies "no pixels" by construction, and that is the direction that cannot lose artwork. The converse is
+  deliberately not claimed, so a cel erased back to transparency still writes, conservatively.
+  `SaveSnapshot.CelContent.rasterImage` became optional in the same move — asking a blank texture for its image
+  is what *created* the cost, since `renderToUIImage()` mints a canvas-sized transparent `UIImage` and memoizes
+  it where nothing drops it again.
+
+  **MEASURED, 60 vector-only cels at 2048×2048, iOS 26.5 simulator (iPad Pro 13-inch M4), Debug**, three
+  samples each way, machine at 5.2% idle so the *timings* are contended and the byte and footprint figures are
+  not:
+
+  | | before | after |
+  |---|---|---|
+  | package on disk | 6.9 MB | **4.6 MB** |
+  | of which `_raster.png` | 2.3 MB in 60 files | **0 bytes in 0 files** |
+  | `pngsEncoded` per save | 60 | **0** |
+  | save, awaited | 645 / 648 / 540 ms | **188 / 192 / 240 ms** |
+  | `phys_footprint` after a load | 3317.1 / 3317.6 / 3319.5 MB | **1865.1 / 1865.3 / 1865.7 MB** |
+
+  **~1453 MB, ~24.2 MB a cel** — 16 MiB of that is the `CGContext` arithmetic exactly, the rest the decoded
+  `UIImage` the load no longer holds beside it. **Load wall-clock did not move** (4579/4720/5577 → 6183/6010/4939 ms,
+  overlapping ranges): that fixture's load is dominated by rasterizing 60 vector cels for thumbnails, which this
+  does not touch. Reported as unmoved rather than dressed up.
+
+  Two traps decided the shape and both are now pinned by tests. `validateProject` **gates the atomic swap**, so
+  a validator still demanding the file would have moved every staged package to Trash while the save reported
+  success — silent total loss, in an app that looked fine. And `rasterFileName` stays **non-optional**: its
+  absence is what makes PencilKit-era manifests fail to decode, which is what has the gallery skip those
+  projects rather than open them blank. A legacy package heals on load — a blank PNG is scanned exactly, byte
+  by byte with an early exit, and the bitmap released — and one opaque pixel in 2048² survives, with a test
+  that fails if the scan is ever made cheap by sampling. **The owner's existing projects heal on their next
+  open-and-save, not on load alone.**
+
+  1583 fast-tier tests (1580 passed, 0 failed, 3 skipped), = 1573 + 10, matched against a static `func test`
+  count of 1690 against 1680.

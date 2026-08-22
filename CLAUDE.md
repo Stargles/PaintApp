@@ -193,6 +193,20 @@ simulators, zero uninterruptible processes, and 94.6% idle CPU. Read the real nu
 top -l 2 -n 0 -s 2 | grep "CPU usage" | tail -1
 ```
 
+### `git stash` is per-repository, not per-worktree
+
+An agent working in `../PaintApp-<id>` used `git stash push`/`pop` to park its edits between test runs, and the
+`pop` landed **`stash@{0}` from a completely different session** — "Abandoned vector-interpolation index
+snapshot, 134 commits behind origin/main" — into its tree as ~45 conflicted files. Nothing was lost (both stash
+entries survived, and the agent reset to its branch tip and re-applied its own changes), but the recovery cost a
+cycle and it could as easily have been committed by an agent that did not look.
+
+The stash is a single stack on the repository. Every worktree shares it, and `pop` takes whatever is on top
+regardless of which worktree pushed it. **Do not use `git stash` in this repo at all.** To park work, commit it
+on your own `tmp/<id>` branch — a commit you amend or reset later is free, and it cannot be picked up by anyone
+else. This is the same class of hazard as the shared simulator UDID above: a tool that looks per-session and is
+actually machine-wide.
+
 ### Two branches can mint the same pbxproj object id, and git will merge them happily
 
 The app target auto-includes sources via `PBXFileSystemSynchronizedRootGroup`, but **the UI-test
