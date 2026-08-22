@@ -85,28 +85,6 @@ tools on a **vector layer**, framed as "isn't inline" with how they should work)
       *Owner: "when you click the lasso icon, lasso, then pick eraser or brush or fill, the lasso icon
       should still stay blue. Blue means the lasso is currently on. Currently only lasso and move are
       able to both be blue."* A toolbar highlight-state question, not a canvas one.
-- [ ] **(c) Move is extremely slow on a vector layer — down to ~5 fps, per the owner.** Likely the
-      same overlay as (d) below and may be one branch with it.
-- [ ] **(d) The move tool's handles do not stay a constant screen size across zoom, and do not
-      respond to touch.** *Owner: "the move nodes' size doesn't stay constant to the screen, and right
-      now they don't seem to respond to touch."* **This is the exact bug [ADD_TEXT.md](ADD_TEXT.md)
-      §1 "Handles live outside the warped layer" already named and told the text-tool build not to
-      copy**: `TransformHandleView`'s fixed `24×24` (`Views/TransformOverlaySupport.swift:39-51`)
-      "lives inside the same transformed `container` and carries the unfixed shrink-with-zoom bug that
-      produced 'faint blue line, does not have nodes in it.'" The owner has now hit that bug on the
-      device, in the move overlay rather than the text one. **Add Text Stage 4 shipped the fix's
-      pattern today** (`442dc16`) — `Views/TextTransformOverlayView.swift` is a non-warped sibling
-      view pinned to `CanvasView`'s `container`, every handle dimension `screenPoints / canvasScale`
-      pushed from the coordinator on each transform change, nearest-within-reach hit-testing, raw
-      `touchesBegan/Moved/Ended` instead of a pan recognizer. So (d) is not open-ended: port
-      `Views/ObjectTransformOverlayView.swift` onto that pattern rather than designing a new one —
-      likely also the fix for (c), since a live-rendered handle view inside the transformed hierarchy
-      is exactly the kind of per-touch-move cost item 11 found and fixed on the stroke-preview path.
-      [BUGS.md](BUGS.md)'s cleanup note on `ObjectTransformOverlayView`/`FloatingPieceOverlayView`
-      duplicating handle logic should converge on this pattern too, once it's ported.
-
-Carried from the pre-device-pass programme:
-
 - [ ] **[PERFORMANCE.md](PERFORMANCE.md) item 14's cheap half: stop writing and loading a raster tier
       for cels that carry no raster content.** Re-opened by the owner's stated intent for a real
       document (100–200 frames, 3–5 drawn layers — 300–1000 drawn cels, OWNER-STATED, and an
@@ -124,6 +102,30 @@ Carried from the pre-device-pass programme:
       See PERFORMANCE.md item 14 for the full mechanism, citations and the corrected arithmetic.
 
 ## Done this pass
+
+- **(c) and (d): the Move drag, and handles that keep their size.** Owner: *"Move is extremely slow on
+  a vector layer"* and *"the move nodes' size doesn't stay constant to the screen, and right now they
+  don't seem to respond to touch."* Both were the same overlay and merged as one branch.
+  **(c) was measured rather than guessed**: one touch-move sample of a Move drag cost **102.3 ms** at
+  2048x1024 — the owner's ~5 fps, found — because the drag rasterized on every sample. After: **0.004
+  ms**, with a cold-render control at 41.7 ms holding to 6% across four separate readings, which is
+  what says the ratio is about the code and not the machine. Three of those readings predate the fix's
+  verification run and one is inside it; a fourth agreeing with three is not a new claim, so
+  PERFORMANCE.md is untouched.
+  **(d) is the bug [ADD_TEXT.md](ADD_TEXT.md) §1 had already named and told the text build not to
+  copy** — `TransformHandleView`'s fixed 24x24 living inside the transformed `container`. The Move
+  overlay now sizes in screen points. **`FloatingPieceOverlayView` is knowingly still on the broken
+  one**, documented in BUGS.md and in `TransformOverlaySupport.swift` ("Do not add a third user"), so
+  the raster Move tool's floating piece still shrinks with zoom — and the lasso-move feature lists it
+  as a blocker.
+  Verified 1513 / 1510 passed / 0 failed / 3 skipped, +32 over baseline accounted for by counting
+  `func test` in the two new files; `VectorLayerContentUITests` 5/5, `SelectionAndMoveUITests` 4/4,
+  `CanvasTransformFreezeUITests` 3/3 with one standing skip. **Two of those three class names live in
+  differently-named files**, so a file-name selector would have matched nothing and printed green.
+  One cost to know: the proof of the headline number is a perf test that adds **~19 s to every fast-tier
+  run** from here. It is the only thing pinning the number, so it stayed.
+  Device half genuinely unverified — every figure is a Debug simulator against a Release A13, and
+  whether a 14 pt grip is findable with a fingertip is not something a headless test reaches.
 
 - **The performance programme is confirmed on hardware.** The owner ran seven checks on a Release
   build of `38e22c6` on their iPad 9, 2026-08-21 — the one thing every item in
