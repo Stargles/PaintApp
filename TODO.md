@@ -44,11 +44,32 @@ and branch; `git log --oneline origin/main..tmp/<name>` shows the work.
   `XCTSkip` ("XCUITest cannot synthesise a stationary hold"), in a file this branch never touched.
   **What is still owed is the owner's finger**, not a run: whether a 14 pt grip is findable at the
   zoom they work at, and what the frame rate is in Release on an A13.
-- **`tmp/lasso-active` — owner ask (b), 1 commit**, "Keep the toolbar's Select/lasso icon blue while
-  a selection is live". Was on its final post-rebase confirmation run when the session stopped.
-  **To finish**: same close-out. Its report never landed, so **read the branch to learn whether the
-  selection already survived a tool change or had to be made to** — that distinction was the whole
-  question and the answer is in the diff, not in any document.
+- **`tmp/lasso-active` — owner ask (b), verified and ready. Not merged: the owner merges.** Two
+  commits — "Keep the toolbar's Select/lasso icon blue while a selection is live" and this close-out.
+  Rebased twice, and the two are not the same case. The first, onto `56cdb8b`, **moved no source** —
+  `git ls-tree -r` over `PaintSoftware PaintSoftwareUITests PaintSoftware.xcodeproj` hashes to
+  `31183786…` either side of it. The second, onto `356f0cb` after `tmp/move-overlay` merged
+  mid-verification, **did** (`34b1a6fb…` → `556436c2…`), so every run below was redone against it
+  rather than carried over. **The question the halt left open is answered, and
+  it is the display half — the selection already survived a tool change.** `selectedTool`'s `didSet`
+  only writes to the ActionRecorder; the sites that clear `selection` are `handleActiveContextChanged`,
+  `deselect`, `beginMove`, `beginDuplicate` and `setCanvasPadding`, none of them a tool change; and
+  `CanvasView.swift`'s `selectionClipPath` already clipped a brush/eraser/fill stroke to a live
+  selection whichever tool was current. The commit only rebinds the icon's `isActive` from
+  `activePanel == .select` to `CanvasManager.selectIconIsActive`, so **the blast radius is the toolbar
+  icon, not selection lifetime** — nothing that assumed a tool change cleared a selection is disturbed,
+  because nothing ever did. Fast tier **1525 / 1522 passed / 0 failed / 3 skipped** from the xcresult,
+  **+12** on the 1513 `origin/main` now carries — exactly `SelectionPersistenceLogicTests`'s twelve,
+  and the same +12 a static `func test` count gives across the fast-tier classes on both trees; the
+  three skips are the pre-existing perf baselines. pbxproj duplicate-id check prints `[]` **after**
+  the rebase that merged that file. The four
+  selection/toolbar UI classes are green **18/18** on a device of its own: `ToolPanelsUITests`,
+  `SelectionAndMoveUITests`, `EraserAndPersistenceUITests`, `SelectionPencilOnlyUITests`. **One UI
+  test added**, `ToolPanelsUITests.testSelectIconStaysLitWhileAnotherToolIsCurrent` — the branch's
+  twelve headless tests pin the predicate but cannot see the toolbar (`TopToolbar.swift` is a `View`
+  file outside the logic-test target's compile, which is why the predicate had to become a static
+  function at all), and it fails against the pre-fix wiring restored by hand, so it pins the behaviour
+  rather than merely agreeing with it.
 - **`tmp/lassomove-rulings` — docs only, 1 commit (a WIP commit made by the halt).** Folds the
   owner's three rulings of 2026-08-21 into `LASSO_MOVE.md`: **centreline selection** (confirmed
   knowingly, with the "a 40pt stroke whose spine is outside the loop will not move" consequence

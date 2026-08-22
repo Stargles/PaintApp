@@ -111,10 +111,56 @@ final class ToolPanelsUITests: PaintUITestCase {
         XCTAssertTrue(selectButton.isSelected, "Select should now read as active")
         XCTAssertFalse(brushButton.isSelected, "Brush must stop reading as active once Select is engaged — only one tool highlighted at a time")
 
-        // Switching back to Brush should restore exclusivity the other way.
+        // Switching back to Brush should restore exclusivity the other way. Nothing was ever
+        // selected here, so the lasso icon has nothing to stay lit *for* — the near-miss twin where
+        // a selection is live is `testSelectIconStaysLitWhileAnotherToolIsCurrent` below, and the
+        // two together are what pin "blue means a lasso is on" rather than "blue means the panel is
+        // open".
         brushButton.tap()
         XCTAssertTrue(brushButton.isSelected)
         XCTAssertFalse(selectButton.isSelected)
+    }
+
+    /// The owner's ask of 2026-08-21: "when you click the lasso icon, lasso, then pick eraser or
+    /// brush or fill, the lasso icon should still stay blue. Blue means the lasso is currently on."
+    ///
+    /// `SelectionPersistenceLogicTests` pins the predicate (`CanvasManager.selectIconIsActive`) and
+    /// pins that no paint tool clears `selection`, but it cannot see the toolbar: `TopToolbar.swift`
+    /// is a `View` file and is not compiled into the logic-test target, so nothing headless can
+    /// catch the icon being wired back to `activePanel == .select`. That is this test's whole job.
+    func testSelectIconStaysLitWhileAnotherToolIsCurrent() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let selectButton = app.buttons["toolbar.selectButton"]
+        XCTAssertTrue(selectButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(selectButton.isSelected, "Control: nothing is selected yet, so the icon must start unlit")
+
+        selectButton.tap()
+        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
+        rectangleMode.tap()
+        // Upper portion of the canvas, clear of the Select menu's bottom-docked bar — same reason as
+        // the selection tests in `SelectionAndMoveUITests`.
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.2), to: CGVector(dx: 0.55, dy: 0.35))
+
+        for identifier in ["toolbar.brushButton", "toolbar.eraserButton", "toolbar.fillButton"] {
+            let tool = app.buttons[identifier]
+            tool.tap()
+            XCTAssertTrue(tool.isSelected, "Premise: \(identifier) must actually have become the current tool")
+            XCTAssertTrue(selectButton.isSelected,
+                          "The selection is still live while \(identifier) paints into it, so the lasso icon must stay blue")
+        }
+
+        // …and it is reporting the selection rather than stuck on: deselect, leave the panel, and the
+        // highlight drops. (Deselect leaves the Select panel open, which lights the icon on its own —
+        // hence tapping Brush before reading it.)
+        selectButton.tap()
+        let deselect = app.buttons["selectPanel.deselectButton"]
+        XCTAssertTrue(deselect.waitForExistence(timeout: 5))
+        deselect.tap()
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertFalse(selectButton.isSelected, "With the selection gone the icon must go back to unlit")
     }
 
 }
