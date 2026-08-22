@@ -1605,6 +1605,38 @@ struct CanvasView: UIViewRepresentable {
                 && activePanel != .select && canvasManager.floatingPiece == nil
         }
 
+        /// Whether an armed eyedropper — rather than the Select overlay — owns the canvas's single
+        /// touch. **The Select panel is deliberately absent from this**, and that absence is the
+        /// owner's bug of 2026-08-22 ("the pick tool does not work when the lasso select tool is
+        /// selected").
+        ///
+        /// There is no `.select` case in `Tool`: Select is a *panel*, so opening it leaves
+        /// `selectedTool` at whatever it was, and arming the eyedropper does not close it. The two
+        /// sites below used to disagree about who that left in charge — `updateActiveLayerAndTool`
+        /// suppressed the eyedropper's recognizer on `activePanel != .select` while
+        /// `updateSelectionOverlay` never consulted `selectedTool` at all — so with the panel up the
+        /// recognizer was off *and* the overlay was still eating the touch, and the pick was dead
+        /// with nothing left to re-enable it.
+        ///
+        /// `Tool.eyedropper` is why the eyedropper wins rather than the overlay: it is momentary, and
+        /// the artist "reaches for this one in the middle of doing something else", which is exactly
+        /// what picking a colour mid-lasso is. It hands back the instant the pick resolves —
+        /// `leaveEyedropper` restores the previous tool, this goes false, and the overlay resumes
+        /// capturing with the Select panel still open, so the lasso carries on in the new colour.
+        ///
+        /// **Both sites read this one property**, so they cannot end up both live (two recognizers
+        /// racing for the tap) or both dead (the bug). The `floatingPiece` clause is kept for the
+        /// same reason: false here hands the touch to the floating overlay, which is what the
+        /// unchanged `isCapturingGestures` term already does — the alternative spellings each leave
+        /// one of the two combinations unowned. Reaching that state needs a door the app does not
+        /// currently have (`SideToolbar.eyedropperButton` bakes a floating piece via
+        /// `commitAllInteractiveState()` *before* `selectEyedropper()`, and it is the only caller),
+        /// which is why this is a guard rather than a behaviour —
+        /// `testArmingTheEyedropperBakesAFloatingPieceRatherThanRacingIt` is what pins the bake.
+        var isEyedropperArmed: Bool {
+            canvasManager.selectedTool == .eyedropper && canvasManager.floatingPiece == nil
+        }
+
         func updateSelectionOverlay() {
             guard let overlay = selectionOverlay, let container = containerView else { return }
             let lassoFilling = isLassoFilling
@@ -1614,8 +1646,13 @@ struct CanvasView: UIViewRepresentable {
             // doc comment for why a selection drag needs this too. A lasso fill is a drawing edit by
             // the same test, so borrowing this recognizer also inherits the fix for free.
             overlay.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
+            // `!isEyedropperArmed` is the overlay's half of the 2026-08-22 fix — see that property.
+            // Without it the recognizer re-enabled below would be live underneath an overlay that is
+            // still capturing, and the overlay would go on swallowing the picking tap as the start of
+            // a lasso. It yields only while the tool is armed, so the ordinary Select case — the
+            // whole reason this term exists — is untouched.
             overlay.isCapturingGestures = lassoFilling
-                || ((activePanel == .select) && (canvasManager.floatingPiece == nil))
+                || ((activePanel == .select) && (canvasManager.floatingPiece == nil) && !isEyedropperArmed)
             overlay.updateSelection(canvasManager.selection, allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection)
             // LASSO_FILL.md §7.2/§7.4, pushed down the same way everything else here is: the overlay
             // decides whether this is new and owns the fade, so a pass that changes nothing costs a
@@ -1744,17 +1781,30 @@ struct CanvasView: UIViewRepresentable {
             // **Above the active-layer guard, unlike the fill's twin below it.** The eyedropper reads
             // the composite rather than writing a layer, and with no layers at all the composite is
             // still a picture — the paper — so a pick there is meaningful where a fill would have
-            // nowhere to land. Suspended while Select is engaged or a piece is floating for the
-            // fill's reason: those overlays own the canvas's single-touch gestures while they are up.
-            eyedropperTapRecognizer?.isEnabled = (canvasManager.selectedTool == .eyedropper)
-                && activePanel != .select && canvasManager.floatingPiece == nil
+            // nowhere to land.
+            //
+            // **Not suspended while Select is engaged**, which is where it differs from the fill and
+            // text guards below and from what it read until 2026-08-22 — `isEyedropperArmed` carries
+            // the whole reason, and `updateSelectionOverlay` is the other half that has to move with
+            // it. A piece still floating does suspend it, and that clause lives in the property so
+            // the two sites cannot answer it differently.
+            eyedropperTapRecognizer?.isEnabled = isEyedropperArmed
 
-            // The text tool's placement tap, on the eyedropper's side of the guard rather than the
-            // fill's: it is suspended while Select is engaged or a piece is floating for the fill's
-            // reason (those overlays own the canvas's single-touch gestures while they are up), but
-            // it needs no active layer *index* check here — `beginTextSession` asks
-            // `Tool.textUnavailableReason` about the layer's kind, which is the one place that
-            // question is answered.
+            // The text tool's placement tap. It needs no active layer *index* check here —
+            // `beginTextSession` asks `Tool.textUnavailableReason` about the layer's kind, which is
+            // the one place that question is answered — but it is suspended while Select is engaged
+            // or a piece is floating for the fill's reason: those overlays own the canvas's
+            // single-touch gestures while they are up.
+            //
+            // **This is not the eyedropper's 2026-08-22 bug wearing a different hat, and the reason
+            // is a call order two files away.** `ActionsMenu.addTextRow` — the only door into text
+            // mode — follows `enterTextMode()` with `$activePanel.toggleSettingsPanel(.text)`, so
+            // arriving in the tool is itself what closes the Select panel and the two clauses of this
+            // guard cannot both be true through it. The asymmetry with the eyedropper is real rather
+            // than an oversight: the eyedropper is armed *while* Select is already open, so arming it
+            // is the artist's most recent word; text is a mode you enter and then choose to open
+            // Select on top of, and there Select is theirs. `SelectionAndMoveUITests.
+            // testEnteringTextModeClosesTheSelectPanelSoTextsOwnGuardCannotBite` pins the order.
             textTapRecognizer?.isEnabled = (canvasManager.selectedTool == .text)
                 && activePanel != .select && canvasManager.floatingPiece == nil
 

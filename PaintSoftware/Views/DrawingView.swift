@@ -175,7 +175,22 @@ struct DrawingView: View {
         .animation(.easeInOut(duration: 0.22), value: canvasManager.notice)
         // Continuing to draw or fill dismisses whatever top-bar dropdown is open instead of the first
         // touch being swallowed by a tap-to-dismiss catcher — see CanvasManager.interactionBegan.
+        //
+        // **The armed eyedropper is the one exception, and it exists because the pick is momentary.**
+        // The Select panel used to be immune to this rule by accident: while it is open the selection
+        // overlay owns every canvas touch and no canvas handler ever fires, so nothing sent
+        // `interactionBegan` in the first place. Letting the eyedropper through that overlay
+        // (`CanvasView.Coordinator.isEyedropperArmed`, the owner's 2026-08-22 bug) makes the picking
+        // tap the first canvas touch to reach a handler with Select open — and the rule would then
+        // close the panel out from under an artist whose colour was taken precisely *so that* they
+        // could carry on lassoing. `Tool.eyedropper` is the same sentence from the tool's side: it
+        // hands back to what you were doing, and the panel is half of what you were doing.
+        //
+        // Scoped to Select rather than to every panel: a brush or fill dropdown genuinely is a
+        // top-bar dropdown over live canvas, and closing that on a pick is the existing behaviour
+        // this rule is for.
         .onReceive(canvasManager.interactionBegan) {
+            if activePanel == .select && canvasManager.selectedTool == .eyedropper { return }
             if activePanel != .none { activePanel = .none }
         }
         // The layer options menu belongs to the layer panel — it can't outlive it.

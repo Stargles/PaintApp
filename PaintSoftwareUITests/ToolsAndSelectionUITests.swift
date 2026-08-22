@@ -341,6 +341,242 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "The moved content should still register as raster content, not disappear from the tier the eraser reaches")
     }
 
+    // MARK: - The eyedropper while the Select panel is open (owner, 2026-08-22)
+
+    /// Reads the hex the eyedropper button carries, split into channels, or fails the test.
+    /// `sideToolbar.eyedropperButton`'s `accessibilityValue` is `brushColor.hexString` — the rail
+    /// shows the colour the *next* pick will replace, so it is also how a completed pick is read back
+    /// without opening the colour panel over the canvas that was just sampled.
+    private func brushChannels(_ eyedropper: XCUIElement,
+                               file: StaticString = #filePath, line: UInt = #line) -> (r: Int, g: Int, b: Int)? {
+        guard let hex = eyedropper.value as? String, hex.count >= 6,
+              let r = Int(hex.prefix(2), radix: 16),
+              let g = Int(hex.dropFirst(2).prefix(2), radix: 16),
+              let b = Int(hex.dropFirst(4).prefix(2), radix: 16) else {
+            XCTFail("Expected a hex colour on the eyedropper button, got \(String(describing: eyedropper.value))",
+                    file: file, line: line)
+            return nil
+        }
+        return (r, g, b)
+    }
+
+    /// Paints a red line across the upper canvas and leaves the brush black, so a pick that silently
+    /// did nothing is distinguishable from one that worked. Lifted from
+    /// `EraserAndPersistenceUITests.testTheSidebarEyedropperPicksTheColourUnderTheTapAndRevertsTheTool`,
+    /// including its reason for closing the colour panel with a confirmed wait: the panel is a
+    /// dropdown over the right of the canvas and the stroke runs straight under it.
+    private func paintRedLineAndReturnToBlack(_ app: XCUIApplication, at dy: Double) {
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
+
+        func closeColorPanel() {
+            colorButton.tap()
+            XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
+                          "The colour panel must be closed before the canvas is touched")
+        }
+
+        colorButton.tap()
+        let hexField = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hexField.waitForExistence(timeout: 5))
+        setHexField(app, hexField, to: "FF0000")
+        closeColorPanel()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: dy), to: CGVector(dx: 0.7, dy: dy))
+
+        // Back to black through the SV square rather than the hex field: the field needs the
+        // keyboard, and a second visit to it mid-test is a focus race this test has nothing to do
+        // with. Bottom-left of the square is saturation 0, brightness 0.
+        colorButton.tap()
+        let svSquare = app.otherElements["colorPanel.svSquare"]
+        XCTAssertTrue(svSquare.waitForExistence(timeout: 5))
+        dragWithinElement(svSquare, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.0, dy: 1.0))
+        closeColorPanel()
+    }
+
+    /// **The owner's bug** (2026-08-22): *"The pick tool does not work when the lasso select tool is
+    /// selected."*
+    ///
+    /// There is no `.select` case in `Tool` — Select is a *panel*, and `selectedTool` stays whatever
+    /// it was — so with the panel open two things were true at once: `updateActiveLayerAndTool` left
+    /// `eyedropperTapRecognizer` disabled (its guard read `activePanel != .select`), and
+    /// `updateSelectionOverlay` kept the selection overlay capturing (its condition never consulted
+    /// `selectedTool`). Recogniser off, overlay eating the touch: the pick was dead, and arming the
+    /// tool does not close the panel, so nothing re-enabled it.
+    ///
+    /// `Tool.eyedropper`'s own doc comment is the ruling this encodes: the tool is momentary, and the
+    /// artist "reaches for this one in the middle of doing something else". So while it is armed it
+    /// wins over the Select overlay — and hands straight back, which is the second half of this test.
+    /// The panel is still open afterwards, so the artist carries on lassoing with the colour they
+    /// just took.
+    func testTheEyedropperPicksWhileTheSelectPanelIsOpenAndHandsTheLassoBack() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        // Well up the canvas, clear of the Select panel's bottom-docked bar.
+        paintRedLineAndReturnToBlack(app, at: 0.30)
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        app.buttons["toolbar.selectButton"].tap()
+        let lassoMode = app.buttons["selectPanel.mode.lasso"]
+        XCTAssertTrue(lassoMode.waitForExistence(timeout: 5))
+        lassoMode.tap()
+
+        let eyedropper = app.buttons["sideToolbar.eyedropperButton"]
+        XCTAssertTrue(eyedropper.waitForExistence(timeout: 5))
+        XCTAssertEqual(eyedropper.value as? String, "000000", "Sanity: the brush is black before the pick")
+
+        eyedropper.tap()
+        XCTAssertTrue(eyedropper.isSelected, "Tapping the rail button arms the tool")
+        // The state the bug needs, asserted rather than assumed: arming the eyedropper must NOT close
+        // the Select panel. If a later change makes it close, this test stops covering the bug and
+        // this line is what says so.
+        XCTAssertTrue(lassoMode.exists,
+                      "Arming the eyedropper must leave the Select panel open — that is the reported situation")
+
+        // The tap that does the picking, right on the red line.
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30)).tap()
+
+        // The composite runs off the main thread, so the colour lands a beat after the tap.
+        expectation(for: NSPredicate(format: "value != %@", "000000"), evaluatedWith: eyedropper)
+        waitForExpectations(timeout: 10)
+
+        guard let c = brushChannels(eyedropper) else { return }
+        XCTAssertGreaterThan(c.r, 200, """
+            The pick did nothing with the Select panel open. That is the owner's report of \
+            2026-08-22: `CanvasView.updateActiveLayerAndTool` disabled the eyedropper's recognizer \
+            whenever `activePanel == .select`, and `updateSelectionOverlay` kept the selection \
+            overlay capturing regardless of the tool, so the tap became the start of a lasso. See \
+            `Tool.eyedropper` for why an armed eyedropper outranks the overlay.
+            """)
+        XCTAssertLessThan(c.g, 80, "…the pick should be the red line's colour")
+        XCTAssertLessThan(c.b, 80, "…the pick should be the red line's colour")
+
+        XCTAssertFalse(eyedropper.isSelected,
+                       "A completed pick hands the canvas back to the previous tool (Tool.eyedropper)")
+
+        // The second half, and the reason the overlay yields rather than being switched off: the
+        // artist picked a colour *so that* they could carry on. The panel is still up…
+        XCTAssertTrue(lassoMode.exists, "The Select panel is still open after the pick")
+        let fillButton = app.buttons["selectPanel.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(fillButton.isEnabled, "Sanity: the pick itself must not have created a selection")
+
+        // …and the overlay is capturing again, so a drag lassoes.
+        dragOnCanvas(app, from: CGVector(dx: 0.30, dy: 0.20), to: CGVector(dx: 0.60, dy: 0.42))
+        XCTAssertTrue(fillButton.isEnabled, """
+            The selection overlay never resumed capturing after the pick. It yields *while the \
+            eyedropper is armed* and the revert is what hands it back, so if this fails while the \
+            pick above passed, the yield is keyed off something that outlives the pick.
+            """)
+    }
+
+    /// The other side of the same guard: with the Select panel open and the eyedropper **not** armed,
+    /// the overlay owns the canvas exactly as it always has. This is the assertion that stops the fix
+    /// above from being spelled "the overlay stops capturing whenever Select is open", which would
+    /// delete the Select tool.
+    func testTheSelectOverlayStillOwnsTheCanvasWhileTheEyedropperIsNotArmed() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        paintRedLineAndReturnToBlack(app, at: 0.30)
+
+        app.buttons["toolbar.selectButton"].tap()
+        let lassoMode = app.buttons["selectPanel.mode.lasso"]
+        XCTAssertTrue(lassoMode.waitForExistence(timeout: 5))
+        lassoMode.tap()
+
+        let eyedropper = app.buttons["sideToolbar.eyedropperButton"]
+        XCTAssertTrue(eyedropper.waitForExistence(timeout: 5))
+        XCTAssertFalse(eyedropper.isSelected, "The eyedropper is not armed — this is the ordinary case")
+
+        let fillButton = app.buttons["selectPanel.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(fillButton.isEnabled, "Sanity: no selection yet")
+
+        // A drag straight over the red line: the overlay must take it as a lasso, and nothing must
+        // sample a colour off it.
+        dragOnCanvas(app, from: CGVector(dx: 0.30, dy: 0.20), to: CGVector(dx: 0.60, dy: 0.42))
+
+        XCTAssertTrue(fillButton.isEnabled,
+                      "With the eyedropper unarmed, a canvas drag must still make a selection")
+        XCTAssertEqual(eyedropper.value as? String, "000000", """
+            The brush colour changed without the eyedropper being armed. The overlay must yield only \
+            while `selectedTool == .eyedropper`; if this fails, the recognizer was left live for \
+            every tool.
+            """)
+    }
+
+    /// What the `floatingPiece == nil` half of the two guards is worth, pinned as behaviour: the rail
+    /// button calls `commitAllInteractiveState()` **before** `selectEyedropper()`
+    /// (`SideToolbar.eyedropperButton`), and that calls `commitFloatingPieceIfNeeded()` — so arming
+    /// the eyedropper bakes a floating piece on the way in and the two states never coexist through
+    /// this door. The guard clause is therefore already unreachable rather than load-bearing, and
+    /// this test is what would notice if the bake were ever removed from that button.
+    func testArmingTheEyedropperBakesAFloatingPieceRatherThanRacingIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        // The floating-piece path is raster-only by design — `TopToolbar.toggleMove` sends a vector
+        // layer down `isVectorTransforming` instead, and vector is the default kind.
+        addRasterLayer(app)
+
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
+
+        app.buttons["toolbar.moveButton"].tap()
+        let doneButton = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(doneButton.waitForExistence(timeout: 10), "Setup: Move with no selection floats the whole layer")
+
+        let eyedropper = app.buttons["sideToolbar.eyedropperButton"]
+        XCTAssertTrue(eyedropper.waitForExistence(timeout: 5))
+        eyedropper.tap()
+
+        XCTAssertTrue(doneButton.waitForNonExistence(timeout: 5), """
+            Arming the eyedropper must settle a floating piece, not sit alongside one. \
+            `SideToolbar.eyedropperButton` calls `commitAllInteractiveState()` first for exactly \
+            this reason — the tool samples the composite, and a piece still in the air is content \
+            the artist can see and would expect to pick from.
+            """)
+        XCTAssertTrue(eyedropper.isSelected, "…and the tool is armed once the piece is down")
+    }
+
+    /// Why the identical `activePanel != .select` guard on `textTapRecognizer` (CanvasView) is **not**
+    /// the same bug: text is entered from the Actions menu, and `ActionsMenu.addTextRow` follows
+    /// `enterTextMode()` with `$activePanel.toggleSettingsPanel(.text)`. Both of the guard's clauses
+    /// cannot be true at once through that door, because arriving in text mode *is* what closes the
+    /// Select panel.
+    ///
+    /// Left as behaviour rather than a comment because the reasoning is entirely about a call order
+    /// two files apart: reversing those two statements, or dropping the panel toggle, would reopen it.
+    func testEnteringTextModeClosesTheSelectPanelSoTextsOwnGuardCannotBite() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.selectButton"].tap()
+        let lassoMode = app.buttons["selectPanel.mode.lasso"]
+        XCTAssertTrue(lassoMode.waitForExistence(timeout: 5))
+        lassoMode.tap()
+
+        app.buttons["toolbar.actionsButton"].tap()
+        let addText = app.buttons["actions.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5))
+        XCTAssertTrue(addText.isEnabled, "Sanity: Add Text is available on the default vector layer")
+        addText.tap()
+
+        // `textPanel.fontButton` rather than the panel's own `panel.textSettings` identifier: that one
+        // sits on a plain SwiftUI container, which UIKit does not surface as an element of any
+        // queryable type — it never appeared, which is a wrong *probe* and not a wrong app.
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5),
+                      "Add Text opens the text settings panel")
+        XCTAssertFalse(lassoMode.exists, """
+            Entering text mode left the Select panel open, which puts `textTapRecognizer` in exactly \
+            the state the eyedropper was in: disabled by `activePanel != .select` with the selection \
+            overlay still eating the canvas touch. See CanvasView.updateActiveLayerAndTool.
+            """)
+    }
+
 }
 
 final class EraserAndPersistenceUITests: PaintUITestCase {
