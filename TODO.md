@@ -20,7 +20,7 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-Nothing. Both lasso-fill asks from 2026-08-21 are merged and on the owner's iPad awaiting their eye.
+Nothing. Everything below in Done this pass is merged and on the owner's iPad awaiting their eye.
 
 ## Queued
 
@@ -54,28 +54,6 @@ tools on a **vector layer**, framed as "isn't inline" with how they should work)
 
 New this pass (owner, 2026-08-22, given while the lasso Edge Overlap rebuild was in flight):
 
-- [ ] **(e) Dragging a smart shape's outline should move the whole shape — for every shape kind,
-      none of which can do it today.** Owner, 2026-08-22: *"after you make a smartshape elipse or
-      circle, selecting the line (not the node) of the circle should move the entire shape, same as
-      line and rectangle"* — then, correcting the reading that this was an inconsistency between
-      kinds: *"negative, a line and rectangle also dont move when the line (not node) is pressed and
-      dragged. Instead it just creates a line (pencil), or does nothing (finger). I want both to be
-      able to move."* So **no shape kind supports a body drag** and all of them should: nodes resize,
-      the outline moves.
-      **The failure mode is the lead.** A pencil drag on the outline *draws a new stroke* and a finger
-      drag does nothing, which says the touch is not being claimed by the shape at all — the shape's
-      hit test covers its nodes and everything else falls through to the canvas, where the pencil-only
-      setting then decides whether a brush stroke happens. So this is a hit-test and
-      touch-ownership question first and a geometry question second;
-      `ShapeGeometry.draggingEdge(_:to:anchor:)`
-      ([ShapeGeometry.swift:438](PaintSoftware/Engine/ShapeGeometry.swift:438)) is what an outline
-      drag would eventually call, but nothing is reaching it. Worth checking against
-      `ObjectTransformOverlayView`, which solved the same class of problem for the Move box — grips in
-      screen points, nearest-within-reach hit testing, and raw `touchesBegan/Moved/Ended` so a drag
-      bites on the first pixel — and which deliberately declines touches it has no target for. An
-      outline is a stroked path, so "within reach of the outline" wants the same reach treatment the
-      grips got, in screen points rather than canvas points.
-
 - [ ] **(f) The "cut" eraser has no live feedback — it only applies on lift.** Owner: *"the to cut
       eraser does not have live feedback like the to cross eraser, it only applies when the eraser is
       lifted. I wonder since the to cross eraser is so similar to the to cut except with that one
@@ -90,16 +68,54 @@ New this pass (owner, 2026-08-22, given while the lasso Edge Overlap rebuild was
       rather than assuming. It also compounds with the footprint eraser, which cuts every stroke it
       covers rather than one.
 
-- [ ] **(g) A real-size stamp preview beside the brush/eraser size slider, while it is held.** Owner:
-      *"when changing the size of a brush or eraser its hard to have a grasp of it, so when the
-      sliders are pressed down, I want a sort of preview window showing a single realsize stamp of the
-      brush pop up beside the slider."* Real-size means canvas pixels at the current zoom, not slider
-      units — a 40 px brush on a canvas shown at 0.3x is 12 screen points, and showing 40 would be the
-      same class of bug as the Move handles that scaled with the canvas. It should be the brush's own
-      stamp with its actual hardness, opacity and colour, not a grey disc: the point is judging the
-      mark it will make. Appears on touch-down of the slider, goes away on lift.
-
 ## Done this pass
+
+- **Edge Overlap, rebuilt after it shipped broken** (`7753a39`). The owner, on device: *"if edge
+  overlap is anything less than full, it gives an error for nothing enclosed, briefly turns the
+  inverse fill orange, and refuses to fill anything."* **Three faults, only one of them the
+  algorithm.** (i) `lastFilledPixelCount` was read from slot 1 of the counter buffer while the kernel,
+  bound at offset 0, wrote slot 0 — so every radius >= 1 reported an empty fill and tripped §7's
+  empty-result path. The test that should have caught it asserted *an empty count* and passed
+  vacuously. Fixed structurally: the erode is dispatched unconditionally (identity at radius 0) and is
+  the only counter, so the branch the bug lived in is gone. (ii) The erode treated out-of-loop pixels
+  as zero, so the fill retreated from the **fence** — lasso through a fillable area and a 6 px sliver
+  of paper ran along the loop. The fence is now exempt; the ink is not. (iii) The owner's own algebra —
+  *"expand the collar, then invert, yields the same as invert then erode"* — is **true, and following
+  it precisely is what proved the erode is the right form**: the identity holds for a *greyscale*
+  dilation, and the collar is a binary mask whose coverage ramp lives on the far side of the invert. A
+  binary pre-invert dilation strands a detached fringe — measured `[0, 213, 0, 0, 255, …]` against the
+  erode's `[0, 0, 0, 213, 255, …]` — and that measurement is now a permanent fixture. §6 step 7 opens
+  with "Four specifications, and what each got wrong."
+
+- **(e) A smart shape's outline now moves the whole shape** (`30e38e3`). Owner: *"a line and rectangle
+  also dont move when the line (not node) is pressed and dragged. Instead it just creates a line
+  (pencil), or does nothing (finger)."* **That symptom was the entire diagnosis.**
+  `ShapeOverlayView.hitTest` claimed handles and returned nil for everything else, so an outline touch
+  fell through to the stroke canvas and the pencil-only gate decided the rest — one fact reported
+  twice. `draggingEdge` was unreachable because nothing claimed the touch. Nodes win where both are in
+  reach; 22 screen points of reach at any zoom; ellipse distance exact to 2.8e-13 rather than a coarse
+  scan. Undo needed no new shape: a node drag registers nothing either, because a pending shape is
+  transient and `commitInteractiveShape` records the one step.
+
+- **Pinch-to-merge in the layer panel measured an axis the gesture never shortens** (`0a2ad7d`). Found
+  from **the owner's own `ActionRecorder` recording**, not from code. `PinchMergeGate` fired on the
+  recognizer's *radial* scale below 0.6; the list is vertical. The owner's fingers closed **88% of the
+  vertical gap** (89 → 10.5 pt) and the best scale reached was 0.709, because the fingers were 137 pt
+  apart *horizontally* the whole time and that term dominates `hypot`. **Hold the horizontal gap and
+  drive the vertical gap to zero and the scale is still 0.838 — the gesture had no reachable success
+  state.** Now gated on vertical closing: 45% of the gap at latch, floor of 20 pt of travel so a
+  two-finger rest never merges. The old rule was reachable below ~67 pt of horizontal separation,
+  which is how it passed hand-testing. See BUGS.md for the table.
+
+- **(g) A real-size stamp preview beside the size slider** (`fdd2bad`). Hold either size slider and one
+  dab of the actual brush appears — real hardness, opacity, colour and shape, via `BrushStamper.stampDab`
+  rather than a drawn circle — at the size it will land **at the current zoom**, tracking live if the
+  canvas is pinched while the slider is held. Oversized brushes are shown **clipped at real size**, never
+  scaled, with a dashed edge saying so. **The finding that changed the design**: `Slider.onEditingChanged`
+  does *not* fire on a press that never moves — measured against the real panel with the thumb parked dead
+  centre — so touch-down is served by a simultaneous zero-distance `DragGesture`, and the XCUITest that
+  proves it was watched failing on exactly that.
+
 
 - **A fill lands on top of what is already on the layer** (`5936014`). Owner, after testing:
   *"I cannot fill over things that already have been filled... thats discarded now because I want to
