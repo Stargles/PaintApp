@@ -434,6 +434,58 @@ byte-identical pixel *values* (Metal presents both formats to a shader as RGBA) 
 byte order, at the cost of one runtime capability check. Verify with `CompositorParityLogicTests`,
 which compares values rather than layouts and so would not itself notice the change.
 
+## Pinch-to-merge in the layer panel measures the wrong axis, and can be unreachable (2026-08-22)
+
+**The owner recorded it on their iPad rather than describing it** — `recording-20260822-120508.jsonl`,
+5.5 s, 29 events, pulled over `devicectl`. Open the layers tab, pinch two stacked layers, nothing
+happens. The feature exists and is wired correctly: both touches reached
+`layerPanel.list`, a `UIPinchGestureRecognizer` is in both touches' `grNames`, and
+`LayerStackListView.Coordinator.handlePinch` is attached. It is the **threshold** that is wrong, and
+it is wrong structurally rather than by a few percent.
+
+`PinchMergeGate.shouldMerge` fires on `scale < mergeScaleThreshold` (0.6), where `scale` is
+`UIPinchGestureRecognizer`'s **radial** distance ratio. The layer list is vertical, and the artist's
+gesture is "bring these two stacked rows together" — which is vertical. Measured off the recording,
+per sample, in window points:
+
+| t | horizontal gap | vertical gap | radial dist | scale | vertical gap / start |
+|---|---|---|---|---|---|
+| 2.09 | 137.0 | 89.0 | 163.4 | 1.000 | 1.000 |
+| 2.26 | 139.0 | 66.0 | 153.9 | 0.942 | 0.742 |
+| 2.29 | 126.5 | 35.0 | 131.3 | 0.803 | 0.393 |
+| 2.31 | 124.5 | **10.5** | 124.9 | 0.765 | **0.118** |
+| 2.33 | 115.0 | 13.5 | 115.8 | **0.709** | 0.152 |
+
+**The fingers closed 88% of the way vertically and the best scale reached was 0.709 — the threshold is
+0.6.** The reason is in the first column: the two fingers were **137 pt apart horizontally** and stayed
+115–139 pt apart throughout, because nobody places thumb and forefinger in the same pixel column. That
+horizontal term dominates `hypot` and never shrinks, so radial scale has a **floor** at
+`dx_final / d_start`.
+
+**That floor is the finding.** Hold `dx` at its observed 137 and set the vertical gap to *zero* — the
+fingers meeting exactly — and scale is still `137 / 163.4 = 0.838`. **For this finger placement the
+merge could not have fired however hard the owner pinched.** It is not a gesture that is too demanding;
+it is a gesture with no reachable success state, and any diagonal placement wide enough relative to the
+row height has the same property.
+
+**The fix is to gate on the vertical closure, not the radial scale** — the axis the list actually runs
+in. Two properties any replacement must have, and they are what to write the tests against:
+
+1. **Reachable from any finger placement.** A pair of fingers that meet vertically must fire the merge
+   regardless of how far apart they are horizontally. Today's rule fails this and that is the bug.
+2. **Not firing on a static two-finger touch.** Two fingers landing on adjacent rows are *already*
+   close vertically, so an absolute "within half a row" test would fire before anyone pinched. The rule
+   has to measure *closing* — the vertical gap falling to some fraction of what it was when the pair
+   latched — with a sensible answer for a pair that latched already-touching.
+
+The recording is the regression fixture: replaying those seven samples must merge, and the same samples
+with the vertical motion removed must not. `PinchMergeGate` is already a pure, testable type with the
+threshold stored rather than inlined, so this is a change to one predicate plus what `handlePinch` feeds
+it — the gate takes y positions at latch time already (`pinchTouchStartYs`), so the starting vertical
+gap is available without new plumbing.
+
+**Not yet fixed** — recorded here on 2026-08-22 with three branches already in flight.
+
 ## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15)
 
 The product owner reports it from their iPad: pick Fill and the canvas will not pan, pinch or rotate;
