@@ -95,7 +95,7 @@ merge is where the specification has to be re-read, not where it stops mattering
    fill's own fade has exactly three places it can live: on the paper (just rejected), inside the
    ink's own footprint (what ships), or nowhere — cut coverage hard at the ink's outer extent, which
    closes the halo *and* keeps paint off clean paper, at the cost of a jagged outer edge and of
-   throwing away §6 step 6. **The third option is not built.** It is written into `lassoEdgeErode`'s
+   throwing away §6 step 6. **The third option is not built.** It is written into `lassoInvert`'s
    comment and §6 step 7 so it is not re-discovered as a bug. Measured filled fraction at slider 0…6
    on the closed-box fixture: 0.2906 → 0.4005, the last being the artwork's own footprint to four
    places.

@@ -12,8 +12,10 @@ struct FillParams {
     float threshold;    // 0..1 normalized colour distance above which a pixel is a wall
     float gapRadius;    // px, disk radius for the morphological close (gap bridging)
     // px, disk radius. **Its direction is the algorithm's, not the field's**: the bucket path grows
-    // the filled region under the walls (`edgeDilate`), the lasso path pulls the painted coverage
-    // back inside the artwork's outer silhouette (`lassoEdgeErode`). 0 is identity in both.
+    // the filled region under the walls (`edgeDilate`), the lasso path erodes the painted *coverage*
+    // back inside the artwork's outer silhouette (`lassoEdgeErode`). Those are the same operation
+    // seen from either side of the invert — except on the coverage ramp, which is why the lasso's
+    // runs where it does; see `lassoEdgeErode`. 0 is identity in both.
     float edgeOverlap;
     /// px the *artwork rect* is inset from this buffer on all four sides — `CanvasManager.canvasPadding`
     /// when "Canvas Edge Is a Boundary" is on, and 0 when it is off or there is no padding. 0 means the
@@ -353,7 +355,10 @@ kernel void floodVert(device uchar*        region  [[buffer(0)]],
 
 // MARK: - Edge overlap + paint
 
-// Grow the region by a small disk so the fill slips under the anti-aliased wall pixels.
+// Grow the region by a small disk so the fill slips under the anti-aliased wall pixels. **The
+// bucket fill's alone.** The lasso's Edge Overlap is `lassoEdgeErode`, on the far side of the invert,
+// and §6 step 7 records why running this one on the collar instead — which is algebraically the same
+// operation — is not the same picture.
 //
 // The disk respects the barrier too: a pixel on the padding margin is never grown from a filled
 // pixel on the paper, nor the reverse. Without that, edge overlap would paint up to `edgeOverlap` px
@@ -420,30 +425,25 @@ kernel void paintRegion(const device uchar* region [[buffer(0)]],
 // of ending on a hard polygon edge. `spread` is Krita's *Spread*; it is 0 today, which gives the
 // plain ramp, and it is an argument rather than a constant so the knob exists if the owner asks for it.
 //
-// `filled` counts only the unreached pixels — the artist-visible fill — and is the empty check of
-// §6 step 5. Counting the coverage ramp too would make a leaked fill (which is *all* collar) look
-// non-empty and defeat the whole §7 signal.
+// **This kernel does not count, and that is deliberate.** §6 step 5's empty check is taken by
+// `lassoEdgeErode`, which runs after it on every fill — see that kernel for why the count has to be
+// downstream of Edge Overlap and why it is dispatched unconditionally.
 kernel void lassoInvert(const device uchar4* reference  [[buffer(0)]],
                         const device uchar*   lasso      [[buffer(1)]],
                         constant FillParams&  params     [[buffer(2)]],
                         const device uchar*   reachedA   [[buffer(3)]],
                         const device uchar*   reachedB   [[buffer(4)]],
                         device uchar*         alphaOut   [[buffer(5)]],
-                        device atomic_uint*   filled     [[buffer(6)]],
-                        constant float4&      reference2 [[buffer(7)]],
-                        constant uint&        refCount   [[buffer(8)]],
-                        constant float&       spread     [[buffer(9)]],
+                        constant float4&      reference2 [[buffer(6)]],
+                        constant uint&        refCount   [[buffer(7)]],
+                        constant float&       spread     [[buffer(8)]],
                         uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
     if (lasso[i] == 0) { alphaOut[i] = 0; return; }
 
     bool reached = (reachedA[i] != 0) || (refCount > 1u && reachedB[i] != 0);
-    if (!reached) {
-        alphaOut[i] = 255;
-        atomic_fetch_add_explicit(filled, 1u, memory_order_relaxed);
-        return;
-    }
+    if (!reached) { alphaOut[i] = 255; return; }
 
     float4 c = float4(reference[i]) / 255.0;
     float d = colourDistance(c, params.seedColor);
@@ -456,49 +456,61 @@ kernel void lassoInvert(const device uchar4* reference  [[buffer(0)]],
     alphaOut[i] = uchar(clamp(k * 255.0 + 0.5, 0.0, 255.0));
 }
 
-// **Edge Overlap for the lasso, and it is an *erosion*: the top of the slider is the ink's outer
-// edge, and lowering it tucks the colour further underneath** (LASSO_FILL.md §6 step 7). The owner,
-// on device 2026-08-21: *"right now the low setting has the fill start on the outer edge of the line
-// and if you increase it the paint goes further out. I want it so on the high setting it is on the
-// outer edge, and when you lower it, it shrinks inwards."*
+// **Edge Overlap for the lasso: an erosion of the coverage, and it is the owner's own algorithm
+// written on the side of the invert where the coverage exists.** They described it as growing the
+// collar before inverting it — *"before it inverts the fill, the edge overlap should expand that
+// fill, so that lower values make the fill expand further into the lines. Then it inverts it"* — and
+// that is exactly right: dilating a set and eroding its complement are the same operation, so the
+// two forms agree wherever the thing being operated on is a *set*.
+//
+// **They part company on step 6's ramp, because the fill is not a set — it is an alpha.** The collar
+// is a bit per pixel; the fill's soft edge is 8 bits of coverage that only exists after the invert.
+// A *binary* dilation of the collar therefore cannot see the fade and leaves it behind. Measured
+// 2026-08-22 on `rampWalledBox` along y = 60, artwork 0/64/160/255, slider 4:
+//
+//     erode the coverage:      0,   0,   0, 213, 255, 255, 255
+//     dilate the binary collar: 0, 213,   0,   0, 255, 255, 255
+//
+// The second strands the artwork's own fringe one pixel outside the line with bare ink between it
+// and the fill, which reads on screen as a detached halo. Eroding the coverage carries the 213
+// inward with the boundary, which is what an artist means by the colour tucking under the line.
+// `testLoweringEdgeOverlapTucksTheColourUnderTheLine` pins both the profile and the shape property
+// ("one contiguous run"), and the halo fails the second at every setting below the top.
 //
 // **The slider did not change direction; its range moved.** Up is still more colour. What moved is
 // where the top of the range sits: `CanvasManager.fillEdgeRadius(lasso:)` hands this kernel
 // `fillExpandRange.upperBound - v`, so v = 6 is radius 0 — byte-identical to the old v = 0 — and
-// v = 0 is a 6 px retreat. No setting can put paint outside the artwork's silhouette any more, which
-// is the whole of the complaint. This replaced a dilate by `v`, shipped earlier the same day, whose
-// top of range put paint 6 px out on clean paper.
+// v = 0 is a 6 px retreat. No setting can put paint outside the artwork's silhouette, which is the
+// owner's ruling of 2026-08-21.
 //
-// **The measurement that fixes the top of the range, and what the top of the range still cannot do.**
-// `lassoInvert` paints every unreached pixel solid and gives the reached ones `k = d / T`, so along an
-// outer ramp of a = 64/160 against T = 0.15 the coverage runs 0, 213, 255 while the artist's line runs
-// 0, 64, 160 — the table in `testTheFillsSoftEdgeComesFromTheArtworksOwnAntialiasing`. At radius 0 the
-// fill therefore reaches exactly as far as the ink does and not one pixel further, which is what
-// *"on the high setting it is on the outer edge"* means in pixels. The same table says the fringe
-// pixel lands at alpha 223 — the fill's 213 over the ink's 64 — so ~12% of the background shows
-// through one pixel of the outline. **The fill now composites over that ink rather than under it and
-// the 223 did not move**, because `over` combines alpha as `a1 + a2 - a1*a2`, which is symmetric:
-// inverting the stack changes the fringe's colour, not its opacity. Closing the 12% needs the fill's
-// own fade to land on paper the ink does not occupy, and the owner has ruled the fill may not go
-// there. A hard cut at the ink's outer extent is the only third option and it trades the halo for
-// jaggies.
+// **The fence is exempt from the erosion; the ink is not.** An out-of-loop neighbour is *skipped*
+// rather than counted as zero, so a pixel with no in-loop neighbour keeps its own coverage. The
+// asymmetry is the whole point: ink is something the artist drew and can watch the colour retreat
+// under, while the fence is a gesture that vanishes on lift (§6 step 1) and has nothing to tuck
+// beneath. Letting it erode left an unfilled sliver wherever the fill legitimately reached the loop
+// — a lasso drawn through a filled area, where the ring pixels on ink are not passable and so are
+// never reached — which is the pale seam this whole setting exists to remove.
+// `testALoopDrawnThroughAFilledAreaLeavesNoSliverAlongTheLoop` is the regression. Exempting the
+// fence cannot violate §3's *"the fill shouldn't even touch the loop"*: shrinking never pushes paint
+// across a boundary, and out-of-loop pixels are still written 0 by the stencil on the first line.
 //
-// Mechanically this is `lassoEdgeDilate` with `min` for `max` and the early-out flipped — 0 absorbs,
-// where 255 used to — and it keeps that kernel's `insideArtworkRect` guard for the reason that
-// comment gave: coverage may not be dragged across the artwork rect's boundary in either direction.
+// The `insideArtworkRect` guard stays as it was and is a different rule: coverage may not be dragged
+// across the artwork rect's boundary in either direction, so a fill correctly stopped at the paper's
+// edge does not erode against the padding margin.
 //
-// Out-of-loop pixels read 0, so the erosion pulls the fill back from the **fence** as well as from the
-// ink. Deliberate, and not something the `lasso[i] == 0` stencil is failing to prevent: shrinking can
-// never push paint across the fence, so §3's *"the fill shouldn't even touch the loop"* is safe in
-// either case, and a loop drawn through ink gets the same retreat there that the ink gets.
+// **The pixel count for §6 step 5 is taken here and nowhere else, and this kernel is dispatched on
+// every fill including at radius 0**, where it is an identity copy. Both halves matter:
 //
-// **The pixel count for §6 step 5 *is* retaken here**, and the dilate's comment saying it need not be
-// was right only for a dilate: a max over an all-zero neighbourhood is zero, so growth could never
-// turn an empty result non-empty, but an erosion can turn a non-empty one **empty** — lasso a 3 px
-// hatch line with the slider at the bottom and every painted pixel goes. Left at `lassoInvert`'s
-// count that would commit an invisible fill and eat an undo slot, which is exactly what §7.1 forbids.
-// It lands in slot 1 of `filled` so `lassoInvert`'s own answer in slot 0 survives untouched for the
-// radius-0 path, where this kernel is not dispatched at all.
+//  * *Downstream*, because an erosion can turn a non-empty result **empty** — lasso a 5 px hatch line
+//    with the slider at the bottom and every painted pixel goes. A count taken before it would commit
+//    an invisible fill and eat an undo slot, which §7.1 forbids.
+//  * *Unconditional*, because the version that shipped on 2026-08-21 dispatched this only at radius
+//    ≥ 1 and kept a second counter slot for the radius-0 case. The Swift side then chose between the
+//    two slots — and read slot 1 while this kernel's atomic wrote slot 0, so every radius ≥ 1
+//    reported an empty fill. That is what reached the owner's iPad as *"it gives an error for nothing
+//    enclosed … and refuses to fill anything"*. One kernel that always runs and always counts has
+//    nowhere for that bug to live. `testTheEmptyCheckIsNonZeroAtEveryEdgeOverlapSetting` is the
+//    regression, and it fails against the shipped code at every setting except the top.
 kernel void lassoEdgeErode(const device uchar* alphaIn  [[buffer(0)]],
                            const device uchar*  lasso    [[buffer(1)]],
                            device uchar*        alphaOut [[buffer(2)]],
@@ -510,7 +522,8 @@ kernel void lassoEdgeErode(const device uchar* alphaIn  [[buffer(0)]],
     if (lasso[i] == 0) { alphaOut[i] = 0; return; }
     uchar least = alphaIn[i];
     int r = int(round(params.edgeOverlap));
-    // Radius 0 is exactly identity, which is what makes the top of the slider provably the old zero.
+    // Radius 0 is exactly identity, which is what makes the top of the slider provably the old zero
+    // — and it still counts, because this kernel is the only thing that does.
     if (r <= 0 || least == 0) {
         alphaOut[i] = least;
         if (least == 255) atomic_fetch_add_explicit(filled, 1u, memory_order_relaxed);
@@ -525,7 +538,10 @@ kernel void lassoEdgeErode(const device uchar* alphaIn  [[buffer(0)]],
             int ny = int(gid.y) + dy;
             if (nx < 0 || ny < 0 || nx >= int(params.width) || ny >= int(params.height)) continue;
             if (insideArtworkRect(uint(nx), uint(ny), params) != onPaper) continue;
-            uchar a = alphaIn[pixelIndex(uint(nx), uint(ny), params.width)];
+            uint n = pixelIndex(uint(nx), uint(ny), params.width);
+            // The fence is exempt: skip the neighbour rather than let its 0 pull the minimum down.
+            if (lasso[n] == 0) continue;
+            uchar a = alphaIn[n];
             if (a < least) { least = a; if (least == 0) { alphaOut[i] = 0; return; } }
         }
     }
@@ -534,7 +550,7 @@ kernel void lassoEdgeErode(const device uchar* alphaIn  [[buffer(0)]],
 }
 
 // `paintRegion`'s coverage-aware twin: the fill colour scaled by the 8-bit coverage `lassoInvert`
-// wrote (and `lassoEdgeErode` may then have pulled back). `fillColor` is premultiplied, so scaling
+// wrote and `lassoEdgeErode` then pulled back. `fillColor` is premultiplied, so scaling
 // all four channels by the same `k` keeps it premultiplied and the result composites correctly
 // without a second pass.
 kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],

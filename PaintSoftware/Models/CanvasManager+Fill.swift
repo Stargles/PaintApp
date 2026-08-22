@@ -255,10 +255,17 @@ extension CanvasManager {
     ///
     /// *"I want it so on the high setting it is on the outer edge, and when you lower it, it shrinks
     /// inwards"* — the owner, 2026-08-21. The slider keeps its direction (up is more colour) and its
-    /// whole range slides down by its own width: the lasso erodes by `upperBound - v`, so the top of
-    /// the slider is radius 0 — flush with the artwork's outer silhouette, byte-identical to the old
+    /// whole range slides down by its own width: the lasso passes `upperBound - v`, so the top of the
+    /// slider is radius 0 — flush with the artwork's outer silhouette, byte-identical to the old
     /// zero — and nothing below it can paint outside that silhouette. The bucket is untouched and
     /// still dilates by `v`.
+    ///
+    /// **The two modes run the same operation on opposite sides of the lasso's invert**, which is the
+    /// owner's own observation that it *"shouldn't be all that different codewise to the normal
+    /// one"*: dilating a set and eroding its complement are one operator. The lasso's runs on the
+    /// painted **coverage** rather than on the collar because the fill's soft edge is 8 bits of alpha
+    /// that only exists after the invert — see `lassoEdgeErode` in Fill.metal, and LASSO_FILL.md §6
+    /// step 7 for the measurement that settled it.
     ///
     /// The mapping lives here rather than in `MetalFillSession` on purpose: *where the top of a slider
     /// sits* is a fact about `fillExpandRange`, which is a UI range, and the engine should not have to

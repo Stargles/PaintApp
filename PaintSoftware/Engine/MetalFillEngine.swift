@@ -12,8 +12,9 @@ import simd
 /// tapped pixel and grows. The lasso fill (a session made with a `lassoMask`) runs LASSO_FILL.md §6:
 /// seed the loop's one-pixel ring, flood *inside the loop only*, and paint the loop minus everything
 /// that flood could reach. The two halves that make that work are `lassoBarrier` (the flood may not
-/// leave the loop) and `lassoInvert` (the intersect that makes the loop a wall, paints over interior
-/// line art, and counts the result for the empty check) — both in Fill.metal.
+/// leave the loop) and `lassoInvert` (the intersect that makes the loop a wall and paints over
+/// interior line art) — both in Fill.metal. `lassoEdgeErode` runs last on that path and is where the
+/// empty check is counted, because Edge Overlap can erase a fill and the count has to know.
 ///
 /// Coordinate convention matches the rest of the app: index 0 is the top-left pixel, y increases
 /// downward, 1 unit = 1 pixel. Buffers are laid out as row-major `y * width + x`.
@@ -255,11 +256,6 @@ final class MetalFillSession {
     /// `fillQueue`, which is serial and the only place `fill(...)` is called from in the app.
     private(set) var lastFilledPixelCount: Int = 0
 
-    /// Whether the last `fill(...)` dispatched `lassoEdgeErode`, i.e. which slot of the counter buffer
-    /// holds the answer above. Kept as state rather than threaded through, because the read happens
-    /// after the command buffer completes and by then the local is long gone.
-    private var lassoRecountedAfterErode = false
-
     /// The collar's **reached** set from the last `fill(...)` — one byte per pixel, non-zero wherever
     /// the flood seeded at the loop's ring could walk. Nil for a bucket session.
     ///
@@ -337,10 +333,14 @@ final class MetalFillSession {
                       device.makeBuffer(bytes: $0.baseAddress!, length: count, options: .storageModeShared)
                   }),
                   let barrier = buffer(count), let alpha = buffer(count),
-                  // Two slots, not one: `lassoInvert` counts into 0 and `lassoEdgeErode` recounts
-                  // into 1 (see its comment — an erosion can empty a non-empty result, and §7.1
-                  // turns on that count). Slot 1 is read only when the erode actually ran.
-                  let filled = buffer(2 * MemoryLayout<UInt32>.stride),
+                  // **One slot, and `lassoEdgeErode` is the only thing that writes it.** It briefly
+                  // held two — `lassoInvert` counting into 0 and the erode recounting into 1 — and the
+                  // Swift side then had to choose between them. It chose slot 1 whenever the erode had
+                  // run, but the erode's atomic was bound at offset 0 and wrote slot 0, so slot 1 was
+                  // never written and every Edge Overlap below the top of the slider reported an empty
+                  // fill. The erode now runs on every fill, at radius 0 as an identity copy, so there
+                  // is one counter and no choice to get wrong.
+                  let filled = buffer(MemoryLayout<UInt32>.stride),
                   let params2 = buffer(MemoryLayout<MetalFillEngine.FillParams>.stride) else { return nil }
             self.lassoBuf = lasso
             self.ringBuf = ringB
@@ -403,14 +403,19 @@ final class MetalFillSession {
     ///   the number**, because the two algorithms end on opposite sides of the artist's line:
     ///   - bucket: the painted region is **grown** by this much, so it runs under the wall it stopped
     ///     against instead of ending inside that wall's antialiasing (`edgeDilate`).
-    ///   - lasso: the painted coverage is **pulled back** by this much from the artwork's outer
+    ///   - lasso: the painted **coverage** is pulled back by this much from the artwork's outer
     ///     silhouette, which it already reaches exactly (`lassoEdgeErode`).
+    ///
+    ///   Those are the same operation on either side of the lasso's invert, and the lasso's runs on
+    ///   the coverage rather than on the collar for one reason: the fill's soft edge is 8 bits of
+    ///   alpha that only exists after the invert, so a binary operator upstream cannot carry it. See
+    ///   `lassoEdgeErode` for the measurement and LASSO_FILL.md §6 step 7 for the four specifications
+    ///   this step has had.
     ///
     ///   0 is identity in both. The Edge Overlap *slider* still reads "up is more colour" in both, and
     ///   `CanvasManager.fillEdgeRadius(lasso:)` is where that becomes a radius: for a lasso it passes
     ///   `fillExpandRange.upperBound - v`, which anchors the top of the slider at the ink's outer edge
-    ///   so no setting can put paint on clean paper. That is the owner's ruling of 2026-08-21 and it
-    ///   replaced a dilate, shipped hours earlier, that could. See LASSO_FILL.md §6 step 7.
+    ///   so no setting can put paint on clean paper.
     /// - Parameter canvasEdgeIsWall: make the canvas edge bound the fill. Two mechanisms, both
     ///   described at length above `edgeBridge` in Fill.metal: the artwork rect's boundary becomes a
     ///   **barrier** the flood cannot travel across (unconditional — it does not consult
@@ -510,10 +515,10 @@ final class MetalFillSession {
             if changedPtr.pointee == 0 { break }
         }
 
-        // Stage 3: invert (lasso) or edge-overlap dilate (bucket), paint, then read back.
+        // Stage 3: invert then erode (lasso), or edge-overlap dilate (bucket), paint, then read back.
         guard let cb3 = engine.makeCommandBuffer() else { return nil }
         if let filledBuf, let blit = cb3.makeBlitCommandEncoder() {
-            blit.fill(buffer: filledBuf, range: 0..<(2 * MemoryLayout<UInt32>.stride), value: 0)
+            blit.fill(buffer: filledBuf, range: 0..<MemoryLayout<UInt32>.stride, value: 0)
             blit.endEncoding()
         }
         guard let enc3 = cb3.makeComputeCommandEncoder() else { return nil }
@@ -537,31 +542,30 @@ final class MetalFillSession {
             enc3.setBuffer(regionBuf, offset: 0, index: 3)
             enc3.setBuffer(region2Buf ?? regionBuf, offset: 0, index: 4)
             enc3.setBuffer(alphaBuf, offset: 0, index: 5)
-            enc3.setBuffer(filledBuf, offset: 0, index: 6)
-            enc3.setBytes(&second, length: MemoryLayout<SIMD4<Float>>.size, index: 7)
-            enc3.setBytes(&refCount, length: MemoryLayout<UInt32>.size, index: 8)
-            enc3.setBytes(&spread, length: MemoryLayout<Float>.size, index: 9)
+            enc3.setBytes(&second, length: MemoryLayout<SIMD4<Float>>.size, index: 6)
+            enc3.setBytes(&refCount, length: MemoryLayout<UInt32>.size, index: 7)
+            enc3.setBytes(&spread, length: MemoryLayout<Float>.size, index: 8)
             engine.dispatch2D(enc3, p.lassoInvert, width: width, height: height)
-            // **Edge Overlap, and on this path it is an erosion** — `edgeOverlap` here is how far the
-            // painted coverage is pulled back inside the artwork's outer silhouette, not how far it is
-            // grown past it, and the slider's top of range maps to 0. `lassoEdgeErode` carries the
-            // measurement and the owner's words; `CanvasManager.fillEdgeRadius(lasso:)` does the
-            // mapping, because where the top of a slider sits is a UI fact and not the engine's.
+            // **Edge Overlap, and on this path it is an erosion of the coverage** — how far the
+            // painted alpha is pulled back inside the artwork's outer silhouette, not how far it is
+            // grown past it, with the slider's top of range mapping to 0. `lassoEdgeErode` carries the
+            // measurement, the owner's words and the reason it operates here rather than on the collar
+            // upstream; `CanvasManager.fillEdgeRadius(lasso:)` does the mapping, because where the top
+            // of a slider sits is a UI fact and not the engine's.
+            //
+            // **Dispatched unconditionally, including at radius 0** where the kernel is an identity
+            // copy. That is what makes it the single place the §6 step 5 count is taken: no "did it
+            // run?" question, so no second counter slot and no choice between two answers — which is
+            // exactly what shipped broken on 2026-08-21.
             //
             // `regionTmpBuf` is the bucket path's scratch and is untouched on this one, so it costs no
             // allocation; the encoder dispatches serially with barriers, so the invert has finished
             // writing `alphaBuf` before this reads it.
-            var painted = alphaBuf
-            let eroded = Int(edgeOverlap.rounded()) >= 1
-            if eroded {
-                engine.encode2D(enc3, p.lassoEdgeErode, width: width, height: height,
-                                buffers: [(alphaBuf, 0), (lassoBuf, 1), (regionTmpBuf, 2), (paramsBuf, 3),
-                                          (filledBuf, 4)])
-                painted = regionTmpBuf
-            }
-            lassoRecountedAfterErode = eroded
+            engine.encode2D(enc3, p.lassoEdgeErode, width: width, height: height,
+                            buffers: [(alphaBuf, 0), (lassoBuf, 1), (regionTmpBuf, 2), (paramsBuf, 3),
+                                      (filledBuf, 4)])
             engine.encode2D(enc3, p.paintAlpha, width: width, height: height,
-                            buffers: [(painted, 0), (outBuf, 1), (paramsBuf, 2)])
+                            buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
         } else {
             let painted: MTLBuffer
             if Int(edgeOverlap.rounded()) >= 1 {
@@ -577,11 +581,9 @@ final class MetalFillSession {
         cb3.waitUntilCompleted()
 
         if let filledBuf {
-            // Slot 1 is `lassoEdgeErode`'s recount and slot 0 is `lassoInvert`'s. The erode is not
-            // dispatched at radius 0, so slot 1 would read a zeroed 0 there and claim the loop
-            // enclosed nothing — the empty check has to ask which one actually ran.
-            let slot = lassoRecountedAfterErode ? 1 : 0
-            lastFilledPixelCount = Int(filledBuf.contents().bindMemory(to: UInt32.self, capacity: 2)[slot])
+            // `lassoEdgeErode`'s count, and nothing else's — one slot, one writer, and it runs on
+            // every fill, so this is correct at every radius by construction.
+            lastFilledPixelCount = Int(filledBuf.contents().bindMemory(to: UInt32.self, capacity: 1).pointee)
         }
         var result = [UInt8](repeating: 0, count: count * 4)
         result.withUnsafeMutableBytes { memcpy($0.baseAddress!, outBuf.contents(), count * 4) }

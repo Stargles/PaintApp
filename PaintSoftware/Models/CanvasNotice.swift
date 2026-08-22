@@ -42,8 +42,18 @@ struct CanvasNotice: Identifiable, Equatable {
         /// because the tool reverts on a miss as well as a hit (`applyEyedropperResult`), so without
         /// a word the artist sees only their tool changing under them for no stated reason.
         case nothingToPick
-        /// A lasso fill's loop held nothing out: either the collar leaked through a gap in the line
-        /// art, or there was no enclosed shape inside the loop at all.
+        /// A lasso fill's loop held nothing out: the collar leaked through a gap in the line art,
+        /// there was no enclosed shape inside the loop at all, or Edge Overlap ate what little there
+        /// was.
+        ///
+        /// **The third cause is a later arrival and is genuinely distinguishable from the first
+        /// two** — the count is taken after `lassoEdgeErode`, so a fill that existed and was then
+        /// eroded away is a different path from one that never existed. It is named in the same
+        /// sentence anyway, because the artist's next move is the same whichever it was (look at the
+        /// slider, look at the line) and a fourth branch of UI for a one-line difference is not
+        /// worth its weight. It became reachable when Edge Overlap started defaulting to something
+        /// other than 0 on this tool: lasso a 3 px hatch line with the slider low and every painted
+        /// pixel legitimately goes.
         ///
         /// **Both causes, in one message, because the algorithm genuinely cannot tell them apart**
         /// (LASSO_FILL.md §4 case 11): each is "the collar reached everything inside the fence". Made
@@ -69,7 +79,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .historyUndo(let label):  return "Undid \(label.phrase)."
         case .historyRedo(let label):  return "Redid \(label.phrase)."
         case .nothingToPick:    return "Nothing to pick up there."
-        case .nothingEnclosed:  return "Nothing enclosed — the fill leaked through a gap in the line, or there was no shape inside the loop."
+        case .nothingEnclosed:  return "Nothing enclosed — the fill leaked through a gap in the line, there was no shape inside the loop, or Edge Overlap pulled the colour back past everything there was to paint."
         }
     }
 

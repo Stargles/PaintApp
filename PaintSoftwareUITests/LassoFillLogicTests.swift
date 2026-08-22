@@ -70,11 +70,24 @@ final class LassoFillLogicTests: XCTestCase {
     }
 
     /// A small solid square of ink in the middle of the page — the thinnest thing an artist might
-    /// lasso, and the case an *erosion* can rub out entirely where a dilation never could.
+    /// lasso, and the case a grown collar can swallow entirely: every pixel of it is within 6 px of
+    /// paper, so at the bottom of the slider there is nothing left to paint.
     private func inkBlob(side: Int = 5) -> [UInt8] {
         var bytes = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
         for y in 62..<(62 + side) {
             for x in 62..<(62 + side) { bytes[(y * Self.w + x) * 4 + 3] = 255 }
+        }
+        return bytes
+    }
+
+    /// A solid 40x40 slab of ink at (44, 44)-(83, 83) — the fixture for a loop drawn *through* a
+    /// fillable area. Where the loop crosses ink, the ring pixels sitting on that ink are not
+    /// passable, so the collar never reaches them and the fill legitimately runs right up to the
+    /// fence. That is the case an operator which treats out-of-loop pixels as empty gets wrong.
+    private func inkSlab() -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
+        for y in 44..<84 {
+            for x in 44..<84 { bytes[(y * Self.w + x) * 4 + 3] = 255 }
         }
         return bytes
     }
@@ -118,7 +131,7 @@ final class LassoFillLogicTests: XCTestCase {
     /// is what proves it.
     ///
     /// `edgeRadius` is **the engine's disk radius, and on this path it is not the Edge Overlap slider
-    /// value** — the lasso erodes by `upperBound - v`, so the slider's top is radius 0. Anything
+    /// value** — the lasso grows its collar by `upperBound - v`, so the slider's top is radius 0. Anything
     /// asserting what an *artist* gets goes through `lassoFillAtSlider`, which takes that mapping from
     /// the production code; this one is for assertions about the operator itself.
     private func lassoFill(_ reference: [UInt8], loop: CGPath,
@@ -139,11 +152,54 @@ final class LassoFillLogicTests: XCTestCase {
     /// the failure this whole re-anchoring is a fix for: the shipped direction and the specification
     /// disagreed and every test in the file was written against the specification.
     private func lassoFillAtSlider(_ slider: CGFloat, _ reference: [UInt8], loop: CGPath) throws -> [UInt8] {
+        try lassoFillAndSession(slider, reference, loop: loop).region
+    }
+
+    /// The same fill, keeping the session so the §6 step 5 count can be read beside the pixels. The
+    /// count and the pixels have to be checked *together* — a count nobody compares against what was
+    /// painted is what let `lastFilledPixelCount` read an unwritten buffer slot all the way to the
+    /// owner's iPad.
+    private func lassoFillAndSession(_ slider: CGFloat, _ reference: [UInt8],
+                                     loop: CGPath) throws -> (region: [UInt8], session: MetalFillSession) {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.fillMode = .lasso
         manager.setFillSetting(.edgeOverlap, slider)
-        return try lassoFill(reference, loop: loop,
-                             edgeRadius: Float(manager.fillEdgeRadius(lasso: true)))
+        let session = try lassoSession(reference, loop: loop)
+        let region = try XCTUnwrap(session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
+                                                gapRadius: 8,
+                                                edgeOverlap: Float(manager.fillEdgeRadius(lasso: true)),
+                                                canvasEdgeIsWall: true,
+                                                fillColor: SIMD4<Float>(1, 0, 0, 1)))
+        return (region, session)
+    }
+
+    /// FNV-1a over the whole returned buffer. Used by the byte-identity test, where "the same
+    /// picture" has to mean every byte and not a handful of sampled pixels.
+    private func checksum(_ region: [UInt8]) -> UInt64 {
+        var h: UInt64 = 0xcbf2_9ce4_8422_2325
+        for b in region { h = (h ^ UInt64(b)) &* 0x0000_0100_0000_01b3 }
+        return h
+    }
+
+    /// How many separate runs of non-zero coverage lie along one scanline. The fill and the soft
+    /// fade at its edge are one shape, so the answer is 1; a 2 means some coverage has become
+    /// detached from the fill, which on screen is a halo floating clear of the paint.
+    private func coverageRuns(_ region: [UInt8], y: Int, x: ClosedRange<Int>) -> Int {
+        var runs = 0
+        var inRun = false
+        for px in x {
+            let lit = coverage(region, px, y) > 0
+            if lit && !inRun { runs += 1 }
+            inRun = lit
+        }
+        return runs
+    }
+
+    /// Pixels at full coverage — what `lastFilledPixelCount` claims to be counting.
+    private func solidPixels(_ region: [UInt8]) -> Int {
+        var n = 0
+        for i in 0..<(Self.w * Self.h) where region[i * 4 + 3] == 255 { n += 1 }
+        return n
     }
 
     private func isFilled(_ region: [UInt8], _ x: Int, _ y: Int) -> Bool {
@@ -626,13 +682,15 @@ final class LassoFillLogicTests: XCTestCase {
     ///
     /// This half — direction — is unchanged and is asserted the same way it was: a monotone sweep of
     /// the whole slider, because "does it grow" is the question and a pair of hand-picked values
-    /// cannot answer it. What changed is underneath: the slider is mapped to an **erosion** of
-    /// `upperBound - v` (`CanvasManager.fillEdgeRadius(lasso:)`), so raising it removes retreat rather
-    /// than adding growth. Same direction on screen, opposite operator.
+    /// cannot answer it. What changed underneath, twice: the slider is mapped to `upperBound - v`
+    /// (`CanvasManager.fillEdgeRadius(lasso:)`), and that radius now **grows the collar before the
+    /// invert** rather than eroding the alpha after it. Same direction on screen, and — on hard-edged
+    /// art — the same pixels, because dilating a set and eroding its complement are one operation.
     ///
     /// Measured 2026-08-22, filled fraction of the canvas at slider 0…6 on the closed-box fixture:
     /// 0.2906, 0.3077, 0.3253, 0.3433, 0.3619, 0.3809, 0.4005. The last is `boxFootprint` to four places — at the *top* of the slider the
-    /// result is now exactly the shape the artist drew, where before this change that was the bottom.
+    /// result is exactly the shape the artist drew. **These are the same seven numbers the erosion
+    /// produced**, which is a check on the equivalence rather than a coincidence.
     func testEdgeOverlapStillMeansMoreColourAsYouRaiseIt() throws {
         let reference = box(breakInRightWall: 0)
         var areas: [Double] = []
@@ -681,7 +739,10 @@ final class LassoFillLogicTests: XCTestCase {
     /// `testTheFillsSoftEdgeComesFromTheArtworksOwnAntialiasing` measures that profile on this same
     /// scanline: 0, 213, 255 at x = 17, 18, 19 against an artwork running 0, 64, 160. The claim here
     /// is the identity — slider 6 maps to radius 0, and radius 0 is not merely small but *is* the
-    /// undisturbed result, byte for byte.
+    /// undisturbed result, byte for byte. `testTheTopOfTheSliderIsByteIdenticalToWhatShipped` makes
+    /// the same claim against a golden taken from the pre-change binary, which is the stronger half:
+    /// this one proves the top of the slider equals radius 0 *in this build*, that one proves radius 0
+    /// still equals what the artist had before Edge Overlap moved.
     ///
     /// **What the top of the range cannot do, said out loud so nobody re-discovers it as a bug.** At
     /// x = 18 the artist's 64-alpha pixel composites over a fill at 213 and the stack lands at alpha
@@ -699,8 +760,9 @@ final class LassoFillLogicTests: XCTestCase {
         XCTAssertEqual(coverage(top, 19, 60), 255)
     }
 
-    /// **Lowering the slider tucks the colour further under the line** — the other half of the owner's
-    /// sentence, on the fixture where "under the line" is meaningful.
+    /// **Lowering the slider tucks the colour further under the line** — the other half of the
+    /// owner's sentence, on the fixture where "under the line" is meaningful, and the test that
+    /// decided §6 step 7's fourth specification.
     ///
     /// Measured 2026-08-22 along y = 60, where the artwork ramps 0, 64, 160 at x = 17, 18, 19 and is
     /// solid from x = 20. Slider 4 is a 2 px retreat and slider 2 a 4 px one:
@@ -712,12 +774,18 @@ final class LassoFillLogicTests: XCTestCase {
     /// | slider 4 | 0 | 0 | 0 | 213 | 255 | 255 | 255 |
     /// | slider 2 | 0 | 0 | 0 | 0 | 0 | 213 | 255 |
     ///
-    /// The whole profile walks inward by the retreat, ramp and all — 213 is not a new number, it is
-    /// step 6's fringe coverage carried along by the erosion, which is the signature of a
-    /// morphological operator rather than a threshold.
+    /// **The whole profile walks inward by the retreat, ramp and all** — 213 is not a new number, it
+    /// is step 6's fringe coverage carried along by the erosion. That is the property the second
+    /// assertion states directly, and it is why the operator lives on the alpha rather than on the
+    /// collar: the coverage ramp *is* the fill's soft edge, so an operator that cannot see it leaves
+    /// it behind. A binary dilation of the collar before the invert — tried and measured on 2026-08-22
+    /// — produced `[0, 213, 0, 0, 255, 255, 255]` here: the fringe stranded one pixel outside the
+    /// line with bare ink between it and the fill, which reads on screen as a detached halo.
     ///
-    /// Asserted as a profile rather than as one pixel, for the reason its predecessor gave: a single
-    /// sample cannot tell an operator applied on the wrong side from one not applied at all.
+    /// So the profile table is pinned *and* the shape property is pinned. A table alone would be
+    /// satisfied by any operator that happened to produce those seven numbers on this one fixture;
+    /// "the painted pixels along the scanline are one contiguous run" is the thing an artist would
+    /// actually notice breaking, and it fails on the halo at every setting below the top.
     func testLoweringEdgeOverlapTucksTheColourUnderTheLine() throws {
         let reference = rampWalledBox()
         let s4 = try lassoFillAtSlider(4, reference, loop: loopAroundEverything)
@@ -731,43 +799,141 @@ final class LassoFillLogicTests: XCTestCase {
                        "Slider 2 is 4 px, which has crossed well into the solid part of the line")
         XCTAssertEqual(coverage(s4, 60, 60), 255, "…and the interior is untouched, always")
         XCTAssertEqual(coverage(s2, 60, 60), 255)
+
+        // **The fill and its fade are one shape**, so crossing the left wall along y = 60 must meet
+        // exactly one run of painted pixels. Two runs means coverage detached from the fill — the
+        // stranded fringe above — and that is a defect however good the seven numbers look.
+        for slider in stride(from: CGFloat(0), through: 6, by: 1) {
+            let region = try lassoFillAtSlider(slider, reference, loop: loopAroundEverything)
+            XCTAssertEqual(coverageRuns(region, y: 60, x: 0...63), 1,
+                           "Edge Overlap \(slider): the fill's soft edge travels with its boundary, "
+                           + "so there is no gap of bare pixels between the fade and the fill — "
+                           + "profile \((0...30).map { coverage(region, $0, 60) })")
+        }
     }
 
-    /// **The empty check has to be retaken after an erosion, and the dilate never had to be.**
+    /// **The bug the owner got on their iPad, and the assertion that catches it.** They reported, on
+    /// 2026-08-22: *"if edge overlap is anything less than full, it gives an error for nothing
+    /// enclosed, briefly turns the inverse fill orange, and refuses to fill anything."* Every one of
+    /// those three symptoms is §7's empty-result path, and it fired because `lastFilledPixelCount`
+    /// was reading a **buffer slot nothing had written**: the post-invert erosion's atomic was bound
+    /// at offset 0 while Swift read slot 1, so every radius ≥ 1 reported a count of zero on a fill
+    /// that had painted thousands of pixels.
     ///
-    /// A max over an all-zero neighbourhood is zero, so growing a fill could not turn an empty result
-    /// non-empty and `lassoInvert`'s count stood for the whole pipeline. Shrinking can turn a
-    /// non-empty result **empty**: lasso a 5 px blob with the slider at the bottom and every painted
-    /// pixel goes. Left uncounted, `CanvasManager` would bake a fully transparent image and book an
-    /// undo entry for it — the one thing §7.1 exists to forbid, and the kind of no-op undo step an
-    /// artist notices immediately (§8).
-    func testAFillTheEdgeOverlapErodesAwayEntirelyCommitsNothing() throws {
-        let blob = inkBlob()
-        let loop = rectangleLoop(CGRect(x: 40, y: 40, width: 48, height: 48))
-
-        func run(_ slider: CGFloat) throws -> (painted: Int, count: Int) {
-            let manager = CanvasFixture.manager(layerCount: 1)
-            manager.fillMode = .lasso
-            manager.setFillSetting(.edgeOverlap, slider)
-            let session = try lassoSession(blob, loop: loop)
-            let region = try XCTUnwrap(session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
-                                                    gapRadius: 8,
-                                                    edgeOverlap: Float(manager.fillEdgeRadius(lasso: true)),
-                                                    canvasEdgeIsWall: true,
-                                                    fillColor: SIMD4<Float>(1, 0, 0, 1)))
-            var painted = 0
-            for i in 0..<(Self.w * Self.h) where region[i * 4 + 3] > 0 { painted += 1 }
-            return (painted, session.lastFilledPixelCount)
+    /// **Two assertions, because either alone is passable while broken.** "Non-zero" is the artist's
+    /// symptom; "equal to what was actually painted at full coverage" is what makes the count mean
+    /// anything, and it is the assertion the shipped code cannot satisfy at any radius. The old test
+    /// on this ground asserted only that a count was *small*, which the bug made true for free —
+    /// vacuously green, on precisely the defect it sat next to.
+    func testTheEmptyCheckIsNonZeroAtEveryEdgeOverlapSetting() throws {
+        let reference = box(breakInRightWall: 0)
+        for slider in stride(from: CGFloat(0), through: 6, by: 1) {
+            let run = try lassoFillAndSession(slider, reference, loop: loopAroundEverything)
+            XCTAssertGreaterThan(run.session.lastFilledPixelCount, 0,
+                                 "Edge Overlap \(slider) enclosed the box, so §7 must not fire")
+            XCTAssertGreaterThan(run.session.lastFilledPixelCount, CanvasManager.lassoFillMinimumArea,
+                                 "…by a margin, not by one pixel — Edge Overlap \(slider)")
+            XCTAssertEqual(run.session.lastFilledPixelCount, solidPixels(run.region),
+                           "…and it counts exactly the pixels painted solid — Edge Overlap \(slider)")
         }
 
-        let top = try run(6)
-        XCTAssertEqual(top.painted, 25, "Fixture check: at the top of the slider the 5x5 blob is the fill")
-        XCTAssertEqual(top.count, 25, "…and the radius-0 path still reports `lassoInvert`'s own count")
+        // The same invariant where zero is the *right* answer: a 5 px blob lies entirely within 6 px
+        // of paper, so at the bottom of the slider the grown collar swallows it and nothing is
+        // painted. §7.1 needs the count to agree here as much as above — one that disagreed upward
+        // would bake a fully transparent image and book an undo entry for it.
+        let swallowed = try lassoFillAndSession(0, inkBlob(),
+                                                loop: rectangleLoop(CGRect(x: 40, y: 40, width: 48, height: 48)))
+        XCTAssertEqual(solidPixels(swallowed.region), 0, "6 px of collar growth swallows a 5 px blob")
+        XCTAssertEqual(swallowed.session.lastFilledPixelCount, 0,
+                       "…and the count agrees, so nothing is committed and no undo entry is booked")
+    }
 
-        let bottom = try run(0)
-        XCTAssertEqual(bottom.painted, 0, "6 px inward from a 5 px blob leaves nothing on screen")
-        XCTAssertLessThan(bottom.count, CanvasManager.lassoFillMinimumArea,
-                          "…and the count has to agree, or an invisible fill eats an undo slot")
+    /// **The two end states the owner asked to see**, in their words of 2026-08-22: *"the end result
+    /// fill can either be partially inside the enclosure lines or fully cover them."* Both have to be
+    /// reachable from the slider, and this is the test that says so in pixels rather than in area.
+    ///
+    /// The fixture is the hard-edged box because its walls are a stated set: 3 px at x = 20, 21, 22
+    /// (and the mirror at 98, 99, 100), paper on either side. So "covers the line" and "stops short of
+    /// it" are both assertions about named coordinates.
+    ///
+    /// The bottom of the slider grows the collar by 6 px. The collar reaches every paper pixel out to
+    /// x = 19, so the grown collar runs out to x = 25 and the first painted pixel is x = 26 — the
+    /// whole 3 px wall bare, which is *"partially inside the enclosure lines"*. Asserted on both a
+    /// vertical wall and a horizontal one, because a disk that was accidentally a square or a row
+    /// would pass on one alone.
+    func testEdgeOverlapReachesBothEndStatesTheOwnerAskedToSee() throws {
+        let reference = box(breakInRightWall: 0)
+
+        let full = try lassoFillAtSlider(6, reference, loop: loopAroundEverything)
+        XCTAssertEqual(coverage(full, 19, 60), 0, "Top of the slider: clean paper is still clean")
+        XCTAssertEqual(coverage(full, 20, 60), 255, "…and the line's outer pixel is covered")
+        XCTAssertEqual(coverage(full, 21, 60), 255)
+        XCTAssertEqual(coverage(full, 22, 60), 255, "…all the way through the wall — *fully cover them*")
+        XCTAssertEqual(coverage(full, 60, 20), 255, "…on the horizontal wall too")
+
+        let inside = try lassoFillAtSlider(0, reference, loop: loopAroundEverything)
+        XCTAssertEqual(coverage(inside, 20, 60), 0, "Bottom of the slider: the wall's outer pixel is bare")
+        XCTAssertEqual(coverage(inside, 21, 60), 0)
+        XCTAssertEqual(coverage(inside, 22, 60), 0, "…the whole 3 px wall, in fact")
+        XCTAssertEqual(coverage(inside, 25, 60), 0, "…and 6 px of the interior beyond it")
+        XCTAssertEqual(coverage(inside, 26, 60), 255, "…where the fill starts — *partially inside the lines*")
+        XCTAssertEqual(coverage(inside, 60, 25), 0, "…the same retreat off the horizontal wall")
+        XCTAssertEqual(coverage(inside, 60, 26), 255)
+        XCTAssertEqual(coverage(inside, 60, 60), 255, "…and the middle is still filled, at both ends")
+    }
+
+    /// **A loop drawn through a filled area leaves no sliver along the loop**, at any setting.
+    ///
+    /// The fence is not a line the artist drew — it is a gesture that disappears on lift (§6 step 1),
+    /// and §3's ruling is that the fill must not *touch* it, not that it must stand back from it. So
+    /// where the fill legitimately reaches the fence, Edge Overlap has no business pulling it away:
+    /// there is no ink there to tuck under, and the pale gap it leaves is exactly the seam the whole
+    /// setting exists to remove.
+    ///
+    /// The fixture makes the fill reach the fence honestly rather than by accident. `inkSlab` is a
+    /// solid 40 px square; the loop's right and bottom edges cut through it, so the ring pixels on
+    /// that ink are not passable, the collar never reaches them, and `loopMask ∧ ¬reached` paints the
+    /// slab right up to the loop. The three sampled pixels sit 1–2 px inside the fence on the vertical
+    /// edge, the horizontal edge and the corner — a disk of radius 6 reaches every one of them from
+    /// outside the loop, so an operator that lets out-of-loop pixels pull the coverage down fails all
+    /// three, at every setting except the top.
+    ///
+    /// **The ink is not exempt and the fence is**, and the asymmetry is the point: ink is something
+    /// the artist drew and can see the colour retreat under, while the fence is neither. The last
+    /// assertion holds §3 while the others hold the fence exemption — shrinking can never push paint
+    /// across a boundary, so exempting the fence cannot put paint on it.
+    func testALoopDrawnThroughAFilledAreaLeavesNoSliverAlongTheLoop() throws {
+        let reference = inkSlab()
+        let loop = rectangleLoop(CGRect(x: 20, y: 20, width: 44, height: 44))
+
+        for slider in stride(from: CGFloat(0), through: 6, by: 1) {
+            let region = try lassoFillAtSlider(slider, reference, loop: loop)
+            XCTAssertEqual(coverage(region, 62, 55), 255,
+                           "Edge Overlap \(slider): the fill reaches the loop's vertical edge")
+            XCTAssertEqual(coverage(region, 55, 62), 255,
+                           "…and its horizontal edge")
+            XCTAssertEqual(coverage(region, 62, 62), 255,
+                           "…and the corner, where two fence edges reach the same disk")
+            XCTAssertEqual(coverage(region, 66, 55), 0,
+                           "…while nothing is ever painted outside the loop: §3 is absolute")
+        }
+    }
+
+    /// **The top of the slider is byte-identical to the picture that shipped**, and this is the
+    /// cheapest proof that moving Edge Overlap to the other side of the invert disturbed nothing the
+    /// artist already had.
+    ///
+    /// The two checksums were taken from the pre-change engine — the binary built at `f2932f8`, with
+    /// the erosion still in it and dispatched only at radius ≥ 1 — so they are a genuine golden and
+    /// not a number this file computed from the code it is testing. `R = 0` makes the dilation the
+    /// identity, which makes the grown collar equal to the collar, which empties the middle case of
+    /// `lassoInvert`'s three; the assertion is that the equality is exact over every byte of the
+    /// canvas, on hard-edged art and on a fixture whose walls are antialiased ramps.
+    func testTheTopOfTheSliderIsByteIdenticalToWhatShipped() throws {
+        XCTAssertEqual(checksum(try lassoFillAtSlider(6, box(breakInRightWall: 0), loop: loopAroundEverything)),
+                       0x3DF5_4012_1818_D963, "Hard-edged box, slider 6")
+        XCTAssertEqual(checksum(try lassoFillAtSlider(6, rampWalledBox(), loop: loopAroundEverything)),
+                       0xB6EA_43A8_D53C_4EF3, "Antialiased box, slider 6")
     }
 
     /// **"Moving the gap closing slider up means bigger gaps get filled" — the owner, 2026-08-21.**
@@ -1318,7 +1484,7 @@ final class LassoFillLogicTests: XCTestCase {
         XCTAssertEqual(FillMode.allCases.map(\.displayName), ["Flood", "Lasso"])
     }
 
-    /// **One slider, two stored settings, and the lasso's maps to an erosion of `upperBound - v`.**
+    /// **One slider, two stored settings, and the lasso's maps to a collar growth of `upperBound - v`.**
     /// The Swift-side wire for the re-anchoring: the pixel tests above drive the engine, so a correct
     /// shader could ship behind a mapping that never reaches it — the same coverage gap
     /// `testCanvasPaddingReachesTheKeyTheFillRendersWith` was written for in `FillBoundaryLogicTests`.
@@ -1342,7 +1508,7 @@ final class LassoFillLogicTests: XCTestCase {
         for v in stride(from: CGFloat(0), through: 6, by: 1) {
             manager.setFillSetting(.edgeOverlap, v)
             XCTAssertEqual(manager.fillEdgeRadius(lasso: true), 6 - v,
-                           "Slider \(v) erodes by \(6 - v) px")
+                           "Slider \(v) grows the collar by \(6 - v) px")
         }
 
         manager.setFillSetting(.edgeOverlap, 3)
