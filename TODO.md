@@ -24,14 +24,26 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 final verification run, and this repo does not merge a count nobody read.** Each has its own worktree
 and branch; `git log --oneline origin/main..tmp/<name>` shows the work.
 
-- **`tmp/move-overlay` — owner asks (c) and (d), 2 commits, rebased onto `b109aa0`.**
-  Commits: "The Move box gets the screen's units, and its drag stops rasterizing" and a SESSION_LOG
-  line. **(c) is measured**: the Move drag cost **96.1 / 99.9 / 107.8 ms per touch-move sample** at
-  2048x1024, three runs, control within 6% — which is the owner's reported ~5 fps, found rather than
-  guessed. Fast tier read **1513 total / 1510 passed / 0 failed / 3 skipped** (+32 over the 1481
-  baseline) *before* the rebase; the post-rebase run had not reported when the session stopped.
-  **To finish**: rebase onto `origin/main`, re-run the pbxproj duplicate-id check, run the fast tier
-  and read the count from the xcresult, run the move/selection UI suites in isolation, then merge.
+- **`tmp/move-overlay` — owner asks (c) and (d), 3 commits, rebased onto `1253640`. Verified;
+  the merge is the owner's, and it is `--ff-only` clean.** Commits: "The Move box gets the screen's units, and its drag stops
+  rasterizing" and a SESSION_LOG line. **(c) is measured**: the Move drag cost **96.1 / 99.9 / 107.8
+  ms per touch-move sample** at 2048x1024, three runs, control within 6% — which is the owner's
+  reported ~5 fps, found rather than guessed; a **fourth reading of 102.3 ms** (after 0.004 ms,
+  control 41.7 ms) came off the post-rebase fast tier and sits inside the first three.
+  **The count that was owed is now read.** Both rebases were doc-only replays — `git ls-tree -r` over
+  `PaintSoftware PaintSoftwareUITests PaintSoftware.xcodeproj` hashes to `8a3103a7` before the rebase
+  onto `f53dbdc`, after it, and again after a second onto `1253640` when `tmp/lassomove-rulings`
+  landed mid-verification, so no source byte has moved and the runs below measure this tree — and the
+  post-rebase fast tier reads **1513 total / 1510 passed / 0 failed / 3 skipped**, +32 over the 1481
+  baseline, which is exactly the 32 new test functions (31 `ObjectTransformLogicTests` + 1
+  `PerfBaselineTests`). pbxproj duplicate detector `[]`. The three UI classes this branch owed ran in
+  isolation on `move-overlay-1` and read **13 total / 12 passed / 0 failed / 1 skipped**:
+  `VectorLayerContentUITests` 5/5 (including
+  `testContentDrawnOnAMovedVectorLayerLandsWhereItWasDrawn`, the real vector-Move drag),
+  `SelectionAndMoveUITests` 4/4, `CanvasTransformFreezeUITests` 3/3 — the fourth is a standing
+  `XCTSkip` ("XCUITest cannot synthesise a stationary hold"), in a file this branch never touched.
+  **What is still owed is the owner's finger**, not a run: whether a 14 pt grip is findable at the
+  zoom they work at, and what the frame rate is in Release on an A13.
 - **`tmp/lasso-active` — owner ask (b), 1 commit**, "Keep the toolbar's Select/lasso icon blue while
   a selection is live". Was on its final post-rebase confirmation run when the session stopped.
   **To finish**: same close-out. Its report never landed, so **read the branch to learn whether the
