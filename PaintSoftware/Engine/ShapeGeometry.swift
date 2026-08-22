@@ -492,6 +492,119 @@ struct ShapeGeometry: Equatable {
         return result
     }
 
+    // MARK: - Dragging the outline itself
+
+    /// Shortest distance from `point` (canvas space) to the outline **as it is drawn** — i.e. the
+    /// rotated outline, the one the artist can see and is aiming at.
+    ///
+    /// Measured against the *whole* outline rather than the drawn span: `rotatedCGPath` is what
+    /// `ShapeOverlayView` strokes as its blue guide, and it traces the whole shape even when the
+    /// artist only drew a quarter of it. Aiming at what is on screen is the point.
+    ///
+    /// The probe is carried into the shape's own unrotated frame first, which turns every branch
+    /// below into an axis-aligned problem — the same move `draggingEdge` makes, for the same reason.
+    func distanceToOutline(from point: CGPoint) -> CGFloat {
+        let local = rotation == 0 ? point : point.applying(rotationTransform.inverted())
+        switch kind {
+        case .line:
+            return Self.distance(from: local, toSegment: startPoint, endPoint)
+        case .rectangle:
+            let r = boundingRect
+            let tl = CGPoint(x: r.minX, y: r.minY), tr = CGPoint(x: r.maxX, y: r.minY)
+            let br = CGPoint(x: r.maxX, y: r.maxY), bl = CGPoint(x: r.minX, y: r.maxY)
+            // The boundary, not the filled box: the interior of a rectangle is not its outline, and
+            // claiming it would stop the artist drawing inside a pending shape.
+            return min(min(Self.distance(from: local, toSegment: tl, tr),
+                           Self.distance(from: local, toSegment: tr, br)),
+                       min(Self.distance(from: local, toSegment: br, bl),
+                           Self.distance(from: local, toSegment: bl, tl)))
+        case .oval:
+            return Self.distance(from: local, toEllipseIn: boundingRect)
+        }
+    }
+
+    /// Whether `point` is close enough to the outline to grab it.
+    ///
+    /// `reach` is a **canvas**-point radius, and the caller is expected to have divided its
+    /// screen-point constant by `canvasScale` before handing it over — the split
+    /// `ObjectTransformFrame.handleLayout` states: the view owns the constant, the geometry owns the
+    /// direction. An outline is a hairline, so a reach that shrank with the artwork would make the
+    /// whole shape ungrabbable the moment the artist zoomed out, which is `ADD_TEXT.md` §1's bug.
+    func isOnOutline(_ point: CGPoint, within reach: CGFloat) -> Bool {
+        distanceToOutline(from: point) <= reach
+    }
+
+    /// The geometry produced by dragging the outline from `grabPoint` to `point`: every control
+    /// point moves by that one delta and **nothing else changes** — same size, same rotation, same
+    /// drawn span.
+    ///
+    /// `self` is the geometry latched when the finger went down, not the live one, which is
+    /// `ObjectTransformDrag`'s discipline: measuring each delta against the answer the previous delta
+    /// produced is stable until a mid-drag pinch-zoom moves the reference frame under the gesture.
+    /// Driving it with one delta or sixty gives the same answer for the same final point.
+    ///
+    /// `center` is the midpoint of the two anchors, so it translates with them and
+    /// `rotationTransform` — which pivots about it — comes along untouched. That is why a rotated
+    /// shape does not unwind as it moves.
+    func draggingBody(to point: CGPoint, from grabPoint: CGPoint) -> ShapeGeometry {
+        let dx = point.x - grabPoint.x, dy = point.y - grabPoint.y
+        var result = self
+        result.startPoint = CGPoint(x: startPoint.x + dx, y: startPoint.y + dy)
+        result.endPoint = CGPoint(x: endPoint.x + dx, y: endPoint.y + dy)
+        return result
+    }
+
+    private static func distance(from p: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let dx = b.x - a.x, dy = b.y - a.y
+        let length2 = dx * dx + dy * dy
+        guard length2 > 0 else { return hypot(p.x - a.x, p.y - a.y) }
+        let t = max(0, min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length2))
+        return hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+    }
+
+    /// Distance from `p` to the ellipse inscribed in `rect`, both in the same unrotated frame.
+    ///
+    /// Closed form for this is a quartic, and the usual alternative — Newton on Eberly's root-finding
+    /// form — needs special cases at both axes, at the centre, and on a circle. A coarse angular scan
+    /// followed by a golden-section refinement of the winning bracket has none of those: it converges
+    /// unconditionally, degrades gracefully on a degenerate ellipse, and can never return less than
+    /// the scan already proved reachable. It costs a few hundred trig evaluations, paid once per
+    /// touch-down against a budget of one frame.
+    private static func distance(from p: CGPoint, toEllipseIn rect: CGRect) -> CGFloat {
+        let a = rect.width / 2, b = rect.height / 2
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        guard a > 0 || b > 0 else { return hypot(p.x - c.x, p.y - c.y) }
+        func distance(atAngle t: CGFloat) -> CGFloat {
+            hypot(p.x - (c.x + a * cos(t)), p.y - (c.y + b * sin(t)))
+        }
+        let steps = 256
+        let step = 2 * CGFloat.pi / CGFloat(steps)
+        var bestIndex = 0, coarse = CGFloat.greatestFiniteMagnitude
+        for i in 0..<steps {
+            let d = distance(atAngle: CGFloat(i) * step)
+            if d < coarse { coarse = d; bestIndex = i }
+        }
+        // The true minimum lies in the bracket either side of the winning sample, and inside one
+        // 1.4° window the distance is unimodal for any ellipse worth drawing.
+        var lo = CGFloat(bestIndex - 1) * step, hi = CGFloat(bestIndex + 1) * step
+        let invPhi = (CGFloat(5).squareRoot() - 1) / 2
+        var x1 = hi - invPhi * (hi - lo), x2 = lo + invPhi * (hi - lo)
+        var f1 = distance(atAngle: x1), f2 = distance(atAngle: x2)
+        for _ in 0..<40 {
+            if f1 < f2 {
+                hi = x2; x2 = x1; f2 = f1
+                x1 = hi - invPhi * (hi - lo); f1 = distance(atAngle: x1)
+            } else {
+                lo = x1; x1 = x2; f1 = f2
+                x2 = lo + invPhi * (hi - lo); f2 = distance(atAngle: x2)
+            }
+        }
+        // `coarse` is a distance to a point that really is on the ellipse, so it is a valid upper
+        // bound whatever the refinement did — the `min` is what makes a non-unimodal bracket safe
+        // rather than merely unlikely.
+        return min(coarse, min(f1, f2))
+    }
+
     // MARK: - Follow-the-finger dragging
 
     /// The reference frame captured the first time a freshly-detected shape starts following the

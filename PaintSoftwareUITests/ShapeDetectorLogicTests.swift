@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+import UIKit
 
 /// Pure-logic tests for smart-shape detection and stroke collapsing — no `XCUIApplication`, no
 /// simulator gestures, so they run in milliseconds and exercise exactly the math the app bakes
@@ -9,6 +10,12 @@ import CoreGraphics
 /// (see the project file's "Engine sources shared with PaintSoftwareUITests" group) — the same
 /// arrangement `BrushEngineLogicTests` uses, and the reason both files are deliberately kept free of
 /// any dependency beyond CoreGraphics.
+///
+/// The outline-drag block at the bottom is the one part that reaches for UIKit, and deliberately:
+/// TODO item (e) was a *hit-test* defect, and a claim about how far a screen point is from the
+/// outline at 0.125× zoom can only be checked against the view that ships. `ShapeOverlayView.swift`
+/// is compiled into this target for that, exactly as `ObjectTransformOverlayView.swift` already is.
+/// `ShapeGeometry.swift` itself is untouched by this and stays CoreGraphics-only.
 final class ShapeDetectorLogicTests: XCTestCase {
 
     // MARK: - Helpers
@@ -1656,5 +1663,268 @@ final class ShapeDetectorLogicTests: XCTestCase {
         XCTAssertEqual(failures.count, 0, "\(failures.count) of \(checks): \(failures.prefix(5).joined(separator: " | "))")
         XCTAssertEqual(checks, 6 * 8 * 8 * 2, "the sweep stopped sweeping")
         XCTAssertEqual(lineCount, 32, "the short-arc band the line gate claims moved — see lineDeviationMax")
+    }
+
+    // MARK: - Dragging the outline moves the whole shape — TODO item (e)
+    //
+    // The owner, 2026-08-22: dragging the *line* of a shape rather than one of its nodes drew a new
+    // stroke under the Pencil and did nothing under a finger, for every shape kind. Both halves are
+    // one fact: `ShapeOverlayView.hitTest` claimed handles only, so the touch fell through to the
+    // canvas and the pencil-only setting decided what happened next. The tests below are therefore
+    // about *who owns the touch* first and about geometry second.
+
+    /// Canvas-space fixtures large enough that a node's 22-point reach at 0.125× zoom — 176 canvas
+    /// points — cannot reach the probe point. Each returns the shape, a point on its outline that is
+    /// as far from every node as that outline gets, and the outward normal there.
+    private func outlineFixtures() -> [(name: String, shape: ShapeGeometry, on: CGPoint, out: CGPoint)] {
+        let root = CGFloat(2).squareRoot() / 2
+        return [
+            // Midway between the two endpoints.
+            ("line", ShapeGeometry(kind: .line, startPoint: CGPoint(x: 200, y: 1024),
+                                   endPoint: CGPoint(x: 1800, y: 1024)),
+             CGPoint(x: 1000, y: 1024), CGPoint(x: 0, y: 1)),
+            // The *bottom* edge's midpoint, not the top's: the rotation knob stands 36 screen points
+            // above the top edge, which at 0.125× is 288 canvas points — close enough to a probe
+            // above the top edge to answer `.rotation` and make this test about the wrong thing.
+            ("rectangle", ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 300, y: 400),
+                                        endPoint: CGPoint(x: 1700, y: 1300)),
+             CGPoint(x: 1000, y: 1300), CGPoint(x: 0, y: 1)),
+            // 45° round a circle of radius 600 — the farthest an oval's outline gets from its four
+            // axis nodes.
+            ("oval", ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 400, y: 400),
+                                   endPoint: CGPoint(x: 1600, y: 1600)),
+             CGPoint(x: 1000 + 600 * root, y: 1000 + 600 * root), CGPoint(x: root, y: root))
+        ]
+    }
+
+    /// An overlay in the adjustable state — handles up, interaction on — which is the only state in
+    /// which any drag is possible.
+    private func overlay(for shape: ShapeGeometry, canvasScale: CGFloat) -> ShapeOverlayView {
+        let view = ShapeOverlayView(frame: CGRect(x: 0, y: 0, width: 2048, height: 2048))
+        view.isActive = true
+        // Before `update`, so the handles are rebuilt at the size this zoom calls for rather than
+        // re-centred at the previous one.
+        view.canvasScale = canvasScale
+        view.update(shape: shape, previewImage: nil, showHandles: true)
+        view.isUserInteractionEnabled = true
+        return view
+    }
+
+    private static let zooms: [CGFloat] = [0.125, 0.3, 0.5, 1, 2, 4]
+
+    /// The direct regression for the report. An outline is a hairline, so "close enough to grab it"
+    /// has to be a *screen* distance — a fixed canvas-point reach is the defect `ADD_TEXT.md` §1
+    /// names, and it is what made the Move box's handles unhittable.
+    ///
+    /// **Asserted through the view that ships**, at the zoom it is actually set to, rather than
+    /// against the constant the reach is computed from.
+    func testTheOutlineIsGrabbableAtTheSameScreenDistanceAtEveryZoom() {
+        for fixture in outlineFixtures() {
+            for canvasScale in Self.zooms {
+                let view = overlay(for: fixture.shape, canvasScale: canvasScale)
+                func probe(screenPoints: CGFloat) -> CGPoint {
+                    let canvasPoints = screenPoints / canvasScale
+                    return CGPoint(x: fixture.on.x + fixture.out.x * canvasPoints,
+                                   y: fixture.on.y + fixture.out.y * canvasPoints)
+                }
+                XCTAssertEqual(view.target(at: probe(screenPoints: 18)), .body,
+                               "\(fixture.name): 18 screen points off the outline is inside the 22-point reach at \(canvasScale)×")
+                XCTAssertNil(view.target(at: probe(screenPoints: 30)),
+                             "\(fixture.name): 30 screen points off the outline is beyond it at \(canvasScale)×")
+            }
+        }
+    }
+
+    /// The half that was actually broken: not "does the shape know how to move" but "does the touch
+    /// ever arrive". A declined touch is what falls through to the canvas, where the Pencil drew the
+    /// stray line the owner reported — so both answers here matter and the nil is not a formality.
+    func testTheOutlineClaimsTheTouchAndEverywhereElseStillDeclinesIt() {
+        for fixture in outlineFixtures() {
+            let view = overlay(for: fixture.shape, canvasScale: 1)
+            XCTAssertTrue(view.hitTest(fixture.on, with: nil) === view,
+                          "\(fixture.name): a touch on the outline is claimed by the overlay")
+            let away = CGPoint(x: fixture.on.x + fixture.out.x * 200, y: fixture.on.y + fixture.out.y * 200)
+            XCTAssertNil(view.hitTest(away, with: nil),
+                         "\(fixture.name): a touch away from the shape still falls through to the canvas")
+        }
+    }
+
+    /// Every node sits *on* the outline, so at a node both targets are in reach by construction and
+    /// the ordering is the whole of the resize-versus-move distinction. Asking the outline first
+    /// would cost every shape all of its handles at once.
+    func testANodeBeatsTheOutlineWhereBothAreInReach() {
+        for fixture in outlineFixtures() {
+            for canvasScale in Self.zooms {
+                let view = overlay(for: fixture.shape, canvasScale: canvasScale)
+                let chrome = view.drawnChrome.handles
+                XCTAssertFalse(chrome.isEmpty, "\(fixture.name) has handles at \(canvasScale)×")
+                for entry in chrome {
+                    let centre = CGPoint(x: entry.frame.midX, y: entry.frame.midY)
+                    XCTAssertEqual(view.target(at: centre), entry.kind,
+                                   "\(fixture.name): \(entry.kind) at \(canvasScale)× is the node, not the body")
+                }
+            }
+        }
+    }
+
+    func testTheOutlineReachIsAScreenConstant() {
+        let view = ShapeOverlayView(frame: .zero)
+        for canvasScale in Self.zooms {
+            view.canvasScale = canvasScale
+            XCTAssertEqual(view.bodyReach * canvasScale, 22, accuracy: 1e-9)
+            XCTAssertEqual(view.handleReach * canvasScale, 22, accuracy: 1e-9)
+        }
+    }
+
+    /// The outline is grabbed **where it is drawn**, not where an unrotated one would be.
+    ///
+    /// A 1000 × 200 rectangle turned a quarter turn is 200 × 1000 on screen, and the two candidate
+    /// probes below swap answers exactly: measuring against the unrotated box would put the first at
+    /// distance 0 and the second at 100, which is the reverse of what the artist sees.
+    func testTheOutlineIsMeasuredWhereItIsDrawnNotWhereItWouldBeUnrotated() {
+        let shape = ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: 500, y: 900),
+                                  endPoint: CGPoint(x: 1500, y: 1100), rotation: .pi / 2)
+        XCTAssertEqual(shape.distanceToOutline(from: CGPoint(x: 900, y: 1000)), 0, accuracy: 1e-6,
+                       "the midpoint of the drawn long edge is on the outline")
+        XCTAssertEqual(shape.distanceToOutline(from: CGPoint(x: 1000, y: 1100)), 100, accuracy: 1e-6,
+                       "the midpoint of the *unrotated* long edge is 100 points inside the drawn box")
+    }
+
+    /// An oval's distance is the only one without a closed form, so it gets its own check against
+    /// figures that are exact by construction: on a circle of radius 600, a probe 240 out along any
+    /// bearing is 240 from the outline, and one at the centre is 600 from it.
+    func testDistanceToAnOvalOutlineIsExactAtEveryBearing() {
+        let circle = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 400, y: 400),
+                                   endPoint: CGPoint(x: 1600, y: 1600))
+        for degrees in stride(from: 0, to: 360, by: 7) {
+            let t = CGFloat(degrees) * .pi / 180
+            let outside = CGPoint(x: 1000 + 840 * cos(t), y: 1000 + 840 * sin(t))
+            XCTAssertEqual(circle.distanceToOutline(from: outside), 240, accuracy: 1e-4, "outside at \(degrees)°")
+            let inside = CGPoint(x: 1000 + 360 * cos(t), y: 1000 + 360 * sin(t))
+            XCTAssertEqual(circle.distanceToOutline(from: inside), 240, accuracy: 1e-4, "inside at \(degrees)°")
+        }
+        XCTAssertEqual(circle.distanceToOutline(from: CGPoint(x: 1000, y: 1000)), 600, accuracy: 1e-4,
+                       "the centre of a circle is one radius from its outline")
+        // An eccentric ellipse, where a naive nearest-by-angle answer is wrong: the point directly
+        // above the centre of a 1200 × 200 ellipse is (200/2 − 0) = 100 from the top of it.
+        let ellipse = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 400, y: 900),
+                                    endPoint: CGPoint(x: 1600, y: 1100))
+        XCTAssertEqual(ellipse.distanceToOutline(from: CGPoint(x: 1000, y: 1000)), 100, accuracy: 1e-4)
+        XCTAssertEqual(ellipse.distanceToOutline(from: CGPoint(x: 1600, y: 1000)), 0, accuracy: 1e-4)
+    }
+
+    /// A move moves. Every control point travels by the one delta and **nothing else about the
+    /// geometry changes** — same size, same rotation, same drawn span.
+    func testDraggingTheOutlineTranslatesEveryControlPointAndChangesNothingElse() {
+        let delta = CGPoint(x: 137, y: -84)
+        let grab = CGPoint(x: 500, y: 600)
+        for kind in ShapeGeometry.Kind.allCases {
+            let shape = ShapeGeometry(kind: kind, startPoint: CGPoint(x: 300, y: 400),
+                                      endPoint: CGPoint(x: 900, y: 800), rotation: 0.4,
+                                      spanStart: 0.2, spanSweep: 0.55)
+            let moved = shape.draggingBody(to: CGPoint(x: grab.x + delta.x, y: grab.y + delta.y), from: grab)
+            XCTAssertEqual(moved.startPoint.x, shape.startPoint.x + delta.x, accuracy: 1e-9, "\(kind)")
+            XCTAssertEqual(moved.startPoint.y, shape.startPoint.y + delta.y, accuracy: 1e-9, "\(kind)")
+            XCTAssertEqual(moved.endPoint.x, shape.endPoint.x + delta.x, accuracy: 1e-9, "\(kind)")
+            XCTAssertEqual(moved.endPoint.y, shape.endPoint.y + delta.y, accuracy: 1e-9, "\(kind)")
+            XCTAssertEqual(moved.rotation, shape.rotation, "\(kind): a move does not turn the shape")
+            XCTAssertEqual(moved.spanStart, shape.spanStart, "\(kind): the drawn span is untouched")
+            XCTAssertEqual(moved.spanSweep, shape.spanSweep, "\(kind)")
+            XCTAssertEqual(moved.boundingRect.width, shape.boundingRect.width, accuracy: 1e-9,
+                           "\(kind): a move does not resize")
+            XCTAssertEqual(moved.boundingRect.height, shape.boundingRect.height, accuracy: 1e-9, "\(kind)")
+            XCTAssertEqual(moved.outlineLength, shape.outlineLength, accuracy: 1e-6, "\(kind)")
+            // And on screen: the path the overlay strokes has shifted by the delta and nothing else.
+            let was = shape.rotatedCGPath.boundingBox, now = moved.rotatedCGPath.boundingBox
+            XCTAssertEqual(now.minX, was.minX + delta.x, accuracy: 1e-6, "\(kind): the drawn path moved")
+            XCTAssertEqual(now.minY, was.minY + delta.y, accuracy: 1e-6, "\(kind)")
+            XCTAssertEqual(now.width, was.width, accuracy: 1e-6, "\(kind): …and only moved")
+            XCTAssertEqual(now.height, was.height, accuracy: 1e-6, "\(kind)")
+        }
+    }
+
+    /// One drag is one move, however many samples it arrived in.
+    ///
+    /// The two ways of driving it have to agree: **latched** — the geometry from touch-down plus the
+    /// total delta, which is what `ShapeOverlayView.bodyDragStart` does — and **chained**, each frame
+    /// measured against the answer the frame before produced. They agree only because a body drag is
+    /// a pure translation, and a Pencil delivers a different number of coalesced samples every time,
+    /// so a drag that depended on the count would land somewhere different on every attempt.
+    func testAnOutlineDragArrivesAtTheSamePlaceInOneStepOrSixty() {
+        let grab = CGPoint(x: 500, y: 600), finish = CGPoint(x: 800, y: 425)
+        for kind in ShapeGeometry.Kind.allCases {
+            let start = ShapeGeometry(kind: kind, startPoint: CGPoint(x: 300, y: 400),
+                                      endPoint: CGPoint(x: 900, y: 800), rotation: 0.4,
+                                      spanStart: 0.2, spanSweep: 0.55)
+            var chained = start, previous = grab
+            for i in 1...60 {
+                let t = CGFloat(i) / 60
+                let at = CGPoint(x: grab.x + (finish.x - grab.x) * t, y: grab.y + (finish.y - grab.y) * t)
+                chained = chained.draggingBody(to: at, from: previous)
+                previous = at
+            }
+            let latched = start.draggingBody(to: finish, from: grab)
+            XCTAssertEqual(chained.startPoint.x, latched.startPoint.x, accuracy: 1e-6, "\(kind)")
+            XCTAssertEqual(chained.startPoint.y, latched.startPoint.y, accuracy: 1e-6, "\(kind)")
+            XCTAssertEqual(chained.endPoint.x, latched.endPoint.x, accuracy: 1e-6, "\(kind)")
+            XCTAssertEqual(chained.endPoint.y, latched.endPoint.y, accuracy: 1e-6, "\(kind)")
+            XCTAssertEqual(chained.rotation, latched.rotation, accuracy: 1e-9, "\(kind)")
+        }
+    }
+
+    /// A drag that starts away from the shape is declined at every zoom — which is what leaves the
+    /// Pencil drawing and the finger doing whatever the pencil-only setting says, exactly as before.
+    func testADragThatStartsAwayFromTheShapeIsNeverClaimed() {
+        for fixture in outlineFixtures() {
+            for canvasScale in Self.zooms {
+                let view = overlay(for: fixture.shape, canvasScale: canvasScale)
+                // 200 screen points clear of the outline: past the 22-point body reach and past
+                // every node's 22-point reach at any zoom in the range.
+                let canvasPoints = 200 / canvasScale
+                let away = CGPoint(x: fixture.on.x + fixture.out.x * canvasPoints,
+                                   y: fixture.on.y + fixture.out.y * canvasPoints)
+                XCTAssertNil(view.target(at: away), "\(fixture.name) at \(canvasScale)×")
+            }
+        }
+    }
+
+    /// **What a node drag registers, and therefore what an outline drag registers: nothing.**
+    ///
+    /// A smart shape is transient until it bakes — `updateInteractiveShape` only writes the pending
+    /// geometry, and `commitInteractiveShape` records the single `.shape` step for the whole thing.
+    /// Matching that is what the ask means by "the same terms the shape's other edits are"; inventing
+    /// a per-drag undo step here would give one shape two different kinds of history.
+    func testAnOutlineMoveIsTransientAndTheWholeShapeIsOneUndoStep() {
+        let manager = CanvasFixture.manager()
+        let shape = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 8, y: 8),
+                                  endPoint: CGPoint(x: 40, y: 40))
+        let traced = samples((0...48).map { i in
+            let t = CGFloat(i) / 48 * 2 * .pi - .pi
+            return CGPoint(x: 24 + 16 * cos(t), y: 24 + 16 * sin(t))
+        })
+        manager.beginInteractiveShape(shape, samples: traced)
+        manager.endInteractiveShape()          // pen up: adjustable, handles and outline live
+        let before = manager.history.undoStack.count
+
+        // Sixty frames of an outline drag, driven the way `ShapeOverlayView` drives it: always from
+        // the geometry latched at touch-down.
+        let grab = CGPoint(x: 24, y: 8)        // the top of the oval, on its outline
+        let finish = CGPoint(x: 34, y: 20)
+        for i in 1...60 {
+            let t = CGFloat(i) / 60
+            let at = CGPoint(x: grab.x + (finish.x - grab.x) * t, y: grab.y + (finish.y - grab.y) * t)
+            let moved = shape.draggingBody(to: at, from: grab)
+            manager.updateInteractiveShape(startPoint: moved.startPoint, endPoint: moved.endPoint,
+                                           rotation: moved.rotation)
+        }
+        XCTAssertEqual(manager.history.undoStack.count, before,
+                       "a drag on the outline is a transient edit, exactly as a node drag is")
+        XCTAssertEqual(manager.resolvedShape, shape.draggingBody(to: finish, from: grab),
+                       "and it reached the model — the shape sits where the drag left it")
+
+        manager.commitInteractiveShape()
+        XCTAssertEqual(manager.history.undoStack.count, before + 1,
+                       "one shape, one undo step, whatever it was dragged by on the way")
+        XCTAssertTrue(manager.history.canUndo)
     }
 }

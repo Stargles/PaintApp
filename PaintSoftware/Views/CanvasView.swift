@@ -319,6 +319,12 @@ struct CanvasView: UIViewRepresentable {
             guard let coordinator, let shape = coordinator.canvasManager.activeShape else { return }
             coordinator.applyShapeDrag(shape.draggingEdge(edge, to: point, anchor: anchor))
         }
+        // The one callback that arrives already resolved. A body drag is measured from the geometry
+        // latched at touch-down, which only the overlay saw, so re-deriving it from `activeShape`
+        // here would measure each delta against the answer the previous one gave.
+        shapeOverlay.onBodyDragged = { [weak coordinator = context.coordinator] geometry in
+            coordinator?.applyShapeDrag(geometry)
+        }
 
         host.onLayout = { [weak coordinator = context.coordinator] in
             coordinator?.hostBoundsDidChange()

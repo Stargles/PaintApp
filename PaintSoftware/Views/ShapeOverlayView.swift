@@ -15,14 +15,25 @@ import UIKit
 ///   1. **Following** (finger still down after hold-detection): preview only, no handles.
 ///   2. **Adjustable** (finger lifted): preview + draggable handles.
 ///
-/// In both modes this view only ever claims the touches that land on a handle — see `hitTest`.
-/// Everything else falls through to the stroke view underneath, which is what lets the user start
-/// the next stroke straight over a pending shape: the touch that begins that stroke commits the
-/// shape on its way past (`onStrokeBegan` → `commitTransientsAndRefresh`) and then draws, instead of
-/// being swallowed as a "dismiss" that has to be followed by a second, separate touch.
+/// In both modes this view only ever claims the touches that land on a handle **or on the shape's
+/// own outline** — see `hitTest`. Everything else falls through to the stroke view underneath, which
+/// is what lets the user start the next stroke straight over a pending shape: the touch that begins
+/// that stroke commits the shape on its way past (`onStrokeBegan` → `commitTransientsAndRefresh`) and
+/// then draws, instead of being swallowed as a "dismiss" that has to be followed by a second,
+/// separate touch.
+///
+/// **The outline was not claimed until 2026-08-22, and that was the whole of TODO item (e).** The
+/// owner reported that dragging the line of a shape — any shape, not just an oval — drew a new stroke
+/// under the Pencil and did nothing under a finger. Both of those are the same fact seen twice: the
+/// hit test covered the handles only, so an outline touch fell straight through to the canvas, where
+/// the pencil-only setting decided whether a brush stroke happened. It was never a geometry bug;
+/// `ShapeGeometry.draggingEdge` was sitting right there and nothing was reaching it. The fix is one
+/// more target in `target(at:)`, and the pencil-only path is untouched by it — that lives on
+/// `StrokeCanvasView`/`SelectionOverlayView` underneath, and a touch this view declines still lands
+/// there exactly as it did.
 ///
 /// Lines have start + end handles. Rectangles have 4 corner handles + rotation.
-/// Ovals have 4 axis handles + rotation.
+/// Ovals have 4 axis handles + rotation. Every kind gets the outline.
 ///
 /// Note there is no gesture recognizer here: handles are dragged from raw touch callbacks, so a
 /// drag takes effect on the first pixel of movement rather than after a pan recognizer's ~10pt
@@ -57,6 +68,14 @@ final class ShapeOverlayView: UIView {
     /// still. See `activeAnchor`.
     var onCornerDragged: ((CGPoint, CornerHandle, CGPoint?) -> Void)?
     var onEdgeDragged: ((CGPoint, EdgeHandle, CGPoint?) -> Void)?
+    /// A drag on the shape's own outline, reporting the **whole translated geometry** rather than a
+    /// raw touch point like the four above.
+    ///
+    /// The difference is deliberate: a body drag is measured from the geometry latched when the
+    /// finger went down (`bodyDragStart`), and this view is the only thing that saw that moment. The
+    /// handle callbacks can hand out a bare point because their reference frame is the latched
+    /// *anchor*, which travels with them.
+    var onBodyDragged: ((ShapeGeometry) -> Void)?
 
     /// Which end of a line is being dragged. Both ends used to report through one callback that
     /// unconditionally wrote `endPoint`, so grabbing the start handle moved the far end instead.
@@ -70,10 +89,17 @@ final class ShapeOverlayView: UIView {
 
     // MARK: - Handle model
 
-    private enum HandleKind: Equatable {
+    /// What a touch can be on. Everything but `body` is a drawn dot; `body` is the shape's own
+    /// outline, which is a path rather than a point and so is hit by reach from the path itself.
+    ///
+    /// Internal rather than private only so `ShapeDetectorLogicTests` can name the answers
+    /// `target(at:)` gives — the same seam `ObjectTransformOverlayView.drawnChrome` opens, and for
+    /// the same reason: a zoom-invariance claim has to be checked against the view that ships.
+    enum HandleKind: Equatable {
         case start, end, rotation
         case axisTop, axisBottom, axisLeft, axisRight
         case cornerTL, cornerTR, cornerBL, cornerBR
+        case body
     }
 
     private struct HandleInfo { let kind: HandleKind; let layer: CALayer }
@@ -97,6 +123,11 @@ final class ShapeOverlayView: UIView {
     private static let rotationHandleScreenOffset: CGFloat = 36
     /// Radius of the touch target — half of the 44 pt HIG minimum.
     private static let handleScreenReach: CGFloat = 22
+    /// How close to the outline a touch has to land to grab the shape and move it, in screen points.
+    /// The same 22 as a handle: an outline is a hairline and needs at least as much slack as a dot
+    /// that is actually drawn 14 across, and matching the two means there is no band around a node
+    /// where neither target answers.
+    private static let bodyScreenReach: CGFloat = 22
 
     /// The canvas container's current content scale, pushed down by `CanvasView.Coordinator` on every
     /// transform change. Everything above is divided by this to land at its screen size.
@@ -112,6 +143,17 @@ final class ShapeOverlayView: UIView {
     private var rotationHandleOffset: CGFloat { Self.rotationHandleScreenOffset / canvasScale }
     private var handleBorderWidth: CGFloat { 2 / canvasScale }
     private var outlineWidth: CGFloat { 1 / canvasScale }
+    /// The node target's radius in canvas points. Named rather than spelled out at the one call site
+    /// so `handleReach * canvasScale == 22` is assertable, the way `ObjectTransformOverlayView`
+    /// exposes its own.
+    var handleReach: CGFloat { Self.handleScreenReach / canvasScale }
+    /// The outline target's radius in canvas points.
+    ///
+    /// Floored at a 0.01 scale where the others are not, because this one is consulted for a shape
+    /// that may still be mid-pinch: `canvasScale`'s `didSet` guards the *side effect* on a
+    /// non-positive scale, not the stored value, so a zero would otherwise make every point in the
+    /// plane infinitely close to the outline and swallow the whole canvas.
+    var bodyReach: CGFloat { Self.bodyScreenReach / max(canvasScale, 0.01) }
 
     // MARK: - Layers & gesture
 
@@ -129,6 +171,11 @@ final class ShapeOverlayView: UIView {
     /// would visibly jump. One latched field removes the discontinuity; `activeHandle` is already
     /// tracked across the drag, so there is no new lifecycle here.
     private var activeAnchor: CGPoint?
+    /// The geometry and the touch point latched at the start of an outline drag. Every later sample
+    /// is measured against these two and never against the shape as it now stands — the same
+    /// argument `activeAnchor` above makes and `ObjectTransformDrag` states in full: a reference
+    /// frame recomputed per event drifts, and a mid-drag pinch moves it outright.
+    private var bodyDragStart: (shape: ShapeGeometry, point: CGPoint)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -217,10 +264,11 @@ final class ShapeOverlayView: UIView {
         // A pinch can land while a handle is being dragged, and `rebuildHandles` goes through
         // `clearHandles`, which drops the drag's identity. Carry it across: the drag is the same
         // drag, only the chrome around it changed size.
-        let draggingHandle = activeHandle, draggingAnchor = activeAnchor
+        let draggingHandle = activeHandle, draggingAnchor = activeAnchor, draggingBody = bodyDragStart
         rebuildHandles(for: shape)
         activeHandle = draggingHandle
         activeAnchor = draggingAnchor
+        bodyDragStart = draggingBody
     }
 
     // MARK: - Handle management
@@ -230,6 +278,7 @@ final class ShapeOverlayView: UIView {
         handles.removeAll()
         activeHandle = nil
         activeAnchor = nil
+        bodyDragStart = nil
     }
 
     /// The handles a shape kind gets, and where they sit for the given geometry. The single source
@@ -298,7 +347,7 @@ final class ShapeOverlayView: UIView {
     /// minimum: adjacent corners of any shape under ~44 pt on screen now overlap too. Simplifying it
     /// back to first-match would cost a small shape two of its four corners.
     private func handleKind(at point: CGPoint) -> HandleKind? {
-        let reach = Self.handleScreenReach / canvasScale
+        let reach = handleReach
         var best: (kind: HandleKind, distance: CGFloat)?
         for info in handles {
             let center = CGPoint(x: info.layer.frame.midX, y: info.layer.frame.midY)
@@ -309,10 +358,27 @@ final class ShapeOverlayView: UIView {
         return best?.kind
     }
 
-    /// Claims only the handles. Everywhere else the overlay is transparent to touch, so the canvas
-    /// underneath keeps receiving strokes, fills and two-finger gestures while a shape is pending.
+    /// What a touch at `point` grabs: the nearest node within reach, else the outline, else nothing.
+    ///
+    /// **A node beats the outline, including where they overlap** — and they always overlap, because
+    /// every node sits *on* the outline it belongs to. Asking the outline first would cost every
+    /// shape all of its handles at once, so the ordering here is the whole of the resize-vs-move
+    /// distinction. Same ruling, for the same reason, as
+    /// `ObjectTransformFrame.target(at:reach:rotationOffset:)`.
+    ///
+    /// Returning nil is the third real answer and not a fallthrough: it is what leaves an ordinary
+    /// stroke, a fill, or a two-finger pinch alone while a shape is pending.
+    func target(at point: CGPoint) -> HandleKind? {
+        if let kind = handleKind(at: point) { return kind }
+        guard let shape, shape.isOnOutline(point, within: bodyReach) else { return nil }
+        return .body
+    }
+
+    /// Claims the handles and the outline. Everywhere else the overlay is transparent to touch, so
+    /// the canvas underneath keeps receiving strokes, fills and two-finger gestures while a shape is
+    /// pending.
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard isActive, !isHidden, isUserInteractionEnabled, handleKind(at: point) != nil else { return nil }
+        guard isActive, !isHidden, isUserInteractionEnabled, target(at: point) != nil else { return nil }
         return self
     }
 
@@ -321,9 +387,11 @@ final class ShapeOverlayView: UIView {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
         guard let touch = touches.first else { return }
-        let kind = handleKind(at: touch.location(in: self))
+        let point = touch.location(in: self)
+        let kind = target(at: point)
         activeHandle = kind
         activeAnchor = kind.flatMap(anchor(for:))
+        bodyDragStart = (kind == .body) ? shape.map { ($0, point) } : nil
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -336,12 +404,14 @@ final class ShapeOverlayView: UIView {
         super.touchesEnded(touches, with: event)
         activeHandle = nil
         activeAnchor = nil
+        bodyDragStart = nil
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesCancelled(touches, with: event)
         activeHandle = nil
         activeAnchor = nil
+        bodyDragStart = nil
     }
 
     /// The canvas point a drag on `kind` has to hold still. Nil for the rotation handle (it pivots
@@ -357,7 +427,9 @@ final class ShapeOverlayView: UIView {
         case .axisBottom: return shape.canvasAnchor(opposite: .bottom)
         case .axisLeft: return shape.canvasAnchor(opposite: .left)
         case .axisRight: return shape.canvasAnchor(opposite: .right)
-        case .start, .end, .rotation: return nil
+        // A body drag has no point to hold still — every point moves. What it latches instead is the
+        // whole starting geometry plus the grab point, in `bodyDragStart`.
+        case .start, .end, .rotation, .body: return nil
         }
     }
 
@@ -377,6 +449,23 @@ final class ShapeOverlayView: UIView {
             guard let shape else { return }
             let c = shape.center
             onRotationDragged?(atan2(point.y - c.y, point.x - c.x) + .pi / 2)
+        case .body:
+            guard let start = bodyDragStart else { return }
+            onBodyDragged?(start.shape.draggingBody(to: point, from: start.point))
         }
+    }
+
+    // MARK: - Test seam
+
+    /// Every drawn handle's frame as it actually sits on screen, in canvas points, plus the guide
+    /// outline's stroke width.
+    ///
+    /// `ShapeDetectorLogicTests` multiplies these back up by `canvasScale` and asserts the *screen*
+    /// figures, so a zoom-invariance claim is checked against the layers that ship rather than
+    /// against the constants they were computed from. `ObjectTransformOverlayView.drawnChrome`
+    /// records why that distinction earns its keep: the defect it replaced set a perfectly correct
+    /// constant and then drew it in the wrong space, which a constants-based test would have passed.
+    var drawnChrome: (handles: [(kind: HandleKind, frame: CGRect)], outlineWidth: CGFloat) {
+        (handles.map { ($0.kind, $0.layer.frame) }, shapeLayer.lineWidth)
     }
 }
