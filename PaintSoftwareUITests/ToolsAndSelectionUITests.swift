@@ -163,6 +163,43 @@ final class ToolPanelsUITests: PaintUITestCase {
         XCTAssertFalse(selectButton.isSelected, "With the selection gone the icon must go back to unlit")
     }
 
+    /// The owner's ask is specifically that the real-size stamp preview appears when the size slider
+    /// is **pressed**, before any drag — and that is the one half of it no logic test can reach.
+    ///
+    /// It cannot be observed directly either: the window is on screen only while a finger is down,
+    /// and XCUITest cannot query the tree in the middle of its own gesture. So the fact is made to
+    /// outlive the lift — `CanvasManager.sizePreviewRaiseCount`, surfaced by `DrawingView` as
+    /// `sizePreview.raiseCount`, exactly as `midStrokeEntryCount` is surfaced for the sandwich.
+    func testPressingTheBrushSizeSliderRaisesTheRealSizeStampPreview() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let raiseCount = app.staticTexts["sizePreview.raiseCount"]
+        XCTAssertTrue(raiseCount.waitForExistence(timeout: 5), "The preview's observability marker must exist")
+        XCTAssertEqual(raiseCount.label, "0", "PREMISE: nothing has been held yet")
+        XCTAssertFalse(app.otherElements["sizePreview.window"].exists,
+                       "PREMISE: and no preview is on screen at rest")
+
+        // Brush is the default tool, so one tap opens its settings panel.
+        app.buttons["toolbar.brushButton"].tap()
+        let sizeSlider = app.sliders["brushPanel.sizeSlider"]
+        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "Brush panel should be open")
+
+        // Park the thumb under the middle of the track, so the press below lands on the thumb
+        // rather than on bare track — which a slider ignores, and which would make this test pass
+        // or fail on where the default brush size happens to put the thumb.
+        sizeSlider.adjust(toNormalizedSliderPosition: 0.5)
+        let afterDrag = Int(raiseCount.label) ?? 0
+        XCTAssertGreaterThanOrEqual(afterDrag, 1, "Dragging the slider must have raised the preview")
+
+        // The ask itself: a press that never moves.
+        sizeSlider.press(forDuration: 0.6)
+        XCTAssertEqual(Int(raiseCount.label) ?? -1, afterDrag + 1,
+                       "Touch-down with no drag at all must raise the preview exactly once more")
+        XCTAssertFalse(app.otherElements["sizePreview.window"].exists,
+                       "…and the lift must take it away again rather than stranding it on screen")
+    }
+
 }
 
 final class SelectionAndMoveUITests: PaintUITestCase {

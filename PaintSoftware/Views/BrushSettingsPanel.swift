@@ -17,7 +17,8 @@ struct BrushSettingsPanel: View {
         selectedBrush: \.selectedBrush,
         size: \.brushSize,
         opacity: \.brushOpacity,
-        selectPreset: { manager, preset in manager.selectBrush(preset) }
+        selectPreset: { manager, preset in manager.selectBrush(preset) },
+        previewTool: .brush
     )
 
     var body: some View {

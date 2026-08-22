@@ -46,7 +46,12 @@ struct SideToolbar: View {
                         title: "Size",
                         value: Binding(get: { Double(canvasManager.eraserSize) }, set: { canvasManager.eraserSize = CGFloat($0) }),
                         range: 1...50,
-                        identifier: "sideToolbar.eraserSizeSlider"
+                        identifier: "sideToolbar.eraserSizeSlider",
+                        // `.above`, not beside: a hand on a vertical slider covers the track and
+                        // everything below-and-right of the contact point, and that point travels
+                        // the whole track, so there is no clear spot level with it.
+                        preview: SizePreviewRequest(sliderID: "sideToolbar.eraserSizeSlider",
+                                                    tool: .eraser, side: .above)
                     )
                     Button(action: resetSettings) {
                         Image(systemName: "arrow.counterclockwise")
@@ -67,7 +72,11 @@ struct SideToolbar: View {
                         title: "Size",
                         value: Binding(get: { Double(canvasManager.brushSize) }, set: { canvasManager.brushSize = CGFloat($0) }),
                         range: 1...50,
-                        identifier: "sideToolbar.brushSizeSlider"
+                        identifier: "sideToolbar.brushSizeSlider",
+                        // See the eraser's twin above for why the window goes above the rail rather
+                        // than level with it.
+                        preview: SizePreviewRequest(sliderID: "sideToolbar.brushSizeSlider",
+                                                    tool: .brush, side: .above)
                     )
                     Button(action: resetSettings) {
                         Image(systemName: "arrow.counterclockwise")
@@ -170,10 +179,20 @@ struct SideToolbar: View {
 
     /// A vertical slider with a small caption beneath it. The caption is what makes the rail readable
     /// once its two sliders change meaning between brush and fill modes.
-    private func labeledSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>, identifier: String) -> some View {
+    /// `preview` non-nil marks this as a *size* slider: holding it raises the real-size stamp window
+    /// beside the rail. This hook only covers the **lift** — a press that never moves produces no
+    /// `onEditingChanged` at all, so the touch-down half lives in `.sizePreviewSlider` below, which
+    /// carries the measurement.
+    private func labeledSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>,
+                               identifier: String, preview: SizePreviewRequest? = nil) -> some View {
         VStack(spacing: 4) {
-            VerticalSlider(value: value, range: range, accessibilityIdentifier: identifier)
+            VerticalSlider(value: value, range: range, accessibilityIdentifier: identifier,
+                           onEditingChanged: { isEditing in
+                               guard let preview else { return }
+                               canvasManager.sizePreview.editingChanged(isEditing, for: preview)
+                           })
                 .frame(height: sliderHeight)
+                .sizePreviewSlider(preview, canvasManager: canvasManager)
             Text(title)
                 .font(.system(size: 9, weight: .medium))
                 .foregroundColor(.white.opacity(0.7))
@@ -209,10 +228,13 @@ private struct VerticalSlider: View {
     // sliders happens to come first in the accessibility tree — a known pre-existing bug that
     // masked a real slider-value bug elsewhere (see BUGS.md, "Fill tool" section).
     var accessibilityIdentifier: String? = nil
+    /// Forwarded straight to `Slider`: `true` on touch-down, `false` on lift. The size sliders use it
+    /// to raise and lower the real-size stamp preview.
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     var body: some View {
         GeometryReader { geo in
-            Slider(value: $value, in: range)
+            Slider(value: $value, in: range, onEditingChanged: onEditingChanged)
                 .frame(width: geo.size.height)
                 .rotationEffect(.degrees(-90))
                 .frame(width: geo.size.width, height: geo.size.height)

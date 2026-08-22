@@ -16,7 +16,8 @@ struct EraserSettingsPanel: View {
         selectedBrush: \.selectedEraserBrush,
         size: \.eraserSize,
         opacity: \.eraserOpacity,
-        selectPreset: { manager, preset in manager.selectEraserBrush(preset) }
+        selectPreset: { manager, preset in manager.selectEraserBrush(preset) },
+        previewTool: .eraser
     )
 
     var body: some View {

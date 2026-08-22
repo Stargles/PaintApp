@@ -13,6 +13,10 @@ struct StrokeSettingsSpec {
     let size: ReferenceWritableKeyPath<CanvasManager, CGFloat>
     let opacity: ReferenceWritableKeyPath<CanvasManager, Double>
     let selectPreset: (CanvasManager, Brush) -> Void
+    /// Which tool's stamp the Size slider's real-size preview should draw. Carried here rather than
+    /// inferred from `idPrefix` so adding a third stroke tool is a compile error, not a string match
+    /// that quietly falls through to the brush.
+    let previewTool: SizePreviewTool
 }
 
 /// Procreate-style stroke settings: a horizontally-scrolling preset picker and sliders for every
@@ -45,7 +49,12 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
                     valueText: "\(Int(canvasManager[keyPath: spec.size]))",
                     value: sizeBinding,
                     range: 1...200,
-                    idSuffix: "sizeSlider"
+                    idSuffix: "sizeSlider",
+                    // `.leading`: this panel is a 300-point dropdown pinned to the trailing edge and
+                    // the hand adjusting the slider is inside its bounds, so the window is only
+                    // reliably uncovered past the panel's leading edge.
+                    preview: SizePreviewRequest(sliderID: "\(spec.idPrefix).sizeSlider",
+                                                tool: spec.previewTool, side: .leading)
                 )
                 sliderRow(
                     title: "Opacity",
@@ -102,6 +111,10 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black.opacity(0.9))
+        // The panel can be dismissed out from under a held slider (`interactionBegan` closes it on
+        // the next canvas touch), and a slider that goes away never sends `onEditingChanged(false)`.
+        // Without this the window would be stranded on screen with nothing left to lower it.
+        .onDisappear { canvasManager.sizePreview.dismiss() }
     }
 
     // MARK: - Preset picker
@@ -151,12 +164,21 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
 
     // MARK: - Slider row helper
 
-    private func sliderRow(title: String, valueText: String, value: Binding<Double>, range: ClosedRange<Double>, idSuffix: String) -> some View {
+    /// `preview` non-nil marks this row as a *size* slider: holding it raises the real-size stamp
+    /// window beside the panel. This hook only covers the **lift** — a press that never moves
+    /// produces no `onEditingChanged` at all, so the touch-down half the owner actually asked for
+    /// lives in `.sizePreviewSlider`, which carries the measurement.
+    private func sliderRow(title: String, valueText: String, value: Binding<Double>, range: ClosedRange<Double>,
+                           idSuffix: String, preview: SizePreviewRequest? = nil) -> some View {
         VStack(alignment: .leading) {
             Text("\(title): \(valueText)")
                 .foregroundColor(.white)
-            Slider(value: value, in: range)
-                .accessibilityIdentifier("\(spec.idPrefix).\(idSuffix)")
+            Slider(value: value, in: range, onEditingChanged: { isEditing in
+                guard let preview else { return }
+                canvasManager.sizePreview.editingChanged(isEditing, for: preview)
+            })
+            .accessibilityIdentifier("\(spec.idPrefix).\(idSuffix)")
+            .sizePreviewSlider(preview, canvasManager: canvasManager)
         }
         .padding(.horizontal)
     }

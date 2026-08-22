@@ -760,4 +760,244 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertEqual(alpha(pixels, x: 48, y: 32), 1.0, accuracy: 0.02,
                        "The opaque dab must be opaque despite reusing the faint dab's cached gradient")
     }
+
+    // MARK: - Real-size stamp preview (SizePreview.swift)
+    //
+    // The window that pops up beside a held size slider. Its whole reason to exist is that the
+    // number on the slider is in *canvas* points and the mark the artist is about to judge is in
+    // *screen* points, and the two differ by the canvas zoom — a 40-point brush at 0.3x is a
+    // 12-point mark. Every assertion below is on `SizePreviewGeometry`/`SizePreviewVisibility`
+    // rather than on the view, because `Views/SizePreviewWindow.swift` is not compiled into this
+    // target and nothing inside it could be reached from here.
+
+    /// The load-bearing one: the stamp is `size x zoom`, at every zoom the canvas offers.
+    func testSizePreviewStampIsBrushSizeTimesCanvasScaleAcrossTheZoomRange() {
+        let request = SizePreviewRequest(sliderID: "brushPanel.sizeSlider", tool: .brush, side: .leading)
+        for zoom in [CGFloat(0.125), 0.3, 0.5, 1, 2, 3, 4] {
+            for brushSize in [CGFloat(1), 5, 40, 200] {
+                let size = request.toolSize(brushSize: brushSize, eraserSize: 999)
+                let geometry = SizePreviewGeometry(toolSize: size, canvasScale: zoom)
+                XCTAssertEqual(geometry.stampDiameter, brushSize * zoom, accuracy: 0.0001,
+                               "A \(brushSize)-point brush at \(zoom)x must preview as \(brushSize * zoom) screen points, not \(brushSize)")
+            }
+        }
+    }
+
+    /// The eraser has its own size, and the preview must read that one.
+    func testSizePreviewStampReadsTheEraserSizeNotTheBrushSize() {
+        let eraser = SizePreviewRequest(sliderID: "eraserPanel.sizeSlider", tool: .eraser, side: .leading)
+        let brush = SizePreviewRequest(sliderID: "brushPanel.sizeSlider", tool: .brush, side: .leading)
+        for zoom in [CGFloat(0.125), 0.5, 1, 2, 4] {
+            let eraserGeometry = SizePreviewGeometry(toolSize: eraser.toolSize(brushSize: 5, eraserSize: 20),
+                                                     canvasScale: zoom)
+            XCTAssertEqual(eraserGeometry.stampDiameter, 20 * zoom, accuracy: 0.0001,
+                           "The eraser preview must scale `eraserSize`, not `brushSize`")
+            let brushGeometry = SizePreviewGeometry(toolSize: brush.toolSize(brushSize: 5, eraserSize: 20),
+                                                    canvasScale: zoom)
+            XCTAssertEqual(brushGeometry.stampDiameter, 5 * zoom, accuracy: 0.0001,
+                           "…and the brush preview the other way round")
+        }
+        XCTAssertEqual(eraser.opacity(brushOpacity: 1, eraserOpacity: 0.4), 0.4, accuracy: 0.0001)
+        XCTAssertEqual(brush.opacity(brushOpacity: 1, eraserOpacity: 0.4), 1, accuracy: 0.0001)
+    }
+
+    /// Past the ceiling the window stops growing and the stamp is **not** scaled down to fit —
+    /// scaling to fit would destroy the only thing the preview communicates, so it is clipped
+    /// instead, and `isClipped` is what tells the view to make the crop look deliberate.
+    func testSizePreviewWindowStopsGrowingButTheStampStaysRealSize() {
+        let max = SizePreviewGeometry.maximumWindowSide
+
+        let fits = SizePreviewGeometry(toolSize: 40, canvasScale: 1)
+        XCTAssertEqual(fits.windowSide, 40 + 2 * SizePreviewGeometry.margin, accuracy: 0.0001,
+                       "A stamp that fits gets a window sized to it plus its margins")
+        XCTAssertFalse(fits.isClipped)
+
+        for zoom in [CGFloat(2), 4] {
+            let huge = SizePreviewGeometry(toolSize: 200, canvasScale: zoom)
+            XCTAssertEqual(huge.windowSide, max, accuracy: 0.0001,
+                           "The window must stop at its maximum instead of growing to \(200 * zoom)")
+            XCTAssertEqual(huge.stampDiameter, 200 * zoom, accuracy: 0.0001,
+                           "…and the stamp must still be drawn at real size, not shrunk to fit the window")
+            XCTAssertTrue(huge.isClipped, "…and must say so, so the crop reads as deliberate")
+        }
+    }
+
+    /// …and the other end: a hairline brush at the lowest zoom still gets a window big enough to
+    /// look at, without the stamp inside it being inflated to match.
+    func testSizePreviewWindowHasAFloorSoATinyStampIsStillVisible() {
+        let tiny = SizePreviewGeometry(toolSize: 1, canvasScale: 0.125)
+        XCTAssertEqual(tiny.windowSide, SizePreviewGeometry.minimumWindowSide, accuracy: 0.0001)
+        XCTAssertEqual(tiny.stampDiameter, 0.125, accuracy: 0.0001,
+                       "The floor is on the window, never on the stamp")
+        XCTAssertFalse(tiny.isClipped)
+    }
+
+    // MARK: Visibility
+
+    /// Down shows, lift hides. The owner asked for touch-down specifically, so this is driven by
+    /// `Slider.onEditingChanged` and not by a value change.
+    func testSizePreviewShowsOnTouchDownAndHidesOnLift() {
+        let request = SizePreviewRequest(sliderID: "sideToolbar.brushSizeSlider", tool: .brush, side: .above)
+        var visibility = SizePreviewVisibility()
+        XCTAssertFalse(visibility.isVisible, "Nothing is showing before anything is touched")
+
+        visibility.editingChanged(true, for: request)
+        XCTAssertTrue(visibility.isVisible, "Touch-down alone must raise it, with no drag at all")
+        XCTAssertEqual(visibility.tool, .brush)
+
+        visibility.editingChanged(false, for: request)
+        XCTAssertFalse(visibility.isVisible, "Lift must lower it")
+    }
+
+    /// Dragging the slider is the whole point of holding it, so a value change in between must not
+    /// dismiss the window the press just raised.
+    func testSizePreviewSurvivesAValueChangeWhileTheSliderIsHeld() {
+        let request = SizePreviewRequest(sliderID: "brushPanel.sizeSlider", tool: .brush, side: .leading)
+        var visibility = SizePreviewVisibility()
+        visibility.editingChanged(true, for: request)
+
+        // What a drag does: the binding writes a new size, and `onEditingChanged` is not called
+        // again — except that SwiftUI is free to re-assert `true`, which must also be harmless.
+        for newSize in [CGFloat(9), 24, 61, 200] {
+            visibility.editingChanged(true, for: request)
+            XCTAssertTrue(visibility.isVisible, "Still held at size \(newSize)")
+            XCTAssertEqual(SizePreviewGeometry(toolSize: request.toolSize(brushSize: newSize, eraserSize: 20),
+                                               canvasScale: 0.5).stampDiameter,
+                           newSize * 0.5, accuracy: 0.0001,
+                           "…and following the new value")
+        }
+
+        visibility.editingChanged(false, for: request)
+        XCTAssertFalse(visibility.isVisible)
+    }
+
+    /// Two size sliders drive the same `brushSize` — the rail's and the panel's — so a lift has to
+    /// name which one it came from or a stale one could dismiss the other's preview.
+    func testSizePreviewIgnoresALiftFromADifferentSlider() {
+        let rail = SizePreviewRequest(sliderID: "sideToolbar.brushSizeSlider", tool: .brush, side: .above)
+        let panel = SizePreviewRequest(sliderID: "brushPanel.sizeSlider", tool: .brush, side: .leading)
+        var visibility = SizePreviewVisibility()
+
+        visibility.editingChanged(true, for: rail)
+        visibility.editingChanged(false, for: panel)
+        XCTAssertTrue(visibility.isVisible, "The panel's lift must not lower the rail's preview")
+        XCTAssertEqual(visibility.active?.sliderID, rail.sliderID)
+
+        visibility.editingChanged(false, for: rail)
+        XCTAssertFalse(visibility.isVisible)
+    }
+
+    // MARK: Placement
+
+    /// The rail's slider is vertical and the hand travels its whole length, so the window goes
+    /// *above* it — and gets clamped back onto the screen, since a 176-point window centred on a
+    /// 64-point rail hangs off the leading edge.
+    func testSizePreviewWindowSitsAboveARailSliderAndInsideTheScreen() {
+        let screen = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let slider = CGRect(x: 12, y: 300, width: 56, height: 150)
+        let side: CGFloat = 176
+        let origin = SizePreviewGeometry.windowOrigin(sliderFrame: slider, side: .above,
+                                                      windowSide: side, within: screen)
+        XCTAssertEqual(origin.y, slider.minY - SizePreviewGeometry.gap - side, accuracy: 0.0001,
+                       "Clear above the track, where a hand on the track cannot be")
+        XCTAssertGreaterThanOrEqual(origin.x, screen.minX + SizePreviewGeometry.screenInset,
+                                    "…and pulled back onto the screen rather than half off it")
+        XCTAssertLessThanOrEqual(origin.x + side, screen.maxX - SizePreviewGeometry.screenInset)
+    }
+
+    /// The panel's slider is horizontal inside a 300-point dropdown pinned to the trailing edge, so
+    /// the window goes past its leading edge — outside the bounds the hand is inside.
+    func testSizePreviewWindowSitsLeadingOfAPanelSlider() {
+        let screen = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let slider = CGRect(x: 736, y: 200, width: 276, height: 30)
+        let side: CGFloat = 120
+        let origin = SizePreviewGeometry.windowOrigin(sliderFrame: slider, side: .leading,
+                                                      windowSide: side, within: screen)
+        XCTAssertEqual(origin.x, slider.minX - SizePreviewGeometry.gap - side, accuracy: 0.0001)
+        XCTAssertLessThan(origin.x + side, slider.minX, "Never on top of the panel it belongs to")
+        XCTAssertEqual(origin.y + side / 2, slider.midY, accuracy: 0.0001, "Level with the row")
+    }
+
+    // MARK: The stamp itself
+
+    /// Not a grey disc: the preview goes through `BrushStamper.stampDab`, so what comes back is the
+    /// real brush at the real size. Rendered at 4x zoom and read back in pixels — at 1x a point 15
+    /// away from a 10-point brush's centre would be blank, and here it must be inked.
+    func testSizePreviewStampRendersARealDabAtItsRealScreenSize() {
+        let brush = Brush(name: "Preview", shape: .hardRound, size: 10, opacity: 1,
+                          spacingFraction: 0.1, hardness: 1, stabilization: 0,
+                          dynamics: .fixed)
+        let geometry = SizePreviewGeometry(toolSize: 10, canvasScale: 4)
+        XCTAssertEqual(geometry.stampDiameter, 40, accuracy: 0.0001)
+
+        let image = SizePreviewStampRenderer.stampImage(geometry: geometry, brush: brush, tool: .brush,
+                                                        color: .black, opacity: 1)
+        guard let cg = image.cgImage,
+              let pixels = rgbaPixels(of: image, width: cg.width, height: cg.height) else {
+            return XCTFail("Could not read back the preview stamp")
+        }
+        let scale = CGFloat(cg.width) / geometry.windowSide
+        let centre = cg.width / 2
+
+        XCTAssertEqual(alpha(pixels, x: centre, y: centre), 1, accuracy: 0.05,
+                       "The dab's own centre is solid ink")
+        XCTAssertEqual(alpha(pixels, x: centre + Int(15 * scale), y: centre), 1, accuracy: 0.1,
+                       "15 points out is inside a 40-point stamp — this is the whole zoom claim")
+        XCTAssertEqual(alpha(pixels, x: centre + Int(24 * scale), y: centre), 0, accuracy: 0.05,
+                       "…and 24 points out is past its 20-point radius")
+    }
+
+    /// The eraser preview shows a removal, not eraser-coloured ink: the dab is composited
+    /// `.destinationOut` through a patch of ink, so it comes back as a hole.
+    func testSizePreviewEraserStampPunchesAHoleRatherThanPainting() {
+        let brush = Brush(name: "Preview", shape: .hardRound, size: 10, opacity: 1,
+                          spacingFraction: 0.1, hardness: 1, stabilization: 0,
+                          dynamics: .fixed)
+        let geometry = SizePreviewGeometry(toolSize: 10, canvasScale: 2)
+        let image = SizePreviewStampRenderer.stampImage(geometry: geometry, brush: brush, tool: .eraser,
+                                                        color: .black, opacity: 1)
+        guard let cg = image.cgImage,
+              let pixels = rgbaPixels(of: image, width: cg.width, height: cg.height) else {
+            return XCTFail("Could not read back the preview stamp")
+        }
+        let centre = cg.width / 2
+        XCTAssertEqual(alpha(pixels, x: centre, y: centre), 0, accuracy: 0.05,
+                       "Where the eraser lands there is nothing left")
+        XCTAssertEqual(alpha(pixels, x: 1, y: 1), 1, accuracy: 0.05,
+                       "…and outside it the ink patch it was cut from is untouched")
+    }
+
+    // MARK: The live canvas scale
+
+    /// Silent unless a preview is up (the scale changes every frame of a pinch and this is pushed
+    /// from a path that runs inside `updateUIView`), and up to date the moment one opens.
+    func testCanvasDisplayScaleOnlyPublishesWhileAPreviewIsUp() {
+        let scale = CanvasDisplayScale()
+        scale.record(3)
+        XCTAssertEqual(scale.scale, 1, accuracy: 0.0001, "Nobody is looking, so nothing is published")
+        XCTAssertEqual(scale.latest, 3, accuracy: 0.0001, "…but the value is kept")
+
+        scale.beginPublishing()
+        XCTAssertEqual(scale.scale, 3, accuracy: 0.0001, "Opening a preview catches up to the canvas")
+
+        scale.record(0.5)
+        XCTAssertEqual(scale.scale, 0.5, accuracy: 0.0001, "…and then tracks it live, so a pinch resizes the stamp")
+
+        scale.endPublishing()
+        scale.record(9)
+        XCTAssertEqual(scale.scale, 0.5, accuracy: 0.0001, "Silent again after the lift")
+        XCTAssertEqual(scale.latest, 9, accuracy: 0.0001)
+    }
+
+    /// A degenerate transform must not poison the preview's arithmetic.
+    func testCanvasDisplayScaleRejectsNonPositiveAndNonFiniteScales() {
+        let scale = CanvasDisplayScale()
+        scale.beginPublishing()
+        scale.record(2)
+        scale.record(0)
+        scale.record(-1)
+        scale.record(.nan)
+        scale.record(.infinity)
+        XCTAssertEqual(scale.scale, 2, accuracy: 0.0001)
+    }
 }

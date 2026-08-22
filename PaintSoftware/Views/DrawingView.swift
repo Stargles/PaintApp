@@ -147,9 +147,26 @@ struct DrawingView: View {
                     .padding(.top, 104)
                     .padding(.leading, 8)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                // How many times the real-size stamp preview has been raised — see
+                // `CanvasManager.sizePreviewRaiseCount`. Invisible, and here rather than on the
+                // slider itself because the fact has to *outlive* the gesture: the preview is on
+                // screen only while a finger is down, and XCUITest cannot query the tree in the
+                // middle of its own press.
+                Text("\(canvasManager.sizePreviewRaiseCount)")
+                    .font(.system(size: 8))
+                    .foregroundColor(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("sizePreview.raiseCount")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .allowsHitTesting(false)
             }
         }
         .background(Color.black)
+        // Applied here, above both surfaces that carry a size slider: the left rail is clipped by its
+        // own `cornerRadius(16)` and the settings panel by its `cornerRadius(12)`, so a window
+        // overlaid inside either one would be cut off at that container's edge.
+        .sizePreviewOverlay(canvasManager: canvasManager)
         .animation(.easeInOut(duration: 0.2), value: activePanel)
         .animation(.easeInOut(duration: 0.2), value: canvasManager.floatingPiece != nil)
         // Keyed on the whole notice, not on `notice != nil`: re-raising while one is already up

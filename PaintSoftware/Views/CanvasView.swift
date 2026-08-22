@@ -969,6 +969,13 @@ struct CanvasView: UIViewRepresentable {
         /// no pen on the glass is a stranded state, and telling the two apart is the whole diagnosis.
         private func publishCanvasState() {
             let scale = fitScale * committedScale * liveScale
+            // The one place the canvas's screen scale leaves this coordinator. Every transform pass
+            // already lands here — including the ones `applyTransform`'s identity guard skips, which
+            // is the reason this method is called above it — so the stamp preview tracks a pinch made
+            // with the other hand while a slider is held. `record` is silent unless a preview is
+            // actually up; see `CanvasDisplayScale` for why that matters on a path that runs inside
+            // `updateUIView`.
+            canvasManager.canvasDisplayScale.record(scale)
             let rotation = committedRotation + liveRotation
             let dx = committedOffset.width + liveOffset.width
             let dy = committedOffset.height + liveOffset.height

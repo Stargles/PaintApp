@@ -587,6 +587,40 @@ final class CanvasManager: ObservableObject {
     /// Defaults to `.erase`, the mode that behaves like the raster eraser users already know.
     @Published var vectorEraserMode: VectorEraserMode = .erase
 
+    // MARK: - Real-size stamp preview
+
+    /// Which size slider, if any, currently has a finger on it — the whole visibility rule for the
+    /// real-size stamp preview. See `SizePreview.swift`; raised on touch-down and lowered on lift by
+    /// `View.sizePreviewSlider`, drawn by `DrawingView`'s overlay.
+    @Published var sizePreview = SizePreviewVisibility() {
+        didSet {
+            guard sizePreview.isVisible != oldValue.isVisible else { return }
+            if sizePreview.isVisible {
+                sizePreviewRaiseCount += 1
+                canvasDisplayScale.beginPublishing()
+            } else {
+                canvasDisplayScale.endPublishing()
+            }
+        }
+    }
+
+    /// How many times a preview has been raised this launch.
+    ///
+    /// **Observability, and nothing in the app reads it.** The preview exists only while a finger is
+    /// down on the slider, and XCUITest cannot query the tree in the middle of its own gesture, so
+    /// "did touch-*down* raise it?" — the owner's actual requirement, as distinct from "did dragging
+    /// raise it" — is unanswerable from outside unless the fact outlives the lift. Same job
+    /// `CanvasView.Coordinator.midStrokeEntryCount` does for the sandwich, and surfaced the same way:
+    /// a marker in `DrawingView` that a test can read.
+    @Published private(set) var sizePreviewRaiseCount: Int = 0
+
+    /// Screen points per canvas point, live. Written by `CanvasView.Coordinator.publishCanvasState`,
+    /// read by the stamp preview so its dab is the size the mark will actually land as rather than
+    /// the size the slider says. Its own object rather than a property here — see
+    /// `CanvasDisplayScale`, which explains why republishing this manager on every pinch frame is not
+    /// an option.
+    let canvasDisplayScale = CanvasDisplayScale()
+
     /// Every shape offered in the eraser's picker — the same built-ins as the brush picker (custom
     /// imported textures are a paint-brush-only feature for now).
     var availableEraserBrushes: [Brush] { BrushLibrary.defaults }
