@@ -138,7 +138,16 @@ enum ProjectStore {
             let frameCount: Int
             /// Rendered on the main thread. `RasterLayerTexture` memoizes this per `version`, so for a
             /// cel that hasn't changed since it was last displayed it's a cache read, not a re-render.
-            let rasterImage: UIImage
+            ///
+            /// **Nil when the texture has no backing bitmap at all**, which is every cel of a vector
+            /// document and every cel of a raster layer nobody has drawn on yet. That nil is not
+            /// merely an encode this save skips — asking a blank texture for its image is what
+            /// *creates* the cost: `renderToUIImage()` has a non-optional return, so with no context
+            /// it mints a canvas-sized transparent `UIImage` (16 MiB at the owner's 2048²) and
+            /// memoizes it in `cachedImage`, where nothing ever drops it again. Deciding here, on the
+            /// main actor, from `hasContent` rather than from a rendered image is what keeps that
+            /// allocation from happening at all.
+            let rasterImage: UIImage?
             let fillImage: UIImage?
             let bakedImage: UIImage?
             /// A `makeCopy()`, so the write owns it and live drawing can't mutate it underneath.
@@ -247,7 +256,7 @@ enum ProjectStore {
                              fillReferenceOverride: layer.fillReferenceOverride,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
-                               rasterImage: cel.raster.renderToUIImage(),
+                               rasterImage: cel.raster.hasContent ? cel.raster.renderToUIImage() : nil,
                                fillImage: cel.fillImage, bakedImage: cel.bakedImage,
                                vector: cel.vector?.makeCopy(),
                                interpolation: cel.interpolation)
@@ -732,8 +741,18 @@ enum ProjectStore {
             bytes += data.count
         }
 
+        // The raster tier. A cel whose texture never had a bitmap gets no PNG and says so in the
+        // manifest — `fileName` is still the name the file *would* have, so the cel's identity on
+        // disk does not change if it is drawn into and saved again. See `CelManifest.rasterOmitted`
+        // for why the name stays non-optional, and `ProjectBackupManager.validateProject` for the
+        // half of this change without which every such save would be rejected and trashed.
         let fileName = "\(cel.id.uuidString)_raster.png"
-        if let data = png(cel.rasterImage) { write(data, fileName) }
+        var rasterOmitted: Bool? = nil
+        if let rasterImage = cel.rasterImage {
+            if let data = png(rasterImage) { write(data, fileName) }
+        } else {
+            rasterOmitted = true
+        }
 
         var fillFileName: String?
         if let fillImage = cel.fillImage, let fillData = png(fillImage) {
@@ -784,7 +803,8 @@ enum ProjectStore {
                      pngsEncoded: encoded, pngsReused: 0, bytesWritten: bytes)
 
         return CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
-                           rasterFileName: fileName, fillImageFileName: fillFileName,
+                           rasterFileName: fileName, rasterOmitted: rasterOmitted,
+                           fillImageFileName: fillFileName,
                            bakedImageFileName: bakedFileName,
                            vectorFileName: vectorFileName,
                            interpolationFileName: interpolationFileName)
@@ -1037,9 +1057,41 @@ enum ProjectStore {
     private static func decodeCel(_ celManifest: CelManifest, layerKind: LayerKind,
                                   imagesDir: URL, canvasSize: CGSize) -> DecodedCel {
         var damage = ProjectLoadDamage.LayerDamage()
-        let rasterURL = imagesDir.appendingPathComponent(celManifest.rasterFileName)
-        let raster = UIImage(contentsOfFile: rasterURL.path).map { RasterLayerTexture.load(from: $0, size: canvasSize) }
-            ?? .empty(size: canvasSize)
+        // **Three ways to end up with a blank raster tier, and only one of them touches the disk.**
+        //
+        //  * `rasterOmitted` — this save knew the tier held nothing and wrote no PNG. Straight to
+        //    `.empty`, which allocates no bitmap, without so much as a `stat`.
+        //  * no file — a package written by an older build that omitted the key, or one whose PNG is
+        //    genuinely gone. The existing `?? .empty` covers both; note that a *missing* PNG on a cel
+        //    that claims one cannot reach a normal open, because `validateProject` refuses the
+        //    package first (see `SaveDamageGate`).
+        //  * a PNG that is there and is fully transparent — the legacy case, and the one worth
+        //    healing. Every package written before this change carries one per undrawn cel, so
+        //    loading the owner's own project materialises a 16 MiB `CGContext` at 2048² per cel and
+        //    the save above would faithfully write it back out forever. The exact alpha scan in
+        //    `releaseBitmapIfFullyTransparent()` drops it, and the cel becomes as cheap as one
+        //    written by the new save — which is what lets a document that exists today heal itself
+        //    on the next open-and-save rather than staying expensive for its whole life.
+        //
+        // The heal also puts `strokeCount` back to 0. `load` defaults it to 1 (a flattened bitmap
+        // cannot recover a real count), and that 1 is the reason `Cel.isCertainlyBlank` answers
+        // false for every cel of every reopened project today. A cel that has just been *proved*
+        // pixel-blank should answer true: the onion skin (`OnionSkinSource`) then skips a
+        // canvas-sized draw for it instead of compositing nothing, which is the correct behaviour
+        // and was simply unreachable while every reloaded cel claimed a stroke.
+        let raster: RasterLayerTexture
+        if celManifest.rasterOmitted == true {
+            raster = .empty(size: canvasSize)
+        } else {
+            let rasterURL = imagesDir.appendingPathComponent(celManifest.rasterFileName)
+            if let image = UIImage(contentsOfFile: rasterURL.path) {
+                let loaded = RasterLayerTexture.load(from: image, size: canvasSize)
+                if loaded.releaseBitmapIfFullyTransparent() { loaded.setStrokeCount(0) }
+                raster = loaded
+            } else {
+                raster = .empty(size: canvasSize)
+            }
+        }
         var fillImage: UIImage?
         if let fillFileName = celManifest.fillImageFileName {
             fillImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fillFileName).path)

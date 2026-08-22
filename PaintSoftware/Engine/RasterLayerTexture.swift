@@ -184,11 +184,72 @@ final class RasterLayerTexture: DabTarget {
     private let lock = NSLock()
 
     /// Thread-safe check of whether this texture has any backing bitmap at all, used by `makeCopy`/
-    /// `flipped`/`resized` to skip work for a still-blank texture without racing `context` directly.
-    private var hasContent: Bool {
+    /// `flipped`/`resized` to skip work for a still-blank texture without racing `context` directly,
+    /// and by the save (`ProjectStore.SaveSnapshot.CelContent`) to decide whether a cel's raster tier
+    /// is worth a PNG at all.
+    ///
+    /// **This is a question about the bitmap existing, never about the pixels in it, and the
+    /// asymmetry is the whole safety argument.** `context` is the only pixel store on this class
+    /// (`cachedImage` is derived from it and never written into), it is created in exactly one place
+    /// (`ensureContext`), and the only thing that ever puts it back to nil is
+    /// `releaseBitmapIfFullyTransparent()` below, which proves transparency byte by byte first. So
+    /// `false` here means "no pixels" *by construction* rather than by convention — the direction
+    /// that cannot lose artwork. The converse is deliberately not claimed: an allocated context
+    /// holding nothing but transparent pixels reports `true`, and a save conservatively writes it.
+    var hasContent: Bool {
         lock.lock()
         defer { lock.unlock() }
         return context != nil
+    }
+
+    /// Drops the backing bitmap if — and only if — an exact scan proves every pixel's alpha is zero,
+    /// answering whether it did. Returns false without touching anything when there is no bitmap or
+    /// any pixel is non-transparent.
+    ///
+    /// **This exists for one caller: `ProjectStore.decodeCel` healing a legacy package.** Packages
+    /// written before the save learned to omit a blank cel's PNG carry a canvas-sized fully
+    /// transparent `_raster.png` for every cel. Loading one materialises a 16 MiB `CGContext` at the
+    /// owner's 2048², and — because the save writes back whatever the texture holds — the project
+    /// would go on paying for it on every save forever. Healing it at the moment of decode is what
+    /// lets an existing document become cheap without the artist doing anything.
+    ///
+    /// **Exact, with an early exit, and never a downsample.** A single opaque pixel anywhere in a
+    /// 2048² image has to survive, and a scaled or thumbnailed check would average it away — so this
+    /// walks the context's own bytes, which are a known format (`premultipliedLast`, 8 bits per
+    /// component), and returns the moment it sees a non-zero alpha.
+    ///
+    /// The row-at-a-time `memcmp` is a *fast path only, and it can never be the thing that decides
+    /// artwork is absent*: a row of all-zero bytes has all-zero alphas, so it is skipped; any row that
+    /// differs from zero for any reason falls through to the per-pixel alpha loop, which is the actual
+    /// answer. That keeps the scan exact while making the common case one `memcmp` per row rather than
+    /// four million bounds-checked subscripts.
+    ///
+    /// **Safe to nil `context` only because of when it is called.** Everywhere else in this class the
+    /// nil→non-nil transition is one-way, and code elsewhere leans on that. Here the texture was built
+    /// moments ago inside `decodeCel`, nothing else has a reference to it yet, and the scan has just
+    /// proved there is nothing to lose.
+    @discardableResult
+    func releaseBitmapIfFullyTransparent() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let ctx = context, let base = ctx.data else { return false }
+        let bytesPerRow = ctx.bytesPerRow
+        let width = ctx.width, height = ctx.height
+        let rowBytes = width * 4
+        let bytes = base.assumingMemoryBound(to: UInt8.self)
+        let zeroRow = [UInt8](repeating: 0, count: rowBytes)
+        for row in 0..<height {
+            let rowStart = bytes + row * bytesPerRow
+            let allZero = zeroRow.withUnsafeBytes { memcmp(rowStart, $0.baseAddress!, rowBytes) == 0 }
+            if allZero { continue }
+            // `premultipliedLast` puts alpha in the 4th byte of each pixel — see `Self.bitmapInfo`.
+            for column in 0..<width where rowStart[column * 4 + 3] != 0 {
+                return false
+            }
+        }
+        context = nil
+        cachedImage = nil
+        return true
     }
 
     private static let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue

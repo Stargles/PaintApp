@@ -343,6 +343,27 @@ struct CelManifest: Codable {
     /// Projects from the previous PencilKit engine have no `rasterFileName` key and fail to decode
     /// gracefully (skipped in the gallery list) rather than crash.
     var rasterFileName: String
+    /// `true` when no raster PNG was written because the cel's `RasterLayerTexture` held no backing
+    /// bitmap at all — see `RasterLayerTexture.hasContent`. The overwhelmingly common case on a
+    /// vector document, where every cel's raster tier is untouched and the PNG is a canvas-sized
+    /// image of nothing (73,558 bytes and a 16 MiB `CGContext` on load, per cel, measured on the
+    /// owner's own 2048² project).
+    ///
+    /// **`rasterFileName` still carries the name the file *would* have had, and that is deliberate
+    /// rather than sloppy.** Making it optional would change how the app treats packages from the
+    /// previous PencilKit engine: they have no `rasterFileName` key, the non-optional field is what
+    /// makes their manifests fail to decode, and failing to decode is what makes the gallery skip
+    /// them instead of opening them as blank documents. That behaviour is documented above and is not
+    /// this key's business to retire. Keeping the name also means the file's identity is unchanged if
+    /// the cel is ever drawn into and saved again.
+    ///
+    /// **An older build reading a package that sets this still opens it correctly.** `Decodable`
+    /// ignores keys it does not know, so the old build decodes the manifest, looks for the named
+    /// raster PNG, does not find it, and falls through `decodeCel`'s existing
+    /// `?? .empty(size: canvasSize)` — which is exactly the blank texture the new build would have
+    /// built. (`ProjectBackupManager.validateProject` on that older build would report the package
+    /// damaged; there is no forward-compatibility story for the validator, and none is claimed.)
+    var rasterOmitted: Bool? = nil
     var fillImageFileName: String?
     /// Raster content baked into this cel by a select/move/fill/clear operation (`Cel.bakedImage`).
     var bakedImageFileName: String? = nil

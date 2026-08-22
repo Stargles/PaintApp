@@ -465,6 +465,12 @@ nonisolated enum ProjectBackupManager {
         }
         struct Cel: Decodable {
             var rasterFileName: String
+            /// Mirrors `CelManifest.rasterOmitted`: the cel's raster tier held no bitmap, so no PNG
+            /// was written and `rasterFileName` names a file that is legitimately not there. Without
+            /// this key here the validator would call every such package damaged, and — because
+            /// `ProjectStore.writeAtomically` gates the atomic swap on this very function — every
+            /// save of a document with one blank cel would be quietly trashed instead of committed.
+            var rasterOmitted: Bool?
             var fillImageFileName: String?
             var bakedImageFileName: String?
             var vectorFileName: String?
@@ -498,7 +504,11 @@ nonisolated enum ProjectBackupManager {
 
         for layer in skeleton.layers {
             for cel in layer.cels {
-                if !fileIntact(cel.rasterFileName, isPNG: true) { return false }
+                // **Absent-because-omitted and absent-because-lost stay different states**, and
+                // telling them apart is the entire job of this line. A cel that says `rasterOmitted`
+                // never had a PNG and must validate; a cel that names one and cannot produce it is
+                // damaged exactly as it always was — `BackupManagerLogicTests` pins both directions.
+                if cel.rasterOmitted != true, !fileIntact(cel.rasterFileName, isPNG: true) { return false }
                 if let fill = cel.fillImageFileName, !fileIntact(fill, isPNG: true) { return false }
                 if let baked = cel.bakedImageFileName, !fileIntact(baked, isPNG: true) { return false }
                 if let vector = cel.vectorFileName, !fileIntact(vector, isPNG: false) { return false }

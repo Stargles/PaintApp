@@ -3642,4 +3642,139 @@ final class PerfBaselineTests: XCTestCase {
                           "The unchanged control phase moved by more than the arms are worth; take "
                           + "this run again on a quiet machine (see PERFORMANCE.md §6)")
     }
+
+    // MARK: - What a vector-only document pays for its raster tier (PERFORMANCE.md item 14)
+
+    /// **The document the owner actually has, measured end to end.** Their live package
+    /// `Untitled 2.paintproj` is three cels on three layers at 2048x2048 — two vector layers and one
+    /// raster layer — and every one of the three carries a `<uuid>_raster.png` of 73,558 bytes whose
+    /// alpha channel is min = max = 0. Nothing was ever drawn into the raster tier of any of them, yet
+    /// each pays a canvas-sized PNG encode on every save and a 2048x2048x4 = 16 MiB `CGContext` on
+    /// every load.
+    ///
+    /// This scales that document to a size where the three figures are readable against the noise on
+    /// this Mac: **60 vector-only cels at the owner's real 2048x2048**, three layers of twenty. The
+    /// ink is real vector geometry, so the package is not artificially empty — the strokes are written
+    /// to `_vector.json` exactly as they are in the owner's project, and the only thing the change
+    /// removes is the transparent PNG beside them.
+    ///
+    /// **Three numbers, and they are deliberately not timings alone.**
+    ///  * `packageBytes` / `rasterBytes` — bytes on disk, and how many of them are `_raster.png`.
+    ///    An integer about the files, immune to what else the machine is doing, and the one that
+    ///    transfers directly to the owner's iPad.
+    ///  * `saveAwaited` — wall clock from `ProjectStore.save` to its completion. A millisecond on a
+    ///    contended Mac, so read it as an order of magnitude beside the byte counts, not as a
+    ///    stopwatch (CLAUDE.md and PERFORMANCE.md §6 both say why).
+    ///  * `loadFootprintDelta` — `phys_footprint` across a `load(from:)` while the loaded document is
+    ///    held. A *difference* between two readings in one process, which is the discipline item 14's
+    ///    residency test established: the host's noise cancels.
+    ///
+    /// **The authoring document goes out of scope before the load is measured**, because it holds the
+    /// vector geometry for sixty cels and carrying it into the load's reading would put it into the
+    /// delta this reports.
+    @MainActor
+    func testWhatAVectorOnlyDocumentCostsToSaveAndLoad() async {
+        let canvas = Self.canvasSize          // 2048x2048 — the owner's real canvas
+        let layerCount = 3, celsPerLayer = 20 // 60 cels, the owner's document scaled up
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("perf-vector-only-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let url = ProjectStore.createNewProjectURL(name: "Perf Vector Only")
+        let strokes = Self.movingSceneStrokes(size: canvas)
+        let celCount = layerCount * celsPerLayer
+
+        let written = expectation(description: "the vector-only package is on disk")
+        let saveStarted = CFAbsoluteTimeGetCurrent()
+        autoreleasepool {
+            let manager = CanvasManager()
+            manager.canvasSize = canvas
+            manager.fps = 24
+            manager.sceneFrameCount = celsPerLayer * 2
+            for layerIndex in 0..<layerCount {
+                manager.addVectorLayer(name: "Vector \(layerIndex)")
+                // Built directly rather than through `addCel` for the same reason
+                // `multiCelDocument` does it: the layer's first cel already spans every frame.
+                // **`raster: .empty(size:)` and never touched** — that is the whole point of the
+                // fixture, and it is exactly the state the owner's three cels are in.
+                manager.layers[layerIndex].cels = (0..<celsPerLayer).map { celIndex in
+                    Cel(id: UUID(), startFrame: celIndex * 2, frameCount: 2,
+                        raster: .empty(size: canvas),
+                        vector: VectorCanvas(size: canvas, strokes: strokes))
+                }
+            }
+            ProjectStore.save(manager, to: url) { written.fulfill() }
+        }
+        await fulfillment(of: [written], timeout: 600)
+        let saveAwaited = CFAbsoluteTimeGetCurrent() - saveStarted
+        guard let saveProfile = ProjectStore.lastSaveProfile else {
+            return XCTFail("Every save publishes a profile — see ProjectStore.SaveProfile")
+        }
+
+        // Bytes on disk, split by what they are for. `rasterBytes` is the quantity item 14's cheap
+        // half exists to take to zero on a document like this one.
+        let fm = FileManager.default
+        var packageBytes = 0, rasterBytes = 0, rasterFiles = 0
+        if let walker = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) {
+            for case let file as URL in walker {
+                let bytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                packageBytes += bytes
+                if file.lastPathComponent.hasSuffix("_raster.png") {
+                    rasterBytes += bytes
+                    rasterFiles += 1
+                }
+            }
+        }
+
+        // The load, as a footprint difference across one process. One warm-up allocation is not
+        // needed here the way it is for the residency test: this is the *first* load in this test's
+        // process for this package, which is precisely the case a gallery tap pays.
+        PixelOps.clearRasterizeCache()
+        let footprintBefore = residentBytes()
+        var loaded: CanvasManager?
+        let loadSeconds = autoreleasepool { () -> Double in
+            let started = CFAbsoluteTimeGetCurrent()
+            loaded = ProjectStore.load(from: url)
+            return CFAbsoluteTimeGetCurrent() - started
+        }
+        let footprintAfter = residentBytes()
+        let document = loaded
+
+        report("a vector-only document at 2048x2048 (item 14)", [
+            ("cels", "\(celCount)"),
+            ("layers", "\(layerCount)"),
+            ("packageBytes", megabytes(UInt64(packageBytes))),
+            ("rasterBytes", megabytes(UInt64(rasterBytes))),
+            ("rasterFiles", "\(rasterFiles)"),
+            ("rasterShareOfPackage", String(format: "%.0f%%",
+                packageBytes > 0 ? Double(rasterBytes) * 100 / Double(packageBytes) : 0)),
+            ("bytesPerRasterFile", "\(rasterFiles > 0 ? rasterBytes / rasterFiles : 0)"),
+            ("saveAwaited", milliseconds(saveAwaited)),
+            ("saveMsPerCel", String(format: "%.1f", saveAwaited * 1000 / Double(celCount))),
+            ("pngsEncoded", "\(saveProfile.pngsEncoded)"),
+            ("loadSeconds", milliseconds(loadSeconds)),
+            ("loadFootprintDelta", megabytes(footprintAfter &- footprintBefore)),
+            ("loadFootprintPerCel", megabytes(UInt64(Double(footprintAfter &- footprintBefore)
+                                                     / Double(celCount)))),
+            ("footprintBefore", megabytes(footprintBefore)),
+            ("footprintAfter", megabytes(footprintAfter)),
+        ])
+
+        // Structure, so the measurement cannot quietly stop measuring what it names.
+        XCTAssertEqual(saveProfile.celCount, celCount)
+        XCTAssertEqual(document?.layers.count, layerCount)
+        XCTAssertEqual(document?.layers.first?.cels.count, celsPerLayer)
+        XCTAssertEqual(document?.canvasSize, canvas, "the owner's canvas has to survive the round trip")
+        // The vector geometry is the artwork in this document, and it must be intact whichever way
+        // the raster tier goes — otherwise a "saving fewer bytes" reading would be a data-loss
+        // reading wearing the same numbers.
+        XCTAssertEqual(document?.layers.first?.cels.first?.vector?.strokes.count, strokes.count,
+                       "every stroke must come back, or this measured loss rather than economy")
+    }
 }

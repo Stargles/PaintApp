@@ -34,26 +34,34 @@ final class BackupManagerLogicTests: XCTestCase {
 
     /// Writes a minimal-but-valid project package: manifest.json + images/<uuid>_raster.png with a
     /// real PNG header followed by `rasterBytes` payload bytes.
+    ///
+    /// `omitRaster` writes the package a save produces for a cel whose raster tier holds nothing: the
+    /// manifest still names the file it *would* have had (see `CelManifest.rasterOmitted`), flags the
+    /// omission, and no PNG is written. `writeRasterFile` is the separate knob for the damaged case —
+    /// a cel that claims a raster and cannot produce it.
     @discardableResult
-    private func makeProject(name: String = "Art", id: UUID = UUID(), rasterBytes: Int = 64) -> URL {
+    private func makeProject(name: String = "Art", id: UUID = UUID(), rasterBytes: Int = 64,
+                             omitRaster: Bool? = nil, writeRasterFile: Bool = true) -> URL {
         let url = ProjectBackupManager.projectsDirectory.appendingPathComponent("\(name).paintproj")
         let images = url.appendingPathComponent("images", isDirectory: true)
         try! FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
         let rasterName = "\(UUID().uuidString)_raster.png"
-        var png = Data(pngHeader)
-        png.append(Data(repeating: 0xAB, count: rasterBytes))
-        try! png.write(to: images.appendingPathComponent(rasterName))
+        if writeRasterFile && omitRaster != true {
+            var png = Data(pngHeader)
+            png.append(Data(repeating: 0xAB, count: rasterBytes))
+            try! png.write(to: images.appendingPathComponent(rasterName))
+        }
+        var cel: [String: Any] = [
+            "id": UUID().uuidString,
+            "startFrame": 0,
+            "frameCount": 1,
+            "rasterFileName": rasterName
+        ]
+        if let omitRaster { cel["rasterOmitted"] = omitRaster }
         let manifest: [String: Any] = [
             "id": id.uuidString,
             "name": name,
-            "layers": [[
-                "cels": [[
-                    "id": UUID().uuidString,
-                    "startFrame": 0,
-                    "frameCount": 1,
-                    "rasterFileName": rasterName
-                ]]
-            ]]
+            "layers": [["cels": [cel]]]
         ]
         try! JSONSerialization.data(withJSONObject: manifest).write(to: url.appendingPathComponent("manifest.json"))
         return url
@@ -102,6 +110,44 @@ final class BackupManagerLogicTests: XCTestCase {
         let files = try! FileManager.default.contentsOfDirectory(atPath: images.path)
         try! FileManager.default.removeItem(at: images.appendingPathComponent(files[0]))
         XCTAssertFalse(ProjectBackupManager.validateProject(at: url))
+    }
+
+    /// A package whose cel says its raster was omitted has no PNG to check, and must validate.
+    ///
+    /// **This is the gate that decides whether the save commits at all.**
+    /// `ProjectStore.writeAtomically` validates its own staged package before the atomic swap and, on
+    /// failure, moves the stage to Trash tagged "failedsave" — while still firing the caller's
+    /// completion. So a validator that had not learned about `rasterOmitted` would not produce a red
+    /// test in the app; it would make every save of every document with one undrawn cel do nothing,
+    /// quietly, forever.
+    func testValidateAcceptsACelWhoseRasterWasOmitted() throws {
+        let url = makeProject(omitRaster: true)
+        let images = url.appendingPathComponent("images", isDirectory: true)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: images.path), [],
+                       "Setup: an omitted raster means there is no PNG on disk to validate")
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: url))
+    }
+
+    /// And the other direction, which is the whole reason the validator exists: `rasterOmitted` is
+    /// permission to have no file, not permission to lose one. A cel that does *not* set the flag and
+    /// cannot produce the PNG it names is damaged, whether the file is gone or truncated.
+    func testValidateStillRejectsAClaimedRasterThatIsMissingOrTruncated() {
+        let missing = makeProject(name: "Missing")
+        let missingImages = missing.appendingPathComponent("images", isDirectory: true)
+        let missingFiles = try! FileManager.default.contentsOfDirectory(atPath: missingImages.path)
+        try! FileManager.default.removeItem(at: missingImages.appendingPathComponent(missingFiles[0]))
+        XCTAssertFalse(ProjectBackupManager.validateProject(at: missing))
+
+        let truncated = makeProject(name: "Truncated")
+        let truncatedImages = truncated.appendingPathComponent("images", isDirectory: true)
+        let truncatedFiles = try! FileManager.default.contentsOfDirectory(atPath: truncatedImages.path)
+        try! Data([0x89, 0x50]).write(to: truncatedImages.appendingPathComponent(truncatedFiles[0]))
+        XCTAssertFalse(ProjectBackupManager.validateProject(at: truncated))
+
+        // An explicit `rasterOmitted: false` is the same claim as no key at all, and must not become
+        // a loophole: the cel says there is a file, so the file has to be there.
+        let claimed = makeProject(name: "Claimed", omitRaster: false, writeRasterFile: false)
+        XCTAssertFalse(ProjectBackupManager.validateProject(at: claimed))
     }
 
     func testValidateRejectsTruncatedPNG() {

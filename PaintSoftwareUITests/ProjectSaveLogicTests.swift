@@ -1127,4 +1127,281 @@ final class ProjectSaveLogicTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - A blank raster tier costs nothing (PERFORMANCE.md item 14)
+
+    /// A document whose raster tier is untouched on some cels and drawn on others: layer 0 cel 0 is
+    /// inked, layer 0 cel 1 is not, and the vector layer's cel never touches its raster tier at all.
+    /// The owner's own package is the all-blank end of this, and mixing the two is what makes the
+    /// per-cel decision visible rather than a whole-document one.
+    private func mixedBlanknessManager() -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.projectName = "Blank Tier"
+        let inked = manager.layers[0].cels[0].raster
+        inked.beginStroke()
+        inked.stampCircle(at: CGPoint(x: 20, y: 24), radius: 6, color: .red, alpha: 1, hardness: 1)
+        inked.endStroke()
+        XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 12, frameCount: 2),
+                      "Setup: layer 0 should take a second, undrawn cel at frame 12")
+        manager.addVectorLayer()
+        manager.layers[1].cels[0].vector?.addStroke(
+            VectorStroke(brush: manager.selectedBrush,
+                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                         size: 8, opacity: 1,
+                         samples: [VectorSample(x: 10, y: 10, pressure: 1),
+                                   VectorSample(x: 40, y: 40, pressure: 1)]))
+        return manager
+    }
+
+    /// Every `<uuid>_raster.png` in the package, by file name.
+    private func rasterPNGNames(at url: URL) -> Set<String> {
+        let images = url.appendingPathComponent("images", isDirectory: true)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? []
+        return Set(names.filter { $0.hasSuffix("_raster.png") })
+    }
+
+    /// The saved manifest's cel entries, flattened across layers, keyed by cel id — the JSON as it is
+    /// on disk rather than as the encoder would hand it back, which is the only way to assert a key
+    /// is genuinely absent.
+    private func savedCelEntries(at url: URL,
+                                 file: StaticString = #filePath, line: UInt = #line) -> [String: [String: Any]] {
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let layers = json["layers"] as? [[String: Any]] else {
+            XCTFail("The saved package should carry a manifest with a layers array", file: file, line: line)
+            return [:]
+        }
+        var entries: [String: [String: Any]] = [:]
+        for layer in layers {
+            for cel in (layer["cels"] as? [[String: Any]]) ?? [] {
+                if let id = cel["id"] as? String { entries[id] = cel }
+            }
+        }
+        return entries
+    }
+
+    /// A canvas-sized image that is fully transparent except for one opaque pixel at `pixel` — or
+    /// fully transparent if `pixel` is nil. **Exactly one pixel is the point**: the heal below decides
+    /// whether to throw a bitmap away, and a check that downsampled or thumbnailed the image would
+    /// round a single pixel of the artist's work out of existence.
+    private func transparentImage(size: CGSize, opaquePixelAt pixel: CGPoint?) -> UIImage {
+        UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+            guard let pixel else { return }
+            UIColor.red.setFill()
+            ctx.fill(CGRect(x: pixel.x, y: pixel.y, width: 1, height: 1))
+        }
+    }
+
+    /// Turns a package this build wrote into one an older build would have written: the
+    /// `rasterOmitted` key removed from every cel, and a real `_raster.png` put back at the name the
+    /// manifest already carries. That is precisely the shape of the owner's live
+    /// `Untitled 2.paintproj`, which has three cels each holding a 73,558-byte PNG whose alpha is
+    /// min = max = 0.
+    private func makeLegacyRasterPNGs(at url: URL, canvas: CGSize, opaquePixelAt pixel: CGPoint?,
+                                      file: StaticString = #filePath, line: UInt = #line) {
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        let images = url.appendingPathComponent("images", isDirectory: true)
+        guard let data = try? Data(contentsOf: manifestURL),
+              var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              var layers = json["layers"] as? [[String: Any]] else {
+            return XCTFail("The saved package should carry a manifest with a layers array", file: file, line: line)
+        }
+        let png = transparentImage(size: canvas, opaquePixelAt: pixel).pngData()
+        for layerIndex in layers.indices {
+            var cels = (layers[layerIndex]["cels"] as? [[String: Any]]) ?? []
+            for celIndex in cels.indices {
+                let omitted = cels[celIndex]["rasterOmitted"] as? Bool == true
+                cels[celIndex].removeValue(forKey: "rasterOmitted")
+                guard omitted, let name = cels[celIndex]["rasterFileName"] as? String, let png else { continue }
+                try? png.write(to: images.appendingPathComponent(name))
+            }
+            layers[layerIndex]["cels"] = cels
+        }
+        json["layers"] = layers
+        guard let rewritten = try? JSONSerialization.data(withJSONObject: json) else {
+            return XCTFail("The legacy manifest should re-encode", file: file, line: line)
+        }
+        try? rewritten.write(to: manifestURL)
+    }
+
+    /// **(a) A cel nobody has drawn on pays for nothing.** No `_raster.png`, `rasterOmitted: true` in
+    /// the manifest, and a reload that is otherwise the same document — same cels, same order, same
+    /// pixels on the cel that has some.
+    ///
+    /// **(e) is folded in here on purpose**: the first thing asserted is that the package committed at
+    /// all. `ProjectStore.writeAtomically` validates its own staged package before swapping it in, and
+    /// on failure moves it to Trash and returns *while still firing the completion handler* — so a
+    /// validator that had not been taught about `rasterOmitted` would make every save of this document
+    /// silently do nothing, and a test that only inspected the loaded model would go on passing
+    /// against a package from before the change.
+    func testACelWhoseRasterTierWasNeverDrawnOnWritesNoPNGAndStillReloads() {
+        let manager = mixedBlanknessManager()
+        let inkedCelID = manager.layers[0].cels[0].id
+        let blankCelID = manager.layers[0].cels[1].id
+        let vectorCelID = manager.layers[1].cels[0].id
+        let url = projectURL(name: "Blank Tier")
+        saveAndWait(manager, to: url)
+
+        // The save committed — see the doc comment. Without this the rest is vacuous.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path),
+                      "The save must have swapped a package into the live path, not trashed its stage")
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: url),
+                      "A package whose blank cels omit their raster PNG is intact, not damaged")
+
+        let pngs = rasterPNGNames(at: url)
+        XCTAssertEqual(pngs, ["\(inkedCelID.uuidString)_raster.png"],
+                       "Only the cel with pixels pays for a raster PNG")
+
+        let entries = savedCelEntries(at: url)
+        XCTAssertNil(entries[inkedCelID.uuidString]?["rasterOmitted"],
+                     "A cel that wrote its PNG must not claim the raster was omitted")
+        XCTAssertEqual(entries[blankCelID.uuidString]?["rasterOmitted"] as? Bool, true)
+        XCTAssertEqual(entries[vectorCelID.uuidString]?["rasterOmitted"] as? Bool, true,
+                       "A vector cel's raster tier is untouched too — this is the owner's whole document")
+        XCTAssertNotNil(entries[blankCelID.uuidString]?["rasterFileName"] as? String,
+                        "The name the file would have had stays in the manifest — see CelManifest.rasterOmitted")
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        XCTAssertEqual(reloaded.layers.count, 2)
+        XCTAssertEqual(reloaded.layers[0].cels.map(\.startFrame), [0, 12])
+        XCTAssertEqual(reloaded.layers[0].cels.map(\.id), [inkedCelID, blankCelID])
+        XCTAssertTrue(hasVisiblePixels(reloaded.layers[0].cels[0]), "the inked cel keeps its pixels")
+        XCTAssertFalse(hasVisiblePixels(reloaded.layers[0].cels[1]), "the blank cel comes back transparent")
+        XCTAssertEqual(reloaded.layers[1].cels[0].vector?.strokes.count, 1,
+                       "the vector artwork is untouched by any of this")
+        // The point of the whole change: no bitmap was allocated for the cels that had none.
+        XCTAssertFalse(reloaded.layers[0].cels[1].raster.hasContent)
+        XCTAssertFalse(reloaded.layers[1].cels[0].raster.hasContent)
+        XCTAssertTrue(reloaded.layers[0].cels[0].raster.hasContent)
+    }
+
+    /// **(b) The artwork-loss guard.** One non-transparent pixel in a canvas of nothing is still
+    /// artwork: the PNG is written, `rasterOmitted` is absent, and the pixel is in the same place
+    /// after a round trip. This is the assertion that fails if the "is this cel blank?" question is
+    /// ever answered by a sampled, scaled or heuristic scan instead of by the bitmap's existence.
+    func testACelWithOneNonTransparentPixelKeepsItsPNGAndItsPixel() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let canvas = try XCTUnwrap(manager.canvasSize)
+        let cel = manager.layers[0].cels[0]
+        cel.raster.reset(to: transparentImage(size: canvas, opaquePixelAt: CGPoint(x: 41, y: 17)),
+                         strokeCount: 1)
+        let url = projectURL(name: "One Pixel")
+        saveAndWait(manager, to: url)
+
+        XCTAssertEqual(rasterPNGNames(at: url), ["\(cel.id.uuidString)_raster.png"],
+                       "A cel with one opaque pixel writes its PNG like any other")
+        XCTAssertNil(savedCelEntries(at: url)[cel.id.uuidString]?["rasterOmitted"])
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        guard let bounds = PixelOps.opaqueContentBounds(reloaded.layers[0].cels[0].raster.renderToUIImage()) else {
+            return XCTFail("The single opaque pixel did not survive the round trip — this is artwork loss")
+        }
+        XCTAssertEqual(bounds.midX, 41.5, accuracy: 1)
+        XCTAssertEqual(bounds.midY, 17.5, accuracy: 1)
+        XCTAssertTrue(reloaded.layers[0].cels[0].raster.hasContent)
+    }
+
+    /// **(c) The legacy heal.** A package written before this change carries a canvas-sized fully
+    /// transparent PNG for every undrawn cel. Loading one must not leave the 16 MiB bitmap resident,
+    /// and — the half that makes it a heal rather than a saving — re-saving it must omit the file, so
+    /// a document that exists today becomes cheap on its next open-and-save instead of paying forever.
+    func testALegacyPackagesBlankRasterPNGIsDroppedOnLoadAndNotWrittenBackOut() throws {
+        let manager = mixedBlanknessManager()
+        let canvas = try XCTUnwrap(manager.canvasSize)
+        let blankCelID = manager.layers[0].cels[1].id
+        let inkedCelID = manager.layers[0].cels[0].id
+        let url = projectURL(name: "Legacy Blank")
+        saveAndWait(manager, to: url)
+        makeLegacyRasterPNGs(at: url, canvas: canvas, opaquePixelAt: nil)
+
+        // The fixture really is the old shape: a PNG on disk and no flag in the manifest.
+        XCTAssertEqual(rasterPNGNames(at: url).count, 3, "every cel should have a PNG again")
+        XCTAssertNil(savedCelEntries(at: url)[blankCelID.uuidString]?["rasterOmitted"])
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: url))
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("A legacy package must load") }
+        let healed = reloaded.layers[0].cels[1]
+        XCTAssertFalse(healed.raster.hasContent,
+                       "A transparent legacy PNG must not leave a canvas-sized bitmap resident")
+        XCTAssertEqual(healed.raster.strokeCount, 0)
+        XCTAssertTrue(healed.isCertainlyBlank,
+                      "A cel proved pixel-blank should say so, so the onion skin can skip it")
+        XCTAssertTrue(reloaded.layers[0].cels[0].raster.hasContent, "the inked cel keeps its bitmap")
+
+        // The heal, out the other side: re-saving the reloaded document drops the file for good.
+        let resaved = projectURL(name: "Legacy Blank Resaved")
+        saveAndWait(reloaded, to: resaved)
+        XCTAssertEqual(rasterPNGNames(at: resaved), ["\(inkedCelID.uuidString)_raster.png"],
+                       "A healed cel must not write its transparent PNG back out")
+        XCTAssertEqual(savedCelEntries(at: resaved)[blankCelID.uuidString]?["rasterOmitted"] as? Bool, true)
+    }
+
+    /// **(c), the counterpart, and it is the one that matters most.** The same legacy package with a
+    /// single opaque pixel in each PNG keeps its bitmap and keeps the pixel. If the scan is ever made
+    /// cheap by sampling or scaling, this is the test that goes red.
+    func testALegacyPackageWithOneOpaquePixelKeepsItsBitmapAndItsPixel() throws {
+        let manager = mixedBlanknessManager()
+        let canvas = try XCTUnwrap(manager.canvasSize)
+        let blankCelID = manager.layers[0].cels[1].id
+        let url = projectURL(name: "Legacy Pixel")
+        saveAndWait(manager, to: url)
+        makeLegacyRasterPNGs(at: url, canvas: canvas, opaquePixelAt: CGPoint(x: 5, y: 60))
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("A legacy package must load") }
+        let cel = reloaded.layers[0].cels[1]
+        XCTAssertEqual(cel.id, blankCelID)
+        XCTAssertTrue(cel.raster.hasContent, "One opaque pixel is artwork — the bitmap must be kept")
+        guard let bounds = PixelOps.opaqueContentBounds(cel.raster.renderToUIImage()) else {
+            return XCTFail("The single opaque pixel was scanned away — this is artwork loss")
+        }
+        XCTAssertEqual(bounds.midX, 5.5, accuracy: 1)
+        XCTAssertEqual(bounds.midY, 60.5, accuracy: 1)
+
+        // And it survives the next save, which is where a mistaken heal would actually destroy it.
+        let resaved = projectURL(name: "Legacy Pixel Resaved")
+        saveAndWait(reloaded, to: resaved)
+        XCTAssertTrue(rasterPNGNames(at: resaved).contains("\(blankCelID.uuidString)_raster.png"))
+        guard let again = ProjectStore.load(from: resaved) else { return XCTFail("The re-save should load") }
+        XCTAssertNotNil(PixelOps.opaqueContentBounds(again.layers[0].cels[1].raster.renderToUIImage()),
+                        "The pixel must survive a second round trip too")
+    }
+
+    /// **(f) The legacy skip is untouched.** A manifest from the previous PencilKit engine has no
+    /// `rasterFileName` key at all, and `CelManifest` failing to decode is what makes the gallery skip
+    /// those projects rather than open them as blank documents. `rasterOmitted` was added as a
+    /// separate optional key — instead of making `rasterFileName` optional, which would have been the
+    /// obvious implementation — precisely so this stays true, and nothing else in the suite pins it.
+    func testAPencilKitEraCelManifestWithNoRasterFileNameStillFailsToDecode() throws {
+        let legacy = Data(#"{"id":"\#(UUID().uuidString)","startFrame":0,"frameCount":1}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(CelManifest.self, from: legacy),
+                             "A manifest with no rasterFileName must not decode — the gallery skips those projects")
+
+        // And the new key on its own does not rescue it, which is the mistake worth pinning.
+        let legacyWithFlag = Data(#"{"id":"\#(UUID().uuidString)","startFrame":0,"frameCount":1,"rasterOmitted":true}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(CelManifest.self, from: legacyWithFlag))
+
+        // The control: the same JSON with the key present decodes, so the assertions above are about
+        // the missing key and not about the rest of the literal.
+        let modern = Data(#"{"id":"\#(UUID().uuidString)","startFrame":0,"frameCount":1,"rasterFileName":"a.png","rasterOmitted":true}"#.utf8)
+        let decoded = try JSONDecoder().decode(CelManifest.self, from: modern)
+        XCTAssertEqual(decoded.rasterFileName, "a.png")
+        XCTAssertEqual(decoded.rasterOmitted, true)
+    }
+
+    /// A cel manifest written before this change has no `rasterOmitted` key and must decode to nil —
+    /// meaning "look for the file", which is what keeps every existing package loading unchanged.
+    func testACelManifestWithoutTheRasterOmittedKeyDecodesAsNil() throws {
+        let json = Data(#"{"id":"\#(UUID().uuidString)","startFrame":0,"frameCount":1,"rasterFileName":"a.png"}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(CelManifest.self, from: json).rasterOmitted)
+    }
+
+    /// A cel that wrote its PNG writes no `rasterOmitted` key at all, so a manifest does not grow a
+    /// key per cel on a document where nothing was saved. Same discipline as
+    /// `testAnOrdinaryFolderWritesNoCompositorRoleKey`.
+    func testACelThatWroteItsRasterWritesNoRasterOmittedKey() throws {
+        let manifest = CelManifest(id: UUID(), startFrame: 0, frameCount: 1, rasterFileName: "r.png")
+        let json = String(decoding: try JSONEncoder().encode(manifest), as: UTF8.self)
+        XCTAssertFalse(json.contains("\"rasterOmitted\""))
+    }
 }
