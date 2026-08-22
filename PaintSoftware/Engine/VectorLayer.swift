@@ -587,6 +587,18 @@ final class VectorCanvas {
         }
     }
 
+    /// The inverse of `localSamples`: stored, local-space geometry expressed back in canvas space, so
+    /// it can be re-stamped into `StrokeCanvasView`'s scratch raster — which is a copy of `render()`
+    /// and therefore already carries `transform`. Only `cutPreviewPieces` needs this; every other
+    /// caller is going the other way.
+    private static func canvasSamples(_ samples: [VectorSample], through t: CGAffineTransform) -> [VectorSample] {
+        guard !t.isIdentity else { return samples }
+        return samples.map {
+            let p = $0.point.applying(t)
+            return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
+        }
+    }
+
     private static func localPath(_ path: CGPath, through t: CGAffineTransform) -> CGPath {
         guard !t.isIdentity else { return path }
         var inverse = t.inverted()
@@ -868,8 +880,8 @@ final class VectorCanvas {
         let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
         let scale = Self.scale(of: _transform)
         let localSize = scale > 0 ? size / scale : size
-        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: localSize,
-                                             mode: mode) else { return false }
+        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush,
+                                             size: localSize) else { return false }
 
         let changed: Bool
         switch mode {
@@ -928,8 +940,8 @@ final class VectorCanvas {
         let localSize = scale > 0 ? size / scale : size
         // A one-sample sweep is the single dab stamped so far: `capsuleChain` yields one zero-length
         // capsule for it, so the footprint test below is the nib itself.
-        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: localSize,
-                                             mode: .cutToIntersection) else { return (.missed, []) }
+        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush,
+                                             size: localSize) else { return (.missed, []) }
 
         let resolved = cutToIntersection(sweep: sweep, near: localSamples[0].point, suppressing: suppressing)
         if resolved.outcome == .cut { invalidate() }
@@ -1248,6 +1260,256 @@ final class VectorCanvas {
         }
         if changed { _elements = result }
         return changed
+    }
+
+    /// One stroke's worth of what a Mode 2 gesture is about to do, described so a caller can show it
+    /// without knowing anything about display lists.
+    ///
+    /// **Two halves, and the second one is not optional.** Erasing the doomed span alone is wrong,
+    /// and wrong in a way that is easy to reason past: `BrushStamper` gives every stroke round end
+    /// caps, so the two pieces a cut leaves behind grow caps of their own that reach *back into* the
+    /// gap by the stroke's own radius. Cut a 40pt line with an 8pt eraser and the two new caps meet
+    /// in the middle — the display list gains an element and **not one pixel changes**. A preview
+    /// that only erased would open a hole the lift then fills back in.
+    ///
+    /// So: erase the span, then draw the surviving pieces' cap ends back. What is left is exactly
+    /// `ink(stroke) − ink(pieces)`, which is the definition of what the cut removes.
+    struct CutPreviewEdit {
+        /// The dab-lattice walk to replay for the erase: the parent's samples for a piece carrying a
+        /// `DabLattice`, the stroke's own otherwise. Canvas space.
+        var eraseWalk: [VectorSample]
+        /// `BrushStamper.seed(for:)`'s input — the lattice's parent id where there is one — so the
+        /// erase lands on the same dabs the render put down.
+        var eraseSeedID: UUID
+        /// Spans of `eraseWalk`'s parametric domain to erase.
+        var eraseRanges: [ClosedRange<CGFloat>]
+        /// A surviving piece, and the window of it worth drawing back. Only the ends that abut a cut
+        /// are in any window: the rest of the piece was never erased, and re-painting it would put
+        /// this stroke's colour over whatever crosses above it.
+        struct Restamp {
+            var samples: [VectorSample]
+            var range: ClosedRange<CGFloat>
+        }
+        var restamps: [Restamp]
+        var brush: Brush
+        /// Canvas-space diameter, i.e. the stored size through the layer transform's scale.
+        var size: CGFloat
+        var opacity: Double
+        var color: UIColor
+    }
+
+    /// What a Mode 2 gesture ending here would take away, as something a caller can draw.
+    /// **Reads only** — no element is touched, `version` does not move, and no render cache is
+    /// dropped.
+    ///
+    /// This is `cutAlongFootprint`'s geometry with the splice removed: the same spatial-index query,
+    /// the same `VectorEraser.cutRanges` probe walk, the same `effectiveCuts` merge, and the same
+    /// `StrokeGeometry.splitStroke` pieces. It is that sharing, not a comment, that keeps
+    /// `StrokeCanvasView`'s live preview showing what the lift will actually do — the two answers
+    /// come out of one function.
+    ///
+    /// **Why not just punch the eraser's footprint, the way Mode 1 does.** Because Mode 2 does not
+    /// remove the footprint. It removes the parametric spans of a stroke's *centreline* that lie
+    /// under the footprint — the stroke's whole **width** over those spans — and then gives the two
+    /// surviving pieces round end caps that grow straight back into the gap by the stroke's own
+    /// radius. Both terms are large, they pull in opposite directions, and neither is the footprint:
+    ///
+    /// - Cut a **40pt** line with an **8pt** eraser and the caps meet in the middle: the display list
+    ///   gains an element and **not one pixel changes**. MEASURED, `VectorCutPreviewLogicTests`.
+    /// - Cut the same line with a **60pt** eraser and about a third of the footprint's width survives
+    ///   as caps.
+    ///
+    /// A footprint punch is wrong in the same direction in both: it shows a nib-shaped bite that the
+    /// lift has to hand back. This returns the actual difference instead.
+    func cutPreviewEdits(alongPath canvasSpaceSamples: [VectorSample], brush: Brush, size: CGFloat,
+                         accumulating accumulated: inout [UUID: [ClosedRange<CGFloat>]]) -> [CutPreviewEdit] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !canvasSpaceSamples.isEmpty else { return [] }
+        guard _elements.contains(where: { $0.stroke != nil }) else { return [] }
+
+        let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
+        let rawScale = Self.scale(of: _transform)
+        let scale = rawScale > 0 ? rawScale : 1
+        let localSize = size / scale
+        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush,
+                                             size: localSize) else { return [] }
+
+        let candidates = Set(strokeIndex().segments(near: sweep.bounds).map(\.elementIndex))
+        guard !candidates.isEmpty else { return [] }
+        let nibRadius = StrokeGeometry.stampRadius(forPressure: 1, brush: brush, size: size)
+
+        var edits: [CutPreviewEdit] = []
+        for index in candidates.sorted() {
+            guard let stroke = _elements[index].stroke, stroke.composite == .paint else { continue }
+            let increment = Self.effectiveCuts(VectorEraser.cutRanges(in: stroke.samples, sweep: sweep),
+                                               in: stroke.samples)
+            guard !increment.isEmpty else { continue }
+            let domainEnd = CGFloat(Swift.max(stroke.samples.count - 1, 0))
+            // **The caps have to be drawn against the whole gesture's cut, not this increment's.**
+            // A piece's cap sits at the cut boundary, and the boundary moves outward with every touch
+            // sample; caps drawn at the boundaries the gesture passed through are ink the finished cut
+            // does not leave, and left alone they fill the gap in completely behind the eraser. So the
+            // caller carries the accumulated cut per stroke across the drag and it is merged here.
+            let previous = accumulated[stroke.id] ?? []
+            let merged = StrokeGeometry.mergedCuts(previous + increment, clampedTo: 0...domainEnd)
+            guard merged != previous else { continue }
+            accumulated[stroke.id] = merged
+
+            // The same fallback `stamp(stroke:into:isEraser:)` makes: a lattice with no usable range
+            // would replay the *parent* whole, which is worse than ignoring it.
+            let lattice = stroke.lattice.flatMap { $0.range == nil ? nil : $0 }
+            let source = lattice?.samples ?? stroke.samples
+            let canvasSize = stroke.size * scale
+            let strokeRadius = StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
+                                                          size: canvasSize)
+
+            var eraseRanges: [ClosedRange<CGFloat>] = []
+            for cut in increment {
+                // Widened by the stroke's own radius before anything else: the cap drawn at the
+                // *previous* boundary lies within one radius of it, on the gap side, and this is the
+                // pass that clears it. On the other side the widening reaches into ink that survives,
+                // which the restamp below puts back — its window is `strokeRadius + nibRadius`, so it
+                // always covers what this took.
+                let widened = Self.extend(cut, in: stroke.samples, by: strokeRadius / scale,
+                                          clampedTo: 0...domainEnd)
+                // A cut is expressed in the stroke's own domain; the walk being replayed is the
+                // parent's, so the two ends move across with `DabLattice.parentParameter(of:)` —
+                // exactly how the piece's own `visibleRange` was derived when it was cut.
+                var span = lattice.map { $0.parentParameter(of: widened.lowerBound)
+                                             ... $0.parentParameter(of: widened.upperBound) } ?? widened
+                if let whole = lattice?.range {
+                    let low = Swift.max(span.lowerBound, whole.lowerBound)
+                    let high = Swift.min(span.upperBound, whole.upperBound)
+                    guard high >= low else { continue }
+                    span = low...high
+                }
+                eraseRanges.append(span)
+            }
+            guard !eraseRanges.isEmpty else { continue }
+
+            // How far back into the erased gap a surviving cap can reach: its own radius, plus the
+            // nib's, because the erase is a capsule of the nib's radius around the doomed centreline
+            // and the cap has to be restored everywhere that capsule took it.
+            let reach = strokeRadius + nibRadius
+            var restamps: [CutPreviewEdit.Restamp] = []
+            for run in StrokeGeometry.splitStrokeRuns(stroke.samples, removing: merged) {
+                let canvasRun = Self.canvasSamples(run.samples, through: _transform)
+                guard let first = run.parameters.first, let last = run.parameters.last else { continue }
+                let startAbutsACut = first > StrokeGeometry.epsilon
+                let endAbutsACut = last < domainEnd - StrokeGeometry.epsilon
+                guard startAbutsACut || endAbutsACut else { continue }
+                for window in Self.endWindows(of: canvasRun, reach: reach,
+                                              fromStart: startAbutsACut, fromEnd: endAbutsACut) {
+                    restamps.append(CutPreviewEdit.Restamp(samples: canvasRun, range: window))
+                }
+            }
+
+            edits.append(CutPreviewEdit(eraseWalk: Self.canvasSamples(source, through: _transform),
+                                        eraseSeedID: lattice?.seedID ?? stroke.id,
+                                        eraseRanges: eraseRanges,
+                                        restamps: restamps,
+                                        brush: stroke.brush,
+                                        size: canvasSize,
+                                        opacity: stroke.opacity,
+                                        color: stroke.uiColor))
+        }
+        return edits
+    }
+
+    /// `range` grown by `arcLength` points of the stroke at each end, in the sample-index domain.
+    ///
+    /// Walked by arc length for the same reason `endWindows` is, and rounded outward to a whole
+    /// sample for the same reason: too generous by less than one segment is safe here, because the
+    /// restamp that follows covers strictly more than this took away.
+    private static func extend(_ range: ClosedRange<CGFloat>, in samples: [VectorSample],
+                               by arcLength: CGFloat,
+                               clampedTo domain: ClosedRange<CGFloat>) -> ClosedRange<CGFloat> {
+        guard samples.count > 1, arcLength > 0 else { return range }
+
+        func walk(from parameter: CGFloat, step: Int) -> CGFloat {
+            let anchor = StrokeGeometry.interpolatedSample(in: samples, at: parameter)?.point
+            var i = Int(step < 0 ? parameter.rounded(.down) : parameter.rounded(.up))
+            i = Swift.max(0, Swift.min(i, samples.count - 1))
+            // The partial step from a fractional boundary to its neighbouring sample counts: a cut
+            // edge lands between samples far more often than on one.
+            var travelled = anchor.map { hypot(samples[i].x - $0.x, samples[i].y - $0.y) } ?? 0
+            while i + step >= 0, i + step < samples.count, travelled < arcLength {
+                travelled += hypot(samples[i + step].x - samples[i].x, samples[i + step].y - samples[i].y)
+                i += step
+            }
+            return CGFloat(i)
+        }
+
+        let low = Swift.max(domain.lowerBound, Swift.min(range.lowerBound, walk(from: range.lowerBound, step: -1)))
+        let high = Swift.min(domain.upperBound, Swift.max(range.upperBound, walk(from: range.upperBound, step: 1)))
+        return low > high ? range : low...high
+    }
+
+    /// The parametric windows of `samples` lying within `reach` of whichever ends are asked for.
+    /// Two windows that meet collapse into one over the whole piece — which is what a short piece
+    /// between two cuts wants, and it is also why this cannot just return one range per end.
+    ///
+    /// Walked by arc length rather than by sample count: `reach` is a radius in points, and a stroke's
+    /// samples are as far apart as the pen was moving fast. The walk stops on the first sample at or
+    /// beyond `reach` and keeps it whole rather than interpolating, so a window can only ever be too
+    /// generous by less than one segment — and being too generous only means re-drawing ink that was
+    /// never erased.
+    private static func endWindows(of samples: [VectorSample], reach: CGFloat,
+                                   fromStart: Bool, fromEnd: Bool) -> [ClosedRange<CGFloat>] {
+        guard !samples.isEmpty, fromStart || fromEnd else { return [] }
+        guard samples.count > 1 else { return [0...0] }
+        let domainEnd = CGFloat(samples.count - 1)
+
+        func walk(from index: Int, step: Int) -> Int {
+            var travelled: CGFloat = 0
+            var i = index
+            while i + step >= 0, i + step < samples.count, travelled < reach {
+                travelled += hypot(samples[i + step].x - samples[i].x, samples[i + step].y - samples[i].y)
+                i += step
+            }
+            return i
+        }
+
+        let high = fromStart ? CGFloat(walk(from: 0, step: 1)) : 0
+        let low = fromEnd ? CGFloat(walk(from: samples.count - 1, step: -1)) : domainEnd
+        if fromStart && fromEnd {
+            return low <= high ? [0...domainEnd] : [0...high, low...domainEnd]
+        }
+        return fromStart ? [0...high] : [low...domainEnd]
+    }
+
+    /// Draws one `CutPreviewEdit` into `target` — the whole of what a live Mode 2 preview *does*, and
+    /// the reason it is here rather than in `StrokeCanvasView`: this file is in the UI-test target and
+    /// that one is not, so the preview can be asserted against real pixels without a simulator.
+    ///
+    /// Erase first, then draw the caps back, in that order and never the other way: the erase is a
+    /// `.destinationOut` punch and would take the restored caps with it.
+    ///
+    /// The erase's colour is arbitrary — `.destinationOut` reads only the dab's alpha coverage, which
+    /// is why `stamp(stroke:into:isEraser: true)` above hands the *stroke's* colour through unchanged
+    /// and is none the worse for it. The restamp's colour is not arbitrary and is the stroke's own.
+    static func applyPreview(_ edit: CutPreviewEdit, into target: DabTarget) {
+        let walk = edit.eraseWalk.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+        for range in edit.eraseRanges {
+            BrushStamper.stampStroke(into: target, samples: walk, brush: edit.brush,
+                                     color: .black, brushSize: edit.size,
+                                     brushOpacity: edit.opacity, isEraser: true,
+                                     seed: BrushStamper.seed(for: edit.eraseSeedID),
+                                     visibleRange: range)
+        }
+        for restamp in edit.restamps {
+            let samples = restamp.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+            // No seed: a piece is minted with a fresh `id` at commit time, so there is no seed the
+            // preview could match. Scatter and rotation jitter therefore land somewhere else in the
+            // preview than they will after the cut — for a scattering brush this is an approximation,
+            // and for every non-scattering one (`BrushStamper.stampDab` touches the RNG nowhere else
+            // for a round shape) it is exact.
+            BrushStamper.stampStroke(into: target, samples: samples, brush: edit.brush,
+                                     color: edit.color, brushSize: edit.size,
+                                     brushOpacity: edit.opacity, isEraser: false,
+                                     visibleRange: restamp.range)
+        }
     }
 
     /// Mode 3: **every** stroke whose centreline passes under the eraser's footprint loses the span

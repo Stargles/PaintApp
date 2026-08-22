@@ -386,7 +386,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let paint = RasterVectorParity.paintStroke(scene)
         let erase = RasterVectorParity.eraseStroke(scene)
         guard let sweep = VectorEraser.Sweep(samples: erase.samples, brush: erase.brush,
-                                             size: erase.size, mode: .erase) else {
+                                             size: erase.size) else {
             return XCTFail("The eraser gesture should have a footprint")
         }
         let erasers = VectorEraser.cleanCutCapsules(sweep.capsules, brush: erase.brush, size: erase.size)
@@ -501,7 +501,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let paint = RasterVectorParity.paintStroke(scene)
         let erase = RasterVectorParity.eraseStroke(scene)
         guard let sweep = VectorEraser.Sweep(samples: erase.samples, brush: erase.brush,
-                                             size: erase.size, mode: .erase) else {
+                                             size: erase.size) else {
             return XCTFail("The eraser gesture should have a footprint")
         }
         let erasers = VectorEraser.cleanCutCapsules(sweep.capsules, brush: erase.brush, size: erase.size)
@@ -534,7 +534,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let short = Self.ramp(from: CGPoint(x: 8, y: 64), to: CGPoint(x: 88, y: 64), count: 13,
                               from: 1, to: 1)
         guard let sweep = VectorEraser.Sweep(samples: short, brush: BrushLibrary.hardRound,
-                                             size: Self.wideNib, mode: .erase) else {
+                                             size: Self.wideNib) else {
             return XCTFail("The eraser gesture should have a footprint")
         }
         let erasers = VectorEraser.cleanCutCapsules(sweep.capsules, brush: BrushLibrary.hardRound,

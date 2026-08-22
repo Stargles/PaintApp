@@ -566,6 +566,53 @@ is four times the whole cold sandwich rebuild, so it is the largest single-frame
 the app. Scope a fix once the eraser rewrite has settled.
 *Verified*: `testCutToIntersectionLiveDragCostPerSample`, `PerfBaselineTests.swift`.
 
+**17. Mode 2 (`cutPoints`) live preview — the first Cut measurement that exists. — MEASURED and
+SHIPPED, 2026-08-22.** Not from the ranking either; it came out of the owner asking twice for Cut to
+show something while the finger is down (*"the to cut eraser does not have live feedback like the to
+cross eraser, it only applies when the eraser is lifted"*). The design question was whether a preview
+could be had **without** buying item 10's term: Mode 3 is live because it commits real cuts per
+sample and pays ~95 ms a time re-rendering the layer cold, and copying that mechanism into Cut — which
+has no `IntersectionDriver` latch, so it would fire on nearly every sample over ink — was never on.
+
+*The number.* `testCutPointsLivePreviewCostPerSample` (new, `PerfBaselineTests.swift`) reuses
+`eraseScenePaintStrokes()` and item 10's own 334-sample drag, so the two numbers share a fixture as
+well as a scene, and times three candidate designs **in the same run, seconds apart**, so the ratios
+between them survive whatever the machine is doing.
+
+**MEASURED, iOS 26.5 simulator (`cuteraser`, iPad Pro 13-inch M4 simulated), 2048² canvas, 200-stroke
+vector layer, Debug, CoreGraphics. CONTENDED — 25–35% idle CPU, no other `xcodebuild` alive per
+`pgrep`; the load was ~2.9 cores of Adobe background processes (AdobeIPCBroker, Adobe Desktop
+Service, Creative Cloud) plus WindowServer, which did not go away over the session.** Three
+consecutive runs at that load agreed to **±0.5%** on every median, which is the reason these are
+worth writing down at all: the per-sample work is short enough to fit inside one scheduling slice, so
+it is not being sliced up the way a whole suite is.
+
+| per touch sample | median when the sample cuts | median when it does not |
+|---|---|---|
+| (a) Cut as it was — no preview | **0.000 ms** (render memo hit) | 0.000 ms |
+| (b) span-and-caps preview — SHIPPED | **0.426 ms** (p95 0.466) | 0.071 ms |
+| (c) plain footprint punch | **0.014 ms** | ~0 |
+
+(b) splits **0.107 ms geometry** (`cutPreviewEdits`: one spatial-index query, the `cutRanges` probe
+walk, `splitStroke`, the end-cap windows) and **0.333 ms stamping** (`applyPreview`: erasing the span
+and drawing the caps back) — so the dabs, not the geometry, are where it goes. Two costs are shared with Mode 1 and are **not** new
+here: `renderToUIImage` off the scratch, **0.033 ms** per refresh, and the canvas-sized scratch copy
+at touch-down, **7.7–11.2 ms once per gesture**.
+
+*What it means.* (b) is 30× (c) and still **3.7% of a 60 Hz frame**, against item 10's ~95 ms — 220×
+cheaper than the mechanism it was competing with. (c) was measurably cheaper and is measurably wrong:
+Mode 2 does not remove its footprint, it removes a centreline span *minus* the round end caps the two
+surviving pieces grow back into the gap, and those caps are large. Cut a 40pt line with an 8pt eraser
+and **not one pixel changes** — the footprint punch would open a notch and hand it back on lift.
+`VectorCutPreviewLogicTests` measures both against the committed cut.
+
+*Where it ranks*: shipped, so nowhere — but it is worth keeping beside item 10 as the counter-example.
+Item 10's cost is not "previewing an eraser"; it is *mutating the display list on a per-input-event
+path*. A preview that reads geometry and draws into a scratch raster is three orders of magnitude
+away from one that cuts for real.
+*Verified*: `testCutPointsLivePreviewCostPerSample` (`PerfBaselineTests.swift`),
+`VectorCutPreviewLogicTests`, `CuttingModesUITests.testCutPreviewsLiveAndToCrossStillDoesNot`.
+
 **15. Instrument the save the gallery waits on, then fan its encode out. — BOTH STAGES SHIPPED,
 2026-08-20.** The other half of "leaving to the gallery takes ~3 s"; §6 asked for exactly this run
 and had asked since the document was written.

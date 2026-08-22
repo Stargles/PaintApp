@@ -31,10 +31,9 @@ final class VectorEraserLogicTests: XCTestCase {
         Brush(name: "test", shape: .hardRound, size: size, dynamics: .fixed)
     }
 
-    private func sweep(_ points: [(CGFloat, CGFloat)], size: CGFloat,
-                       mode: VectorEraserMode = .cutPoints) -> VectorEraser.Sweep {
+    private func sweep(_ points: [(CGFloat, CGFloat)], size: CGFloat) -> VectorEraser.Sweep {
         guard let sweep = VectorEraser.Sweep(samples: samples(points), brush: fixedBrush(size: size),
-                                            size: size, mode: mode) else {
+                                            size: size) else {
             preconditionFailure("a non-empty gesture always has a footprint")
         }
         return sweep
@@ -69,7 +68,7 @@ final class VectorEraserLogicTests: XCTestCase {
     }
 
     func testSweepOfNoSamplesHasNoFootprint() {
-        XCTAssertNil(VectorEraser.Sweep(samples: [], brush: fixedBrush(), size: 10, mode: .cutPoints))
+        XCTAssertNil(VectorEraser.Sweep(samples: [], brush: fixedBrush(), size: 10))
     }
 
     // MARK: - Segment/rect clipping
@@ -473,8 +472,7 @@ final class VectorEraserLogicTests: XCTestCase {
 
     private func nib(at point: CGPoint, size: CGFloat) -> VectorEraser.Sweep {
         guard let sweep = VectorEraser.Sweep(samples: [VectorSample(x: point.x, y: point.y, pressure: 1)],
-                                             brush: fixedBrush(size: size), size: size,
-                                             mode: .cutToIntersection) else {
+                                             brush: fixedBrush(size: size), size: size) else {
             preconditionFailure("a one-sample gesture always has a footprint")
         }
         return sweep

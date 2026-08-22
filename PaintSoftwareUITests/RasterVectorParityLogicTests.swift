@@ -303,7 +303,7 @@ enum RasterVectorParity {
         stamp(erase, into: texture, isEraser: true)
 
         guard let sweep = VectorEraser.Sweep(samples: erase.samples, brush: erase.brush,
-                                             size: erase.size, mode: .erase) else { return nil }
+                                             size: erase.size) else { return nil }
         let cuts = StrokeGeometry.mergedCuts(VectorEraser.cutRanges(in: paint.samples, sweep: sweep),
                                              clampedTo: 0...CGFloat(max(paint.samples.count - 1, 0)))
         let pieces: [VectorElement] = StrokeGeometry.splitStroke(paint.samples, removing: cuts).map { run in

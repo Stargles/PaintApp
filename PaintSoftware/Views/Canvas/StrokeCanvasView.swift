@@ -146,6 +146,25 @@ final class StrokeCanvasView: UIView {
     /// between input samples rather than one dot per sample — otherwise a fast drag draws a gappy
     /// line that a bucket fill can leak through.
     private var lastStampPoint: CGPoint?
+    /// Mode 2's preview walks the gesture one **increment** at a time — the previously stored sample
+    /// to the one just admitted — so each touch sample asks about the footprint it has just added
+    /// rather than about the whole gesture so far. Without that the probe walk would grow with the
+    /// length of the drag, which is the shape of cost that made Mode 3 unaffordable.
+    ///
+    /// A capsule chain over the whole gesture is exactly the union of the chains over its
+    /// increments (consecutive capsules share their endpoints), so punching increment by increment
+    /// covers the same ink the lift's single whole-gesture sweep will.
+    private var lastPreviewSample: VectorSample?
+    /// Mode 2's preview, per cut stroke: every span of it the gesture has taken so far, in that
+    /// stroke's own parametric domain. Empty except mid-drag.
+    ///
+    /// **The preview needs the whole gesture's cut even though it is applied one increment at a
+    /// time.** A cut piece is drawn with a round end cap at the boundary, and the boundary walks
+    /// outward with the eraser; caps drawn at boundaries the gesture has already passed are ink the
+    /// finished cut does not leave, and unless they are accounted for they fill the gap back in
+    /// behind the finger. `VectorCanvas.cutPreviewEdits` merges into this and reads the caps off the
+    /// merged result. It is a few ranges per stroke touched, not per sample.
+    private var previewCuts: [UUID: [ClosedRange<CGFloat>]] = [:]
     /// Smooths raw touch positions into a trailing "follow" point before `stampPath`. Reset to the
     /// raw touch-down position at the start of every stroke so the first stamp lands under the
     /// touch rather than smoothing in from an earlier stroke's trailing point.
@@ -799,6 +818,8 @@ final class StrokeCanvasView: UIView {
         }()
         currentVectorSamples = []
         lastStampPoint = nil
+        lastPreviewSample = nil
+        previewCuts = [:]
         livePreviewFrames = 0
         // Re-armed per stroke, not per brush change: the threshold is a function of the size and
         // spacing this stroke is being drawn at, and both can move between strokes.
@@ -810,9 +831,22 @@ final class StrokeCanvasView: UIView {
     }
 
     /// Which preview strategy a gesture on a vector layer uses — see `VectorScratchRole`.
+    ///
+    /// **Mode 2 joined `.replacement` on 2026-08-22.** It had `.none` since it was written, on the
+    /// reasoning that a cut commits on lift so the canvas render alone is truth — true of the
+    /// *document*, and beside the point for the artist, who was dragging an eraser across their line
+    /// and seeing absolutely nothing happen until they lifted off. The owner asked for the same live
+    /// feedback Mode 3 gives, twice. It gets it here without Mode 3's mechanism: Mode 3 is "live"
+    /// because it commits real cuts per sample and pays ~95 ms a time re-rendering the layer cold
+    /// ([PERFORMANCE.md](PERFORMANCE.md) item 10), whereas `.replacement` erases into a *copy* of the
+    /// render and never touches the display list at all.
+    ///
+    /// Mode 3 keeps `.none`, and must: it has already changed the document by the time the next
+    /// refresh runs, so the canvas render genuinely is the truth for it, and a scratch would be a
+    /// canvas-sized allocation showing what is already on screen.
     private static func scratchRole(isEraser: Bool, mode: VectorEraserMode) -> VectorScratchRole {
         guard isEraser else { return .overlay }
-        return mode == .erase ? .replacement : .none
+        return mode == .cutToIntersection ? .none : .replacement
     }
 
     private func moveVectorStroke(_ touch: UITouch, _ event: UIEvent) {
@@ -960,18 +994,21 @@ final class StrokeCanvasView: UIView {
     private func endVectorScratch() {
         vectorScratch = nil
         vectorScratchRole = .overlay
+        lastPreviewSample = nil
+        previewCuts = [:]
         updateEraserFootprint(at: nil)
     }
 
     /// Shows Mode 3's footprint ring at `point` in canvas space, or hides it.
     ///
-    /// Modes 2 and 3 set `vectorScratchRole == .none` and so paint nothing at all during a drag, which
-    /// was tolerable while the eraser's size only decided how far it could *reach*. Since 2026-08-18
+    /// Mode 3 sets `vectorScratchRole == .none` and so paints nothing at all during a drag, which was
+    /// tolerable while the eraser's size only decided how far it could *reach*. Since 2026-08-18
     /// Mode 3's size **is** its selection radius — every stroke whose centreline the circle covers is
     /// cut, and every crossing inside it is erased through — so an unseen radius turns the tool into
-    /// guesswork: the artist would be aiming a 50-point selection circle they cannot see. Mode 1 needs
-    /// none of this (its punch appears under the finger as it is made) and Mode 2 cuts at the
-    /// footprint's edge, which is its own feedback; only Mode 3 acts at a distance.
+    /// guesswork: the artist would be aiming a 50-point selection circle they cannot see. Modes 1 and
+    /// 2 need none of this: each shows the ink going away under the finger as it goes (Mode 2 since
+    /// 2026-08-22 — see `previewCutSpans`), and only Mode 3 acts at a distance from its own
+    /// footprint.
     ///
     /// Drawn in this view's own coordinates, which *are* canvas coordinates — `StrokeInput` takes
     /// `touch.location(in:)` on this view, and that same point is what `cutToIntersection` resolves
@@ -1037,10 +1074,55 @@ final class StrokeCanvasView: UIView {
             return
         }
         guard stored else { return }
-        // Live preview into the scratch raster: this stroke's ink for a paint stroke, or (Mode 1) a
-        // `.destinationOut` punch into a copy of the layer. Modes 2/3 have no scratch content.
-        if let scratch = vectorScratch, !isNoScratchRole {
+        // Live preview into the scratch raster: this stroke's ink for a paint stroke, (Mode 1) a
+        // `.destinationOut` punch into a copy of the layer, or (Mode 2) the doomed spans punched out
+        // of that same copy. Mode 3 has no scratch content — it has already cut for real.
+        guard let scratch = vectorScratch, !isNoScratchRole else { return }
+        if isEraser, vectorEraserMode == .cutPoints, inBetweenCelID == nil, let vectorCanvas {
+            previewCutSpans(to: point, pressure: pressure, in: vectorCanvas, into: scratch)
+        } else {
             stampPath(to: point, pressure: pressure, into: scratch)
+        }
+    }
+
+    /// Mode 2's live feedback: erase, out of the scratch copy of the layer, exactly the ink the lift
+    /// is going to remove.
+    ///
+    /// **Not the eraser's footprint**, which is Mode 1's preview and is right only for Mode 1. Mode 2
+    /// removes the parametric spans of a stroke's *centreline* that pass under the footprint — the
+    /// stroke's whole width over those spans — and then gives each surviving piece a round end cap
+    /// that grows back into the gap by the stroke's own radius. Cut a 40pt line with an 8pt eraser
+    /// and the two caps meet: the layer gains an element and **not one pixel changes**. A footprint
+    /// preview would show a nib-shaped notch and hand it back the instant the artist lifted off.
+    ///
+    /// `VectorCanvas.cutPreviewEdits` answers with both terms — the doomed spans, from the same
+    /// `VectorEraser.cutRanges` walk the commit uses, and the caps, from the same
+    /// `StrokeGeometry.splitStroke` pieces the commit builds — and `VectorCanvas.applyPreview` erases
+    /// the first and draws the second. For an opaque brush that is the post-cut render's own pixels.
+    ///
+    /// **Nothing is mutated.** No element changes, `version` does not move, no render cache is
+    /// dropped — so this does not buy the cold-re-render term that costs Mode 3 ~95 ms a sample.
+    /// The real cut still happens exactly once, in `commitVectorStroke`.
+    ///
+    /// The selection clip is applied the same way `commitVectorStroke` applies it — see
+    /// `StrokeGeometry.splitRuns`, which keeps only runs of consecutive *inside* samples, so a
+    /// segment erases only when both its ends are inside. A sample that is the first inside one
+    /// after an excluded stretch starts a new run, and previews as the lone dab that run will be.
+    private func previewCutSpans(to point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas,
+                                 into scratch: RasterLayerTexture) {
+        let sample = VectorSample(x: point.x, y: point.y, pressure: pressure)
+        let previous = lastPreviewSample
+        lastPreviewSample = sample
+        let increment: [VectorSample]
+        if let clipPath = selectionClipPath {
+            guard clipPath.contains(point) else { return }
+            increment = previous.map { clipPath.contains($0.point) ? [$0, sample] : [sample] } ?? [sample]
+        } else {
+            increment = previous.map { [$0, sample] } ?? [sample]
+        }
+        for edit in canvas.cutPreviewEdits(alongPath: increment, brush: brush, size: brushSize,
+                                           accumulating: &previewCuts) {
+            VectorCanvas.applyPreview(edit, into: scratch)
         }
     }
 

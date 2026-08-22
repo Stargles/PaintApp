@@ -106,13 +106,16 @@ final class VectorPreviewPlanLogicTests: XCTestCase {
 
     // MARK: - Role 3 of 3: .none, which must not regress either
 
-    /// Modes 2 and 3 preview nothing at all: the canvas render alone is truth, because Mode 3
-    /// commits during the drag and Mode 2 on lift. One render, no scratch layer, no frames — and
-    /// **regardless of whether a scratch texture exists**, which it does: `beginVectorStroke`
-    /// allocates an empty one for every role. The role is what suppresses the preview, not the
-    /// absence of a texture, and a plan that keyed off the texture would light up a layer full of
-    /// nothing on every touch sample of every cut.
-    func testTheCuttingModesPreviewNothingEvenThoughAScratchExists() {
+    /// Mode 3 previews nothing at all: it commits real cuts during the drag, so the canvas render
+    /// alone is truth. One render, no scratch layer, no frames — and **regardless of whether a
+    /// scratch texture exists**, which it does: `beginVectorStroke` allocates an empty one for every
+    /// role. The role is what suppresses the preview, not the absence of a texture, and a plan that
+    /// keyed off the texture would light up a layer full of nothing on every touch sample.
+    ///
+    /// **Mode 2 used to be here too, and moved to `.replacement` on 2026-08-22** — it commits on
+    /// lift, so before then it showed the artist nothing for the whole drag. `.none` is now Mode 3
+    /// alone. See `VectorScratchRole`.
+    func testMode3PreviewsNothingEvenThoughAScratchExists() {
         for hasScratch in [false, true] {
             let plan = VectorPreviewPlan.forVectorLayer(role: .none,
                                                         hasScratch: hasScratch,

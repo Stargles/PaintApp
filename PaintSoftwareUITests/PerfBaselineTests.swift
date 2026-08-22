@@ -185,6 +185,13 @@ final class PerfBaselineTests: XCTestCase {
         String(format: "%.1f ms", seconds * 1000)
     }
 
+    /// `milliseconds` at three decimals, for figures that live below one. A per-touch-sample cost is
+    /// tenths of a millisecond when it is healthy, and `%.1f` renders every healthy value — and the
+    /// difference between two of them — as "0.0 ms", which is not a measurement.
+    private func preciseMilliseconds(_ seconds: Double) -> String {
+        String(format: "%.3f ms", seconds * 1000)
+    }
+
     // MARK: - The baseline
 
     /// (a) wall-clock per stroke, (b) peak resident memory during it, (c) thumbnail regenerations.
@@ -920,7 +927,7 @@ final class PerfBaselineTests: XCTestCase {
         let strokes = Self.eraseScenePaintStrokes()
         let eraserSamples = Self.eraseSceneGesture(7)
         guard let sweep = VectorEraser.Sweep(samples: eraserSamples, brush: Self.eraseSceneEraserBrush,
-                                             size: Self.eraseSceneEraserSize, mode: .erase) else {
+                                             size: Self.eraseSceneEraserSize) else {
             return XCTFail("The scenario's eraser gesture must have a footprint")
         }
         let erasers = VectorEraser.cleanCutCapsules(sweep.capsules, brush: Self.eraseSceneEraserBrush,
@@ -1056,6 +1063,215 @@ final class PerfBaselineTests: XCTestCase {
                              "This scenario only measures what it claims to if the sweep actually crosses strokes and cuts them")
         XCTAssertLessThan(totalMeasured.seconds, 60.0,
                           "A single drag down one column taking a minute is a catastrophic regression, not slowness")
+    }
+
+    // MARK: - Mode 2 (cutPoints) live-preview cost — the first Cut measurement that exists
+
+    /// **What one touch sample of Mode 2 costs, three ways**, so the choice of preview is made
+    /// against numbers instead of against intuition. Nothing had ever measured Mode 2 at all:
+    /// `PERFORMANCE.md` item 10's ~95 ms is Mode **3**, and it is 95 ms because each cut mutates the
+    /// display list and forces the next `render()` cold. Mode 2 mutates nothing until lift, so the
+    /// question is whether a preview can be had without buying that term.
+    ///
+    /// The three per-sample costs, on the same scene and the same drag:
+    ///
+    /// - **(a) Cut as it was** — no scratch, no preview. `refreshDisplay()` re-reads
+    ///   `renderIfNonEmpty()`, which is memoized on `version`, and `version` does not move during a
+    ///   Mode 2 drag. So this is the cache hit, and it is the floor everything else is measured
+    ///   against.
+    /// - **(b) The exact-span preview** — `cutPreviewEdits` (spatial-index query + the same
+    ///   `cutRanges` probe walk and `splitStroke` pieces the lift uses) and `applyPreview` (erasing
+    ///   the doomed spans out of the scratch and drawing the surviving pieces' end caps back into
+    ///   it). No mutation, no display-list rebuild, no cold render.
+    /// - **(c) A plain footprint punch** — `StrokeCanvasView.stampPath`'s arithmetic exactly: walk
+    ///   from the previous sample to this one at the brush's spacing and stamp eraser dabs. Cheaper
+    ///   than (b), and shows a nib-shaped bite that Mode 2 does not take (see `cutPreviewEdits` on
+    ///   the surviving pieces' end caps), which is why (b) is preferred if it can be afforded.
+    ///
+    /// `scratchToUIImage` is reported alongside because both preview options pay it and (a) does not:
+    /// a `.replacement` role puts the scratch itself in the base slot, so `refreshDisplay` asks the
+    /// texture for a `UIImage` every refresh. It is **Mode 1's existing per-sample cost**, unchanged
+    /// by this work and listed so the total is not read as new.
+    ///
+    /// The drag is the same dense vertical sweep `testCutToIntersectionLiveDragCostPerSample` uses
+    /// (column 0, every 6 pt), so the two live-drag numbers share a fixture as well as a scene.
+    ///
+    /// Bucketed by outcome the way Mode 3's is, though for a different asymmetry. Mode 3's buckets
+    /// are cache hit vs cold re-render; these are "this sample grew the cut" vs "it did not", which
+    /// is a probe walk and a handful of dabs against a spatial-index query that comes back empty.
+    /// Averaging the two together on a drag whose mix is an artefact of the scene would be a number
+    /// about the scene.
+    func testCutPointsLivePreviewCostPerSample() {
+        let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.eraseScenePaintStrokes())
+
+        // Warm-up, same reasoning as the two tests above: faults in the spatial index and the first
+        // render so sample 0 is not charged a one-time cold-cache cost.
+        _ = autoreleasepool { canvas.render() }
+
+        let x: CGFloat = 300
+        var points: [CGPoint] = []
+        var y: CGFloat = 40
+        while y <= 2040 {
+            points.append(CGPoint(x: x, y: y))
+            y += 6
+        }
+        let brush = Self.eraseSceneEraserBrush
+        let size = Self.eraseSceneEraserSize
+
+        // (a) Cut as it was: the per-sample work is `refreshDisplay()`'s re-read of a render whose
+        // version never moves.
+        var noPreview: [Double] = []
+        for _ in points {
+            autoreleasepool {
+                let start = CFAbsoluteTimeGetCurrent()
+                _ = canvas.renderIfNonEmpty()
+                noPreview.append(CFAbsoluteTimeGetCurrent() - start)
+            }
+        }
+
+        // The scratch a `.replacement` role allocates once per gesture: a canvas-sized copy of the
+        // layer's own render. Mode 1 has always paid this; Mode 2 now does too, once, at touch-down.
+        let scratchStart = CFAbsoluteTimeGetCurrent()
+        let scratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
+        let scratchAllocation = CFAbsoluteTimeGetCurrent() - scratchStart
+
+        // (b) The exact-span preview, driven exactly as `recordVectorSample` drives it: one
+        // two-sample increment per touch sample, the previous stored sample to this one.
+        var geometry: [Double] = []
+        var stamping: [Double] = []
+        var geometryWhenCutting: [Double] = []
+        var stampingWhenCutting: [Double] = []
+        var cutting: [Double] = []
+        var idle: [Double] = []
+        var samplesThatFoundInk = 0
+        var piecesPunched = 0
+        var previous: CGPoint?
+        var accumulated: [UUID: [ClosedRange<CGFloat>]] = [:]
+        for point in points {
+            autoreleasepool {
+                let increment = [previous, point].compactMap { $0 }
+                    .map { VectorSample(x: $0.x, y: $0.y, pressure: 1) }
+                previous = point
+                let geometryStart = CFAbsoluteTimeGetCurrent()
+                let edits = canvas.cutPreviewEdits(alongPath: increment, brush: brush, size: size,
+                                                   accumulating: &accumulated)
+                geometry.append(CFAbsoluteTimeGetCurrent() - geometryStart)
+                let stampStart = CFAbsoluteTimeGetCurrent()
+                for edit in edits { VectorCanvas.applyPreview(edit, into: scratch) }
+                stamping.append(CFAbsoluteTimeGetCurrent() - stampStart)
+                let total = geometry[geometry.count - 1] + stamping[stamping.count - 1]
+                if edits.isEmpty {
+                    idle.append(total)
+                } else {
+                    cutting.append(total)
+                    geometryWhenCutting.append(geometry[geometry.count - 1])
+                    stampingWhenCutting.append(stamping[stamping.count - 1])
+                    samplesThatFoundInk += 1
+                }
+                piecesPunched += edits.reduce(0) { $0 + $1.eraseRanges.count }
+            }
+        }
+
+        // The display term both previews pay: `refreshDisplay` reads the scratch as a `UIImage`.
+        // Measured over the first 40 samples only — the texture memoizes on its own version, so
+        // measuring it inside the loop above would have measured a cache hit on the samples that
+        // stamped nothing.
+        var toImage: [Double] = []
+        for i in 0..<40 {
+            autoreleasepool {
+                VectorCanvas.applyPreview(CutPreviewProbe.edit(at: CGFloat(i)), into: scratch)
+                let start = CFAbsoluteTimeGetCurrent()
+                _ = scratch.renderToUIImage()
+                toImage.append(CFAbsoluteTimeGetCurrent() - start)
+            }
+        }
+
+        // (c) The footprint punch, on its own fresh scratch: `stampPath`'s walk, verbatim.
+        let footprintScratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
+        var footprint: [Double] = []
+        var last: CGPoint?
+        let spacing = BrushStamper.stampSpacing(brushSize: size, brush: brush)
+        for point in points {
+            autoreleasepool {
+                let start = CFAbsoluteTimeGetCurrent()
+                if let previous = last {
+                    last = BrushStamper.advance(from: previous, to: point, spacing: spacing) { dab in
+                        BrushStamper.stampDab(into: footprintScratch, at: dab, pressure: 1, brush: brush,
+                                              color: .black, brushSize: size, brushOpacity: 1,
+                                              isEraser: true)
+                    }
+                } else {
+                    BrushStamper.stampDab(into: footprintScratch, at: point, pressure: 1, brush: brush,
+                                          color: .black, brushSize: size, brushOpacity: 1, isEraser: true)
+                    last = point
+                }
+                footprint.append(CFAbsoluteTimeGetCurrent() - start)
+            }
+        }
+
+        func mean(_ values: [Double]) -> Double {
+            values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
+        }
+        // The median and the 95th percentile, not just the mean: on a machine under load one sample
+        // can be descheduled for milliseconds, and a mean over 334 samples carries that outlier into
+        // the published figure. The median says what a sample costs; p95 says what the worst
+        // *routine* sample costs; `max` is reported too but is a machine reading, not a code reading.
+        func percentile(_ values: [Double], _ fraction: Double) -> Double {
+            guard !values.isEmpty else { return 0 }
+            let sorted = values.sorted()
+            let index = Swift.min(Int(Double(sorted.count - 1) * fraction), sorted.count - 1)
+            return sorted[index]
+        }
+        func worst(_ values: [Double]) -> Double { values.max() ?? 0 }
+        let exact = zip(geometry, stamping).map(+)
+
+        report("Mode 2 live-preview cost per sample", [
+            ("paintStrokes", "\(canvas.elements.count)"),
+            ("dragSamples", "\(points.count)"),
+            ("samplesThatFoundInk", "\(samplesThatFoundInk)"),
+            ("spansPunched", "\(piecesPunched)"),
+            ("a_cutTodayNoPreview_median", preciseMilliseconds(percentile(noPreview, 0.5))),
+            ("a_cutTodayNoPreview_mean", preciseMilliseconds(mean(noPreview))),
+            ("b_exactSpanPreview_medianWhenItCuts", preciseMilliseconds(percentile(cutting, 0.5))),
+            ("b_exactSpanPreview_meanWhenItCuts", preciseMilliseconds(mean(cutting))),
+            ("b_exactSpanPreview_p95WhenItCuts", preciseMilliseconds(percentile(cutting, 0.95))),
+            ("b_exactSpanPreview_medianWhenItDoesNot", preciseMilliseconds(percentile(idle, 0.5))),
+            ("b_exactSpanPreview_meanOverAllSamples", preciseMilliseconds(mean(exact))),
+            ("b_exactSpanPreview_max", preciseMilliseconds(worst(exact))),
+            ("b_ofWhichGeometry_medianWhenItCuts", preciseMilliseconds(percentile(geometryWhenCutting, 0.5))),
+            ("b_ofWhichStamping_medianWhenItCuts", preciseMilliseconds(percentile(stampingWhenCutting, 0.5))),
+            ("c_footprintPunch_median", preciseMilliseconds(percentile(footprint, 0.5))),
+            ("c_footprintPunch_mean", preciseMilliseconds(mean(footprint))),
+            ("c_footprintPunch_p95", preciseMilliseconds(percentile(footprint, 0.95))),
+            ("c_footprintPunch_max", preciseMilliseconds(worst(footprint))),
+            ("scratchToUIImage_median", preciseMilliseconds(percentile(toImage, 0.5))),
+            ("scratchAllocationOncePerGesture", preciseMilliseconds(scratchAllocation)),
+            ("elementsAfterTheWholeDrag", "\(canvas.elements.count)"),
+        ])
+
+        XCTAssertGreaterThan(samplesThatFoundInk, 0,
+                             "This scenario only measures what it claims to if the sweep actually crosses strokes")
+        XCTAssertEqual(canvas.elements.count, Self.eraseSceneStrokeCount,
+                       "A preview that changed the display list is not a preview — `cutPreviewPieces` must read only")
+        // The **median**, deliberately: a mean over 334 samples carries one descheduled sample into
+        // the assertion, and a red result would then be a reading about this Mac's other processes
+        // rather than about the preview. See CLAUDE.md on what contention does to a suite.
+        XCTAssertLessThan(percentile(cutting, 0.5), 0.016,
+                          "A per-sample preview costing more than one 60 Hz frame is not live feedback, it is a stutter")
+    }
+
+    /// A throwaway edit for the `scratchToUIImage` measurement above: something must dirty the
+    /// texture between reads, or the memo hands back the same `UIImage` and the number is a lie.
+    private enum CutPreviewProbe {
+        static func edit(at offset: CGFloat) -> VectorCanvas.CutPreviewEdit {
+            let samples = [VectorSample(x: 4, y: 4 + offset, pressure: 1),
+                           VectorSample(x: 12, y: 4 + offset, pressure: 1)]
+            return VectorCanvas.CutPreviewEdit(eraseWalk: samples, eraseSeedID: UUID(),
+                                               eraseRanges: [0...1], restamps: [],
+                                               brush: Brush(name: "Probe", shape: .hardRound, size: 4,
+                                                            hardness: 1),
+                                               size: 4, opacity: 1, color: .black)
+        }
     }
 
     // MARK: - The erase-heavy scene

@@ -4,6 +4,51 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## Cut is a no-op on screen when the eraser is thinner than the line (2026-08-22)
+
+Found while building Mode 2's live preview, and **not introduced by it** — this is how Mode 2 has
+behaved since it was written. Recorded because the preview now shows it honestly, so the artist meets
+it directly instead of only after lifting off.
+
+Mode 2 removes the parametric span of a stroke's centreline that lies under the eraser, then hands the
+two surviving pieces to `BrushStamper`, which gives every stroke **round end caps**. Each cap reaches
+back into the gap by the stroke's own radius. Cut a 40pt line with an 8pt eraser and the two caps meet
+in the middle: the display list gains an element and **zero pixels change**. MEASURED —
+`VectorCutPreviewLogicTests.testAStrokeThickerThanTheEraserPreviewsTheNothingThatTheCutActuallyTakes`
+asserts the pixel delta is exactly 0.
+
+The cut is real and useful — the line is now two strokes that can be moved apart — but nothing on
+screen says so. Before the live preview the artist at least saw the same nothing *after* lifting; now
+they watch nothing happen for the whole drag, which is a more pointed version of the same question.
+
+**This is an owner decision, not a defect to pick a fix for.** The options are not equivalent:
+
+- Leave it. Cut is a geometry tool; a thin eraser across a thick line is a request the tool answers
+  precisely and invisibly.
+- Refuse it — a cut whose span is shorter than the stroke's own diameter changes nothing visible, so
+  it could be declined, leaving the stroke whole and the eraser feeling like it missed.
+- Widen it — grow the span by the stroke's radius so the gap actually opens, at the cost of the cut no
+  longer landing where the artist aimed.
+
+Nothing was changed here. The preview reports the current behaviour faithfully, which is the most a
+preview should do about it.
+
+## Mode 2's preview draws into a flattened copy, so a crossing stroke flickers (2026-08-22)
+
+The live preview seeds a scratch raster from `VectorCanvas.render()` — a **flattened** image — and
+erases the doomed spans out of it. A second stroke whose *ink* overlaps a doomed span, but whose
+*centreline* stays outside the eraser, is not cut and keeps all its ink after the lift; in the preview
+its overlapping pixels go with the span and come back the moment the finger comes up.
+
+Bounded by construction: the region at risk is the overlap of two strokes inside one eraser footprint.
+`VectorCutPreviewLogicTests.testInkThatSurvivesTheCutIsBrieflyErasedFromTheFlattenedPreview` pins it
+under 10% of what the cut removes, so a change that made it large would fail rather than be noticed by
+somebody drawing.
+
+The exact fix is to re-render the affected strokes instead of drawing into a flat copy, and that is
+precisely the term that makes Mode 3 cost ~95 ms a sample (PERFORMANCE.md items 10 and 17). Not worth
+it for a flicker on a crossing, unless the owner reports seeing it.
+
 ## The mask cache is the one canvas-sized cache with no byte bound (2026-08-20)
 
 Found while reconciling the app's memory budgets for PERFORMANCE.md item 13, and deliberately not

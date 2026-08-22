@@ -285,17 +285,32 @@ final class Mode1UITests: VectorEraserTestSupport {
 
 }
 
-/// The two cutting modes (Mode 2 "Cut", Mode 3 "To Cross"): the shared no-live-preview property,
-/// and Mode 3's per-crossing resolution.
+/// The two cutting modes (Mode 2 "Cut", Mode 3 "To Cross"): which of them previews, and Mode 3's
+/// per-crossing resolution.
 final class CuttingModesUITests: VectorEraserTestSupport {
 
-    // MARK: - Cutting modes share no live preview
+    // MARK: - Which cutting mode previews, and why they differ
 
-    /// The other side of the same plumbing, and the reason `.none` exists as a distinct role: Modes
-    /// 2 and 3 have nothing to preview — Mode 3 commits during the drag and Mode 2 on lift, so the
-    /// canvas render alone is always the truth. Previewing them anyway would cost a canvas-sized
-    /// allocation and a full-canvas composite *per touch sample* for no visible effect.
-    func testCuttingModesDoNotPayForALivePreview() throws {
+    /// **Cut previews live; To Cross does not, and does not need to.** The two look identical to the
+    /// artist — ink vanishing under the finger — and get there by opposite routes, which is the
+    /// whole content of this test.
+    ///
+    /// - **Cut** (`.cutPoints`) commits nothing until lift, so a copy of the layer's render is put
+    ///   on screen with the doomed spans erased out of it: role `replacement`, frames climbing
+    ///   through the drag. This is `.erase`'s mechanism, not `.cutToIntersection`'s — it mutates no
+    ///   geometry and forces no cold re-render.
+    /// - **To Cross** (`.cutToIntersection`) commits a *real* cut on every touch sample, so the
+    ///   canvas render already is the feedback. A scratch would be a canvas-sized allocation showing
+    ///   what is on screen already: role `none`, zero frames.
+    ///
+    /// **This test asserted the opposite until 2026-08-22**, and its old doc comment argued that
+    /// both cutting modes previewing nothing was deliberate, costing "a canvas-sized allocation and
+    /// a full-canvas composite per touch sample for no visible effect". The premise was wrong for
+    /// Cut and the owner overruled it: *"the to cut eraser does not have live feedback like the to
+    /// cross eraser, it only applies when the eraser is lifted"*, and then, after an investigation,
+    /// *"I still would like it to be live feedback."* There was a visible effect. It was the ink not
+    /// going away.
+    func testCutPreviewsLiveAndToCrossStillDoesNot() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         addVectorLayer(app)
@@ -304,14 +319,76 @@ final class CuttingModesUITests: VectorEraserTestSupport {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
 
-        for mode in ["Cut", "To Cross"] {
-            selectVectorEraserMode(app, mode)
-            drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.42), to: CGVector(dx: 0.5, dy: 0.58))
-            let trace = gestureTrace(canvas)
-            XCTAssertEqual(trace?.role, "none", "'\(mode)' should allocate no preview scratch at all")
-            XCTAssertEqual(trace?.frames, 0, "'\(mode)' should publish no preview frames")
-            app.buttons["sideToolbar.undoButton"].tap() // restore the stroke for the next mode
+        // A pressed-and-held drag rather than `drawLine`, for the reason
+        // `testMode1PublishesLivePreviewFramesThroughoutTheGesture` gives: the frame *count* is the
+        // only observable evidence that a preview followed the finger, and a flick delivers too few
+        // touch-moves to tell "followed the finger" from "drew the touch-down frame once".
+        func dragAcrossTheLine() {
+            let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+            let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.60))
+            start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
         }
+
+        selectVectorEraserMode(app, "Cut")
+        dragAcrossTheLine()
+        let cut = gestureTrace(canvas)
+        XCTAssertEqual(cut?.role, "replacement",
+                       "Cut must preview by replacing the display with a copy of the layer's render "
+                       + "that has the doomed spans erased out of it (VectorScratchRole.replacement) "
+                       + "— 'none' is the artist dragging an eraser and seeing nothing happen")
+        XCTAssertGreaterThan(cut?.frames ?? 0, 1,
+                             "The erased copy must reach the screen repeatedly *during* the drag. "
+                             + "Exactly 1 frame is the touch-down frame alone, i.e. feedback that "
+                             + "never follows the finger")
+        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5, timeout: 5),
+                      "…and the cut itself must still land on lift")
+
+        app.buttons["sideToolbar.undoButton"].tap() // restore the stroke for the next mode
+
+        selectVectorEraserMode(app, "To Cross")
+        dragAcrossTheLine()
+        let toCross = gestureTrace(canvas)
+        XCTAssertEqual(toCross?.role, "none",
+                       "To Cross must allocate no preview scratch: it has already committed real "
+                       + "cuts during the drag, so the canvas render is the feedback")
+        XCTAssertEqual(toCross?.frames, 0, "…and so must publish no preview frames")
+    }
+
+    /// **One gesture, one undo step, and undo puts the whole line back.** The preview and the commit
+    /// are two readings of one drag; if the preview ever committed as well, the first undo press
+    /// would land on a half-cut layer instead of on the line as drawn.
+    ///
+    /// This is also the residue test. The scratch holding the preview is released in
+    /// `StrokeCanvasView.endVectorScratch`, and the display falls back to the canvas's own render —
+    /// so if a released preview could survive on screen, undoing the cut would leave the erased
+    /// notch visible over restored geometry, which reads to the artist as corrupted artwork rather
+    /// than as a bug in a preview.
+    func testACutIsStillOneUndoStepNowThatItPreviews() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        addVectorLayer(app)
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1, "Setup: one stroke")
+
+        selectVectorEraserMode(app, "Cut")
+        drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.40), to: CGVector(dx: 0.5, dy: 0.60))
+        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5, timeout: 5), "The cut should land")
+        let afterCut = vectorMarkerViaPanel(app, layerIndex: 1)
+        XCTAssertEqual(afterCut?.strokes, 2, "Cut splits the line into two pieces")
+        XCTAssertEqual(afterCut?.erases, 0, "…geometrically: Cut retains no punch")
+
+        app.buttons["sideToolbar.undoButton"].tap()
+
+        let afterUndo = vectorMarkerViaPanel(app, layerIndex: 1)
+        XCTAssertEqual(afterUndo?.strokes, 1,
+                       "One undo press must restore the whole line. Reading 2 means the preview "
+                       + "committed a cut of its own and the gesture was applied twice")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                       "…and the restored ink must actually be on screen, with no released preview "
+                       + "left sitting over it")
     }
 
     // MARK: - Mode 3

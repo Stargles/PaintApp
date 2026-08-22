@@ -36,11 +36,15 @@ enum VectorEraser {
         /// (mirroring `BrushStamper`'s half-point diameter floor), so this is always positive and the
         /// probe walk always terminates.
         let probeStep: CGFloat
-        let mode: VectorEraserMode
 
         /// Nil when the gesture has no footprint at all (no samples) — the caller reads that as
         /// "nothing to erase" and skips the whole traversal.
-        init?(samples: [VectorSample], brush: Brush, size: CGFloat, mode: VectorEraserMode) {
+        ///
+        /// **Carries no mode.** It held one until 2026-08-22 and nothing ever read it: which mode is
+        /// running is the *caller's* branch (`VectorCanvas.erase`'s switch), and a footprint is a
+        /// footprint whichever of them asked for it. Storing it invited a future reader to believe the
+        /// sweep behaved differently per mode, which it never did.
+        init?(samples: [VectorSample], brush: Brush, size: CGFloat) {
             let capsules = StrokeGeometry.capsuleChain(samples: samples, brush: brush, size: size)
             guard let bounds = StrokeGeometry.bounds(of: capsules) else { return nil }
             var smallest = CGFloat.greatestFiniteMagnitude
@@ -48,7 +52,6 @@ enum VectorEraser {
             self.capsules = capsules
             self.bounds = bounds
             self.probeStep = max(smallest, StrokeGeometry.epsilon)
-            self.mode = mode
         }
 
         /// Whether `point` lies under the eraser's footprint.
