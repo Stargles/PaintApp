@@ -20,73 +20,22 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-**Session 61 halted at 97% usage. Three branches are committed but NOT merged — none finished its
-final verification run, and this repo does not merge a count nobody read.** Each has its own worktree
-and branch; `git log --oneline origin/main..tmp/<name>` shows the work.
-
-- **`tmp/move-overlay` — owner asks (c) and (d), 3 commits, rebased onto `1253640`. Verified;
-  the merge is the owner's, and it is `--ff-only` clean.** Commits: "The Move box gets the screen's units, and its drag stops
-  rasterizing" and a SESSION_LOG line. **(c) is measured**: the Move drag cost **96.1 / 99.9 / 107.8
-  ms per touch-move sample** at 2048x1024, three runs, control within 6% — which is the owner's
-  reported ~5 fps, found rather than guessed; a **fourth reading of 102.3 ms** (after 0.004 ms,
-  control 41.7 ms) came off the post-rebase fast tier and sits inside the first three.
-  **The count that was owed is now read.** Both rebases were doc-only replays — `git ls-tree -r` over
-  `PaintSoftware PaintSoftwareUITests PaintSoftware.xcodeproj` hashes to `8a3103a7` before the rebase
-  onto `f53dbdc`, after it, and again after a second onto `1253640` when `tmp/lassomove-rulings`
-  landed mid-verification, so no source byte has moved and the runs below measure this tree — and the
-  post-rebase fast tier reads **1513 total / 1510 passed / 0 failed / 3 skipped**, +32 over the 1481
-  baseline, which is exactly the 32 new test functions (31 `ObjectTransformLogicTests` + 1
-  `PerfBaselineTests`). pbxproj duplicate detector `[]`. The three UI classes this branch owed ran in
-  isolation on `move-overlay-1` and read **13 total / 12 passed / 0 failed / 1 skipped**:
-  `VectorLayerContentUITests` 5/5 (including
-  `testContentDrawnOnAMovedVectorLayerLandsWhereItWasDrawn`, the real vector-Move drag),
-  `SelectionAndMoveUITests` 4/4, `CanvasTransformFreezeUITests` 3/3 — the fourth is a standing
-  `XCTSkip` ("XCUITest cannot synthesise a stationary hold"), in a file this branch never touched.
-  **What is still owed is the owner's finger**, not a run: whether a 14 pt grip is findable at the
-  zoom they work at, and what the frame rate is in Release on an A13.
-- **`tmp/lasso-active` — owner ask (b), verified and ready. Not merged: the owner merges.** Two
-  commits — "Keep the toolbar's Select/lasso icon blue while a selection is live" and this close-out.
-  Rebased twice, and the two are not the same case. The first, onto `56cdb8b`, **moved no source** —
-  `git ls-tree -r` over `PaintSoftware PaintSoftwareUITests PaintSoftware.xcodeproj` hashes to
-  `31183786…` either side of it. The second, onto `356f0cb` after `tmp/move-overlay` merged
-  mid-verification, **did** (`34b1a6fb…` → `556436c2…`), so every run below was redone against it
-  rather than carried over. **The question the halt left open is answered, and
-  it is the display half — the selection already survived a tool change.** `selectedTool`'s `didSet`
-  only writes to the ActionRecorder; the sites that clear `selection` are `handleActiveContextChanged`,
-  `deselect`, `beginMove`, `beginDuplicate` and `setCanvasPadding`, none of them a tool change; and
-  `CanvasView.swift`'s `selectionClipPath` already clipped a brush/eraser/fill stroke to a live
-  selection whichever tool was current. The commit only rebinds the icon's `isActive` from
-  `activePanel == .select` to `CanvasManager.selectIconIsActive`, so **the blast radius is the toolbar
-  icon, not selection lifetime** — nothing that assumed a tool change cleared a selection is disturbed,
-  because nothing ever did. Fast tier **1525 / 1522 passed / 0 failed / 3 skipped** from the xcresult,
-  **+12** on the 1513 `origin/main` now carries — exactly `SelectionPersistenceLogicTests`'s twelve,
-  and the same +12 a static `func test` count gives across the fast-tier classes on both trees; the
-  three skips are the pre-existing perf baselines. pbxproj duplicate-id check prints `[]` **after**
-  the rebase that merged that file. The four
-  selection/toolbar UI classes are green **18/18** on a device of its own: `ToolPanelsUITests`,
-  `SelectionAndMoveUITests`, `EraserAndPersistenceUITests`, `SelectionPencilOnlyUITests`. **One UI
-  test added**, `ToolPanelsUITests.testSelectIconStaysLitWhileAnotherToolIsCurrent` — the branch's
-  twelve headless tests pin the predicate but cannot see the toolbar (`TopToolbar.swift` is a `View`
-  file outside the logic-test target's compile, which is why the predicate had to become a static
-  function at all), and it fails against the pre-fix wiring restored by hand, so it pins the behaviour
-  rather than merely agreeing with it.
-- **`tmp/lassomove-rulings` — docs only, 1 commit (a WIP commit made by the halt).** Folds the
-  owner's three rulings of 2026-08-21 into `LASSO_MOVE.md`: **centreline selection** (confirmed
-  knowingly, with the "a 40pt stroke whose spine is outside the loop will not move" consequence
-  stated to them); **one undo step per nudge** (matching what session 56 gave the whole-layer
-  transform); and the third, which is richer than the question asked and reshapes stage 1 —
-
-  > *"when you lasso and move, the part that is lassoed should be in a temporal non commit stage with
-  > move nodes. You can move it freely, and when it bakes it should clear on commit"*
-
-  That is the **existing floating-piece lifecycle** (`Views/FloatingPieceOverlayView.swift`,
-  `commitFloatingPieceIfNeeded` in `SelectionModels.swift`), so the vector path should adopt it
-  rather than grow a parallel one. Two things were left open for whoever finishes it: the undo ruling
-  and the floating model are in tension (the **split must belong to the first nudge's undo step**, or
-  undoing past it leaves a stroke cut in half with nothing moved), and `FloatingPieceOverlayView` is
-  the *other* half of `BUGS.md`'s duplicated-overlay entry — it must converge on Stage 4's
-  `TextTransformOverlayView` pattern or the new feature ships with the very shrink-with-zoom bug the
-  owner reported today.
+- [ ] **The second-fill race, on the lasso path only** — `tmp/lassorace`. Owner, on device
+      2026-08-21: *"remember that weird bug when you filled something and then filled another thing
+      while the previous thing was unbaked and it did the weird fill thing? that bug is present in
+      the lasso bug right now. currently I havent found the normal fill to do it though."* The
+      generation guard `2226ef0` gave the normal fill does not reach the lasso path. **The owner's
+      negative half is the lead**: whatever differs between the two paths is where it lives.
+      Carrying two more owner asks on the same branch, as separate commits:
+      **the gap-closing and edge-overlap sliders must be inverted in lasso mode**, in the sense that
+      *"moving the gap closing slider up means bigger gaps get filled, and moving the edge overlap up
+      means the fill gets bigger."* Edge overlap is currently hard-zeroed in lasso mode
+      (`CanvasManager+Fill.swift:215`) **on my instruction, which was wrong** — the owner reports the
+      fill bleeding at antialiased edges, which is the halo that control exists to close.
+      The owner has also ruled that the two modes are **not** meant to agree pixel-for-pixel, and that
+      more gap closing making the normal fill smaller while making the inverted fill bigger is
+      *intended*. So the properties to pin are single-mode and monotonic — the gap width that seals
+      grows with the slider, the filled area grows with edge overlap — not a cross-mode parity.
 
 ## Queued
 
@@ -102,10 +51,6 @@ tools on a **vector layer**, framed as "isn't inline" with how they should work)
       strokes it crosses (see the vector eraser's split/punch decision). **The owner has already ruled
       it out for text — "it's okay if it moves text whole," since splitting a `TextFrame` mid-glyph is
       not a sane operation.**
-- [ ] **(b) The lasso tool icon should stay highlighted while a different tool is briefly in use.**
-      *Owner: "when you click the lasso icon, lasso, then pick eraser or brush or fill, the lasso icon
-      should still stay blue. Blue means the lasso is currently on. Currently only lasso and move are
-      able to both be blue."* A toolbar highlight-state question, not a canvas one.
 - [ ] **[PERFORMANCE.md](PERFORMANCE.md) item 14's cheap half: stop writing and loading a raster tier
       for cels that carry no raster content.** Re-opened by the owner's stated intent for a real
       document (100–200 frames, 3–5 drawn layers — 300–1000 drawn cels, OWNER-STATED, and an
@@ -123,6 +68,21 @@ tools on a **vector layer**, framed as "isn't inline" with how they should work)
       See PERFORMANCE.md item 14 for the full mechanism, citations and the corrected arithmetic.
 
 ## Done this pass
+
+- **(b) The lasso icon stays lit while another tool is in use** — and the answer to the question the
+  branch was really asking is that **the selection already survived a tool change; only the readout
+  lied.** Proved from the tree rather than from prose: the fix adds no code to any clearing path (one
+  changed argument in `TopToolbar` plus one pure static predicate), no clearing site is a tool change
+  (`selectedTool`'s `didSet` only writes to `ActionRecorder`), and `CanvasView` was already handing
+  the stroke view `selectionClipPath` regardless of which tool was current — so brush, eraser and
+  fill were being clipped to the selection all along. Blast radius is the icon alone.
+  The predicate became a static function precisely so it could be tested: `TopToolbar.swift` is a
+  `View` file outside the logic target's compile. The new XCUITest is **verified non-vacuous** — with
+  the pre-fix wiring restored by hand it fails on its own assertion, which is the check that
+  separates a real test from one that would pass against anything.
+  1525 / 1522 passed / 0 failed / 3 skipped, +12 over 1513, matched by a static `func test` count on
+  both trees. UI suites 18/18. Note `ToolsAndSelectionUITests` is a **file, not a class** — a selector
+  naming it matches nothing and still prints green.
 
 - **(c) and (d): the Move drag, and handles that keep their size.** Owner: *"Move is extremely slow on
   a vector layer"* and *"the move nodes' size doesn't stay constant to the screen, and right now they
