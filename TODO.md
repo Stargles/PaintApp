@@ -20,23 +20,61 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- **(a) the lasso move** — being designed.
+Nothing.
 
 ## Queued
 
-New this pass (owner, 2026-08-21, given after the device pass — four asks about the lasso and move
-tools on a **vector layer**, framed as "isn't inline" with how they should work):
+Nothing — the owner's list is empty. Two things are *carried*, both deliberate and neither an ask:
 
-- [ ] **(a) A lasso selection should move only the selected part, not the whole drawing — text
-      excepted.** *The owner's own framing, close to their words: "the move tool: when selected, it
-      moves your entire drawings on the cel. This is currently correct, nothing needs to change.
-      However, when you lasso and then move, only the parts inside the selection should be moved."*
-      This is a real feature, not a fix: it means splitting `VectorStroke` geometry at the selection
-      boundary and cutting a region out of a fill, the way the vector eraser already splits and punches
-      strokes it crosses (see the vector eraser's split/punch decision). **The owner has already ruled
-      it out for text — "it's okay if it moves text whole," since splitting a `TextFrame` mid-glyph is
-      not a sane operation.**
+- **The raster Move's undo half of ruling 4 is not built** (the vector half and selection-at-bake shipped). A
+  raster nudge changes only `FloatingPiece.transform`, which is transient and not in the document, so per-nudge
+  steps must be transient — and the bake step then sits on top of them and its undo restores the pre-move cel,
+  killing every step beneath. Making it work means the bake step's undo *re-creating the float* at its last
+  transform, which doubles what a raster Move retains in history and needs `finalizePendingGesturesForHistoryAction`
+  to grow a raster-float arm it has never had. That is a second feature. See LASSO_MOVE.md §3 stage 4.
+- **[ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)'s first finding**, unruled: fourteen places decide who owns
+  a canvas touch and none of them is *the* place. Four defects trace to it, three in the last week. The remedy
+  is one pure `CanvasTouchOwner` type, and it is the one item that pays for itself on the **first** new tool —
+  which matters, because the next session is large features.
+
 ## Done this pass
+
+- **(a) A lasso selection moves only what is inside it** (`a5fa3b2`). Draw a loop with Select on a vector layer
+  and tap Move: the lassoed ink lifts out in one frame — strokes the loop crosses are **cut at the boundary**,
+  a fill loses the chunk that was inside, text and placed images come whole if their centre is in. Drag at
+  60 fps with the marching ants travelling with the piece; tap Move again, switch tools or save, and it bakes.
+  Undo walks back one drag at a time and one more press rejoins the cut stroke. A loop that caught nothing does
+  nothing — it does **not** fall back to moving the whole drawing.
+
+  **Five owner rulings taken 2026-08-22, on top of §5's six.** The load-bearing one: *"The lasso will only pick
+  up and move whatever is inside of it. If the hole is fully inside, it moves it. If its outside, it wont."* —
+  which **overruled the design's proposal that eraser marks never move and never split**. An erase element now
+  takes exactly the same centre-line test and the same split treatment as a paint stroke, which is both simpler
+  and consistent with this app's own "the eraser is a stroke" decision. Two consequences are handled rather than
+  discovered: a punch-only float renders legitimately blank (a punch lowers alpha on what is beneath it *in the
+  same list*, so alone on transparency it draws nothing) and is latched anyway; and both halves of a split
+  replace the parent **at the parent's index**, so a moved punch keeps its z-position.
+
+  Also settled: undo past the move rejoins the line; an empty lasso does nothing; the raster Move inherits
+  selection-at-bake and travelling ants. **The ants ruling was corrected mid-build** — the design proposed
+  leaving them where drawn, LASSO_MOVE.md §5 had already argued they travel "which is what Photoshop and
+  Illustrator do", and the spec won.
+
+  1617 fast-tier tests (1614 passed, 0 failed, 3 skipped) = 1591 + 26, static `func test` 1730 against 1703
+  with the extra one an XCUITest. The conservation-of-ink test — a lift-and-bake with no drag is pixel-identical
+  to the drawing before it — was watched failing at *"Composites differ at (22, 15) channel A: got 182,
+  expected 255"*.
+
+- **[ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)** (`6e1f9ce`), written for the next session's large
+  features. **Fourteen independent decisions across three unrelated mechanisms** arbitrate one canvas touch —
+  recognizer `isEnabled`, `isUserInteractionEnabled`, and five `hitTest` overrides — with `shouldRequireFailure`
+  reading three of them back. Four defects trace to it, three from this week including today's pick tool and
+  the shape-outline drag (*a different mechanism, same class*). **It is structural, not sloppiness**:
+  `activePanel` is `@State` on `DrawingView` while `selectedTool` and `floatingPiece` are on `CanvasManager`,
+  so no object can see all the inputs and no single function can be written. Also: eleven hand-written cache
+  keys, every save-failure path returning silently, and a persisted layer property living in four hand-kept
+  structs.
+
 
 - **(h) The pick tool works while the Select panel is open** (`dd89769`). Owner: *"The pick tool does not work
   when the lasso select tool is selected."* Reported first as a fill-tool problem, withdrawn as a false alarm,
