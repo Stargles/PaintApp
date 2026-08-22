@@ -475,11 +475,13 @@ kernel void lassoInvert(const device uchar4* reference  [[buffer(0)]],
 // 0, 64, 160 — the table in `testTheFillsSoftEdgeComesFromTheArtworksOwnAntialiasing`. At radius 0 the
 // fill therefore reaches exactly as far as the ink does and not one pixel further, which is what
 // *"on the high setting it is on the outer edge"* means in pixels. The same table says the fringe
-// pixel composites 64 over 213 and lands at alpha 223, so ~12% of the background shows through one
-// pixel of the outline. Closing *that* needs the fill's own fade to land on paper the ink does not
-// occupy, and the owner has ruled the fill may not go there. The fade has one place to be and this is
-// which side of the line it is on; a hard cut at the ink's outer extent is the only third option and
-// it trades the halo for jaggies.
+// pixel lands at alpha 223 — the fill's 213 over the ink's 64 — so ~12% of the background shows
+// through one pixel of the outline. **The fill now composites over that ink rather than under it and
+// the 223 did not move**, because `over` combines alpha as `a1 + a2 - a1*a2`, which is symmetric:
+// inverting the stack changes the fringe's colour, not its opacity. Closing the 12% needs the fill's
+// own fade to land on paper the ink does not occupy, and the owner has ruled the fill may not go
+// there. A hard cut at the ink's outer extent is the only third option and it trades the halo for
+// jaggies.
 //
 // Mechanically this is `lassoEdgeDilate` with `min` for `max` and the early-out flipped — 0 absorbs,
 // where 255 used to — and it keeps that kernel's `insideArtworkRect` guard for the reason that
