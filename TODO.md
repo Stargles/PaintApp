@@ -22,6 +22,7 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 - **PERFORMANCE.md item 14's cheap half** — `tmp/rasteromit`.
 - **(f) the cut eraser's live feedback** — `tmp/cuteraser`, opened with the owner's refutation ask.
+- **(h) the pick tool is dead while the Select panel is open** — `tmp/pickselect`.
 
 ## Queued
 
@@ -74,6 +75,22 @@ New this pass (owner, 2026-08-22, given while the lasso Edge Overlap rebuild was
       so "give Mode 2 the same live path" may mean giving it the same cost, and that wants measuring
       rather than assuming. It also compounds with the footprint eraser, which cuts every stroke it
       covers rather than one.
+
+New this pass (owner, 2026-08-22, while testing on the iPad):
+
+- [ ] **(h) The pick tool does nothing while the lasso Select tool is up.** Owner: *"The pick tool does not
+      work when the lasso select tool is selected."* First reported as "paint dropper tool doesnt work when in
+      fill tool mode", withdrawn as a false alarm, then reproduced precisely — **the fill tool was never
+      involved**; it is the Select *panel*. There is no `.select` case in `Tool`, so "the lasso select tool" is
+      `ActivePanel.select`, and two lines conspire:
+      [CanvasView.swift:1749](PaintSoftware/Views/CanvasView.swift:1749) disables the eyedropper's recognizer
+      whenever `activePanel == .select`, while
+      [CanvasView.swift:1617](PaintSoftware/Views/CanvasView.swift:1617) leaves the selection overlay capturing
+      because it never consults `selectedTool`. Arming the dropper does not close the panel, so nothing
+      re-enables it: the recognizer is off and the overlay eats the tap as the start of a lasso. The guard has a
+      real purpose — the overlay owns single-touch gestures while it is up — it simply never considered a
+      *momentary* tool being armed on top of it, which is precisely what
+      [Tool.swift:11-20](PaintSoftware/Models/Tool.swift:11) says the eyedropper is for.
 
 ## Done this pass
 
