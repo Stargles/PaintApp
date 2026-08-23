@@ -20,7 +20,24 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-Nothing.
+- **(k) stage 1 — the vector float's corner and rotate nodes** — `tmp/movenodes`.
+
+New this pass (owner, 2026-08-23, after testing the touch-ownership build):
+
+- [ ] **(k) Expand the Move tool, loosely after Procreate.** Owner: *"when moving, there should be an option
+      menu on the bottom instead of still keeping the select menu, in which different types of moving can be
+      done."* **Uniform** (today's raster behaviour), **Freeform** (corner drags scale x and y independently),
+      **Distort** (each of the 4 corners moves independently, turning the box into a quadrilateral, with the
+      contents foreshortening — "useful for 3d perspective"). **Warp is explicitly declined** — *"Unlike
+      procreate, Warp will not be a feature (like liquify)."* Plus **Flip Horizontal**, **Flip Vertical** and
+      **Rotate 45°**. Also reported: *"the move tool on vector layer does not have any move nodes for rotate or
+      scale"* — which a read of the tree narrowed to the **lasso** path specifically; whole-cel vector Move
+      already has all six handles, and one constant restricts the lasso float to `[.body]`.
+      **Two rulings taken 2026-08-23**: the **yellow node rotates the box only** while the green one rotates
+      box and art; and vector Distort **maps existing stroke points with no subdivision** — *"do no subdivision
+      for now... then if i tell you subdivision may be necessary, go for it."*
+      Four stages, each shippable alone: (1) the missing handles, (2) the Move menu, (3) Freeform + the yellow
+      node, (4) Distort. See the design in the branch.
 
 ## Verified on the device
 
