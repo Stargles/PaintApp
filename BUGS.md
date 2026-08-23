@@ -563,6 +563,26 @@ the action recorder (see CLAUDE.md), reproduce it on the iPad, and read which re
 — the recording carries every state transition and every `shouldRequireFailureOf` answer, which is
 exactly the evidence the simulator refused to produce.
 
+**One hypothesis is now eliminated by reading, 2026-08-22, and it was the obvious one.**
+`shouldRequireFailure` (`CanvasView.swift`) is the code that can wedge a transform behind a stroke
+recognizer — its own comment at the call site says so — so it was the natural suspect. It cannot be
+this instance. Its guard requires `activeHost.isUserInteractionEnabled`, which is `shouldInteract`,
+which requires `selectedTool.paintsOnCanvas` — and **`Tool.fill.paintsOnCanvas` is false**. So with
+Fill selected the guard fails and the function returns `false`: *no failure dependency is stated at
+all*, and there is nothing in that state to wedge. Reached independently by two readers before the
+`CanvasTouchOwner` refactor and confirmed after it, which changed this line from reading flags
+`reconcileLayers` had pushed onto the host to recomputing the predicate live — the right direction for
+the *class* of defect, but it does not intersect this instance, and the owner should **not** be asked
+to re-test this as a fix check.
+
+Two facts found on the way, worth keeping: **`strokeRecognizer.isEnabled` is read here and assigned
+nowhere in the app**, so that third conjunct has always been a no-op defaulting to `true`; and a
+staleness race between an input changing and the next `reconcileLayers` pass would be *intermittent*,
+where this report is deterministic ("pick Fill and the canvas will not pan"). The capture is now
+**more** worth taking than it was, because `shouldRequireFailureOf` records every answer to the
+ActionRecorder and that answer is now computed from live state rather than from a flag pushed a pass
+earlier — so the `failureRequirement` lines are evidence about the moment of the gesture.
+
 ## A mask sourced from a graded group can be stale (2026-08-15)
 
 A group used as a mask **source** whose effect reshapes coverage — blur, outline, bloom, Sobel,
