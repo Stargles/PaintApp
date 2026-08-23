@@ -377,6 +377,7 @@ final class ShapeOverlayView: UIView {
     /// Claims the handles and the outline. Everywhere else the overlay is transparent to touch, so
     /// the canvas underneath keeps receiving strokes, fills and two-finger gestures while a shape is
     /// pending.
+    ///
     /// **The ownership half of `hitTest`, asked on its own.** `hitTest` answers two questions at
     /// once — *is this touch mine* and *which view of mine is hit* — and only the first is the
     /// arbitration this canvas gets wrong. Split out, it is what `CanvasView.Coordinator.canvasChrome(at:)`

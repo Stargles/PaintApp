@@ -1443,6 +1443,13 @@ struct CanvasView: UIViewRepresentable {
 
         /// Drives `ObjectTransformOverlayView` from the active vector layer's aggregate transform
         /// while `isVectorTransforming` is on — the only remaining user of this overlay.
+        /// **A producer, not a consumer of `CanvasTouchOwner`.** Whether the Move box is up turns on
+        /// `activeCelIsInBetween`, `canvasSize` and whether the active cel even holds a
+        /// `VectorCanvas` — none of which `CanvasTouchInputs` carries, and adding them would make the
+        /// input space of the ownership question the whole document. What this feeds into the shared
+        /// answer is `ObjectTransformOverlayView.claimsTouch(at:)`, via `canvasChrome(at:)`. Note the
+        /// whole-layer arm below tests `isLayerEffectivelyVisible` and the float arm does not — the
+        /// asymmetry `CanvasTouchOwnerLogicTests.isReachable` cites.
         func updateTransformOverlay() {
             guard let overlay = transformOverlay, let container = containerView else { return }
             // **Ahead of the whole-layer arm.** A lasso move's box is about a *region* of the cel, so
@@ -1774,9 +1781,14 @@ struct CanvasView: UIViewRepresentable {
         /// point in the container's space is a point in each of theirs; `handleTextPress` has relied
         /// on that since it grew its own hand-rolled version of this function.
         ///
-        /// The order is front-to-back as `makeUIView` adds them: the text grips sit above the editor
-        /// (a corner's target overlaps the move band, and the resize is the more specific gesture),
-        /// and the Move box above the guides.
+        /// **The order is a stated precedence, not a reading of the view stack.** Every one of these
+        /// five is `bringSubviewToFront`-ed by its own `update*` pass, so their real z-order depends
+        /// on which pass ran last and is not something this function could ask. Only the first two
+        /// are load-bearing today — `handleTextPress`, the one caller, asks whether the point is a
+        /// live text box or one of its grips, and the text grips come first for the reason
+        /// `makeUIView` gives where it adds them: a corner's target overlaps the move band, and the
+        /// resize is the more specific gesture. A caller that needs a different tie-break between the
+        /// other three should say so here rather than at its own site.
         func canvasChrome(at point: CGPoint) -> CanvasTouchChrome {
             if textTransformOverlay?.claimsTouch(at: point) == true { return .textHandle }
             if textOverlay?.claimsTouch(at: point) == true { return .textBoxOrBand }
@@ -1876,6 +1888,12 @@ struct CanvasView: UIViewRepresentable {
             scheduleShapePreviewRenderIfNeeded()
             // Above every layer host so it's visible and hit-testable; interaction is disabled
             // during shape following so touches pass through to the stroke view instead.
+            //
+            // **A producer, not a consumer of `CanvasTouchOwner`, and deliberately left one.**
+            // `isShapeInAdjustableState` turns on `shapeGestureActive` and `resolvedShape` — state
+            // none of that type's four inputs can see — so it cannot be an answer read back out of
+            // it. What it feeds in is `ShapeOverlayView.claimsTouch(at:)`, which is the half of this
+            // view's `hitTest` that *is* arbitration, and which `canvasChrome(at:)` asks.
             container.bringSubviewToFront(overlay)
             overlay.isUserInteractionEnabled = isAdjustable
         }

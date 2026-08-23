@@ -180,6 +180,7 @@ final class TextTransformOverlayView: UIView {
     /// text box's move band underneath it, and the canvas under that, keep receiving everything they
     /// did before — the same discipline `ShapeOverlayView` and `TextOverlayView` both follow, and
     /// what lets a tap elsewhere commit this box and place the next one.
+    ///
     /// **The ownership half of `hitTest`, asked on its own.** `hitTest` answers two questions at
     /// once — *is this touch mine* and *which view of mine is hit* — and only the first is the
     /// arbitration this canvas gets wrong. Split out, it is what `CanvasView.Coordinator.canvasChrome(at:)`

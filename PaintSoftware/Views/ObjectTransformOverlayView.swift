@@ -221,6 +221,7 @@ final class ObjectTransformOverlayView: UIView {
     ///
     /// A grip can sit outside this view's bounds (the knob, on a layer at the top of the canvas), so
     /// containment in `bounds` is deliberately not consulted; `target(at:)` is the whole test.
+    ///
     /// **The ownership half of `hitTest`, asked on its own.** `hitTest` answers two questions at
     /// once — *is this touch mine* and *which view of mine is hit* — and only the first is the
     /// arbitration this canvas gets wrong. Split out, it is what `CanvasView.Coordinator.canvasChrome(at:)`

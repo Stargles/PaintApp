@@ -394,6 +394,7 @@ final class TextOverlayView: UIView, UITextViewDelegate {
     /// commits this one on its way past (`beginTextSession` → `beginCanvasEdit`) and places the new
     /// one, instead of being swallowed as a dismiss the artist then has to follow with a second tap.
     /// `ShapeOverlayView` makes itself transparent for the same reason.
+    ///
     /// **The ownership half of `hitTest`, asked on its own.** `hitTest` answers two questions at
     /// once — *is this touch mine* and *which view of mine is hit* — and only the first is the
     /// arbitration this canvas gets wrong. Split out, it is what `CanvasView.Coordinator.canvasChrome(at:)`

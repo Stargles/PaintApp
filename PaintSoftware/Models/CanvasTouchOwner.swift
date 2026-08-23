@@ -4,12 +4,12 @@ import Foundation
 
 /// The one place that answers "who owns this canvas touch".
 ///
-/// **Why this type exists.** A single one-finger touch on the canvas is arbitrated today by
-/// fourteen independent decisions spread over three unrelated UIKit mechanisms — recognizer
-/// `isEnabled`, view `isUserInteractionEnabled`, and `hitTest` overrides — each of which spells its
-/// own predicate over the same four inputs (`selectedTool`, `activePanel`, `floatingPiece`, the
-/// active layer's state), and a fifth question (`shouldRequireFailureOf`) reads three of them back
-/// out. Four defects trace to that arrangement, three of them inside one week:
+/// **Why this type exists.** A single one-finger touch on the canvas was arbitrated by fourteen
+/// independent decisions spread over three unrelated UIKit mechanisms — recognizer `isEnabled`, view
+/// `isUserInteractionEnabled`, and `hitTest` overrides — each of which spelled its own predicate over
+/// the same four inputs (`selectedTool`, `activePanel`, `floatingPiece`, the active layer's state),
+/// and a fifth question (`shouldRequireFailureOf`) read three of them back out. Four defects trace to
+/// that arrangement, three of them inside one week:
 ///
 ///  * 2026-08-22 — the pick tool was dead with the Select panel open. The eyedropper's recognizer
 ///    consulted `activePanel`; the selection overlay's gate never consulted `selectedTool`; **the
@@ -28,9 +28,10 @@ import Foundation
 /// **What makes it structural rather than sloppy, and why the function takes a value.**
 /// `activePanel` is `@State` on `DrawingView`, while `selectedTool` and `floatingPiece` live on
 /// `CanvasManager`. *No single object can see all four inputs*, which is why no single function
-/// exists today. So this one reaches for nothing: it takes `CanvasTouchInputs` explicitly, which is
-/// what lets `activePanel` stay where it is and what makes the whole answer testable headlessly —
-/// the same argument `Tool.paintsOnCanvas` makes one clause smaller.
+/// could be written before this one. So this one reaches for nothing: it takes `CanvasTouchInputs`
+/// explicitly, which is what lets `activePanel` stay where it is — `@State` on the view, mirrored to
+/// the coordinator, exactly as before — and what makes the whole answer testable headlessly. The
+/// decision moved; the state did not. Same argument as `Tool.paintsOnCanvas`, one clause larger.
 ///
 /// **Scope: one finger, and the arbitration only.** Two-finger navigation (pan / pinch / rotate) is
 /// deliberately not an owner here. Those three recognizers are never gated by tool, panel, floating
@@ -38,6 +39,33 @@ import Foundation
 /// `CanvasView.shouldRequireFailure`, which this file models separately as
 /// `transformWaitsOnActiveStroke` / `transformDependencyIsUnresolvable` rather than folding into the
 /// owner.
+///
+/// **Where the fourteen live now.** Each is one property on `CanvasTouchInputs`, named after its
+/// site, and the site is one line that reads it:
+///
+/// | mechanism | site | property |
+/// |---|---|---|
+/// | recognizer `isEnabled` | `reconcileLayers` catch-all | `catchAllIsEnabled` |
+/// | | `updateActiveLayerAndTool` eyedropper | `eyedropperPressIsEnabled` |
+/// | | `updateActiveLayerAndTool` text | `textPressIsEnabled` |
+/// | | `updateActiveLayerAndTool` fill | `fillPressIsEnabled` |
+/// | `isUserInteractionEnabled` | `reconcileLayers`' `shouldInteract` | `activeHostIsInteractive` |
+/// | | `updateSelectionOverlay` | `selectionOverlayIsCapturing` |
+/// | | `updateFloatingOverlay` | `floatingOverlayIsInteractive` |
+/// | | `updateShapeOverlay` | *producer* — `isShapeInAdjustableState`, see below |
+/// | | `updateTransformOverlay` | *producer* — `ObjectTransformOverlayView.isActive`, see below |
+/// | `hitTest` | all five overlays | *producers* — `claimsTouch(at:)` → `CanvasTouchChrome` |
+/// | the fifteenth | `shouldRequireFailure` | `transformWaitsOnActiveStroke` |
+///
+/// **The seven marked *producer* are inputs to this type rather than consumers of it, and saying so
+/// is more honest than forcing them.** A `hitTest` override answers two questions at once — *is this
+/// touch mine* and *which of my subviews is hit* — and only the first is arbitration; that half is
+/// `claimsTouch(at:)`, and `CanvasView.Coordinator.canvasChrome(at:)` asks the five of them to build
+/// `chrome`. The two overlay-activation gates depend on state none of the four inputs can see
+/// (`shapeGestureActive` and `resolvedShape`; `activeCelIsInBetween` and whether the cel has a
+/// vector), which is exactly why `chrome` is handed in rather than derived. Guide editing is a third
+/// such mode, and `GuideOverlayView` has no activation gate at all — it is interactive whenever
+/// `editing != .none` — which is why a guide grip turns up in more conflict rows than anything else.
 ///
 /// **`contenders(in:)` is the interesting half.** Today's mechanisms are *not* mutually exclusive:
 /// every container-mounted recognizer carries `cancelsTouchesInView = false`, and a recognizer
@@ -411,9 +439,10 @@ extension CanvasTouchOwner {
     /// **More than one is not a modelling artefact — it is what the app does.** Each container-mounted
     /// recognizer sets `cancelsTouchesInView = false`, and UIKit delivers a touch to the recognizers
     /// of every view in its responder chain, so a `hitTest` claim by an overlay does not take the
-    /// touch away from the fill press underneath it. `handleTextPress` compensates by re-running the
-    /// text overlays' own `hitTest` before it acts, which is the one place that double delivery is
-    /// handled today; that compensation is modelled here.
+    /// touch away from the fill press underneath it. `handleTextPress` is the one handler that
+    /// compensates — and it now does so by asking *this* function, `contenders(in:).contains(.textPress)`,
+    /// rather than re-running the two text overlays' `hitTest` by hand. The exemption it needs is the
+    /// `chrome` test on `.textPress` below, so the guard and the model cannot drift apart.
     static func contenders(in i: CanvasTouchInputs) -> [CanvasTouchOwner] {
         var result: [CanvasTouchOwner] = []
 
@@ -448,8 +477,13 @@ extension CanvasTouchOwner {
     /// **Behaviour-preserving where the gates agree**: with exactly one contender this returns it,
     /// which is what happens today. Where they disagree it returns the first by the precedence
     /// `contenders(in:)` lists — that is a *choice*, and every combination in which it has to be made
-    /// is enumerated by `CanvasTouchOwnerLogicTests.testEveryTouchWithMoreThanOneClaimant` so the
+    /// is enumerated by `CanvasTouchOwnerLogicTests.testTouchesWithMoreThanOneClaimant` so the
     /// list can be reviewed rather than discovered later.
+    ///
+    /// **Nothing in the app calls this yet, deliberately.** Every converted gate asks the property it
+    /// used to spell, and `handleTextPress` asks `contenders`; switching a site to `owner` is what
+    /// *resolves* one of those conflict rows, which is a behaviour change and a decision for the
+    /// owner rather than a refactor.
     static func owner(in i: CanvasTouchInputs) -> CanvasTouchOwner {
         contenders(in: i).first ?? .nobody
     }
