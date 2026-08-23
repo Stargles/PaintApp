@@ -36,8 +36,29 @@ New this pass (owner, 2026-08-23, after testing the touch-ownership build):
       **Two rulings taken 2026-08-23**: the **yellow node rotates the box only** while the green one rotates
       box and art; and vector Distort **maps existing stroke points with no subdivision** — *"do no subdivision
       for now... then if i tell you subdivision may be necessary, go for it."*
-      Four stages, each shippable alone: (1) the missing handles, (2) the Move menu, (3) Freeform + the yellow
-      node, (4) Distort. See the design in the branch.
+      **Four more rulings, 2026-08-23.** (i) **Text**: *"Perspective distorting text is supposed to be a feature
+      I remember explaining a while ago... It is useful to put text on 3d surfaces. Hold distort until text can
+      warp."* (ii) **Stroke width under Distort**: *"There should be an extra option in the menu to switch
+      between these two modes when in distort. I say do it properly with that, with default being no scaling."*
+      — so a per-sample taper, behind a toggle, defaulting **off**. (iii) **Placed images**: *"Teach images to
+      hold a stretched shape"* — the real work, not the refusal. (iv) **Reset** goes on the bar.
+
+      **Two discoveries that reshape the order, both verified in the tree:**
+      1. **`TransformMode` already exists** (`SelectionModels.swift:28`) with `freeform`, `uniform`, `distort`,
+         `warp`, and its own comment says *"Distort/Warp aren't implemented with real per-corner/mesh geometry
+         yet — they render and gesture identically to Uniform."* So Uniform and Freeform are already real for
+         raster, Distort is a declared stub, and **`warp` is a case to delete** under the owner's ruling.
+      2. **Perspective text was never lost — and it is the same work as Distort.** [ADD_TEXT.md](ADD_TEXT.md)'s
+         **Stage 5 *is* "the projective distort"**, Stage 4 (rotate/scale/handles) shipped 2026-08-21 leaving a
+         clean seam (`TextFrame.affineTransform` returns nil for any non-parallelogram and every drawing path
+         already branches on it), and Stage 6's own list contains *"Converting `FloatingPiece`'s `.distort`,
+         which today runs the uniform-scale path and whose own doc comment admits it, onto this solver."*
+         **One `Homography` solver plus one projective render path unblocks both.** The owner's "hold distort
+         until text can warp" is therefore the correct build order, not a delay.
+
+      Order: (1) the missing handles, (2) the Move menu — delete Warp, add Rotate 45° and Reset, (3) Freeform +
+      the yellow node + images holding a stretched shape, (4) **ADD_TEXT Stage 5's solver**, (5) Distort on both
+      tiers with the width toggle. See the design in the branch.
 
 ## Verified on the device
 
