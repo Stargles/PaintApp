@@ -31,6 +31,14 @@ import UIKit
 /// pan/pinch keep working while the box is up. That is safe rather than merely tidy: the active
 /// layer's host is already non-interactive while `isVectorTransforming` is on
 /// (`CanvasView.swift`'s `shouldInteract`), so nothing underneath can paint.
+///
+/// **The one thing that costs is the tap *away* from the box**, which settles it — a raster piece
+/// gets that free from `FloatingPieceOverlayView`'s total claim, and a tap recognizer added here
+/// would never fire off-target. So it lives on the container instead
+/// (`CanvasView.Coordinator.handleMoveBoxCommit`) and is arbitrated against this view's own claim by
+/// `CanvasTouchOwner`: a touch on a grip is `.objectTransformOverlay` and a touch away from it is
+/// `.moveBoxCommit`. Owner's ruling, 2026-08-22 — before it, a touch away from a vector Move box did
+/// nothing at all.
 final class ObjectTransformOverlayView: UIView {
 
     // MARK: - Callbacks

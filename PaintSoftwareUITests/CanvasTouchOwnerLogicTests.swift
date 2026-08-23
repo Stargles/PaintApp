@@ -16,18 +16,22 @@ import XCTest
 /// change it was written to make safe. So every expectation in this file is either
 ///
 ///  * a **set of signatures**, generated from a rule over `Tool.allCases` (so a new tool extends both
-///    sides of the comparison and invalidates nothing) — `testNobodyOwnsATouchOnlyInTheThreeDeclaredCases`,
+///    sides of the comparison and invalidates nothing) —
 ///    `testTheTransformDependencyIsUnresolvableOnlyInTheDeclaredCases`;
 ///  * a **property asserted per state**, which names the signature it failed at —
-///    `testAnOverlayClaimIsAdditive`, `testTheOnlyTwoWaysToBeClaimedTwiceWithNoOverlayInvolved`,
-///    `testEveryToolReachesTheOwnerItNames`;
+///    `testNoReachableTouchHasMoreThanOneActor`, `testEveryContenderAfterTheFirstStandsDown`,
+///    `testAnOverlayClaimTakesTheTouchFromEveryOtherView`, `testEveryToolReachesTheOwnerItNames`;
 ///  * or a **per-(tool, fill-mode) count**, never a total, so the tool axis is factored out entirely
 ///    — `testTheReachableInputSpaceIsTheSizeThisFileClaims`.
 ///
-/// The one hand-maintained list left is `testTouchesWithMoreThanOneClaimant`'s set of owner
-/// *combinations*, which carries no arithmetic and exists to be read: each row is a live defect, and
-/// a new row appearing is a review, not a recomputation. Adding a paint tool does not touch it;
-/// adding a tool with a canvas recognizer of its own does, and should.
+/// The one hand-maintained list left is `testEveryTouchOfferedToMoreThanOneMechanism`'s set of
+/// *combinations*, which carries no arithmetic and exists to be read. **Its meaning changed on
+/// 2026-08-22 and that is worth saying plainly**: it used to be a list of live defects — two things
+/// acting on one touch — and it is now a list of touches that are *offered* to two mechanisms and
+/// settled by precedence, with only the first acting. The teeth that make that true are
+/// `testEveryContenderAfterTheFirstStandsDown` and `testNoReachableTouchHasMoreThanOneActor`, which
+/// assert per state; the list stays because "which combinations even arise" is still the thing a
+/// person should read down when they add a mechanism.
 final class CanvasTouchOwnerLogicTests: XCTestCase {
 
     // MARK: - The input space
@@ -214,62 +218,127 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
 
     // MARK: - Nobody
 
-    /// **The test this type exists for.** "Owned by nobody" is exactly what the 2026-08-22 pick-tool
-    /// bug was, and it is invisible from any one gate: the touch simply does nothing and the app
-    /// says nothing. Three families remain, all of them on a vector layer, and all three are
-    /// reported to the owner rather than fixed here.
+    /// **The test this type exists for, and since 2026-08-22 the set is empty.**
+    ///
+    /// "Owned by nobody" is exactly what the pick-tool bug was, and it is invisible from any one
+    /// gate: the touch simply does nothing and the app says nothing. Three families survived the
+    /// extraction, all of them on a vector layer:
     ///
     ///  1. **Vector layer mid-Move, brush selected, touch away from the box.** `shouldInteract` is
     ///     false (`isVectorTransforming`), the catch-all is off (the layer is visible and has a
-    ///     surface), and a paint tool has no recognizer of its own. The artist draws and nothing
-    ///     happens, with no notice — where a value layer or a hidden layer would have explained
-    ///     itself.
+    ///     surface), and a paint tool has no recognizer of its own.
     ///  2. **Lassoed vector piece floating, brush selected, touch away from the box.** The same
-    ///     hole, plus a second: `FloatingPieceOverlayView` covers the whole container and commits a
-    ///     raster piece on a tap outside it, while a vector float's `ObjectTransformOverlayView`
-    ///     claims only its own grips. So the raster and vector Move differ in whether tapping away
-    ///     does anything at all.
-    ///  3. **Lassoed vector piece floating with the Select panel open — every tool.** The selection
-    ///     overlay yields to `vectorFloat`, the fill and text presses yield to the Select panel, and
-    ///     nothing takes over. The canvas is inert away from the box even for the lasso the open
-    ///     panel is for.
-    func testNobodyOwnsATouchOnlyInTheThreeDeclaredCases() {
+    ///     hole, plus the structural one: `FloatingPieceOverlayView` covers the whole container and
+    ///     commits a raster piece on a tap outside it, while a vector float's
+    ///     `ObjectTransformOverlayView` claims only its own grips.
+    ///  3. **Lassoed vector piece floating with the Select panel open — every tool but the pick.**
+    ///     The selection overlay stands aside for `vectorFloat`, the fill and text presses for the
+    ///     Select panel, and nothing took over.
+    ///
+    /// The owner ruled (j) on all three: **the tap commits the float**, so a vector Move behaves like
+    /// a raster one — chosen over leaving it silent and over raising a notice. `.moveBoxCommit` is
+    /// what took them, and this test is now the statement that nothing is left.
+    ///
+    /// Watched failing with `.moveBoxCommit` taken back out of `contenders(in:)`: **122 reachable
+    /// inputs in 15 signatures**, the first of them *tool=eraser select=false float=false vfloat=false
+    /// vxform=true layer=vector visible=true chrome=none*. (The report of this defect quoted 118. 122
+    /// is what this enumeration measures and what the assertion above holds; the four-state gap is
+    /// not reconciled, and the assertion is on zero either way.)
+    func testNoReachableTouchIsOwnedByNobody() {
         var found = Set<String>()
+        var reachableInputs = 0
         forEachReachableInput { inputs in
             guard CanvasTouchOwner.owner(in: inputs) == .nobody else { return }
+            reachableInputs += 1
             found.insert(self.signature(inputs))
         }
+        XCTAssertEqual(reachableInputs, 0,
+                       "\(reachableInputs) reachable inputs owned by nobody, in \(found.count) "
+                       + "signatures: \(found.sorted())")
+    }
 
-        var expected = Set<String>()
+    /// (j), stated at the point the artist is standing: a lassoed vector piece is floating, the
+    /// finger comes down away from the box, and **the box is put down** — where before the ruling
+    /// nothing happened and nothing was said.
+    ///
+    /// **The tool axis is the interesting half, and the answer is "only where the tool had nothing to
+    /// do".** `.moveBoxCommit` is last in the precedence on purpose: a tool with a live recognizer of
+    /// its own keeps the touch exactly as it did before — the fill still floods, the pick still
+    /// picks, the text tool still places a box — and the tap-away takes only what used to fall
+    /// through. A brush has no canvas recognizer, and with the Select panel open the fill and text
+    /// presses are suspended and the selection overlay stands aside for the float, so those are
+    /// precisely the states that had nobody.
+    ///
+    /// Watched failing with `.moveBoxCommit` out of `contenders(in:)`: *("nobody") is not equal to
+    /// ("moveBoxCommit") — tool pen/flood, select false*, sixteen times over.
+    func testATouchAwayFromAFloatingVectorPieceCommitsIt() {
         for tool in Tool.allCases {
-            let modes = tool == .fill ? ["/flood", "/lasso"] : [""]
-            for m in modes {
-                // 1 & 2 — a paint tool, no Select panel, a vector layer either mid-transform or
-                // with a piece floating. Visible: hide the layer and the catch-all speaks instead,
-                // which is the whole difference between these three states and every other silent
-                // one — the notice exists and simply is not wired to `isVectorTransforming`.
-                if tool.paintsOnCanvas {
-                    expected.insert("tool=\(tool)\(m) select=false float=false vfloat=false vxform=true layer=vector visible=true chrome=none")
-                    expected.insert("tool=\(tool)\(m) select=false float=false vfloat=true vxform=false layer=vector visible=true chrome=none")
-                }
-                // 3 — Select open over a floating vector piece, whatever the tool.
-                expected.insert("tool=\(tool)\(m) select=true float=false vfloat=true vxform=false layer=vector visible=true chrome=none")
-                // 3b — the same with the layer hidden, for the tools the catch-all does not speak
-                // for. `handleCatchAllTap` returns early unless `Tool.paintsOnCanvas`, so hiding the
-                // layer rescues a brush from silence and leaves the fill, the text tool and the
-                // eyedropper exactly where they were.
-                if !tool.paintsOnCanvas {
-                    expected.insert("tool=\(tool)\(m) select=true float=false vfloat=true vxform=false layer=vector visible=false chrome=none")
+            for fillMode in FillMode.allCases {
+                for panel in [ActivePanel.none, .select] {
+                    let inputs = CanvasTouchInputs(tool: tool, fillMode: fillMode, panel: panel,
+                                                   hasVectorFloat: true, activeLayer: .vector)
+                    let owner = CanvasTouchOwner.owner(in: inputs)
+                    let what = "tool \(tool)/\(fillMode.rawValue), select \(panel == .select)"
+                    XCTAssertNotEqual(owner, .nobody, "\(what) still does nothing at all")
+                    // The tool's own mechanism where it has one and it is armed; the box's tap-away
+                    // everywhere else. Spelled from `Tool.canvasRecognizerOwner` rather than listed,
+                    // so a tool added later answers here the way it answers everywhere.
+                    let toolsOwn = tool.canvasRecognizerOwner(fillMode: fillMode)
+                    let toolIsArmed = toolsOwn != nil
+                        && CanvasTouchOwner.contenders(in: inputs).contains(toolsOwn!)
+                    XCTAssertEqual(owner, toolIsArmed ? toolsOwn! : .moveBoxCommit, what)
+                    XCTAssertEqual(CanvasTouchOwner.actors(in: inputs), [owner],
+                                   "and only one thing acts — \(what)")
                 }
             }
         }
-        // The eyedropper is the one tool that survives case 3, and that is the 2026-08-22 fix
-        // working: `isEyedropperArmed` does not consult the Select panel.
-        expected.remove("tool=eyedropper select=true float=false vfloat=true vxform=false layer=vector visible=true chrome=none")
-        expected.remove("tool=eyedropper select=true float=false vfloat=true vxform=false layer=vector visible=false chrome=none")
+        // The plainest form of the ruling, which is the one the owner will try: a brush in hand, a
+        // piece floating, a finger anywhere off the box.
+        let brush = CanvasTouchInputs(tool: .pen, hasVectorFloat: true, activeLayer: .vector)
+        XCTAssertEqual(CanvasTouchOwner.owner(in: brush), .moveBoxCommit)
+    }
 
-        XCTAssertEqual(found, expected,
-                       "new: \(found.subtracting(expected).sorted())\ngone: \(expected.subtracting(found).sorted())")
+    /// The whole-layer half of the same ruling, and the reason it is here rather than left out: it is
+    /// the *same box*, put up by `updateTransformOverlay`'s other arm, and the same asymmetry — the
+    /// raster counterpart of Move-with-no-selection is a floating piece, which has always committed
+    /// on a tap away.
+    ///
+    /// **The visibility clause is the part worth checking**, because the two arms of
+    /// `updateTransformOverlay` differ on it: the whole-layer arm asks `isLayerEffectivelyVisible`
+    /// and the float arm does not. A box that is not on screen must not be claiming taps — there the
+    /// catch-all's "this layer is hidden" is still the right answer.
+    func testAWholeLayerVectorMoveCommitsOnATouchAwayOnlyWhileItsBoxIsOnScreen() {
+        let onScreen = CanvasTouchInputs(tool: .pen, isVectorTransforming: true, activeLayer: .vector,
+                                         activeLayerIsOnScreen: true)
+        XCTAssertEqual(CanvasTouchOwner.owner(in: onScreen), .moveBoxCommit)
+
+        let hidden = CanvasTouchInputs(tool: .pen, isVectorTransforming: true, activeLayer: .vector,
+                                       activeLayerIsOnScreen: false)
+        XCTAssertEqual(CanvasTouchOwner.owner(in: hidden), .catchAllNotice,
+                       "no box on screen, so the notice is still the right answer")
+        XCTAssertFalse(CanvasTouchOwner.contenders(in: hidden).contains(.moveBoxCommit),
+                       "and the tap-away is not even offered it")
+
+        // …and the float's arm, which does not consult visibility, keeps its box. The notice still
+        // speaks first there — it is ahead in the precedence, and (j) was about touches that did
+        // nothing, not about touches that already explained themselves.
+        let hiddenFloat = CanvasTouchInputs(tool: .pen, hasVectorFloat: true, activeLayer: .vector,
+                                            activeLayerIsOnScreen: false)
+        XCTAssertEqual(CanvasTouchOwner.owner(in: hiddenFloat), .catchAllNotice)
+        XCTAssertTrue(CanvasTouchOwner.contenders(in: hiddenFloat).contains(.moveBoxCommit))
+    }
+
+    /// A touch **on** the box is a drag, not a commit. The two are one feature and two owners, the
+    /// same split `.selectionOverlay`/`.lassoFill` makes, and getting it wrong would mean grabbing
+    /// the box put it down.
+    func testATouchOnTheMoveBoxIsStillADragAndNotACommit() {
+        for tool in Tool.allCases {
+            let inputs = CanvasTouchInputs(tool: tool, hasVectorFloat: true, activeLayer: .vector,
+                                           chrome: .transformBoxOrHandle)
+            XCTAssertEqual(CanvasTouchOwner.owner(in: inputs), .objectTransformOverlay, "tool \(tool)")
+            XCTAssertFalse(CanvasTouchOwner.contenders(in: inputs).contains(.moveBoxCommit),
+                           "the tap-away is not even offered a touch on the box — tool \(tool)")
+        }
     }
 
     /// The 2026-08-22 bug, stated directly: with the Select panel open and the eyedropper armed, the
@@ -327,36 +396,81 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
 
     // MARK: - More than one
 
-    /// **Every combination in which two mechanisms both act on one touch.**
+    /// **One touch, one actor — the rule the owner settled on 2026-08-22, walked over the whole
+    /// space.**
     ///
-    /// These are defects present in the app right now, not modelling artefacts: each container
-    /// recognizer sets `cancelsTouchesInView = false`, and UIKit delivers a touch to the recognizers
-    /// of every view in its responder chain — so an overlay's `hitTest` claim does not take the
-    /// touch away from the fill press mounted on the container underneath it.
+    /// Before it — the report of the defect counted 1,678 reachable combinations — two things acted
+    /// on one touch: drag a guide grip with Fill selected and the grip moved *and* a flood fill landed
+    /// under it; with the pick armed, the grip moved *and* the brush colour changed and the tool
+    /// reverted; drag a floating vector piece's box with Fill selected and the piece moved *and* a
+    /// fill dumped underneath; tap into your own text with Fill selected and the caret placed *and*
+    /// the layer flooded; adjust a guide while a Move piece floated and the guide moved *and* the
+    /// piece was dropped.
     ///
-    /// Two structural families produce all 36 signatures:
+    /// **No combination is deliberately left with two**, so there is no exemption list here.
     ///
-    ///  * **`<overlay chrome> + <whichever container recognizer is enabled>` (24 of them).** Grab a
-    ///    guide grip with Fill selected and the grip drags *and* a flood fill lands under it; grab a
-    ///    shape handle with the eyedropper armed and the brush colour changes too; drag a floating
-    ///    vector piece's box with Fill selected and the piece moves *and* the layer is flooded.
-    ///    `handleTextPress` is the **only** handler in the app that defends itself, by re-running the
-    ///    two text overlays' `hitTest` before it acts — which is why `textOverlay+textPress` and
-    ///    `textHandle+textPress` are absent from this list and every other pairing is present.
-    ///  * **`catchAllNotice` alongside something that did work.** `needsCatch` reads only the
-    ///    active layer's state and never asks whether a floating piece or the Select panel has taken
-    ///    the touch, so dragging a Move piece over a hidden active layer raises "this layer is
-    ///    hidden" on every touch, and lassoing with no layers raises "no layers" on every drag.
-    /// **The list is the deliverable here — it is read, not counted.** It carried a census beside it
-    /// (36 hand-maintained totals), and that was wrong twice over: every one of those numbers moves
-    /// when a tool is added, which is the event this whole type exists to make cheap; and a count is
-    /// blind to exactly the change it looks most able to catch, because two states swapping — one
-    /// stopping colliding, another starting — leaves the total where it was. The signature-level
-    /// teeth are `testAnOverlayClaimIsAdditive` and
-    /// `testTheOnlyTwoWaysToBeClaimedTwiceWithNoOverlayInvolved` below, which assert *per state* and
-    /// name the state they failed at. What is left here is the reviewable set of families, which a
-    /// person is meant to read down and act on.
-    func testTouchesWithMoreThanOneClaimant() {
+    /// Watched failing by making `CanvasTouchOwner.yieldsToTheOwner` answer `false` for the five
+    /// container recognizers — which is exactly the app as it stood, four of the five handlers not
+    /// asking. **5,662 assertion failures**, the first *[guideOverlay, catchAllNotice] both act at
+    /// tool=eraser select=false float=false vfloat=false vxform=false layer=none visible=false
+    /// chrome=guideGrip*.
+    func testNoReachableTouchHasMoreThanOneActor() {
+        forEachReachableInput { inputs in
+            let actors = CanvasTouchOwner.actors(in: inputs)
+            XCTAssertLessThanOrEqual(actors.count, 1,
+                                     "\(actors.map(\.rawValue)) both act at \(self.signature(inputs))")
+            let owner = CanvasTouchOwner.owner(in: inputs)
+            XCTAssertEqual(actors, owner == .nobody ? [] : [owner], "at \(self.signature(inputs))")
+        }
+    }
+
+    /// **The teeth under the rule: everything offered a touch behind the owner is something that
+    /// stands down.**
+    ///
+    /// `actors(in:)` can only be right if `yieldsToTheOwner` is right, and `yieldsToTheOwner` is a
+    /// claim about handlers — five of them open by asking `owner(in:)`. This is the assertion that a
+    /// *sixth* mechanism cannot be added behind them without either asking the same question or
+    /// showing up here. It is the one that fails when somebody wires a new recognizer onto the
+    /// container and forgets the guard.
+    ///
+    /// The first contender is exempt because it *is* the owner; nothing else may be a view, because
+    /// UIKit gives a touch to one view and the owner is the view it gave it to.
+    func testEveryContenderAfterTheFirstStandsDown() {
+        forEachReachableInput { inputs in
+            let contenders = CanvasTouchOwner.contenders(in: inputs)
+            for loser in contenders.dropFirst() {
+                XCTAssertTrue(loser.yieldsToTheOwner,
+                              "\(loser.rawValue) is offered this touch behind "
+                              + "\(contenders[0].rawValue) and does not stand down, at "
+                              + "\(self.signature(inputs))")
+            }
+        }
+    }
+
+    /// **Every combination in which two mechanisms are offered one touch.**
+    ///
+    /// Not defects any more — each is settled by the precedence in `contenders(in:)`, and only the
+    /// first of them acts — but still the reviewable set, because "which combinations arise at all"
+    /// is what a person adding a mechanism has to read. Three structural families produce every row:
+    ///
+    ///  * **`<overlay chrome> + <whichever container recognizer is enabled>`.** Each container
+    ///    recognizer sets `cancelsTouchesInView = false` and is attached to an ancestor of every
+    ///    overlay, so a `hitTest` claim above it takes nothing away — it is offered the touch and
+    ///    declines. That declining is rule (i).
+    ///  * **`+ catchAllNotice` alongside something that worked.** `needsCatch` reads only the active
+    ///    layer's state and never asks whether a floating piece or the Select panel has taken the
+    ///    touch. The notice sits behind everything that acts, so it now stays quiet.
+    ///  * **`<anything armed> + moveBoxCommit`.** The vector Move box's tap-away, which is (j). It is
+    ///    *behind* the tools rather than ahead of them — a raster float outranks them through
+    ///    `!hasFloatingPiece` inside `fillPressIsEnabled` and friends, and copying that would have
+    ///    settled rows nobody ruled on. It takes only the touch nothing else wanted.
+    ///
+    /// **What is *absent* is the change (i) made to this list.** Every `<overlay> + <container-sized
+    /// view>` row — `guideOverlay+selectionOverlay`, `guideOverlay+floatingPiece`,
+    /// `shapeOverlay+lassoFill` and the rest — is gone, because UIKit hands a touch to one view and
+    /// those two views are no longer above the overlays that claim grips (see `updateUIView`'s
+    /// ordering, and `updateGuideOverlay`, which is the pass that moved).
+    func testEveryTouchOfferedToMoreThanOneMechanism() {
         var found = Set<String>()
         forEachReachableInput { inputs in
             let contenders = CanvasTouchOwner.contenders(in: inputs)
@@ -370,43 +484,41 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
             "guideOverlay+catchAllNotice",
             "guideOverlay+eyedropper",
             "guideOverlay+fillPress",
-            "guideOverlay+lassoFill",
             "guideOverlay+textPress",
-            "guideOverlay+selectionOverlay",
-            "guideOverlay+selectionOverlay+catchAllNotice",
-            "guideOverlay+floatingPiece",
-            "guideOverlay+floatingPiece+catchAllNotice",
-            // A pending shape. The `+catchAllNotice` rows are the ones the previous shape of this
-            // model could not express: `updateShapeOverlay` never asks whether the layer is still
-            // visible, so hiding it leaves the handles up *and* arms the "this layer is hidden"
-            // notice under them.
+            "guideOverlay+moveBoxCommit",
+            "guideOverlay+catchAllNotice+moveBoxCommit",
+            "guideOverlay+eyedropper+moveBoxCommit",
+            "guideOverlay+fillPress+moveBoxCommit",
+            "guideOverlay+textPress+moveBoxCommit",
+            // A pending shape. The `+catchAllNotice` row is the one the earlier shape of this model
+            // could not express: `updateShapeOverlay` never asks whether the layer is still visible,
+            // so hiding it leaves the handles up *and* arms the "this layer is hidden" notice under
+            // them.
             "shapeOverlay+eyedropper",
             "shapeOverlay+fillPress",
-            "shapeOverlay+lassoFill",
             "shapeOverlay+textPress",
-            "shapeOverlay+selectionOverlay",
-            "shapeOverlay+selectionOverlay+catchAllNotice",
             "shapeOverlay+catchAllNotice",
             // A live text session — note the absence of any `+textPress` pairing.
             "textOverlay+eyedropper",
             "textOverlay+fillPress",
-            "textOverlay+lassoFill",
-            "textOverlay+selectionOverlay",
-            "textOverlay+selectionOverlay+catchAllNotice",
             "textOverlay+catchAllNotice",
             "textTransformOverlay+eyedropper",
             "textTransformOverlay+fillPress",
-            "textTransformOverlay+lassoFill",
-            "textTransformOverlay+selectionOverlay",
-            "textTransformOverlay+selectionOverlay+catchAllNotice",
             "textTransformOverlay+catchAllNotice",
-            // The Move box, on a vector layer mid-transform or with a lassoed piece floating.
+            // The Move box itself, on a vector layer mid-transform or with a lassoed piece floating.
+            // No `+moveBoxCommit`: a touch on the box is a drag, and the tap-away is not offered it.
             "objectTransformOverlay+eyedropper",
             "objectTransformOverlay+fillPress",
-            "objectTransformOverlay+lassoFill",
             "objectTransformOverlay+textPress",
-            "objectTransformOverlay+selectionOverlay",
             "objectTransformOverlay+catchAllNotice",
+            // (j)'s own rows, on plain canvas away from the box. `moveBoxCommit` is last in every one
+            // of them, which is the whole of its precedence argument: it takes what is left.
+            "catchAllNotice+moveBoxCommit",
+            "eyedropper+moveBoxCommit",
+            "fillPress+moveBoxCommit",
+            "textPress+moveBoxCommit",
+            "lassoFill+moveBoxCommit",
+            "selectionOverlay+moveBoxCommit",
             // The catch-all's own two, with no overlay involved.
             "floatingPiece+catchAllNotice",
             "selectionOverlay+catchAllNotice",
@@ -417,32 +529,38 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                        + "gone: \(expected.subtracting(found).sorted())")
     }
 
-    /// **Why the list above needs no census: an overlay's claim is purely additive, and this says so
-    /// once per state.**
+    /// **Why the list above needs no census: an overlay's claim displaces every other *view* and
+    /// nothing else, and this says so once per state.**
     ///
-    /// The 24 `<overlay> + <recognizer>` rows are not 24 independent facts. They are one fact —
-    /// every `hitTest` override sits on a view whose ancestors carry the container recognizers, and
-    /// every one of those recognizers sets `cancelsTouchesInView = false`, so claiming a point takes
-    /// the touch away from nobody. Stated as an equation: the contenders for a touch on chrome are
-    /// the chrome's owner, followed by exactly the contenders the same state would have had on plain
-    /// canvas, less the two that a claim genuinely does displace —
+    /// The `<overlay> + <recognizer>` rows are not independent facts. They are one fact stated as an
+    /// equation — the contenders for a touch on chrome are the chrome's owner, followed by exactly
+    /// the contenders the same state would have had on plain canvas, less
     ///
-    ///  * `activeLayerStroke`, always, because all five overlays sit above the layer hosts and a
-    ///    claim there is what keeps the touch off the stroke view (`30e38e3`);
-    ///  * `textPress`, on the two text chromes only, which is `handleTextPress`' own guard — the one
-    ///    compensation any handler in the app makes.
+    ///  * **every view**, because UIKit hands a touch to one view: the layer host underneath
+    ///    (`30e38e3`), `SelectionOverlayView` while it captures, and `FloatingPieceOverlayView` while
+    ///    a piece floats. The last two are the (i) change — they are pinned to the whole container
+    ///    with no `hitTest` override, and until the pass ordering in `updateUIView` was fixed they
+    ///    sat *above* the guide overlay and quietly ate its grips;
+    ///  * **`textPress`, on the two text chromes only**, which is `handleTextPress`' own guard: there
+    ///    the placement tap is not merely outranked, it is wrong;
+    ///  * **`moveBoxCommit`, on the Move box only**, because a touch on the box is a drag.
     ///
     /// Asserted per state and reported by signature, so a change that moved one combination into
     /// another fails here naming the combination, where a total would have absorbed it.
-    func testAnOverlayClaimIsAdditive() {
+    ///
+    /// Watched failing with the previous `contenders(in:)` put back — the one that listed the
+    /// container-sized views alongside a chrome claim: 1,174 states, the first
+    /// *("[guideOverlay, selectionOverlay]") is not equal to ("[guideOverlay]")*.
+    func testAnOverlayClaimTakesTheTouchFromEveryOtherView() {
         forEachReachableInput { inputs in
             guard let chromeOwner = inputs.chrome.owner else { return }
             var plainCanvas = inputs
             plainCanvas.chrome = .none
             let isTextChrome = inputs.chrome == .textBoxOrBand || inputs.chrome == .textHandle
             let expected = [chromeOwner] + CanvasTouchOwner.contenders(in: plainCanvas).filter {
-                if $0 == .activeLayerStroke { return false }
+                if !$0.yieldsToTheOwner { return false }
                 if isTextChrome, $0 == .textPress { return false }
+                if inputs.chrome == .transformBoxOrHandle, $0 == .moveBoxCommit { return false }
                 return true
             }
             XCTAssertEqual(CanvasTouchOwner.contenders(in: inputs), expected,
@@ -451,30 +569,131 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     }
 
     /// The other half of the same argument, for the states where no overlay is involved at all:
-    /// **on plain canvas a touch is claimed twice exactly when the catch-all speaks over something
-    /// that did work**, and never for any other reason.
+    /// **on plain canvas a touch is offered twice exactly when the catch-all speaks over something
+    /// that did work, or when the Move box's tap-away sits over an armed tool**, and never for any
+    /// other reason.
     ///
     /// Everything else on plain canvas is mutually exclusive by construction, and that is worth
-    /// stating because it is what makes the two rows in the list above the *only* two: a floating
-    /// piece suppresses the selection overlay, both presses and the stroke; the Select panel
-    /// suppresses both presses and the stroke; and no two tools' mechanisms can be armed at once
-    /// (`testEveryToolReachesTheOwnerItNames`). The catch-all is the one gate that never asks whether
-    /// anybody else took the touch — `needsCatch` reads only the active layer's own state — so
-    /// dragging a Move piece over a hidden active layer raises "this layer is hidden" on every touch,
-    /// and lassoing with no layers raises "no layers" on every drag.
-    func testTheOnlyTwoWaysToBeClaimedTwiceWithNoOverlayInvolved() {
+    /// stating because it is what makes the rows in the list above the *only* rows: a floating piece
+    /// suppresses the selection overlay, both presses and the stroke; the Select panel suppresses
+    /// both presses and the stroke; and no two tools' mechanisms can be armed at once
+    /// (`testEveryToolReachesTheOwnerItNames`).
+    func testTheOnlyTwoWaysToBeOfferedATouchTwiceWithNoOverlayInvolved() {
         forEachReachableInput { inputs in
             guard inputs.chrome == .none else { return }
             let contenders = CanvasTouchOwner.contenders(in: inputs)
+            // The catch-all is the one gate that never asks whether anybody else took the touch —
+            // `needsCatch` reads only the active layer's own state.
             let catchAllSpeaksOverSomeoneElse = inputs.catchAllRaisesNotice
                 && (inputs.floatingOverlayIsInteractive || inputs.selectionOverlayIsCapturing)
-            XCTAssertEqual(contenders.count > 1, catchAllSpeaksOverSomeoneElse,
+            // …and the Move box's tap-away, whose gate is the float rather than the tool, so
+            // whatever was armed stays armed underneath it. It is last in the precedence, so it is
+            // the one thing here that never displaces anybody.
+            let moveBoxSitsUnderSomething = inputs.moveBoxCommitsThisTouch && contenders.count > 1
+            XCTAssertEqual(contenders.count > 1,
+                           catchAllSpeaksOverSomeoneElse || moveBoxSitsUnderSomething,
                            "at \(self.signature(inputs))")
             guard catchAllSpeaksOverSomeoneElse else { return }
-            // Two, and the notice is the second — the mechanism that *acted* is still the owner.
-            XCTAssertEqual(contenders.count, 2, "at \(self.signature(inputs))")
-            XCTAssertEqual(contenders.last, .catchAllNotice, "at \(self.signature(inputs))")
+            // The mechanism that *acted* is still the owner, and the notice is behind it.
+            XCTAssertEqual(contenders.firstIndex(of: .catchAllNotice).map { $0 > 0 }, true,
+                           "at \(self.signature(inputs))")
         }
+    }
+
+    // MARK: - Rule (i), at the four places the owner named
+
+    /// **Grab a guide grip with Fill selected and only the grip moves.** The flood used to land under
+    /// it, because `fillTapRecognizer` sits on the container with `cancelsTouchesInView = false` and
+    /// the guide overlay's `hitTest` claim took nothing away from it.
+    ///
+    /// Watched failing with `yieldsToTheOwner` returning false for the five recognizers:
+    /// *("[guideOverlay, fillPress]") is not equal to ("[guideOverlay]") — fill/flood on a guide
+    /// grip*, and fifteen more across the four chromes.
+    func testGrabbingChromeWithAToolArmedLeavesTheToolAlone() {
+        let cases: [(chrome: CanvasTouchChrome, owner: CanvasTouchOwner, why: String)] = [
+            (.guideGrip, .guideOverlay, "a guide grip"),
+            (.shapeHandleOrOutline, .shapeOverlay, "a smart shape's handle or outline"),
+            (.textBoxOrBand, .textOverlay, "your own live text"),
+            (.textHandle, .textTransformOverlay, "a text box's grip"),
+        ]
+        for (chrome, owner, why) in cases {
+            for tool in Tool.allCases {
+                for fillMode in FillMode.allCases {
+                    let inputs = CanvasTouchInputs(tool: tool, fillMode: fillMode,
+                                                   activeLayer: .raster, chrome: chrome)
+                    XCTAssertEqual(CanvasTouchOwner.actors(in: inputs), [owner],
+                                   "\(tool)/\(fillMode.rawValue) on \(why)")
+                }
+            }
+        }
+    }
+
+    /// **The Move box wins over the tool under it**, which is the owner's "drag a floating piece's
+    /// box with Fill selected → the piece moves *and* a fill dumps under it".
+    func testDraggingTheMoveBoxDoesNotAlsoRunTheToolUnderneath() {
+        for tool in Tool.allCases {
+            for fillMode in FillMode.allCases {
+                let inputs = CanvasTouchInputs(tool: tool, fillMode: fillMode, hasVectorFloat: true,
+                                               activeLayer: .vector, chrome: .transformBoxOrHandle)
+                XCTAssertEqual(CanvasTouchOwner.actors(in: inputs), [.objectTransformOverlay],
+                               "\(tool)/\(fillMode.rawValue) on the Move box")
+            }
+        }
+    }
+
+    /// **Family F2: the catch-all must not speak over something that worked.** A Move piece dragged
+    /// over a hidden active layer popped "this layer is hidden" on every touch of the drag, and
+    /// lassoing with no layers popped "no layers" on every drag.
+    ///
+    /// Watched failing with `yieldsToTheOwner` returning false for the five recognizers, on both
+    /// halves: *("[floatingPiece, catchAllNotice]") is not equal to ("[floatingPiece]")* and
+    /// *("[selectionOverlay, catchAllNotice]") is not equal to ("[selectionOverlay]")*.
+    func testTheNoticeStaysQuietWhenSomebodyElseTookTheTouch() {
+        // A raster piece floating over a hidden active layer, brush selected.
+        let overAHiddenLayer = CanvasTouchInputs(tool: .pen, hasFloatingPiece: true,
+                                                 activeLayer: .raster, activeLayerIsOnScreen: false)
+        XCTAssertTrue(overAHiddenLayer.catchAllRaisesNotice, "the gate is still open — that is the point")
+        XCTAssertEqual(CanvasTouchOwner.actors(in: overAHiddenLayer), [.floatingPiece])
+
+        // Lassoing with no layers at all.
+        let withNoLayers = CanvasTouchInputs(tool: .pen, panel: .select, activeLayer: .none)
+        XCTAssertTrue(withNoLayers.catchAllRaisesNotice)
+        XCTAssertEqual(CanvasTouchOwner.actors(in: withNoLayers), [.selectionOverlay])
+
+        // And on plain canvas with nobody else in the way it still speaks, which is its whole job.
+        let plainHiddenLayer = CanvasTouchInputs(tool: .pen, activeLayer: .raster,
+                                                 activeLayerIsOnScreen: false)
+        XCTAssertEqual(CanvasTouchOwner.actors(in: plainHiddenLayer), [.catchAllNotice])
+    }
+
+    /// **A guide grip stays the guide's with the Select panel open and with a piece floating.**
+    ///
+    /// This is the one row of (i) that is not a handler guard at all: `SelectionOverlayView` and
+    /// `FloatingPieceOverlayView` are pinned to the whole container with no `hitTest` override, so
+    /// while the guide overlay was fronted *before* them in `updateUIView` they were above it and ate
+    /// every touch that would have reached a grip. Moving that one pass is the fix, and this is what
+    /// says the model now agrees.
+    ///
+    /// Watched failing against the previous `contenders(in:)`, which listed the container-sized views
+    /// alongside a chrome claim: *[guideOverlay, selectionOverlay] is not [guideOverlay]*.
+    func testAGuideGripIsTheGuidesEvenUnderTheSelectPanelOrAFloatingPiece() {
+        let underSelect = CanvasTouchInputs(tool: .pen, panel: .select, activeLayer: .raster,
+                                            chrome: .guideGrip)
+        XCTAssertEqual(CanvasTouchOwner.contenders(in: underSelect), [.guideOverlay])
+
+        let overAFloat = CanvasTouchInputs(tool: .pen, hasFloatingPiece: true, activeLayer: .raster,
+                                           chrome: .guideGrip)
+        XCTAssertEqual(CanvasTouchOwner.contenders(in: overAFloat), [.guideOverlay],
+                       "and the piece is not dropped by the same touch")
+
+        // Beside the grip the two views have everything back, which is what makes the overlay
+        // transparent everywhere else rather than modal.
+        var beside = underSelect
+        beside.chrome = .none
+        XCTAssertEqual(CanvasTouchOwner.owner(in: beside), .selectionOverlay)
+        var besideFloat = overAFloat
+        besideFloat.chrome = .none
+        XCTAssertEqual(CanvasTouchOwner.owner(in: besideFloat), .floatingPiece)
     }
 
     /// The one compensation the app already has, pinned so a refactor cannot drop it: a tap that

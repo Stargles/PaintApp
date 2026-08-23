@@ -4,6 +4,31 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## The raster Move box is the one piece of chrome `CanvasTouchOwner` cannot arbitrate by point (2026-08-22)
+
+Found while settling the "one touch, one actor" rule, and deliberately left — it is a gap in the
+*model*, and the behaviour it describes is already single-actor by UIKit's own ordering rather than by
+the precedence that now settles everything else.
+
+Every other overlay that claims a target has a `CanvasTouchChrome` case, so
+`CanvasView.Coordinator.canvasChrome(at:)` can ask it whether *this point* is its, and the five
+container recognizers stand down when the answer is yes. `FloatingPieceOverlayView` has none: it is a
+single total claim (`CanvasTouchOwner.floatingPiece`) covering the box, its grips and the tap-away
+alike, because the view is pinned to the whole container with no `hitTest` override. So the model
+cannot distinguish "on the raster Move box" from "anywhere else while a raster piece floats", and
+`yieldsToTheOwner` has to answer for the pair.
+
+The visible consequence is one row: a **guide grip that sits under the raster Move box**. The guide
+overlay is now fronted above the floating overlay (`updateUIView`'s ordering), so the grip wins and the
+piece is not dropped — which is the ruling — but it wins because it is the top view, not because
+anything asked the precedence. Nothing double-fires either way.
+
+The fix is to give the raster box a chrome case of its own — a `claimsTouch(at:)` on
+`FloatingPieceOverlayView` measured against `piece.transformedBounds`, a sixth
+`CanvasTouchChrome`, and a clause in `CanvasTouchOwnerLogicTests.isReachable`. It is half an hour and
+it moves the per-pair reachable count, which is why it is written down rather than folded into a
+behaviour change.
+
 ## Cut is a no-op on screen when the eraser is thinner than the line (2026-08-22)
 
 Found while building Mode 2's live preview, and **not introduced by it** — this is how Mode 2 has

@@ -78,9 +78,13 @@ final class FloatingPieceOverlayView: TransformOverlayView {
 
     /// **`claimsTouch` is not asked and there is no `hitTest` override, so this is a total claim.**
     /// The view is pinned to the whole container, so the moment a piece is floating every touch
-    /// inside the canvas is its — including the tap outside the piece that commits it. That is the
-    /// asymmetry with a lassoed *vector* piece, whose `ObjectTransformOverlayView` claims only its
-    /// own grips and therefore has no tap-away commit at all.
+    /// inside the canvas is its — including the tap outside the piece that commits it.
+    ///
+    /// A lassoed *vector* piece reaches the same behaviour by a different route, because
+    /// `ObjectTransformOverlayView` claims only its own grips: its tap-away rides a container
+    /// recognizer instead (`CanvasView.Coordinator.handleMoveBoxCommit`, `CanvasTouchOwner`'s
+    /// `.moveBoxCommit`). Until 2026-08-22 it had no tap-away commit at all, and that asymmetry was
+    /// the whole of defect (j) — a touch away from a vector box did nothing and said nothing.
     ///
     /// `isInteractive` is handed in rather than derived from `newPiece` here: it is
     /// `CanvasTouchInputs.floatingOverlayIsInteractive`, one of the fourteen gates, and the whole

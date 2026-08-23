@@ -49,6 +49,7 @@ import Foundation
 /// | | `updateActiveLayerAndTool` eyedropper | `eyedropperPressIsEnabled` |
 /// | | `updateActiveLayerAndTool` text | `textPressIsEnabled` |
 /// | | `updateActiveLayerAndTool` fill | `fillPressIsEnabled` |
+/// | | `updateActiveLayerAndTool` Move-box commit | `moveBoxCommitIsEnabled` (added 2026-08-22) |
 /// | `isUserInteractionEnabled` | `reconcileLayers`' `shouldInteract` | `activeHostIsInteractive` |
 /// | | `updateSelectionOverlay` | `selectionOverlayIsCapturing` |
 /// | | `updateFloatingOverlay` | `floatingOverlayIsInteractive` |
@@ -67,12 +68,15 @@ import Foundation
 /// such mode, and `GuideOverlayView` has no activation gate at all — it is interactive whenever
 /// `editing != .none` — which is why a guide grip turns up in more conflict rows than anything else.
 ///
-/// **`contenders(in:)` is the interesting half.** Today's mechanisms are *not* mutually exclusive:
-/// every container-mounted recognizer carries `cancelsTouchesInView = false`, and a recognizer
-/// attached to an ancestor still receives a touch that a descendant's `hitTest` claimed. So two
-/// mechanisms can — and in the cases below do — both act on one touch. `contenders(in:)` returns
-/// every mechanism that would act; `owner(in:)` returns the first by precedence, or `.nobody`.
-/// A count other than one is a defect, and `CanvasTouchOwnerLogicTests` pins the exact set.
+/// **`contenders(in:)` is the interesting half, and since 2026-08-22 it is only half the answer.**
+/// Two mechanisms can still be *offered* one touch: every container-mounted recognizer carries
+/// `cancelsTouchesInView = false`, and a recognizer attached to an ancestor still receives a touch
+/// that a descendant's `hitTest` claimed. What changed is that they no longer both *act*. Each of the
+/// five container recognizers now asks `owner(in:)` before it does anything and stands down when the
+/// answer is not itself — the rule the owner settled on that day: **whatever chrome the artist
+/// actually grabbed wins, and the tool underneath does not also fire.** `contenders(in:)` still
+/// returns everything the gates offer the touch to, because that is what the fourteen gates say;
+/// `actors(in:)` is what actually happens, and it is never more than one.
 enum CanvasTouchOwner: String, CaseIterable, Hashable {
     /// The active layer's own `StrokeGestureRecognizer`, inside its `LayerHostView`. The stroke, the
     /// erase, and the smart-shape gesture that grows out of holding one still.
@@ -112,6 +116,25 @@ enum CanvasTouchOwner: String, CaseIterable, Hashable {
     /// — a vector layer mid-transform, or a lassoed vector piece floating.
     case objectTransformOverlay
 
+    /// The tap **away** from that same Move box, which settles it — `moveBoxCommitRecognizer` on the
+    /// container.
+    ///
+    /// **A different action from the same feature, so a different owner**, exactly as `.lassoFill` is
+    /// a different owner from `.selectionOverlay`: one drags the box, the other puts it down. They are
+    /// two *mechanisms* as well as two actions — `ObjectTransformOverlayView` claims only its own
+    /// grips (that is what keeps two-finger pan alive while the box is up), so the tap that lands
+    /// anywhere else cannot reach it and rides a container recognizer instead.
+    ///
+    /// **It exists because a vector float had no tap-away commit at all**, which is the asymmetry the
+    /// owner settled on 2026-08-22: `FloatingPieceOverlayView` covers the whole container and commits
+    /// a *raster* piece the moment you tap outside it, while the 122 reachable input combinations that
+    /// reach this state on a vector layer were owned by nobody — the touch did nothing and said nothing.
+    ///
+    /// **Last in the precedence**, which is the deliberate difference from the raster piece: it takes
+    /// the touches that used to do nothing, and leaves every gesture that already worked alone. The
+    /// argument is written out where the append is.
+    case moveBoxCommit
+
     /// `GuideOverlayView`, on a touch that landed on a guide grip.
     case guideOverlay
 
@@ -122,6 +145,11 @@ enum CanvasTouchOwner: String, CaseIterable, Hashable {
     /// Nobody claims this touch, and nothing tells the artist why. **This is exactly the state the
     /// 2026-08-22 pick-tool bug was in**, which is why it is a named case a test can assert on
     /// rather than a fallthrough.
+    ///
+    /// **No reachable state produces it any more**, and the case is kept precisely so a test can say
+    /// that: `CanvasTouchOwnerLogicTests.testNoReachableTouchIsOwnedByNobody` walks the whole space
+    /// and asserts the empty set. Deleting it would turn "the canvas went silent" back into a
+    /// fallthrough nothing can assert on.
     case nobody
 }
 
@@ -441,6 +469,27 @@ extension CanvasTouchInputs {
     /// `Tool.paintsOnCanvas` before raising a notice — the path exists to explain why a touch that
     /// would have drawn did not, and the fill and the eyedropper are not owed an explanation.
     var catchAllRaisesNotice: Bool { catchAllIsEnabled && tool.paintsOnCanvas }
+
+    /// Whether the vector Move box is on screen — **the fifteenth gate, and the one (j) needed.**
+    ///
+    /// The two arms are `updateTransformOverlay`'s two arms, restated: a lassoed piece floating, or
+    /// the whole active vector layer mid-transform. The asymmetry between them is real and is copied
+    /// here rather than tidied — the float's arm does not consult visibility (so its box is up even
+    /// on a hidden layer) and the whole-layer arm does, because "a layer inside a hidden group isn't
+    /// on screen either, and the handles shouldn't be". `CanvasTouchOwnerLogicTests.isReachable`
+    /// cites the same asymmetry for `.transformBoxOrHandle`, and the two have to agree or a box the
+    /// artist cannot see would be claiming taps.
+    var moveBoxIsUp: Bool {
+        hasVectorFloat || (isVectorTransforming && activeLayer == .vector && activeLayerIsOnScreen)
+    }
+
+    /// `moveBoxCommitRecognizer.isEnabled` — the state-only half, which is all a recognizer gate can
+    /// read.
+    var moveBoxCommitIsEnabled: Bool { moveBoxIsUp }
+
+    /// Whether *this* touch is the tap-away that settles the box: the box is up, and the finger did
+    /// not land on it. A touch on the box is a drag, and `.objectTransformOverlay` already owns it.
+    var moveBoxCommitsThisTouch: Bool { moveBoxCommitIsEnabled && chrome != .transformBoxOrHandle }
 }
 
 // MARK: - The fifteenth question: what the transform recognizers wait on
@@ -484,69 +533,118 @@ extension CanvasTouchInputs {
 // MARK: - The answer
 
 extension CanvasTouchOwner {
-    /// Every mechanism that would act on this touch, most specific first.
+    /// Every mechanism this touch is offered to, most specific first. **The first of them acts and
+    /// the rest stand down** — see `actors(in:)`, which is the shorter answer.
     ///
-    /// **More than one is not a modelling artefact — it is what the app does.** Each container-mounted
-    /// recognizer sets `cancelsTouchesInView = false`, and UIKit delivers a touch to the recognizers
-    /// of every view in its responder chain, so a `hitTest` claim by an overlay does not take the
-    /// touch away from the fill press underneath it. `handleTextPress` is the one handler that
-    /// compensates — and it now does so by asking *this* function, `contenders(in:).contains(.textPress)`,
-    /// rather than re-running the two text overlays' `hitTest` by hand. The exemption it needs is the
-    /// `chrome` test on `.textPress` below, so the guard and the model cannot drift apart.
+    /// The list has exactly two tiers, and the split is a fact about UIKit rather than a taste:
+    ///
+    ///  * **Views.** UIKit hands a touch to exactly *one* view, so the moment an overlay's `hitTest`
+    ///    claims the point every other view is out — the layer host underneath (`30e38e3`), and the
+    ///    two container-sized ones, `SelectionOverlayView` and `FloatingPieceOverlayView`. That is
+    ///    why they sit inside the `chrome == .none` arm. It is true only because the claiming overlay
+    ///    is *above* those two in the view stack, which is not automatic: `CanvasView.updateUIView`
+    ///    orders its `update…` passes so that it is, and says so where they are ordered.
+    ///  * **Container-mounted recognizers.** Each sets `cancelsTouchesInView = false` and is attached
+    ///    to an ancestor of every overlay, so a claim above them takes nothing away — they are
+    ///    offered the touch as well, and each one's handler asks `owner(in:)` and returns when the
+    ///    answer is not itself. Before 2026-08-22 only `handleTextPress` did, and the other four
+    ///    firing under a grabbed grip is the whole of defect (i).
     static func contenders(in i: CanvasTouchInputs) -> [CanvasTouchOwner] {
         var result: [CanvasTouchOwner] = []
 
         if let chromeOwner = i.chrome.owner { result.append(chromeOwner) }
 
-        // A total claim over the container, so it precedes everything mounted below it — but not the
-        // recognizers mounted on the container itself, which is why it does not return early.
-        if i.floatingOverlayIsInteractive { result.append(.floatingPiece) }
+        if i.chrome == .none {
+            // A total claim over the container: pinned to the whole thing, no `hitTest` override.
+            if i.floatingOverlayIsInteractive { result.append(.floatingPiece) }
 
-        if i.selectionOverlayIsCapturing {
-            result.append(i.isLassoFilling ? .lassoFill : .selectionOverlay)
+            if i.selectionOverlayIsCapturing {
+                result.append(i.isLassoFilling ? .lassoFill : .selectionOverlay)
+            }
+
+            if i.activeHostReceivesTouches { result.append(.activeLayerStroke) }
         }
-
-        // Only where no overlay claimed the point: every one of the five `hitTest` overrides sits
-        // above the layer hosts, and a claim there is what keeps the touch off the stroke view.
-        if i.activeHostReceivesTouches, i.chrome == .none { result.append(.activeLayerStroke) }
 
         if i.eyedropperPressIsEnabled { result.append(.eyedropper) }
         if i.fillPressIsEnabled { result.append(.fillPress) }
-        // `handleTextPress`' own guard: a tap that landed on the live box or on one of its grips
-        // does nothing here, or tapping into your own text would commit it and open a fresh box.
+        // `handleTextPress`' own guard, kept as a `contenders` exemption rather than folded into the
+        // precedence: on the two text chromes the placement tap is not merely outranked, it is
+        // *wrong* — tapping into your own text would commit it and open a fresh box — and the
+        // difference shows up the moment something else is the owner.
         if i.textPressIsEnabled, i.chrome != .textBoxOrBand, i.chrome != .textHandle {
             result.append(.textPress)
         }
         if i.catchAllRaisesNotice { result.append(.catchAllNotice) }
 
+        // **Last, deliberately — it takes the touch nobody else wanted.**
+        //
+        // A raster float outranks every tool because `!hasFloatingPiece` is written into
+        // `fillPressIsEnabled`, `isEyedropperArmed`, `textPressIsEnabled` and
+        // `selectionOverlayIsCapturing`, and the obvious way to make a vector float "behave like a
+        // raster one" is to put this at the front and let the same four stand down. That would settle
+        // rows the owner did not rule on and would take away gestures that work today — a lasso fill
+        // while a piece floats, a lasso *selection* drawn while a whole-layer Move is engaged, which
+        // is how the artist gets from Move to a lasso move. The ruling (j) is about touches that
+        // currently do **nothing and say nothing**, and putting this last claims exactly those: the
+        // 122 combinations `testNoReachableTouchIsOwnedByNobody` used to list, and not one more.
+        if i.moveBoxCommitsThisTouch { result.append(.moveBoxCommit) }
+
         return result
+    }
+
+    /// Whether this mechanism stands down when `owner(in:)` names somebody else.
+    ///
+    /// True for the five recognizers mounted on the container, each of which now opens its handler
+    /// with that question. False for every *view*, and not because a view is privileged: a view is
+    /// only ever offered a touch UIKit already decided was its, so it is always the owner when it is
+    /// a contender at all — `testEveryContenderAfterTheFirstStandsDown` is what holds that
+    /// to be true rather than assumed.
+    ///
+    /// **The one thing this cannot express is a touch on the *raster* Move box**, because that box
+    /// has no `CanvasTouchChrome` case of its own — `.floatingPiece` is a single total claim covering
+    /// the box and the tap-away alike. Its tap-away commit does ask the owner; its box drags do not,
+    /// and do not need to, since nothing else is offered a touch on the box. Giving the raster box a
+    /// chrome case would let this model say so at point granularity, and is the obvious next
+    /// tidying — it is not needed for either rule settled here.
+    var yieldsToTheOwner: Bool {
+        switch self {
+        case .eyedropper, .fillPress, .textPress, .catchAllNotice, .moveBoxCommit:
+            return true
+        case .activeLayerStroke, .selectionOverlay, .lassoFill, .floatingPiece,
+             .shapeOverlay, .textOverlay, .textTransformOverlay, .objectTransformOverlay,
+             .guideOverlay, .nobody:
+            return false
+        }
+    }
+
+    /// **What actually happens to this touch.** One mechanism, or none.
+    ///
+    /// The owner acts; every contender behind it that `yieldsToTheOwner` stands down. Anything left
+    /// beside the owner is a second thing acting on one touch — defect (i) — and
+    /// `CanvasTouchOwnerLogicTests.testNoReachableTouchHasMoreThanOneActor` walks the whole space
+    /// asserting there is none.
+    static func actors(in i: CanvasTouchInputs) -> [CanvasTouchOwner] {
+        let offered = contenders(in: i)
+        guard let owner = offered.first else { return [] }
+        return offered.filter { $0 == owner || !$0.yieldsToTheOwner }
     }
 
     /// The single mechanism entitled to act on this touch.
     ///
-    /// **Behaviour-preserving where the gates agree**: with exactly one contender this returns it,
-    /// which is what happens today. Where they disagree it returns the first by the precedence
-    /// `contenders(in:)` lists — that is a *choice*, and every combination in which it has to be made
-    /// is enumerated by `CanvasTouchOwnerLogicTests.testTouchesWithMoreThanOneClaimant` so the
-    /// list can be reviewed rather than discovered later.
+    /// **Five handlers read this, and that is the settling of the conflict rows.** This function and
+    /// the precedence in `contenders(in:)` used to be deliberately ahead of their callers — written
+    /// as the proposal for how the rows should be settled, with a note to delete them if they were
+    /// settled some other way. On 2026-08-22 the owner settled them exactly this way: *whatever
+    /// chrome the artist actually grabbed wins, and the tool underneath does not also fire.* So
+    /// `handleFillPress`, `handleEyedropperPress`, `handleTextPress`, `handleCatchAllTap` and
+    /// `handleMoveBoxCommit` each open with `owner(in:) == <its own case>`, which is one line apiece
+    /// and is why the settling was one line apiece.
     ///
-    /// **Nothing in the app calls this, deliberately — and that is unused surface, which is a cost
-    /// worth naming rather than glossing.** Every converted gate asks the property it used to spell,
-    /// and `handleTextPress` asks `contenders`; switching a site to `owner` is what *resolves* one of
-    /// those conflict rows, which is a behaviour change and a decision for the product owner rather
-    /// than a refactor. So this function, and the precedence ordering in `contenders(in:)` that only
-    /// it consumes, are **deliberately ahead of their callers**: they are the proposal for how the
-    /// conflict rows should be settled, written where the rows are enumerated, so the settling is a
-    /// one-line change at each site rather than a redesign.
-    ///
-    /// A shared answer nobody reads is the thing that drifts next, and the two things that stop this
-    /// one drifting are named here so they are not deleted as incidental:
-    /// `CanvasTouchOwnerLogicTests.testOwnerIsAlwaysTheFirstContenderOrNobody` walks every reachable
-    /// state and pins this to `contenders`' head, and `testNobodyOwnsATouchOnlyInTheThreeDeclaredCases`
-    /// pins the `.nobody` fallthrough — so the ordering cannot quietly stop meaning anything while it
-    /// waits. **If the conflict rows are ever settled some other way, delete this and the ordering
-    /// with it**; keeping an unread precedence around after its proposal has been rejected is exactly
-    /// the drift this comment exists to prevent.
+    /// **A bespoke guard per site is the shape that produced the defect**, so the precedence is the
+    /// one place the answer is chosen. Reading down `contenders(in:)`'s appends is reading the
+    /// ruling: chrome first; then the container-sized views; then each tool's own recognizer; then
+    /// the catch-all notice, which explains a touch nobody took and so must not speak over one
+    /// somebody did; and last the Move box's tap-away, which takes what is left.
     static func owner(in i: CanvasTouchInputs) -> CanvasTouchOwner {
         contenders(in: i).first ?? .nobody
     }

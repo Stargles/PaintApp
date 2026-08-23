@@ -356,13 +356,22 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.updateOnionSkin()
         context.coordinator.updateActiveLayerAndTool()
         context.coordinator.updateInterpolationPreviews()
-        context.coordinator.updateGuideOverlay()
-        context.coordinator.updateTransformOverlay()
+        // **From here down the order is a hit-testing rule, not a drawing one.** Two of these views
+        // are pinned to the whole container with no `hitTest` override — `SelectionOverlayView` while
+        // it is capturing, `FloatingPieceOverlayView` while a piece floats — so every overlay that
+        // claims only its own grips has to sit *above* both of them or its grips are unreachable:
+        // UIKit gives the touch to one view, and it gives it to the top one. That is what
+        // `CanvasTouchOwner.contenders(in:)` means by an overlay claim displacing the other views,
+        // and until 2026-08-22 the guide overlay was on the wrong side of it — fronted first, so
+        // opening the Select panel or floating a piece quietly took its grips away.
         context.coordinator.updateSelectionOverlay()
-        // After the selection overlay, which re-fronts itself: a lasso move's box has to sit above
-        // its own marching ants, and this is where it takes the front back.
+        // Above the marching ants: a lasso move's box has to sit over its own selection outline, and
+        // its grips over a capturing selection overlay. `updateVectorFloat` re-fronts it for the
+        // first of those reasons and this pass covers the whole-layer transform, which has no float.
+        context.coordinator.updateTransformOverlay()
         context.coordinator.updateVectorFloat()
         context.coordinator.updateFloatingOverlay()
+        context.coordinator.updateGuideOverlay()
         context.coordinator.updateShapeOverlay()
         context.coordinator.updateTextOverlay()
         context.coordinator.hostBoundsDidChange()
@@ -404,6 +413,9 @@ struct CanvasView: UIViewRepresentable {
         /// Enabled when there are no layers or the active layer is hidden, so a drawing-tool touch
         /// raises a user-facing notice instead of being silently swallowed.
         weak var catchAllTapRecognizer: TouchTypePressRecognizer?
+        /// The tap that puts the vector Move box down. Enabled only while that box is on screen —
+        /// `CanvasTouchInputs.moveBoxCommitIsEnabled`. See `handleMoveBoxCommit`.
+        weak var moveBoxCommitRecognizer: UITapGestureRecognizer?
         /// The eyedropper's tap. A third `TouchTypePressRecognizer` rather than a third mechanism —
         /// see `setUpGestures`.
         weak var eyedropperTapRecognizer: TouchTypePressRecognizer?
@@ -1955,7 +1967,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func updateActiveLayerAndTool() {
-            // **All three container recognizers, from one value, above the active-layer guard.**
+            // **All four container recognizers, from one value, above the active-layer guard.**
             // Each of them used to carry its own spelling of the same four inputs, and the fill's
             // sat *below* the two guards further down — so with no layers, or with a layer whose
             // host had not been built yet, it was never re-evaluated and kept whatever value it last
@@ -1976,6 +1988,11 @@ struct CanvasView: UIViewRepresentable {
             eyedropperTapRecognizer?.isEnabled = touch.eyedropperPressIsEnabled
             textTapRecognizer?.isEnabled = touch.textPressIsEnabled
             fillTapRecognizer?.isEnabled = touch.fillPressIsEnabled
+            // A fourth alongside them, added with the Move box's tap-away commit — see
+            // `handleMoveBoxCommit`. Above the active-layer guard with the other three, and for the
+            // fill's reason: the states it has to switch *off* in include ones where that guard
+            // returns early.
+            moveBoxCommitRecognizer?.isEnabled = touch.moveBoxCommitIsEnabled
 
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
@@ -2120,6 +2137,13 @@ struct CanvasView: UIViewRepresentable {
             // Re-asserted every pass: `reconcileLayers` brings every layer host to front whenever
             // layer order changes, which puts hosts above this overlay. A transparent host still
             // lets the dashes show through visually while `hitTest` never reaches the handles.
+            //
+            // **And it is asserted *after* the selection and floating overlays, which is why this
+            // call moved down `updateUIView`.** Those two are pinned to the whole container with no
+            // `hitTest` override, so with the Select panel open or a piece floating they were
+            // swallowing every touch that would have reached a guide grip — the grips were on screen
+            // and ungrabbable, and no gate said so. This overlay claims only its grips
+            // (`GuideOverlayView.hitTest`), so sitting above them costs them nothing.
             guideOverlay.superview?.bringSubviewToFront(guideOverlay)
         }
 
@@ -2747,6 +2771,68 @@ struct CanvasView: UIViewRepresentable {
             textPress.name = "canvas.textPress"
             view.addGestureRecognizer(textPress)
             textTapRecognizer = textPress
+
+            // The tap **away** from the vector Move box, which puts the box down — the vector half of
+            // what `FloatingPieceOverlayView`'s own tap-outside already does for a raster piece.
+            //
+            // **On the container rather than on `ObjectTransformOverlayView`, because that overlay
+            // claims only its own grips**, deliberately: everywhere else it is transparent to touch
+            // so the canvas keeps panning and pinching while the box is up. A tap recognizer added to
+            // it would therefore never fire off the box, which is precisely the tap this is for.
+            //
+            // A plain `UITapGestureRecognizer` and **not** a `TouchTypePressRecognizer`, unlike the
+            // four above: settling a float writes nothing and records nothing (every nudge is already
+            // its own undo step — LASSO_MOVE.md §5), so "would this input have drawn?" answers no and
+            // pencil-only mode has no stake in it. The raster tap-outside is a plain tap for the same
+            // reason, and matching it is the point.
+            let moveBoxCommit = UITapGestureRecognizer(target: self, action: #selector(handleMoveBoxCommit(_:)))
+            moveBoxCommit.numberOfTouchesRequired = 1
+            moveBoxCommit.delegate = self
+            moveBoxCommit.cancelsTouchesInView = false
+            // **`delaysTouchesEnded = false` is the one place this diverges from the raster tap**, and
+            // the reason is where it is mounted. `UIGestureRecognizer` withholds a view's
+            // `touchesEnded` until the recognizer settles; the raster tap lives on the floating
+            // overlay, so that is one view, but this one lives on the container and is therefore an
+            // ancestor of every overlay and every layer host. `ObjectTransformOverlayView` ends its
+            // drag out of raw `touchesEnded` — and that is where the float's one undo step per nudge
+            // is written — so a delay there would be a delay on the artist's own Move gesture.
+            moveBoxCommit.delaysTouchesEnded = false
+            moveBoxCommit.isEnabled = false
+            moveBoxCommit.name = "canvas.moveBoxCommit"
+            view.addGestureRecognizer(moveBoxCommit)
+            moveBoxCommitRecognizer = moveBoxCommit
+        }
+
+        /// Settles the vector Move box when the artist taps away from it — owner's ruling, 2026-08-22.
+        ///
+        /// **What it is fixing:** `FloatingPieceOverlayView` covers the whole container and commits a
+        /// raster piece the moment you tap outside it, while a vector float's
+        /// `ObjectTransformOverlayView` claims only its own grips, so there was no tap-away commit at
+        /// all. `CanvasTouchOwnerLogicTests` counted 122 reachable combinations in which the touch was
+        /// owned by nobody because of it: mid-Move on a vector layer, or with a lassoed piece
+        /// floating, a touch away from the box did nothing *and said nothing* — where a hidden layer
+        /// would at least have raised a banner. The owner chose this over leaving it silent and over
+        /// raising a notice.
+        ///
+        /// **Both arms, because both are the same asymmetry.** A lassoed float settles through
+        /// `commitVectorFloatIfNeeded()` and a whole-layer transform through `isVectorTransforming =
+        /// false` — the two branches `TopToolbar.toggleMove` already takes when Move is engaged, so
+        /// tapping away and tapping the Move button are the same two calls. Neither records a step of
+        /// its own: a float's nudges are already on the stack one apiece (LASSO_MOVE.md §5) and the
+        /// transform's bracket closes on the flag's `didSet`, which is what pushes *its* step.
+        @objc func handleMoveBoxCommit(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended, let container = containerView else { return }
+            // Before the ownership guard, as every canvas touch is: a tap that this handler declines
+            // still closes an open top-bar dropdown.
+            canvasManager.canvasInteractionBegan()
+            let canvasPoint = recognizer.location(in: container)
+            let touch = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
+            guard CanvasTouchOwner.owner(in: touch) == .moveBoxCommit else { return }
+            if canvasManager.vectorFloat != nil {
+                canvasManager.commitVectorFloatIfNeeded()
+            } else if canvasManager.isVectorTransforming {
+                canvasManager.isVectorTransforming = false
+            }
         }
 
         /// The text tool's placement tap: put a box where the artist tapped and raise the keyboard.
@@ -2774,12 +2860,13 @@ struct CanvasView: UIViewRepresentable {
             // `canvasChrome(at:)` asks both (and the other three), and `contenders` is what encodes
             // the exemption, so the guard and the model cannot drift apart.
             //
-            // `contenders` rather than `owner`: today a guide grip or a shape handle does **not**
-            // suppress this tap — every container recognizer here sets `cancelsTouchesInView =
-            // false`, so both act — and that is one of the rows `CanvasTouchOwnerLogicTests.
-            // testTouchesWithMoreThanOneClaimant` enumerates. Swapping in `owner` would silently fix
-            // some of them and change behaviour; this conversion preserves it and leaves the list to
-            // be decided on.
+            // **`owner` rather than `contenders` since 2026-08-22**, which is the whole of rule (i)
+            // at this site: a guide grip or a shape handle under the finger used *not* to suppress
+            // this tap — every container recognizer here sets `cancelsTouchesInView = false`, so
+            // both acted — and the owner ruled that whatever chrome the artist grabbed wins. The
+            // four sibling handlers now open with the same line. The `chrome` exemption for the two
+            // text overlays stays inside `contenders`, because there this tap is not merely
+            // outranked, it is wrong.
             //
             // **One clause did not survive the conversion, deliberately: `canvasManager.
             // textGestureActive`.** The guard used to read `if textGestureActive, hitTest != nil`,
@@ -2794,7 +2881,7 @@ struct CanvasView: UIViewRepresentable {
             // rather than a restatement, which is why it is written down here instead of being left
             // to be discovered.
             let touch = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
-            guard CanvasTouchOwner.contenders(in: touch).contains(.textPress) else { return }
+            guard CanvasTouchOwner.owner(in: touch) == .textPress else { return }
             canvasManager.beginTextSession(at: canvasPoint)
             guard canvasManager.textGestureActive else { return }
             updateTextOverlay()
@@ -2805,7 +2892,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer, eyedropperTapRecognizer, textTapRecognizer]
+            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer, eyedropperTapRecognizer, textTapRecognizer, moveBoxCommitRecognizer]
             if alwaysConcurrent.contains(where: { $0 === gestureRecognizer }) || alwaysConcurrent.contains(where: { $0 === otherGestureRecognizer }) {
                 return true
             }
@@ -3150,6 +3237,16 @@ struct CanvasView: UIViewRepresentable {
             // their own recognizers on this same view and are not owed an explanation — the
             // eyedropper in particular still picks with no layers at all, off the paper.
             guard canvasManager.selectedTool.paintsOnCanvas else { return }
+            // **And a touch somebody else took is not owed one either** (rule (i), owner 2026-08-22).
+            // `needsCatch` reads only the active layer's own state and never asks whether a floating
+            // piece, the Select panel or a grabbed grip has taken the touch, so dragging a Move piece
+            // over a hidden active layer raised "this layer is hidden" on every touch of the drag and
+            // lassoing with no layers raised "no layers" on every drag. The notice is the last thing
+            // in the precedence for exactly this reason: it explains a touch nobody acted on.
+            if let container = containerView {
+                let touch = canvasTouchInputs(chrome: canvasChrome(at: recognizer.location(in: container)))
+                guard CanvasTouchOwner.owner(in: touch) == .catchAllNotice else { return }
+            }
             // The same test `StrokeGestureRecognizer.touchesBegan` applies, read straight off the
             // source flag that `reconcileLayers` mirrors down to `StrokeCanvasView.pencilOnlyDrawing`
             // — not off a third copy of the preference, so the two paths cannot drift apart.
@@ -3201,13 +3298,21 @@ struct CanvasView: UIViewRepresentable {
                 // source flag rather than off a third copy of the preference, so the fill path and the
                 // stroke path cannot drift apart.
                 guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+                // **Rule (i): whatever chrome the artist grabbed wins.** This recognizer is on the
+                // container with `cancelsTouchesInView = false`, so an overlay claiming the point
+                // takes nothing away from it — dragging a guide grip, a smart shape's handle or a
+                // vector Move box with Fill selected used to move the chrome *and* dump a flood fill
+                // underneath it. Declining here binds the whole sequence for the reason the doc
+                // comment gives: `fillDragStartHost` stays nil, so `.changed` and `.ended` are no-ops
+                // and no adjustable fill is committed by a press this handler refused.
                 // container's bounds equal canvasSize, so location(in:) there is canvas-pixel space.
+                let canvasPoint = recognizer.location(in: container)
+                guard CanvasTouchOwner.owner(in: canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))) == .fillPress else { return }
                 // The drag delta is measured in fixed screen (host) space so feel is zoom-independent.
                 fillDragStartHost = recognizer.location(in: host)
                 fillDragStartGap = canvasManager.fillGapClosingDistance
                 fillDragStartThreshold = canvasManager.fillThreshold
                 fillDragStartEdge = canvasManager.fillEdgeOverlap
-                let canvasPoint = recognizer.location(in: container)
                 // Pressing back inside the current adjustable fill resumes drag-adjusting it. A
                 // press elsewhere bakes it first via `beginInteractiveFill`'s `beginCanvasEdit`.
                 if canvasManager.isFillInAdjustableState, canvasManager.isPointInPendingFill(at: canvasPoint) {
@@ -3307,12 +3412,20 @@ struct CanvasView: UIViewRepresentable {
             canvasManager.canvasInteractionBegan()
             guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             guard !eyedropperPickInFlight else { return }
-
+            // **Rule (i)**, the same line the other four container recognizers now open with: with
+            // the pick armed, dragging a guide grip or a shape handle used to move the chrome *and*
+            // replace the brush colour and revert the tool — so the artist finished the drag holding
+            // a different colour and a different tool than the one they started it with. Declining
+            // here leaves `eyedropperRevertPending` false, so the `.ended` arm above has nothing to
+            // settle and the tool is not disturbed.
+            //
             // container's bounds are set to canvasSize (`applyTransform`) and it carries the
             // zoom/rotation as its own `transform`, so this single call *is* the view→canvas mapping
             // at any zoom and any rotation — UIKit inverts the transform. Same line `handleFillPress`
             // uses. See `Eyedropper`'s note on why the feature contains no transform arithmetic.
             let canvasPoint = recognizer.location(in: container)
+            guard CanvasTouchOwner.owner(in: canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))) == .eyedropper else { return }
+
             guard let request = canvasManager.eyedropperRequest() else {
                 canvasManager.applyEyedropperResult(nil, revertTool: false)
                 eyedropperRevertPending = true

@@ -601,6 +601,70 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(rasterizations(nudges: 12), 3, "and twelve nudges cost exactly the same")
     }
 
+    // MARK: - Ruling (j): a touch away from the box puts it down
+
+    /// **Tapping away from a floating piece settles it, and settles it the way every other door
+    /// does** — owner's ruling, 2026-08-22, closing the asymmetry with the raster Move tool, whose
+    /// `FloatingPieceOverlayView` has always committed on a tap outside.
+    ///
+    /// The undo accounting is the part that had to be checked rather than assumed, because §5's
+    /// "undo is one step per nudge" is a settled ruling and a new commit door is exactly where a
+    /// second step gets recorded by accident. One drag, one step — and the commit adds none of its
+    /// own, because the nudge already wrote it. The single press then walks the artist all the way
+    /// back: it is the *first* nudge's step, so it un-does the split with it and gives back the
+    /// stroke that was there before, un-cut.
+    ///
+    /// The two halves are asserted together on purpose. `CanvasTouchOwner` says the tap away from the
+    /// box belongs to `.moveBoxCommit`; `commitVectorFloatIfNeeded()` is what that handler calls, and
+    /// is the same call `TopToolbar.toggleMove`'s vector-float branch makes. Driving the model call
+    /// alone would leave "and it is actually reached by a tap" unstated.
+    ///
+    /// Watched failing with the plausible wrong answer written in — a commit that writes the box's
+    /// final position on its way out, `nudgeVectorFloat(to: float.frame.transform)` inside
+    /// `commitVectorFloatIfNeeded`. It is the shape the raster path has (`commitFloatingPieceIfNeeded`
+    /// really does register a cel change of its own), it is a *zero-delta* nudge so it moves nothing
+    /// visible, and it went red on five assertions at once: *2 step(s) for one drag and a tap*, and
+    /// then the undo landing one drag short — *one stroke back, not two halves* with the stroke still
+    /// cut in half and its far sample at 34 instead of 60.
+    ///
+    /// (`commitAllInteractiveState()` in place of `commitVectorFloatIfNeeded()` was tried as the
+    /// counterfactual first and is **not** one: it routes to the same call and records the same single
+    /// step. Worth knowing before someone reaches for it as an equivalent.)
+    func testATapAwayFromTheBoxCommitsInOneUndoStepAndUndoPutsThePieceBack() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 4, y: 30), to: CGPoint(x: 60, y: 30), size: 4))
+        let originalID = vector.elements[0].id
+        let samplesBefore = vector.elements[0].stroke?.samples.map(\.x)
+        select(manager, layerIndex, loop(CGRect(x: 34, y: 10, width: 26, height: 40)))
+
+        let stepsBefore = manager.history.undoStack.count
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 6, dy: 0))
+
+        // The touch that follows: away from the box, on a vector layer with a float up. This is the
+        // arbitration `handleMoveBoxCommit` performs before it calls anything.
+        let awayFromTheBox = CanvasTouchInputs(tool: manager.selectedTool, hasVectorFloat: true,
+                                              activeLayer: .vector, chrome: .none)
+        XCTAssertEqual(CanvasTouchOwner.owner(in: awayFromTheBox), .moveBoxCommit,
+                       "the tap is the box's to take")
+        manager.commitVectorFloatIfNeeded()
+
+        XCTAssertNil(manager.vectorFloat, "the piece is down")
+        XCTAssertTrue(vector.suppressedElementIDs.isEmpty, "and nothing is left suppressed")
+        XCTAssertEqual(manager.history.undoStack.count - stepsBefore, 1,
+                       "\(manager.history.undoStack.count - stepsBefore) step(s) for one drag and a tap")
+
+        manager.undo()
+
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore, "and the one step is spent")
+        XCTAssertEqual(vector.elements.count, 1, "one stroke back, not two halves")
+        XCTAssertEqual(vector.elements[0].id, originalID, "the very stroke that was there before")
+        XCTAssertEqual(vector.elements[0].stroke?.samples.map(\.x), samplesBefore,
+                       "every sample back where it started")
+        XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
+        XCTAssertNotNil(manager.selection, "and the loop is back on screen to be redrawn")
+    }
+
     // MARK: - Helpers
 
     /// The box transform a drag of `(dx, dy)` canvas points produces, from where the float is now.

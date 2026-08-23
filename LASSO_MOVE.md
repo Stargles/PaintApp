@@ -896,6 +896,33 @@ design proposal rather than a previous ruling; the rest confirm defaults.
     transforms, so it costs nothing and lands on the same frame the piece does; at each gesture end
     the model's own path catches up.
 
+A twelfth was settled on **2026-08-22**, after the enumeration in `CanvasTouchOwnerLogicTests`
+counted what a touch away from the box actually did.
+
+12. **A touch away from the box puts the piece down**, exactly as a tap outside a raster floating
+    piece has always committed it (`FloatingPieceOverlayView.handleTapOutside`). Until this was
+    settled a vector float had no tap-away commit at all — `ObjectTransformOverlayView` claims only
+    its own grips, so 122 reachable input combinations left the touch owned by nobody: it did nothing
+    *and said nothing*, where a hidden layer would at least have raised a banner. With the Select
+    panel open the canvas was inert away from the box, including for the lasso the open panel is for.
+    The owner chose the commit over leaving it silent and over raising a notice. It rides a container
+    recognizer (`CanvasView.Coordinator.handleMoveBoxCommit`, `CanvasTouchOwner.moveBoxCommit`) and
+    calls `commitVectorFloatIfNeeded()` — the same call `TopToolbar.toggleMove` makes, so tapping away
+    and tapping Move again are one behaviour with two doors. Before this there was only the one:
+    `MoveTransformBottomBar` — the bar with the Done button — is shown on `floatingPiece != nil`, so a
+    vector float never had it. **It records nothing of its own**, which
+    is §5.5 holding: the nudges are already on the stack one apiece, and
+    `LassoMoveLogicTests.testATapAwayFromTheBoxCommitsInOneUndoStepAndUndoPutsThePieceBack` is what
+    keeps a second step from creeping in through the new door. The same tap ends a whole-layer vector
+    Move (`isVectorTransforming = false`), which is the other arm of the same box.
+
+    **It is last in the arbitration on purpose**: it takes only the touches that used to do nothing.
+    A tool with a live recognizer of its own still acts — the fill still floods, the pick still picks,
+    a lasso fill still fills — where a *raster* float suppresses all three through `!hasFloatingPiece`
+    in their gates. Matching the raster suppression would have settled rows nobody ruled on and would
+    have taken away the lasso selection an artist draws while Move is engaged, which is how they get
+    from Move to a lasso move in the first place.
+
 ### Still needs a ruling
 
 - **Should a fill chunk that lands on nothing still be a fill?** Moving a chunk of flat colour out
