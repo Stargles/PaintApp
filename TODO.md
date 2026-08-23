@@ -20,9 +20,21 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- **`CanvasTouchOwner`** — [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)'s finding 1, on `tmp/touchowner`.
-  The owner ruled 2026-08-22 to do it **before** the new features, on the grounds that it pays for itself on
-  the first new tool.
+Nothing.
+
+## Verified on the device
+
+**All five of this pass's changes were confirmed by the owner on their iPad, 2026-08-22**: *"five changes are
+behaving correctly."* That covers the lasso move, the Cut eraser's live preview, the pick tool under the Select
+panel, the raster-tier omission on save, and the raster Move's travelling ants. Nothing from this pass is
+waiting on an eye any more.
+
+Three behaviour questions are still carried, and are **not** defects — each was raised by us, not reported:
+the Cut eraser across a line thicker than the eraser (visibly does nothing, and always did); a crossing line
+that can flicker during a cut drag, under 10% of what the cut removes; and a fill chunk dropped on blank paper
+staying a fill. All three want the owner's eye on real artwork rather than another run.
+
+## Queued
 
 ## Verified on the device
 
@@ -75,6 +87,46 @@ Nothing — the owner's list is empty. Two things are *carried*, both deliberate
   which matters, because the next session is large features.
 
 ## Done this pass
+
+- **One touch now does one thing, and a tap away from a vector Move box puts the piece down**
+  (`38b6fed`), plus the type that found both (`e0d59b2` and its three parents). This is
+  [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)'s finding 1, which the owner ruled should go **before** the
+  next large features.
+
+  **Deriving the contract before touching a gate is what produced the value.** Enumerating the input space —
+  every tool x every panel x floating-piece x layer state, 3,600 reachable combinations — found **1,678 where
+  two things acted on one touch** and **118 owned by nobody**. Neither was reported by anyone; both were live.
+  Drag a guide grip with Fill selected and the grip moved *and* a flood fill landed under it; with the pick
+  tool armed the brush colour changed too; tap into your own text with Fill selected and the caret placed *and*
+  the layer flooded. **The cause was never a missing check at any one site**: every container recognizer sets
+  `cancelsTouchesInView = false`, so an overlay's `hitTest` claim does not take the touch from the recognizer
+  beneath it. `handleTextPress` was the only handler in the app that compensated, by re-checking the overlays
+  itself — which is exactly why text was absent from the collision list.
+
+  Settled per the owner's rulings: each of the five container recognizers now asks `owner(in:)` and stands down
+  when the answer is not itself — one rule in one place rather than thirteen bespoke guards of the kind that
+  produced the defect — and `.moveBoxCommit` gives a vector float the tap-away commit a raster float always
+  had, sitting **last in the precedence** so it takes only touches that used to do nothing.
+  `contenders(in:)` still reports everything the gates *offer* a touch to; `actors(in:)` is what happens, and
+  is never more than one. `.nobody` is kept as a case with no reachable producer, so a test can assert the
+  empty set — deleting it would turn "the canvas went silent" back into a fallthrough nothing can name.
+
+  **A review nearly cost the refactor its point and was right to.** The tests shipped with 38 hand-maintained
+  expected counts, every one of which would shift the moment a tool was added — the exact event the work exists
+  to make cheap. They are gone, replaced by properties asserted per state, and the replacement was
+  mutation-checked rather than assumed. A second reviewer rebuilt the whole test file as a standalone `swiftc`
+  harness and ran 24 mutations, catching 22, having gone in willing to conclude "not worth merging".
+
+  1646 fast-tier tests (1643 passed, 0 failed, 3 skipped) = 1617 + 19 + 10, matched at every step by a static
+  `func test` count. **An honest gap is recorded rather than papered over**: nothing couples `CanvasTouchInputs`
+  to what `CanvasView` actually gathers, because an out-of-process test target cannot see it, and the type's
+  doc comment names the five fields nothing covers.
+
+  **One hypothesis eliminated on the way**, in [BUGS.md](BUGS.md): the open "two-finger pan is dead while Fill
+  is selected" cannot be `shouldRequireFailure`, because `Tool.fill.paintsOnCanvas` is false so the guard
+  returns before stating any dependency. Two readers reached that independently. **Do not ask the owner to
+  re-test it as a fix check** — a green re-test would mean nothing.
+
 
 - **(a) A lasso selection moves only what is inside it** (`a5fa3b2`). Draw a loop with Select on a vector layer
   and tap Move: the lassoed ink lifts out in one frame — strokes the loop crosses are **cut at the boundary**,

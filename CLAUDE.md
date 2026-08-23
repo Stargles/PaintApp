@@ -253,7 +253,12 @@ The scheme's LaunchAction stays Debug (Xcode's Run button is for development); `
 Release` above is what makes the shipped build the one that's actually optimised — Debug measured
 62x slower than Release on the alpha-mask render path. `~/PaintApp/deploy/deploy.sh` does this but
 **pulls `main` first**, so it never ships branch work — run the steps above from the worktree
-instead. The first `install` often fails with `NWError 54`; just re-run it. Never pass the device by
+instead. The first `install` often fails with `NWError 54`; just re-run it. **A different failure —
+`CoreDeviceError 1011`, "unable to locate a device matching the requested device identifier" — is a
+stale tunnel, not a missing iPad**: `devicectl list devices` still shows it `available (paired)` while
+three installs in a row fail. Run `xcrun devicectl device info details --device <UUID>` first; that
+re-establishes the tunnel (watch `lastConnectionDate` move) and the next `install` succeeds. Retrying
+`install` alone does not, so it reads like a dead device and is not one. Never pass the device by
 name (`devicectl`'s columns shift on the space in "Kevin's iPad") — use the UUID above.
 
 Auto-resign for the 7-day free-account cert: `/Library/LaunchDaemons/com.paintapp.resign.plist`
