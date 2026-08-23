@@ -237,14 +237,46 @@ extension CanvasTouchInputs {
     /// Named so that the enumeration in the tests proves that rather than assuming it.
     var selectPanelIsOpen: Bool { panel == .select }
 
-    /// `CanvasView.Coordinator.isEyedropperArmed`, verbatim. **The Select panel is deliberately
-    /// absent**: Select is a panel, not a `Tool`, so arming the eyedropper does not close it, and
-    /// the momentary pick is the artist's most recent word. That absence is the 2026-08-22 fix.
+    /// Whether an armed eyedropper — rather than the Select overlay — owns the canvas's single
+    /// touch. **The Select panel is deliberately absent from this**, and that absence is the
+    /// owner's bug of 2026-08-22 ("the pick tool does not work when the lasso select tool is
+    /// selected").
+    ///
+    /// There is no `.select` case in `Tool`: Select is a *panel*, so opening it leaves
+    /// `selectedTool` at whatever it was, and arming the eyedropper does not close it. The two
+    /// sites that read this used to disagree about who that left in charge —
+    /// `updateActiveLayerAndTool` suppressed the eyedropper's recognizer on `activePanel != .select`
+    /// while `updateSelectionOverlay` never consulted `selectedTool` at all — so with the panel up
+    /// the recognizer was off *and* the overlay was still eating the touch, and the pick was dead
+    /// with nothing left to re-enable it.
+    ///
+    /// `Tool.eyedropper` is why the eyedropper wins rather than the overlay: it is momentary, and
+    /// the artist "reaches for this one in the middle of doing something else", which is exactly
+    /// what picking a colour mid-lasso is. It hands back the instant the pick resolves —
+    /// `leaveEyedropper` restores the previous tool, this goes false, and the overlay resumes
+    /// capturing with the Select panel still open, so the lasso carries on in the new colour.
+    ///
+    /// **Both sites read this one property**, so they cannot end up both live (two recognizers
+    /// racing for the tap) or both dead (the bug). The `floatingPiece` clause is kept for the
+    /// same reason: false here hands the touch to the floating overlay, which is what the
+    /// `selectionOverlayIsCapturing` term already does — the alternative spellings each leave
+    /// one of the two combinations unowned. Reaching that state needs a door the app does not
+    /// currently have (`SideToolbar.eyedropperButton` bakes a floating piece via
+    /// `commitAllInteractiveState()` *before* `selectEyedropper()`, and it is the only caller),
+    /// which is why this is a guard rather than a behaviour —
+    /// `testArmingTheEyedropperBakesAFloatingPieceRatherThanRacingIt` is what pins the bake.
+    ///
+    /// **This comment moved here from `CanvasView.Coordinator` when the gates were converted**, for
+    /// the rule the conversion followed: a comment that explains a decision lives where the decision
+    /// is, and the decision is now made once, here.
     var isEyedropperArmed: Bool { tool == .eyedropper && !hasFloatingPiece }
 
-    /// `CanvasView.Coordinator.isLassoFilling`, verbatim. The Select panel wins the tie: a selection
-    /// drag begun there must not turn into a fill because the fill tool happens to be the last one
-    /// picked in the toolbar.
+    /// Whether the fill tool's lasso mode currently owns the selection overlay's lasso gesture.
+    ///
+    /// The Select panel wins the tie: it is the overlay's own tool, and a selection drag begun there
+    /// must not turn into a fill because the fill tool happens to be the last one picked in the
+    /// toolbar. A floating piece takes priority over both, exactly as it does for the plain
+    /// selection — the same guard `fillPressIsEnabled` uses.
     var isLassoFilling: Bool {
         tool == .fill && fillMode == .lasso && !selectPanelIsOpen && !hasFloatingPiece
     }
@@ -280,26 +312,45 @@ extension CanvasTouchInputs {
     /// pinned to the whole container with no `hitTest` override.
     var floatingOverlayIsInteractive: Bool { hasFloatingPiece }
 
-    /// `updateActiveLayerAndTool`'s `fillTapRecognizer.isEnabled`, as the assignment spells it.
+    /// The fill tool's flood press. Not per-layer, so it does not live behind the tool-settings
+    /// cache in `updateActiveLayerAndTool` and stays in sync every call. Suspended while Select is
+    /// engaged or a piece is floating, so the fill tool's press cannot race the Selection/Move
+    /// overlays' own gestures — and suspended in lasso mode too, where the selection overlay's pan
+    /// is the gesture that matters and this recognizer would otherwise apply a flood fill at the
+    /// point the loop started.
     ///
-    /// **The assignment sits below a `guard` this predicate does not restate, and that is a defect
-    /// rather than a simplification.** In `updateActiveLayerAndTool` the eyedropper's and the text
-    /// tool's gates are written *above* `guard canvasManager.layers.indices.contains(...)`, with a
-    /// doc comment explaining why; the fill's is written below it, along with `guard let host`. So
-    /// with no layers — or with `currentLayerIndex` parked at -1 mid-delete — the fill recognizer is
-    /// never re-evaluated and keeps whatever value it last held. This property states the answer the
-    /// gate *means*, which is a behaviour change on exactly that combination; it is listed as a
-    /// chosen answer in `CanvasTouchOwnerLogicTests`.
+    /// **The assignment used to sit below a `guard` this predicate does not restate, and that was a
+    /// defect rather than a simplification.** The eyedropper's and the text tool's gates were
+    /// written *above* `guard canvasManager.layers.indices.contains(...)`; the fill's was written
+    /// below it, along with `guard let host`. So with no layers — or on a pass where the active
+    /// layer's host had not been built yet — the fill recognizer was never re-evaluated and kept
+    /// whatever value it last held, which is why Fill on a fresh document with no layers was
+    /// completely silent. This property states the answer the gate *means*, and the conversion moved
+    /// the assignment up beside the other two.
     var fillPressIsEnabled: Bool {
         tool == .fill && fillMode == .flood && !selectPanelIsOpen && !hasFloatingPiece
     }
 
-    /// `eyedropperTapRecognizer.isEnabled = isEyedropperArmed`.
+    /// `eyedropperTapRecognizer.isEnabled`. **Above the active-layer guard, unlike the fill's
+    /// twin**: the eyedropper reads the composite rather than writing a layer, and with no layers at
+    /// all the composite is still a picture — the paper — so a pick there is meaningful where a fill
+    /// would have nowhere to land.
     var eyedropperPressIsEnabled: Bool { isEyedropperArmed }
 
-    /// `textTapRecognizer.isEnabled`, verbatim. The Select clause is real rather than the
-    /// eyedropper's bug in a different hat: `ActionsMenu.addTextRow` closes the Select panel on the
-    /// way into text mode, so the two clauses cannot both bite.
+    /// The text tool's placement tap. It needs no active-layer check — `beginTextSession` asks
+    /// `Tool.textUnavailableReason` about the layer's kind, which is the one place that question is
+    /// answered — but it is suspended while Select is engaged or a piece is floating for the fill's
+    /// reason: those overlays own the canvas's single-touch gestures while they are up.
+    ///
+    /// **This is not the eyedropper's 2026-08-22 bug wearing a different hat, and the reason is a
+    /// call order two files away.** `ActionsMenu.addTextRow` — the only door into text mode —
+    /// follows `enterTextMode()` with `$activePanel.toggleSettingsPanel(.text)`, so arriving in the
+    /// tool is itself what closes the Select panel, and the two clauses of this guard cannot both be
+    /// true through it. The asymmetry with the eyedropper is real rather than an oversight: the
+    /// eyedropper is armed *while* Select is already open, so arming it is the artist's most recent
+    /// word; text is a mode you enter and then choose to open Select on top of, and there Select is
+    /// theirs. `SelectionAndMoveUITests.testEnteringTextModeClosesTheSelectPanelSoTextsOwnGuardCannotBite`
+    /// pins the order.
     var textPressIsEnabled: Bool { tool == .text && !selectPanelIsOpen && !hasFloatingPiece }
 
     /// `reconcileLayers`' `needsCatch`, verbatim: no layers, the active layer not effectively

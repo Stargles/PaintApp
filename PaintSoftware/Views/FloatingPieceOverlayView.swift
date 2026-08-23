@@ -76,10 +76,20 @@ final class FloatingPieceOverlayView: TransformOverlayView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(_ newPiece: FloatingPiece?) {
+    /// **`claimsTouch` is not asked and there is no `hitTest` override, so this is a total claim.**
+    /// The view is pinned to the whole container, so the moment a piece is floating every touch
+    /// inside the canvas is its — including the tap outside the piece that commits it. That is the
+    /// asymmetry with a lassoed *vector* piece, whose `ObjectTransformOverlayView` claims only its
+    /// own grips and therefore has no tap-away commit at all.
+    ///
+    /// `isInteractive` is handed in rather than derived from `newPiece` here: it is
+    /// `CanvasTouchInputs.floatingOverlayIsInteractive`, one of the fourteen gates, and the whole
+    /// point of the conversion is that a gate is read from the shared answer instead of spelled
+    /// again wherever the view happens to be updated.
+    func update(_ newPiece: FloatingPiece?, isInteractive: Bool) {
         piece = newPiece
         isHidden = newPiece == nil
-        isUserInteractionEnabled = newPiece != nil
+        isUserInteractionEnabled = isInteractive
         guard newPiece != nil else { return }
         layoutFromPiece()
     }

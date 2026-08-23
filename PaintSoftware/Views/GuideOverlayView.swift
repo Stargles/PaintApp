@@ -230,9 +230,24 @@ final class GuideOverlayView: UIView {
     /// Claims only the grips, and only while they are shown. Everywhere else the overlay is
     /// transparent to touch, so the canvas underneath keeps receiving strokes, guide capture and
     /// two-finger gestures with a guide on screen.
+    /// **The ownership half of `hitTest`, asked on its own.** `hitTest` answers two questions at
+    /// once — *is this touch mine* and *which view of mine is hit* — and only the first is the
+    /// arbitration this canvas gets wrong. Split out, it is what `CanvasView.Coordinator.canvasChrome(at:)`
+    /// asks to build `CanvasTouchInputs.chrome`, so the five overlays' claims reach the one function
+    /// that says who owns a touch instead of each being re-derived by whoever needs to know. The
+    /// geometry stays here, untouched.
+    ///
+    /// **`editing` in place of an `isActive` flag is the one thing that makes this overlay
+    /// different**, and it is why a guide grip turns up in more of `CanvasTouchOwner`'s
+    /// owned-by-more-than-one rows than anything else: guide editing is a mode none of the four
+    /// inputs to that type can see, so the model has to treat a guide claim as reachable in every
+    /// state.
+    func claimsTouch(at point: CGPoint) -> Bool {
+        editing != .none && !isHidden && isUserInteractionEnabled && grip(at: point) != nil
+    }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard editing != .none, !isHidden, isUserInteractionEnabled,
-              grip(at: point) != nil else { return nil }
+        guard claimsTouch(at: point) else { return nil }
         return self
     }
 

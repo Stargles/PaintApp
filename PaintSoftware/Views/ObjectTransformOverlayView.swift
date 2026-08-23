@@ -221,11 +221,24 @@ final class ObjectTransformOverlayView: UIView {
     ///
     /// A grip can sit outside this view's bounds (the knob, on a layer at the top of the canvas), so
     /// containment in `bounds` is deliberately not consulted; `target(at:)` is the whole test.
+    /// **The ownership half of `hitTest`, asked on its own.** `hitTest` answers two questions at
+    /// once — *is this touch mine* and *which view of mine is hit* — and only the first is the
+    /// arbitration this canvas gets wrong. Split out, it is what `CanvasView.Coordinator.canvasChrome(at:)`
+    /// asks to build `CanvasTouchInputs.chrome`, so the five overlays' claims reach the one function
+    /// that says who owns a touch instead of each being re-derived by whoever needs to know. The
+    /// geometry stays here, untouched.
+    func claimsTouch(at point: CGPoint) -> Bool {
+        isActive && !isHidden && isUserInteractionEnabled && target(at: point) != nil
+    }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard isActive, !isHidden, isUserInteractionEnabled, target(at: point) != nil else { return nil }
+        guard claimsTouch(at: point) else { return nil }
         return self
     }
 
+    /// Deliberately **not** `claimsTouch`: `point(inside:)` is asked about geometry alone, by
+    /// callers that have already decided the view is live, and folding the activation state in here
+    /// would change what a superview's own hit-testing sees.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         target(at: point) != nil
     }

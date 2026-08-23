@@ -542,6 +542,13 @@ struct CanvasView: UIViewRepresentable {
             let tree = canvasManager.renderTree
             let sandwichEngaged = isSandwichEngaged(tree)
 
+            // Derived once for the same reason, and used by both touch gates this function owns —
+            // the active host's `isUserInteractionEnabled` and the catch-all recognizer's `isEnabled`.
+            // They are two halves of one arrangement ("this touch is not the layer's; say why"), and
+            // reading them off one value is what keeps them from drifting into the shapes
+            // `CanvasTouchOwner`'s doc comment lists.
+            let touch = canvasTouchInputs()
+
             let currentIDs = Set(canvasManager.layers.map(\.id))
             for (id, host) in layerHosts where !currentIDs.contains(id) {
                 host.removeFromSuperview()
@@ -839,12 +846,13 @@ struct CanvasView: UIViewRepresentable {
                 // stayed interactive with the eyedropper selected and the picking touch started a
                 // brush stroke alongside the pick (owner, 2026-08-17). `Tool.paintsOnCanvas` is an
                 // exhaustive switch with no `default:`, so the next tool added has to answer.
+                //
+                // The six clauses that follow "is this the active layer" are
+                // `CanvasTouchInputs.activeHostIsInteractive`, which every other gate that needs
+                // them reads too — including `shouldRequireFailureOf`, which used to read this
+                // property back off the view instead.
                 let shouldInteract = (index == canvasManager.currentLayerIndex)
-                    && canvasManager.selectedTool.paintsOnCanvas
-                    && activePanel != .select && canvasManager.floatingPiece == nil
-                    && canvasManager.vectorFloat == nil
-                    && !(canvasManager.isVectorTransforming && layer.kind == .vector)
-                    && !layer.hasNoDrawingSurface
+                    && touch.activeHostIsInteractive
                 if host.isUserInteractionEnabled != shouldInteract {
                     host.isUserInteractionEnabled = shouldInteract
                 }
@@ -859,18 +867,18 @@ struct CanvasView: UIViewRepresentable {
 
             // Enable the catch-all gesture when no layers exist, the active layer is hidden — by its
             // own switch or by a group's gating it (§4.1), either reads as "hidden" here — or the
-            // active layer has no drawing surface at all (`.compositing`, `.value`), which
-            // `shouldInteract` above has just as deliberately declined interaction for.
-            let needsCatch: Bool
-            if canvasManager.layers.isEmpty {
-                needsCatch = true
-            } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) {
-                let layer = canvasManager.layers[canvasManager.currentLayerIndex]
-                needsCatch = !canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex)
-                    || layer.hasNoDrawingSurface
-            } else {
-                needsCatch = false
-            }
+            // active layer has no drawing surface at all (`.value`), which `shouldInteract` above
+            // has just as deliberately declined interaction for.
+            //
+            // The three cases are `CanvasTouchInputs.catchAllIsEnabled`, so this gate and
+            // `shouldInteract` are now two readings of one value rather than two spellings that have
+            // to be kept agreeing. **One state answers differently from the hand-spelled version it
+            // replaces**: layers present but `currentLayerIndex` out of range used to fall to a bare
+            // `else { false }`, and reads as "no active layer" here. `deleteLayer` is the only writer
+            // that can park the index, it parks it at -1 only when the last layer goes (so
+            // `layers.isEmpty` and both answers are `true`), and it clamps every other case — so the
+            // difference is unreachable, and it is the reading the other thirteen gates already take.
+            let needsCatch = touch.catchAllIsEnabled
             if catchAllTapRecognizer?.isEnabled != needsCatch {
                 catchAllTapRecognizer?.isEnabled = needsCatch
             }
@@ -1714,68 +1722,97 @@ struct CanvasView: UIViewRepresentable {
                 && canvasManager.layers[layerIndex].cels[celIndex].id == piece.sourceCelID
         }
 
+        // MARK: - Who owns a canvas touch
+
+        /// **The one value every gate on this canvas reads.** Fourteen decisions across three UIKit
+        /// mechanisms used to spell their own predicate over these same inputs, and four defects —
+        /// three of them inside one week — came out of two of those spellings disagreeing. They are
+        /// stated once now, in `CanvasTouchOwner`, and this is the only place that gathers the inputs.
+        ///
+        /// **It takes them rather than reaching for them, and that is structural.** `activePanel` is
+        /// `@State` on `DrawingView`, mirrored down to this coordinator; `selectedTool`,
+        /// `floatingPiece` and the layer stack are on `CanvasManager`. No *object* can see all of it,
+        /// which is why the answer could not live on either of them and why `CanvasTouchOwner` is a
+        /// pure function over a value — the same argument, and the same testability, as
+        /// `Tool.paintsOnCanvas`.
+        ///
+        /// `chrome` is the position-dependent half and is `.none` for every state-only gate. Pass
+        /// `canvasChrome(at:)` when the question is about a particular point.
+        func canvasTouchInputs(chrome: CanvasTouchChrome = .none) -> CanvasTouchInputs {
+            let index = canvasManager.currentLayerIndex
+            let layer = canvasManager.layers.indices.contains(index) ? canvasManager.layers[index] : nil
+            let activeLayer: CanvasActiveLayer
+            switch layer?.kind {
+            case nil:
+                // No layers, or `currentLayerIndex` out of range.
+                activeLayer = .none
+            case .value:
+                // `Layer.hasNoDrawingSurface` is `kind == .value`; switching on the kind rather than
+                // asking the property is what makes a fourth `LayerKind` answer here at compile time.
+                activeLayer = .noDrawingSurface
+            case .vector:
+                activeLayer = .vector
+            case .raster:
+                activeLayer = .raster
+            }
+            return CanvasTouchInputs(
+                tool: canvasManager.selectedTool,
+                fillMode: canvasManager.fillMode,
+                panel: activePanel,
+                hasFloatingPiece: canvasManager.floatingPiece != nil,
+                hasVectorFloat: canvasManager.vectorFloat != nil,
+                isVectorTransforming: canvasManager.isVectorTransforming,
+                activeLayer: activeLayer,
+                activeLayerIsOnScreen: layer != nil && canvasManager.isLayerEffectivelyVisible(index),
+                chrome: chrome)
+        }
+
+        /// Which overlay's `hitTest` claims this point, in the order UIKit would ask them — the five
+        /// `hitTest` overrides asked once, in one place, instead of by whoever remembers to.
+        ///
+        /// **Container coordinates.** Every one of these overlays is pinned to `containerView`, so a
+        /// point in the container's space is a point in each of theirs; `handleTextPress` has relied
+        /// on that since it grew its own hand-rolled version of this function.
+        ///
+        /// The order is front-to-back as `makeUIView` adds them: the text grips sit above the editor
+        /// (a corner's target overlaps the move band, and the resize is the more specific gesture),
+        /// and the Move box above the guides.
+        func canvasChrome(at point: CGPoint) -> CanvasTouchChrome {
+            if textTransformOverlay?.claimsTouch(at: point) == true { return .textHandle }
+            if textOverlay?.claimsTouch(at: point) == true { return .textBoxOrBand }
+            if transformOverlay?.claimsTouch(at: point) == true { return .transformBoxOrHandle }
+            if shapeOverlay?.claimsTouch(at: point) == true { return .shapeHandleOrOutline }
+            if guideOverlay?.claimsTouch(at: point) == true { return .guideGrip }
+            return .none
+        }
+
         // MARK: - Select & Move overlays
 
         /// Whether the fill tool's lasso mode currently owns the selection overlay's lasso gesture.
-        ///
-        /// The Select panel wins the tie: it is the overlay's own tool, and a selection drag begun
-        /// there must not turn into a fill because the fill tool happens to be the last one picked in
-        /// the toolbar. A floating piece takes priority over both, exactly as it does for the plain
-        /// selection — the same guard `fillTapRecognizer` uses.
-        var isLassoFilling: Bool {
-            canvasManager.selectedTool == .fill && canvasManager.fillMode == .lasso
-                && activePanel != .select && canvasManager.floatingPiece == nil
-        }
+        /// The predicate and the reasoning are `CanvasTouchInputs.isLassoFilling`'s.
+        var isLassoFilling: Bool { canvasTouchInputs().isLassoFilling }
 
         /// Whether an armed eyedropper — rather than the Select overlay — owns the canvas's single
-        /// touch. **The Select panel is deliberately absent from this**, and that absence is the
-        /// owner's bug of 2026-08-22 ("the pick tool does not work when the lasso select tool is
-        /// selected").
-        ///
-        /// There is no `.select` case in `Tool`: Select is a *panel*, so opening it leaves
-        /// `selectedTool` at whatever it was, and arming the eyedropper does not close it. The two
-        /// sites below used to disagree about who that left in charge — `updateActiveLayerAndTool`
-        /// suppressed the eyedropper's recognizer on `activePanel != .select` while
-        /// `updateSelectionOverlay` never consulted `selectedTool` at all — so with the panel up the
-        /// recognizer was off *and* the overlay was still eating the touch, and the pick was dead
-        /// with nothing left to re-enable it.
-        ///
-        /// `Tool.eyedropper` is why the eyedropper wins rather than the overlay: it is momentary, and
-        /// the artist "reaches for this one in the middle of doing something else", which is exactly
-        /// what picking a colour mid-lasso is. It hands back the instant the pick resolves —
-        /// `leaveEyedropper` restores the previous tool, this goes false, and the overlay resumes
-        /// capturing with the Select panel still open, so the lasso carries on in the new colour.
-        ///
-        /// **Both sites read this one property**, so they cannot end up both live (two recognizers
-        /// racing for the tap) or both dead (the bug). The `floatingPiece` clause is kept for the
-        /// same reason: false here hands the touch to the floating overlay, which is what the
-        /// unchanged `isCapturingGestures` term already does — the alternative spellings each leave
-        /// one of the two combinations unowned. Reaching that state needs a door the app does not
-        /// currently have (`SideToolbar.eyedropperButton` bakes a floating piece via
-        /// `commitAllInteractiveState()` *before* `selectEyedropper()`, and it is the only caller),
-        /// which is why this is a guard rather than a behaviour —
-        /// `testArmingTheEyedropperBakesAFloatingPieceRatherThanRacingIt` is what pins the bake.
-        var isEyedropperArmed: Bool {
-            canvasManager.selectedTool == .eyedropper && canvasManager.floatingPiece == nil
-        }
+        /// touch. The predicate, and the twenty lines of reasoning that go with it (the owner's bug
+        /// of 2026-08-22, why the Select panel is deliberately absent, and why the `floatingPiece`
+        /// clause is kept), are `CanvasTouchInputs.isEyedropperArmed`'s.
+        var isEyedropperArmed: Bool { canvasTouchInputs().isEyedropperArmed }
 
         func updateSelectionOverlay() {
             guard let overlay = selectionOverlay, let container = containerView else { return }
-            let lassoFilling = isLassoFilling
+            let touch = canvasTouchInputs()
+            let lassoFilling = touch.isLassoFilling
             overlay.mode = lassoFilling ? .lasso : canvasManager.selectionMode
             // Mirrored down every pass, same as `reconcileLayers` mirrors it to
             // `StrokeCanvasView.pencilOnlyDrawing` — see `SelectionOverlayView.pencilOnlyDrawing`'s
             // doc comment for why a selection drag needs this too. A lasso fill is a drawing edit by
             // the same test, so borrowing this recognizer also inherits the fix for free.
             overlay.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
-            // `!isEyedropperArmed` is the overlay's half of the 2026-08-22 fix — see that property.
-            // Without it the recognizer re-enabled below would be live underneath an overlay that is
-            // still capturing, and the overlay would go on swallowing the picking tap as the start of
-            // a lasso. It yields only while the tool is armed, so the ordinary Select case — the
-            // whole reason this term exists — is untouched.
-            overlay.isCapturingGestures = lassoFilling
-                || ((activePanel == .select) && (canvasManager.floatingPiece == nil)
-                    && (canvasManager.vectorFloat == nil) && !isEyedropperArmed)
+            // `CanvasTouchInputs.selectionOverlayIsCapturing` — the same value
+            // `updateActiveLayerAndTool` reads for the eyedropper's recognizer, which is the point:
+            // its `!isEyedropperArmed` term is this overlay's half of the 2026-08-22 fix, and the two
+            // sites disagreeing about it is what left the picking tap owned by nobody.
+            overlay.isCapturingGestures = touch.selectionOverlayIsCapturing
             // The exterior hatch says "you cannot paint out there". While a piece is floating nobody
             // can paint anywhere — every host has declined interaction — so the stripes would be
             // stating a restriction that is not the live one, over artwork the artist is trying to
@@ -1798,7 +1835,8 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func updateFloatingOverlay() {
-            floatingOverlay?.update(canvasManager.floatingPiece)
+            floatingOverlay?.update(canvasManager.floatingPiece,
+                                    isInteractive: canvasTouchInputs().floatingOverlayIsInteractive)
             guard let overlay = floatingOverlay, let container = containerView else { return }
 
             // A piece lifted by the Move tool still belongs to its source layer, so it renders in
@@ -1907,48 +1945,31 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func updateActiveLayerAndTool() {
-            // **Above the active-layer guard, unlike the fill's twin below it.** The eyedropper reads
-            // the composite rather than writing a layer, and with no layers at all the composite is
-            // still a picture — the paper — so a pick there is meaningful where a fill would have
-            // nowhere to land.
+            // **All three container recognizers, from one value, above the active-layer guard.**
+            // Each of them used to carry its own spelling of the same four inputs, and the fill's
+            // sat *below* the two guards further down — so with no layers, or with a layer whose
+            // host had not been built yet, it was never re-evaluated and kept whatever value it last
+            // held. `CanvasTouchInputs.fillPressIsEnabled` states the answer the assignment means,
+            // which is why it moves up here with the other two; the live consequence is that Fill on
+            // a document with no layers now dismisses an open menu and does nothing, instead of
+            // being an inert tool whose recognizer was never switched on. `beginInteractiveFill`
+            // guards the empty document itself.
             //
-            // **Not suspended while Select is engaged**, which is where it differs from the fill and
-            // text guards below and from what it read until 2026-08-22 — `isEyedropperArmed` carries
-            // the whole reason, and `updateSelectionOverlay` is the other half that has to move with
-            // it. A piece still floating does suspend it, and that clause lives in the property so
-            // the two sites cannot answer it differently.
-            eyedropperTapRecognizer?.isEnabled = isEyedropperArmed
-
-            // The text tool's placement tap. It needs no active layer *index* check here —
-            // `beginTextSession` asks `Tool.textUnavailableReason` about the layer's kind, which is
-            // the one place that question is answered — but it is suspended while Select is engaged
-            // or a piece is floating for the fill's reason: those overlays own the canvas's
-            // single-touch gestures while they are up.
-            //
-            // **This is not the eyedropper's 2026-08-22 bug wearing a different hat, and the reason
-            // is a call order two files away.** `ActionsMenu.addTextRow` — the only door into text
-            // mode — follows `enterTextMode()` with `$activePanel.toggleSettingsPanel(.text)`, so
-            // arriving in the tool is itself what closes the Select panel and the two clauses of this
-            // guard cannot both be true through it. The asymmetry with the eyedropper is real rather
-            // than an oversight: the eyedropper is armed *while* Select is already open, so arming it
-            // is the artist's most recent word; text is a mode you enter and then choose to open
-            // Select on top of, and there Select is theirs. `SelectionAndMoveUITests.
-            // testEnteringTextModeClosesTheSelectPanelSoTextsOwnGuardCannotBite` pins the order.
-            textTapRecognizer?.isEnabled = (canvasManager.selectedTool == .text)
-                && activePanel != .select && canvasManager.floatingPiece == nil
+            // The reasoning that used to sit on each of the three lines now sits on the property it
+            // moved into: `isEyedropperArmed` (why the Select panel is deliberately absent, and the
+            // owner's bug of 2026-08-22), `textPressIsEnabled` (why text's Select clause is *not*
+            // that bug in a different hat — `ActionsMenu.addTextRow` closes the panel on the way in,
+            // and `SelectionAndMoveUITests.
+            // testEnteringTextModeClosesTheSelectPanelSoTextsOwnGuardCannotBite` pins the order),
+            // and `fillPressIsEnabled` (why lasso mode hands the drag to the selection overlay).
+            let touch = canvasTouchInputs()
+            eyedropperTapRecognizer?.isEnabled = touch.eyedropperPressIsEnabled
+            textTapRecognizer?.isEnabled = touch.textPressIsEnabled
+            fillTapRecognizer?.isEnabled = touch.fillPressIsEnabled
 
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return }
             let layer = canvasManager.layers[canvasManager.currentLayerIndex]
             guard let host = layerHosts[layer.id] else { return }
-
-            // Not per-layer, so it lives outside the AppliedTool caching guard below and stays in
-            // sync every call. Suspended while Select is engaged or a piece is floating, so the fill
-            // tool's press can't race the Selection/Move overlays' own gestures — and suspended in
-            // lasso mode too, where the selection overlay's pan is the gesture that matters and this
-            // recognizer would otherwise apply a flood fill at the point the loop started.
-            fillTapRecognizer?.isEnabled = (canvasManager.selectedTool == .fill)
-                && canvasManager.fillMode == .flood
-                && activePanel != .select && canvasManager.floatingPiece == nil
 
             // Also outside the AppliedTool guard: toggling "paint outside selection" doesn't touch
             // any of that struct's fields. Only applies to the layer/cel the selection belongs to.
@@ -2736,14 +2757,21 @@ struct CanvasView: UIViewRepresentable {
             // container's bounds equal canvasSize, so `location(in:)` there is canvas-pixel space —
             // the same mapping `handleFillPress` uses.
             let canvasPoint = recognizer.location(in: container)
-            // Both text overlays, not just the editor. A grip sits *outside* the box, so without the
-            // second test grabbing a corner handle would fall through to here and commit the very
-            // session the artist was resizing — then open an empty box under their finger.
-            if canvasManager.textGestureActive,
-               textOverlay?.hitTest(canvasPoint, with: nil) != nil
-                || textTransformOverlay?.hitTest(canvasPoint, with: nil) != nil {
-                return
-            }
+            // **The one handler in the app that defended itself, now asking the one function.** Both
+            // text overlays are consulted, not just the editor: a grip sits *outside* the box, so
+            // without the second test grabbing a corner handle would fall through to here and commit
+            // the very session the artist was resizing — then open an empty box under their finger.
+            // `canvasChrome(at:)` asks both (and the other three), and `contenders` is what encodes
+            // the exemption, so the guard and the model cannot drift apart.
+            //
+            // `contenders` rather than `owner`: today a guide grip or a shape handle does **not**
+            // suppress this tap — every container recognizer here sets `cancelsTouchesInView =
+            // false`, so both act — and that is one of the rows `CanvasTouchOwnerLogicTests.
+            // testTouchesWithMoreThanOneClaimant` enumerates. Swapping in `owner` would silently fix
+            // some of them and change behaviour; this conversion preserves it and leaves the list to
+            // be decided on.
+            let touch = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
+            guard CanvasTouchOwner.contenders(in: touch).contains(.textPress) else { return }
             canvasManager.beginTextSession(at: canvasPoint)
             guard canvasManager.textGestureActive else { return }
             updateTextOverlay()
@@ -2805,12 +2833,25 @@ struct CanvasView: UIViewRepresentable {
         private func shouldRequireFailure(_ gestureRecognizer: UIGestureRecognizer, of otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
             guard transformRecognizers.contains(where: { $0 === gestureRecognizer }) else { return false }
+            // **Asked, not read back.** This used to read three flags off the view hierarchy —
+            // `activeHost.isUserInteractionEnabled`, `strokeView.isUserInteractionEnabled` and
+            // `strokeView.strokeRecognizer.isEnabled` — which is a fourth question answered out of
+            // three other gates' answers, and the reason this line appears in the architecture
+            // review's finding at all. The first two are both `shouldInteract`, and the third is
+            // never assigned anywhere in the app, so the whole predicate always was
+            // `CanvasTouchInputs.activeHostIsInteractive`; it now says so, one pass earlier than
+            // `reconcileLayers` can have pushed it down.
+            //
+            // What it asks and what it *should* ask still differ, and
+            // `CanvasTouchInputs.transformDependencyIsUnresolvable` is where that is written down:
+            // the question here is "is the active host accepting touches", where the one that decides
+            // whether the stroke recognizer can ever reach a terminal state is "did *this* touch
+            // reach it". Converting to `activeHostReceivesTouches` would close that — and would
+            // change behaviour on a hidden active layer — so it is reported rather than shipped.
+            guard canvasTouchInputs().transformWaitsOnActiveStroke else { return false }
             guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return false }
             let activeLayer = canvasManager.layers[canvasManager.currentLayerIndex]
             guard let activeHost = layerHosts[activeLayer.id] else { return false }
-            guard activeHost.isUserInteractionEnabled,
-                  activeHost.strokeView.isUserInteractionEnabled,
-                  activeHost.strokeView.strokeRecognizer.isEnabled else { return false }
             return otherGestureRecognizer === activeHost.strokeView.strokeRecognizer
         }
 
