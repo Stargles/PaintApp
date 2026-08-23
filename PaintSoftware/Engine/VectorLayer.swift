@@ -1499,11 +1499,54 @@ final class VectorCanvas {
     /// escape is not available here — a lasso removes no geometry, and dropping the lattice would
     /// re-phase every dab and visibly re-roll a scattering brush the instant the artist nudged.
     ///
-    /// Stage 1's `t` is a pure translation — the float's box offers only its move band
-    /// (`ObjectTransformFrame.allowedHandles`) — so `VectorStroke.size` and `TextFrame.size` are
-    /// deliberately left alone. A scale would need both, and the lattice re-walked; that is stage 3.
-    static func mapping(_ element: VectorElement, through t: CGAffineTransform) -> VectorElement {
+    /// **`t` must be a similarity** — translate · rotate · uniform scale. That is what the lasso
+    /// float's box can express (`LayerTransform` is position + one scale + one rotation) and it is
+    /// the whole reason a scale is cheap here: a point map alone cannot carry `VectorStroke.size`,
+    /// `LayerTransform.scale`/`rotation` or a text frame's point size, and each of those is picked
+    /// out of `t` below rather than being left behind. A non-uniform or projective `t` would make
+    /// `hypot(t.a, t.b)` a plausible lie — one number standing in for two different axis scales — so
+    /// the shape is asserted rather than hoped for. Freeform and Distort do not widen this function;
+    /// they need a different one.
+    ///
+    /// ## Why scaling one scalar is exact, and where it stops being
+    ///
+    /// Multiplying `stroke.size` by the similarity's own factor is not an approximation. It is exact,
+    /// dab for dab: `BrushStamper.stampSpacing` is linear in brush size and `advance` walks in
+    /// geometric distance, so a path *k*× longer walked with *k*× spacing takes the identical number
+    /// of steps at the identical parameters. Identical count ⇒ the seeded `DabRNG` draws the
+    /// identical sequence; identical parameters ⇒ `visibleRange` selects the identical dabs of a cut
+    /// piece's parent walk. Measured across 264 similarity cases (k ∈ [0.25, 8], θ ∈ [0, 2.1]): worst
+    /// dab displacement 1.3e-13 pt, worst parameter error 8.9e-16.
+    /// `LassoMoveLogicTests.testAScaledPieceLandsEveryDabWhereTheSimilarityPutsIt` pins it.
+    ///
+    /// Three floors break the similarity, and they are inherited knowingly rather than fixed:
+    ///
+    ///  * **`stampSpacing`'s 1 pt floor** (`BrushStamper.stampSpacing`). Below
+    ///    `brushSize * spacingFraction == 1` the spacing stops scaling with the size, so the scaled
+    ///    stroke gets a different dab count. That binds at ordinary sizes, not only at hairlines —
+    ///    under 20 pt for Hard Round, under 33 pt for the Pen. It costs no ink: dab diameter still
+    ///    scales, so the stroke is the right weight and still solid. It re-rolls the dab RNG, which is
+    ///    invisible on every brush whose `scatter` and `rotationJitter` are zero — which is all five
+    ///    built-ins. `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount` pins the boundary.
+    ///  * **`stampDab`'s 0.5 pt diameter floor** and `stampApproximateSquare`'s 1 pt dab/step floors,
+    ///    for the same reason at heavy shrink.
+    ///  * **Pencil grain** is an absolute noise field keyed on canvas position, so it re-samples under
+    ///    any map — as it already does for a plain translation, so a scale is no regression.
+    ///
+    /// Under rotation the dabs are exact too, with one cosmetic caveat: per-dab rotation jitter and
+    /// scatter offsets are drawn in absolute angles, so a square-tipped or scattering brush keeps its
+    /// dab *orientation* when the piece turns. Statistically identical, and invisible on a round dab.
+    static func mapping(_ element: VectorElement, throughSimilarity t: CGAffineTransform) -> VectorElement {
         guard !t.isIdentity else { return element }
+        // The codebase's one answer to "how much did this scale by" — `VectorCanvas.scale(of:)`, which
+        // `addStroke` already uses to carry a canvas-space width into local space.
+        let k = hypot(t.a, t.b)
+        let theta = atan2(t.b, t.a)
+        assert(abs(k - hypot(t.c, t.d)) <= 1e-6 * max(1, k)
+               && abs(t.a * t.c + t.b * t.d) <= 1e-6 * max(1, k * k),
+               "mapping(_:throughSimilarity:) was handed \(t), which scales or shears its two axes "
+               + "differently. `k` would be one number standing in for two, and every width below "
+               + "would be wrong in a way the live preview cannot show.")
         var transform = t
         switch element {
         case .stroke(var stroke):
@@ -1518,8 +1561,15 @@ final class VectorCanvas {
                 }
                 stroke.lattice = lattice
             }
+            // The scalar `BrushStamper` actually stamps with. Guarded on `k != 1` so a pure
+            // translation leaves the stored number bit-identical rather than multiplied by a 1.0 that
+            // rounding might not be.
+            if k != 1 { stroke.size *= k }
             return .stroke(stroke)
         case .fill(let fill):
+            // A `CGPath` carries the whole affine, scale and rotation included, so a fill needs no
+            // currency of its own. (`copy(using:)` works in single precision — a mapped coordinate is
+            // right to about 1e-6 of its magnitude, not to 1e-9.)
             guard let path = fill.cgPath, let moved = path.copy(using: &transform) else { return element }
             var mapped = VectorFillElement(path: moved, color: fill.color, opacity: fill.opacity,
                                            evenOddFill: fill.evenOddFill)
@@ -1528,7 +1578,12 @@ final class VectorCanvas {
             mapped.id = fill.id
             return .fill(mapped)
         case .image(var image):
+            // A placed image is a `LayerTransform` — position, **one** scale, one rotation — which is
+            // exactly a similarity and so follows this map whole. It is also why a flip or a Freeform
+            // stretch cannot be handed to this function: neither fits in that shape.
             image.transform.position = image.transform.position.applying(t)
+            if k != 1 { image.transform.scale *= k }
+            if theta != 0 { image.transform.rotation += theta }
             return .image(image)
         case .text(var text):
             // Stored **local**, despite `TextFrame.corners`' own doc saying canvas space — that
@@ -1537,6 +1592,23 @@ final class VectorCanvas {
             // stored corners by a canvas-space delta on a transformed layer sends the text somewhere
             // else entirely.
             text.frame.corners = text.frame.corners.map { $0.applying(t) }
+            // **`size` and `pointSize` scale with the corners, and that is not optional.** Mapping the
+            // corners alone would draw correctly — `TextFrame.affineTransform` is the ratio of the
+            // corners to `size`, so the glyphs would come out k× larger on their own — but it breaks
+            // the invariant `TextFrame.Basis` states, that `basis.width == size.width` for every frame
+            // this project writes. `TextFrameDrag.resized` and `TextFrame.resized(to:)` both read
+            // `basis.width` as a *layout* extent and write it straight back into `size`, so the first
+            // handle drag, or the first keystroke into a still-`autoSize` box, would snap the type
+            // back to the size it had before the scale — long after the artist could connect the two.
+            // Scaling all three together keeps the invariant, puts the same words on the same lines,
+            // and leaves `autoSize` meaning what it meant.
+            if k != 1 {
+                text.frame.size = CGSize(width: text.frame.size.width * k,
+                                         height: text.frame.size.height * k)
+                // Stored unclamped; `Typography.pointSizeRange` (8...512) is applied at render, so a
+                // piece shrunk past the floor and dragged back comes back at full size.
+                text.recipe.typography.pointSize *= k
+            }
             return .text(text)
         }
     }

@@ -25,12 +25,17 @@ struct ObjectTransformFrame: Equatable {
     /// ruled correct on 2026-08-21 are unchanged, and the default is what keeps every existing call
     /// site untouched.
     ///
-    /// **A lasso move's floating piece hands it `[.body]` — translation only — and that is a
-    /// correctness bound rather than timidity.** `VectorStroke.size` is a scalar no geometry map can
-    /// carry, so a scaled piece would translate its spine and keep its old width; and LASSO_MOVE.md
-    /// defers the dab lattice under rotate/scale to a later stage "with a measurement, not here".
-    /// A filter is genuinely needed because `handleLayout` emits all four corners unconditionally —
-    /// only the rotation knob was ever conditional — so there was no other way to suppress scaling.
+    /// **Nothing restricts it today, and the filter is kept anyway.** A lasso move's floating piece
+    /// used to hand it `[.body]` — translation only — because `VectorStroke.size` is a scalar no
+    /// geometry *point* map can carry, so a scaled piece would have spread its spine and kept its old
+    /// width. `VectorCanvas.mapping(_:throughSimilarity:)` now carries the scale and the angle into
+    /// every element kind that holds a width or an angle, so the bound is discharged and the float
+    /// offers all six grips.
+    ///
+    /// The mechanism stays because it is the *one* place a handle set is decided: `handleLayout`
+    /// emits all four corners unconditionally and filters here, and the hit test reads the same
+    /// function, so a grip that is not drawn cannot be grabbable and neither can drift. Freeform's
+    /// edge nodes and the box-only rotate knob are meant to arrive through this filter, not beside it.
     var allowedHandles: Set<Handle> = Set(Handle.allCases)
 
     init(transform: LayerTransform, contentSize: CGSize,

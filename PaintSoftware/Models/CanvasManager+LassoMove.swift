@@ -135,10 +135,13 @@ extension CanvasManager {
             return false
         }
         let pivot = CGPoint(x: bounds.midX, y: bounds.midY)
+        // Every handle: the four corners scale the piece uniformly about its centre and the knob turns
+        // it, the same six the whole-cel box has always offered. What used to restrict this to the
+        // move band was a real correctness bound and is now discharged — `VectorCanvas.mapping`
+        // carries the similarity's scale and angle into the three places that hold a width or an
+        // angle, and its doc comment is where the exactness argument and its floors live.
         let frame = ObjectTransformFrame(transform: vector.layerTransform(pivot: pivot),
-                                         contentSize: bounds.size,
-                                         // Translation only — see `ObjectTransformFrame.allowedHandles`.
-                                         allowedHandles: [.body])
+                                         contentSize: bounds.size)
         vectorFloat = VectorFloat(layerID: target.layerID, celID: target.celID,
                                   insideIDs: split.insideIDs, liftedInside: lifted,
                                   pivot: pivot, contentSize: bounds.size,
@@ -184,7 +187,7 @@ extension CanvasManager {
         let oldElements = vector.elements
         let newElements = oldElements.map { element -> VectorElement in
             guard let lifted = float.liftedInside[element.id] else { return element }
-            return VectorCanvas.mapping(lifted, through: localDelta)
+            return VectorCanvas.mapping(lifted, throughSimilarity: localDelta)
         }
         let oldSelection = selection
         let newSelection = Self.moving(float.selectionBeforeLift,

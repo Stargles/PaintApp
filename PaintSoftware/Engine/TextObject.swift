@@ -392,8 +392,14 @@ extension TextFrame {
         /// Unit vector along the box's local +y (down the page).
         var v: CGVector
         /// How far the quad runs along `u` and along `v`. Equal to `size` for every frame this
-        /// project writes — `VectorCanvas.mappingText` scales `size` and `corners` together — so the
-        /// two are stated separately only so a decoded document cannot make one lie about the other.
+        /// project writes — `VectorCanvas.mapping(_:throughSimilarity:)`'s text arm scales `size`,
+        /// `corners` and the recipe's point size together for exactly this reason — so the two are
+        /// stated separately only so a decoded document cannot make one lie about the other.
+        ///
+        /// **`TextFrameDrag.resized` and `TextFrame.resized(to:)` both depend on that equality**: each
+        /// reads `basis.width` as a layout extent and writes it back into `size`. A frame whose
+        /// corners had been scaled without its `size` would therefore lose the scale on the first
+        /// handle drag or the first auto-size regrow, and nowhere in between would say so.
         var width: CGFloat
         var height: CGFloat
     }

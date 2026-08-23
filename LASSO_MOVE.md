@@ -11,9 +11,11 @@ piece outside stays, and from then on either can be moved, erased or re-cut on i
 region loses the chunk that was inside and that chunk travels as its own fill. Text and placed images
 move whole or not at all. An eraser mark is an ordinary element and does all of the above.
 
-The lassoed part **floats** while you work it — uncommitted, with a move band, freely movable, the
-marching ants travelling with it — and bakes into the drawing when you tap away, clearing the
-selection as it goes. Each nudge is its own undo step.
+The lassoed part **floats** while you work it — uncommitted, in a blue box with a white node at each
+corner and a green knob above the top edge, the marching ants travelling with it. Drag inside the box
+to slide it, a corner to grow or shrink it about its centre keeping its proportions, the knob to turn
+it. It bakes into the drawing when you tap away, clearing the selection as it goes. Each gesture —
+one drag of one node — is its own undo step.
 
 ---
 
@@ -27,13 +29,13 @@ remaining kinds are a `CGPath` boolean and a centre-point test.
 |---|---|
 | both halves of a membership walk, from **one** pass, sharing each crossing bit for bit | `StrokeGeometry.membershipRuns(_:inside:)`. `splitRuns` is now this filtered to the inside runs, so the live selection clip and the lasso move can never disagree about where a stroke leaves a loop |
 | the split itself — strokes (paint *and* erase), fills, images, text | `VectorCanvas.splitForLassoMove(insideLocalPath:)` |
-| one element moved by an affine, geometry **and** dab lattice together | `VectorCanvas.mapping(_:through:)` |
+| one element moved by a similarity — geometry, dab lattice, **and every scalar that holds a width or an angle**: `VectorStroke.size`, a placed image's scale and rotation, a text frame's box and point size | `VectorCanvas.mapping(_:throughSimilarity:)` |
 | the elements a float has lifted, skipped by the flatten | `VectorCanvas.suppressedElementIDs` — `editingElementID` is now a one-element view over it |
 | the float's own picture | `VectorCanvas.renderIsolated(ids:)`, sharing `renderLocalContent(elements:quality:)` with the display so the isolation rules cannot fork |
 | the lifecycle: lift, nudge, bake, cancel, undo | `CanvasManager+LassoMove.swift`, and `VectorFloat` |
 | the piece on screen under a Core Animation transform | `StrokeCanvasView.beginVectorFloat` / `updateVectorFloat` / `endVectorFloat`, modelled line for line on the whole-layer `beginLiveLayerTransform` trio |
 | travelling marching ants | `SelectionOverlayView.setLiveSelectionTransform` during a drag; `CanvasManager.moving(_:by:)` writes the real path at each gesture end |
-| a box that offers its move band only | `ObjectTransformFrame.allowedHandles` |
+| a box that offers all six grips — move band, four corners, rotate knob | the default `ObjectTransformFrame.allowedHandles`; the filter is kept for Freeform's edge nodes, not because anything withholds a grip today |
 | the way in | `TopToolbar.toggleMove()` — with a selection on a vector cel, `beginVectorLassoMove()` |
 
 **The whole move costs three canvas renders** — the hole, the float, the bake — and that does not
@@ -208,11 +210,31 @@ half's texture change — the exact defect `DabLattice` was built to prevent.
 Under a **pure translation** that makes the moved half's ink a rigid translate of what it was, dab
 for dab, at zero tolerance. That is a stronger guarantee than the feature needs and it is free.
 
-**It holds only for translation, and that is one of the reasons stage 1 is translation-only.** Under
-a scale, `BrushStamper.stampSpacing` changes with brush size, so the dab phase shifts whatever the
-lattice says; under a rotation it survives, but the piece and the parent walk must rotate about the
-same pivot or the range means something different. Stage 3 either recomputes honestly or drops the
-lattice and accepts the re-phase — decided there, with a measurement, not here.
+**It holds for the whole similarity, and the earlier text here saying otherwise was wrong.** This
+paragraph used to read *"under a scale, `BrushStamper.stampSpacing` changes with brush size, so the
+dab phase shifts whatever the lattice says"*, and gave that as a reason the box could offer nothing
+but its move band. That is true only if the geometry is scaled and `VectorStroke.size` is not — which
+was the state of `mapping` at the time, and is the defect rather than a law. Scale both and the walk
+is **similar to itself**: `stampSpacing` is linear in brush size, `advance` walks in geometric
+distance, so a path *k*× longer walked with *k*× spacing takes the identical number of steps at the
+identical parameters. Identical parameters mean `visibleRange` selects the identical dabs — a
+lattice's `parameters` are indices in the *parent's* domain and no similarity moves them — and an
+identical dab count means the seeded `DabRNG` replays the identical sequence. Measured across 264
+similarity cases (k ∈ [0.25, 8], θ ∈ [0, 2.1]): worst dab displacement **1.3e-13 pt**, worst
+parameter error **8.9e-16**. Rotation was never in doubt and is exact for the same reason; the piece
+and the parent turn about the same pivot because they are the same array of points, mapped once.
+
+The exceptions are three floors, not a phase shift, and they are inherited knowingly:
+`stampSpacing`'s 1 pt minimum (which binds under 20 pt for Hard Round and under 33 pt for the Pen, so
+this is not only a hairline case), `stampDab`'s 0.5 pt diameter minimum, and
+`stampApproximateSquare`'s dab/step minimums. Below them a scaled stroke gets a different *number* of
+dabs — never a different weight, because dab diameter still scales, and never anything visible,
+because the RNG re-roll only matters to a brush with `scatter` or `rotationJitter` above zero and all
+five built-ins have neither. Pencil grain is an absolute noise field keyed on canvas position and
+re-samples under any map, as it already did for a translation.
+`VectorCanvas.mapping(_:throughSimilarity:)`'s doc comment carries this; `LassoMoveLogicTests`
+`testAScaledPieceLandsEveryDabWhereTheSimilarityPutsIt` pins the exactness and
+`testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount` pins the boundary.
 
 **One artefact this creates, named because it is deterministic and nobody would look for it.**
 `BrushStamper`'s doc says the boundary is inclusive (`BrushStamper.swift:157-159`): *"a dab exactly
@@ -294,8 +316,22 @@ applied to a second tool, not a new one.
 
 **The rule: a text element moves whole iff its frame's bounding-box centre is inside the loop.**
 `TextFrame.boundingBox` exists (`TextObject.swift:293`) and moving the element is translating
-`frame.corners` by the delta — four points, no re-layout, no re-measure, and correct for a rotated
-or scaled frame because the corners *are* the frame (`TextObject.swift:252-256`).
+`frame.corners` by the delta — four points, no re-layout, no re-measure, and correct for a frame that
+is already rotated or scaled because the corners *are* the frame (`TextObject.swift:252-256`).
+
+**Under a scale the corners are not enough, and this is the one place text costs more than it looks
+like it should.** Scaling `corners` alone renders correctly — `TextFrame.affineTransform` is the
+ratio of the corners to `size`, so the glyphs come out *k*× larger with the wrap width untouched,
+which is the Illustrator behaviour. But it breaks the invariant `TextFrame.Basis` states, that
+`basis.width == size.width` for every frame this project writes, and two functions depend on it:
+`TextFrameDrag.resized` and `TextFrame.resized(to:)` each read `basis.width` as a *layout* extent and
+write it straight back into `size`. So a text element scaled by a lasso and then re-edited would snap
+back to its old type size on the first handle drag or the first keystroke into a still-`autoSize`
+box — long after the artist could connect the two, and invisible to any test that only renders the
+bake. `mapping(_:throughSimilarity:)` therefore scales **`corners`, `size` and
+`recipe.typography.pointSize` together**: same words on the same lines, invariant intact, `autoSize`
+still meaning what it meant. `pointSize` is stored unclamped (the 8...512 range is applied at render),
+so a piece shrunk past the floor and dragged back comes back at full size.
 
 Why the centre and not the two obvious alternatives:
 
@@ -719,8 +755,9 @@ different from the plan, and each is worth naming:
   a bitmap, and its geometry is already in the cel. It got its own `VectorFloat`, and the raster
   piece was left alone.
 - **The box is `ObjectTransformOverlayView`, not `FloatingPieceOverlayView`.** The vector float
-  wants exactly the whole-layer Move box, which is already model-side and already tested; borrowing
-  it needed only `allowedHandles`.
+  wants exactly the whole-layer Move box, which is already model-side and already tested. It first
+  borrowed it through `allowedHandles`, holding the box to its move band; since the scale and rotate
+  nodes shipped it borrows the box whole and adds nothing.
 - **A drag writes nothing at all** — not even the live transform. The plan had
   `updateFloatingTransform` writing per delta; a `@Published` write per touch-move is a whole SwiftUI
   pass on a gesture built specifically not to have one, so the live value is held in the coordinator
@@ -732,16 +769,26 @@ different from the plan, and each is worth naming:
   delete a punch the artist can still put back with one more drag, so it is left to the eraser's own
   commit path, where it already runs.
 
-**Explicitly still not done:** rotate and scale (the lattice question §1 defers — the box offers its
-move band alone, and `ObjectTransformFrame.allowedHandles` is where that is enforced); ink-based
-membership; the handle-size port; bringing `setVectorTransform` onto per-nudge undo; and per-nudge
-undo for the **raster** Move — see stage 4, where it is now the largest remaining item rather than a
-footnote.
+**Explicitly still not done:** ink-based membership; the handle-size port; bringing
+`setVectorTransform` onto per-nudge undo; and per-nudge undo for the **raster** Move — see stage 4,
+where it is now the largest remaining item rather than a footnote.
+
+**Uniform scale and rotate shipped separately**, after the owner reported the missing nodes: *"the
+move tool on vector layer does not have any move nodes for rotate or scale."* The whole-cel box had
+always had them; only the lassoed float was restricted. The restriction was one argument, and
+discharging it was four lines in `mapping` plus the exactness argument above — no per-sample width,
+no `VectorSample` migration, no lattice re-walk, no Codable change. **Freeform (independent-axis
+scale), the box-only rotate knob, flips and Distort are still not built**, and none of them can go
+through `mapping(_:throughSimilarity:)`: `LayerTransform` holds one scale and one rotation and cannot
+express a per-axis stretch, a negative determinant or a homography. They need a quad, which is a
+model type this stage deliberately did not introduce.
 
 **Stage 4 — the follow-ups, independent small branches.** Each stands alone; none blocks the others.
 
-- **Rotate and scale a lasso selection**, which means deciding the lattice question §1 defers and
-  probably means accepting a re-phase under scale. The float already has the handles for it.
+- ~~**Rotate and scale a lasso selection**~~ — **done**, see §0. There was no re-phase to accept: the
+  walk is similar to itself once `VectorStroke.size` scales with the geometry.
+- **Freeform, the box-only rotate knob, flips and Distort**, which all need a four-corner quad rather
+  than a `LayerTransform` and are their own staged piece of work.
 - **Ink-based membership behind a setting**, if the owner says the centreline rule feels wrong on
   thick lines — the named, deferred option §1 keeps on the board rather than deleting. It should
   move the *eraser* with it, since the argument for the centreline is that the two tools agree.
@@ -857,7 +904,10 @@ Settled by the owner on **2026-08-21**, across two conversations the same day. D
    one press or four, they answered **"Four — one per nudge."** This is the same question session 56
    left open for the whole-layer transform, asked so the two would agree — so the ruling covers both,
    and §3 stage 4 records that `setVectorTransform` does not obey it yet. A *nudge* is one gesture,
-   touch-down to touch-up; a step per drag **delta** remains forbidden (§2).
+   touch-down to touch-up; a step per drag **delta** remains forbidden (§2). The corner and rotate
+   nodes changed nothing here: **one drag of a corner is one step and one turn of the knob is one
+   step**, on the same rule and through the same `nudgeVectorFloat`, whichever grip the finger was on
+   (`LassoMoveLogicTests.testAMoveAScaleARotateAndAMoveAreFourStepsAndTheFifthGivesBackTheUnsplitStroke`).
 6. **The lassoed part floats before it bakes.** Verbatim: *"when you lasso and move, the part that is
    lassoed should be in a temporal non commit stage with move nodes. You can move it freely, and when
    it bakes it should clear on commit."* This is a lifecycle, not an answer to the narrower question

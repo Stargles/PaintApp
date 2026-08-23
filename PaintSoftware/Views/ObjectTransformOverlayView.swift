@@ -194,9 +194,10 @@ final class ObjectTransformOverlayView: UIView {
         path.addLines(between: corners)
         path.closeSubpath()
         // The tether from the top edge to the knob, so the knob reads as belonging to this box
-        // rather than as a stray dot floating above it. Drawn only when there *is* a knob: a lasso
-        // move's box offers its move band alone (`ObjectTransformFrame.allowedHandles`), and a tether
-        // to nothing is a line sticking out of the artwork for no reason.
+        // rather than as a stray dot floating above it. Drawn only when there *is* a knob: no box
+        // withholds the rotation grip today (both the whole-cel arm and the lasso float offer all
+        // six), but `ObjectTransformFrame.allowedHandles` is the filter every future handle set comes
+        // through, and a tether to nothing is a line sticking out of the artwork for no reason.
         if frameModel.allowedHandles.contains(.rotation) {
             let topCentre = CGPoint(x: (corners[0].x + corners[1].x) / 2, y: (corners[0].y + corners[1].y) / 2)
             path.move(to: topCentre)

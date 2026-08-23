@@ -90,7 +90,25 @@ final class LassoMoveLogicTests: XCTestCase {
                         vector: .empty(size: CanvasFixture.canvasSize)))
                 manager.currentFrame = 6
             }),
-            ("undo with zero nudges", { $0.undo() })
+            ("undo with zero nudges", { $0.undo() }),
+            // The two handle kinds the box gained in stage 1. A scale and a rotate reach the same
+            // teardown as a move, and this is the artwork-loss test, so they belong in it.
+            ("commit after a scale", { manager in
+                manager.nudgeVectorFloat(to: {
+                    guard var t = manager.vectorFloat?.frame.transform else { return .identity }
+                    t.scale *= 1.8
+                    return t
+                }())
+                manager.commitVectorFloatIfNeeded()
+            }),
+            ("undo after a rotate", { manager in
+                manager.nudgeVectorFloat(to: {
+                    guard var t = manager.vectorFloat?.frame.transform else { return .identity }
+                    t.rotation += 0.5
+                    return t
+                }())
+                manager.undo()
+            })
         ]
         for path in paths {
             let (manager, layerIndex, vector) = fixture()
@@ -376,21 +394,32 @@ final class LassoMoveLogicTests: XCTestCase {
     /// **The bake identity.** A zero-delta nudge changes no sample and no pixel — including on a
     /// layer whose own transform is neither identity nor a pure translation, which is the only case
     /// where `.concatenating(baseTransform.inverted())` can be wrong.
+    ///
+    /// The rotated case was added with the corner and rotate handles: `mapping` now reads
+    /// `hypot(t.a, t.b)` and `atan2(t.b, t.a)` off the delta, so a base transform that is not
+    /// axis-aligned is on the bake path in a way it was not before, and a zero-delta nudge is where a
+    /// mis-derived scale or angle would show up as a piece that jumps the moment it is picked up.
     func testAZeroDeltaNudgeChangesNoSampleAndNoPixelOnATransformedLayer() {
         for transform in [CGAffineTransform.identity,
-                          CGAffineTransform(translationX: 7, y: -3).scaledBy(x: 1.4, y: 1.4)] {
+                          CGAffineTransform(translationX: 7, y: -3).scaledBy(x: 1.4, y: 1.4),
+                          CGAffineTransform(rotationAngle: 0.4).concatenating(
+                            CGAffineTransform(translationX: 6, y: 9))] {
             let (manager, layerIndex, vector) = fixture()
             vector.setTransform(transform)
             vector.addStroke(stroke(from: CGPoint(x: 6, y: 22), to: CGPoint(x: 40, y: 22), size: 5))
             vector.addStroke(stroke(from: CGPoint(x: 6, y: 34), to: CGPoint(x: 40, y: 34), size: 5))
             // The loop is CANVAS space; the stored geometry is LOCAL. On a transformed layer the two
             // are different rectangles, and skipping the mapping is silently wrong here and only here.
+            // Built as a transformed *path* rather than `CGRect.applying`, which answers with a
+            // bounding box and so would quietly select a different set of strokes once the layer is
+            // turned.
             let localLoop = CGRect(x: 20, y: 4, width: 40, height: 50)
-            let canvasLoop = localLoop.applying(transform)
+            var mapping = transform
+            let canvasLoop = CGPath(rect: localLoop, transform: &mapping)
             // Both taken *before* the lift: after it the moved ids are suppressed, so the render is
             // the hole rather than the drawing, and comparing against that would assert nothing.
             let pixelsBefore = cgImage(vector)
-            select(manager, layerIndex, loop(canvasLoop))
+            select(manager, layerIndex, canvasLoop)
             XCTAssertTrue(manager.beginVectorLassoMove(), "transform \(transform)")
             guard let float = manager.vectorFloat else { return XCTFail("no float") }
 
@@ -516,7 +545,15 @@ final class LassoMoveLogicTests: XCTestCase {
 
     // MARK: - The marching ants (§5.6)
 
-    /// The ants **travel with the piece** and clear **at the bake**, not at the lift.
+    /// The ants **travel with the piece** and clear **at the bake**, not at the lift — and since the
+    /// box gained its corners and its knob, they scale and turn with it too.
+    ///
+    /// That second half had to be checked rather than assumed. `moving(_:by:)` is a plain
+    /// `path.copy(using:)`, which carries any affine, but the affine it is handed comes from
+    /// `canvasDelta(of:at:)` composing `baseTransform.inverted()` with `affine(from:pivot:)` — and
+    /// `affine(from:pivot:)` builds translate·rotate·scale·translate(-pivot), so the pivot has to be
+    /// the one the box's transform was derived about or the ants land beside the ink rather than on
+    /// it. The assertion is the loop's own corner, scaled about the box centre.
     func testTheSelectionTravelsWithTheFloatAndClearsAtTheBake() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 40, y: 20)))
@@ -530,6 +567,18 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(manager.selection?.bounds.origin.x ?? 0, loopRect.origin.x + 9, accuracy: 1e-6,
                        "one transform on the path, and the ants are where the piece is")
         XCTAssertEqual(manager.selection?.bounds.origin.y ?? 0, loopRect.origin.y - 4, accuracy: 1e-6)
+
+        // A corner drag to 2×, from the box wherever the move left it. The loop's top-left must land
+        // where the box centre scales it to, and the loop must be twice the size.
+        guard let centre = manager.vectorFloat?.frame.transform.position else { return XCTFail("no float") }
+        let cornerBefore = manager.selection?.bounds.origin ?? .zero
+        manager.nudgeVectorFloat(to: scaledBy(manager, 2))
+        XCTAssertEqual(manager.selection?.bounds.origin.x ?? 0,
+                       centre.x + (cornerBefore.x - centre.x) * 2, accuracy: 1e-4,
+                       "the ants scale about the same centre the ink does")
+        XCTAssertEqual(manager.selection?.bounds.origin.y ?? 0,
+                       centre.y + (cornerBefore.y - centre.y) * 2, accuracy: 1e-4)
+        XCTAssertEqual(manager.selection?.bounds.width ?? 0, loopRect.width * 2, accuracy: 1e-4)
 
         manager.commitVectorFloatIfNeeded()
         XCTAssertNil(manager.selection, "and they clear on commit")
@@ -665,6 +714,326 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertNotNil(manager.selection, "and the loop is back on screen to be redrawn")
     }
 
+    // MARK: - The corner and rotate handles
+
+    /// **A scaled piece gets thicker, not merely longer.**
+    ///
+    /// This is the one assertion that catches the defect the `allowedHandles: [.body]` restriction
+    /// existed to prevent. `VectorCanvas.mapping` maps sample *points*; `BrushStamper` stamps with
+    /// the scalar `stroke.size`. Scale the spine and leave the scalar alone and the ink spreads along
+    /// its length and keeps its old width — and because the live preview is a `UIView.transform` on a
+    /// bitmap, the drag *looks* right and only the bake is wrong.
+    ///
+    /// Watched failing with the stroke arm's `stroke.size *= k` absent, i.e. exactly today's `main`:
+    /// *("8.0") is not equal to ("16.0")* on the height — a spine spread 2× with its width untouched
+    /// — and *("40.0") is not equal to ("48.0")* on the width, which is the same defect seen from the
+    /// other side: 16 pt of spine doubled to 32 while the 8 pt of dab that pads each end did not.
+    func testAScaledFloatKeepsItsInkWeightRelativeToItsSpine() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 8))
+        guard let before = inkBounds(vector) else { return XCTFail("nothing rendered") }
+
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        manager.nudgeVectorFloat(to: scaledBy(manager, 2))
+        manager.commitVectorFloatIfNeeded()
+
+        guard let after = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        // A pixel and a half, for the grid: Hard Round's 0.95 hardness leaves no measurable fringe for
+        // `opaqueContentBounds` (`alpha > 0`) to pick up — the source measured 24 × 8 for a 16 pt
+        // spine with an 8 pt dab, exactly the geometry — so this is rounding, not softness.
+        XCTAssertEqual(after.width, before.width * 2, accuracy: 1.5, "the spine spread 2×")
+        XCTAssertEqual(after.height, before.height * 2, accuracy: 1.5,
+                       "and the ink got 2× thicker with it — the half that fails when `size` is left alone")
+    }
+
+    /// **The exactness claim, measured where it is made.** Under a similarity — translate, rotate,
+    /// uniform scale — scaling `stroke.size` by the same factor is not an approximation: the walk is
+    /// similar to itself, dab for dab.
+    ///
+    /// `stampSpacing` is linear in brush size and `advance` walks in geometric distance, so a path
+    /// *k*× longer walked with *k*× spacing takes the identical number of steps at the identical
+    /// parameters. That gives an identical dab count (so the seeded `DabRNG` draws the identical
+    /// sequence), identical `visibleRange` selection for a lattice-carrying piece, and every dab
+    /// exactly where the similarity puts it, at exactly *k*× the radius.
+    ///
+    /// Run on a **cut** piece on purpose: a piece carries its parent's samples in a `DabLattice` and
+    /// renders a sub-run of the parent's walk, which is the only case where the geometry and the ink
+    /// can disagree.
+    ///
+    /// The similarity compared against is built here from the scale factor and the box centre, not
+    /// taken from `VectorCanvas.affine` — the transform is an input to the claim, not the claim.
+    ///
+    /// Watched failing with `stroke.size *= k` absent: *("29") is not equal to ("15")* — the same
+    /// spacing over a path twice as long is twice as many dabs, and no assertion about position could
+    /// even be reached.
+    func testAScaledPieceLandsEveryDabWhereTheSimilarityPutsIt() {
+        let (manager, layerIndex, vector) = fixture()
+        // `spacingFraction` 0.25 at size 8 gives a 2 pt spacing, and 4 pt when doubled — both clear
+        // of `stampSpacing`'s 1 pt floor, which is the one thing that breaks the similarity. See
+        // `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount`.
+        var brush = BrushLibrary.hardRound
+        brush.spacingFraction = 0.25
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 32), to: CGPoint(x: 58, y: 32),
+                                size: 8, brush: brush))
+        let loopRect = CGRect(x: 30, y: 16, width: 28, height: 32)
+        select(manager, layerIndex, loop(loopRect))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let float = manager.vectorFloat, let movedID = float.insideIDs.first,
+              let lifted = vector.elements.first(where: { $0.id == movedID })?.stroke else {
+            return XCTFail("no float")
+        }
+        XCTAssertNotNil(lifted.lattice, "fixture precondition: the travelling piece carries a parent lattice")
+
+        let k: CGFloat = 2
+        let centre = float.frame.transform.position
+        let similarity = CGAffineTransform(translationX: centre.x, y: centre.y)
+            .scaledBy(x: k, y: k)
+            .translatedBy(x: -centre.x, y: -centre.y)
+        let expected = dabs(of: lifted).map { (point: $0.point.applying(similarity), radius: $0.radius * k) }
+
+        manager.nudgeVectorFloat(to: scaledBy(manager, k))
+
+        guard let scaled = vector.elements.first(where: { $0.id == movedID })?.stroke else {
+            return XCTFail("the piece vanished")
+        }
+        let actual = dabs(of: scaled)
+        XCTAssertEqual(actual.count, expected.count,
+                       "a k× path walked with k× spacing takes the same number of steps")
+        guard actual.count == expected.count else { return }
+        for (i, (a, e)) in zip(actual, expected).enumerated() {
+            XCTAssertEqual(a.point.x, e.point.x, accuracy: 1e-9, "dab \(i)")
+            XCTAssertEqual(a.point.y, e.point.y, accuracy: 1e-9, "dab \(i)")
+            XCTAssertEqual(a.radius, e.radius, accuracy: 1e-9, "dab \(i)'s radius")
+        }
+    }
+
+    /// **The documented exception, pinned rather than inherited.** `stampSpacing` floors at 1 pt, so
+    /// below `brushSize * spacingFraction == 1` the spacing stops being linear in size and the walk
+    /// stops being similar to itself: the scaled stroke gets *more* dabs than similarity predicts,
+    /// packed closer together relative to its own width.
+    ///
+    /// That floor binds at ordinary sizes, not only at hairlines — Hard Round's `spacingFraction` is
+    /// 0.05, so it binds below 20 pt, and the Pen's is 0.03, so it binds below 33 pt. It costs no ink
+    /// (dab diameter still scales, so the stroke is the right weight and still solid) and it re-rolls
+    /// nothing visible, because every built-in brush has `scatter` and `rotationJitter` at zero and a
+    /// round dab does not care what the RNG said. Recorded here so a later reading of
+    /// `testAScaledPieceLandsEveryDabWhereTheSimilarityPutsIt` cannot mistake its brush for an
+    /// arbitrary choice.
+    func testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount() {
+        var brush = BrushLibrary.hardRound
+        brush.spacingFraction = 0.05
+        let line = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
+        func walk(size: CGFloat, scale k: CGFloat) -> Int {
+            let target = RecordingDabTarget()
+            BrushStamper.stampStroke(into: target,
+                                     samples: line.map {
+                                         BrushStamper.Sample(point: CGPoint(x: $0.x * k, y: $0.y * k),
+                                                             pressure: $0.pressure)
+                                     },
+                                     brush: brush, color: .black, brushSize: size * k,
+                                     brushOpacity: 1, seed: 99)
+            return target.dabs.count
+        }
+        // Clear of the floor at both sizes: 40 × 0.05 = 2 pt, doubling to 4 pt.
+        XCTAssertEqual(walk(size: 40, scale: 2), walk(size: 40, scale: 1),
+                       "above the floor the dab count is scale-invariant")
+        // Under it at both sizes: 4 × 0.05 = 0.2 pt, floored to 1 pt on each side, so the 2× path
+        // simply gets twice as many 1 pt steps.
+        XCTAssertEqual(walk(size: 4, scale: 2), walk(size: 4, scale: 1) * 2 - 1,
+                       "under the floor the spacing stops scaling and the count doubles instead")
+    }
+
+    /// **A rotated piece is the same ink turned.** The dab set is the source's, mapped — so the ink's
+    /// box transposes under a quarter turn and the amount of ink is conserved.
+    ///
+    /// The pixel *count* rather than a pixel comparison: a turned raster is resampled onto a
+    /// different set of grid cells, so pinning bytes would be pinning the rasterizer. Count is the
+    /// conservation quantity, and it catches ink loss without pinning resampling.
+    func testARotatedFloatIsTheSameInkTurned() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32), size: 6))
+        guard let before = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        let inkBefore = opaquePixelCount(vector)
+
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 22, width: 40, height: 20)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        manager.nudgeVectorFloat(to: turnedBy(manager, .pi / 2))
+        manager.commitVectorFloatIfNeeded()
+
+        guard let after = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        XCTAssertEqual(after.width, before.height, accuracy: 1.5, "a quarter turn transposes the box")
+        XCTAssertEqual(after.height, before.width, accuracy: 1.5)
+        XCTAssertEqual(Double(opaquePixelCount(vector)), Double(inkBefore),
+                       accuracy: Double(inkBefore) * 0.1,
+                       "and turning ink does not destroy any of it")
+    }
+
+    /// **A lift, a scale out and back, and a bake leave the drawing pixel-identical** — §8.1's
+    /// conservation test, and the one that would catch a `size` that accumulated instead of being
+    /// derived.
+    ///
+    /// It is not trivially true. Every nudge maps `float.liftedInside`, the elements exactly as the
+    /// split produced them, so the map is absolute from the lift and the round trip is a return to
+    /// the identity. An implementation that scaled the *current* geometry instead would come back at
+    /// 4× — and would drift on every intermediate drag besides.
+    ///
+    /// Watched failing with the nudge written to accumulate — `mapping(element, ...)` in place of
+    /// `mapping(lifted, ...)` at `CanvasManager+LassoMove.swift`, the one-word change that turns an
+    /// absolute map into an incremental one: *Composites differ at (26, 0) channel A: got 142,
+    /// expected 0*, i.e. ink 26 points up the canvas that the drawing never had, from a piece that
+    /// came back at 2.5³ rather than at 1.
+    func testAScaleOutAndBackIsPixelIdentical() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 24, y: 26), to: CGPoint(x: 40, y: 26), size: 5))
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 26, y: 34, width: 12, height: 6),
+                                                      transform: nil),
+                                         color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1),
+                                         opacity: 1))
+        let before = cgImage(vector)
+
+        select(manager, layerIndex, loop(CGRect(x: 14, y: 16, width: 36, height: 32)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let lift = manager.vectorFloat?.frame.transform else { return XCTFail("no float") }
+        manager.nudgeVectorFloat(to: scaledBy(manager, 2.5))
+        manager.nudgeVectorFloat(to: turnedBy(manager, 0.7))
+        manager.nudgeVectorFloat(to: lift)          // the box dragged back to exactly where it started
+        manager.commitVectorFloatIfNeeded()
+
+        assertPixelsIdentical(cgImage(vector), before,
+                              "a scale out and back is not an edit, and must change no pixel")
+    }
+
+    /// **Every kind travels under a scale, and each in its own currency.** A stroke's is `size`, a
+    /// placed image's is `LayerTransform.scale`/`rotation`, a fill's is nothing at all (a `CGPath`
+    /// carries any affine), and text's is its corners *with* its layout box and its point size.
+    ///
+    /// Text is the one that has to be argued rather than assumed. Scaling `corners` alone would draw
+    /// correctly — `TextFrame.affineTransform` is the ratio of the corners to `size` — but it breaks
+    /// the invariant `TextFrame.Basis` states, that `basis.width == size.width` for every frame this
+    /// project writes. `TextFrameDrag.resized` and `TextFrame.resized(to:)` both read `basis.width`
+    /// as a layout extent and write it back into `size`, so the first handle drag or the first
+    /// keystroke into a still-`autoSize` box after a lasso scale would snap the type back to its old
+    /// size. Scaling `size` and `pointSize` with the corners keeps the invariant, keeps the same
+    /// words on the same lines, and leaves `autoSize` meaningful.
+    ///
+    /// Watched failing with `mapping`'s `.image` arm left at position-only: *("1.0") is not equal to
+    /// ("2.0")* — the photo stayed its original size while everything around it doubled.
+    func testAScaledFloatCarriesItsPlacedImageAndItsText() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 28, y: 24), to: CGPoint(x: 36, y: 24), size: 3))
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 28, y: 28, width: 8, height: 4),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1))
+        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                          rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                                                          size: CGSize(width: 6, height: 6)),
+                                           transform: LayerTransform(position: CGPoint(x: 30, y: 36),
+                                                                     scale: 1, rotation: 0)))
+        var recipe = TextRecipe(string: "hi")
+        recipe.typography.pointSize = 12
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(origin: CGPoint(x: 32, y: 38),
+                                                             size: CGSize(width: 10, height: 6))))
+
+        select(manager, layerIndex, loop(CGRect(x: 20, y: 16, width: 28, height: 32)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let float = manager.vectorFloat else { return XCTFail("no float") }
+        XCTAssertEqual(float.insideIDs.count, 4, "all four kinds travel")
+        let centre = float.frame.transform.position
+        func scaledAbout(_ p: CGPoint, _ k: CGFloat) -> CGPoint {
+            CGPoint(x: centre.x + (p.x - centre.x) * k, y: centre.y + (p.y - centre.y) * k)
+        }
+        guard let fillBefore = vector.elements.compactMap(\.fill).first?.cgPath?.boundingBoxOfPath else {
+            return XCTFail("no fill")
+        }
+
+        manager.nudgeVectorFloat(to: scaledBy(manager, 2))
+
+        guard let image = vector.elements.compactMap(\.image).first else { return XCTFail("no image") }
+        XCTAssertEqual(image.transform.scale, 2, accuracy: 1e-9, "a placed image resizes with the piece")
+        XCTAssertEqual(image.transform.position.x, scaledAbout(CGPoint(x: 30, y: 36), 2).x, accuracy: 1e-6)
+        XCTAssertEqual(image.transform.position.y, scaledAbout(CGPoint(x: 30, y: 36), 2).y, accuracy: 1e-6)
+
+        guard let text = vector.elements.compactMap(\.text).first else { return XCTFail("no text") }
+        XCTAssertEqual(text.frame.corners[0].x, scaledAbout(CGPoint(x: 32, y: 38), 2).x, accuracy: 1e-6)
+        XCTAssertEqual(text.frame.corners[0].y, scaledAbout(CGPoint(x: 32, y: 38), 2).y, accuracy: 1e-6)
+        XCTAssertEqual(text.frame.size, CGSize(width: 20, height: 12),
+                       "the layout box scales with the corners, so `basis.width == size.width` still holds")
+        XCTAssertEqual(text.recipe.typography.pointSize, 24, accuracy: 1e-9,
+                       "and the type scales with the box, which is what makes the glyphs bigger")
+
+        guard let fillAfter = vector.elements.compactMap(\.fill).first?.cgPath?.boundingBoxOfPath else {
+            return XCTFail("no fill")
+        }
+        // `CGPath.copy(using:)` works in single precision, so a mapped 16 pt extent comes back as
+        // 15.999998 — a fact about CoreGraphics, not about the map.
+        XCTAssertEqual(fillAfter.width, fillBefore.width * 2, accuracy: 1e-4, "a fill needs no currency of its own")
+        XCTAssertEqual(fillAfter.height, fillBefore.height * 2, accuracy: 1e-4)
+    }
+
+    /// A rotation turns a placed image as well as moving it — the other half of the `.image` arm, and
+    /// the one a translation-only `mapping` could never have exposed.
+    func testARotatedFloatTurnsItsPlacedImage() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                          rect: CGRect(x: 0, y: 0, width: 8, height: 8),
+                                                                          size: CGSize(width: 8, height: 8)),
+                                           transform: LayerTransform(position: CGPoint(x: 32, y: 32),
+                                                                     scale: 1, rotation: 0.2)))
+        select(manager, layerIndex, loop(CGRect(x: 16, y: 16, width: 32, height: 32)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+
+        manager.nudgeVectorFloat(to: turnedBy(manager, .pi / 2))
+
+        guard let image = vector.elements.compactMap(\.image).first else { return XCTFail("no image") }
+        XCTAssertEqual(image.transform.rotation, 0.2 + .pi / 2, accuracy: 1e-6,
+                       "the photo turns with the box rather than sliding around it upright")
+    }
+
+    /// **The float's box offers every handle**, and nothing else pinned the constant on either side
+    /// of the change: `grep allowedHandles PaintSoftwareUITests/` returned nothing before this test,
+    /// so `[.body]` was silent and so would any regression back to it be.
+    func testAFloatBoxOffersEveryHandle() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32)))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 22, width: 40, height: 20)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+
+        XCTAssertEqual(manager.vectorFloat?.frame.allowedHandles, Set(ObjectTransformFrame.Handle.allCases),
+                       "a lassoed piece scales and turns like the whole-cel box does")
+    }
+
+    /// **A scale is a nudge and a rotate is a nudge** — LASSO_MOVE.md §5.2, which the handles do not
+    /// change: one gesture, one step, whichever grip the finger was on. Four mixed drags walk back
+    /// one at a time and the fifth press gives back the stroke the lasso cut.
+    func testAMoveAScaleARotateAndAMoveAreFourStepsAndTheFifthGivesBackTheUnsplitStroke() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 4, y: 30), to: CGPoint(x: 60, y: 30), size: 4))
+        let originalID = vector.elements[0].id
+        select(manager, layerIndex, loop(CGRect(x: 34, y: 10, width: 26, height: 40)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        let stepsAtLift = manager.history.undoStack.count
+
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
+        manager.nudgeVectorFloat(to: scaledBy(manager, 1.5))
+        manager.nudgeVectorFloat(to: turnedBy(manager, 0.4))
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 0, dy: 3))
+        XCTAssertEqual(manager.history.undoStack.count - stepsAtLift, 4,
+                       "one step per gesture, whichever handle it was on")
+
+        for press in 1...3 {
+            manager.undo()
+            XCTAssertNotNil(manager.vectorFloat, "press \(press) leaves the piece floating")
+        }
+        manager.undo()
+        XCTAssertNil(manager.vectorFloat, "the fourth press ends the float")
+        XCTAssertEqual(vector.elements.count, 1, "and gives back one stroke, not two halves")
+        XCTAssertEqual(vector.elements[0].id, originalID)
+        XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
+    }
+
     // MARK: - Helpers
 
     /// The box transform a drag of `(dx, dy)` canvas points produces, from where the float is now.
@@ -672,6 +1041,58 @@ final class LassoMoveLogicTests: XCTestCase {
         guard var transform = manager.vectorFloat?.frame.transform else { return .identity }
         transform.position = CGPoint(x: transform.position.x + dx, y: transform.position.y + dy)
         return transform
+    }
+
+    /// The box transform a corner drag to `k`× produces, from where the float is now — the shape
+    /// `ObjectTransformDrag`'s corner arm writes (`start.scale * (currentDistance / startDistance)`).
+    private func scaledBy(_ manager: CanvasManager, _ k: CGFloat) -> LayerTransform {
+        guard var transform = manager.vectorFloat?.frame.transform else { return .identity }
+        transform.scale *= k
+        return transform
+    }
+
+    /// The box transform the green knob produces after turning it `radians` — `ObjectTransformDrag`'s
+    /// rotation arm, `start.rotation + (currentAngle - startAngle)`.
+    private func turnedBy(_ manager: CanvasManager, _ radians: CGFloat) -> LayerTransform {
+        guard var transform = manager.vectorFloat?.frame.transform else { return .identity }
+        transform.rotation += radians
+        return transform
+    }
+
+    /// Records where every dab landed and how big it was, so a claim about the *walk* is measured at
+    /// the level it is made rather than inferred from pixels.
+    private final class RecordingDabTarget: DabTarget {
+        private(set) var dabs: [(point: CGPoint, radius: CGFloat)] = []
+        func beginStroke() {}
+        func endStroke() {}
+        func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
+                         alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
+            dabs.append((point, radius))
+        }
+    }
+
+    /// Mirrors `VectorCanvas.stamp(stroke:into:isEraser:)`, which is private to that class. **The
+    /// lattice arm is the load-bearing half here**: a cut piece draws from its parent's samples
+    /// through a `visibleRange`, so walking `stroke.samples` instead would measure a walk the
+    /// renderer never performs.
+    private func dabs(of stroke: VectorStroke) -> [(point: CGPoint, radius: CGFloat)] {
+        let target = RecordingDabTarget()
+        let lattice = stroke.lattice.flatMap { $0.range == nil ? nil : $0 }
+        let source = lattice?.samples ?? stroke.samples
+        BrushStamper.stampStroke(into: target,
+                                 samples: source.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
+                                 brush: stroke.brush, color: stroke.uiColor, brushSize: stroke.size,
+                                 brushOpacity: stroke.opacity, isEraser: stroke.composite == .erase,
+                                 seed: BrushStamper.seed(for: lattice?.seedID ?? stroke.id),
+                                 visibleRange: lattice?.range)
+        return target.dabs
+    }
+
+    /// How many pixels carry ink — the conservation quantity a rotation preserves and a lost element
+    /// does not.
+    private func opaquePixelCount(_ vector: VectorCanvas) -> Int {
+        guard let cg = vector.render().cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return 0 }
+        return stride(from: 3, to: bytes.count, by: 4).reduce(0) { $0 + (bytes[$1] > 128 ? 1 : 0) }
     }
 
     private func isOpaque(_ vector: VectorCanvas, at point: CGPoint) -> Bool {
