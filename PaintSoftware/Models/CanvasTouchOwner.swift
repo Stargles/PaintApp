@@ -101,18 +101,21 @@ enum CanvasTouchOwner: String, CaseIterable, Hashable {
 
 /// What the active layer is, as far as owning a touch is concerned.
 ///
-/// Four distinctions and no more, because these are the four the fourteen gates actually make. A
-/// `.raster` and a `.vector` layer differ only through `isVectorTransforming`, which is a separate
-/// input.
+/// **Kind only — whether it is on screen is a separate input.** Three distinctions and no more,
+/// because these are the three the fourteen gates make of a layer's *kind*. Visibility is
+/// `CanvasTouchInputs.activeLayerIsOnScreen`, and the two axes are deliberately not folded together:
+/// `reconcileLayers` decides `host.isHidden` from visibility and `host.isUserInteractionEnabled`
+/// from `shouldInteract`, which never consults visibility, so a hidden `.value` layer and a hidden
+/// `.vector` layer answer the gates differently from a hidden `.raster` one. A single enum with a
+/// `.hidden` case cannot say which kind is hidden, and both ways of resolving that lose a state the
+/// app can actually be in: fold a hidden value layer into `.hidden` and `shouldInteract` wrongly
+/// goes true (which stakes pan/pinch/rotate on a recognizer in an invisible view — see
+/// `transformDependencyIsUnresolvable`); fold it into `.noDrawingSurface` and the catch-all stops
+/// raising "this layer is hidden". Two axes cost one `Bool` and lose neither.
 enum CanvasActiveLayer: String, CaseIterable, Hashable {
     /// No layers at all, or `currentLayerIndex` parked out of range — `deleteLayer` leaves it at -1
-    /// mid-edit, so this is a real running state and not only an empty document.
+    /// when the last layer goes, so this is a real running state and not only an empty document.
     case none
-
-    /// Present, but not *effectively* visible: its own switch is off, or an enclosing folder's is
-    /// (§4.1). `reconcileLayers` sets `host.isHidden` from exactly this, and a hidden view receives
-    /// no touches — which is a gate in its own right that `shouldInteract` does not mention.
-    case hidden
 
     /// A `.value` layer: `Layer.hasNoDrawingSurface`. Neither of its modes holds pixels for a stroke
     /// to land in.
@@ -124,7 +127,7 @@ enum CanvasActiveLayer: String, CaseIterable, Hashable {
     var exists: Bool {
         switch self {
         case .none: return false
-        case .hidden, .noDrawingSurface, .vector, .raster: return true
+        case .noDrawingSurface, .vector, .raster: return true
         }
     }
 
@@ -132,19 +135,7 @@ enum CanvasActiveLayer: String, CaseIterable, Hashable {
     var hasNoDrawingSurface: Bool {
         switch self {
         case .noDrawingSurface: return true
-        case .none, .hidden, .vector, .raster: return false
-        }
-    }
-
-    /// Whether a view hosting this layer would be hit-testable at all — `reconcileLayers` sets
-    /// `host.isHidden = !isLayerEffectivelyVisible(index)`, and UIKit does not deliver touches to a
-    /// hidden view. **Kept separate from `exists` on purpose**: `shouldInteract` never consults
-    /// visibility, so the host can be `isUserInteractionEnabled` *and* hidden at the same time, and
-    /// that combination is what `transformDependencyIsUnresolvable` is about.
-    var isOnScreen: Bool {
-        switch self {
-        case .hidden, .none: return false
-        case .noDrawingSurface, .vector, .raster: return true
+        case .none, .vector, .raster: return false
         }
     }
 }
@@ -203,6 +194,15 @@ struct CanvasTouchInputs: Hashable {
     /// `CanvasManager.isVectorTransforming` — Move engaged on a vector layer with no selection.
     var isVectorTransforming: Bool
     var activeLayer: CanvasActiveLayer
+    /// `isLayerEffectivelyVisible(currentLayerIndex)` — the layer's own switch *and* every enclosing
+    /// folder's (§4.1). `reconcileLayers` sets `host.isHidden = !this`, and UIKit delivers no touch
+    /// to a hidden view, so this is a gate in its own right — one that `shouldInteract` never
+    /// mentions because it is applied through a different property one line above it.
+    ///
+    /// **Kept apart from `activeLayer` on purpose.** The host can be `isUserInteractionEnabled` and
+    /// invisible at the same time, and that combination is what `transformDependencyIsUnresolvable`
+    /// is about. See `CanvasActiveLayer`'s own comment for why one enum cannot carry both.
+    var activeLayerIsOnScreen: Bool
     var chrome: CanvasTouchChrome
 
     init(tool: Tool,
@@ -212,6 +212,7 @@ struct CanvasTouchInputs: Hashable {
          hasVectorFloat: Bool = false,
          isVectorTransforming: Bool = false,
          activeLayer: CanvasActiveLayer = .raster,
+         activeLayerIsOnScreen: Bool = true,
          chrome: CanvasTouchChrome = .none) {
         self.tool = tool
         self.fillMode = fillMode
@@ -220,6 +221,10 @@ struct CanvasTouchInputs: Hashable {
         self.hasVectorFloat = hasVectorFloat
         self.isVectorTransforming = isVectorTransforming
         self.activeLayer = activeLayer
+        // Normalised rather than stored as given: a layer that does not exist is not on
+        // screen, and letting the value type hold that pair would be the same class of
+        // mistake as the collapsed enum this axis replaced.
+        self.activeLayerIsOnScreen = activeLayer.exists && activeLayerIsOnScreen
         self.chrome = chrome
     }
 }
@@ -263,7 +268,7 @@ extension CanvasTouchInputs {
     /// Whether a touch can actually reach the active layer's stroke recognizer: interactive *and*
     /// on screen. The two halves come from two different mechanisms and disagree whenever the active
     /// layer is hidden with a paint tool selected.
-    var activeHostReceivesTouches: Bool { activeHostIsInteractive && activeLayer.isOnScreen }
+    var activeHostReceivesTouches: Bool { activeHostIsInteractive && activeLayerIsOnScreen }
 
     /// `updateSelectionOverlay`'s `overlay.isCapturingGestures`, verbatim.
     var selectionOverlayIsCapturing: Bool {
@@ -300,7 +305,7 @@ extension CanvasTouchInputs {
     /// `reconcileLayers`' `needsCatch`, verbatim: no layers, the active layer not effectively
     /// visible, or the active layer holding no pixels.
     var catchAllIsEnabled: Bool {
-        !activeLayer.exists || !activeLayer.isOnScreen || activeLayer.hasNoDrawingSurface
+        !activeLayer.exists || !activeLayerIsOnScreen || activeLayer.hasNoDrawingSurface
     }
 
     /// Whether the catch-all would actually *say* anything. `handleCatchAllTap` asks
@@ -327,7 +332,7 @@ extension CanvasTouchInputs {
     /// whether the stroke recognizer will ever reach a terminal state is "did *this* touch reach the
     /// host?", and two things can answer no while `shouldInteract` is still true:
     ///
-    ///  * the host is hidden (`activeLayer == .hidden`) — `shouldInteract` never consults visibility,
+    ///  * the host is hidden (`!activeLayerIsOnScreen`) — `shouldInteract` never consults visibility,
     ///    so it stays `true`, `host.isHidden` is set `true` one line above it, and UIKit delivers
     ///    nothing to a hidden view's recognizers;
     ///  * an overlay above the hosts claimed the touch in its `hitTest` — a shape outline, a text
@@ -343,7 +348,7 @@ extension CanvasTouchInputs {
     /// elsewhere. It does describe a *different* dead canvas, reachable with a brush selected.
     var transformDependencyIsUnresolvable: Bool {
         guard transformWaitsOnActiveStroke else { return false }
-        return !activeLayer.isOnScreen || chrome != .none
+        return !activeLayerIsOnScreen || chrome != .none
     }
 }
 

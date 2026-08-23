@@ -1,7 +1,7 @@
 import XCTest
 
-/// Walks the **whole** input space of "who owns this canvas touch" — 28,800 combinations, of which
-/// 3,600 are states the app can actually be in — rather than sampling it.
+/// Walks the **whole** input space of "who owns this canvas touch" — 46,080 combinations, of which
+/// 5,880 are states the app can actually be in — rather than sampling it.
 ///
 /// **Exhaustion is the point.** Every defect this type was extracted to retire was a combination
 /// nobody thought to try: the pick tool with the Select panel open (owned by nobody), a shape's
@@ -42,12 +42,23 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         case .none:
             return true
         case .transformBoxOrHandle:
-            // The Move box is on screen for exactly two states (`updateTransformOverlay`).
-            return i.hasVectorFloat || (i.isVectorTransforming && i.activeLayer == .vector)
+            // The Move box is on screen for exactly two states (`updateTransformOverlay`). The
+            // whole-layer arm tests `isLayerEffectivelyVisible` before it activates the overlay —
+            // "a layer inside a hidden group isn't on screen either, and the handles shouldn't be" —
+            // so a hidden layer reaches this chrome only through a lassoed float, whose arm does not
+            // ask.
+            return i.hasVectorFloat
+                || (i.isVectorTransforming && i.activeLayer == .vector && i.activeLayerIsOnScreen)
         case .shapeHandleOrOutline, .textBoxOrBand, .textHandle:
             // A pending shape and a live text session are both baked by
             // `commitAllInteractiveState()`, which every route into Move and every toolbar toggle
             // calls; and both need a layer with pixels to have started on.
+            //
+            // **Visibility is deliberately not required.** Neither `updateShapeOverlay` nor
+            // `updateTextOverlay` consults `isLayerEffectivelyVisible` — unlike
+            // `updateTransformOverlay` above, which does — so hiding the layer a shape or a text box
+            // is pending on leaves its handles on screen and grabbable. That is what produces the
+            // `shapeOverlay+catchAllNotice` and `textOverlay+catchAllNotice` rows below.
             if i.hasFloatingPiece || i.hasVectorFloat || i.isVectorTransforming { return false }
             return i.activeLayer == .raster || i.activeLayer == .vector
         case .guideGrip:
@@ -67,15 +78,21 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                         for hasVectorFloat in [false, true] {
                             for isVectorTransforming in [false, true] {
                                 for activeLayer in CanvasActiveLayer.allCases {
+                                    for onScreen in [false, true] {
                                     for chrome in CanvasTouchChrome.allCases {
                                         let inputs = CanvasTouchInputs(
                                             tool: tool, fillMode: fillMode, panel: panel,
                                             hasFloatingPiece: hasFloatingPiece,
                                             hasVectorFloat: hasVectorFloat,
                                             isVectorTransforming: isVectorTransforming,
-                                            activeLayer: activeLayer, chrome: chrome)
+                                            activeLayer: activeLayer,
+                                            activeLayerIsOnScreen: onScreen, chrome: chrome)
+                                        // `.none` normalises visibility to false, so the `true` half
+                                        // of that pair is the same state twice.
+                                        guard inputs.activeLayerIsOnScreen == onScreen else { continue }
                                         guard isReachable(inputs) else { continue }
                                         body(inputs)
+                                    }
                                     }
                                 }
                             }
@@ -94,7 +111,8 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         let mode = i.tool == .fill ? "/\(i.fillMode.rawValue)" : ""
         return "tool=\(i.tool)\(mode) select=\(i.panel == .select) float=\(i.hasFloatingPiece)"
             + " vfloat=\(i.hasVectorFloat) vxform=\(i.isVectorTransforming)"
-            + " layer=\(i.activeLayer.rawValue) chrome=\(i.chrome.rawValue)"
+            + " layer=\(i.activeLayer.rawValue) visible=\(i.activeLayerIsOnScreen)"
+            + " chrome=\(i.chrome.rawValue)"
     }
 
     // MARK: - The space is the size it says it is
@@ -109,14 +127,18 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                         for vfloat in [false, true] {
                             for vxform in [false, true] {
                                 for layer in CanvasActiveLayer.allCases {
+                                    for onScreen in [false, true] {
                                     for chrome in CanvasTouchChrome.allCases {
                                         total += 1
                                         let inputs = CanvasTouchInputs(
                                             tool: tool, fillMode: fillMode, panel: panel,
                                             hasFloatingPiece: float, hasVectorFloat: vfloat,
                                             isVectorTransforming: vxform,
-                                            activeLayer: layer, chrome: chrome)
+                                            activeLayer: layer,
+                                            activeLayerIsOnScreen: onScreen, chrome: chrome)
+                                        guard inputs.activeLayerIsOnScreen == onScreen else { continue }
                                         if isReachable(inputs) { reachable += 1 }
+                                    }
                                     }
                                 }
                             }
@@ -125,8 +147,8 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(total, 28_800, "the enumerated space changed — a case was added to one of the input enums")
-        XCTAssertEqual(reachable, 3_600, "the reachability rules changed; re-read `isReachable`'s clauses")
+        XCTAssertEqual(total, 46_080, "the enumerated space changed — a case was added to one of the input enums")
+        XCTAssertEqual(reachable, 5_880, "the reachability rules changed; re-read `isReachable`'s clauses")
     }
 
     // MARK: - The answer is always defined, and always singular where it can be
@@ -185,18 +207,28 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
             let modes = tool == .fill ? ["/flood", "/lasso"] : [""]
             for m in modes {
                 // 1 & 2 — a paint tool, no Select panel, a vector layer either mid-transform or
-                // with a piece floating.
+                // with a piece floating. Visible: hide the layer and the catch-all speaks instead,
+                // which is the whole difference between these three states and every other silent
+                // one — the notice exists and simply is not wired to `isVectorTransforming`.
                 if tool.paintsOnCanvas {
-                    expected.insert("tool=\(tool)\(m) select=false float=false vfloat=false vxform=true layer=vector chrome=none")
-                    expected.insert("tool=\(tool)\(m) select=false float=false vfloat=true vxform=false layer=vector chrome=none")
+                    expected.insert("tool=\(tool)\(m) select=false float=false vfloat=false vxform=true layer=vector visible=true chrome=none")
+                    expected.insert("tool=\(tool)\(m) select=false float=false vfloat=true vxform=false layer=vector visible=true chrome=none")
                 }
                 // 3 — Select open over a floating vector piece, whatever the tool.
-                expected.insert("tool=\(tool)\(m) select=true float=false vfloat=true vxform=false layer=vector chrome=none")
+                expected.insert("tool=\(tool)\(m) select=true float=false vfloat=true vxform=false layer=vector visible=true chrome=none")
+                // 3b — the same with the layer hidden, for the tools the catch-all does not speak
+                // for. `handleCatchAllTap` returns early unless `Tool.paintsOnCanvas`, so hiding the
+                // layer rescues a brush from silence and leaves the fill, the text tool and the
+                // eyedropper exactly where they were.
+                if !tool.paintsOnCanvas {
+                    expected.insert("tool=\(tool)\(m) select=true float=false vfloat=true vxform=false layer=vector visible=false chrome=none")
+                }
             }
         }
         // The eyedropper is the one tool that survives case 3, and that is the 2026-08-22 fix
         // working: `isEyedropperArmed` does not consult the Select panel.
-        expected.remove("tool=eyedropper select=true float=false vfloat=true vxform=false layer=vector chrome=none")
+        expected.remove("tool=eyedropper select=true float=false vfloat=true vxform=false layer=vector visible=true chrome=none")
+        expected.remove("tool=eyedropper select=true float=false vfloat=true vxform=false layer=vector visible=false chrome=none")
 
         XCTAssertEqual(found, expected,
                        "new: \(found.subtracting(expected).sorted())\ngone: \(expected.subtracting(found).sorted())")
@@ -207,9 +239,12 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     /// `.nobody` — the recognizer was off *and* the selection overlay was still eating the tap.
     func testThePickToolOwnsItsTapWithTheSelectPanelOpen() {
         for layer in CanvasActiveLayer.allCases {
-            let inputs = CanvasTouchInputs(tool: .eyedropper, panel: .select, activeLayer: layer)
-            XCTAssertEqual(CanvasTouchOwner.contenders(in: inputs), [.eyedropper],
-                           "active layer \(layer.rawValue)")
+            for onScreen in [false, true] {
+                let inputs = CanvasTouchInputs(tool: .eyedropper, panel: .select, activeLayer: layer,
+                                               activeLayerIsOnScreen: onScreen)
+                XCTAssertEqual(CanvasTouchOwner.contenders(in: inputs), [.eyedropper],
+                               "active layer \(layer.rawValue) onScreen=\(onScreen)")
+            }
         }
     }
 
@@ -261,7 +296,7 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     /// of every view in its responder chain — so an overlay's `hitTest` claim does not take the
     /// touch away from the fill press mounted on the container underneath it.
     ///
-    /// Two structural families produce all 29 signatures:
+    /// Two structural families produce all 36 signatures:
     ///
     ///  * **`<overlay chrome> + <whichever container recognizer is enabled>` (24 of them).** Grab a
     ///    guide grip with Fill selected and the grip drags *and* a flood fill lands under it; grab a
@@ -285,39 +320,49 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         let expected: [String: Int] = [
             // A guide grip is reachable in every state, because guide editing is a mode none of
             // these inputs can see.
-            "guideOverlay+catchAllNotice": 162,
-            "guideOverlay+eyedropper": 140,
-            "guideOverlay+fillPress": 63,
-            "guideOverlay+lassoFill": 63,
-            "guideOverlay+textPress": 126,
-            "guideOverlay+selectionOverlay": 42,
-            "guideOverlay+selectionOverlay+catchAllNotice": 18,
-            "guideOverlay+floatingPiece": 360,
-            "guideOverlay+floatingPiece+catchAllNotice": 120,
-            // A pending shape.
-            "shapeOverlay+eyedropper": 40,
-            "shapeOverlay+fillPress": 18,
-            "shapeOverlay+lassoFill": 18,
-            "shapeOverlay+textPress": 36,
-            "shapeOverlay+selectionOverlay": 20,
+            "guideOverlay+catchAllNotice": 384,
+            "guideOverlay+eyedropper": 220,
+            "guideOverlay+fillPress": 99,
+            "guideOverlay+lassoFill": 99,
+            "guideOverlay+textPress": 198,
+            "guideOverlay+selectionOverlay": 54,
+            "guideOverlay+selectionOverlay+catchAllNotice": 36,
+            "guideOverlay+floatingPiece": 480,
+            "guideOverlay+floatingPiece+catchAllNotice": 240,
+            // A pending shape. The `+catchAllNotice` rows are the ones the previous shape of this
+            // model could not express: `updateShapeOverlay` never asks whether the layer is still
+            // visible, so hiding it leaves the handles up *and* arms the "this layer is hidden"
+            // notice under them.
+            "shapeOverlay+eyedropper": 80,
+            "shapeOverlay+fillPress": 36,
+            "shapeOverlay+lassoFill": 36,
+            "shapeOverlay+textPress": 72,
+            "shapeOverlay+selectionOverlay": 28,
+            "shapeOverlay+selectionOverlay+catchAllNotice": 12,
+            "shapeOverlay+catchAllNotice": 108,
             // A live text session — note the absence of any `+textPress` pairing.
-            "textOverlay+eyedropper": 40,
-            "textOverlay+fillPress": 18,
-            "textOverlay+lassoFill": 18,
-            "textOverlay+selectionOverlay": 20,
-            "textTransformOverlay+eyedropper": 40,
-            "textTransformOverlay+fillPress": 18,
-            "textTransformOverlay+lassoFill": 18,
-            "textTransformOverlay+selectionOverlay": 20,
+            "textOverlay+eyedropper": 80,
+            "textOverlay+fillPress": 36,
+            "textOverlay+lassoFill": 36,
+            "textOverlay+selectionOverlay": 28,
+            "textOverlay+selectionOverlay+catchAllNotice": 12,
+            "textOverlay+catchAllNotice": 108,
+            "textTransformOverlay+eyedropper": 80,
+            "textTransformOverlay+fillPress": 36,
+            "textTransformOverlay+lassoFill": 36,
+            "textTransformOverlay+selectionOverlay": 28,
+            "textTransformOverlay+selectionOverlay+catchAllNotice": 12,
+            "textTransformOverlay+catchAllNotice": 108,
             // The Move box, on a vector layer mid-transform or with a lassoed piece floating.
-            "objectTransformOverlay+eyedropper": 40,
-            "objectTransformOverlay+fillPress": 18,
-            "objectTransformOverlay+lassoFill": 18,
-            "objectTransformOverlay+textPress": 36,
+            "objectTransformOverlay+eyedropper": 60,
+            "objectTransformOverlay+fillPress": 27,
+            "objectTransformOverlay+lassoFill": 27,
+            "objectTransformOverlay+textPress": 54,
             "objectTransformOverlay+selectionOverlay": 10,
+            "objectTransformOverlay+catchAllNotice": 60,
             // The catch-all's own two, with no overlay involved.
-            "floatingPiece+catchAllNotice": 120,
-            "selectionOverlay+catchAllNotice": 18,
+            "floatingPiece+catchAllNotice": 240,
+            "selectionOverlay+catchAllNotice": 36,
         ]
 
         XCTAssertEqual(Set(found.keys), Set(expected.keys),
@@ -369,15 +414,15 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         var found = Set<String>()
         forEachReachableInput { inputs in
             guard inputs.transformDependencyIsUnresolvable else { return }
-            found.insert("hiddenHost=\(!inputs.activeLayer.isOnScreen) chrome=\(inputs.chrome.rawValue) tool=\(inputs.tool)")
+            found.insert("hiddenHost=\(!inputs.activeLayerIsOnScreen) chrome=\(inputs.chrome.rawValue) tool=\(inputs.tool)")
         }
 
         var expected = Set<String>()
         for tool in Tool.allCases where tool.paintsOnCanvas {
             expected.insert("hiddenHost=true chrome=none tool=\(tool)")
-            expected.insert("hiddenHost=true chrome=guideGrip tool=\(tool)")
             for chrome in [CanvasTouchChrome.guideGrip, .shapeHandleOrOutline, .textBoxOrBand, .textHandle] {
                 expected.insert("hiddenHost=false chrome=\(chrome.rawValue) tool=\(tool)")
+                expected.insert("hiddenHost=true chrome=\(chrome.rawValue) tool=\(tool)")
             }
         }
 
@@ -449,10 +494,13 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     func testTheCatchAllSpeaksOnlyForATouchThatWouldHaveDrawn() {
         for tool in Tool.allCases {
             for layer in CanvasActiveLayer.allCases {
-                let inputs = CanvasTouchInputs(tool: tool, activeLayer: layer)
-                let expected = tool.paintsOnCanvas && !(layer == .raster || layer == .vector)
-                XCTAssertEqual(inputs.catchAllRaisesNotice, expected,
-                               "tool \(tool) on \(layer.rawValue)")
+                for onScreen in [false, true] {
+                    let inputs = CanvasTouchInputs(tool: tool, activeLayer: layer,
+                                                   activeLayerIsOnScreen: onScreen)
+                    let drawable = (layer == .raster || layer == .vector) && inputs.activeLayerIsOnScreen
+                    XCTAssertEqual(inputs.catchAllRaisesNotice, tool.paintsOnCanvas && !drawable,
+                                   "tool \(tool) on \(layer.rawValue) onScreen=\(onScreen)")
+                }
             }
         }
     }
