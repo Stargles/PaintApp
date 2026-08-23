@@ -1,17 +1,7 @@
 import SwiftUI
 
-/// **No `adjust` case.** The toolbar carried a slider icon for one, and behind it was
-/// `StubToolPanel` — a placeholder that had never grown a feature. Every grade the artist can
-/// actually apply lives on a value layer's own Blend Mode menu (`LayerPanel.valueBlendModeRow`),
-/// reached from the layer they want to grade, which is where the owner said it belongs: "the adjust
-/// icon at the top can be removed, its what the layer edit does."
-enum ActivePanel: Equatable {
-    case none, actions, select, move, layers, brush, color, fill, eraser
-    /// The text tool's settings panel. **Not opened from the toolbar** — there is no text icon
-    /// there; the way in is the Actions menu's "Add Text" row, which is why `ActionsMenu` is the one
-    /// panel that had to grow an `activePanel` binding. See `Tool.text`.
-    case text
-}
+// `ActivePanel` itself now lives in `Models/ActivePanel.swift` — see its doc comment for why a
+// `View` file could not hold it. This extension stays here, with the two call sites that use it.
 
 extension Binding where Value == ActivePanel {
     /// Opens (or closes) the settings panel of the tool that's *already* active. Unlike
