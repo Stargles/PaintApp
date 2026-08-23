@@ -38,6 +38,29 @@ staying a fill. All three want the owner's eye on real artwork rather than anoth
 
 ## Queued
 
+New this pass (owner rulings, 2026-08-22, on the touch-ownership truth table):
+
+- [ ] **(i) One touch, one actor.** Deriving `CanvasTouchOwner`'s contract enumerated the input space and found
+      **1,678 reachable combinations where two things act on one touch** — drag a guide grip with Fill selected
+      and the grip moves *and* a flood fill lands under it; with the pick tool armed, the brush colour changes
+      too; drag a floating piece's box with Fill selected and the piece moves *and* a fill dumps under it. The
+      cause is not a missing check anywhere: **every container recognizer sets `cancelsTouchesInView = false`**,
+      so an overlay claiming a touch in `hitTest` does not take it away from the recognizer beneath. The rule
+      to apply: **whatever chrome the artist actually grabbed wins, and the tool underneath does not also
+      fire.** `handleTextPress` already works this way — it re-checks both text overlays before acting, and is
+      the only handler in the app that does, which is exactly why text is absent from the collision list. It is
+      the pattern the other thirteen sites need.
+- [ ] **(j) A tap outside a floating vector piece commits it, as it already does for raster.** The same
+      enumeration found **118 combinations owned by nobody**, all on a vector layer: mid-Move, or with a lassoed
+      piece floating, a touch anywhere outside the box does nothing *and says nothing* — where a hidden layer
+      would at least raise a banner. With the Select panel open the canvas is inert away from the box,
+      including the lasso the open panel is for. **Owner's ruling, 2026-08-22: make the tap commit the float**,
+      chosen over leaving it silent or raising a notice, because it makes the vector float behave like the
+      raster one. The asymmetry today is structural: `FloatingPieceOverlayView` covers the whole container and
+      commits a raster piece on a tap outside, while a vector float's `ObjectTransformOverlayView` claims only
+      its own grips.
+
+
 Nothing — the owner's list is empty. Two things are *carried*, both deliberate and neither an ask:
 
 - **The raster Move's undo half of ruling 4 is not built** (the vector half and selection-at-bake shipped). A
