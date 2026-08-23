@@ -152,6 +152,34 @@ enum CanvasActiveLayer: String, CaseIterable, Hashable {
     case vector
     case raster
 
+    /// The touch-relevant kind of the layer a `LayerKind?` describes; `nil` means "no layers, or
+    /// `currentLayerIndex` parked out of range", which is `.none`.
+    ///
+    /// **Here rather than inline in `CanvasView.Coordinator.canvasTouchInputs()`, where it was
+    /// written, because it is a correspondence between two model enums and a `View` file is the one
+    /// place it cannot be checked.** `canvasTouchInputs()` is the function that *gathers* the shared
+    /// answer's inputs, and it lives in a `View` file, so nothing in the fast tier can link it — the
+    /// failure that would follow from gathering one of these wrongly (a gate reads the shared value,
+    /// the value is wrong, the canvas goes dead) is precisely what this type exists to prevent, and
+    /// it is the half of the arrangement a logic test cannot reach. This mapping was the only part
+    /// of that gathering with a decision in it; moving it leaves nine one-line field reads that a
+    /// reader can check by eye, and puts the exhaustive `switch` — the one that makes a fourth
+    /// `LayerKind` answer at compile time — where the enum it answers for lives.
+    init(kind: LayerKind?) {
+        switch kind {
+        case nil:
+            self = .none
+        case .value:
+            // `Layer.hasNoDrawingSurface` is `kind == .value`; switching on the kind rather than
+            // asking the property is what makes a fourth `LayerKind` answer here at compile time.
+            self = .noDrawingSurface
+        case .vector:
+            self = .vector
+        case .raster:
+            self = .raster
+        }
+    }
+
     var exists: Bool {
         switch self {
         case .none: return false
@@ -209,6 +237,28 @@ enum CanvasTouchChrome: String, CaseIterable, Hashable {
 /// Taken as a struct rather than read off `CanvasManager` because **no object can see all of it**:
 /// `panel` is `@State` on `DrawingView` and the rest is on the manager. That is the whole reason
 /// this is a value type and the function is `static`.
+///
+/// **The gathering is not covered by the fast tier, and saying so is more honest than a test that
+/// pretends otherwise.** Everything below this line is exhaustively tested headlessly; the function
+/// that *fills it in* — `CanvasView.Coordinator.canvasTouchInputs(chrome:)` — is in a `View` file,
+/// and View files are not compiled into the UI-test target (the reason `ActivePanel` had to move out
+/// of `TopToolbar.swift` for this type to exist at all). So a field gathered from the wrong property
+/// would answer every test in `CanvasTouchOwnerLogicTests` correctly and still take the canvas out.
+/// Three things stand in for the test that cannot be written, and none of them is a substitute for
+/// reading those nine lines when one is added:
+///
+///  * the only part of the gathering with a decision in it is `CanvasActiveLayer.init(kind:)`, which
+///    is here and is tested (`testALayersKindMapsToTheKindTheGatesMakeOfIt`);
+///  * three of the nine fields are exercised end-to-end by named XCUITests —
+///    `SelectionAndMoveUITests.testTheEyedropperPicksWhileTheSelectPanelIsOpenAndHandsTheLassoBack`
+///    covers `tool` and `panel` through the gates that read them, and
+///    `testEnteringTextModeClosesTheSelectPanelSoTextsOwnGuardCannotBite` covers `panel` against
+///    `textPressIsEnabled`;
+///  * the remaining five (`fillMode`, `hasFloatingPiece`, `hasVectorFloat`, `isVectorTransforming`,
+///    `activeLayerIsOnScreen`) are covered only by whatever XCUITest happens to exercise the feature
+///    they belong to. **That is the live gap.** Closing it properly means the gathering moving
+///    somewhere the test target can link, which is a change to where `activePanel` lives and is not
+///    this refactor.
 struct CanvasTouchInputs: Hashable {
     var tool: Tool
     var fillMode: FillMode
@@ -480,10 +530,23 @@ extension CanvasTouchOwner {
     /// is enumerated by `CanvasTouchOwnerLogicTests.testTouchesWithMoreThanOneClaimant` so the
     /// list can be reviewed rather than discovered later.
     ///
-    /// **Nothing in the app calls this yet, deliberately.** Every converted gate asks the property it
-    /// used to spell, and `handleTextPress` asks `contenders`; switching a site to `owner` is what
-    /// *resolves* one of those conflict rows, which is a behaviour change and a decision for the
-    /// owner rather than a refactor.
+    /// **Nothing in the app calls this, deliberately — and that is unused surface, which is a cost
+    /// worth naming rather than glossing.** Every converted gate asks the property it used to spell,
+    /// and `handleTextPress` asks `contenders`; switching a site to `owner` is what *resolves* one of
+    /// those conflict rows, which is a behaviour change and a decision for the product owner rather
+    /// than a refactor. So this function, and the precedence ordering in `contenders(in:)` that only
+    /// it consumes, are **deliberately ahead of their callers**: they are the proposal for how the
+    /// conflict rows should be settled, written where the rows are enumerated, so the settling is a
+    /// one-line change at each site rather than a redesign.
+    ///
+    /// A shared answer nobody reads is the thing that drifts next, and the two things that stop this
+    /// one drifting are named here so they are not deleted as incidental:
+    /// `CanvasTouchOwnerLogicTests.testOwnerIsAlwaysTheFirstContenderOrNobody` walks every reachable
+    /// state and pins this to `contenders`' head, and `testNobodyOwnsATouchOnlyInTheThreeDeclaredCases`
+    /// pins the `.nobody` fallthrough — so the ordering cannot quietly stop meaning anything while it
+    /// waits. **If the conflict rows are ever settled some other way, delete this and the ordering
+    /// with it**; keeping an unread precedence around after its proposal has been rejected is exactly
+    /// the drift this comment exists to prevent.
     static func owner(in i: CanvasTouchInputs) -> CanvasTouchOwner {
         contenders(in: i).first ?? .nobody
     }

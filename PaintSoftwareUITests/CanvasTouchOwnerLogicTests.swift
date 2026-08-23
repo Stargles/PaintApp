@@ -1,7 +1,7 @@
 import XCTest
 
-/// Walks the **whole** input space of "who owns this canvas touch" — 46,080 combinations, of which
-/// 5,880 are states the app can actually be in — rather than sampling it.
+/// Walks the **whole** input space of "who owns this canvas touch" — 3,840 combinations for each
+/// (tool, fill mode) pair, 490 of them states the app can actually be in — rather than sampling it.
 ///
 /// **Exhaustion is the point.** Every defect this type was extracted to retire was a combination
 /// nobody thought to try: the pick tool with the Select panel open (owned by nobody), a shape's
@@ -10,11 +10,24 @@ import XCTest
 /// every case for the same reason, and this file follows its style — an exhaustive `switch` with no
 /// `default:`, so the next tool, panel or overlay has to answer.
 ///
-/// The three tests that matter are `testNobodyOwnsATouchOnlyInTheThreeDeclaredCases`,
-/// `testTouchesWithMoreThanOneClaimant` and
-/// `testTheTransformDependencyIsUnresolvableOnlyInTheDeclaredCases`. Each pins a *set of
-/// signatures* rather than a count: a gate that changes does not merely move a number, it names the
-/// combination it changed.
+/// **Nothing here is a number that moves when a tool is added, and that is a requirement rather than
+/// a nicety.** The whole promise of `CanvasTouchOwner` is that the next tool is one edit; a test that
+/// has to be recomputed whenever the thing it guards changes is not a guard, it is a tax on the
+/// change it was written to make safe. So every expectation in this file is either
+///
+///  * a **set of signatures**, generated from a rule over `Tool.allCases` (so a new tool extends both
+///    sides of the comparison and invalidates nothing) — `testNobodyOwnsATouchOnlyInTheThreeDeclaredCases`,
+///    `testTheTransformDependencyIsUnresolvableOnlyInTheDeclaredCases`;
+///  * a **property asserted per state**, which names the signature it failed at —
+///    `testAnOverlayClaimIsAdditive`, `testTheOnlyTwoWaysToBeClaimedTwiceWithNoOverlayInvolved`,
+///    `testEveryToolReachesTheOwnerItNames`;
+///  * or a **per-(tool, fill-mode) count**, never a total, so the tool axis is factored out entirely
+///    — `testTheReachableInputSpaceIsTheSizeThisFileClaims`.
+///
+/// The one hand-maintained list left is `testTouchesWithMoreThanOneClaimant`'s set of owner
+/// *combinations*, which carries no arithmetic and exists to be read: each row is a live defect, and
+/// a new row appearing is a review, not a recomputation. Adding a paint tool does not touch it;
+/// adding a tool with a canvas recognizer of its own does, and should.
 final class CanvasTouchOwnerLogicTests: XCTestCase {
 
     // MARK: - The input space
@@ -117,11 +130,24 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
 
     // MARK: - The space is the size it says it is
 
+    /// **Counted per (tool, fill mode) pair, never in total, and the difference is the whole point.**
+    /// A total is a number that moves whenever a tool is added — the one event this type exists to
+    /// make cheap — and it moves for a reason that has nothing to do with what the number is
+    /// guarding, which is "did a case appear on one of the *other* axes, or did `isReachable`'s
+    /// clauses change". Dividing the tool axis out leaves a number that only moves when something
+    /// worth looking at moved.
+    ///
+    /// The division is legitimate because **no clause in `isReachable` reads the tool or the fill
+    /// mode** — every one of them is about floats, the active layer or the chrome — so every pair
+    /// admits exactly the same states. That is asserted here rather than assumed, and it is the
+    /// assertion that makes the per-pair figure meaningful: if a reachability rule ever did start
+    /// reading the tool, the uniformity check below is what says so.
     func testTheReachableInputSpaceIsTheSizeThisFileClaims() {
-        var reachable = 0
-        var total = 0
+        var totalByPair: [String: Int] = [:]
+        var reachableByPair: [String: Int] = [:]
         for tool in Tool.allCases {
             for fillMode in FillMode.allCases {
+                let pair = "\(tool)/\(fillMode.rawValue)"
                 for panel in ActivePanel.allCases {
                     for float in [false, true] {
                         for vfloat in [false, true] {
@@ -129,7 +155,7 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                                 for layer in CanvasActiveLayer.allCases {
                                     for onScreen in [false, true] {
                                     for chrome in CanvasTouchChrome.allCases {
-                                        total += 1
+                                        totalByPair[pair, default: 0] += 1
                                         let inputs = CanvasTouchInputs(
                                             tool: tool, fillMode: fillMode, panel: panel,
                                             hasFloatingPiece: float, hasVectorFloat: vfloat,
@@ -137,7 +163,7 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                                             activeLayer: layer,
                                             activeLayerIsOnScreen: onScreen, chrome: chrome)
                                         guard inputs.activeLayerIsOnScreen == onScreen else { continue }
-                                        if isReachable(inputs) { reachable += 1 }
+                                        if isReachable(inputs) { reachableByPair[pair, default: 0] += 1 }
                                     }
                                     }
                                 }
@@ -147,8 +173,20 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(total, 46_080, "the enumerated space changed — a case was added to one of the input enums")
-        XCTAssertEqual(reachable, 5_880, "the reachability rules changed; re-read `isReachable`'s clauses")
+
+        let pairs = Tool.allCases.count * FillMode.allCases.count
+        XCTAssertEqual(totalByPair.count, pairs, "every (tool, fill mode) pair should have been walked")
+        for (pair, count) in totalByPair.sorted(by: { $0.key < $1.key }) {
+            XCTAssertEqual(count, 3_840,
+                           "\(pair): the enumerated space changed — a case was added to `ActivePanel`, "
+                           + "`CanvasActiveLayer` or `CanvasTouchChrome`")
+        }
+        for (pair, count) in reachableByPair.sorted(by: { $0.key < $1.key }) {
+            XCTAssertEqual(count, 490,
+                           "\(pair): the reachability rules changed; re-read `isReachable`'s clauses. "
+                           + "A figure that differs *between* pairs means a clause has started reading "
+                           + "the tool, which this file's per-pair counting assumes it does not.")
+        }
     }
 
     // MARK: - The answer is always defined, and always singular where it can be
@@ -309,67 +347,133 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     ///    active layer's state and never asks whether a floating piece or the Select panel has taken
     ///    the touch, so dragging a Move piece over a hidden active layer raises "this layer is
     ///    hidden" on every touch, and lassoing with no layers raises "no layers" on every drag.
+    /// **The list is the deliverable here — it is read, not counted.** It carried a census beside it
+    /// (36 hand-maintained totals), and that was wrong twice over: every one of those numbers moves
+    /// when a tool is added, which is the event this whole type exists to make cheap; and a count is
+    /// blind to exactly the change it looks most able to catch, because two states swapping — one
+    /// stopping colliding, another starting — leaves the total where it was. The signature-level
+    /// teeth are `testAnOverlayClaimIsAdditive` and
+    /// `testTheOnlyTwoWaysToBeClaimedTwiceWithNoOverlayInvolved` below, which assert *per state* and
+    /// name the state they failed at. What is left here is the reviewable set of families, which a
+    /// person is meant to read down and act on.
     func testTouchesWithMoreThanOneClaimant() {
-        var found: [String: Int] = [:]
+        var found = Set<String>()
         forEachReachableInput { inputs in
             let contenders = CanvasTouchOwner.contenders(in: inputs)
             guard contenders.count > 1 else { return }
-            found[contenders.map(\.rawValue).joined(separator: "+"), default: 0] += 1
+            found.insert(contenders.map(\.rawValue).joined(separator: "+"))
         }
 
-        let expected: [String: Int] = [
+        let expected: Set<String> = [
             // A guide grip is reachable in every state, because guide editing is a mode none of
             // these inputs can see.
-            "guideOverlay+catchAllNotice": 384,
-            "guideOverlay+eyedropper": 220,
-            "guideOverlay+fillPress": 99,
-            "guideOverlay+lassoFill": 99,
-            "guideOverlay+textPress": 198,
-            "guideOverlay+selectionOverlay": 54,
-            "guideOverlay+selectionOverlay+catchAllNotice": 36,
-            "guideOverlay+floatingPiece": 480,
-            "guideOverlay+floatingPiece+catchAllNotice": 240,
+            "guideOverlay+catchAllNotice",
+            "guideOverlay+eyedropper",
+            "guideOverlay+fillPress",
+            "guideOverlay+lassoFill",
+            "guideOverlay+textPress",
+            "guideOverlay+selectionOverlay",
+            "guideOverlay+selectionOverlay+catchAllNotice",
+            "guideOverlay+floatingPiece",
+            "guideOverlay+floatingPiece+catchAllNotice",
             // A pending shape. The `+catchAllNotice` rows are the ones the previous shape of this
             // model could not express: `updateShapeOverlay` never asks whether the layer is still
             // visible, so hiding it leaves the handles up *and* arms the "this layer is hidden"
             // notice under them.
-            "shapeOverlay+eyedropper": 80,
-            "shapeOverlay+fillPress": 36,
-            "shapeOverlay+lassoFill": 36,
-            "shapeOverlay+textPress": 72,
-            "shapeOverlay+selectionOverlay": 28,
-            "shapeOverlay+selectionOverlay+catchAllNotice": 12,
-            "shapeOverlay+catchAllNotice": 108,
+            "shapeOverlay+eyedropper",
+            "shapeOverlay+fillPress",
+            "shapeOverlay+lassoFill",
+            "shapeOverlay+textPress",
+            "shapeOverlay+selectionOverlay",
+            "shapeOverlay+selectionOverlay+catchAllNotice",
+            "shapeOverlay+catchAllNotice",
             // A live text session — note the absence of any `+textPress` pairing.
-            "textOverlay+eyedropper": 80,
-            "textOverlay+fillPress": 36,
-            "textOverlay+lassoFill": 36,
-            "textOverlay+selectionOverlay": 28,
-            "textOverlay+selectionOverlay+catchAllNotice": 12,
-            "textOverlay+catchAllNotice": 108,
-            "textTransformOverlay+eyedropper": 80,
-            "textTransformOverlay+fillPress": 36,
-            "textTransformOverlay+lassoFill": 36,
-            "textTransformOverlay+selectionOverlay": 28,
-            "textTransformOverlay+selectionOverlay+catchAllNotice": 12,
-            "textTransformOverlay+catchAllNotice": 108,
+            "textOverlay+eyedropper",
+            "textOverlay+fillPress",
+            "textOverlay+lassoFill",
+            "textOverlay+selectionOverlay",
+            "textOverlay+selectionOverlay+catchAllNotice",
+            "textOverlay+catchAllNotice",
+            "textTransformOverlay+eyedropper",
+            "textTransformOverlay+fillPress",
+            "textTransformOverlay+lassoFill",
+            "textTransformOverlay+selectionOverlay",
+            "textTransformOverlay+selectionOverlay+catchAllNotice",
+            "textTransformOverlay+catchAllNotice",
             // The Move box, on a vector layer mid-transform or with a lassoed piece floating.
-            "objectTransformOverlay+eyedropper": 60,
-            "objectTransformOverlay+fillPress": 27,
-            "objectTransformOverlay+lassoFill": 27,
-            "objectTransformOverlay+textPress": 54,
-            "objectTransformOverlay+selectionOverlay": 10,
-            "objectTransformOverlay+catchAllNotice": 60,
+            "objectTransformOverlay+eyedropper",
+            "objectTransformOverlay+fillPress",
+            "objectTransformOverlay+lassoFill",
+            "objectTransformOverlay+textPress",
+            "objectTransformOverlay+selectionOverlay",
+            "objectTransformOverlay+catchAllNotice",
             // The catch-all's own two, with no overlay involved.
-            "floatingPiece+catchAllNotice": 240,
-            "selectionOverlay+catchAllNotice": 36,
+            "floatingPiece+catchAllNotice",
+            "selectionOverlay+catchAllNotice",
         ]
 
-        XCTAssertEqual(Set(found.keys), Set(expected.keys),
-                       "new: \(Set(found.keys).subtracting(expected.keys).sorted())\n"
-                       + "gone: \(Set(expected.keys).subtracting(found.keys).sorted())")
-        for (key, count) in expected {
-            XCTAssertEqual(found[key], count, "count changed for \(key)")
+        XCTAssertEqual(found, expected,
+                       "new: \(found.subtracting(expected).sorted())\n"
+                       + "gone: \(expected.subtracting(found).sorted())")
+    }
+
+    /// **Why the list above needs no census: an overlay's claim is purely additive, and this says so
+    /// once per state.**
+    ///
+    /// The 24 `<overlay> + <recognizer>` rows are not 24 independent facts. They are one fact —
+    /// every `hitTest` override sits on a view whose ancestors carry the container recognizers, and
+    /// every one of those recognizers sets `cancelsTouchesInView = false`, so claiming a point takes
+    /// the touch away from nobody. Stated as an equation: the contenders for a touch on chrome are
+    /// the chrome's owner, followed by exactly the contenders the same state would have had on plain
+    /// canvas, less the two that a claim genuinely does displace —
+    ///
+    ///  * `activeLayerStroke`, always, because all five overlays sit above the layer hosts and a
+    ///    claim there is what keeps the touch off the stroke view (`30e38e3`);
+    ///  * `textPress`, on the two text chromes only, which is `handleTextPress`' own guard — the one
+    ///    compensation any handler in the app makes.
+    ///
+    /// Asserted per state and reported by signature, so a change that moved one combination into
+    /// another fails here naming the combination, where a total would have absorbed it.
+    func testAnOverlayClaimIsAdditive() {
+        forEachReachableInput { inputs in
+            guard let chromeOwner = inputs.chrome.owner else { return }
+            var plainCanvas = inputs
+            plainCanvas.chrome = .none
+            let isTextChrome = inputs.chrome == .textBoxOrBand || inputs.chrome == .textHandle
+            let expected = [chromeOwner] + CanvasTouchOwner.contenders(in: plainCanvas).filter {
+                if $0 == .activeLayerStroke { return false }
+                if isTextChrome, $0 == .textPress { return false }
+                return true
+            }
+            XCTAssertEqual(CanvasTouchOwner.contenders(in: inputs), expected,
+                           "at \(self.signature(inputs))")
+        }
+    }
+
+    /// The other half of the same argument, for the states where no overlay is involved at all:
+    /// **on plain canvas a touch is claimed twice exactly when the catch-all speaks over something
+    /// that did work**, and never for any other reason.
+    ///
+    /// Everything else on plain canvas is mutually exclusive by construction, and that is worth
+    /// stating because it is what makes the two rows in the list above the *only* two: a floating
+    /// piece suppresses the selection overlay, both presses and the stroke; the Select panel
+    /// suppresses both presses and the stroke; and no two tools' mechanisms can be armed at once
+    /// (`testEveryToolReachesTheOwnerItNames`). The catch-all is the one gate that never asks whether
+    /// anybody else took the touch — `needsCatch` reads only the active layer's own state — so
+    /// dragging a Move piece over a hidden active layer raises "this layer is hidden" on every touch,
+    /// and lassoing with no layers raises "no layers" on every drag.
+    func testTheOnlyTwoWaysToBeClaimedTwiceWithNoOverlayInvolved() {
+        forEachReachableInput { inputs in
+            guard inputs.chrome == .none else { return }
+            let contenders = CanvasTouchOwner.contenders(in: inputs)
+            let catchAllSpeaksOverSomeoneElse = inputs.catchAllRaisesNotice
+                && (inputs.floatingOverlayIsInteractive || inputs.selectionOverlayIsCapturing)
+            XCTAssertEqual(contenders.count > 1, catchAllSpeaksOverSomeoneElse,
+                           "at \(self.signature(inputs))")
+            guard catchAllSpeaksOverSomeoneElse else { return }
+            // Two, and the notice is the second — the mechanism that *acted* is still the owner.
+            XCTAssertEqual(contenders.count, 2, "at \(self.signature(inputs))")
+            XCTAssertEqual(contenders.last, .catchAllNotice, "at \(self.signature(inputs))")
         }
     }
 
@@ -463,14 +567,51 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     /// `Tool.canvasRecognizerOwner` and `Tool.paintsOnCanvas` are complementary by construction, and
     /// this is what says so. A tool that answered `true` to both would be the 2026-08-17 defect
     /// exactly — one touch reaching a stroke view *and* a recognizer of its own.
-    func testEveryToolEitherPaintsOnCanvasOrOwnsItsOwnRecognizer() {
+    ///
+    /// **And the answer's *identity* is checked, not only its nil-ness.** `canvasRecognizerOwner` is
+    /// sold as having `Tool.paintsOnCanvas`' shape — an exhaustive `switch` with no `default:`, so
+    /// the next tool cannot ship without answering — but a test that only asks whether it returned
+    /// *something* lets the next tool answer wrongly and stay green, which is the same hole
+    /// `paintsOnCanvas` was written to close one level down. So the name is checked against the
+    /// model: in the tool's own plain state (a visible raster layer, no panel, nothing floating,
+    /// plain canvas under the finger) the owner `CanvasTouchOwner` derives must be exactly the
+    /// mechanism the tool named, or the active layer's stroke where it named none.
+    ///
+    /// That also states "**every tool reaches at least one owner**": there is no tool whose plain
+    /// touch is owned by nobody, which is the single-tool form of the 2026-08-22 bug.
+    func testEveryToolReachesTheOwnerItNames() {
         for tool in Tool.allCases {
             for fillMode in FillMode.allCases {
-                let recognizer = tool.canvasRecognizerOwner(fillMode: fillMode)
-                XCTAssertEqual(tool.paintsOnCanvas, recognizer == nil,
+                let named = tool.canvasRecognizerOwner(fillMode: fillMode)
+                XCTAssertEqual(tool.paintsOnCanvas, named == nil,
                                "\(tool) answers both / neither")
+                let plain = CanvasTouchInputs(tool: tool, fillMode: fillMode, activeLayer: .raster)
+                XCTAssertEqual(CanvasTouchOwner.contenders(in: plain), [named ?? .activeLayerStroke],
+                               "\(tool)/\(fillMode.rawValue) names \(named.map(\.rawValue) ?? "no recognizer") "
+                               + "but its plain touch is owned by "
+                               + "\(CanvasTouchOwner.contenders(in: plain).map(\.rawValue))")
             }
         }
+    }
+
+    /// The one part of `CanvasView.Coordinator.canvasTouchInputs(chrome:)` that had a decision in it,
+    /// pulled into the model so it can be checked at all — see `CanvasActiveLayer.init(kind:)` for
+    /// why, and `CanvasTouchInputs`' own comment for the part of the gathering that still cannot be.
+    /// A `.value` layer is the interesting row: it exists, and it holds no pixels, and collapsing
+    /// those two into one answer is what the two-axis shape of these inputs exists to avoid.
+    func testALayersKindMapsToTheKindTheGatesMakeOfIt() {
+        XCTAssertEqual(CanvasActiveLayer(kind: nil), .none)
+        XCTAssertEqual(CanvasActiveLayer(kind: .raster), .raster)
+        XCTAssertEqual(CanvasActiveLayer(kind: .vector), .vector)
+        XCTAssertEqual(CanvasActiveLayer(kind: .value), .noDrawingSurface)
+
+        // And the two properties the fourteen gates actually read off it, so a future case cannot be
+        // added to `CanvasActiveLayer` and left answering the defaults.
+        XCTAssertFalse(CanvasActiveLayer(kind: nil).exists)
+        XCTAssertTrue(CanvasActiveLayer(kind: .value).exists)
+        XCTAssertTrue(CanvasActiveLayer(kind: .value).hasNoDrawingSurface)
+        XCTAssertFalse(CanvasActiveLayer(kind: .raster).hasNoDrawingSurface)
+        XCTAssertFalse(CanvasActiveLayer(kind: .vector).hasNoDrawingSurface)
     }
 
     /// The fill tool's two modes reach two different owners, and that is the whole of the

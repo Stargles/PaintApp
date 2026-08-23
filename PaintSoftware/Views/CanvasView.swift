@@ -1748,20 +1748,12 @@ struct CanvasView: UIViewRepresentable {
         func canvasTouchInputs(chrome: CanvasTouchChrome = .none) -> CanvasTouchInputs {
             let index = canvasManager.currentLayerIndex
             let layer = canvasManager.layers.indices.contains(index) ? canvasManager.layers[index] : nil
-            let activeLayer: CanvasActiveLayer
-            switch layer?.kind {
-            case nil:
-                // No layers, or `currentLayerIndex` out of range.
-                activeLayer = .none
-            case .value:
-                // `Layer.hasNoDrawingSurface` is `kind == .value`; switching on the kind rather than
-                // asking the property is what makes a fourth `LayerKind` answer here at compile time.
-                activeLayer = .noDrawingSurface
-            case .vector:
-                activeLayer = .vector
-            case .raster:
-                activeLayer = .raster
-            }
+            // **Nine one-line reads and no decision, which is the point.** The one part of this that
+            // had a decision in it — a layer's kind mapped to the kind the gates make of it — is
+            // `CanvasActiveLayer.init(kind:)`, in the model, where a logic test can reach it. What is
+            // left is nine fields, each the property it is named for, because this function is the
+            // half of the arrangement nothing in the fast tier can link (see that initialiser's
+            // comment, and `CanvasTouchInputs`' own, for the gap that leaves and what covers it).
             return CanvasTouchInputs(
                 tool: canvasManager.selectedTool,
                 fillMode: canvasManager.fillMode,
@@ -1769,7 +1761,7 @@ struct CanvasView: UIViewRepresentable {
                 hasFloatingPiece: canvasManager.floatingPiece != nil,
                 hasVectorFloat: canvasManager.vectorFloat != nil,
                 isVectorTransforming: canvasManager.isVectorTransforming,
-                activeLayer: activeLayer,
+                activeLayer: CanvasActiveLayer(kind: layer?.kind),
                 activeLayerIsOnScreen: layer != nil && canvasManager.isLayerEffectivelyVisible(index),
                 chrome: chrome)
         }
@@ -1804,11 +1796,11 @@ struct CanvasView: UIViewRepresentable {
         /// The predicate and the reasoning are `CanvasTouchInputs.isLassoFilling`'s.
         var isLassoFilling: Bool { canvasTouchInputs().isLassoFilling }
 
-        /// Whether an armed eyedropper — rather than the Select overlay — owns the canvas's single
-        /// touch. The predicate, and the twenty lines of reasoning that go with it (the owner's bug
-        /// of 2026-08-22, why the Select panel is deliberately absent, and why the `floatingPiece`
-        /// clause is kept), are `CanvasTouchInputs.isEyedropperArmed`'s.
-        var isEyedropperArmed: Bool { canvasTouchInputs().isEyedropperArmed }
+        // **`isEyedropperArmed` was here and is deleted**, because both of its readers now take
+        // `eyedropperPressIsEnabled` and `selectionOverlayIsCapturing` off the shared value instead —
+        // and a forwarding property nobody reads is the thing that drifts next. It was the 2026-08-22
+        // pick-tool fix, this idea applied exactly once; the reasoning is now on
+        // `CanvasTouchInputs.isEyedropperArmed`, which is where searches for the name should land.
 
         func updateSelectionOverlay() {
             guard let overlay = selectionOverlay, let container = containerView else { return }
@@ -2788,6 +2780,19 @@ struct CanvasView: UIViewRepresentable {
             // testTouchesWithMoreThanOneClaimant` enumerates. Swapping in `owner` would silently fix
             // some of them and change behaviour; this conversion preserves it and leaves the list to
             // be decided on.
+            //
+            // **One clause did not survive the conversion, deliberately: `canvasManager.
+            // textGestureActive`.** The guard used to read `if textGestureActive, hitTest != nil`,
+            // and `claimsTouch` already carries the overlay's own `isActive` — which
+            // `updateTextOverlay` mirrors from `textGestureActive` — so the model asks the *pushed*
+            // copy where the old line also asked the live one. They differ for exactly one frame:
+            // between a text session ending and the next `updateTextOverlay` pass hiding the editor,
+            // a tap where the box still is used to place a **new** box on top of the one just
+            // committed, and now places nothing. That is the better answer of the two (a tap that
+            // lands on chrome the artist can still see should not act as if the chrome were gone),
+            // it is one frame wide, and a second tap places the box — but it is a behaviour change
+            // rather than a restatement, which is why it is written down here instead of being left
+            // to be discovered.
             let touch = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
             guard CanvasTouchOwner.contenders(in: touch).contains(.textPress) else { return }
             canvasManager.beginTextSession(at: canvasPoint)
