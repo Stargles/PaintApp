@@ -56,6 +56,23 @@ New this pass (owner, 2026-08-23, after testing the touch-ownership build):
          **One `Homography` solver plus one projective render path unblocks both.** The owner's "hold distort
          until text can warp" is therefore the correct build order, not a delay.
 
+      **Five more rulings, 2026-08-26.** (v) **One toggle governs whether the ink deforms with the shape**,
+      in Freeform *and* Distort — the owner's own framing, *"there should be an option on if the ink should be
+      scaled/deformed or should stay the same when distorted"* — **defaulting to "ink keeps its shape"**, which
+      is also the cheap path, so the feature ships before the harder one is built. (vi) **Text in a flipped
+      selection mirrors** like everything else. (vii) **A Freeform stretch survives a switch to Uniform** —
+      3:1 stays 3:1 and scales from there. (viii) **A flip on a lassoed piece is its own undo press**, and the
+      whole-layer flip deliberately differs. (ix) The yellow node is **float-only for now**; the whole-layer box
+      has no `boxRef` to hang an angle on and no Freeform to aim.
+
+      **The finding that made stage 3 affordable, verified in the tree**: `DabGradientCache.stamp` ends in
+      `ctx.drawRadialGradient` **in the context's current user space** (`RasterLayerTexture.swift:85`), so a
+      non-uniform CTM turns every dab into an ellipse *exactly*, through code that already exists in both
+      `DabTarget` implementations. No new drawing primitive, no third implementation, no Metal question. The
+      stretched-ink path is a `saveGState`/`concatenate`/`restoreGState` wrap plus a unit-determinant residue
+      stored on the stroke — and because the dab walk then happens in the *pre-stretch* frame, the dab count,
+      the parameters and the seeded RNG sequence are identical to the unstretched stroke.
+
       Order: (1) the missing handles, (2) the Move menu — delete Warp, add Rotate 45° and Reset, (3) Freeform +
       the yellow node + images holding a stretched shape, (4) **ADD_TEXT Stage 5's solver**, (5) Distort on both
       tiers with the width toggle. See the design in the branch.
