@@ -20,74 +20,8 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- **(k) stage 1 — the vector float's corner and rotate nodes** — `tmp/movenodes`.
-
-New this pass (owner, 2026-08-23, after testing the touch-ownership build):
-
-- [ ] **(k) Expand the Move tool, loosely after Procreate.** Owner: *"when moving, there should be an option
-      menu on the bottom instead of still keeping the select menu, in which different types of moving can be
-      done."* **Uniform** (today's raster behaviour), **Freeform** (corner drags scale x and y independently),
-      **Distort** (each of the 4 corners moves independently, turning the box into a quadrilateral, with the
-      contents foreshortening — "useful for 3d perspective"). **Warp is explicitly declined** — *"Unlike
-      procreate, Warp will not be a feature (like liquify)."* Plus **Flip Horizontal**, **Flip Vertical** and
-      **Rotate 45°**. Also reported: *"the move tool on vector layer does not have any move nodes for rotate or
-      scale"* — which a read of the tree narrowed to the **lasso** path specifically; whole-cel vector Move
-      already has all six handles, and one constant restricts the lasso float to `[.body]`.
-      **Two rulings taken 2026-08-23**: the **yellow node rotates the box only** while the green one rotates
-      box and art; and vector Distort **maps existing stroke points with no subdivision** — *"do no subdivision
-      for now... then if i tell you subdivision may be necessary, go for it."*
-      **Four more rulings, 2026-08-23.** (i) **Text**: *"Perspective distorting text is supposed to be a feature
-      I remember explaining a while ago... It is useful to put text on 3d surfaces. Hold distort until text can
-      warp."* (ii) **Stroke width under Distort**: *"There should be an extra option in the menu to switch
-      between these two modes when in distort. I say do it properly with that, with default being no scaling."*
-      — so a per-sample taper, behind a toggle, defaulting **off**. (iii) **Placed images**: *"Teach images to
-      hold a stretched shape"* — the real work, not the refusal. (iv) **Reset** goes on the bar.
-
-      **Two discoveries that reshape the order, both verified in the tree:**
-      1. **`TransformMode` already exists** (`SelectionModels.swift:28`) with `freeform`, `uniform`, `distort`,
-         `warp`, and its own comment says *"Distort/Warp aren't implemented with real per-corner/mesh geometry
-         yet — they render and gesture identically to Uniform."* So Uniform and Freeform are already real for
-         raster, Distort is a declared stub, and **`warp` is a case to delete** under the owner's ruling.
-      2. **Perspective text was never lost — and it is the same work as Distort.** [ADD_TEXT.md](ADD_TEXT.md)'s
-         **Stage 5 *is* "the projective distort"**, Stage 4 (rotate/scale/handles) shipped 2026-08-21 leaving a
-         clean seam (`TextFrame.affineTransform` returns nil for any non-parallelogram and every drawing path
-         already branches on it), and Stage 6's own list contains *"Converting `FloatingPiece`'s `.distort`,
-         which today runs the uniform-scale path and whose own doc comment admits it, onto this solver."*
-         **One `Homography` solver plus one projective render path unblocks both.** The owner's "hold distort
-         until text can warp" is therefore the correct build order, not a delay.
-
-      **Five more rulings, 2026-08-26.** (v) **One toggle governs whether the ink deforms with the shape**,
-      in Freeform *and* Distort — the owner's own framing, *"there should be an option on if the ink should be
-      scaled/deformed or should stay the same when distorted"* — **defaulting to "ink keeps its shape"**, which
-      is also the cheap path, so the feature ships before the harder one is built. (vi) **Text in a flipped
-      selection mirrors** like everything else. (vii) **A Freeform stretch survives a switch to Uniform** —
-      3:1 stays 3:1 and scales from there. (viii) **A flip on a lassoed piece is its own undo press**, and the
-      whole-layer flip deliberately differs. (ix) The yellow node is **float-only for now**; the whole-layer box
-      has no `boxRef` to hang an angle on and no Freeform to aim.
-
-      **The finding that made stage 3 affordable, verified in the tree**: `DabGradientCache.stamp` ends in
-      `ctx.drawRadialGradient` **in the context's current user space** (`RasterLayerTexture.swift:85`), so a
-      non-uniform CTM turns every dab into an ellipse *exactly*, through code that already exists in both
-      `DabTarget` implementations. No new drawing primitive, no third implementation, no Metal question. The
-      stretched-ink path is a `saveGState`/`concatenate`/`restoreGState` wrap plus a unit-determinant residue
-      stored on the stroke — and because the dab walk then happens in the *pre-stretch* frame, the dab count,
-      the parameters and the seeded RNG sequence are identical to the unstretched stroke.
-
-      Order: (1) the missing handles, (2) the Move menu — delete Warp, add Rotate 45° and Reset, (3) Freeform +
-      the yellow node + images holding a stretched shape, (4) **ADD_TEXT Stage 5's solver**, (5) Distort on both
-      tiers with the width toggle. See the design in the branch.
-
-## Verified on the device
-
-**All five of this pass's changes were confirmed by the owner on their iPad, 2026-08-22**: *"five changes are
-behaving correctly."* That covers the lasso move, the Cut eraser's live preview, the pick tool under the Select
-panel, the raster-tier omission on save, and the raster Move's travelling ants. Nothing from this pass is
-waiting on an eye any more.
-
-Three behaviour questions are still carried, and are **not** defects — each was raised by us, not reported:
-the Cut eraser across a line thicker than the eraser (visibly does nothing, and always did); a crossing line
-that can flicker during a cut drag, under 10% of what the cut removes; and a fill chunk dropped on blank paper
-staying a fill. All three want the owner's eye on real artwork rather than another run.
+- **ADD_TEXT Stage 5 — the projective warp** — `tmp/textwarp`. Unblocks both perspective text and Move's
+  Distort; one `Homography` solver serves both.
 
 ## Queued
 
@@ -142,6 +76,26 @@ Nothing — the owner's list is empty. Two things are *carried*, both deliberate
   which matters, because the next session is large features.
 
 ## Done this pass
+
+- **Stage 2 of the Move expansion: the lassoed piece gets a menu of its own** (`903cf73`). Lasso on a vector
+  layer, tap Move, and the bottom bar now appears exactly as it does for a raster piece — before, a vector
+  float got a box and six grips and no menu at all, on the layer kind Move lands on by default. **Warp is gone
+  from the picker** (three tabs: Freeform, Uniform, Distort), per the owner's ruling; it was never persisted,
+  so no migration. **Two Rotate 45° buttons** compose onto the current angle and re-quantise onto the
+  eighth-turn grid — measured over a 200,000-angle sweep: without folding whole turns out, eight presses record
+  2π and the pixel comparison goes red; without the re-quantise, **13% of reachable lift angles** come back a
+  few ulps off. **Reset** snaps the piece back to its pick-up pose in **one undoable step** — "undo every
+  nudge" was rejected because the first nudge's step is the one that un-does the split, so it would tear the
+  float down. **Mirror gained a real vector arm** (`VectorFloat.mirror`, folded in front of the absolute map),
+  and the brief's warning about the similarity assert was half wrong in an instructive way: a reflection
+  *passes* the shape test — what it breaks is `atan2` and a text frame's corner order, so the `.image` and
+  `.text` arms now assert a positive determinant and **Mirror is disabled with the reason in the bar** when the
+  piece carries an image or a text box. The mode picker is inert on a vector float with a stated reason —
+  stage 3 turns it on. **While anything floats, the Select menu steps aside** for the Move menu and comes back
+  on Done; `activePanel` is never written, so `CanvasTouchOwner`'s enumeration is untouched and its tests pass
+  unmodified. 1666 fast-tier tests (1663 passed, 0 failed, 3 skipped) = 1655 + 11, static +12 with the twelfth
+  an XCUITest, every mutation watched failing.
+
 
 - **One touch now does one thing, and a tap away from a vector Move box puts the piece down**
   (`38b6fed`), plus the type that found both (`e0d59b2` and its three parents). This is
