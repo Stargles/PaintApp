@@ -1508,6 +1508,15 @@ final class VectorCanvas {
     /// the shape is asserted rather than hoped for. Freeform and Distort do not widen this function;
     /// they need a different one.
     ///
+    /// **A *reflection* passes that assert, and is deliberately allowed — but only for two of the four
+    /// kinds.** The Move menu's Mirror folds one into `t` (`VectorFloat.mirror`), and the shape test
+    /// above cannot see it: a reflection has equal axis norms and perpendicular axes, so `k` is still
+    /// the true scale and strokes and fills follow the map exactly, dab for dab. What a reflection
+    /// does break is `theta`, which `atan2(t.b, t.a)` reads as an *angle* — meaningless for a map that
+    /// turns the plane over — and the corner-order of a text frame. Those are precisely the `.image`
+    /// and `.text` arms, so each asserts the determinant is positive, and `canBeMirrored(_:)` below is
+    /// the same fact stated where a caller can ask it *before* offering the artist the button.
+    ///
     /// ## Why scaling one scalar is exact, and where it stops being
     ///
     /// Multiplying `stroke.size` by the similarity's own factor is not an approximation. It is exact,
@@ -1581,11 +1590,20 @@ final class VectorCanvas {
             // A placed image is a `LayerTransform` — position, **one** scale, one rotation — which is
             // exactly a similarity and so follows this map whole. It is also why a flip or a Freeform
             // stretch cannot be handed to this function: neither fits in that shape.
+            assert(t.a * t.d - t.b * t.c > 0,
+                   "mapping(_:throughSimilarity:) was handed the reflection \(t) with a placed image "
+                   + "in the piece. `LayerTransform` has no flip, so `theta` below would turn the "
+                   + "photo through \(theta) rad instead of mirroring it. "
+                   + "Ask `canBeMirrored(_:)` before offering Mirror.")
             image.transform.position = image.transform.position.applying(t)
             if k != 1 { image.transform.scale *= k }
             if theta != 0 { image.transform.rotation += theta }
             return .image(image)
         case .text(var text):
+            assert(t.a * t.d - t.b * t.c > 0,
+                   "mapping(_:throughSimilarity:) was handed the reflection \(t) with a text box in "
+                   + "the piece. Reflecting `frame.corners` reverses their winding, which is not what "
+                   + "`TextFrame.Basis` reads them as. Ask `canBeMirrored(_:)` before offering Mirror.")
             // Stored **local**, despite `TextFrame.corners`' own doc saying canvas space — that
             // comment is written from the authoring perspective, and `localText(fromCanvas:)` maps
             // every incoming frame through `_transform.inverted()` before it is stored. Translating
@@ -1610,6 +1628,34 @@ final class VectorCanvas {
                 text.recipe.typography.pointSize *= k
             }
             return .text(text)
+        }
+    }
+
+    /// Whether this element can go through `mapping(_:throughSimilarity:)` with a **reflection** — the
+    /// Move menu's Mirror — rather than only with an orientation-preserving similarity.
+    ///
+    /// Two kinds can, exactly, and two cannot at all:
+    ///
+    ///  * a **stroke** follows the map point for point, and its one scalar (`size`) is untouched by a
+    ///    reflection, whose `k` is 1. A reflection preserves arc length, so `BrushStamper` walks the
+    ///    identical number of dabs at the identical parameters and the seeded RNG draws the identical
+    ///    sequence — the same argument the scale case makes above, with `k == 1`;
+    ///  * a **fill** is a `CGPath`, which carries any affine including this one. Reversing every
+    ///    subpath's winding together leaves the same interior under both fill rules;
+    ///  * a **placed image**'s whole placement is a `LayerTransform` — position, one *unsigned-in-
+    ///    practice* scale, one rotation. There is no flip in that shape and no way to put one there
+    ///    without a stored field and a decode migration, so a mirrored photo is not expressible;
+    ///  * a **text box** is four corners plus a layout size, and `TextFrame.Basis` reads the corners
+    ///    as an ordered frame. Reflecting them reverses that order, which is a different statement
+    ///    from "the glyphs are mirrored" and is not one the layout can act on.
+    ///
+    /// Stated here, beside the function that would be wrong, rather than in the Move bar: the bar asks
+    /// (`CanvasManager.mirrorUnavailableReason`) and the two arms above assert. A third kind added to
+    /// `VectorElement` has to answer this switch before it can be lassoed and mirrored.
+    static func canBeMirrored(_ element: VectorElement) -> Bool {
+        switch element {
+        case .stroke, .fill: return true
+        case .image, .text: return false
         }
     }
 

@@ -56,6 +56,33 @@ struct VectorFloat {
     /// `VectorCanvas.affine(from: frame.transform, pivot: pivot) == baseTransform`.
     var frame: ObjectTransformFrame
 
+    /// `frame.transform` exactly as the lift produced it — where **Reset** puts the piece back to,
+    /// and the angle `FixedAngleRotation` measures its grid from.
+    ///
+    /// Held separately rather than re-derived from `baseTransform` and `pivot` at the moment Reset is
+    /// pressed: the two agree at lift by construction, and re-deriving would make Reset's answer
+    /// depend on a `layerTransform(pivot:)` round trip that a later whole-layer transform could have
+    /// moved underneath it.
+    let liftFrameTransform: LayerTransform
+
+    /// What **Mirror** has done to the piece, in the layer's own local space, about `pivot`. Identity
+    /// until the artist presses one of the two mirror buttons; a reflection, or a half-turn once both
+    /// have been pressed.
+    ///
+    /// **A reflection is the one thing `LayerTransform` cannot hold** — it is position, *one* scale
+    /// and one rotation, with no flip and no signed axis — so Mirror cannot be expressed by moving the
+    /// box the way Rotate and Reset are. It lives here instead, and rides along as the first factor of
+    /// every nudge's map, which is what keeps it absolute-from-the-lift like everything else: the
+    /// nudge maps `liftedInside`, so a mirror folded into that map survives a hundred subsequent drags
+    /// without being re-applied or accumulated.
+    ///
+    /// `mapping(_:throughSimilarity:)` accepts the product (a reflection has equal axis norms and
+    /// perpendicular axes, so the shape assert holds and `hypot(t.a, t.b)` is still the true scale),
+    /// and it is exact for the two element kinds a drawing produces. It is **not** expressible for a
+    /// placed image or a text box — see `CanvasManager.mirrorUnavailableReason`, which is why the
+    /// buttons refuse rather than this quietly doing the wrong thing.
+    var mirror: CGAffineTransform = .identity
+
     /// The whole display list before the split, and the selection before the lift — what a cancel or
     /// an undo past the first nudge puts back, verbatim.
     let elementsBeforeLift: [VectorElement]
@@ -146,6 +173,7 @@ extension CanvasManager {
                                   insideIDs: split.insideIDs, liftedInside: lifted,
                                   pivot: pivot, contentSize: bounds.size,
                                   baseTransform: vector.transform, frame: frame,
+                                  liftFrameTransform: frame.transform, mirror: .identity,
                                   elementsBeforeLift: elementsBeforeLift, selectionBeforeLift: selection,
                                   sourceVersion: vector.contentVersion,
                                   mayDiverge: split.mayDiverge, wantsLatch: true,
@@ -179,11 +207,28 @@ extension CanvasManager {
     /// when `t` is the lift's own transform, and is what
     /// `LassoMoveLogicTests.testAZeroDeltaNudgeChangesNoSampleAndNoPixel` pins.
     func nudgeVectorFloat(to transform: LayerTransform) {
+        applyToVectorFloat(transform: transform, mirror: vectorFloat?.mirror ?? .identity)
+    }
+
+    /// **The nudge, generalised over the one thing the box cannot express.** A drag of a grip calls it
+    /// through `nudgeVectorFloat(to:)` with the mirror unchanged; the Move bar's Mirror buttons call
+    /// it with the box unchanged and a new reflection. Rotate 45°/90° and Reset are ordinary
+    /// transform changes and go through the first door.
+    ///
+    /// One call is one undo step either way, which is LASSO_MOVE.md §5.2's "one step per nudge"
+    /// applied to a button press: a tap of Mirror is one thing the artist did and costs one press of
+    /// Undo to take back, exactly as a drag does.
+    func applyToVectorFloat(transform: LayerTransform, mirror: CGAffineTransform) {
         guard var float = vectorFloat, let vector = vectorCanvas(ofFloat: float) else { return }
         guard vector.contentVersion == float.sourceVersion else { return cancelVectorFloat() }
 
-        let localDelta = VectorCanvas.affine(from: transform, pivot: float.pivot)
-            .concatenating(float.baseTransform.inverted())
+        // The reflection rides in front of the box's own map, so the piece is mirrored in its own
+        // local frame *before* the box's rotation carries it — which is what makes the mirror axis
+        // turn with the piece, the same way the raster piece's `flipH` sits inside its
+        // `affineTransform` ahead of `rotated(by:)`.
+        let localDelta = mirror.concatenating(
+            VectorCanvas.affine(from: transform, pivot: float.pivot)
+                .concatenating(float.baseTransform.inverted()))
         let oldElements = vector.elements
         let newElements = oldElements.map { element -> VectorElement in
             guard let lifted = float.liftedInside[element.id] else { return element }
@@ -191,16 +236,25 @@ extension CanvasManager {
         }
         let oldSelection = selection
         let newSelection = Self.moving(float.selectionBeforeLift,
-                                       by: Self.canvasDelta(of: float, at: transform))
+                                       by: Self.canvasDelta(of: float, at: transform, mirror: mirror))
         let oldFrameTransform = float.frame.transform
+        let oldMirror = float.mirror
 
         vector.elements = newElements
         vector.bumpVersion()
         float.frame.transform = transform
+        float.mirror = mirror
         float.nudges += 1
         // A float whose bitmap is only an approximation of the composite shows the truth between
         // gestures: the latch drops, the layer re-renders whole, and the next drag re-arms it.
-        if float.mayDiverge {
+        //
+        // **A changed mirror drops it for a different reason, and needs the same treatment.** The
+        // latched bitmap is a render of the piece *unmirrored*, and the transform it is shown under is
+        // built from `frame.transform` alone — there is nowhere in that pipeline for a reflection to
+        // go. Dropping the latch hands the display back to the layer's own render, which reads the
+        // geometry this function has just mirrored, so what the artist sees is the truth; the next
+        // drag re-arms the latch against it through `beginVectorFloatDrag`.
+        if float.mayDiverge || mirror != oldMirror {
             float.wantsLatch = false
             vector.suppressedElementIDs = []
         }
@@ -212,6 +266,7 @@ extension CanvasManager {
                                      oldElements: oldElements, newElements: newElements,
                                      oldSelection: oldSelection, newSelection: newSelection,
                                      oldFrameTransform: oldFrameTransform, newFrameTransform: transform,
+                                     oldMirror: oldMirror, newMirror: mirror,
                                      // The first nudge carries the split, so undoing it gives back the
                                      // unsplit stroke and dismisses the float.
                                      endsFloat: float.nudges == 1,
@@ -280,8 +335,15 @@ extension CanvasManager {
     /// The canvas-space affine that carries the float's content from where it was lifted to where the
     /// box is at `transform` — what the ants are moved by, and what the latched bitmap is shown
     /// through.
-    static func canvasDelta(of float: VectorFloat, at transform: LayerTransform) -> CGAffineTransform {
+    /// `mirror` defaults to the one the float is currently carrying; `applyToVectorFloat` passes the
+    /// value it is about to write, since the ants have to arrive with the ink rather than a press
+    /// behind it.
+    static func canvasDelta(of float: VectorFloat, at transform: LayerTransform,
+                            mirror: CGAffineTransform? = nil) -> CGAffineTransform {
+        // Canvas → local (where the reflection is expressed, about `pivot`) → canvas. Exactly the
+        // sandwich `applyToVectorFloat` builds for the geometry, read one space out.
         float.baseTransform.inverted()
+            .concatenating(mirror ?? float.mirror)
             .concatenating(VectorCanvas.affine(from: transform, pivot: float.pivot))
     }
 
@@ -356,6 +418,9 @@ extension CanvasManager {
     /// * **The box follows the geometry**, so an undo mid-float does not leave the handles somewhere
     ///   the content is not.
     /// * **The marching ants follow it too**, since they travel with the piece.
+    /// * **The mirror follows it as well** — it is the half of the piece's pose the box cannot hold,
+    ///   so a step that restored only `frame.transform` would put a mirrored piece back at the right
+    ///   place facing the wrong way, and every nudge after it would re-derive from the wrong map.
     /// * **The first nudge's step ends the float**: undoing it restores the *pre-split* list, drops
     ///   the suppression and puts the loop back, because the cut was an artifact of the move.
     ///
@@ -366,6 +431,8 @@ extension CanvasManager {
                                               oldSelection: Selection?, newSelection: Selection?,
                                               oldFrameTransform: LayerTransform,
                                               newFrameTransform: LayerTransform,
+                                              oldMirror: CGAffineTransform,
+                                              newMirror: CGAffineTransform,
                                               endsFloat: Bool, layerID: UUID, celID: UUID) {
         let beforeLift = vectorFloat?.elementsBeforeLift ?? oldElements
         let selectionBeforeLift = vectorFloat?.selectionBeforeLift
@@ -382,6 +449,7 @@ extension CanvasManager {
                 self.vectorFloat = nil
             } else {
                 self.vectorFloat?.frame.transform = oldFrameTransform
+                self.vectorFloat?.mirror = oldMirror
                 self.vectorFloat?.sourceVersion = vector.contentVersion
             }
             self.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
@@ -391,6 +459,7 @@ extension CanvasManager {
             vector.bumpVersion()
             self.selection = newSelection
             self.vectorFloat?.frame.transform = newFrameTransform
+            self.vectorFloat?.mirror = newMirror
             self.vectorFloat?.sourceVersion = vector.contentVersion
             self.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         })

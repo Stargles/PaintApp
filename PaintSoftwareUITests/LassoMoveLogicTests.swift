@@ -1034,6 +1034,364 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
     }
 
+    // MARK: - The Move menu (stage 2)
+    //
+    // The bar is shown for **both** kinds of floating piece since 2026-08-22, so every button on it
+    // needs a vector arm as well as the raster one it was written for. These are the vector arms and
+    // the two decisions inside them: how a fixed-angle rotation composes, and what Reset costs in
+    // undo steps.
+
+    /// **Eight presses of Rotate 45° put the piece back exactly where it started** — the same box
+    /// angle bit for bit, the same samples, and the same drawing after the bake.
+    ///
+    /// A test that checked *one* press would see none of what this is about, and neither would one
+    /// that checked eight on a straight layer only. Two separate roundings have to be handled, and
+    /// each is watched failing here by a layer rotation chosen to expose it:
+    ///
+    ///  * **on the straight layer**, the running sum of eight `π/4`s is exactly `2 * .pi`, and `2π`
+    ///    is not `0`. Watched failing with `truncatingRemainder` removed from
+    ///    `FixedAngleRotation.stepped`: *XCTAssertEqual failed: ("Optional(6.283185307179586)") is
+    ///    not equal to ("Optional(0.0)") — eight eighths is a whole turn*, followed by three moved
+    ///    samples and *Composites differ at (45, 28) channel A: got 0, expected 255* — a full turn
+    ///    is visible in the pixels, not only in the last bits;
+    ///  * **on the layer rotated to 1.1 rad**, the running sum lands *off* the eighth-turn grid, and
+    ///    the fold cannot save it. 1.1 is not a special number — a sweep of 200 000 lift angles found
+    ///    13% of the reachable range behaves this way — it is simply one this suite can name. Watched
+    ///    failing with the grid snap removed and the fold kept: *("Optional(1.1)") is not equal to
+    ///    ("Optional(1.100000000000001)")*.
+    ///
+    /// The samples are compared bit-exactly on the straight layer and to 1e-9 on the rotated one, for
+    /// `testAZeroDeltaNudgeChangesNoSampleAndNoPixelOnATransformedLayer`'s reason: a zero-delta map on
+    /// a transformed layer is a `base ∘ base⁻¹` round trip, which is exactly the identity only when
+    /// `base` is.
+    func testEightPressesOfRotate45LandTheFloatExactlyWhereItStarted() {
+        for layerRotation in [CGFloat(0), 1.1] {
+            let (manager, layerIndex, vector) = fixture()
+            let layerTransform = CGAffineTransform(rotationAngle: layerRotation)
+            vector.setTransform(layerTransform)
+            vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 30), size: 5))
+            vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 24, y: 34, width: 10, height: 5),
+                                                          transform: nil),
+                                             color: CodableColor(red: 0, green: 0.5, blue: 1, alpha: 1),
+                                             opacity: 1))
+            let pixelsBefore = cgImage(vector)
+            let note = "layer at \(layerRotation) rad"
+
+            // The loop is canvas space and the geometry is local, so on the turned layer the two are
+            // different quadrilaterals — mapped as a *path*, never as a `CGRect`, whose `applying`
+            // answers with a bounding box.
+            var mapping = layerTransform
+            select(manager, layerIndex, CGPath(rect: CGRect(x: 12, y: 12, width: 40, height: 34),
+                                               transform: &mapping))
+            XCTAssertTrue(manager.beginVectorLassoMove(), note)
+            guard let liftRotation = manager.vectorFloat?.frame.transform.rotation else {
+                return XCTFail("no float — \(note)")
+            }
+            let samplesAtLift = vector.elements.compactMap(\.stroke).map(\.samples)
+
+            for press in 1...8 {
+                manager.rotateFloating(eighths: 1)
+                XCTAssertNotNil(manager.vectorFloat, "press \(press) must not dismiss the piece — \(note)")
+            }
+
+            XCTAssertEqual(manager.vectorFloat?.frame.transform.rotation, liftRotation,
+                           "eight eighths is a whole turn, and a whole turn is not a rotation — \(note)")
+            let samplesAfter = vector.elements.compactMap(\.stroke).map(\.samples)
+            XCTAssertEqual(samplesAtLift.count, samplesAfter.count, note)
+            for (before, after) in zip(samplesAtLift, samplesAfter) {
+                for (a, b) in zip(before, after) {
+                    if layerRotation == 0 {
+                        XCTAssertEqual(a.x, b.x, "a whole turn must not move a sample — \(note)")
+                        XCTAssertEqual(a.y, b.y, note)
+                    } else {
+                        XCTAssertEqual(a.x, b.x, accuracy: 1e-9, note)
+                        XCTAssertEqual(a.y, b.y, accuracy: 1e-9, note)
+                    }
+                }
+            }
+            manager.commitVectorFloatIfNeeded()
+            assertPixelsIdentical(cgImage(vector), pixelsBefore,
+                                  "the drawing after the bake is the drawing before the lift — \(note)")
+        }
+    }
+
+    /// The raster piece takes the identical arithmetic, so the two Move tools turn the same way — and
+    /// four presses of Rotate 90° close the loop for the same reason eight of 45° do.
+    func testEightPressesOfRotate45AndFourOfRotate90CloseTheLoopOnARasterPiece() {
+        for (eighths, presses) in [(1, 8), (2, 4), (-1, 8), (-2, 4)] {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(.black, rect: CGRect(x: 10, y: 10, width: 20, height: 14)))
+            manager.beginMove()
+            guard let lift = manager.floatingPiece?.liftTransform else { return XCTFail("nothing lifted") }
+
+            for _ in 1...presses { manager.rotateFloating(eighths: eighths) }
+
+            XCTAssertEqual(manager.floatingPiece?.transform.rotation, lift.rotation,
+                           "\(presses) × \(eighths) eighths is a whole turn")
+            XCTAssertEqual(manager.floatingPiece?.transform, lift,
+                           "and a whole turn leaves the whole pose alone, not only the angle")
+        }
+    }
+
+    /// **Fixed-angle rotation composes onto the box's current angle; it does not re-derive from the
+    /// pick-up state.** Turning the knob by hand and then pressing 45° adds 45° to the hand-turn —
+    /// re-deriving would silently throw the hand-turn away, which is the behaviour this pins against.
+    func testRotate45AddsToAFreehandTurnRatherThanReplacingIt() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32), size: 4))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 22, width: 40, height: 20)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let lift = manager.vectorFloat?.frame.transform.rotation else { return XCTFail("no float") }
+
+        manager.nudgeVectorFloat(to: turnedBy(manager, 0.3))
+        manager.rotateFloating(eighths: 1)
+
+        XCTAssertEqual(manager.vectorFloat?.frame.transform.rotation ?? 0, lift + 0.3 + .pi / 4,
+                       accuracy: 1e-9,
+                       "the button turns the piece from where the artist left it")
+    }
+
+    /// **Reset snaps the piece back to exactly where it was picked up, and costs one undo step.**
+    ///
+    /// The step count is the decision: LASSO_MOVE.md §5's settled rule is one step per nudge, and
+    /// Reset is one thing the artist did, so one press of Undo puts the piece back where it was
+    /// *before* the Reset. It is not a shortcut for "undo every nudge" — that would spend an unbounded
+    /// number of history steps on one tap and, worse, the first nudge's step is the one that un-does
+    /// the split, so it would end the float and put the artist back before they pressed Move.
+    ///
+    /// Watched failing with `resetFloating`'s vector arm passing `mirror: float.mirror` instead of
+    /// `.identity`: *the mirror is part of the pose Reset puts back* — the piece landed at the right
+    /// place still facing backwards.
+    func testResetPutsTheLassoedPieceBackWhereItWasPickedUpInOneUndoableStep() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 22), to: CGPoint(x: 42, y: 30), size: 5))
+        vector.addStroke(stroke(from: CGPoint(x: 22, y: 38), to: CGPoint(x: 30, y: 40), size: 3))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 14, width: 40, height: 34)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let lift = manager.vectorFloat?.frame.transform else { return XCTFail("no float") }
+        let samplesAtLift = vector.elements.compactMap(\.stroke).map(\.samples)
+        XCTAssertFalse(manager.canResetFloating, "nothing has moved, so there is nothing to put back")
+
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 9, dy: -5))
+        manager.nudgeVectorFloat(to: scaledBy(manager, 1.7))
+        manager.rotateFloating(eighths: 1)
+        manager.mirrorFloating(horizontal: true)
+        XCTAssertTrue(manager.canResetFloating)
+        let poseBeforeReset = manager.vectorFloat?.frame.transform
+        let stepsBeforeReset = manager.history.undoStack.count
+
+        manager.resetFloating()
+
+        XCTAssertEqual(manager.history.undoStack.count - stepsBeforeReset, 1, "one tap, one step")
+        XCTAssertEqual(manager.vectorFloat?.frame.transform, lift)
+        XCTAssertEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity, "the mirror is part of the pose it puts back")
+        let samplesAfterReset = vector.elements.compactMap(\.stroke).map(\.samples)
+        for (before, after) in zip(samplesAtLift, samplesAfterReset) {
+            for (a, b) in zip(before, after) {
+                XCTAssertEqual(a.x, b.x, accuracy: 1e-6, "back to the pick-up geometry, not near it")
+                XCTAssertEqual(a.y, b.y, accuracy: 1e-6)
+            }
+        }
+        XCTAssertFalse(manager.canResetFloating, "and there is nothing left to reset")
+
+        manager.undo()
+        XCTAssertEqual(manager.vectorFloat?.frame.transform, poseBeforeReset,
+                       "one undo takes back the Reset, not the whole move")
+        XCTAssertNotNil(manager.vectorFloat, "and leaves the piece floating, as every other step does")
+    }
+
+    /// Reset on a raster piece is the same snap-back and records nothing, because **nothing** about a
+    /// raster Move's in-flight transform is on the undo stack — the whole move is one step, taken at
+    /// the bake. One Undo afterwards still reverts the move, Reset or no Reset.
+    func testResetOnARasterPieceSnapsBackAndAddsNoHistoryStep() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.black, rect: CGRect(x: 10, y: 10, width: 20, height: 14)))
+        manager.beginMove()
+        guard let lift = manager.floatingPiece?.liftTransform else { return XCTFail("nothing lifted") }
+        XCTAssertFalse(manager.canResetFloating)
+        let stepsAtLift = manager.history.undoStack.count
+
+        var dragged = lift
+        dragged.position = CGPoint(x: lift.position.x + 12, y: lift.position.y + 3)
+        dragged.scaleX = 1.6
+        dragged.scaleY = 1.6
+        manager.updateFloatingTransform(dragged)
+        manager.mirrorFloating(horizontal: true)
+        XCTAssertTrue(manager.canResetFloating)
+
+        manager.resetFloating()
+
+        XCTAssertEqual(manager.floatingPiece?.transform, lift, "position, scale, rotation and the flip")
+        XCTAssertEqual(manager.history.undoStack.count, stepsAtLift,
+                       "a raster move puts one step on the stack, at the bake — Reset is not a second one")
+    }
+
+    /// **Mirror flips a lassoed piece about its own centre, and pressing it twice is not an edit.**
+    ///
+    /// A reflection is the one pose `LayerTransform` cannot hold — position, one scale, one rotation,
+    /// no flip — so it rides as `VectorFloat.mirror`, folded in front of the map every nudge already
+    /// applies. That is what makes it absolute-from-the-lift like everything else, which the second
+    /// half of this test is about: the flip has to survive a later drag rather than being re-applied
+    /// or lost.
+    ///
+    /// Watched failing with `mirror` left out of `applyToVectorFloat`'s `localDelta` (the map built
+    /// from the box alone): *XCTAssertEqual failed: ("20.0") is not equal to ("44.0")* — the button
+    /// changed the stored flag and not one sample.
+    func testMirrorFlipsALassoedPieceAboutItsOwnCentreAndSurvivesALaterDrag() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 28), size: 4))
+        let pixelsBefore = cgImage(vector)
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 12, width: 40, height: 26)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let float = manager.vectorFloat else { return XCTFail("no float") }
+        let pivot = float.pivot
+        XCTAssertNil(manager.mirrorUnavailableReason, "strokes and fills mirror exactly")
+
+        manager.mirrorFloating(horizontal: true)
+
+        guard let mirrored = vector.elements.compactMap(\.stroke).first?.samples else { return XCTFail("no stroke") }
+        XCTAssertEqual(mirrored.first?.x ?? 0, 2 * pivot.x - 20, accuracy: 1e-6,
+                       "every sample reflects across the piece's own vertical centre line")
+        XCTAssertEqual(mirrored.last?.x ?? 0, 2 * pivot.x - 44, accuracy: 1e-6)
+        XCTAssertEqual(mirrored.first?.y ?? 0, 20, accuracy: 1e-6, "and a horizontal mirror leaves y alone")
+
+        // The flip must ride the *next* drag rather than being undone by it: the nudge re-derives from
+        // the lift geometry, so a mirror the map does not carry would evaporate here.
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 6, dy: 0))
+        guard let after = vector.elements.compactMap(\.stroke).first?.samples else { return XCTFail("no stroke") }
+        XCTAssertEqual(after.first?.x ?? 0, 2 * pivot.x - 20 + 6, accuracy: 1e-6,
+                       "the piece is still mirrored, and now six points along")
+
+        // Back the other way, and back where it was: two mirrors and a drag home are not an edit.
+        manager.mirrorFloating(horizontal: true)
+        manager.nudgeVectorFloat(to: float.frame.transform)
+        XCTAssertEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity, "two presses cancel")
+        manager.commitVectorFloatIfNeeded()
+        assertPixelsIdentical(cgImage(vector), pixelsBefore,
+                              "a mirror and a mirror back must change no pixel")
+    }
+
+    /// Both mirrors together are a half-turn, which is the one composition that has to come out right
+    /// for the two buttons to be independent of the order they are pressed in.
+    func testMirroringBothWaysIsAHalfTurnAboutThePiecesCentre() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 28), size: 4))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 12, width: 40, height: 26)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let pivot = manager.vectorFloat?.pivot else { return XCTFail("no float") }
+
+        manager.mirrorFloating(horizontal: true)
+        manager.mirrorFloating(horizontal: false)
+
+        guard let samples = vector.elements.compactMap(\.stroke).first?.samples else { return XCTFail("no stroke") }
+        XCTAssertEqual(samples.first?.x ?? 0, 2 * pivot.x - 20, accuracy: 1e-6)
+        XCTAssertEqual(samples.first?.y ?? 0, 2 * pivot.y - 20, accuracy: 1e-6,
+                       "H then V is a point reflection, not a second horizontal flip")
+    }
+
+    /// **Mirror refuses, out loud, when the lassoed piece carries a placed image or a text box.**
+    ///
+    /// Neither is expressible: an image's whole placement is a `LayerTransform` with no flip in it,
+    /// and a text frame is four ordered corners that `TextFrame.Basis` reads as a frame rather than as
+    /// a shape. Carrying them through the reflection anyway is not a rounding error — `theta` becomes
+    /// `atan2` of a map that turns the plane over, and the photo would come back rotated a half turn
+    /// instead of mirrored. So the button is off and the bar says why, which is the difference between
+    /// a disabled control and a control that does nothing.
+    func testMirrorIsRefusedAndSaysWhyWhenThePieceCarriesAnImageOrText() {
+        for kind in ["image", "text"] {
+            let (manager, layerIndex, vector) = fixture()
+            vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
+            if kind == "image" {
+                vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                                   rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                                                                   size: CGSize(width: 6, height: 6)),
+                                                   transform: LayerTransform(position: CGPoint(x: 30, y: 34),
+                                                                             scale: 1, rotation: 0)))
+            } else {
+                var recipe = TextRecipe(string: "hi")
+                recipe.typography.pointSize = 12
+                vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                                    frame: TextFrame(origin: CGPoint(x: 30, y: 34),
+                                                                     size: CGSize(width: 10, height: 6))))
+            }
+            select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
+            XCTAssertTrue(manager.beginVectorLassoMove(), "\(kind): the lift should have caught both")
+            let samplesBefore = vector.elements.compactMap(\.stroke).map(\.samples)
+            let stepsBefore = manager.history.undoStack.count
+
+            XCTAssertNotNil(manager.mirrorUnavailableReason, "\(kind): the bar has to have something to say")
+            manager.mirrorFloating(horizontal: true)
+
+            XCTAssertEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity, "\(kind): and the press changes nothing")
+            XCTAssertEqual(manager.history.undoStack.count, stepsBefore,
+                           "\(kind): a refused button spends no undo step either")
+            let samplesAfter = vector.elements.compactMap(\.stroke).map(\.samples)
+            for (before, after) in zip(samplesBefore, samplesAfter) {
+                for (a, b) in zip(before, after) { XCTAssertEqual(a.x, b.x, accuracy: 1e-9, "\(kind)") }
+            }
+        }
+    }
+
+    /// A mirror is a nudge: one undo step, the box left standing, and the mirror itself restored — the
+    /// half of the pose the box transform cannot carry, and so the half a step that only restored
+    /// `frame.transform` would silently drop.
+    func testUndoingAMirrorRestoresTheFlipAndLeavesThePieceFloating() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 28), size: 4))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 12, width: 40, height: 26)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        // A drag first, so the mirror is not the *first* nudge — undoing that one deliberately ends
+        // the float and gives back the unsplit stroke, which is a different rule being tested above.
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 5, dy: 0))
+        let samplesAfterDrag = vector.elements.compactMap(\.stroke).map(\.samples)
+        let stepsAfterDrag = manager.history.undoStack.count
+
+        manager.mirrorFloating(horizontal: true)
+        XCTAssertEqual(manager.history.undoStack.count - stepsAfterDrag, 1, "one press, one step")
+        XCTAssertNotEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity)
+
+        manager.undo()
+
+        XCTAssertNotNil(manager.vectorFloat, "the piece is still in the artist's hand")
+        XCTAssertEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity, "and facing the way it was")
+        let samplesAfterUndo = vector.elements.compactMap(\.stroke).map(\.samples)
+        for (before, after) in zip(samplesAfterDrag, samplesAfterUndo) {
+            for (a, b) in zip(before, after) { XCTAssertEqual(a.x, b.x, accuracy: 1e-6) }
+        }
+
+        manager.redo()
+        XCTAssertNotEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity, "and redo puts the flip back")
+    }
+
+    /// The Move bar's Done button settles **whichever** kind is floating. It used to call
+    /// `commitFloatingPieceIfNeeded()` alone, which is the raster piece — on a vector layer that is a
+    /// button that returns false and does nothing.
+    func testDoneSettlesEitherKindOfFloatingPiece() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32), size: 4))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 22, width: 40, height: 20)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertTrue(manager.isAnyPieceFloating, "and the bar is up for it")
+
+        XCTAssertTrue(manager.commitAnyFloatingPiece())
+
+        XCTAssertNil(manager.vectorFloat)
+        XCTAssertFalse(manager.isAnyPieceFloating)
+        XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
+    }
+
+    /// `warp` is gone from the enum rather than hidden — owner, 2026-08-22: *"Unlike procreate, Warp
+    /// will not be a feature (like liquify)."* A hidden case stays in `allCases`, keeps answering
+    /// `switch`es and keeps its string wherever the next thing to persist a mode would put it; this is
+    /// the assertion that a later tidy-up cannot quietly reinstate it.
+    func testTheTransformModesAreFreeformUniformAndDistortWithNoWarp() {
+        XCTAssertEqual(TransformMode.allCases.map(\.rawValue), ["freeform", "uniform", "distort"])
+        XCTAssertEqual(TransformMode.allCases.filter { !$0.isImplemented }, [.distort],
+                       "and Distort is the only one the bar still has to caption")
+    }
+
     // MARK: - Helpers
 
     /// The box transform a drag of `(dx, dy)` canvas points produces, from where the float is now.

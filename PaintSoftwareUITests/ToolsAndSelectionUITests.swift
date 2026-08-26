@@ -254,6 +254,66 @@ final class SelectionAndMoveUITests: PaintUITestCase {
                        "the stroke the loop crossed became two independent strokes")
     }
 
+    /// **The Move menu replaces the Select menu while a lassoed piece is floating, and hands it back
+    /// when the piece bakes** — owner, 2026-08-22: *"when moving, there should be an option menu on
+    /// the bottom instead of still keeping the select menu."*
+    ///
+    /// Three things only a UI test can say, and all three were false before this change:
+    ///
+    ///  * the bar comes up for a **vector** float at all — its gate read `floatingPiece != nil`, the
+    ///    raster piece, so a lassoed piece got six grips and no menu;
+    ///  * the Select menu stands down while it is up. The two dock at the same place and could both
+    ///    be on screen at once;
+    ///  * `activePanel` is **not** cleared, so the Select menu is back the moment the piece bakes.
+    ///    That is the difference between suppressing a presentation and closing a panel, and it is
+    ///    invisible to anything that only checks the first two.
+    ///
+    /// Watched failing with `DrawingView`'s two gates put back the way they were —
+    /// `if canvasManager.floatingPiece != nil` for the bar and a bare `if activePanel == .select` for
+    /// the panel: *XCTAssertTrue failed — a lassoed vector piece raises the Move menu, exactly as a
+    /// raster piece does*, at the `waitForExistence` on Done, because on the default (vector) layer
+    /// kind the bar never came up at all.
+    func testTheMoveMenuReplacesTheSelectMenuWhileAPieceFloatsAndGivesItBack() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: 0.26), to: CGVector(dx: 0.85, dy: 0.26))
+
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
+        rectangleMode.tap()
+        dragOnCanvas(app, from: CGVector(dx: 0.6, dy: 0.16), to: CGVector(dx: 0.95, dy: 0.36))
+        XCTAssertTrue(rectangleMode.exists, "setup: the Select menu is the one that is up")
+
+        app.buttons["toolbar.moveButton"].tap()
+
+        let doneButton = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(doneButton.waitForExistence(timeout: 5),
+                      "a lassoed vector piece raises the Move menu, exactly as a raster piece does")
+        XCTAssertFalse(rectangleMode.exists, "and the Select menu stands down rather than stacking under it")
+        // Every button the bar offers this piece — a stroke, so Mirror is available — is live rather
+        // than decorative. Reset is the one that starts off: nothing has been dragged yet.
+        for identifier in ["moveBar.mirrorHorizontalButton", "moveBar.mirrorVerticalButton",
+                           "moveBar.rotate45LeftButton", "moveBar.rotate45RightButton",
+                           "moveBar.rotate90LeftButton", "moveBar.rotate90RightButton"] {
+            XCTAssertTrue(app.buttons[identifier].isEnabled, "\(identifier) should be usable on a lassoed stroke")
+        }
+        XCTAssertFalse(app.buttons["moveBar.resetButton"].isEnabled,
+                       "Reset has nothing to put back until the piece has been moved")
+
+        dragOnCanvas(app, from: CGVector(dx: 0.75, dy: 0.26), to: CGVector(dx: 0.75, dy: 0.44))
+        XCTAssertTrue(app.buttons["moveBar.resetButton"].isEnabled, "and turns on once it has")
+
+        doneButton.tap()
+
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5),
+                      "baking the piece gives the artist back the panel they were in — `activePanel` was never cleared")
+        XCTAssertFalse(doneButton.exists, "and the Move menu goes with the piece")
+    }
+
     /// Rectangle-select a region, then Fill it — the fill should land directly in the raster tier
     /// (Cel.raster), the same tier the eraser stamps into, not a separate Cel.bakedImage layer the
     /// eraser can never reach (see `CanvasManager.registerUndoableCelChange`'s doc comment).

@@ -108,10 +108,14 @@ struct DrawingView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                // Move/Duplicate's transform controls live in a bottom bar (not the trailing panel)
-                // and are keyed off whether a piece is actually floating, not off which panel is open —
-                // tapping the canvas to commit, or Duplicate from the Select panel, both surface it.
-                if canvasManager.floatingPiece != nil {
+                // The Move menu lives in a bottom bar (not the trailing panel) and is keyed off whether
+                // anything is actually floating, not off which panel is open — tapping the canvas to
+                // commit, or Duplicate from the Select panel, both surface it.
+                //
+                // **`isAnyPieceFloating`, not `floatingPiece != nil`.** Until 2026-08-22 this read the
+                // raster piece alone, so a lassoed *vector* region — which is what Move does on the
+                // default layer kind — came up with a transform box, six grips and no menu at all.
+                if canvasManager.isAnyPieceFloating {
                     VStack {
                         Spacer()
                         MoveTransformBottomBar(canvasManager: canvasManager)
@@ -122,7 +126,21 @@ struct DrawingView: View {
 
                 // The Select tool's menu docks at the bottom (Procreate reference) instead of dropping
                 // down from the top toolbar, so it never covers the upper canvas while lassoing.
-                if activePanel == .select {
+                //
+                // **It stands down while anything is floating** — owner, 2026-08-22: "when moving,
+                // there should be an option menu on the bottom instead of still keeping the select
+                // menu". The two dock at the same place and used to be able to be up at once.
+                //
+                // **Suppressing the presentation, not clearing `activePanel`**, and the difference is
+                // the artist's place in their own tools: Select is still their open panel, so when the
+                // piece bakes the menu comes back by itself rather than leaving them on a bare canvas
+                // wondering which button they were last in. It also keeps this change out of the
+                // touch-arbitration entirely — `CanvasTouchInputs.panel` is fed the same
+                // `activePanel` it always was, so `CanvasTouchOwner`'s answer for every one of these
+                // states is bit-for-bit what it was before (and the overlay was already not capturing:
+                // `selectionOverlayIsCapturing` has required `!hasFloatingPiece && !hasVectorFloat`
+                // since it was written).
+                if activePanel == .select && !canvasManager.isAnyPieceFloating {
                     VStack {
                         Spacer()
                         SelectPanel(canvasManager: canvasManager)
@@ -168,7 +186,9 @@ struct DrawingView: View {
         // overlaid inside either one would be cut off at that container's edge.
         .sizePreviewOverlay(canvasManager: canvasManager)
         .animation(.easeInOut(duration: 0.2), value: activePanel)
-        .animation(.easeInOut(duration: 0.2), value: canvasManager.floatingPiece != nil)
+        // One flag drives both docked bars now — the Move menu arriving and the Select menu standing
+        // down are the same transition, so they have to be keyed on the same value or they cross.
+        .animation(.easeInOut(duration: 0.2), value: canvasManager.isAnyPieceFloating)
         // Keyed on the whole notice, not on `notice != nil`: re-raising while one is already up
         // swaps the value rather than crossing nil, and only the full value is different enough for
         // SwiftUI to re-run the transition.

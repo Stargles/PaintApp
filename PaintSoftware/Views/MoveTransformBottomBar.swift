@@ -1,29 +1,84 @@
 import SwiftUI
 
-/// Floating bottom bar shown whenever a `FloatingPiece` is active (a Move or Duplicate in
-/// progress): mirror horizontal/vertical, rotate 90° left/right, and the Freeform/Uniform/Distort/
-/// Warp mode picker. Procreate reference: the Transform tool's bottom toolbar.
+/// **The Move menu** — the bottom bar shown whenever anything is floating: a raster Move/Duplicate
+/// piece *or* a lassoed vector region. Mirror horizontal/vertical, rotate 45° and 90° either way,
+/// Reset, Done, and the Freeform/Uniform/Distort mode picker. Procreate reference: the Transform
+/// tool's bottom toolbar.
+///
+/// **It replaces the Select menu rather than sitting on top of it** (owner, 2026-08-22: *"when
+/// moving, there should be an option menu on the bottom instead of still keeping the select menu"*).
+/// The two used to dock at the same place and could both be up at once. `DrawingView` now suppresses
+/// the Select panel's *presentation* for as long as `isAnyPieceFloating`, and deliberately does not
+/// clear `activePanel` — so when the piece bakes, the Select menu comes straight back if Select is
+/// still the artist's open panel, and they have not lost their place.
+///
+/// **No button here is allowed to be pressed and do nothing.** Two of them can be unavailable, and
+/// each says so rather than going quietly grey: Mirror, when the lassoed piece carries a placed image
+/// or text (`CanvasManager.mirrorUnavailableReason` — `LayerTransform` has no flip), and Reset, when
+/// the piece is already sitting exactly where it was picked up.
 struct MoveTransformBottomBar: View {
     @ObservedObject var canvasManager: CanvasManager
 
+    private var mirrorReason: String? { canvasManager.mirrorUnavailableReason }
+
+    /// The picker is live only for a raster piece. A lassoed vector piece scales uniformly about its
+    /// centre whichever mode is showing — `ObjectTransformDrag`'s corner arm writes one `scale` —
+    /// so offering a working-looking Freeform there would be the "acts like Uniform for now" caption
+    /// with no caption. Stage 3's non-uniform scale is what turns this on.
+    private var modeIsAdjustable: Bool { canvasManager.vectorFloat == nil }
+
+    /// One line under the buttons, or none. Ordered by which the artist is most likely to have just
+    /// pressed against.
+    private var caption: String? {
+        if let mirrorReason { return mirrorReason }
+        if !modeIsAdjustable { return "A lassoed piece scales uniformly about its centre." }
+        if !canvasManager.transformMode.isImplemented { return "Coming soon — acts like Uniform for now" }
+        return nil
+    }
+
     var body: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 16) {
-                iconButton("arrow.left.and.right") { canvasManager.mirrorFloating(horizontal: true) }
-                    .accessibilityLabel("Mirror Horizontal")
-                iconButton("arrow.up.and.down") { canvasManager.mirrorFloating(horizontal: false) }
-                    .accessibilityLabel("Mirror Vertical")
+            HStack(spacing: 14) {
+                iconButton("arrow.left.and.right", enabled: mirrorReason == nil) {
+                    canvasManager.mirrorFloating(horizontal: true)
+                }
+                .accessibilityLabel("Mirror Horizontal")
+                .accessibilityIdentifier("moveBar.mirrorHorizontalButton")
+
+                iconButton("arrow.up.and.down", enabled: mirrorReason == nil) {
+                    canvasManager.mirrorFloating(horizontal: false)
+                }
+                .accessibilityLabel("Mirror Vertical")
+                .accessibilityIdentifier("moveBar.mirrorVerticalButton")
 
                 divider
 
-                iconButton("rotate.left") { canvasManager.rotateFloating90(clockwise: false) }
+                // ±1 eighth of a turn and ±2, left pair then right pair, so the two directions read
+                // as two directions rather than as four unrelated icons.
+                iconButton("rotate.left") { canvasManager.rotateFloating(eighths: -2) }
                     .accessibilityLabel("Rotate 90° Left")
-                iconButton("rotate.right") { canvasManager.rotateFloating90(clockwise: true) }
+                    .accessibilityIdentifier("moveBar.rotate90LeftButton")
+                iconButton("rotate.left", badge: "45") { canvasManager.rotateFloating(eighths: -1) }
+                    .accessibilityLabel("Rotate 45° Left")
+                    .accessibilityIdentifier("moveBar.rotate45LeftButton")
+                iconButton("rotate.right", badge: "45") { canvasManager.rotateFloating(eighths: 1) }
+                    .accessibilityLabel("Rotate 45° Right")
+                    .accessibilityIdentifier("moveBar.rotate45RightButton")
+                iconButton("rotate.right") { canvasManager.rotateFloating(eighths: 2) }
                     .accessibilityLabel("Rotate 90° Right")
+                    .accessibilityIdentifier("moveBar.rotate90RightButton")
 
                 divider
 
-                Button("Done") { canvasManager.commitFloatingPieceIfNeeded() }
+                iconButton("arrow.uturn.backward", enabled: canvasManager.canResetFloating) {
+                    canvasManager.resetFloating()
+                }
+                .accessibilityLabel("Reset")
+                .accessibilityIdentifier("moveBar.resetButton")
+
+                divider
+
+                Button("Done") { canvasManager.commitAnyFloatingPiece() }
                     .foregroundColor(.blue)
                     .fontWeight(.semibold)
                     .accessibilityIdentifier("moveBar.doneButton")
@@ -39,9 +94,11 @@ struct MoveTransformBottomBar: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 360)
+            .disabled(!modeIsAdjustable)
+            .opacity(modeIsAdjustable ? 1 : 0.45)
 
-            if !canvasManager.transformMode.isImplemented {
-                Text("Coming soon — acts like Uniform for now")
+            if let caption {
+                Text(caption)
                     .font(.caption2)
                     .foregroundColor(.gray)
             }
@@ -56,12 +113,26 @@ struct MoveTransformBottomBar: View {
         Rectangle().fill(Color.white.opacity(0.25)).frame(width: 1, height: 24)
     }
 
-    private func iconButton(_ system: String, action: @escaping () -> Void) -> some View {
+    /// `enabled: false` uses `.disabled` rather than dropping the button, so the row does not reflow
+    /// under the artist's finger the moment a piece with text in it is lifted — and so an XCUITest can
+    /// assert the button is *there and off* rather than merely absent.
+    private func iconButton(_ system: String, badge: String? = nil, enabled: Bool = true,
+                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: system)
-                .font(.title3)
-                .foregroundColor(.white)
-                .frame(width: 36, height: 36)
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: system)
+                    .font(.title3)
+                    .foregroundColor(.white)
+                    .frame(width: 36, height: 36)
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.trailing, 1)
+                }
+            }
         }
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
     }
 }

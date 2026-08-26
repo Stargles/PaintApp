@@ -25,11 +25,21 @@ enum SelectionMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// What a drag on the Move box's corners does.
+///
+/// **There is no `warp`, and there is not going to be one** — the owner ruled it out on 2026-08-22:
+/// *"Unlike procreate, Warp will not be a feature (like liquify)."* The case was **deleted** rather
+/// than hidden behind a flag, because a permanently-hidden case is the thing that drifts: it stays in
+/// `allCases`, keeps answering `switch`es, keeps its string in whatever gets persisted next, and the
+/// next reader has no way to tell "not yet" from "never". Nothing decoded it — `TransformMode` is
+/// live UI state and appears nowhere in `ProjectStore` — so removing it needed no migration.
+///
+/// `.distort` is the opposite kind of absence: it is coming (per-corner geometry, shared with
+/// perspective text), and until it lands it gestures like `.uniform` and the bar says so.
 enum TransformMode: String, CaseIterable, Identifiable {
     case freeform
     case uniform
     case distort
-    case warp
 
     var id: String { rawValue }
     var displayName: String {
@@ -37,12 +47,73 @@ enum TransformMode: String, CaseIterable, Identifiable {
         case .freeform: return "Freeform"
         case .uniform: return "Uniform"
         case .distort: return "Distort"
-        case .warp: return "Warp"
         }
     }
-    /// Distort/Warp aren't implemented with real per-corner/mesh geometry yet — they render and
-    /// gesture identically to Uniform until that follow-up work lands.
-    var isImplemented: Bool { self == .freeform || self == .uniform }
+    /// Distort isn't implemented with real per-corner geometry yet — it renders and gestures
+    /// identically to Uniform until that follow-up work lands.
+    var isImplemented: Bool {
+        switch self {
+        case .freeform, .uniform: return true
+        case .distort: return false
+        }
+    }
+}
+
+// MARK: - One press of a fixed-angle rotate button
+
+/// The arithmetic behind Rotate 45° / Rotate 90°, kept out of both the bar and the manager so it can
+/// be asserted headlessly.
+///
+/// **Fixed-angle rotation composes onto whatever rotation the box already has** — it does not
+/// re-derive from the pick-up state — because that is the only answer that leaves a freehand turn of
+/// the green knob alone: re-deriving would mean tapping 45° after turning the piece by hand silently
+/// threw the hand-turn away.
+///
+/// **But composition alone does not close a loop, and 45° is where that shows.** Eight presses must
+/// leave the piece exactly where it started, and two separate things stop plain `rotation += π/4`
+/// from managing it. Both are measured, not assumed — the figures below come from an exhaustive
+/// sweep of 200 000 lift angles across `(-π, π]`, the whole range `atan2` can produce:
+///
+///  * **A whole turn is not the identity.** `π/4` is exact in binary (`Double.pi` scaled by 2⁻²) and
+///    eight of them do sum to exactly `2 * .pi` — but `2π` is not `0`, and a box left holding `2π`
+///    turns every subsequent comparison into a near-miss. Folding whole turns out with
+///    `truncatingRemainder` fixes that, and is exact for a grid value: `fmod(2π, 2π)` is a true zero.
+///  * **The running sum only lands on the grid for *some* starting angles.** From `lift == 0` it is
+///    exact; from `lift == 1.1` it is not, and it comes back `1.100000000000001`. **13% of the range
+///    is in that second group** (103 923 of 800 000 sweep cases across ±45° and ±90°), so a rotated
+///    layer is a coin toss rather than an exotic case. The fix is to **re-quantise onto the
+///    eighth-turn grid, measured from the lift** — so the grid is the artist's own starting angle —
+///    whenever the composition lands within a whisker of it. With the snap the sweep is exact in all
+///    800 000 cases.
+///
+/// **Bit-exact, not merely close** — which is what
+/// `LassoMoveLogicTests.testEightPressesOfRotate45LandTheFloatExactlyWhereItStarted` asserts, on a
+/// straight layer *and* on one rotated to 1.1 rad precisely because that angle is in the 13%.
+///
+/// The one case that is not bit-exact is a fixed-angle press composed onto a *freehand* rotation: the
+/// running total is then off the grid, the snap does not fire, and eight presses accumulate a few
+/// ulps. That is a rounding difference of about 1e-16 radians on a piece the artist has already
+/// turned by hand, and closing it would mean carrying the button presses as an integer beside the
+/// angle — which buys nothing anybody can see.
+enum FixedAngleRotation {
+    /// An eighth of a turn: 45°. Exact in binary, which is the whole reason the grid is eighths.
+    static let unit: CGFloat = .pi / 4
+
+    /// How far off the grid a composition may land and still be snapped back onto it. Six orders of
+    /// magnitude above the ulps this is here to absorb, and eleven below anything an artist could
+    /// have meant — 1e-9 rad is 6e-8 degrees.
+    static let snapTolerance: CGFloat = 1e-9
+
+    /// `rotation`, turned by `eighths` × 45°, re-quantised against `lift`.
+    static func stepped(from rotation: CGFloat, lift: CGFloat, eighths: Int) -> CGFloat {
+        var turned = (rotation - lift) + unit * CGFloat(eighths)
+        let onGrid = (turned / unit).rounded() * unit
+        if abs(turned - onGrid) <= snapTolerance { turned = onGrid }
+        // Exact for a grid value — `fmod(2π, 2π)` is a true zero — so a whole turn returns the piece
+        // to the angle it was lifted at rather than to that angle plus 2π.
+        turned = turned.truncatingRemainder(dividingBy: 2 * .pi)
+        return lift + turned
+    }
 }
 
 /// A finalized selection: a closed path in canvas point space, stamped with the (layer, cel) it
@@ -347,14 +418,114 @@ extension CanvasManager {
         floatingPiece?.mode = mode
     }
 
-    func mirrorFloating(horizontal: Bool) {
-        guard floatingPiece != nil else { return }
-        if horizontal { floatingPiece!.transform.flipH.toggle() } else { floatingPiece!.transform.flipV.toggle() }
+    // MARK: - The Move menu
+    //
+    // **Everything below answers for both kinds of floating piece**, and that symmetry is the whole
+    // of stage 2. The bar used to be shown only while `floatingPiece != nil` — the *raster* Move —
+    // so a lassoed vector piece got a transform box, a set of grips, and no menu at all: the
+    // artist could drag it and nothing else. Each operation now has a raster arm and a vector arm,
+    // and the two properties that say when a button is *off* (`mirrorUnavailableReason`,
+    // `canResetFloating`) exist so that no button on the bar can be pressed and do nothing.
+
+    /// Whether anything is floating — a raster Move/Duplicate piece, or a lassoed vector region.
+    /// The Move bar is up exactly when this is true, and the Select panel is suppressed for exactly
+    /// as long (`DrawingView`).
+    var isAnyPieceFloating: Bool { floatingPiece != nil || vectorFloat != nil }
+
+    /// The bar's Done button, and the tap-away that means the same thing. Both kinds settle here so a
+    /// caller does not have to know which one it has.
+    @discardableResult
+    func commitAnyFloatingPiece() -> Bool {
+        let raster = commitFloatingPieceIfNeeded()
+        let vector = commitVectorFloatIfNeeded()
+        return raster || vector
     }
 
-    func rotateFloating90(clockwise: Bool) {
-        guard floatingPiece != nil else { return }
-        floatingPiece!.transform.rotation += clockwise ? .pi / 2 : -.pi / 2
+    /// Why Mirror is unavailable on whatever is floating, or nil when it is available. Shown in the
+    /// bar, in the artist's terms, rather than the buttons going quietly grey.
+    ///
+    /// **Only a vector float can refuse, and only because of what it is carrying.** A raster piece is
+    /// pixels and flips by negating a scale. A vector float's pose lives in `LayerTransform`, which
+    /// has no flip, so Mirror is carried instead as a reflection folded into the map every nudge
+    /// already applies (`VectorFloat.mirror`) — exact for strokes and fills, and impossible for the
+    /// two kinds whose own placement is a `LayerTransform` or a text frame's four corners. Refusing
+    /// those is `VectorCanvas.canBeMirrored(_:)`; carrying them anyway would silently turn a mirrored
+    /// photo into a half-turned one.
+    var mirrorUnavailableReason: String? {
+        guard let float = vectorFloat else { return nil }
+        guard float.liftedInside.values.allSatisfy(VectorCanvas.canBeMirrored) else {
+            return "Mirror can't flip a placed image or a text box."
+        }
+        return nil
+    }
+
+    /// Mirror Horizontal / Mirror Vertical, about the piece's own centre and along its own axes — so
+    /// a piece the artist has already turned mirrors across the axis they can see, not the screen's.
+    func mirrorFloating(horizontal: Bool) {
+        if floatingPiece != nil {
+            if horizontal { floatingPiece!.transform.flipH.toggle() } else { floatingPiece!.transform.flipV.toggle() }
+            return
+        }
+        guard let float = vectorFloat, mirrorUnavailableReason == nil else { return }
+        let reflection = CGAffineTransform(translationX: float.pivot.x, y: float.pivot.y)
+            .scaledBy(x: horizontal ? -1 : 1, y: horizontal ? 1 : -1)
+            .translatedBy(x: -float.pivot.x, y: -float.pivot.y)
+        applyToVectorFloat(transform: float.frame.transform,
+                           mirror: float.mirror.concatenating(reflection))
+    }
+
+    /// Rotate by a whole number of eighth-turns: ±1 is the Rotate 45° pair the owner asked for,
+    /// ±2 the Rotate 90° pair that was already there. **Composed onto the rotation the box already
+    /// has, then re-quantised** — see `FixedAngleRotation`, which is where the exactness argument
+    /// lives and why eight presses of 45° land the piece bit-exactly where it started.
+    func rotateFloating(eighths: Int) {
+        if let piece = floatingPiece {
+            floatingPiece!.transform.rotation = FixedAngleRotation.stepped(from: piece.transform.rotation,
+                                                                          lift: piece.liftTransform.rotation,
+                                                                          eighths: eighths)
+            return
+        }
+        guard let float = vectorFloat else { return }
+        var turned = float.frame.transform
+        turned.rotation = FixedAngleRotation.stepped(from: turned.rotation,
+                                                     lift: float.liftFrameTransform.rotation,
+                                                     eighths: eighths)
+        applyToVectorFloat(transform: turned, mirror: float.mirror)
+    }
+
+    /// Whether **Reset** has anything to put back. False the instant the piece is already sitting
+    /// exactly where it was picked up, which is what stops the button from spending an undo step
+    /// doing nothing — the same reason it is disabled rather than merely inert.
+    var canResetFloating: Bool {
+        if let piece = floatingPiece { return piece.transform != piece.liftTransform }
+        guard let float = vectorFloat else { return false }
+        return float.frame.transform != float.liftFrameTransform || float.mirror != .identity
+    }
+
+    /// **Reset**: the piece snaps back to exactly where it was picked up — position, scale, rotation
+    /// and any mirror — in one tap, undoing the dragging without undoing the lift.
+    ///
+    /// **It is one undoable step, not a shortcut for "undo every nudge"** (owner's question, decided
+    /// here). LASSO_MOVE.md §5's settled rule is one step per nudge, and Reset is one thing the artist
+    /// did: one press of Undo puts the piece back where it was before the Reset, exactly as one press
+    /// takes back a drag. Spelling it as "undo every nudge" would be worse in two concrete ways —
+    /// one tap would silently consume an unbounded number of history steps, and on a vector float the
+    /// *first* nudge's step is the one that also un-does the split and dismisses the float, so
+    /// "undo every nudge" would tear the piece down and put the artist back before they ever pressed
+    /// Move. "Snap it back to where I picked it up" is not "forget that I picked it up".
+    ///
+    /// The raster arm records nothing, and that is the same rule rather than an exception: a raster
+    /// Move puts **one** step on the stack, at the bake, and nothing about the in-flight transform is
+    /// undoable — so there is no per-nudge step for Reset to sit beside. One Undo after the bake still
+    /// reverts the whole move, Reset or no Reset.
+    func resetFloating() {
+        guard canResetFloating else { return }
+        if let piece = floatingPiece {
+            floatingPiece!.transform = piece.liftTransform
+            return
+        }
+        guard let float = vectorFloat else { return }
+        applyToVectorFloat(transform: float.liftFrameTransform, mirror: .identity)
     }
 
     // MARK: Committing

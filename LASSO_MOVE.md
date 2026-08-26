@@ -38,6 +38,29 @@ remaining kinds are a `CGPath` boolean and a centre-point test.
 | a box that offers all six grips — move band, four corners, rotate knob | the default `ObjectTransformFrame.allowedHandles`; the filter is kept for Freeform's edge nodes, not because anything withholds a grip today |
 | the way in | `TopToolbar.toggleMove()` — with a selection on a vector cel, `beginVectorLassoMove()` |
 
+### The Move menu — shipped 2026-08-22 (stage 2)
+
+Until this the bar was raised on `floatingPiece != nil`, the *raster* piece, so a lassoed vector
+region got a box, six grips and **no menu at all**. It is now raised for both, and every button on it
+has a vector arm.
+
+| what | where |
+|---|---|
+| the bar, for either kind of float | `MoveTransformBottomBar`, gated on `CanvasManager.isAnyPieceFloating` in `DrawingView` |
+| Done, for either kind | `CanvasManager.commitAnyFloatingPiece()` |
+| Mirror H/V | `CanvasManager.mirrorFloating(horizontal:)`. Raster toggles `FloatingTransform.flipH/flipV`; a vector float carries `VectorFloat.mirror`, a reflection folded in front of the map every nudge already applies — **`LayerTransform` has no flip, so there is nowhere else for it to go** |
+| what Mirror cannot do, and how it says so | `VectorCanvas.canBeMirrored(_:)` → `CanvasManager.mirrorUnavailableReason`. A placed image's whole placement is a `LayerTransform` and a text box is four ordered corners; neither can hold a reflection, so with either in the piece the two buttons are **disabled and the bar says why** |
+| Rotate 45° and Rotate 90°, both directions | `CanvasManager.rotateFloating(eighths:)` over `FixedAngleRotation.stepped(from:lift:eighths:)` — composed onto the box's current angle and re-quantised onto the eighth-turn grid, so eight presses of 45° return the piece **bit-exactly** to where it started |
+| Reset | `CanvasManager.resetFloating()` / `canResetFloating`. One undo step on a vector float (§5.13); nothing on a raster piece, which has no per-nudge steps for it to sit beside |
+| the Select menu standing down while anything floats | `DrawingView` — the *presentation* is suppressed, `activePanel` is deliberately not cleared, so the panel returns by itself at the bake |
+| `TransformMode.warp` | **deleted** (§5.14) |
+
+The Select-menu suppression is presentation only, and that is what keeps it out of the touch
+arbitration: `CanvasTouchInputs.panel` is fed the same `activePanel` it always was, so
+`CanvasTouchOwner`'s answer is unchanged in every state — and the selection overlay was already
+standing down anyway, since `selectionOverlayIsCapturing` has required
+`!hasFloatingPiece && !hasVectorFloat` since it was written.
+
 **The whole move costs three canvas renders** — the hole, the float, the bake — and that does not
 grow with the number of nudges, because the moved ids stay suppressed for the float's life so the
 source's pixels genuinely do not change between drags.
@@ -964,7 +987,9 @@ counted what a touch away from the box actually did.
     is §5.5 holding: the nudges are already on the stack one apiece, and
     `LassoMoveLogicTests.testATapAwayFromTheBoxCommitsInOneUndoStepAndUndoPutsThePieceBack` is what
     keeps a second step from creeping in through the new door. The same tap ends a whole-layer vector
-    Move (`isVectorTransforming = false`), which is the other arm of the same box.
+    Move (`isVectorTransforming = false`), which is the other arm of the same box. (**The Done button
+    is now the third door**: §0's Move menu is raised for a vector float too, and all three call the
+    same commit.)
 
     **It is last in the arbitration on purpose**: it takes only the touches that used to do nothing.
     A tool with a live recognizer of its own still acts — the fill still floods, the pick still picks,
@@ -972,6 +997,45 @@ counted what a touch away from the box actually did.
     in their gates. Matching the raster suppression would have settled rows nobody ruled on and would
     have taken away the lasso selection an artist draws while Move is engaged, which is how they get
     from Move to a lasso move in the first place.
+
+Four more came with the Move menu, **2026-08-22**. The first two are the owner's words; the third and
+fourth are decisions this stage had to make and are recorded so they are not re-opened by accident.
+
+13. **The Move menu replaces the Select menu while anything is floating.** Verbatim: *"when moving,
+    there should be an option menu on the bottom instead of still keeping the select menu."* Both bars
+    dock at the same place and both could be up at once. The Move bar wins for as long as a piece
+    floats — **and `activePanel` is not cleared**, so when the piece bakes the Select menu comes back
+    if Select is still the artist's open panel. Suppressing a presentation and closing a panel look
+    identical for the length of the move and differ entirely at the end of it: the artist should not
+    have to find their place again because they moved something.
+14. **Warp is not a feature.** Verbatim: *"Unlike procreate, Warp will not be a feature (like
+    liquify)."* The case is **deleted from `TransformMode`**, not hidden — a permanently-hidden case
+    stays in `allCases`, keeps answering `switch`es, and gives the next reader no way to tell "not
+    yet" from "never". Nothing decoded it, so no migration was owed. `.distort` is the opposite kind
+    of absence and keeps its "acts like Uniform for now" caption.
+15. **Rotate 45° composes onto the box's current angle; it does not re-derive from the pick-up
+    state.** Re-deriving would mean that tapping 45° after turning the piece by hand silently threw
+    the hand-turn away. The cost is that a running sum of `π/4` does not close a loop, so each press
+    re-quantises onto the eighth-turn grid measured from the lift — without which **13% of reachable
+    lift angles** come back a few ulps off after eight presses (measured over 200 000 angles;
+    `FixedAngleRotation` carries the figures). Eight presses are bit-exact, and
+    `LassoMoveLogicTests.testEightPressesOfRotate45LandTheFloatExactlyWhereItStarted` asserts it on a
+    straight layer *and* on one rotated to 1.1 rad, which is one of the 13%.
+16. **Reset is one undoable step, not a shortcut for "undo every nudge".** It sits with §5.5 rather
+    than against it: Reset is one thing the artist did, so one press of Undo puts the piece back where
+    it was *before* the Reset, exactly as one press takes back a drag. The alternative is worse in two
+    concrete ways — one tap would consume an unbounded number of history steps, and the *first*
+    nudge's step is the one that also un-does the split (§5.8), so "undo every nudge" would tear the
+    float down and put the artist back before they pressed Move. "Snap it back to where I picked it
+    up" is not "forget that I picked it up". On a **raster** piece Reset records nothing, which is the
+    same rule rather than an exception: nothing about a raster Move's in-flight transform is on the
+    stack, so there is no per-nudge step for it to sit beside.
+
+    **Mirror is the one button that can be unavailable**, and it says so rather than going quietly
+    grey. A reflection is not expressible for a placed image (whose placement *is* a `LayerTransform`)
+    or for a text box (four ordered corners that `TextFrame.Basis` reads as a frame), so a piece
+    carrying either disables both Mirror buttons with the reason in the bar. Strokes and fills — what
+    drawing on a vector layer produces — mirror exactly.
 
 ### Still needs a ruling
 
