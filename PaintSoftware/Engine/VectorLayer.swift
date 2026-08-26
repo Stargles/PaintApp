@@ -2368,9 +2368,14 @@ final class VectorCanvas {
     /// **Stage 4 draws through `TextFrame.affineTransform`**, so a rotated or independently-scaled
     /// box flattens turned rather than through its bounding box — one concatenated matrix, no
     /// bitmap, no resampling, and byte-identical to stage 3 for an upright frame because there that
-    /// matrix *is* the translate stage 3 wrote. A frame with no affine map (a collapsed quad, or the
-    /// non-parallelogram only stage 5 can make) keeps the bounding-box fallback, and that is the
-    /// branch `warpHomography` replaces.
+    /// matrix *is* the translate stage 3 wrote.
+    ///
+    /// **Stage 5 filled in the middle branch**: a `.projective` frame goes through
+    /// `TextLayout.drawWarped`, which rasterises the glyphs at box size and carries them onto the
+    /// quad with the `warpHomography` kernel. The bounding-box draw is still here and still the last
+    /// resort, but it now means only "this quad has collapsed", not "this quad has perspective".
+    /// Routing through `TextLayout` rather than warping here is stage 3's rasterizer rule one level
+    /// up: there is one place text turns into pixels, and the bake and the flatten share it.
     private static func draw(text element: VectorTextElement, into cg: CGContext, quality: RenderQuality) {
         _ = quality
         let frame = element.frame
@@ -2383,6 +2388,8 @@ final class VectorCanvas {
             cg.concatenate(transform)
             TextLayout.draw(element.recipe, font: font, boxSize: frame.size,
                             clip: !frame.autoSize, into: cg)
+        } else if TextLayout.drawWarped(element.recipe, frame: frame) {
+            // Nothing more: the warp drew itself, in the layer's own local coordinates.
         } else {
             cg.translateBy(x: box.minX, y: box.minY)
             TextLayout.draw(element.recipe, font: font, boxSize: box.size,

@@ -776,3 +776,83 @@ kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
     float3 graded = saturate(effectChannels(kind, params, lut, colour, gid));
     result.write(float4(graded * alpha, alpha), gid);
 }
+
+// MARK: - The projective warp
+//
+// ADD_TEXT.md §3 stage 5's bake. One dispatch, one destination pixel per thread, the inverse
+// homography and a `1/w` divide — "the same function shape as the existing `sampleBilinear()` /
+// `texelClamped()` helpers".
+//
+// **A compute kernel doing its own perspective divide is the only thing that fits this codebase, and
+// it fits cleanly.** ADD_TEXT.md §1: there are zero `MTLRenderPipelineState` and zero
+// `drawPrimitives` in the tree and 29 `MTLComputePipelineState` hits, so there is no rasteriser to
+// hand a quad to and no vertex stage to interpolate `1/w` for us. §2 records why Core Image's
+// `CIPerspectiveTransform` was rejected rather than adopted: it would bring a `CIContext` with its
+// own device, queue, kernel cache and intermediate pool, unbudgeted and invisible to
+// `CompositorBudget.hasHeadroom`, into a process sized against 192 MiB on a 3 GB device where jetsam
+// rather than `makeTexture` is the failure mode.
+
+/// The nine floats of the inverse homography, destination texels to source texels.
+///
+/// The destination's origin and its scale are folded in on the Swift side (`ImageWarp.inverseTexelMap`)
+/// rather than passed separately, so there is exactly one place the composition can be wrong and both
+/// backends read the same nine numbers. Layout must match `WarpParams` in `Engine/ImageWarp.swift`.
+struct WarpParams {
+    float m0, m1, m2;
+    float m3, m4, m5;
+    float m6, m7, m8;
+};
+
+/// Bilinear, **transparent** outside the source rather than clamped to its edge, on premultiplied
+/// texels.
+///
+/// The one place this departs from `sampleBilinear` above, and it is not a preference: the source of
+/// a text warp is a glyph bitmap that a sized box has clipped, so its edge texels can be opaque ink.
+/// Clamping would smear that ink outwards as an infinite skirt across the whole destination. A sprite
+/// warp wants nothing at all outside its own rectangle.
+///
+/// `position` is already offset by −0.5, i.e. it is in "texel index" space where index `i` sits at
+/// the centre of texel `i`.
+static inline float4 sampleBilinearTransparent(texture2d<float, access::read> source, float2 position) {
+    int width = int(source.get_width()), height = int(source.get_height());
+    float2 base = floor(position);
+    float2 fraction = position - base;
+    int x = int(base.x), y = int(base.y);
+
+    float4 t00 = float4(0.0f), t10 = float4(0.0f), t01 = float4(0.0f), t11 = float4(0.0f);
+    bool x0 = x >= 0 && x < width, x1 = (x + 1) >= 0 && (x + 1) < width;
+    bool y0 = y >= 0 && y < height, y1 = (y + 1) >= 0 && (y + 1) < height;
+    if (x0 && y0) { t00 = source.read(uint2(uint(x), uint(y))); }
+    if (x1 && y0) { t10 = source.read(uint2(uint(x + 1), uint(y))); }
+    if (x0 && y1) { t01 = source.read(uint2(uint(x), uint(y + 1))); }
+    if (x1 && y1) { t11 = source.read(uint2(uint(x + 1), uint(y + 1))); }
+
+    float4 top = mix(t00, t10, fraction.x);
+    float4 bottom = mix(t01, t11, fraction.x);
+    return mix(top, bottom, fraction.y);
+}
+
+/// One destination pixel of a projective warp.
+///
+/// The rule, stated identically in `ImageWarp.warp`'s doc comment so the two implementations can be
+/// checked against one sentence rather than against each other's code:
+///
+/// 1. The destination pixel's **centre** is `(x + 0.5, y + 0.5)`.
+/// 2. `w = m6·x + m7·y + m8`; **discard where `w <= 0`** — the far side of the vanishing line, which
+///    has no source at all. Writing transparent there rather than sampling something is what keeps a
+///    corner dragged past the horizon from producing plausible-looking garbage.
+/// 3. `(u, v)` is the numerator over `w`, in source texel coordinates.
+/// 4. Bilinear over the four texels around `(u − 0.5, v − 0.5)`, transparent outside.
+kernel void warpHomography(texture2d<float, access::read>  source [[texture(0)]],
+                           texture2d<float, access::write> result [[texture(1)]],
+                           constant WarpParams &params [[buffer(0)]],
+                           uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= result.get_width() || gid.y >= result.get_height()) { return; }
+    float2 p = float2(gid) + 0.5f;
+    float w = params.m6 * p.x + params.m7 * p.y + params.m8;
+    if (!(w > 0.0f)) { result.write(float4(0.0f), gid); return; }
+    float inv = 1.0f / w;
+    float u = (params.m0 * p.x + params.m1 * p.y + params.m2) * inv;
+    float v = (params.m3 * p.x + params.m4 * p.y + params.m5) * inv;
+    result.write(sampleBilinearTransparent(source, float2(u, v) - 0.5f), gid);
+}

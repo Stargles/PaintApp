@@ -56,6 +56,7 @@ struct TextSettingsPanel: View {
                           idSuffix: "paragraphSpacingSlider")
 
                 alignmentPicker
+                cornerModePicker
 
                 Spacer(minLength: 8)
             }
@@ -219,6 +220,40 @@ struct TextSettingsPanel: View {
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier("\(Self.idPrefix).alignmentPicker")
+        }
+        .padding(.horizontal)
+    }
+
+    // MARK: - Corners
+
+    /// What the four corner grips do — `ADD_TEXT.md` §3 stage 5, "four independent corner handles".
+    ///
+    /// **A mode rather than a modifier key**, which an iPad does not reliably have and which the
+    /// owner did not ask for: they framed the Move tool's version of this as a mode ("each of the 4
+    /// points can be moved independently"), and stage 5 is the solver both will share. It is also
+    /// additive — stage 4 built corner-drag-as-scale and pinned a dozen identities on it, and none of
+    /// them change.
+    ///
+    /// Not bound to `textRecipe`, so — unlike every other control on this panel — it does **not** go
+    /// through `textRecipeDidChange()`. Nothing about the type changed, so nothing needs re-resolving
+    /// and a pristine box must not regrow because the artist changed their mind about a gesture.
+    private var cornerModePicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Corners").foregroundColor(.white)
+            Picker("Corners", selection: $canvasManager.textCornerMode) {
+                ForEach(TextCornerMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("\(Self.idPrefix).cornerModePicker")
+            Text(canvasManager.textCornerMode == .distort
+                 ? "Drag a corner on its own to put the text into perspective. Tap into the text to type and it flattens while you do."
+                 : "Drag a corner to scale the box about the opposite one.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("\(Self.idPrefix).cornerModeHint")
         }
         .padding(.horizontal)
     }

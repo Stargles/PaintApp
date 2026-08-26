@@ -549,6 +549,269 @@ final class TextTransformLogicTests: XCTestCase {
                                  "And the column is no wider than the box is tall.")
     }
 
+    // MARK: - Stage 5: the seam with the new solver
+
+    /// **The claim stage 5's entry makes, measured rather than assumed.** ADD_TEXT.md §3 stage 5:
+    /// *"`affine()` on the new solver is expected to return the same matrix for every quad stage 4
+    /// can make, and `Homography` only has to cover the ones it cannot."*
+    ///
+    /// Every quad stage 4 can make is `TextFrame.corners(origin:u:v:width:height:)` over some
+    /// rotation, some pair of extents and some origin — that one function is where all four of
+    /// stage 4's paths (resize, rotate, auto-size regrow, initial placement) build their corners. So
+    /// the sweep is over its inputs: 36 rotations × 4 widths × 4 heights × 3 origins = 1728 frames.
+    ///
+    /// Two things are asserted, and the first is the one that would actually break a drawing path:
+    /// the two must **agree about whether there is an affine map at all**, because a disagreement
+    /// there is a box that silently stops drawing as glyphs and starts drawing as a resampled bitmap.
+    /// Then the matrices themselves, to 1e-12.
+    ///
+    /// **They are not bit-identical, and that is a finding worth stating rather than hiding behind a
+    /// loose accuracy.** Measured worst element difference over the whole sweep: **1.1e-16** — one
+    /// ULP at magnitude 1. The cause is that the box prescale is a multiply by `1/w` in the solver
+    /// (`H = M · diag(1/w, 1/h, 1)`) and a divide by `w` in `affineTransform`, and `x * (1/w)` and
+    /// `x / w` are not the same double. Nothing downstream can see 1e-16 of a canvas point.
+    func testTheSolversAffineMatchesStageFoursForEveryQuadItCanMake() throws {
+        var compared = 0, worst: CGFloat = 0
+        for degrees in stride(from: 0, through: 350, by: 10) {
+            for width in [24, 61.3, 300, 1997] as [CGFloat] {
+                for height in [24, 41.7, 120, 880] as [CGFloat] {
+                    for origin in [-500, 0, 137.25] as [CGFloat] {
+                        let angle = CGFloat(degrees) * .pi / 180
+                        let u = CGVector(dx: cos(angle), dy: sin(angle))
+                        let v = CGVector(dx: -sin(angle), dy: cos(angle))
+                        var frame = upright(size: CGSize(width: width, height: height))
+                        frame.corners = TextFrame.corners(origin: CGPoint(x: origin, y: origin / 2),
+                                                          u: u, v: v, width: width, height: height)
+
+                        let stageFour = frame.affineTransform
+                        let solved = frame.homography?.affine()
+                        XCTAssertEqual(stageFour == nil, solved == nil,
+                                       "The two disagree about whether \(width)×\(height) at \(degrees)° "
+                                       + "has an affine map at all.")
+                        guard let stageFour, let solved else { continue }
+                        compared += 1
+                        for (got, want) in zip([solved.a, solved.b, solved.c, solved.d, solved.tx, solved.ty],
+                                               [stageFour.a, stageFour.b, stageFour.c, stageFour.d,
+                                                stageFour.tx, stageFour.ty]) {
+                            worst = max(worst, abs(got - want))
+                            XCTAssertEqual(got, want, accuracy: 1e-12)
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(compared, 1728, "Every quad in the sweep must have had an affine map.")
+        print("MEASURED seam: \(compared) stage-4 quads, worst element difference \(worst).")
+    }
+
+    /// And the other half of the seam, which is what makes the first half worth having: the quads
+    /// stage 4 *cannot* make are exactly the ones `affineTransform` refuses and the solver covers.
+    func testTheSolverCoversTheQuadStageFourRefuses() throws {
+        var skewed = upright()
+        skewed.corners[2].x += 30          // pull one corner out of the parallelogram
+        skewed.mode = .projective
+        XCTAssertNil(skewed.affineTransform, "Stage 4 has no matrix for this, by construction.")
+        let homography = try XCTUnwrap(skewed.homography, "And stage 5 has one.")
+        XCTAssertNil(homography.affine(), "A real perspective term, not a parallelogram in disguise.")
+        for (index, corner) in [CGPoint(x: 0, y: 0), CGPoint(x: skewed.size.width, y: 0),
+                                CGPoint(x: skewed.size.width, y: skewed.size.height),
+                                CGPoint(x: 0, y: skewed.size.height)].enumerated() {
+            assertPoint(try XCTUnwrap(homography.map(corner)), skewed.corners[index], accuracy: 1e-9)
+        }
+    }
+
+    // MARK: - Stage 5: four independent corners
+
+    /// A distort drag puts the corner under the finger and **leaves the other three exactly where
+    /// they were** — which is the whole difference from stage 4's corner drag, where all four move.
+    func testADistortDragMovesOnlyTheCornerUnderTheFinger() throws {
+        let start = upright(size: CGSize(width: 120, height: 60))
+        for handle in [TextFrame.Handle.topLeft, .topRight, .bottomRight, .bottomLeft] {
+            let corner = try XCTUnwrap(handle.corner)
+            let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: handle, distort: true))
+            XCTAssertTrue(drag.isDistort)
+            // Outwards along the diagonal from the box's centre, which never crosses another corner.
+            let centre = start.centre
+            let held = start[corner]
+            let target = CGPoint(x: held.x + (held.x - centre.x) * 0.4,
+                                 y: held.y + (held.y - centre.y) * 0.4)
+            let moved = try XCTUnwrap(drag.distortedFrame(draggedTo: target))
+            assertPoint(moved[corner], target, "\(handle) must follow the finger exactly.")
+            for other in TextFrame.Corner.allCases where other != corner {
+                assertPoint(moved[other], start[other], accuracy: 1e-12,
+                            "\(handle) moved corner \(other), which a distort must not.")
+            }
+            XCTAssertEqual(moved.size, start.size, "A distort changes the codomain, never the box.")
+        }
+    }
+
+    /// The edge grips and the rotation knob are **not** distortable in either mode — "four
+    /// independent corner handles" means four, and an edge midpoint has no corner to move.
+    func testOnlyTheFourCornersCanDistort() {
+        let start = upright()
+        for handle in [TextFrame.Handle.top, .right, .bottom, .left, .rotation] {
+            XCTAssertNil(handle.corner, "\(handle) does not sit on a corner.")
+            let drag = TextFrameDrag(frame: start, handle: handle, distort: true)
+            XCTAssertEqual(drag?.isDistort, false,
+                           "\(handle) asked to distort must fall back to its stage-4 behaviour.")
+        }
+    }
+
+    /// A distort that leaves the quad a parallelogram — sliding one corner exactly along the
+    /// direction that keeps the opposite edges parallel — must come back out `.affine`.
+    ///
+    /// **The mode is derived from the corners, not asserted by the gesture**, and this is why: an
+    /// unconditional `.projective` would make `affineTransform` refuse a quad it can express, and the
+    /// box would lose the native, unresampled drawing path for no visible reason.
+    func testADistortThatLandsOnAParallelogramComesBackAffine() throws {
+        let start = upright(size: CGSize(width: 120, height: 60))
+        let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: .bottomRight, distort: true))
+        // The parallelogram condition is p2 == p1 + p3 − p0.
+        let parallelogram = CGPoint(x: start[.topRight].x + start[.bottomLeft].x - start[.topLeft].x,
+                                    y: start[.topRight].y + start[.bottomLeft].y - start[.topLeft].y)
+        let unchanged = try XCTUnwrap(drag.distortedFrame(draggedTo: parallelogram))
+        XCTAssertEqual(unchanged.mode, .affine)
+        XCTAssertNotNil(unchanged.affineTransform)
+
+        let pulled = try XCTUnwrap(drag.distortedFrame(draggedTo: CGPoint(x: parallelogram.x + 40,
+                                                                          y: parallelogram.y + 10)))
+        XCTAssertEqual(pulled.mode, .projective)
+        XCTAssertNil(pulled.affineTransform, "A projective frame has no affine matrix, by definition.")
+        XCTAssertNotNil(pulled.homography)
+    }
+
+    /// A distort clears `autoSize`, the way stage 4's eight sizing grips do — a box the artist has
+    /// shaped by hand is authoritative from then on.
+    func testADistortClearsAutoSize() throws {
+        let start = upright(size: CGSize(width: 120, height: 60), autoSize: true)
+        let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: .bottomRight, distort: true))
+        let moved = try XCTUnwrap(drag.distortedFrame(draggedTo: CGPoint(x: 200, y: 190)))
+        XCTAssertFalse(moved.autoSize)
+    }
+
+    /// **Clamping holds the last valid quad, through the real model path.**
+    ///
+    /// `HomographyLogicTests` pins the predicate; this pins that `CanvasManager.dragTextHandle`
+    /// actually obeys it — the frame after a refused delta is the frame from the last accepted one,
+    /// not the starting frame and not a quad with the corner under the finger.
+    func testARefusedDistortHoldsTheLastValidQuad() throws {
+        let manager = manager()
+        manager.beginTextSession(at: CGPoint(x: 40, y: 60))
+        manager.updateTextString("Wall")
+        manager.textCornerMode = .distort
+        manager.beginTextHandleDrag(.bottomRight)
+
+        // A legal move first, so "the last valid quad" is not the starting one.
+        let opposite = manager.textFrame[.topLeft]
+        let legal = CGPoint(x: opposite.x + 160, y: opposite.y + 120)
+        manager.dragTextHandle(to: legal)
+        let held = manager.textFrame
+        assertPoint(held[.bottomRight], legal, accuracy: 1e-9)
+
+        // Then straight through the opposite corner and out the other side, which is a bowtie.
+        manager.dragTextHandle(to: CGPoint(x: opposite.x - 200, y: opposite.y - 150))
+        XCTAssertEqual(manager.textFrame.corners, held.corners,
+                       "A refused delta must leave the last valid quad standing.")
+        manager.endTextHandleDrag()
+    }
+
+    /// A distort drag registers no history step of its own, exactly as stage 4's drags do not — the
+    /// session's single step covers everything inside it, and a second one underneath it would be a
+    /// dead entry the artist has to press through.
+    func testADistortDragRegistersNoHistoryStepOfItsOwn() {
+        let manager = manager()
+        manager.beginTextSession(at: CGPoint(x: 40, y: 60))
+        manager.updateTextString("Wall")
+        manager.textCornerMode = .distort
+        let depth = manager.history.undoStack.count
+        manager.beginTextHandleDrag(.bottomRight)
+        for step in 1...30 {
+            manager.dragTextHandle(to: CGPoint(x: 150 + CGFloat(step), y: 140 + CGFloat(step) / 2))
+        }
+        manager.endTextHandleDrag()
+        XCTAssertEqual(manager.history.undoStack.count, depth,
+                       "A drag records nothing; the session's own commit is the one step.")
+    }
+
+    // MARK: - Stage 5: typing in a distorted box happens flat
+
+    /// **ADD_TEXT.md §5.2, the owner's ruling, as geometry**: the editing box is flat — no
+    /// perspective — but it keeps the rotation and it stays where the warped box was.
+    ///
+    /// The three assertions are the three ways a plausible implementation gets this wrong: snapping
+    /// to axis-aligned (loses a rotation the artist can see), keeping the perspective (defeats the
+    /// point), and re-placing at the origin (the box jumps across the canvas when you tap into it).
+    func testTheFlatEditingBoxKeepsTheRotationAndDropsThePerspective() throws {
+        var warped = turned(upright(size: CGSize(width: 160, height: 60)), by: .pi / 6)
+        warped.corners[1].x += 26
+        warped.corners[1].y -= 18
+        warped.mode = .projective
+        XCTAssertNil(warped.affineTransform)
+
+        let flat = warped.flattenedForEditing
+        XCTAssertEqual(flat.mode, .affine)
+        XCTAssertNotNil(flat.affineTransform, "The whole point is that the caret gets an affine map.")
+        XCTAssertEqual(flat.size, warped.size)
+
+        // Still turned: the box's own +x axis is not the canvas's.
+        let basis = try XCTUnwrap(flat.basis)
+        XCTAssertGreaterThan(abs(basis.u.dy), 0.1, "A flattened box must not snap to axis-aligned.")
+
+        // And still where it was: the flat box's centre is the warped box's own centre carried
+        // through the map, which is not the same as the quad's corner average but is within a box's
+        // own width of it.
+        let warpedCentre = try XCTUnwrap(warped.homography?.map(CGPoint(x: warped.size.width / 2,
+                                                                        y: warped.size.height / 2)))
+        assertPoint(flat.centre, warpedCentre, accuracy: 1e-9,
+                    "The flat box is centred on the warped box's own middle.")
+    }
+
+    /// An `.affine` frame is returned unchanged — stage 4's behaviour (you edit in place under the
+    /// affine transform, rotated caret and all) has to survive stage 5 untouched.
+    func testAnAffineFrameIsNotFlattenedAtAll() {
+        let turnedFrame = turned(upright(), by: .pi / 5)
+        XCTAssertEqual(turnedFrame.flattenedForEditing, turnedFrame)
+    }
+
+    // MARK: - Stage 5: it actually bakes warped
+
+    /// The bake goes through the warp, not through the bounding box: a strongly foreshortened box
+    /// puts most of its ink in the half where the quad is wide, and almost none in the half where it
+    /// has narrowed.
+    ///
+    /// Asserted as an inequality between the two halves rather than as any measured extent — a
+    /// bounding-box fallback draws the same glyphs in both halves and fails, and the claim is true of
+    /// every font.
+    func testAForeshortenedBoxBakesItsInkIntoTheWideEnd() throws {
+        let words = recipe("MMMMMMMM", pointSize: 20)
+        var frame = TextFrame(origin: CGPoint(x: 20, y: 40), size: CGSize(width: 160, height: 60),
+                              autoSize: false)
+        // Left edge full height, right edge squeezed to a sliver about its own middle.
+        frame.corners = [CGPoint(x: 20, y: 40), CGPoint(x: 180, y: 62),
+                         CGPoint(x: 180, y: 78), CGPoint(x: 20, y: 100)]
+        frame.mode = .projective
+        XCTAssertNil(frame.affineTransform)
+        XCTAssertNotNil(frame.homography)
+
+        let image = try XCTUnwrap(TextLayout.render(recipe: words, frame: frame,
+                                                    canvasSize: Self.canvasSize))
+        let cg = try XCTUnwrap(image.cgImage)
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
+        let width = Int(Self.canvasSize.width), height = Int(Self.canvasSize.height)
+        var left = 0, right = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * 4 + 3
+                guard bytes.indices.contains(index), bytes[index] > 0 else { continue }
+                if x < 100 { left += 1 } else { right += 1 }
+            }
+        }
+        XCTAssertGreaterThan(left + right, 0, "The warp put no ink on the canvas at all.")
+        XCTAssertGreaterThan(left, right,
+                             "A foreshortened box has more ink in its wide end; a bounding-box "
+                             + "fallback would spread it evenly.")
+    }
+
     // MARK: - Support
 
     /// A canvas with one raster layer and an empty undo stack. `addLayer()` registers a structural

@@ -110,6 +110,13 @@ struct CanvasView: UIViewRepresentable {
         }
         textOverlay.onFocusChanged = { [weak coordinator = context.coordinator] focused in
             coordinator?.canvasManager.textIsFocused = focused
+            // **And re-run the overlay pass by hand, because `textIsFocused` is deliberately not
+            // `@Published`** — it changes as the keyboard comes and goes and nothing was reading it
+            // from a view until stage 5. `updateTextOverlay` now hides the nine grips while a
+            // `.projective` box is being typed into (they would otherwise sit on a quad the artist
+            // cannot see, inches from the flat editing box in front of it), and without this line
+            // that would only take effect on whatever unrelated SwiftUI pass happened next.
+            coordinator?.updateTextOverlay()
         }
         // The two hooks the model holds so it can drop the keyboard and route undo without knowing
         // what a first responder is. Weak on both sides: the manager outlives the view.
@@ -1915,8 +1922,18 @@ struct CanvasView: UIViewRepresentable {
             // Fed the same frame on the same pass, so the grips and the outline they grip cannot be
             // a frame apart. Handles stay up for the whole session, keyboard or not — an artist
             // sizing a wrap width does it while reading the text.
-            textTransformOverlay?.update(isActive: active, frame: canvasManager.textFrame,
-                                         canvasScale: canvasContentScale)
+            //
+            // **With one exception, added in stage 5: a `.projective` box being typed into.**
+            // ADD_TEXT.md §1's unwarp-while-typing rule puts a *flat* box on screen there while the
+            // model keeps the warped quad, so grips drawn from the model would sit on a quad the
+            // artist cannot see, several inches from the box they are looking at. Illustrator hides
+            // its envelope handles inside "edit contents" for the same reason. Tapping away restores
+            // both the perspective and the grips.
+            let flatEditing = canvasManager.textFrame.mode == .projective && canvasManager.textIsFocused
+            textTransformOverlay?.update(isActive: active && !flatEditing,
+                                         frame: canvasManager.textFrame,
+                                         canvasScale: canvasContentScale,
+                                         cornerMode: canvasManager.textCornerMode)
             guard active else { return }
             // Above every layer host so the box is visible and its band hit-testable. It claims only
             // the box and the band (`TextOverlayView.hitTest`), so everything else still falls

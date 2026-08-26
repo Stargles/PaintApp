@@ -464,6 +464,54 @@ extension TextFrame {
         return t
     }
 
+    /// The frame's four corners as the solver's own type, in the same order.
+    var quad: Quad? { Quad(corners) }
+
+    /// **The full 3×3 that `affineTransform` is the special case of** — ADD_TEXT.md §3 stage 5, and
+    /// the map every `.projective` frame draws through.
+    ///
+    /// Computed, never stored, which is §1's whole rule for this object: "not a warped bitmap, not
+    /// the 3×3 matrix". Retype the string, change the font, change the point size and the glyphs
+    /// re-lay-out into the same box and land in the same perspective, because the perspective was
+    /// never baked into anything.
+    ///
+    /// **It agrees with `affineTransform` on every quad stage 4 can make**, which is the seam that
+    /// stage entry left and `HomographyLogicTests.testTheSolversAffineMatchesStageFoursForEveryQuadItCanMake`
+    /// measures rather than assumes: 1728 rotated, scaled and translated boxes, no disagreement about
+    /// *whether* there is an affine map and at most 1.1e-16 between the two matrices when there is.
+    /// The residue is one ULP from the box prescale being a multiply by `1/w` here and a divide by
+    /// `w` there, and the two implementations are kept separate on purpose — routing
+    /// `affineTransform` through this would make the seam true by construction and the test vacuous.
+    var homography: Homography? {
+        guard let quad, size.width > TextFrame.degenerateExtent,
+              size.height > TextFrame.degenerateExtent else { return nil }
+        return Homography(boxSize: size, to: quad)
+    }
+
+    /// The flat box the artist types into while the frame is warped — ADD_TEXT.md §1 "Typing in a
+    /// distorted box happens unwarped" and §5.2, which the owner settled: *"Tap into perspective text
+    /// and the box springs back to flat while you type, the perspective version ghosted behind."*
+    ///
+    /// **Flat, not upright.** The obvious reading of "springs back to flat" is an axis-aligned box,
+    /// and that is the wrong one: a title the artist rotated 30° and *then* put into perspective would
+    /// snap straight the moment they tapped into it, losing an orientation they can see and did not
+    /// ask to change. What is taken out is the *foreshortening* alone —
+    /// `Homography.linearised(at:)` at the box's centre keeps the rotation, the scale and the shear
+    /// and drops the divide, so the flat box sits where the warped one sat and points the way it
+    /// pointed.
+    ///
+    /// Returns `self` unchanged for an `.affine` frame: there is nothing to unwarp, and stage 4's
+    /// behaviour — you edit in place under the affine transform, caret and all — is untouched.
+    var flattenedForEditing: TextFrame {
+        guard mode == .projective, let homography,
+              let flat = homography.linearised(at: CGPoint(x: size.width / 2, y: size.height / 2))
+        else { return self }
+        var out = self
+        out.corners = Quad.rect(CGRect(origin: .zero, size: size)).mapped(by: flat).points
+        out.mode = .affine
+        return out
+    }
+
     /// Point-in-quad with a slop collar, in the frame's own space.
     ///
     /// `VectorCanvas.frame(_:contains:slop:)` is this — it delegates here — so the display list's
@@ -535,6 +583,23 @@ extension TextFrame {
 
         /// True for the eight that size the box. The rotation knob is the exception everywhere.
         var isResize: Bool { self != .rotation }
+
+        /// The quad corner this grip sits *on*, for the four that sit on one — and nil for the four
+        /// edge midpoints and the knob, which sit between corners or off the box entirely.
+        ///
+        /// **This is what makes the four corners "independent" in stage 5's sense**: a distort drag
+        /// writes one entry of `corners` and leaves the other three exactly where they were, where a
+        /// stage-4 corner drag rebuilds all four from a basis. Only these four can distort; the edge
+        /// grips keep sizing an axis and the knob keeps rotating, in both modes.
+        var corner: Corner? {
+            switch self {
+            case .topLeft: return .topLeft
+            case .topRight: return .topRight
+            case .bottomRight: return .bottomRight
+            case .bottomLeft: return .bottomLeft
+            case .top, .right, .bottom, .left, .rotation: return nil
+            }
+        }
 
         /// How the box's width responds: nil freezes it.
         fileprivate var widthSign: CGFloat? {
@@ -628,6 +693,35 @@ extension TextFrame {
     }
 }
 
+// MARK: - What a corner grip does
+
+/// Whether dragging a corner sizes the box or distorts it — the segmented control at the bottom of
+/// the text panel, and `ADD_TEXT.md` §3 stage 5's "four independent corner handles".
+///
+/// **Tool state, deliberately kept out of `TextFrame`.** §1's rule is that the object stores what the
+/// text is and where it sits, never a mode of working; `TextFrame.mode` is a different question (what
+/// kind of map the quad needs) and is *derived* from the corners rather than chosen. Lives here
+/// rather than beside `CanvasManager` so `TextFrameDrag` — which is in this file and is what actually
+/// reads the decision — does not have to reach up into the app layer for it.
+enum TextCornerMode: String, CaseIterable, Identifiable, Codable {
+    /// Stage 4: a corner sizes both axes about the opposite corner, and the quad stays a
+    /// parallelogram.
+    case scale
+    /// Stage 5: a corner moves alone and the other three stay put, which is what makes the map
+    /// projective and puts type onto a wall.
+    case distort
+
+    var id: String { rawValue }
+
+    /// Label for the segmented control. Short enough to sit two-across in a 300 pt panel.
+    var displayName: String {
+        switch self {
+        case .scale: return "Scale"
+        case .distort: return "Distort"
+        }
+    }
+}
+
 // MARK: - One drag
 
 /// A handle drag in flight: **the whole starting quad and the anchor, latched at touch-down**.
@@ -653,28 +747,91 @@ struct TextFrameDrag: Equatable {
     /// The canvas point this drag holds still, latched with the quad.
     let anchor: CGPoint
 
-    private let basis: TextFrame.Basis
+    /// **Stage 5's fork.** False is stage 4 exactly: the eight sizing grips rebuild the whole quad
+    /// from a basis and the knob turns it. True is the projective distort — one corner moves, the
+    /// other three do not, and the quad stops being a parallelogram.
+    ///
+    /// A property of the *drag*, latched at touch-down, and never of the `TextFrame`: which grip
+    /// gesture the artist has selected is tool state, and the document stores only what the text is
+    /// and where it sits (§1, "the object stores a recipe, never a result").
+    let isDistort: Bool
 
-    init?(frame: TextFrame, handle: TextFrame.Handle) {
+    /// Nil only for a distort drag on a quad too warped to have perpendicular axes — which is every
+    /// quad a distort has already made, and none of which the sizing paths are reachable from.
+    private let basis: TextFrame.Basis?
+
+    init?(frame: TextFrame, handle: TextFrame.Handle, distort: Bool = false) {
+        if distort, handle.corner != nil, frame.corners.count == 4,
+           frame.size.width > TextFrame.degenerateExtent,
+           frame.size.height > TextFrame.degenerateExtent,
+           let corner = handle.corner {
+            self.start = frame
+            self.handle = handle
+            self.isDistort = true
+            // The diagonally opposite corner — the one point a distort provably does not move,
+            // since it writes exactly one entry of `corners`. Taken straight rather than through
+            // `anchor(for:)`, which decomposes onto the frame's axes and so assumes the
+            // parallelogram a distorted quad is not.
+            self.anchor = frame[TextFrame.Corner(rawValue: (corner.rawValue + 2) % 4) ?? .bottomRight]
+            self.basis = frame.basis
+            return
+        }
         guard let basis = frame.basis, let anchor = frame.anchor(for: handle) else { return nil }
         self.start = frame
         self.handle = handle
         self.anchor = anchor
         self.basis = basis
+        self.isDistort = false
     }
 
     /// The frame this drag produces with the finger at `point`.
     ///
     /// Pure, and a function of the *latched* frame alone — driving one delta or sixty produces the
     /// same answer for the same final point, which is the property `TextTransformLogicTests` pins.
+    ///
+    /// **A distort drag answers through `distortedFrame(draggedTo:)` and falls back to the latched
+    /// frame when that one is refused.** The live caller is `CanvasManager.dragTextHandle`, which
+    /// asks the optional form directly so it can hold the *last valid* quad rather than the starting
+    /// one — ADD_TEXT.md §1's clamping rule. This total form exists so a caller that drives a whole
+    /// gesture in one call still gets an answer, and so the two can never mean different things.
     func frame(draggedTo point: CGPoint, minimumExtent: CGFloat = TextFrame.minimumExtent) -> TextFrame {
-        handle == .rotation ? rotated(towards: point) : resized(towards: point, minimumExtent: minimumExtent)
+        if isDistort { return distortedFrame(draggedTo: point) ?? start }
+        return handle == .rotation ? rotated(towards: point) : resized(towards: point, minimumExtent: minimumExtent)
+    }
+
+    /// The frame with this drag's corner moved to `point` and the other three left alone — or **nil
+    /// when the quad that would produce is not one a homography can be drawn through**.
+    ///
+    /// `Homography.isValidQuad` is the whole of the refusal: strictly convex, non-self-intersecting,
+    /// above an area floor, solvable, and all four box corners at positive weight. ADD_TEXT.md §1 is
+    /// explicit that the resulting handle "will feel like it sticks", and that clamping is the honest
+    /// trade: rendering garbage or flipping the box through the horizon are both worse, and the big
+    /// editors do the same thing.
+    ///
+    /// **`autoSize` is cleared, and `mode` is derived rather than asserted.** Clearing the bit is
+    /// stage 4's rule for the eight sizing grips applied to a ninth kind of sizing — a box the artist
+    /// has shaped by hand is authoritative, and it also keeps `resized(to:)`'s parallelogram
+    /// arithmetic from ever meeting a projective quad. Deriving the mode matters more than it looks:
+    /// a distort that happens to land back on a parallelogram must go back to `.affine`, or
+    /// `affineTransform` would refuse a quad it can express and the artist would lose the native,
+    /// unresampled drawing path for a box that no longer needs the warp.
+    func distortedFrame(draggedTo point: CGPoint) -> TextFrame? {
+        guard isDistort, let corner = handle.corner, var quad = start.quad else { return nil }
+        quad[corner.rawValue] = point
+        guard Homography.isValidQuad(quad, boxSize: start.size) else { return nil }
+        var next = start
+        next.corners = quad.points
+        next.autoSize = false
+        let tolerance = max(1e-6, 1e-6 * max(start.size.width, start.size.height))
+        next.mode = quad.isParallelogram(tolerance: tolerance) ? .affine : .projective
+        return next
     }
 
     /// Turns the box about its own centre. Neither `size` nor `autoSize` moves: a rotation is not a
     /// resize, and freezing a pristine box's growth because it was turned would clip the artist's
     /// next keystroke for no reason they could name. See `CanvasManager.dragTextHandle`.
     private func rotated(towards point: CGPoint) -> TextFrame {
+        guard let basis else { return start }
         let c = start.centre
         // `+ π/2` because the knob stands off the *top* edge: dragging it straight up from the centre
         // is the box upright, which is angle zero. `ShapeOverlayView.report`'s rotation arm, verbatim.
@@ -697,6 +854,7 @@ struct TextFrameDrag: Equatable {
     /// implicit. From here `size` is authoritative, the text wraps and clips into it, and the
     /// overlay draws a solid outline where a pristine box draws a dashed one.
     private func resized(towards point: CGPoint, minimumExtent: CGFloat) -> TextFrame {
+        guard let basis else { return start }
         let d = CGVector(dx: point.x - anchor.x, dy: point.y - anchor.y)
         // Dot products rather than a 2×2 solve because `u ⟂ v` for every quad stage 4 writes; see
         // this file's stage-4 header for what happens to one that is not.

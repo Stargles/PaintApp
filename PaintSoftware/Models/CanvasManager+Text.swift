@@ -200,8 +200,20 @@ extension CanvasManager {
     /// Returns silently on a frame too degenerate to have axes — a zero-size box has no direction to
     /// size along, and a handle that quietly did nothing would be better than one that produced
     /// NaNs.
+    /// **Stage 5 added the second half of the first line.** A corner grip distorts when the panel's
+    /// Corners control says so; the four edge grips and the rotation knob never do, in either mode.
+    ///
+    /// **A distort drag drops the keyboard first**, and that is not tidiness. The moment the quad
+    /// stops being a parallelogram the frame becomes `.projective`, and `ADD_TEXT.md` §1's
+    /// unwarp-while-typing rule then says the box must spring flat for the caret — which, if the
+    /// caret were still live, would happen *underneath the finger*, mid-gesture, with the handle the
+    /// artist is holding jumping to a different place. Resigning first makes the rule's precondition
+    /// false before the drag can trip it.
     func beginTextHandleDrag(_ handle: TextFrame.Handle) {
-        guard textGestureActive, let drag = TextFrameDrag(frame: textFrame, handle: handle) else { return }
+        guard textGestureActive else { return }
+        let distort = textCornerMode == .distort && handle.corner != nil
+        guard let drag = TextFrameDrag(frame: textFrame, handle: handle, distort: distort) else { return }
+        if distort, textIsFocused { textFocusResigner?() }
         textHandleDrag = drag
         textFingerDown = true
         refreshUndoRedoState()
@@ -213,9 +225,23 @@ extension CanvasManager {
     /// "`setVectorTransform` is explicitly not the pattern to copy". The frame is a pure function of
     /// the latched drag and this one point, so sixty deltas cost sixty struct assignments and
     /// produce exactly the answer one delta to the same place would have.
+    /// **Stage 5's clamping lives in the one word `guard`.** `ADD_TEXT.md` §1: a drag that would
+    /// fail `isValidQuad` — a corner across the diagonal, a quad squeezed shut, a corner past the
+    /// vanishing line — holds the last valid quad rather than being refused outright or rendering
+    /// garbage. The handle then feels like it sticks, which the document says plainly is a UX cliff
+    /// and the honest one, and which is what the big editors do.
+    ///
+    /// The last valid quad is `textFrame` itself, because the only thing that ever writes it during a
+    /// drag is this line. So "hold it" is "do not write it", and no second copy of the frame has to
+    /// be kept in step with the first.
     func dragTextHandle(to canvasPoint: CGPoint) {
         guard textGestureActive, let drag = textHandleDrag else { return }
-        textFrame = drag.frame(draggedTo: canvasPoint)
+        if drag.isDistort {
+            guard let distorted = drag.distortedFrame(draggedTo: canvasPoint) else { return }
+            textFrame = distorted
+        } else {
+            textFrame = drag.frame(draggedTo: canvasPoint)
+        }
         objectWillChange.send()
     }
 

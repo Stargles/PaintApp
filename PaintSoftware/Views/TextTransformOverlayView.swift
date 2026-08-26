@@ -74,6 +74,10 @@ final class TextTransformOverlayView: UIView {
 
     private(set) var isActive = false
     private var frameModel: TextFrame?
+    /// What a corner grip will do if the artist takes hold of it. Only the drawn colour depends on
+    /// it — the geometry is identical either way, and `CanvasManager.beginTextHandleDrag` is where
+    /// the decision is actually made, so the two cannot disagree about what a drag does.
+    private var cornerMode: TextCornerMode = .scale
     private let handleHost = CALayer()
     private var handles: [(handle: TextFrame.Handle, layer: CALayer)] = []
     /// Which grip the finger is on. Latched here only so `touchesMoved` knows where to send the
@@ -101,7 +105,8 @@ final class TextTransformOverlayView: UIView {
     /// Handles are shown for the whole life of a session, including while the caret is live: an
     /// artist sizing a wrap width does it *while* reading the text, and hiding the grips whenever the
     /// keyboard is up would mean tapping away and back for every adjustment.
-    func update(isActive: Bool, frame: TextFrame, canvasScale: CGFloat) {
+    func update(isActive: Bool, frame: TextFrame, canvasScale: CGFloat,
+                cornerMode: TextCornerMode = .scale) {
         self.canvasScale = canvasScale
         guard isActive else {
             deactivate()
@@ -112,8 +117,9 @@ final class TextTransformOverlayView: UIView {
             isHidden = false
             isUserInteractionEnabled = true
         }
-        let sameShape = frameModel?.corners == frame.corners
+        let sameShape = frameModel?.corners == frame.corners && self.cornerMode == cornerMode
         frameModel = frame
+        self.cornerMode = cornerMode
         // Rebuild only when the quad moved; otherwise leave the layers alone. Tearing sublayers down
         // and re-adding them on every pass is what made the shape overlay's handles blink.
         if sameShape, !handles.isEmpty { return }
@@ -161,9 +167,14 @@ final class TextTransformOverlayView: UIView {
         clearHandles()
         for entry in frameModel.handleLayout(rotationOffset: rotationOffset) {
             let isRotation = entry.handle == .rotation
+            // A corner that is about to move on its own is drawn as its own thing, so the artist can
+            // tell which gesture they are holding before they move it. The four edge grips keep
+            // sizing an axis in both modes and so keep their colour in both.
+            let isDistortCorner = cornerMode == .distort && entry.handle.corner != nil
             let size = isRotation ? rotationHandleSize : handleSize
             let dot = CALayer()
-            dot.backgroundColor = isRotation ? UIColor.systemGreen.cgColor : UIColor.white.cgColor
+            dot.backgroundColor = isRotation ? UIColor.systemGreen.cgColor
+                : (isDistortCorner ? UIColor.systemOrange.cgColor : UIColor.white.cgColor)
             dot.borderColor = isRotation ? UIColor.white.cgColor : UIColor.systemBlue.cgColor
             dot.borderWidth = handleBorderWidth
             dot.cornerRadius = size / 2

@@ -48,6 +48,10 @@ final class TextOverlayView: UIView, UITextViewDelegate {
     private static let moveBandScreenPoints: CGFloat = 22
     private static let outlineScreenWidth: CGFloat = 1
     private static let dashScreenLength: CGFloat = 6
+    /// How faint the perspective ghost is behind the flat editing box. Low enough to read as a
+    /// reminder rather than as a second copy of the text, high enough that the artist can see where
+    /// the words will actually land.
+    private static let ghostOpacity: Float = 0.3
 
     /// Screen points per canvas point, pushed from the coordinator on every transform change.
     var canvasScale: CGFloat = 1 {
@@ -83,6 +87,14 @@ final class TextOverlayView: UIView, UITextViewDelegate {
     }()
 
     private let glyphLayer = CALayer()
+    /// The perspective version, shown faintly *behind* the flat editing box while the artist types
+    /// into a warped frame — ADD_TEXT.md §5.2, the owner's ruling: *"the perspective version ghosted
+    /// behind, snapping back when you tap away."*
+    ///
+    /// The same bitmap as `glyphLayer`, so it costs one extra `CALayer` and no extra rasterization.
+    /// Hidden — and its `contents` dropped — for every `.affine` frame, which is every frame stages
+    /// 1-4 could make.
+    private let ghostLayer = CALayer()
     private let outlineLayer = CAShapeLayer()
 
     // MARK: - State
@@ -118,13 +130,18 @@ final class TextOverlayView: UIView, UITextViewDelegate {
         isHidden = true
         isUserInteractionEnabled = false
 
-        glyphLayer.anchorPoint = .zero
-        glyphLayer.position = .zero
-        glyphLayer.magnificationFilter = .linear
-        // A warped edge aliases hard without this. Stage 1 never warps, but the flag costs nothing
-        // and Stage 5 would otherwise have to remember it.
-        glyphLayer.allowsEdgeAntialiasing = true
-        layer.addSublayer(glyphLayer)
+        for host in [ghostLayer, glyphLayer] {
+            host.anchorPoint = .zero
+            host.position = .zero
+            host.magnificationFilter = .linear
+            // A warped edge aliases hard without this — ADD_TEXT.md §1 names it among the settings a
+            // `CATransform3D` preview needs, and stage 1 set it a feature early precisely so stage 5
+            // would not have to remember.
+            host.allowsEdgeAntialiasing = true
+            layer.addSublayer(host)
+        }
+        ghostLayer.isHidden = true
+        ghostLayer.opacity = Self.ghostOpacity
 
         outlineLayer.fillColor = nil
         outlineLayer.strokeColor = UIColor.systemBlue.withAlphaComponent(0.9).cgColor
@@ -182,6 +199,8 @@ final class TextOverlayView: UIView, UITextViewDelegate {
         if textView.isFirstResponder { textView.resignFirstResponder() }
         textView.text = ""
         glyphLayer.contents = nil
+        ghostLayer.contents = nil
+        ghostLayer.isHidden = true
         outlineLayer.path = nil
         renderedKey = nil
         appliedStyle = nil
@@ -244,31 +263,94 @@ final class TextOverlayView: UIView, UITextViewDelegate {
     /// `bounds`/`center`/`transform` and never by `frame` — assigning `frame` to a transformed view
     /// is undefined, and the caret would land somewhere unrelated to the words. The centre is the
     /// box's own middle carried through the map, which is exactly what cancels the recentring.
+    /// **ADD_TEXT.md §1's unwarp-while-typing rule, as one predicate.**
+    ///
+    /// iOS's caret, selection handles and loupe render badly under a `CATransform3D` with a
+    /// perspective component — badly enough that §1 calls the concession "visible and the honest
+    /// one", and §5.2 records the owner closing the question: typing into distorted text happens
+    /// flat. So while the frame is `.projective` **and** the caret is live, everything the artist
+    /// interacts with is the flattened box; the warped version is behind it at `ghostOpacity`.
+    ///
+    /// `.affine` is untouched by any of this. Stage 4's behaviour — you edit in place under the
+    /// affine transform, rotated caret and all — is exactly what a false answer here produces.
+    private var isFlatEditing: Bool {
+        frameModel.mode == .projective && textView.isFirstResponder
+    }
+
+    /// The frame the artist can see and touch, which is the model's own except while flat-editing.
+    ///
+    /// The *model* is never flattened: `CanvasManager.textFrame` stays the warped quad throughout, so
+    /// what commits is the perspective the artist built and a session interrupted mid-type bakes the
+    /// warp rather than the editing convenience.
+    private var displayFrame: TextFrame {
+        isFlatEditing ? frameModel.flattenedForEditing : frameModel
+    }
+
     private func applyFrameGeometry() {
-        let box = frameModel.boundingBox
-        let transform = frameModel.affineTransform
-        let boxSize = transform == nil ? box.size : frameModel.size
+        let display = displayFrame
+        let box = display.boundingBox
+        let transform = display.affineTransform
+        let projective = transform == nil ? display.homography : nil
+        let boxSize = (transform == nil && projective == nil) ? box.size : display.size
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         glyphLayer.bounds = CGRect(origin: .zero, size: boxSize)
-        // `anchorPoint` and `position` are both zero, so the layer-to-superlayer map *is* the
-        // transform and local (0,0) lands on the frame's top-left corner.
-        glyphLayer.setAffineTransform(transform ?? CGAffineTransform(translationX: box.minX, y: box.minY))
+        if let transform {
+            // `anchorPoint` and `position` are both zero, so the layer-to-superlayer map *is* the
+            // transform and local (0,0) lands on the frame's top-left corner.
+            glyphLayer.setAffineTransform(transform)
+        } else if let projective {
+            // **The live warp: sixteen floats, and nothing rasterizes.** ADD_TEXT.md §4 rule 2 — the
+            // render server does the perspective divide and the resampling off the app thread, so a
+            // 60 Hz corner drag is strictly cheaper than even the 4.0 ms raster dab BUGS.md measures.
+            glyphLayer.transform = projective.catransform3D
+        } else {
+            glyphLayer.setAffineTransform(CGAffineTransform(translationX: box.minX, y: box.minY))
+        }
+        applyGhostGeometry(boxSize: boxSize)
         CATransaction.commit()
 
+        // The caret rides whatever the artist is editing. Under a flat edit that is an ordinary
+        // affine placement; under a `.projective` frame nobody is typing into (the keyboard is down,
+        // or the box was only just warped) the linearised map keeps the invisible text view over its
+        // own glyphs so the next tap lands in the right character.
+        let caretTransform = transform ?? projective?.linearised(at: CGPoint(x: boxSize.width / 2,
+                                                                             y: boxSize.height / 2))
         textView.transform = .identity
         textView.bounds = CGRect(origin: .zero, size: boxSize)
-        if let transform {
-            let middle = CGPoint(x: boxSize.width / 2, y: boxSize.height / 2).applying(transform)
+        if let caretTransform {
+            let middle = CGPoint(x: boxSize.width / 2, y: boxSize.height / 2).applying(caretTransform)
             // The linear part only: the translation is carried by `center`, and applying it twice
             // would put the caret one box-width away from the glyphs.
-            textView.transform = CGAffineTransform(a: transform.a, b: transform.b,
-                                                   c: transform.c, d: transform.d, tx: 0, ty: 0)
+            textView.transform = CGAffineTransform(a: caretTransform.a, b: caretTransform.b,
+                                                   c: caretTransform.c, d: caretTransform.d,
+                                                   tx: 0, ty: 0)
             textView.center = middle
         } else {
             textView.center = CGPoint(x: box.midX, y: box.midY)
         }
+    }
+
+    /// Places the perspective ghost, or takes it away.
+    ///
+    /// Always the *model's* frame, never the display one — the whole point of the ghost is to show
+    /// the thing the flat box is standing in for. Its `contents` are dropped when it is not needed so
+    /// a hidden layer is not holding a second reference to the glyph bitmap for the rest of the
+    /// session.
+    private func applyGhostGeometry(boxSize: CGSize) {
+        guard isFlatEditing, let warped = frameModel.homography else {
+            if !ghostLayer.isHidden {
+                ghostLayer.isHidden = true
+                ghostLayer.contents = nil
+            }
+            return
+        }
+        ghostLayer.isHidden = false
+        ghostLayer.bounds = CGRect(origin: .zero, size: boxSize)
+        ghostLayer.transform = warped.catransform3D
+        ghostLayer.contentsScale = glyphLayer.contentsScale
+        ghostLayer.contents = glyphLayer.contents
     }
 
     // MARK: - Style
@@ -301,7 +383,7 @@ final class TextOverlayView: UIView, UITextViewDelegate {
         outlineLayer.frame = bounds
         // The quad, not the bounding rectangle — stage 4 turns boxes, and an axis-aligned outline
         // around a turned one is a rectangle drawn where the text is not.
-        outlineLayer.path = Self.outlinePath(for: frameModel)
+        outlineLayer.path = Self.outlinePath(for: displayFrame)
         outlineLayer.lineWidth = Self.outlineScreenWidth / max(canvasScale, 0.01)
         if frameModel.autoSize {
             let dash = Self.dashScreenLength / max(canvasScale, 0.01)
@@ -340,16 +422,31 @@ final class TextOverlayView: UIView, UITextViewDelegate {
     /// exactly this.
     private var glyphContentsScale: CGFloat {
         let display = max(traitCollection.displayScale, 1)
-        let wanted = max(1, min(canvasScale * display, 3 * display))
+        let wanted = max(1, min(canvasScale * display * warpMagnification, 3 * display))
         let longest = max(glyphBoxSize.width, glyphBoxSize.height, 1)
         return max(TextLayout.minimumRenderScale, min(wanted, Self.maximumGlyphTexels / longest))
+    }
+
+    /// How much the frame's own map magnifies the box at its densest corner — ADD_TEXT.md §1's
+    /// "`contentsScale` comes from the largest per-corner destination scale of `H`".
+    ///
+    /// **1 for every frame stages 1-4 could make**, because a stage-4 quad's extent along each axis
+    /// is its `size` along that axis by construction (`TextFrame.Basis` documents that equality and
+    /// what depends on it). So this changed no existing backing store; it exists for the near corner
+    /// of a foreshortened quad, which is the one place a warped box genuinely needs more texels than
+    /// it has points.
+    private var warpMagnification: CGFloat {
+        guard let homography = frameModel.homography else { return 1 }
+        return max(1, homography.maximumCornerScale(ofBox: frameModel.size))
     }
 
     /// The bitmap is the *layout box*, not the frame's bounding rectangle: the rotation is carried
     /// by the layer's transform, so rendering the bounding box would rasterize the box's own
     /// diagonal and then rotate that.
     private var glyphBoxSize: CGSize {
-        frameModel.affineTransform == nil ? frameModel.boundingBox.size : frameModel.size
+        let display = displayFrame
+        if display.affineTransform != nil || display.homography != nil { return display.size }
+        return display.boundingBox.size
     }
 
     private static let maximumGlyphTexels: CGFloat = 4096
@@ -384,6 +481,10 @@ final class TextOverlayView: UIView, UITextViewDelegate {
         CATransaction.setDisableActions(true)
         glyphLayer.contentsScale = key.scale
         glyphLayer.contents = image.cgImage
+        if !ghostLayer.isHidden {
+            ghostLayer.contentsScale = key.scale
+            ghostLayer.contents = image.cgImage
+        }
         CATransaction.commit()
     }
 
@@ -406,11 +507,16 @@ final class TextOverlayView: UIView, UITextViewDelegate {
     /// between them decides *which* view `hitTest` returns, not whether the touch is ours.
     func claimsTouch(at point: CGPoint) -> Bool {
         guard isActive, !isHidden, isUserInteractionEnabled else { return false }
-        return frameModel.contains(point) || frameModel.contains(point, slop: moveBand)
+        let display = displayFrame
+        return display.contains(point) || display.contains(point, slop: moveBand)
     }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard claimsTouch(at: point) else { return nil }
+        // **The flat box while flat-editing, the warped quad otherwise.** What the artist is aiming
+        // at is what is on screen; testing the model's quad here would mean tapping the perspective
+        // ghost to place a caret in the flat box standing in front of it.
+        let frameModel = displayFrame
         // The quad and a collar around it, not the bounding rectangle — the same predicate the
         // display list's re-open query uses (`TextFrame.contains`), so tapping the empty corner of a
         // turned box is tapping the canvas, exactly as it is when the object is committed.
@@ -482,6 +588,12 @@ final class TextOverlayView: UIView, UITextViewDelegate {
     }
 
     func textViewDidBeginEditing(_ textView: UITextView) {
+        // Before the model is told, because `isFlatEditing` reads `isFirstResponder` directly and the
+        // box has to spring flat on the same turn the keyboard comes up — waiting for the SwiftUI
+        // pass would show one frame of caret under a perspective transform, which is exactly the
+        // thing §1 says renders badly.
+        applyFrameGeometry()
+        applyOutlineStyle()
         onFocusChanged?(true)
     }
 
@@ -490,6 +602,9 @@ final class TextOverlayView: UIView, UITextViewDelegate {
         // very next thing that happens is usually the commit reading `textRecipe.string`.
         isTextChangeScheduled = false
         pushTextToModel()
+        // And back into perspective on the way out, for `textViewDidBeginEditing`'s reason mirrored.
+        applyFrameGeometry()
+        applyOutlineStyle()
         onFocusChanged?(false)
     }
 }

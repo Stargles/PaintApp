@@ -194,10 +194,10 @@ enum TextLayout {
     /// For an upright frame that matrix *is* the translate stage 1 wrote, which is why this
     /// generalisation changed no stage-1 pixel.
     ///
-    /// A frame with no affine map — a collapsed quad, or the non-parallelogram only stage 5 can make
-    /// — falls back to drawing through its bounding box, the stage 1 branch kept as the honest
-    /// approximation rather than nothing at all. Stage 5 replaces *that* branch with the
-    /// `warpHomography` kernel and its scalar Swift twin.
+    /// **Stage 5 replaced the fallback branch with the warp.** A frame with no affine map is now
+    /// either `.projective` — glyphs rasterised at box size and carried through `warpHomography` (or
+    /// its scalar Swift twin) onto the quad — or genuinely collapsed, in which case the stage 1
+    /// bounding-box draw is still the honest approximation and is still what happens.
     static func render(recipe: TextRecipe, frame: TextFrame, canvasSize: CGSize,
                        library: FontLibrary = .shared) -> UIImage? {
         guard !recipe.string.isEmpty, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
@@ -219,12 +219,81 @@ enum TextLayout {
             if let transform = frame.affineTransform {
                 cg.concatenate(transform)
                 draw(recipe, font: font, boxSize: frame.size, clip: !frame.autoSize, into: cg)
+            } else if drawWarped(recipe, frame: frame, library: library) {
+                // Nothing more: the warp drew itself, in canvas coordinates, above.
             } else {
                 cg.translateBy(x: box.minX, y: box.minY)
                 draw(recipe, font: font, boxSize: box.size, clip: !frame.autoSize, into: cg)
             }
             cg.restoreGState()
         }
+    }
+
+    // MARK: - Warping
+
+    /// The supersample ceiling on a warp's source bitmap. Past 3× the artist cannot see the
+    /// difference and the backing store is the square of it — ADD_TEXT.md §1's cap on the live
+    /// overlay's `contentsScale`, reused for the bake because it is the same trade.
+    static let maximumWarpSupersample: CGFloat = 3
+
+    /// And the absolute one, in texels on the longest side. §4 rule 1: "capped absolutely at
+    /// 4096×4096 texels even fully supersampled". A cap in *points* is not a cap at all once
+    /// `autoSize` can grow a title as wide as the string.
+    static let maximumWarpTexels: CGFloat = 4096
+
+    /// How many source texels per canvas point a warp's glyph bitmap should carry, so the densest
+    /// part of the destination is not resampled up from too little.
+    ///
+    /// The densest part is a *corner* — `Homography.maximumCornerScale` says why — which is exactly
+    /// the property that makes a strongly foreshortened quad affordable: the near edge asks for the
+    /// detail and the far edge, which is where most of the area went, costs nothing extra.
+    static func warpSourceScale(boxSize: CGSize, homography: Homography) -> CGFloat {
+        let wanted = max(1, min(homography.maximumCornerScale(ofBox: boxSize), maximumWarpSupersample))
+        let longest = max(boxSize.width, boxSize.height, 1)
+        return max(minimumRenderScale, min(wanted, maximumWarpTexels / longest))
+    }
+
+    /// The recipe's glyphs carried onto the frame's quad: the image, and the canvas rectangle it
+    /// covers.
+    ///
+    /// **One box-sized raster, one warp over the quad's bounding box.** Neither is canvas-sized, and
+    /// neither happens more than once per commit — ADD_TEXT.md §4 rule 7. §2's rejected alternative,
+    /// a CPU resample as the *live* path, is the one this must not become: it is called from the bake
+    /// and from the vector flatten, never from a gesture.
+    ///
+    /// `sourceScale` is read back off the rendered image rather than taken from what was asked for,
+    /// because `UIGraphicsImageRenderer` rounds its pixel dimensions and a half-texel of disagreement
+    /// between the two would be a half-texel shift in every warped glyph.
+    static func warpedGlyphs(recipe: TextRecipe, frame: TextFrame,
+                             library: FontLibrary = .shared) -> (image: UIImage, destination: CGRect)? {
+        guard !recipe.string.isEmpty, let homography = frame.homography else { return nil }
+        let destination = frame.boundingBox.integral
+        guard destination.width >= 1, destination.height >= 1 else { return nil }
+        let scale = warpSourceScale(boxSize: frame.size, homography: homography)
+        guard let source = renderBox(recipe: recipe, boxSize: frame.size, clip: !frame.autoSize,
+                                     scale: scale, library: library)?.cgImage,
+              source.width > 0, source.height > 0 else { return nil }
+        let sourceScale = CGFloat(source.width) / frame.size.width
+        guard let warped = ImageWarp.warpedImage(source: source, sourceScale: sourceScale,
+                                                 boxSize: frame.size, homography: homography,
+                                                 destination: destination) else { return nil }
+        return (UIImage(cgImage: warped, scale: 1, orientation: .up), destination)
+    }
+
+    /// Draws the warped glyphs into the *current UIKit graphics context* at their canvas position,
+    /// and reports whether it had anything to draw.
+    ///
+    /// Shared by the raster bake and the vector flatten so the two cannot come to disagree about
+    /// where a warped box lands — the same discipline that made `draw` internal in stage 3, one level
+    /// up. `UIImage.draw(in:)` rather than `CGContext.draw(_:in:)` because both callers are inside a
+    /// `UIGraphicsImageRenderer`, whose context is already y-flipped for UIKit; the CoreGraphics call
+    /// would put the text upside down.
+    @discardableResult
+    static func drawWarped(_ recipe: TextRecipe, frame: TextFrame,
+                           library: FontLibrary = .shared) -> Bool {
+        guard let warped = warpedGlyphs(recipe: recipe, frame: frame, library: library) else { return false }
+        warped.image.draw(in: warped.destination)
+        return true
     }
 
     /// The same glyphs at *box* size rather than canvas size — the live overlay's bitmap.

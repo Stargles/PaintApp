@@ -2252,6 +2252,20 @@ final class CanvasManager: ObservableObject {
     /// owns the session, and a reference frame living in a view is a reference frame that dies when
     /// SwiftUI decides to rebuild one.
     var textHandleDrag: TextFrameDrag?
+    /// What the four **corner** grips do — size the box the way stage 4 shipped, or move that one
+    /// corner on its own, which is `ADD_TEXT.md` §3 stage 5's projective distort.
+    ///
+    /// **Tool state, not document state, and that is why it is here rather than on `TextFrame`.**
+    /// §1's rule is that the object stores what the text is and where it sits and nothing else; which
+    /// gesture the artist currently has selected is neither. It also has to survive between sessions
+    /// — an artist putting six labels onto the same wall sets it once — which is the same argument
+    /// the recipe's font and colour already win.
+    ///
+    /// A mode rather than a modifier because the owner framed the Move tool's version as one ("each
+    /// of the 4 points can be moved independently"), and because stage 4 deliberately built
+    /// corner-drag-as-scale and pinned it with a dozen identities. Distort is additive to that, not a
+    /// replacement for it. The edge grips and the rotation knob are unaffected in either mode.
+    @Published var textCornerMode: TextCornerMode = .scale
     /// The id of the **already-committed vector element** this session re-opened, or nil for a box
     /// that does not exist in any display list yet (a fresh placement, or any raster session).
     ///
