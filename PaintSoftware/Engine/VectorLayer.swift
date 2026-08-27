@@ -874,10 +874,25 @@ final class VectorCanvas {
     /// its center lands at `t.position`, rotated/scaled about that center. `pivot` must be the same
     /// fixed point used to derive `t` via `layerTransform(pivot:)`.
     static func affine(from t: LayerTransform, pivot: CGPoint) -> CGAffineTransform {
-        CGAffineTransform.identity
+        affine(from: t, aspect: 1, pivot: pivot)
+    }
+
+    /// The same, for a box the Move bar's **Freeform** has stretched: `aspect` is how much wider than
+    /// tall the box is, and the two axis scales it implies come from
+    /// `ObjectTransformFrame.axisScales(scale:aspect:)` rather than being spelled again here — the box
+    /// and the geometry it maps must not be able to disagree about which axis is which.
+    /// `aspect == 1` returns `affine(from:pivot:)` bit for bit, so no existing caller changes by
+    /// going through here.
+    ///
+    /// **This is the only affine in the lasso move that is not a similarity**, and every consumer of
+    /// it has to know: `mapping(_:throughSimilarity:)` asserts against exactly that shape, and the
+    /// stretched arm is `mapping(_:throughStretch:)`.
+    static func affine(from t: LayerTransform, aspect: CGFloat, pivot: CGPoint) -> CGAffineTransform {
+        let s = ObjectTransformFrame.axisScales(scale: t.scale, aspect: aspect)
+        return CGAffineTransform.identity
             .translatedBy(x: t.position.x, y: t.position.y)
             .rotated(by: t.rotation)
-            .scaledBy(x: t.scale, y: t.scale)
+            .scaledBy(x: s.x, y: s.y)
             .translatedBy(x: -pivot.x, y: -pivot.y)
     }
 
@@ -1549,7 +1564,9 @@ final class VectorCanvas {
     /// out of `t` below rather than being left behind. A non-uniform or projective `t` would make
     /// `hypot(t.a, t.b)` a plausible lie — one number standing in for two different axis scales — so
     /// the shape is asserted rather than hoped for. Freeform and Distort do not widen this function;
-    /// they need a different one.
+    /// they need a different one — Freeform's is `mapping(_:throughStretch:)` below, which shares the
+    /// stroke and fill arms with this one through `drawn(_:through:widthScale:)` and differs only in
+    /// where the ink's width scale comes from.
     ///
     /// **A *reflection* passes that assert, and is deliberately allowed — but only for two of the four
     /// kinds.** The Move menu's Mirror folds one into `t` (`VectorFloat.mirror`), and the shape test
@@ -1599,36 +1616,9 @@ final class VectorCanvas {
                "mapping(_:throughSimilarity:) was handed \(t), which scales or shears its two axes "
                + "differently. `k` would be one number standing in for two, and every width below "
                + "would be wrong in a way the live preview cannot show.")
-        var transform = t
         switch element {
-        case .stroke(var stroke):
-            stroke.samples = stroke.samples.map {
-                let p = $0.point.applying(t)
-                return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
-            }
-            if var lattice = stroke.lattice {
-                lattice.samples = lattice.samples.map {
-                    let p = $0.point.applying(t)
-                    return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
-                }
-                stroke.lattice = lattice
-            }
-            // The scalar `BrushStamper` actually stamps with. Guarded on `k != 1` so a pure
-            // translation leaves the stored number bit-identical rather than multiplied by a 1.0 that
-            // rounding might not be.
-            if k != 1 { stroke.size *= k }
-            return .stroke(stroke)
-        case .fill(let fill):
-            // A `CGPath` carries the whole affine, scale and rotation included, so a fill needs no
-            // currency of its own. (`copy(using:)` works in single precision — a mapped coordinate is
-            // right to about 1e-6 of its magnitude, not to 1e-9.)
-            guard let path = fill.cgPath, let moved = path.copy(using: &transform) else { return element }
-            var mapped = VectorFillElement(path: moved, color: fill.color, opacity: fill.opacity,
-                                           evenOddFill: fill.evenOddFill)
-            // The id is identity, not geometry: a nudge moves an element, it does not mint a new one,
-            // and the float tracks its pieces by id.
-            mapped.id = fill.id
-            return .fill(mapped)
+        case .stroke, .fill:
+            return drawn(element, through: t, widthScale: k) ?? element
         case .image(var image):
             // A placed image is a `LayerTransform` — position, **one** scale, one rotation — which is
             // exactly a similarity and so follows this map whole. It is also why a flip or a Freeform
@@ -1671,6 +1661,143 @@ final class VectorCanvas {
                 text.recipe.typography.pointSize *= k
             }
             return .text(text)
+        }
+    }
+
+    /// **One element moved by a non-uniform `t` — the Move bar's Freeform.**
+    ///
+    /// `mapping(_:throughSimilarity:)` asserts its two axes scale alike, and its own doc says why:
+    /// `hypot(t.a, t.b)` would be one number standing in for two. This is the other function that
+    /// sentence promises, and it differs in exactly one place — where the ink's width comes from.
+    ///
+    /// ## The ink keeps its shape; the path stretches. Owner's ruling, 2026-08-26
+    ///
+    /// *"There should be an option on if the ink should be scaled/deformed or should stay the same
+    /// when distorted"*, **defaulting to ink-keeps-its-shape** — one toggle over Freeform and Distort
+    /// together. That default is what this function is: the centre line goes wherever `t` puts it, and
+    /// the dab stays **round**. A 3:1 horizontal stretch gives a stroke whose spine is three times as
+    /// long and whose ink is still a circle, not an ellipse.
+    ///
+    /// It is also the reason this stage needs **no renderer change at all**. The deforming half is a
+    /// `saveGState`/`concatenate`/`restoreGState` around `DabGradientCache.stamp`, whose
+    /// `drawRadialGradient` already draws an exact ellipse under a non-uniform CTM — but it needs the
+    /// residue *stored on the stroke*, and therefore a `Codable` field, a decode default and a second
+    /// implementation in both `DabTarget`s. None of that is here, and none of it is owed until the
+    /// toggle ships.
+    ///
+    /// ## Which of the two scales the round dab takes
+    ///
+    /// **`sqrt(|det t|)` — the geometric mean of the two axis scales**, not one axis, not neither.
+    /// Three things follow and each is the reason:
+    ///
+    ///  * **It agrees with Uniform where the two overlap.** For a similarity `sqrt(|det|) == k`
+    ///    exactly, so a Freeform drag along the box's own diagonal produces the identical document a
+    ///    Uniform drag would have. Taking "the ink never scales in Freeform" instead — the literal
+    ///    reading of the owner's earlier *"default being no scaling"*, which was said of **Distort**,
+    ///    where there is no global scale to speak of — would put a discontinuity exactly there: the
+    ///    same visible gesture would thicken the ink in one mode and not the other.
+    ///  * **It is the only choice that is symmetric in the two axes.** Picking `|t.a|` would make a
+    ///    3:1 stretch and a 1:3 stretch produce different ink weights for the same shape turned
+    ///    ninety degrees.
+    ///  * **It composes.** `sqrt(|det|)` is multiplicative, so stretching 2:1 and then 1:2 leaves the
+    ///    width exactly where it started rather than drifting by a factor per gesture.
+    ///
+    /// The stroke's own dab walk still pays `mapping(_:throughSimilarity:)`'s three floors, and one
+    /// more besides: under a *non*-uniform map the walk is no longer similar to itself, so the dab
+    /// count and phase genuinely do change. Nothing is lost by it — the weight and the path are both
+    /// right — but the exactness claim the similarity carries does **not** extend here, and no test
+    /// should be written as though it did.
+    ///
+    /// ## The two kinds it refuses
+    ///
+    /// A placed image's placement *is* a `LayerTransform` and a text frame's `Basis` reads four
+    /// ordered corners as `size`; neither can hold a per-axis stretch, for the same reason neither
+    /// can hold a flip. `canBeStretched(_:)` is the question asked *before* the artist is offered the
+    /// mode, exactly as `canBeMirrored(_:)` is asked before they are offered the button — teaching
+    /// images to hold a stretched shape is its own stage (the owner's *"Teach images to hold a
+    /// stretched shape"*).
+    static func mapping(_ element: VectorElement, throughStretch t: CGAffineTransform) -> VectorElement {
+        guard !t.isIdentity else { return element }
+        let k = sqrt(abs(t.a * t.d - t.b * t.c))
+        switch element {
+        case .stroke, .fill:
+            return drawn(element, through: t, widthScale: k) ?? element
+        case .image, .text:
+            assertionFailure("mapping(_:throughStretch:) was handed a placed image or a text box, "
+                             + "whose placement cannot hold the per-axis stretch in \(t). Ask "
+                             + "`canBeStretched(_:)` before offering Freeform.")
+            return element
+        }
+    }
+
+    /// The two kinds that follow **any** affine — a polyline of points carrying one scalar width, and
+    /// a `CGPath`. Nil for the two whose own placement is a `LayerTransform` or four ordered corners,
+    /// which each caller answers for itself because the answer differs: a similarity carries them and
+    /// a stretch cannot.
+    ///
+    /// Shared by both public mappings so the half they agree about cannot drift — the same discipline
+    /// `mapping(_:throughSimilarity:)`'s own header states for the kinds. `widthScale` is the one
+    /// number they disagree about, and each derives it where the argument for it is written down.
+    private static func drawn(_ element: VectorElement, through t: CGAffineTransform,
+                              widthScale k: CGFloat) -> VectorElement? {
+        var transform = t
+        switch element {
+        case .stroke(var stroke):
+            stroke.samples = stroke.samples.map {
+                let p = $0.point.applying(t)
+                return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
+            }
+            if var lattice = stroke.lattice {
+                lattice.samples = lattice.samples.map {
+                    let p = $0.point.applying(t)
+                    return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
+                }
+                stroke.lattice = lattice
+            }
+            // The scalar `BrushStamper` actually stamps with. Guarded on `k != 1` so a pure
+            // translation leaves the stored number bit-identical rather than multiplied by a 1.0 that
+            // rounding might not be.
+            if k != 1 { stroke.size *= k }
+            return .stroke(stroke)
+        case .fill(let fill):
+            // A `CGPath` carries the whole affine, scale and rotation included, so a fill needs no
+            // currency of its own. (`copy(using:)` works in single precision — a mapped coordinate is
+            // right to about 1e-6 of its magnitude, not to 1e-9.)
+            guard let path = fill.cgPath, let moved = path.copy(using: &transform) else { return nil }
+            var mapped = VectorFillElement(path: moved, color: fill.color, opacity: fill.opacity,
+                                           evenOddFill: fill.evenOddFill)
+            // The id is identity, not geometry: a nudge moves an element, it does not mint a new one,
+            // and the float tracks its pieces by id.
+            mapped.id = fill.id
+            return .fill(mapped)
+        case .image, .text:
+            return nil
+        }
+    }
+
+    /// Whether this element can go through `mapping(_:throughStretch:)` — i.e. whether **Freeform** is
+    /// offerable on a float carrying it.
+    ///
+    /// The same shape as `canBeMirrored(_:)` below and for the same underlying reason, but they are
+    /// two questions and not one: a reflection is a *similarity* that only the `.image` and `.text`
+    /// arms mishandle, and a per-axis stretch is not a similarity at all. Today the two answers
+    /// coincide; the stage that teaches a placed image to hold a stretched shape moves this one and
+    /// leaves that one alone, which is why the Move bar asks each separately.
+    ///
+    ///  * a **stroke** is points plus one width, and a stretch moves the points and scales the width
+    ///    by the map's own area root — visibly right, and the only sense in which a round dab can
+    ///    follow a non-uniform map without becoming an ellipse;
+    ///  * a **fill** is a `CGPath`, which carries any affine exactly, stretch included — so a fill is
+    ///    the one kind Freeform is *perfect* on;
+    ///  * a **placed image** stores position, **one** scale and one rotation. There is nowhere in that
+    ///    shape for two axis scales, and inventing one means a stored field and a decode migration;
+    ///  * a **text box** would have to keep `Basis.width == size.width` while its corners stopped
+    ///    describing a rectangle scaled uniformly from `size` — which is the perspective-text problem,
+    ///    not this one.
+    static func canBeStretched(_ element: VectorElement) -> Bool {
+        switch element {
+        case .stroke, .fill: return true
+        case .image, .text: return false
         }
     }
 

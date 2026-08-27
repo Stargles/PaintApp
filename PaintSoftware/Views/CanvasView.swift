@@ -1496,10 +1496,11 @@ struct CanvasView: UIViewRepresentable {
             // `isVectorTransforming` at all — Move with a selection never turns that flag on.
             if let float = canvasManager.vectorFloat,
                canvasManager.layerIndex(ofID: float.layerID) != nil {
-                let transform = liveVectorFloatTransform ?? float.frame.transform
+                let pose = liveVectorFloatPose ?? Self.pose(of: float)
                 overlay.update(isActive: true,
-                               frame: ObjectTransformFrame(transform: transform,
+                               frame: ObjectTransformFrame(transform: pose.transform,
                                                            contentSize: float.contentSize,
+                                                           aspect: pose.aspect,
                                                            allowedHandles: float.frame.allowedHandles),
                                canvasScale: canvasContentScale)
                 container.bringSubviewToFront(overlay)
@@ -1570,13 +1571,21 @@ struct CanvasView: UIViewRepresentable {
         /// and folding them together would mean every branch below asking which it was.
         private var activeVectorFloatDrag: ObjectTransformDrag?
 
-        /// Where the box is *right now*, while the finger is down.
+        /// Where the box is *right now*, while the finger is down — its similarity **and** its
+        /// Freeform aspect, since the two together are the pose and either alone draws the box in a
+        /// place the piece is not.
         ///
         /// **Held here rather than on the model, and that is the point.** `vectorFloat` is
         /// `@Published`, so writing the live value would put a whole SwiftUI pass on every touch-move
         /// of a gesture built specifically not to have one. The model learns the answer once, at the
         /// gesture's end, where it becomes one undo step.
-        private var liveVectorFloatTransform: LayerTransform?
+        private var liveVectorFloatPose: ObjectTransformDrag.Pose?
+
+        /// The pose a float is resting at — its box transform and its aspect, read as one value so no
+        /// call site can pick up one and forget the other.
+        private static func pose(of float: VectorFloat) -> ObjectTransformDrag.Pose {
+            ObjectTransformDrag.Pose(transform: float.frame.transform, aspect: float.frame.aspect)
+        }
 
         /// Reconciles the layer host and the marching ants with `canvasManager.vectorFloat`, on every
         /// pass, the same self-healing shape as every other `update…` here.
@@ -1598,9 +1607,10 @@ struct CanvasView: UIViewRepresentable {
                 // and the base it is measured from have to describe the same moment.
                 host.strokeView.beginVectorFloat(
                     image: vector.renderIsolated(ids: float.insideIDs),
-                    base: VectorCanvas.affine(from: float.latchedFrameTransform, pivot: float.pivot))
+                    base: VectorCanvas.affine(from: float.latchedFrameTransform,
+                                              aspect: float.latchedAspect, pivot: float.pivot))
             }
-            showVectorFloat(float, at: liveVectorFloatTransform ?? float.frame.transform)
+            showVectorFloat(float, at: liveVectorFloatPose ?? Self.pose(of: float))
             if let container = containerView, let overlay = transformOverlay {
                 container.bringSubviewToFront(overlay)
             }
@@ -1618,14 +1628,17 @@ struct CanvasView: UIViewRepresentable {
         /// One delta's worth of display: a `UIView.transform` on the latched piece, and one
         /// `CALayer` transform on each of the two marching-ants layers. No allocation, no rasterize,
         /// no model write.
-        private func showVectorFloat(_ float: VectorFloat, at transform: LayerTransform) {
-            let placement = VectorCanvas.affine(from: transform, pivot: float.pivot)
+        private func showVectorFloat(_ float: VectorFloat, at pose: ObjectTransformDrag.Pose) {
+            let placement = VectorCanvas.affine(from: pose.transform, aspect: pose.aspect,
+                                                pivot: float.pivot)
             // The piece is measured from where its *bitmap* sits, which is the lift for an ordinary
-            // float and the last nudge for a re-armed one.
+            // float and the last nudge for a re-armed one — `latchedAspect` as well as
+            // `latchedFrameTransform`, or a stretch already in the bitmap would be applied twice.
             layerHosts[float.layerID]?.strokeView.updateVectorFloat(placement)
             // The ants are measured from where the *model's* selection path sits, which is the last
             // nudge. Identity between gestures, which is when the two are the same thing.
-            let written = VectorCanvas.affine(from: float.frame.transform, pivot: float.pivot)
+            let written = VectorCanvas.affine(from: float.frame.transform, aspect: float.frame.aspect,
+                                              pivot: float.pivot)
             selectionOverlay?.setLiveSelectionTransform(written.inverted().concatenating(placement))
         }
 
@@ -1635,7 +1648,12 @@ struct CanvasView: UIViewRepresentable {
             // so it would record a step that reverts nothing. The float writes its own step per
             // gesture end instead.
             if let float = canvasManager.vectorFloat {
-                activeVectorFloatDrag = ObjectTransformDrag(frame: float.frame, handle: handle, at: point)
+                // **The mode is latched here, once**, with the rest of the drag — see
+                // `ObjectTransformDrag.isFreeform`. The Move bar's picker stays live while a piece
+                // floats, and reading it per delta would change what the finger already down means.
+                activeVectorFloatDrag = ObjectTransformDrag(frame: float.frame, handle: handle,
+                                                            at: point,
+                                                            freeform: canvasManager.vectorFloatIsFreeform)
                 canvasManager.beginVectorFloatDrag()
                 // Synchronously, not on the next SwiftUI pass: the first delta can arrive before one.
                 updateVectorFloat()
@@ -1663,12 +1681,13 @@ struct CanvasView: UIViewRepresentable {
             // Core Animation transform and the ants are two `CALayer` transforms; the geometry catches
             // up once, at the gesture's end.
             if let drag = activeVectorFloatDrag, let float = canvasManager.vectorFloat {
-                let transform = drag.transform(draggedTo: point)
-                liveVectorFloatTransform = transform
-                showVectorFloat(float, at: transform)
+                let pose = drag.pose(draggedTo: point)
+                liveVectorFloatPose = pose
+                showVectorFloat(float, at: pose)
                 transformOverlay?.update(isActive: true,
-                                         frame: ObjectTransformFrame(transform: transform,
+                                         frame: ObjectTransformFrame(transform: pose.transform,
                                                                      contentSize: float.contentSize,
+                                                                     aspect: pose.aspect,
                                                                      allowedHandles: float.frame.allowedHandles),
                                          canvasScale: canvasContentScale)
                 return
@@ -1689,12 +1708,12 @@ struct CanvasView: UIViewRepresentable {
 
         func endObjectTransformDrag() {
             if activeVectorFloatDrag != nil {
-                let transform = liveVectorFloatTransform
+                let pose = liveVectorFloatPose
                 activeVectorFloatDrag = nil
-                liveVectorFloatTransform = nil
+                liveVectorFloatPose = nil
                 // One gesture, one nudge, one undo step. No `commitStructureGesture` — see
                 // `beginObjectTransformDrag`.
-                if let transform { canvasManager.nudgeVectorFloat(to: transform) }
+                if let pose { canvasManager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect) }
                 updateVectorFloat()
                 return
             }

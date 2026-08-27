@@ -13,6 +13,11 @@ import Foundation
 /// The semantics are the ones the owner ruled correct on 2026-08-21 and are unchanged by the port:
 /// dragging inside the box moves the whole layer, a corner scales it uniformly about its centre, and
 /// the knob above the top edge turns it about the same centre.
+///
+/// **The lasso move's floating piece borrows the same box**, and since stage 3a it can be *stretched*
+/// as well as scaled — see `aspect`. A whole-layer box never is, because `VectorCanvas.setTransform`
+/// reads its argument back as a similarity, and both defaults below are the unstretched ones for that
+/// reason.
 struct ObjectTransformFrame: Equatable {
 
     /// The layer's aggregate move/scale/rotate, about `contentSize`'s centre.
@@ -38,11 +43,49 @@ struct ObjectTransformFrame: Equatable {
     /// edge nodes and the box-only rotate knob are meant to arrive through this filter, not beside it.
     var allowedHandles: Set<Handle> = Set(Handle.allCases)
 
-    init(transform: LayerTransform, contentSize: CGSize,
+    /// **Freeform's independent axes, held as the one number `LayerTransform` has no room for: how
+    /// much wider than tall the box is, relative to the content in it.** 1 is a box that has never
+    /// been stretched; 3 is the owner's *"3:1"*, three times as wide as it is tall for the same
+    /// artwork. The *area* factor stays in `transform.scale`, which is the geometric mean of the two
+    /// axis scales, so this holds only the shape.
+    ///
+    /// **That split is what makes the owner's ruling (2026-08-26) true by construction** — *"a
+    /// Freeform stretch survives a switch to Uniform: 3:1 stays 3:1 and scales from there."* Uniform
+    /// drags `transform.scale` and never touches this, so the shape is exactly what survives; and a
+    /// Freeform drag whose two axes grow by the same factor leaves `aspect` alone and multiplies
+    /// `scale`, which is what Uniform would have done. Freeform therefore *contains* Uniform rather
+    /// than sitting beside it, and there is no discontinuity for an artist to fall through when they
+    /// drag a corner along the box's own diagonal.
+    ///
+    /// Positive by construction — `ObjectTransformDrag` floors both axes at `minimumScale` before
+    /// deriving it, and nothing else writes it. A zero or negative value makes `axisScales` NaN, which
+    /// `local(_:)` refuses rather than silently turning the box inside out.
+    ///
+    /// Defaulted to 1 so every existing call site — the whole-layer Move box above all, whose
+    /// `VectorCanvas.setTransform` path can only carry a similarity — is untouched.
+    var aspect: CGFloat = 1
+
+    init(transform: LayerTransform, contentSize: CGSize, aspect: CGFloat = 1,
          allowedHandles: Set<Handle> = Set(Handle.allCases)) {
         self.transform = transform
         self.contentSize = contentSize
+        self.aspect = aspect
         self.allowedHandles = allowedHandles
+    }
+
+    /// The box's two axis scales. **The one place `scale` and `aspect` are turned back into a pair**,
+    /// so the projection, its inverse and `VectorCanvas.affine(from:aspect:pivot:)` cannot disagree
+    /// about which axis the aspect widens — the same discipline `handleLayout` applies to the grips.
+    ///
+    /// `aspect == 1` returns `(scale, scale)` exactly: `sqrt(1)` is 1 and `x / 1` is `x`, so an
+    /// unstretched box is bit-identical to what it was before Freeform existed.
+    static func axisScales(scale: CGFloat, aspect: CGFloat) -> (x: CGFloat, y: CGFloat) {
+        let half = sqrt(aspect)
+        return (scale * half, scale / half)
+    }
+
+    var axisScales: (x: CGFloat, y: CGFloat) {
+        Self.axisScales(scale: transform.scale, aspect: aspect)
     }
 
     /// A box with no extent draws and hits nothing — the state the overlay hides itself in.
@@ -67,7 +110,8 @@ struct ObjectTransformFrame: Equatable {
     /// and this is a model type — depending on it would make the whole floating-piece overlay a
     /// prerequisite for compiling the Move box's geometry, and for testing it.
     func projected(_ local: CGPoint) -> CGPoint {
-        let x = local.x * transform.scale, y = local.y * transform.scale
+        let s = axisScales
+        let x = local.x * s.x, y = local.y * s.y
         let r = transform.rotation
         return CGPoint(x: transform.position.x + x * cos(r) - y * sin(r),
                        y: transform.position.y + x * sin(r) + y * cos(r))
@@ -160,13 +204,13 @@ struct ObjectTransformFrame: Equatable {
     /// `point` expressed in the box's own local, centred, unrotated, unscaled space. Nil when the
     /// transform is degenerate and cannot be inverted.
     private func local(_ point: CGPoint) -> CGPoint? {
-        let scale = transform.scale
-        guard abs(scale) > .ulpOfOne else { return nil }
+        let s = axisScales
+        guard abs(s.x) > .ulpOfOne, abs(s.y) > .ulpOfOne else { return nil }
         let dx = point.x - transform.position.x, dy = point.y - transform.position.y
         let r = -transform.rotation
         let rx = dx * cos(r) - dy * sin(r)
         let ry = dx * sin(r) + dy * cos(r)
-        return CGPoint(x: rx / scale, y: ry / scale)
+        return CGPoint(x: rx / s.x, y: ry / s.y)
     }
 }
 
@@ -194,41 +238,116 @@ struct ObjectTransformDrag: Equatable {
     /// move band there is nothing to hold still, and it is the centre only so the type stays simple.
     let anchor: CGPoint
 
+    /// `ObjectTransformFrame.aspect` when the finger went down, latched for the same reason `start`
+    /// is: every delta is measured from the pose the drag began in, never from the one the previous
+    /// delta produced.
+    let startAspect: CGFloat
+
+    /// Whether a corner drag stretches the two axes independently (**Freeform**) or scales them
+    /// together (**Uniform**).
+    ///
+    /// **Latched at touch-down, like everything else on this type.** The Move bar's picker is live
+    /// while a piece floats, so an artist can change it mid-drag; reading it per delta would change
+    /// what the finger already on the screen means, and the piece would lurch on the frame the
+    /// segment changed. `false` for every caller that does not ask, which keeps the whole-layer Move
+    /// box on the uniform arm — `VectorCanvas.setTransform` can only carry a similarity, so a
+    /// stretched whole layer has nowhere to be stored.
+    let isFreeform: Bool
+
     /// Below this the layer is a dot the artist cannot get back — the same floor the pre-port
-    /// `handleScalePan` applied.
+    /// `handleScalePan` applied. Applied per *axis* under Freeform, so neither can be collapsed
+    /// independently of the other.
     static let minimumScale: CGFloat = 0.02
 
-    init(frame: ObjectTransformFrame, handle: ObjectTransformFrame.Handle, at point: CGPoint) {
+    /// What a drag produces: the box's similarity, plus the one part of its pose a `LayerTransform`
+    /// cannot hold. `aspect` is unchanged from the lift for every drag except a Freeform corner.
+    struct Pose: Equatable {
+        var transform: LayerTransform
+        var aspect: CGFloat
+    }
+
+    init(frame: ObjectTransformFrame, handle: ObjectTransformFrame.Handle, at point: CGPoint,
+         freeform: Bool = false) {
         self.start = frame.transform
         self.startPoint = point
         self.handle = handle
         self.anchor = frame.centre
+        self.startAspect = frame.aspect
+        self.isFreeform = freeform
     }
 
-    /// The transform this drag produces with the finger at `point`.
-    func transform(draggedTo point: CGPoint) -> LayerTransform {
+    /// The transform this drag produces with the finger at `point`. **Loses the aspect**, so it is
+    /// only correct for a caller that cannot hold one — see `pose(draggedTo:)`, which every Freeform
+    /// caller uses.
+    func transform(draggedTo point: CGPoint) -> LayerTransform { pose(draggedTo: point).transform }
+
+    /// The pose this drag produces with the finger at `point`.
+    func pose(draggedTo point: CGPoint) -> Pose {
         switch handle {
         case .body:
             var moved = start
             moved.position = CGPoint(x: start.position.x + (point.x - startPoint.x),
                                      y: start.position.y + (point.y - startPoint.y))
-            return moved
+            return Pose(transform: moved, aspect: startAspect)
         case .topLeft, .topRight, .bottomRight, .bottomLeft:
-            let startDistance = hypot(startPoint.x - anchor.x, startPoint.y - anchor.y)
-            // A grab that starts on the centre has no radius to scale against, and dividing by it
-            // would send the layer to infinity on the first pixel of movement.
-            guard startDistance > 1 else { return start }
-            let currentDistance = hypot(point.x - anchor.x, point.y - anchor.y)
-            var scaled = start
-            scaled.scale = max(start.scale * (currentDistance / startDistance), Self.minimumScale)
-            return scaled
+            guard isFreeform else { return Pose(transform: uniformlyScaled(to: point), aspect: startAspect) }
+            return stretched(to: point)
         case .rotation:
             let startAngle = atan2(startPoint.y - anchor.y, startPoint.x - anchor.x)
             let currentAngle = atan2(point.y - anchor.y, point.x - anchor.x)
             var turned = start
             turned.rotation = start.rotation + (currentAngle - startAngle)
-            return turned
+            return Pose(transform: turned, aspect: startAspect)
         }
+    }
+
+    /// **Uniform**: one factor, the ratio of the two radii, on both axes. Unchanged since the port.
+    private func uniformlyScaled(to point: CGPoint) -> LayerTransform {
+        let startDistance = hypot(startPoint.x - anchor.x, startPoint.y - anchor.y)
+        // A grab that starts on the centre has no radius to scale against, and dividing by it
+        // would send the layer to infinity on the first pixel of movement.
+        guard startDistance > 1 else { return start }
+        let currentDistance = hypot(point.x - anchor.x, point.y - anchor.y)
+        var scaled = start
+        scaled.scale = max(start.scale * (currentDistance / startDistance), Self.minimumScale)
+        return scaled
+    }
+
+    /// **Freeform**: each axis grows by its own factor, measured in the *box's* axes rather than the
+    /// screen's — so a piece the artist has already turned stretches along the edges they can see,
+    /// which is the same reason the rotation arm measures its angles about `anchor`.
+    ///
+    /// The two per-axis scales are then re-split into the area factor (`scale`, their geometric mean)
+    /// and the shape (`aspect`, their ratio), which is the whole of the owner's *"3:1 stays 3:1 and
+    /// scales from there"*: a subsequent Uniform drag multiplies `scale` and leaves `aspect` where
+    /// this put it.
+    ///
+    /// **`fx == fy` reproduces the uniform arm** — the two `sqrt(aspect)` halves cancel, leaving
+    /// `scale · sqrt(f·f)` and `aspect · (f/f)`, i.e. the same scale to within a rounding step and
+    /// the aspect untouched exactly. So dragging a corner along the box's own diagonal in Freeform is
+    /// Uniform, with no seam for the artist to feel.
+    private func stretched(to point: CGPoint) -> Pose {
+        let r = -start.rotation
+        let (d0x, d0y) = inBoxAxes(startPoint, cosR: cos(r), sinR: sin(r))
+        let (d1x, d1y) = inBoxAxes(point, cosR: cos(r), sinR: sin(r))
+        // A grab on one of the box's own axes has no lever on the *other* one, and dividing by it
+        // would send that axis to infinity on the first pixel — the uniform arm's centre guard,
+        // applied per axis instead of to the radius. It is reachable without a degenerate grab: a
+        // corner of a box one point tall sits within a point of its own horizontal axis.
+        let fx = abs(d0x) > 1 ? abs(d1x / d0x) : 1
+        let fy = abs(d0y) > 1 ? abs(d1y / d0y) : 1
+        let base = ObjectTransformFrame.axisScales(scale: start.scale, aspect: startAspect)
+        let sx = max(base.x * fx, Self.minimumScale)
+        let sy = max(base.y * fy, Self.minimumScale)
+        var stretched = start
+        stretched.scale = sqrt(sx * sy)
+        return Pose(transform: stretched, aspect: sx / sy)
+    }
+
+    /// `point`'s offset from the anchor, turned back into the box's own unrotated axes.
+    private func inBoxAxes(_ point: CGPoint, cosR: CGFloat, sinR: CGFloat) -> (CGFloat, CGFloat) {
+        let dx = point.x - anchor.x, dy = point.y - anchor.y
+        return (dx * cosR - dy * sinR, dx * sinR + dy * cosR)
     }
 }
 

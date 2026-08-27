@@ -374,6 +374,177 @@ final class ObjectTransformLogicTests: XCTestCase {
         XCTAssertEqual(drag.start, frame.transform)
     }
 
+    // MARK: - Freeform (Move stage 3a)
+
+    /// **A Freeform corner pulls one axis and leaves the other where it was.** The 400×300 box's
+    /// bottom-right corner dragged three times as far from the centre *horizontally only* comes back
+    /// 1200×300 — which is `aspect == 3` (three times as wide as tall for the same artwork) with the
+    /// area factor `sqrt(3)` in `scale`.
+    ///
+    /// The split is the point: `LayerTransform` has one scale, so a pose that stretched only one axis
+    /// had nowhere to be stored, which is why the Move bar's picker was raster-only until this stage.
+    ///
+    /// Watched failing with the corner arm forced back to the uniform one and `axisScales` made to
+    /// ignore the aspect — `main`'s behaviour reached through this stage's API: *("1.0") is not equal
+    /// to ("3.0")* on the aspect, and, further down, *("742.16") is not equal to ("300.0") — the axis
+    /// the finger did not pull is untouched*. The uniform arm takes the ratio of the two *radii*, so
+    /// pulling sideways grows the box vertically by 2.47× as well.
+    func testAFreeformCornerStretchesOnlyTheAxisTheFingerPulled() {
+        let frame = upright()
+        let centre = frame.centre
+        let corner = frame.corners[2]                       // bottom-right, (1200, 650)
+        let pulled = CGPoint(x: centre.x + (corner.x - centre.x) * 3, y: corner.y)
+        let drag = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: corner, freeform: true)
+        let pose = drag.pose(draggedTo: pulled)
+
+        XCTAssertEqual(pose.aspect, 3, accuracy: Self.loose, "three times as wide as it is tall")
+        XCTAssertEqual(pose.transform.scale, sqrt(3), accuracy: Self.loose,
+                       "and the area factor is the geometric mean of the two axis scales")
+
+        let stretched = ObjectTransformFrame(transform: pose.transform, contentSize: frame.contentSize,
+                                             aspect: pose.aspect)
+        assertPoint(stretched.corners[2], pulled, "the corner arrives under the finger")
+        assertPoint(stretched.centre, centre, "and the centre is still what a scale holds still")
+        XCTAssertEqual(stretched.corners[1].x - stretched.corners[0].x, 1200, accuracy: Self.loose)
+        XCTAssertEqual(stretched.corners[3].y - stretched.corners[0].y, 300, accuracy: Self.loose,
+                       "the axis the finger did not pull is untouched")
+    }
+
+    /// **Freeform contains Uniform rather than sitting beside it.** Drag a corner along the box's own
+    /// diagonal — both axes growing by the same factor — and Freeform produces the pose Uniform would
+    /// have: the same scale, and an aspect that has not moved.
+    ///
+    /// This is the seam an artist would otherwise fall through, and it is why `scale` holds the
+    /// *geometric mean* rather than one axis: any other split makes the same visible gesture mean two
+    /// different things depending on which segment of the picker is lit.
+    ///
+    /// It is an invariant rather than a coordinate, so it is true of any correct split — every
+    /// symmetric mean of two equal numbers is that number. What it fails against is an arm that is
+    /// not a superset of the uniform one at all: watched failing with the stretch measured from the
+    /// touch-down point instead of from the anchor (the shape of the *raster* corner arm, which
+    /// anchors the opposite corner), *("1.0") is not equal to ("2.0")*.
+    func testAFreeformDragAlongTheDiagonalIsTheUniformDrag() {
+        let frame = upright()
+        let centre = frame.centre
+        let corner = frame.corners[2]
+        let doubled = CGPoint(x: centre.x + (corner.x - centre.x) * 2,
+                              y: centre.y + (corner.y - centre.y) * 2)
+        let free = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: corner, freeform: true)
+        let fixed = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: corner)
+
+        let pose = free.pose(draggedTo: doubled)
+        XCTAssertEqual(pose.transform.scale, fixed.transform(draggedTo: doubled).scale, accuracy: Self.epsilon)
+        XCTAssertEqual(pose.aspect, 1, "a diagonal drag changes the size and not the shape")
+    }
+
+    /// The stretch is measured in the **box's** axes, not the screen's — so a piece the artist has
+    /// already turned stretches along the edges they can see. Same reason the rotation arm measures
+    /// its angles about the anchor rather than about the origin.
+    ///
+    /// The box is turned a quarter turn, so its own +x axis points down the screen; pulling the
+    /// corner *downwards* is therefore a pull along the box's width.
+    ///
+    /// Watched failing with the corner arm forced back to the uniform one: *("1.0") is not equal to
+    /// ("3.0")*.
+    func testAFreeformStretchFollowsTheBoxsOwnAxesThroughARotation() {
+        let frame = upright(rotation: .pi / 2)
+        let centre = frame.centre
+        let corner = frame.corners[2]
+        // The corner's offset from the centre, in the box's own axes, is (+200, +150); a quarter turn
+        // maps that to canvas (-150, +200). Tripling the box's *x* means tripling the canvas y term.
+        let pulled = CGPoint(x: centre.x - 150, y: centre.y + 600)
+        let drag = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: corner, freeform: true)
+        let pose = drag.pose(draggedTo: pulled)
+
+        XCTAssertEqual(pose.aspect, 3, accuracy: Self.loose,
+                       "pulling down a box turned on its side stretches its width, not its height")
+        XCTAssertEqual(pose.transform.rotation, frame.transform.rotation, "and turns nothing")
+    }
+
+    /// **The owner's ruling, 2026-08-26: *"a Freeform stretch survives a switch to Uniform — 3:1 stays
+    /// 3:1 and scales from there."*** It falls out of the split rather than needing a rule: the
+    /// uniform arm writes `scale` and never touches `aspect`, so a stretched box scaled up stays the
+    /// same shape.
+    ///
+    /// Watched failing with `axisScales` ignoring the aspect: *("1385.64") is not equal to ("2400.0")*
+    /// — the box comes back square and `sqrt(3)`× too small, which is the pre-stage behaviour.
+    func testAUniformDragLeavesAFreeformStretchWhereItIs() {
+        let stretched = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 1000, y: 500),
+                                                                       scale: sqrt(3), rotation: 0),
+                                             contentSize: CGSize(width: 400, height: 300),
+                                             aspect: 3)
+        let corner = stretched.corners[2]
+        let centre = stretched.centre
+        let doubled = CGPoint(x: centre.x + (corner.x - centre.x) * 2,
+                              y: centre.y + (corner.y - centre.y) * 2)
+        let pose = ObjectTransformDrag(frame: stretched, handle: .bottomRight, at: corner)
+            .pose(draggedTo: doubled)
+
+        XCTAssertEqual(pose.aspect, 3, accuracy: Self.epsilon, "3:1 stays 3:1")
+        XCTAssertEqual(pose.transform.scale, 2 * sqrt(3), accuracy: Self.loose, "and scales from there")
+        let after = ObjectTransformFrame(transform: pose.transform, contentSize: stretched.contentSize,
+                                         aspect: pose.aspect)
+        XCTAssertEqual(after.corners[1].x - after.corners[0].x, 2400, accuracy: Self.loose)
+        XCTAssertEqual(after.corners[3].y - after.corners[0].y, 600, accuracy: Self.loose)
+    }
+
+    /// A stretched box hit-tests its **stretched** interior. `contains` maps the point back through
+    /// the pose, so a point that was inside the square box and is outside the stretched one is
+    /// declined — otherwise the move band would answer for empty canvas beside a narrowed piece.
+    ///
+    /// Watched failing with `axisScales` made to ignore the aspect: both halves go red at once, which
+    /// is the point — the box would draw stretched and hit-test square.
+    func testAStretchedBoxHitTestsTheShapeItDraws() {
+        var frame = upright()
+        frame.aspect = 4                                  // 800 wide, 150 tall
+        XCTAssertTrue(frame.contains(CGPoint(x: 1380, y: 500)), "well inside the widened box")
+        XCTAssertFalse(frame.contains(CGPoint(x: 1000, y: 620)),
+                       "and outside the narrowed one, though the unstretched box contained it")
+        XCTAssertTrue(upright().contains(CGPoint(x: 1000, y: 620)), "fixture precondition")
+    }
+
+    /// Neither axis can be collapsed on its own — `minimumScale` is applied per axis before the pose
+    /// is derived, so a corner dragged onto the box's own centre line leaves a piece the artist can
+    /// still grab rather than an invisible sliver.
+    ///
+    /// Watched failing with the corner arm forced back to the uniform one: *("1.8") is not equal to
+    /// ("0.02")* — one radius ratio floors both axes together or neither.
+    func testAFreeformCornerCannotCollapseEitherAxis() {
+        let frame = upright()
+        let drag = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: frame.corners[2],
+                                       freeform: true)
+        // Dragged back onto the centre in x, and out to 3× in y.
+        let pose = drag.pose(draggedTo: CGPoint(x: frame.centre.x, y: frame.centre.y + 450))
+        let axes = ObjectTransformFrame.axisScales(scale: pose.transform.scale, aspect: pose.aspect)
+        XCTAssertEqual(axes.x, ObjectTransformDrag.minimumScale, accuracy: Self.loose)
+        XCTAssertEqual(axes.y, 3, accuracy: Self.loose, "and the other axis is unaffected by the floor")
+    }
+
+    /// **Nothing switched Freeform on where nobody asked for it.**
+    ///
+    /// The trap this feature was warned about is `allowedHandles`, which defaults to *all cases* — so
+    /// a new grip turns itself on everywhere, the whole-layer box included. Freeform sidesteps it by
+    /// adding no grip at all, and pays the same tax on the two defaults it *did* add: an
+    /// `ObjectTransformFrame` built the way the whole-layer Move box builds one is unstretched, and a
+    /// drag built the way `CanvasView`'s whole-layer arm builds one is uniform. Both matter because
+    /// `VectorCanvas.setTransform` stores a similarity — a stretched whole layer has nowhere to go,
+    /// and would be silently discarded at the gesture's end.
+    ///
+    /// Watched failing with `freeform:`'s default flipped to `true`: *XCTAssertFalse failed — a drag
+    /// that did not ask for Freeform does not get it*, and *("10.5") is not equal to ("1.0")* on the
+    /// aspect. **Two tests written years before this one went red with it** —
+    /// `testACornerScalesAboutTheCentreAndTurnsNothing` and `testScaleCannotBeDraggedBelowItsFloor` —
+    /// so the whole-layer box was already partly defended; this states the rule outright.
+    func testTheWholeLayerBoxIsUnstretchedAndItsDragIsUniform() {
+        let frame = ObjectTransformFrame(transform: LayerTransform(position: .zero, scale: 1, rotation: 0),
+                                         contentSize: CGSize(width: 400, height: 300))
+        XCTAssertEqual(frame.aspect, 1, "a box nobody stretched is square")
+        XCTAssertEqual(frame.axisScales.x, frame.axisScales.y, "and its two axes are one number")
+        let drag = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: frame.corners[2])
+        XCTAssertFalse(drag.isFreeform, "and a drag that did not ask for Freeform does not get it")
+        XCTAssertEqual(drag.pose(draggedTo: CGPoint(x: 900, y: 100)).aspect, 1)
+    }
+
     // MARK: - The live drag, expressed to Core Animation
 
     /// The claim the whole (c) fix rests on: assigning this affine to the already-rendered image

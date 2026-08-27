@@ -35,8 +35,69 @@ remaining kinds are a `CGPath` boolean and a centre-point test.
 | the lifecycle: lift, nudge, bake, cancel, undo | `CanvasManager+LassoMove.swift`, and `VectorFloat` |
 | the piece on screen under a Core Animation transform | `StrokeCanvasView.beginVectorFloat` / `updateVectorFloat` / `endVectorFloat`, modelled line for line on the whole-layer `beginLiveLayerTransform` trio |
 | travelling marching ants | `SelectionOverlayView.setLiveSelectionTransform` during a drag; `CanvasManager.moving(_:by:)` writes the real path at each gesture end |
-| a box that offers all six grips — move band, four corners, rotate knob | the default `ObjectTransformFrame.allowedHandles`; the filter is kept for Freeform's edge nodes, not because anything withholds a grip today |
+| a box that offers all six grips — move band, four corners, rotate knob | the default `ObjectTransformFrame.allowedHandles`; the filter is kept for Freeform's edge nodes and the box-only knob, not because anything withholds a grip today. **Freeform itself added no grip** — see below |
 | the way in | `TopToolbar.toggleMove()` — with a selection on a vector cel, `beginVectorLassoMove()` |
+
+### Freeform — shipped 2026-08-27 (stage 3a)
+
+The Move bar's mode picker was raster-only until this stage, with a caption saying why: a lassoed
+vector piece scaled uniformly whichever segment was lit, because `LayerTransform` is position, **one**
+scale and one rotation. It now carries a second number beside it and the picker is live.
+
+| what | where |
+|---|---|
+| the box's shape, as one number: **how much wider than tall it is**, with the area factor left in `transform.scale` | `ObjectTransformFrame.aspect`, and `axisScales(scale:aspect:)` — the **one** place the pair is turned back into two axis scales, so the projection, its inverse and the geometry map cannot disagree |
+| a corner drag that scales the two axes independently | `ObjectTransformDrag.pose(draggedTo:)`'s `stretched` arm, on `isFreeform` — **latched at touch-down** with the rest of the drag, so flipping the picker mid-drag cannot lurch the piece |
+| the non-similarity affine the box now implies | `VectorCanvas.affine(from:aspect:pivot:)`. `aspect == 1` is the old function bit for bit |
+| one element moved by it | `VectorCanvas.mapping(_:throughStretch:)`, beside the similarity one it does **not** widen. The two share `drawn(_:through:widthScale:)` — the half they agree about — and differ only in where the width scale comes from |
+| which of the two a nudge uses | `applyToVectorFloat`, on the *pose* and not on the mode: an unstretched float goes through the similarity arm exactly as it did before Freeform existed, assert and all |
+| Freeform refusing, out loud, on a piece carrying a placed image or a text box | `VectorCanvas.canBeStretched(_:)` → `CanvasManager.freeformUnavailableReason`, the Mirror pattern applied to the neighbouring impossibility. `vectorFloatIsFreeform` is the second guard, on the drag, because `transformMode` is shared with the raster tier and outlives the piece that chose it |
+| the stretch surviving undo, Reset and a mode switch | `frame.aspect` in the nudge's undo step; the `aspect != 1` term in `canResetFloating`; and `nudgeVectorFloat(to:aspect:)`'s defaulted `aspect`, which is what makes *"3:1 stays 3:1 and scales from there"* fall out rather than need a rule |
+
+**The ink keeps its shape and the path stretches — owner's ruling, 2026-08-26**, one toggle over
+Freeform and Distort together, *defaulting to* ink-keeps-its-shape. So the dab stays round and the
+round dab takes **`sqrt(|det|)`, the map's own area root**. Three reasons, and the first is the one
+that settles it:
+
+- **It agrees with Uniform where the two overlap.** For a similarity `sqrt(|det|)` *is* `k`, so a
+  Freeform drag along the box's own diagonal produces the identical document a Uniform drag would.
+  Freeform therefore **contains** Uniform rather than sitting beside it, and there is no seam for an
+  artist to fall through. The literal alternative — *"default being no scaling"*, which the owner said
+  of **Distort**, where there is no global scale to read — would put a discontinuity exactly there.
+- **It is the only choice symmetric in the two axes**: a 3:1 stretch and a 1:3 stretch are the same
+  shape turned ninety degrees and must weigh the same.
+- **It composes.** A pose whose `scale` did not move has two axis scales multiplying to one, so a
+  *pure shape change never changes the ink weight at all* — which is the "unit-determinant residue"
+  the stretched-ink path will later store on the stroke.
+
+**Nothing is persisted and no renderer changed**, which is the whole of why 3a shipped alone.
+`aspect` lives on the transient float; `VectorStroke`, `VectorImageElement` and every `Codable` are
+untouched. The deforming-ink half is a `saveGState`/`concatenate`/`restoreGState` around
+`DabGradientCache.stamp` — whose `drawRadialGradient` already draws an exact ellipse under a
+non-uniform CTM — plus a stored residue, a decode default and a second `DabTarget` implementation.
+
+**One honest cost, and it is bounded rather than hidden: while the finger is down on a Freeform
+corner, the preview is not the bake.** The latched piece is a *bitmap* under a Core Animation
+transform, so a non-uniform one stretches the ink along with the path, which is the opposite of what
+the bake does by ruling. A gesture that changes the aspect therefore **drops the latch** at its end —
+the same mechanism `mayDiverge` and Mirror already use — so the layer re-renders from real geometry
+between gestures and the next drag's preview is measured from *that* render. The approximation is one
+gesture's worth of stretch and cannot accumulate. Making it exact is the deforming-ink renderer path,
+i.e. the toggle's other half.
+
+**Not in this stage, and each for a stated reason:**
+
+- **Edge nodes** (single-axis grips on the four edges, which the raster overlay has). Freeform is
+  complete without them — the owner's own definition is *"corner drags scale x and y independently"* —
+  and adding four `Handle` cases walks straight into the trap this stage was warned about:
+  `allowedHandles` defaults to *all cases*, so a new grip switches itself on for the whole-layer box
+  too, where there is nothing to store it in.
+- **The yellow box-only rotate knob** (3b) and **placed images holding a stretched shape** (3c).
+- **Freeform on the whole-layer box.** `VectorCanvas.setTransform` stores a `CGAffineTransform` but
+  `layerTransform(pivot:)` reads it back as a similarity, so a stretched whole layer would be silently
+  discarded at the gesture's end. Both defaults — `ObjectTransformFrame.aspect` and
+  `ObjectTransformDrag(freeform:)` — are the unstretched, uniform ones for that reason, and
+  `testTheWholeLayerBoxIsUnstretchedAndItsDragIsUniform` is what keeps them there.
 
 ### The Move menu — shipped 2026-08-22 (stage 2)
 
@@ -800,18 +861,29 @@ where it is now the largest remaining item rather than a footnote.
 move tool on vector layer does not have any move nodes for rotate or scale."* The whole-cel box had
 always had them; only the lassoed float was restricted. The restriction was one argument, and
 discharging it was four lines in `mapping` plus the exactness argument above — no per-sample width,
-no `VectorSample` migration, no lattice re-walk, no Codable change. **Freeform (independent-axis
-scale), the box-only rotate knob, flips and Distort are still not built**, and none of them can go
-through `mapping(_:throughSimilarity:)`: `LayerTransform` holds one scale and one rotation and cannot
-express a per-axis stretch, a negative determinant or a homography. They need a quad, which is a
-model type this stage deliberately did not introduce.
+no `VectorSample` migration, no lattice re-walk, no Codable change. None of Freeform, the box-only
+rotate knob, flips or Distort can go through `mapping(_:throughSimilarity:)`: `LayerTransform` holds
+one scale and one rotation and cannot express a per-axis stretch, a negative determinant or a
+homography.
+
+**This paragraph used to end "they need a quad, which is a model type this stage deliberately did not
+introduce", and two of the four have since disproved it.** Flips shipped in stage 2 as one
+`CGAffineTransform` on the float (`VectorFloat.mirror`), and Freeform shipped in stage 3a as **one
+extra scalar** on the box (`ObjectTransformFrame.aspect`) plus a second mapping function. A quad is
+what *Distort* needs — four corners moving independently is a homography and nothing smaller — and
+generalising from it to the whole list overstated the cost of the two cheapest members by a model
+type each. The box-only knob is the remaining unbuilt one and it needs no quad either.
 
 **Stage 4 — the follow-ups, independent small branches.** Each stands alone; none blocks the others.
 
 - ~~**Rotate and scale a lasso selection**~~ — **done**, see §0. There was no re-phase to accept: the
   walk is similar to itself once `VectorStroke.size` scales with the geometry.
-- **Freeform, the box-only rotate knob, flips and Distort**, which all need a four-corner quad rather
-  than a `LayerTransform` and are their own staged piece of work.
+- ~~**Freeform**~~ — **done**, stage 3a, see §0. It needed one scalar on the box and a second mapping
+  function, not the quad this list assumed.
+- ~~**Flips**~~ — **done**, stage 2, as one affine on the float.
+- **The box-only rotate knob** (stage 3b) and **placed images holding a stretched shape** (3c), and
+  then **Distort** (stage 5) over the shared `Homography` solver — the one member of this list that
+  really does need a quad.
 - **Ink-based membership behind a setting**, if the owner says the centreline rule feels wrong on
   thick lines — the named, deferred option §1 keeps on the board rather than deleting. It should
   move the *eraser* with it, since the argument for the centreline is that the two tools agree.

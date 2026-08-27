@@ -20,7 +20,12 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-Nothing in flight.
+- **(5) Move stage 3a — Freeform on a lassoed vector piece** — `tmp/freeform`. The mode picker is live
+  for a vector float, a corner drag scales the two axes independently about the centre, and the ink
+  keeps its round shape at the map's area root (the owner's 2026-08-26 default). No renderer change and
+  nothing new persisted. Stage 3b (the yellow box-only knob) and 3c (placed images holding a stretched
+  shape) are deliberately not in it; a piece carrying an image or a text box has the picker disabled
+  with the reason in the bar, exactly as Mirror already refuses.
 
 ## Queued
 

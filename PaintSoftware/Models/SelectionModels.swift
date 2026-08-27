@@ -459,6 +459,37 @@ extension CanvasManager {
         return nil
     }
 
+    /// Why **Freeform** is unavailable on whatever is floating, or nil when it is available. The
+    /// mode picker on the Move bar is disabled for exactly as long, with this in the caption.
+    ///
+    /// **The same shape as `mirrorUnavailableReason`, and for the same underlying reason** — a placed
+    /// image's placement is a `LayerTransform` and a text frame is four ordered corners, and neither
+    /// holds two axis scales any more than it holds a flip. It is a *separate* property rather than a
+    /// shared one because the two questions come apart in the stage after this: teaching an image to
+    /// hold a stretched shape (the owner's own words) unblocks Freeform on it and leaves Mirror
+    /// exactly where it is.
+    ///
+    /// A raster piece answers nil: `FloatingTransform` has held `scaleX`/`scaleY` since Move shipped,
+    /// which is why the picker was live for it and greyed for a vector float until this stage.
+    var freeformUnavailableReason: String? {
+        guard let float = vectorFloat else { return nil }
+        guard float.liftedInside.values.allSatisfy(VectorCanvas.canBeStretched) else {
+            return "Freeform can't stretch a placed image or a text box."
+        }
+        return nil
+    }
+
+    /// Whether a corner drag on the **lassoed vector piece** stretches the two axes independently.
+    ///
+    /// **The one place the answer is decided**, and it is deliberately not just `transformMode ==
+    /// .freeform`: `transformMode` is shared with the raster tier and survives the piece that was
+    /// floating when it was chosen, so a float carrying a placed image could inherit `.freeform` from
+    /// a raster Move three gestures ago. The bar disables the picker and this refuses the drag; both
+    /// read the same reason, so neither can be the only guard.
+    var vectorFloatIsFreeform: Bool {
+        transformMode == .freeform && freeformUnavailableReason == nil
+    }
+
     /// Mirror Horizontal / Mirror Vertical, about the piece's own centre and along its own axes — so
     /// a piece the artist has already turned mirrors across the axis they can see, not the screen's.
     func mirrorFloating(horizontal: Bool) {
@@ -470,7 +501,7 @@ extension CanvasManager {
         let reflection = CGAffineTransform(translationX: float.pivot.x, y: float.pivot.y)
             .scaledBy(x: horizontal ? -1 : 1, y: horizontal ? 1 : -1)
             .translatedBy(x: -float.pivot.x, y: -float.pivot.y)
-        applyToVectorFloat(transform: float.frame.transform,
+        applyToVectorFloat(transform: float.frame.transform, aspect: float.frame.aspect,
                            mirror: float.mirror.concatenating(reflection))
     }
 
@@ -490,7 +521,7 @@ extension CanvasManager {
         turned.rotation = FixedAngleRotation.stepped(from: turned.rotation,
                                                      lift: float.liftFrameTransform.rotation,
                                                      eighths: eighths)
-        applyToVectorFloat(transform: turned, mirror: float.mirror)
+        applyToVectorFloat(transform: turned, aspect: float.frame.aspect, mirror: float.mirror)
     }
 
     /// Whether **Reset** has anything to put back. False the instant the piece is already sitting
@@ -499,7 +530,11 @@ extension CanvasManager {
     var canResetFloating: Bool {
         if let piece = floatingPiece { return piece.transform != piece.liftTransform }
         guard let float = vectorFloat else { return false }
-        return float.frame.transform != float.liftFrameTransform || float.mirror != .identity
+        // The aspect is the third term for the same reason it is the third argument to
+        // `applyToVectorFloat`: a piece stretched back to its original *area* and rotation is still
+        // not where it was picked up, and Reset is the only way back to a square box.
+        return float.frame.transform != float.liftFrameTransform || float.frame.aspect != 1
+            || float.mirror != .identity
     }
 
     /// **Reset**: the piece snaps back to exactly where it was picked up — position, scale, rotation
@@ -525,7 +560,9 @@ extension CanvasManager {
             return
         }
         guard let float = vectorFloat else { return }
-        applyToVectorFloat(transform: float.liftFrameTransform, mirror: .identity)
+        // Aspect 1, not the lift's: a float always lifts unstretched, since the box is built from
+        // `layerTransform(pivot:)` and that reads a similarity. See `beginVectorLassoMove`.
+        applyToVectorFloat(transform: float.liftFrameTransform, aspect: 1, mirror: .identity)
     }
 
     // MARK: Committing

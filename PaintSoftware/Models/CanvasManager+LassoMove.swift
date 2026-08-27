@@ -107,6 +107,12 @@ struct VectorFloat {
     /// re-armed latch on a `mayDiverge` float renders the piece where it now is, and says so here.
     var latchedFrameTransform: LayerTransform
 
+    /// `frame.aspect` the latched bitmap was rendered at — the other half of `latchedFrameTransform`,
+    /// and needed for the same reason: the Core Animation transform the piece is shown under is
+    /// `base⁻¹ · placement`, so if the base does not carry the stretch the bitmap already has baked
+    /// into it, the piece is shown stretched **twice**.
+    var latchedAspect: CGFloat
+
     /// Gesture ends so far. Zero means the split happened and nothing else did, which is the one
     /// state an undo has to *un-happen* rather than step back from.
     var nudges: Int = 0
@@ -167,6 +173,10 @@ extension CanvasManager {
         // move band was a real correctness bound and is now discharged — `VectorCanvas.mapping`
         // carries the similarity's scale and angle into the three places that hold a width or an
         // angle, and its doc comment is where the exactness argument and its floors live.
+        //
+        // **The box lifts unstretched** (`ObjectTransformFrame.aspect` defaults to 1) whatever the
+        // layer's own transform is, because `layerTransform(pivot:)` reads a similarity — so Reset's
+        // target is 1 and needs no stored field of its own beside `liftFrameTransform`.
         let frame = ObjectTransformFrame(transform: vector.layerTransform(pivot: pivot),
                                          contentSize: bounds.size)
         vectorFloat = VectorFloat(layerID: target.layerID, celID: target.celID,
@@ -177,7 +187,7 @@ extension CanvasManager {
                                   elementsBeforeLift: elementsBeforeLift, selectionBeforeLift: selection,
                                   sourceVersion: vector.contentVersion,
                                   mayDiverge: split.mayDiverge, wantsLatch: true,
-                                  latchedFrameTransform: frame.transform)
+                                  latchedFrameTransform: frame.transform, latchedAspect: frame.aspect)
         celContentChangedOutsideStroke(layerID: target.layerID, celID: target.celID)
         refreshUndoRedoState()
         return true
@@ -193,6 +203,7 @@ extension CanvasManager {
               let vector = vectorCanvas(ofFloat: float) else { return }
         float.wantsLatch = true
         float.latchedFrameTransform = float.frame.transform
+        float.latchedAspect = float.frame.aspect
         vector.suppressedElementIDs = float.insideIDs
         float.sourceVersion = vector.contentVersion
         vectorFloat = float
@@ -206,8 +217,14 @@ extension CanvasManager {
     /// and a box dragged to `t` wants stored geometry mapped by `A(t)·base⁻¹` — which is the identity
     /// when `t` is the lift's own transform, and is what
     /// `LassoMoveLogicTests.testAZeroDeltaNudgeChangesNoSampleAndNoPixel` pins.
-    func nudgeVectorFloat(to transform: LayerTransform) {
-        applyToVectorFloat(transform: transform, mirror: vectorFloat?.mirror ?? .identity)
+    /// `aspect` defaults to the one the float already carries, so a Uniform drag, the rotate knob and
+    /// the move band all leave a Freeform stretch alone — the owner's *"a Freeform stretch survives a
+    /// switch to Uniform: 3:1 stays 3:1 and scales from there"* (2026-08-26), which falls out of the
+    /// default rather than needing a rule.
+    func nudgeVectorFloat(to transform: LayerTransform, aspect: CGFloat? = nil) {
+        applyToVectorFloat(transform: transform,
+                           aspect: aspect ?? vectorFloat?.frame.aspect ?? 1,
+                           mirror: vectorFloat?.mirror ?? .identity)
     }
 
     /// **The nudge, generalised over the one thing the box cannot express.** A drag of a grip calls it
@@ -218,7 +235,13 @@ extension CanvasManager {
     /// One call is one undo step either way, which is LASSO_MOVE.md §5.2's "one step per nudge"
     /// applied to a button press: a tap of Mirror is one thing the artist did and costs one press of
     /// Undo to take back, exactly as a drag does.
-    func applyToVectorFloat(transform: LayerTransform, mirror: CGAffineTransform) {
+    ///
+    /// **`aspect` is the third thing the box cannot express**, and it arrives here rather than through
+    /// `frame.transform` for the same reason `mirror` does: `LayerTransform` holds one scale. Unlike
+    /// the mirror it is *not* folded in front of the map — it belongs to the box's own axes, so it
+    /// rides inside `VectorCanvas.affine(from:aspect:pivot:)` where the box's rotation carries it.
+    func applyToVectorFloat(transform: LayerTransform, aspect: CGFloat = 1,
+                            mirror: CGAffineTransform) {
         guard var float = vectorFloat, let vector = vectorCanvas(ofFloat: float) else { return }
         guard vector.contentVersion == float.sourceVersion else { return cancelVectorFloat() }
 
@@ -227,22 +250,31 @@ extension CanvasManager {
         // turn with the piece, the same way the raster piece's `flipH` sits inside its
         // `affineTransform` ahead of `rotated(by:)`.
         let localDelta = mirror.concatenating(
-            VectorCanvas.affine(from: transform, pivot: float.pivot)
+            VectorCanvas.affine(from: transform, aspect: aspect, pivot: float.pivot)
                 .concatenating(float.baseTransform.inverted()))
+        // **Which mapping, decided by the pose and not by the mode.** An unstretched float goes
+        // through the similarity arm bit for bit, so every Uniform move, rotate and mirror is exactly
+        // the document it was before Freeform existed — including `mapping`'s assert, which is the
+        // tripwire that catches a stretch leaking into a path that cannot carry one.
+        let isStretched = aspect != 1
         let oldElements = vector.elements
         let newElements = oldElements.map { element -> VectorElement in
             guard let lifted = float.liftedInside[element.id] else { return element }
-            return VectorCanvas.mapping(lifted, throughSimilarity: localDelta)
+            return isStretched ? VectorCanvas.mapping(lifted, throughStretch: localDelta)
+                               : VectorCanvas.mapping(lifted, throughSimilarity: localDelta)
         }
         let oldSelection = selection
         let newSelection = Self.moving(float.selectionBeforeLift,
-                                       by: Self.canvasDelta(of: float, at: transform, mirror: mirror))
+                                       by: Self.canvasDelta(of: float, at: transform,
+                                                            aspect: aspect, mirror: mirror))
         let oldFrameTransform = float.frame.transform
+        let oldAspect = float.frame.aspect
         let oldMirror = float.mirror
 
         vector.elements = newElements
         vector.bumpVersion()
         float.frame.transform = transform
+        float.frame.aspect = aspect
         float.mirror = mirror
         float.nudges += 1
         // A float whose bitmap is only an approximation of the composite shows the truth between
@@ -254,7 +286,18 @@ extension CanvasManager {
         // go. Dropping the latch hands the display back to the layer's own render, which reads the
         // geometry this function has just mirrored, so what the artist sees is the truth; the next
         // drag re-arms the latch against it through `beginVectorFloatDrag`.
-        if float.mayDiverge || mirror != oldMirror {
+        //
+        // **A changed aspect drops it for a third reason, and it is the sharpest of the three.** The
+        // latched bitmap is *ink*, so a non-uniform Core Animation transform stretches the ink with
+        // the path — a 3:1 pull turns a 10 pt line into a 30 pt one across the stretch and leaves it
+        // 10 pt along it. The bake does the opposite by ruling (the dab stays round at
+        // `sqrt(|det|)`× its size), so the preview and the document genuinely disagree while the
+        // finger is down. Dropping the latch is what bounds that: at every gesture end the layer
+        // re-renders from the real geometry and the artist sees the truth, and the next drag's
+        // preview is measured from *that* render — so the approximation is one gesture's worth of
+        // stretch and never accumulates. Making the preview exact instead means the deforming-ink
+        // renderer path, which is the toggle's half of the work and not this stage's.
+        if float.mayDiverge || mirror != oldMirror || aspect != oldAspect {
             float.wantsLatch = false
             vector.suppressedElementIDs = []
         }
@@ -266,6 +309,7 @@ extension CanvasManager {
                                      oldElements: oldElements, newElements: newElements,
                                      oldSelection: oldSelection, newSelection: newSelection,
                                      oldFrameTransform: oldFrameTransform, newFrameTransform: transform,
+                                     oldAspect: oldAspect, newAspect: aspect,
                                      oldMirror: oldMirror, newMirror: mirror,
                                      // The first nudge carries the split, so undoing it gives back the
                                      // unsplit stroke and dismisses the float.
@@ -338,13 +382,17 @@ extension CanvasManager {
     /// `mirror` defaults to the one the float is currently carrying; `applyToVectorFloat` passes the
     /// value it is about to write, since the ants have to arrive with the ink rather than a press
     /// behind it.
+    /// `aspect` likewise defaults to the float's own, so the ants stretch with the piece under
+    /// Freeform: a selection outline is a `CGPath` and carries a non-uniform affine exactly.
     static func canvasDelta(of float: VectorFloat, at transform: LayerTransform,
+                            aspect: CGFloat? = nil,
                             mirror: CGAffineTransform? = nil) -> CGAffineTransform {
         // Canvas → local (where the reflection is expressed, about `pivot`) → canvas. Exactly the
         // sandwich `applyToVectorFloat` builds for the geometry, read one space out.
         float.baseTransform.inverted()
             .concatenating(mirror ?? float.mirror)
-            .concatenating(VectorCanvas.affine(from: transform, pivot: float.pivot))
+            .concatenating(VectorCanvas.affine(from: transform, aspect: aspect ?? float.frame.aspect,
+                                               pivot: float.pivot))
     }
 
     /// `selection` moved by a canvas-space affine — one transform on the path, which is all §5.6's
@@ -421,6 +469,9 @@ extension CanvasManager {
     /// * **The mirror follows it as well** — it is the half of the piece's pose the box cannot hold,
     ///   so a step that restored only `frame.transform` would put a mirrored piece back at the right
     ///   place facing the wrong way, and every nudge after it would re-derive from the wrong map.
+    /// * **And so does the aspect**, for exactly that reason one more time: `LayerTransform` carries
+    ///   the area and not the shape, so restoring it alone would leave a 3:1 stretch on a box that
+    ///   thinks it is square, and the *next* nudge would map the lift through it again.
     /// * **The first nudge's step ends the float**: undoing it restores the *pre-split* list, drops
     ///   the suppression and puts the loop back, because the cut was an artifact of the move.
     ///
@@ -431,6 +482,7 @@ extension CanvasManager {
                                               oldSelection: Selection?, newSelection: Selection?,
                                               oldFrameTransform: LayerTransform,
                                               newFrameTransform: LayerTransform,
+                                              oldAspect: CGFloat, newAspect: CGFloat,
                                               oldMirror: CGAffineTransform,
                                               newMirror: CGAffineTransform,
                                               endsFloat: Bool, layerID: UUID, celID: UUID) {
@@ -449,6 +501,7 @@ extension CanvasManager {
                 self.vectorFloat = nil
             } else {
                 self.vectorFloat?.frame.transform = oldFrameTransform
+                self.vectorFloat?.frame.aspect = oldAspect
                 self.vectorFloat?.mirror = oldMirror
                 self.vectorFloat?.sourceVersion = vector.contentVersion
             }
@@ -459,6 +512,7 @@ extension CanvasManager {
             vector.bumpVersion()
             self.selection = newSelection
             self.vectorFloat?.frame.transform = newFrameTransform
+            self.vectorFloat?.frame.aspect = newAspect
             self.vectorFloat?.mirror = newMirror
             self.vectorFloat?.sourceVersion = vector.contentVersion
             self.celContentChangedOutsideStroke(layerID: layerID, celID: celID)

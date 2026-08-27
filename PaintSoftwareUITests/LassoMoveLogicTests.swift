@@ -1392,7 +1392,304 @@ final class LassoMoveLogicTests: XCTestCase {
                        "and Distort is the only one the bar still has to caption")
     }
 
+    // MARK: - Freeform (stage 3a)
+    //
+    // The Move bar's mode picker was raster-only until this stage, and the caption said why: a
+    // lassoed vector piece scaled uniformly whichever segment was lit, because `LayerTransform` holds
+    // one scale. It now carries an `ObjectTransformFrame.aspect` beside it, and
+    // `VectorCanvas.mapping(_:throughStretch:)` carries that into the geometry.
+    //
+    // **The ruling these tests encode** (owner, 2026-08-26): one toggle decides whether the ink
+    // deforms with the shape, over Freeform and Distort together, **defaulting to ink-keeps-its-
+    // shape** — so the dab stays round and the path stretches. The round dab takes the map's own area
+    // root, `sqrt(|det|)`, which is what makes Freeform *contain* Uniform instead of contradicting it.
+
+    /// **The path stretches; the ink keeps its shape.**
+    ///
+    /// A 16 pt horizontal spine with 8 pt of ink, stretched to three times its width and left at its
+    /// original height, comes back with a 48 pt spine and ink `sqrt(3)`× thicker — not 3× (that is the
+    /// deforming-ink mode, which is the toggle's other half and needs a renderer change) and not 1×
+    /// (that is "no scaling", the literal reading of an earlier ruling about *Distort*, where there is
+    /// no global scale to read). The three are far enough apart that the tolerance cannot hide which
+    /// one shipped: 13.9 pt against 8 and 24.
+    ///
+    /// Watched failing with `stroke.size *= k` removed from the shared `drawn` arm: *("8.0") is not
+    /// equal to ("13.86…")* — the spine spread and the ink did not follow it at all.
+    func testAFreeformStretchSpreadsThePathAndKeepsTheInkRound() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 8))
+        guard let before = inkBounds(vector) else { return XCTFail("nothing rendered") }
+
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        let pose = stretched(manager, x: 3, y: 1)
+        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+
+        guard let stroke = vector.elements.compactMap(\.stroke).first else { return XCTFail("no stroke") }
+        XCTAssertEqual(stroke.size, 8 * sqrt(3), accuracy: 1e-6,
+                       "the round dab takes the map's area root, not one of its two axes")
+        XCTAssertEqual(stroke.samples.first?.x ?? 0, 8, accuracy: 1e-6, "and the spine takes the full 3×")
+        XCTAssertEqual(stroke.samples.last?.x ?? 0, 56, accuracy: 1e-6)
+        XCTAssertEqual(stroke.samples.first?.y ?? 0, 32, accuracy: 1e-6, "with the other axis untouched")
+
+        manager.commitVectorFloatIfNeeded()
+        guard let after = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        XCTAssertEqual(after.width, 3 * 16 + 8 * sqrt(3), accuracy: 1.5,
+                       "48 pt of spine plus a dab's worth of cap at each end")
+        XCTAssertEqual(after.height, before.height * sqrt(3), accuracy: 1.5,
+                       "and the ink is sqrt(3)× thicker — neither 1× nor 3×")
+    }
+
+    /// **Changing only the shape changes no ink weight at all**, and that is arithmetic rather than a
+    /// special case: a pose whose `scale` did not move has two axis scales that multiply to one, so
+    /// `sqrt(|det|)` is one and `stroke.size` is untouched to the last bit.
+    ///
+    /// It is the property that makes the rule *symmetric*: a piece squashed to a third of its width
+    /// and one stretched to three times it are the same statement about ink weight, so the answer
+    /// cannot depend on which way round the artist dragged. (Every nudge maps the **lift**, not the
+    /// previous nudge, so the second half below is the mirror-image pose rather than a composition —
+    /// that absolute-from-the-lift discipline is `VectorFloat.liftedInside`'s whole point.)
+    func testAPureShapeChangeLeavesTheInkWeightAlone() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 8))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let box = manager.vectorFloat?.frame.transform else { return XCTFail("no float") }
+
+        // The box's own scale untouched; only the aspect moves. `axisScales` is then (√3, 1/√3).
+        manager.nudgeVectorFloat(to: box, aspect: 3)
+        guard let squashed = vector.elements.compactMap(\.stroke).first else { return XCTFail("no stroke") }
+        XCTAssertEqual(squashed.size, 8, accuracy: 1e-9, "a shape change is not a size change")
+        XCTAssertEqual(squashed.samples.first?.x ?? 0, 32 - 8 * sqrt(3), accuracy: 1e-6,
+                       "though the spine really did stretch")
+
+        manager.nudgeVectorFloat(to: box, aspect: 1.0 / 3.0)
+        guard let pulled = vector.elements.compactMap(\.stroke).first else { return XCTFail("no stroke") }
+        XCTAssertEqual(pulled.size, 8, accuracy: 1e-9, "and the same holds squashed the other way")
+    }
+
+    /// **The owner's ruling, 2026-08-26: *"a Freeform stretch survives a switch to Uniform — 3:1 stays
+    /// 3:1 and scales from there."*** Read here at the level the artist experiences it: stretch the
+    /// piece, then scale it with a Uniform corner drag, and both axes double while the shape holds.
+    ///
+    /// `nudgeVectorFloat(to:)`'s defaulted `aspect` is what carries it — the move band, the knob, the
+    /// Rotate buttons and a Uniform corner all leave the stretch alone because none of them passes one.
+    ///
+    /// Watched failing with that default changed to a bare `1`: *("1.0") is not equal to ("3.0") —
+    /// 3:1 stays 3:1*, and the spine snaps back from 48 to 27.7. That is the whole failure mode the
+    /// ruling is about — the artist stretches a piece, scales it, and the stretch silently evaporates.
+    func testAUniformScaleAfterAStretchKeepsTheStretch() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 28, y: 32), to: CGPoint(x: 36, y: 32), size: 4))
+        select(manager, layerIndex, loop(CGRect(x: 16, y: 22, width: 32, height: 20)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+
+        let pose = stretched(manager, x: 3, y: 1)
+        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+        guard let afterStretch = vector.elements.compactMap(\.stroke).first else { return XCTFail("no stroke") }
+        let spread = (afterStretch.samples.last?.x ?? 0) - (afterStretch.samples.first?.x ?? 0)
+        XCTAssertEqual(spread, 24, accuracy: 1e-6,
+                       "fixture precondition: an 8 pt spine really is 3× longer, not sqrt(3)× longer")
+
+        manager.nudgeVectorFloat(to: scaledBy(manager, 2))
+
+        XCTAssertEqual(manager.vectorFloat?.frame.aspect ?? 0, 3, accuracy: 1e-6, "3:1 stays 3:1")
+        guard let afterScale = vector.elements.compactMap(\.stroke).first else { return XCTFail("no stroke") }
+        XCTAssertEqual((afterScale.samples.last?.x ?? 0) - (afterScale.samples.first?.x ?? 0),
+                       spread * 2, accuracy: 1e-6, "and scales from there")
+        XCTAssertEqual(afterScale.size, afterStretch.size * 2, accuracy: 1e-6,
+                       "a Uniform scale still thickens the ink, stretch or no stretch")
+    }
+
+    /// **Undo restores the aspect, not only the box transform.** The stretch is the third thing a
+    /// `LayerTransform` cannot hold — after position/scale/rotation and before the mirror — so a step
+    /// that put back `frame.transform` alone would leave a 3:1 box calling itself square, and the
+    /// *next* nudge would map the lift through the wrong pose.
+    ///
+    /// Watched failing with `frame.aspect = oldAspect` removed from the undo closure: the aspect
+    /// stays at 3, and the second assertion below (*the geometry comes back with it*) goes red too,
+    /// because the following nudge re-derives from a pose that never existed.
+    func testUndoingAFreeformNudgeRestoresTheAspectAndNotOnlyTheBox() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 6))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 3, dy: 0))
+        guard let box = manager.vectorFloat?.frame.transform else { return XCTFail("no float") }
+        let samplesAfterMove = vector.elements.compactMap(\.stroke).first?.samples.map(\.x) ?? []
+
+        let pose = stretched(manager, x: 3, y: 1)
+        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+        XCTAssertEqual(manager.vectorFloat?.frame.aspect ?? 0, 3, accuracy: 1e-6, "fixture precondition")
+
+        manager.undo()
+
+        XCTAssertEqual(manager.vectorFloat?.frame.aspect ?? 0, 1, accuracy: 1e-9,
+                       "the box is square again, not merely back at its old scale")
+        XCTAssertEqual(manager.vectorFloat?.frame.transform, box)
+        let restored = vector.elements.compactMap(\.stroke).first?.samples.map(\.x) ?? []
+        XCTAssertEqual(restored.count, samplesAfterMove.count)
+        for (a, b) in zip(restored, samplesAfterMove) {
+            XCTAssertEqual(a, b, accuracy: 1e-6, "and the geometry comes back with it")
+        }
+    }
+
+    /// **Reset puts a stretched piece back square**, and it is *offered* for a piece whose only change
+    /// is the stretch — which is the half `canResetFloating` would miss if it compared box transforms
+    /// alone, since a pure shape change leaves `frame.transform` exactly where the lift put it.
+    ///
+    /// Watched failing with the `frame.aspect != 1` clause removed from `canResetFloating`: *Reset has
+    /// something to put back* fails first, and `resetFloating`'s own guard then makes the press inert,
+    /// so the piece stays stretched with no way back short of Undo.
+    func testResetPutsAStretchedPieceBackSquareAndIsOfferedForAStretchAlone() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 6))
+        let before = cgImage(vector)
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let box = manager.vectorFloat?.frame.transform else { return XCTFail("no float") }
+        XCTAssertFalse(manager.canResetFloating, "nothing has happened yet")
+
+        manager.nudgeVectorFloat(to: box, aspect: 3)
+        XCTAssertEqual(manager.vectorFloat?.frame.transform, box,
+                       "fixture precondition: a pure shape change moves nothing the box can hold")
+        XCTAssertTrue(manager.canResetFloating, "Reset has something to put back")
+
+        manager.resetFloating()
+
+        XCTAssertEqual(manager.vectorFloat?.frame.aspect ?? 0, 1, accuracy: 1e-9)
+        manager.commitVectorFloatIfNeeded()
+        assertPixelsIdentical(cgImage(vector), before, "and the drawing is the one that was lifted")
+    }
+
+    /// **Freeform refuses, out loud, when the piece carries a placed image or a text box** — the
+    /// Mirror pattern, applied to the neighbouring impossibility. An image's placement *is* a
+    /// `LayerTransform`, which has one scale and no second axis any more than it has a flip; a text
+    /// frame's `Basis` reads four ordered corners as a layout size.
+    ///
+    /// Both halves matter and they are separate guards: the bar disables the picker from the reason,
+    /// and `vectorFloatIsFreeform` refuses the drag even if `transformMode` arrived already set to
+    /// `.freeform` from a raster Move three gestures ago — which it can, since the mode is shared
+    /// with the raster tier and outlives the piece that chose it.
+    func testFreeformIsRefusedAndSaysWhyWhenThePieceCarriesAnImageOrText() {
+        for kind in ["image", "text"] {
+            let (manager, layerIndex, vector) = fixture()
+            vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
+            if kind == "image" {
+                vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                                   rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                                                                   size: CGSize(width: 6, height: 6)),
+                                                   transform: LayerTransform(position: CGPoint(x: 30, y: 34),
+                                                                             scale: 1, rotation: 0)))
+            } else {
+                var recipe = TextRecipe(string: "hi")
+                recipe.typography.pointSize = 12
+                vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                                    frame: TextFrame(origin: CGPoint(x: 30, y: 34),
+                                                                     size: CGSize(width: 10, height: 6))))
+            }
+            select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
+            XCTAssertTrue(manager.beginVectorLassoMove(), "\(kind): the lift should have caught both")
+
+            manager.setTransformMode(.freeform)
+            XCTAssertNotNil(manager.freeformUnavailableReason, "\(kind): the bar has to have something to say")
+            XCTAssertFalse(manager.vectorFloatIsFreeform,
+                           "\(kind): and the drag refuses even with the mode already lit")
+        }
+
+        // The same predicate answers the other way for what a drawing is actually made of.
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 26, y: 30, width: 10, height: 5),
+                                                      transform: nil),
+                                         color: black(), opacity: 1, evenOddFill: false))
+        select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        manager.setTransformMode(.freeform)
+        XCTAssertNil(manager.freeformUnavailableReason, "strokes and fills stretch exactly")
+        XCTAssertTrue(manager.vectorFloatIsFreeform)
+    }
+
+    /// **A stretched float shows the truth between gestures.**
+    ///
+    /// The latched preview is a *bitmap* under a Core Animation transform, so a non-uniform one
+    /// stretches the ink along with the path — the opposite of what the bake does by ruling. The float
+    /// therefore drops its latch at the end of any gesture that changed the aspect, exactly as a
+    /// `mayDiverge` float and a mirrored one do: the layer re-renders from real geometry, the artist
+    /// sees what they will get, and the next drag's preview is measured from *that* render, so the
+    /// approximation is one gesture's worth of stretch and never accumulates.
+    ///
+    /// A Uniform nudge on the same float is checked in the same test, because the cost must be paid
+    /// only by the pose that incurs it: an unstretched float keeps the cheap latched path it has had
+    /// since the feature shipped.
+    func testAStretchedFloatDropsItsLatchAndAUniformOneDoesNot() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 6))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertEqual(manager.vectorFloat?.mayDiverge, false, "fixture precondition: ordinary artwork")
+
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
+        XCTAssertEqual(manager.vectorFloat?.wantsLatch, true, "a plain move keeps the cheap path")
+        XCTAssertEqual(vector.suppressedElementIDs, manager.vectorFloat?.insideIDs)
+
+        let pose = stretched(manager, x: 3, y: 1)
+        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+        XCTAssertEqual(manager.vectorFloat?.wantsLatch, false,
+                       "and a stretch hands the display back to the layer's own render")
+        XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
+
+        // The next drag re-arms it, and against the pose the bitmap will actually be rendered at —
+        // both halves, or the stretch already in the bitmap is applied to it a second time.
+        manager.beginVectorFloatDrag()
+        XCTAssertEqual(manager.vectorFloat?.wantsLatch, true)
+        XCTAssertEqual(manager.vectorFloat?.latchedAspect ?? 0, manager.vectorFloat?.frame.aspect ?? -1)
+        XCTAssertEqual(manager.vectorFloat?.latchedFrameTransform, manager.vectorFloat?.frame.transform)
+    }
+
+    /// A fill is the one kind Freeform is *perfect* on: a `CGPath` carries any affine exactly, so the
+    /// stretched chunk is the shape the box drew, to the last coordinate — no width scalar to reason
+    /// about and no dab walk to re-phase.
+    ///
+    /// Watched failing with `axisScales` made to ignore the aspect: *("27.71") is not equal to
+    /// ("48.0") — three times as wide*, and the height comes back 13.86 instead of 8, because the
+    /// piece scaled uniformly by `sqrt(3)` on both axes instead of stretching on one.
+    func testAFillFollowsAFreeformStretchExactly() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 24, y: 28, width: 16, height: 8),
+                                                      transform: nil),
+                                         color: black(), opacity: 1, evenOddFill: false))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let pivot = manager.vectorFloat?.pivot else { return XCTFail("no float") }
+
+        let pose = stretched(manager, x: 3, y: 1)
+        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+
+        guard let box = vector.elements.compactMap(\.fill).first?.cgPath?.boundingBoxOfPath else {
+            return XCTFail("no fill")
+        }
+        XCTAssertEqual(box.width, 48, accuracy: 1e-3, "three times as wide")
+        XCTAssertEqual(box.height, 8, accuracy: 1e-3, "and exactly as tall as it was")
+        XCTAssertEqual(box.midX, pivot.x, accuracy: 1e-3, "about the box's own centre")
+        XCTAssertEqual(box.midY, pivot.y, accuracy: 1e-3)
+    }
+
     // MARK: - Helpers
+
+    /// The pose a **Freeform** corner drag that grows the box by `(fx, fy)` on its own two axes
+    /// writes, from where the float is now — `ObjectTransformDrag`'s stretched arm stated as its two
+    /// outputs, so a test says what the artist did rather than where their finger was.
+    private func stretched(_ manager: CanvasManager, x fx: CGFloat, y fy: CGFloat)
+        -> (transform: LayerTransform, aspect: CGFloat) {
+        guard let frame = manager.vectorFloat?.frame else { return (.identity, 1) }
+        let base = ObjectTransformFrame.axisScales(scale: frame.transform.scale, aspect: frame.aspect)
+        let sx = base.x * fx, sy = base.y * fy
+        var transform = frame.transform
+        transform.scale = sqrt(sx * sy)
+        return (transform, sx / sy)
+    }
 
     /// The box transform a drag of `(dx, dy)` canvas points produces, from where the float is now.
     private func movedBy(_ manager: CanvasManager, dx: CGFloat, dy: CGFloat) -> LayerTransform {

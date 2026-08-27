@@ -12,26 +12,36 @@ import SwiftUI
 /// clear `activePanel` — so when the piece bakes, the Select menu comes straight back if Select is
 /// still the artist's open panel, and they have not lost their place.
 ///
-/// **No button here is allowed to be pressed and do nothing.** Two of them can be unavailable, and
-/// each says so rather than going quietly grey: Mirror, when the lassoed piece carries a placed image
-/// or text (`CanvasManager.mirrorUnavailableReason` — `LayerTransform` has no flip), and Reset, when
-/// the piece is already sitting exactly where it was picked up.
+/// **No control here is allowed to be pressed and do nothing.** Three can be unavailable, and each
+/// says so rather than going quietly grey: Mirror, when the lassoed piece carries a placed image or
+/// text (`CanvasManager.mirrorUnavailableReason` — `LayerTransform` has no flip); the **mode picker**,
+/// on a piece carrying either of those for the neighbouring reason that a `LayerTransform` has no
+/// second axis scale (`freeformUnavailableReason`); and Reset, when the piece is already sitting
+/// exactly where it was picked up.
 struct MoveTransformBottomBar: View {
     @ObservedObject var canvasManager: CanvasManager
 
     private var mirrorReason: String? { canvasManager.mirrorUnavailableReason }
+    private var freeformReason: String? { canvasManager.freeformUnavailableReason }
 
-    /// The picker is live only for a raster piece. A lassoed vector piece scales uniformly about its
-    /// centre whichever mode is showing — `ObjectTransformDrag`'s corner arm writes one `scale` —
-    /// so offering a working-looking Freeform there would be the "acts like Uniform for now" caption
-    /// with no caption. Stage 3's non-uniform scale is what turns this on.
-    private var modeIsAdjustable: Bool { canvasManager.vectorFloat == nil }
+    /// **The picker is live for a lassoed vector piece too, as of stage 3.** It used to be raster-only
+    /// with the caption *"A lassoed piece scales uniformly about its centre"*, which was true:
+    /// `ObjectTransformDrag`'s corner arm wrote one `scale`, so offering a working-looking Freeform
+    /// would have been the "acts like Uniform for now" caption with no caption. It now writes an
+    /// `ObjectTransformFrame.aspect` alongside it and `VectorCanvas.mapping(_:throughStretch:)` carries
+    /// it into the geometry, so the only float that still cannot stretch is one carrying a placed
+    /// image or a text box — and that one says so, in the caption, rather than going quietly grey.
+    private var modeIsAdjustable: Bool { freeformReason == nil }
 
     /// One line under the buttons, or none. Ordered by which the artist is most likely to have just
-    /// pressed against.
+    /// pressed against — and with the two refusals merged where they coincide, so a piece with a
+    /// photo in it does not disable the picker with a caption that only mentions Mirror.
     private var caption: String? {
+        if mirrorReason != nil, freeformReason != nil {
+            return "A placed image or a text box can't be mirrored or stretched."
+        }
         if let mirrorReason { return mirrorReason }
-        if !modeIsAdjustable { return "A lassoed piece scales uniformly about its centre." }
+        if let freeformReason { return freeformReason }
         if !canvasManager.transformMode.isImplemented { return "Coming soon — acts like Uniform for now" }
         return nil
     }
