@@ -4,103 +4,36 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
-## Every effect and blend mode is masked to the layer's own ink, because the paper is not in the composite (2026-08-27)
+## A project restored from backup or from Recently Deleted comes back with no strokes (2026-08-27)
 
-**Reported from the iPad, 2026-08-27, DIAGNOSED, and the mechanism was independently verified line by
-line.** The owner: *"Chromatic abberation seems to for some reason be masked to the objects on the
-layers only. If it is transparent to the canvas, it doesnt affect it. Other effects and blend modes
-might have this error too, so it's worth a check."* Their diagnosis was right and their instinct that
-it generalises was right — it is 8 effects and 20 blend modes, not one effect.
+**Found by running the full suite at a phase boundary, and it is on `main` today — not a regression
+from any branch in flight.** `GalleryRecoveryUITests.testCorruptedProjectIsAutoRestoredFromBackupOnLaunch`
+and `testDeletedProjectCanBeRestoredFromRecentlyDeleted` both fail the same way: a project with one
+stroke is saved, put through the recovery path, reopened — and `readLayerStrokeCount` returns **0**
+where the test wants 1.
 
-**ROOT CAUSE: the canvas paper is a `UIView` painted *behind* the composite, not a layer inside it.**
-`let paper = UIView(); paper.backgroundColor = .white` (`CanvasView.swift:39-43`, driven by
-`updatePaper()` at `:540-552`), added to the container *before* the two sandwich image views that carry
-the composite (`:57-60`), so it is strictly below them in z-order and no compositor pass can read it.
-`makeSandwichRequests` — the only builder the live canvas uses — hardcodes `background: nil` on all
-three requests (`RenderRequest.swift:547`) and says why at `:472-476`: *the live canvas paints its own
-paperView behind the whole stack*. **The only caller in the app that passes `includeBackground: true`
-is the eyedropper** (`CanvasManager+Eyedropper.swift:52`), which is exactly why README can say the
-eyedropper samples the composite "paper included" while nothing else does.
+**This is the safety net failing, which is the worst place for it.** The recovery path exists so that a
+crash or a mistaken delete does not cost the artist their work; it currently returns the project's
+*shell* and loses its vector content. The two tests are the ones written to prove exactly that cannot
+happen.
 
-So an adjustment layer grades an accumulator that is **transparent everywhere the artist has not
-painted**. Every kernel then correctly short-circuits on alpha 0 — `if (!(alpha > 0.0f)) { ... return; }`
-(`Composite.metal:773` generic, `:572` chromatic aberration, CPU twins at `EffectKernels.swift:96` and
-`:279`) — because a transparent pixel has no colour to unpremultiply. grade(transparent) = transparent,
-`mix` writes the backdrop back unchanged, and the effect reads as masked to the ink.
+**Confirmed real, not environmental**, by CLAUDE.md's own triage: isolated re-run, freshly erased
+device, one class, `-parallel-testing-enabled NO`. Both fail identically at `27ab4c2` (`main`) and at
+the effect-backdrop tip, so the cause predates both. Two *other* failures in the same full run
+(`BlendModesAndCompositorUITests.testOpeningALayerMenuPutsMaskAndFillControlsOnTheRows`,
+`FillLiveAdjustUITests.testRaisingEdgeOverlapAfterFillGrowsFillUnderSoftEdge`) passed clean on the same
+isolated run and were environmental.
 
-**The effect is NOT scoped to the layer's own texture, and three plausible theories are refuted by
-reading.** `Layer.layerEffect` is `kind == .value ? effect : nil` (`Layer.swift:120`) and a value layer
-holds no pixels, so there is no "own ink" to be scoped to. Both backends grade the *accumulator*
-(`Compositor.swift:853-880` reads `context.currentImage`; `MetalCompositor.swift:648-668` grades
-`front`). Both dispatch over the full canvas, so there is no scissor or content-bounds rect. And `mix()`
-uses only `node.opacity` and the resolved `AlphaMask` coverage, never the layer alpha as a mask.
+**Not yet diagnosed.** What is known: both failing tests share one shape — draw, save, recover, count —
+so the question is which half is broken, the save or the recovery. The distinguishing experiment is
+cheap: assert the stroke count *before* the corruption/delete step. If it is already 0 there, this is a
+save bug wearing a recovery costume and it is much more serious than it looks. **Do that before reading
+any recovery code.**
 
-### Per-effect verdict (13 effects)
+**How long has it been broken is unknown and worth one measurement**, because no full-suite run is
+recorded in the last several sessions' close-outs — the fast tier is what has been gating merges, and
+these two tests are XCUITests outside it.
 
-| Effect | On an alpha-0 backdrop today | Verdict |
-|---|---|---|
-| Levels, Curves, Brightness/Contrast, HSV Shift, Gradient Map, Posterize, Noise | no-op — the kernel writes 0 | **wrong**; Brightness/Contrast and Noise are the most visible (dimming the canvas does nothing; film grain over paper is the whole use case) |
-| **Chromatic Aberration** | no-op outside the ink; inside it, alpha comes from the centre texel only (`Composite.metal:579`) so no fringe crosses the silhouette | **wrong — the reported one.** The centre-alpha rule is a *separate, deliberate, documented* choice (`:562-565`) and becomes moot once the backdrop is opaque; leave it alone |
-| Gaussian / Directional Blur | works — convolves premultiplied and spreads ink into transparency | correct today; an opaque backdrop changes almost nothing, since blurring uniform paper is identity |
-| **Sharpen** | works — convolves premultiplied like Blur, and is not gated by the alpha short-circuit either | correct today. **This row was missing and the table said thirteen** — an opaque backdrop is the identity away from the ink, because `sharpenCombine`'s `x + amount·(x − blur(x))` has a second term of exactly zero across flat paper; at an ink/paper boundary it now sharpens against the real paper colour instead of against implicit transparent black |
-| Bloom | works — the glow spreads outside the ink | correct today. **An opaque paper breaks it**: default threshold 0.75 (`Effect.swift:314`) against white paper at Lum 1.0 makes the entire canvas a bright source |
-| Sobel | edges at the ink's alpha boundary; flat regions emit `(0,0,0,0)` so the paper shows through | works **by accident**. An opaque backdrop flips its background white → black |
-| Outline | keys on `src.a > threshold` (`Composite.metal:696-698`, default 0.5) | works today. **An opaque paper makes that true for every pixel and Outline becomes a complete no-op** |
-
-The 20 affected blend modes are fixed by giving them a backdrop, **not** by editing `blendOver`
-(`Composite.metal:236-250`) — its `mix(cs, B(cb,cs), da)` is W3C Compositing Level 1 and is correct for
-a genuinely transparent backdrop. Eleven modes are gated byte-for-byte against `CGBlendMode`, so editing
-the formula would break `CompositorParityLogicTests`.
-
-### The ruling, 2026-08-27
-
-The owner was shown both options and took the more expensive one: **"Paper is part of the picture, but
-rescue those three."** The paper becomes part of what an adjustment layer grades and what a blend mode
-blends against, **and** Outline, Bloom and Sobel get a way to see the ink alone rather than being
-allowed to regress. That second half is a new concept — an effect scoped to the pixels below it rather
-than to the accumulated backdrop — and wants a short specification before it is built.
-
-**[EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) is the specification**, written 2026-08-27: §3 costs the
-four ways to give Outline, Sobel and Bloom an ink-only input and recommends the one that adds no state
-to either backend, §5 records the owner's four answers, and §6 is the build order. **Bloom and Sobel
-become artist-facing choices rather than fixed properties, and Sobel's new default changes how it looks
-in documents that already use it.**
-
-### The blocker a reviewer found, and it is not a tuning problem
-
-**Putting an opaque background into the `full` and `below` requests hides the "Behind" onion skin.**
-`onionSkin` is added to the container at `CanvasView.swift:49-50`, *before* `sandwichBelow` (`:57-58`)
-and `sandwichAbove` (`:59-60`), and the comment at `:54-56` states the invariant: the disengaged
-z-order is `onionSkin < below < above < chrome`. `updateOnionSkin` routes the `.behind` placement to
-that lower view (`:2311-2315`). **The Behind ghost is visible today only because the composited sandwich
-images are transparent where the artist has not painted — the same transparency that is the bug.** Once
-the paper is inside the artwork image there is no view position left that is above the paper and below
-the artwork, because they are one image. Fixing it means compositing the onion-skin frames into the
-request as well (they are already CGImages, `CanvasView.swift:2378`, but have never been part of a
-`RenderRequest`), or keeping the paper out of the composite and giving the effect path a synthetic
-opaque backdrop instead. **Decide this before writing the compositing change, not after.**
-
-### Other traps on this path, all found by reading
-
-- **`above` must keep `background: nil`.** It is composited over the live stroke, so a background there
-  is an opaque sheet over everything beneath it — the reason already given at `RenderRequest.swift:472-476`.
-- **Double-painted paper.** If `paperView` keeps painting while the composite also carries the
-  background, an *opaque* colour hides the mistake and a *translucent* one does not.
-- **The padding margin.** `canvasSize` includes `canvasPadding` (`CanvasManager.swift:20-27`) and both
-  compositors fill the background across the whole bounds, while `paperView` is inset
-  (`CanvasView.swift:544-551`). Flipping the flag without insetting turns the grey margin into paper.
-  The eyedropper has this discrepancy today, unnoticed because it is the only caller.
-- **`SandwichFullKey` would go stale.** It asserts `full` depends on everything except `activeLayerIndex`
-  (`RenderRequest.swift:385-398`); adding a background makes `full` depend on `canvasBackgroundColor` and
-  `isCanvasBackgroundVisible` too, and without them in the key a paper-colour change will not invalidate
-  the cached composite.
-- **Backend parity is the gate for this subsystem and this is exactly the change that breaks it.**
-  `MetalCompositor.swift:599-605` premultiplies in float and dispatches `compositeFill`;
-  `Compositor.swift:675-677` goes through `UIColor.setFill` + `UIRectFill`. Two paths to one colour that
-  can differ by a least-significant bit.
-- **The project thumbnail has the same flag off** (`ProjectStore.swift:284`, `includeBackground: false`)
-  and its own comment already calls the transparent-backed tile "a real defect". Same one-flag change,
-  same ruling — and flipping it changes every existing gallery thumbnail until each project is re-saved.
 
 ## Move with no selection blocked the brush button (2026-08-27) — FIXED `a506d66`
 

@@ -16,10 +16,7 @@ What happened this pass belongs there and in `git log`, not here.
 
 ## In flight
 
-- **The effect backdrop, stages 4-6** — [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) §6. Stages 1-3 are on
-  `tmp/effectbackdrop` (the onion skin's z-order, `Effect.input`, and the paper entering the composite);
-  4 is the re-walk that makes the ink-only input real, 5 is Bloom's and Sobel's controls, 6 is the
-  thumbnail flag.
+- **Nothing.** The effect backdrop's six stages are merged.
 
 ## Canvas geometry, and how a coordinate is stored
 
