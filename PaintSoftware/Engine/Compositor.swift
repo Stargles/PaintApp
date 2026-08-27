@@ -674,7 +674,13 @@ enum CoreGraphicsCompositor {
             .image { context in
                 if let background = request.background {
                     background.color.setFill()
-                    UIRectFill(bounds)
+                    // `background.rect`, not `bounds`: the paper is the artwork rect and the padding
+                    // margin is not paper — see `RenderBackground.rect` for why that is the decision
+                    // and not an oversight. Identical to filling `bounds` on every document with no
+                    // padding, which is the default and every fixture in the suite. The rect is
+                    // already whole pixels and symmetric on all four sides, so this agrees with the
+                    // Metal fill without either side rounding or flipping anything.
+                    UIRectFill(background.rect)
                 }
                 draw(request.tree, of: request, in: bounds, context: context)
             }

@@ -1393,6 +1393,204 @@ final class EffectLayerLogicTests: XCTestCase {
                        "And a node the artist has named keeps that name, exactly as a layer does")
     }
 
+    // MARK: - The paper is part of the picture (EFFECT_BACKDROP.md §6 step 3)
+
+    /// **A grade that darkens rather than brightens, because white paper is the fixture.**
+    /// `brighten` above pushes 255 well past 1.0 and clamps back to 255, so it cannot tell a graded
+    /// paper from an ungraded one. CSS Filter Effects Level 1 again: `contrast(1)` is the identity
+    /// and `brightness(0.5)` halves, so white 255 grades to 128 and there is nothing to argue about.
+    private static let darken = Effect.brightnessContrast(
+        Effect.BrightnessContrast(brightness: 0.5, contrast: 1))
+
+    /// What the live canvas shows at rest: `composite(full)` out of the three requests the sandwich
+    /// is built from. **The distinction from `composite(_:)` above matters and is the whole subject
+    /// of these tests** — `makeRenderRequest(includeBackground: false)` composites onto transparency
+    /// by the caller's choice, while `makeSandwichRequests` is what the artist is actually looking
+    /// at, and until 2026-08-27 it hardcoded `background: nil` on all three.
+    private func liveCanvas(_ manager: CanvasManager, active: Int = 0, atFrame frame: Int = 0) -> CGImage? {
+        manager.makeSandwichRequests(atFrame: frame, activeLayerIndex: active)
+            .flatMap { Compositor.composite($0.full) }
+    }
+
+    /// **The owner's report, as one assertion.** From their iPad, 2026-08-27: *"Chromatic abberation
+    /// seems to for some reason be masked to the objects on the layers only. If it is transparent to
+    /// the canvas, it doesnt affect it."* Their instinct that it generalised was right — it was eight
+    /// effects and twenty blend modes — and this is the general case: an adjustment layer over a
+    /// region of canvas nobody has painted on.
+    ///
+    /// **It failed before the fix and it failed with a very specific value: RGBA (0, 0, 0, 0).** The
+    /// paper was a `UIView` behind the composite, so the accumulator was transparent out here, the
+    /// kernel short-circuited on alpha 0 exactly as it should, and `mix` wrote the transparent
+    /// backdrop straight back. The kernels were never wrong. The image handed to them was.
+    func testAnAdjustmentLayerGradesTheEmptyCanvasTheArtistIsLookingAt() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(grey, rect: CGRect(x: 0, y: 0, width: 24, height: 24)))
+        manager.addValueLayer(effect: Self.darken)
+
+        guard let image = liveCanvas(manager) else { return XCTFail("Fixture must composite") }
+
+        XCTAssertEqual(pixel(image, 48, 48), opaqueGrey(128),
+                       "White paper through brightness(0.5) is 128, and the artist can see it. "
+                       + "Before EFFECT_BACKDROP.md §6 step 3 this pixel was RGBA (0, 0, 0, 0) — the effect "
+                       + "reading as masked to the ink, which is the report. Got RGBA \(pixel(image, 48, 48))")
+        XCTAssertEqual(pixel(image, 8, 8), opaqueGrey(64),
+                       "…and the ink is graded by the same transfer it always was: 128 halves to 64")
+    }
+
+    /// **The reported effect specifically, and the half of its behaviour that was actually wrong.**
+    /// Chromatic aberration outside the silhouette was a no-op, because there was no colour out there
+    /// to split. With the paper in the accumulator the fringe crosses the edge, which is what the
+    /// artist expects an aberration to do.
+    ///
+    /// `Composite.metal:562-565`'s centre-alpha rule is **not** touched to achieve this and is not
+    /// what the report was about: it is a separate, deliberate, documented choice that the fringe
+    /// appears in colour and never in coverage, and over an opaque backdrop the coverage is 1
+    /// everywhere and the rule is moot.
+    ///
+    /// Asserted as "somewhere in this band" rather than at one coordinate on purpose: which pixel
+    /// carries the strongest fringe is the kernel's business and is pinned by `EffectParityLogicTests`
+    /// against the published formula. The claim here is only that the region outside the ink stopped
+    /// being untouched.
+    func testChromaticAberrationFringesOutsideTheInkNowThatThereIsSomethingOutThere() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let ink = CGRect(x: 16, y: 16, width: 32, height: 32)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.black, rect: ink))
+        manager.addValueLayer(effect: .chromaticAberration(
+            Effect.ChromaticAberration(offsetX: 4, offsetY: 0)))
+
+        guard let image = liveCanvas(manager) else { return XCTFail("Fixture must composite") }
+
+        let band = (Int(ink.maxX)...(Int(ink.maxX) + 5)).map { pixel(image, $0, 32) }
+        XCTAssertTrue(band.allSatisfy { $0.count == 4 && $0[3] == 255 },
+                      "Every pixel outside the ink is opaque now — it is paper, not nothing. Got \(band)")
+        XCTAssertTrue(band.contains { $0[0] != $0[2] },
+                      "…and at least one of them carries a colour fringe: the red and blue taps land on "
+                      + "different sides of the silhouette, which is what chromatic aberration is. "
+                      + "Before the fix this whole band was RGBA (0, 0, 0, 0). Got \(band)")
+    }
+
+    /// **Every blend mode in one test, by construction rather than by enumeration.** Twenty tests
+    /// would be twenty places to forget to add the twenty-first; `BlendMode.allCases` cannot forget.
+    /// It also sweeps `clipToBelow`, which is in the enum and is not a blend — `renderNodes` resolves
+    /// it into a mask before either backend sees it — and which is included rather than filtered out
+    /// precisely because the claim below is true of it too.
+    ///
+    /// The claim that holds for *every* mode is the one the bug broke, and it is about alpha rather
+    /// than about any mode's formula: with a paper underneath, a blended layer has a backdrop, so the
+    /// canvas is opaque everywhere — including where the layer has no ink, which must be exactly the
+    /// paper and not a mode's idea of what to do with nothing. `blendOver` is untouched: it is W3C
+    /// Compositing Level 1, eleven of these are gated byte-for-byte against `CGBlendMode`, and what
+    /// changed is that it is finally given a `cb` to work with.
+    ///
+    /// Two spot checks carry the arithmetic, because "opaque" alone would pass on a mode that ignored
+    /// the backdrop entirely: red over white multiplies to red and screens to white. Those two are
+    /// the pair that differ most visibly between a real backdrop and a transparent one — over
+    /// transparency both used to give plain red.
+    func testEveryBlendModeBlendsAgainstThePaper() {
+        for mode in BlendMode.allCases {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+            manager.setLayerBlendMode(layerIndex: 0, to: mode)
+
+            guard let image = liveCanvas(manager) else {
+                XCTFail("\(mode.rawValue): fixture must composite"); continue
+            }
+            XCTAssertEqual(pixel(image, 48, 48), opaqueGrey(255),
+                           "\(mode.rawValue): where the layer has no ink the canvas is the paper, untouched. "
+                           + "Got RGBA \(pixel(image, 48, 48))")
+            XCTAssertEqual(pixel(image, 8, 8)[3], 255,
+                           "\(mode.rawValue): a blend over paper is opaque — there is a backdrop now")
+        }
+
+        func blended(_ mode: BlendMode) -> [Int] {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+            manager.setLayerBlendMode(layerIndex: 0, to: mode)
+            guard let image = liveCanvas(manager) else { return [] }
+            return pixel(image, 8, 8)
+        }
+        XCTAssertEqual(blended(.multiply), [255, 0, 0, 255],
+                       "multiply(white, red) is red — the backdrop is real and it is white")
+        XCTAssertEqual(blended(.screen), [255, 255, 255, 255],
+                       "screen(white, red) is white, which is the case that cannot be faked: over "
+                       + "transparency this used to come out plain red")
+    }
+
+    /// **`above` keeps `background: nil`, and this test is the guard rail on the one hazard the fix
+    /// could reintroduce.** `makeSandwichRequests`' own doc comment named it before the fix existed:
+    /// a background in the upper half is an opaque sheet drawn over the live stroke and over
+    /// everything beneath it. `full` and `below` are the two that sit at the bottom of what the
+    /// artist sees; `above` is composited onto transparency by design.
+    func testTheUpperHalfOfTheSandwichStaysTransparentBacked() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 16, height: 16)))
+
+        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0) else {
+            return XCTFail("Every leaf should cut")
+        }
+        XCTAssertNotNil(requests.full.background, "`full` is what the canvas shows at rest, paper included")
+        XCTAssertNotNil(requests.below.background, "`below` is the bottom of the mid-stroke sandwich")
+        XCTAssertNil(requests.above.background,
+                     "`above` is drawn over everything beneath it, so a background in it is an opaque "
+                     + "sheet over the whole picture — the hazard the old doc comment named")
+
+        guard let above = Compositor.composite(requests.above) else { return XCTFail("`above` must composite") }
+        XCTAssertEqual(pixel(above, 48, 48), [0, 0, 0, 0],
+                       "…and it composites onto transparency in fact, not only in the request")
+    }
+
+    /// **The padding margin is not paper, decided here rather than inherited.**
+    /// `CanvasManager.canvasSize` includes `canvasPadding`, so "fill the background across the whole
+    /// buffer" — which is what shipped, unnoticed, because the eyedropper was the only caller — would
+    /// paint canvas colour across a margin the artist is being shown in light grey. That was
+    /// invisible while nothing composited a background onto the screen and stops being invisible the
+    /// moment the live canvas does.
+    ///
+    /// The decision, recorded on `RenderBackground.rect`: **the paper is the artwork rect.** The
+    /// margin stays transparent, so `CanvasView`'s `paddingBackdrop` still shows through it and the
+    /// same document's margin reads the same whether or not an effect layer has engaged the sandwich.
+    /// It is also what every other consumer already believes — an exported or thumbnailed composite
+    /// leaves the margin transparent, and the grey is a view.
+    ///
+    /// At padding 0, which is the default and every other fixture in this suite, the rect is the
+    /// whole buffer and this is byte-for-byte the fill that always happened.
+    func testThePaperIsTheArtworkRectAndThePaddingMarginIsNotPaper() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        manager.setCanvasPadding(8)
+        XCTAssertEqual(manager.canvasSize, CGSize(width: 80, height: 80),
+                       "Premise: padding is folded into the canvas, so the buffer grew by 8 on every side")
+
+        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0),
+              let background = requests.full.background else {
+            return XCTFail("Fixture must produce a sandwich with a paper in it")
+        }
+        XCTAssertEqual(background.rect, CGRect(x: 8, y: 8, width: 64, height: 64),
+                       "The paper is `canvasSize` inset by `canvasPadding` on every side")
+
+        guard let image = liveCanvas(manager) else { return XCTFail("Fixture must composite") }
+        XCTAssertEqual(pixel(image, 4, 4), [0, 0, 0, 0],
+                       "The margin is transparent in the composite, so the grey backdrop view still shows "
+                       + "through it. Got RGBA \(pixel(image, 4, 4))")
+        XCTAssertEqual(pixel(image, 40, 40), opaqueGrey(255),
+                       "…and the artwork rect is paper")
+
+        // A padding-0 canvas of the same size, to state the other half: the inset is arithmetic that
+        // vanishes at the default rather than a special case that only the default avoids.
+        let plain = CanvasFixture.manager(layerCount: 2)
+        guard let plainRequests = plain.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0) else {
+            return XCTFail("Every leaf should cut")
+        }
+        XCTAssertEqual(plainRequests.full.background?.rect,
+                       CGRect(origin: .zero, size: CanvasFixture.canvasSize),
+                       "With no padding the paper is the whole buffer, exactly as the fill always was")
+    }
+
     // MARK: - Which image an effect is handed (EFFECT_BACKDROP.md §4)
 
     /// **§4's table, written out as data rather than restated as prose.** `Effect.input` is an

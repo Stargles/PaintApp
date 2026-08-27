@@ -265,13 +265,20 @@ kernel void compositeOver(texture2d<float, access::read>  backdrop [[texture(0)]
     result.write(blendOver(dst, src, mode), gid);
 }
 
-/// Fills a texture with a constant premultiplied colour — the canvas background, the initial clear
-/// when there is none, and the transparent start of every buffered group's scratch texture.
+/// Fills a rectangle of a texture with a constant premultiplied colour — the canvas background, the
+/// initial clear when there is none, and the transparent start of every buffered group's scratch
+/// texture.
+///
+/// `origin` exists because a compute grid always starts at zero and the paper does not: the canvas
+/// background covers the artwork rect, which is the canvas inset by its padding margin (see
+/// `RenderBackground.rect`). Every other caller passes `(0, 0)` and dispatches the whole texture,
+/// which is the same single write it always was.
 kernel void compositeFill(texture2d<float, access::write> result [[texture(0)]],
                           constant float4                &color  [[buffer(0)]],
+                          constant uint2                 &origin [[buffer(1)]],
                           uint2 gid [[thread_position_in_grid]])
 {
-    result.write(color, gid);
+    result.write(color, gid + origin);
 }
 
 /// One layer's pixels, or one group's assembled composite, clipped by a resolved alpha mask

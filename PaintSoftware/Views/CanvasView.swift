@@ -546,10 +546,26 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: - Layer stack
 
+        /// Whether the composite currently on screen already contains the canvas colour.
+        ///
+        /// **This is the "or it is applied twice" half of EFFECT_BACKDROP.md §6 step 3.** Once
+        /// `full` and `below` carry the paper, a `paperView` still painting under them is a second
+        /// copy of it. An opaque colour hides that completely — white over white is white — and a
+        /// translucent one does not: two 50% sheets are 75%, and the artist's canvas quietly darkens
+        /// the moment an effect layer engages the sandwich.
+        ///
+        /// **Gated on the composite being on screen, not on the sandwich being engaged**, because
+        /// those are not the same instant. `updateSandwich`'s "do not blank the hosts until the first
+        /// composite has landed" trap returns early while the images are still being built, and
+        /// hiding the paper in that window would flash the padding backdrop's grey across the canvas
+        /// for the length of a rebuild. So `updateSandwich` sets this where it sets
+        /// `sandwichPresentation`, and only after the images are actually installed.
+        private var compositeCarriesThePaper = false
+
         func updatePaper() {
             guard let paperView else { return }
             paperView.backgroundColor = UIColor(canvasManager.canvasBackgroundColor)
-            paperView.isHidden = !canvasManager.isCanvasBackgroundVisible
+            paperView.isHidden = !canvasManager.isCanvasBackgroundVisible || compositeCarriesThePaper
             // Inset the paper to the artwork rect; the grey backdrop shows through the margin.
             if let c = paperInsetConstraints {
                 let p = canvasManager.canvasPadding
@@ -1162,7 +1178,16 @@ struct CanvasView: UIViewRepresentable {
         private func updateSandwich(tree: [RenderNode], engaged: Bool) {
             guard let belowView = sandwichBelowView, let aboveView = sandwichAboveView else { return }
 
+            /// Every exit from this function agrees with the view stack about who is painting the
+            /// paper — see `compositeCarriesThePaper`. Cheap enough to call unconditionally: every
+            /// write inside `updatePaper` is guarded by a read, so an idle pass costs comparisons.
+            func paperIsNowPaintedBy(_ theComposite: Bool) {
+                compositeCarriesThePaper = theComposite
+                updatePaper()
+            }
+
             guard engaged else {
+                paperIsNowPaintedBy(false)
                 // Before the early return below, which is reached on every pass once the canvas has
                 // settled onto Core Animation's path: a live mask installed while the sandwich was
                 // engaged has to come off when it disengages, and a stroke that began while it was
@@ -1226,7 +1251,7 @@ struct CanvasView: UIViewRepresentable {
             // **Trap 1: do not blank the hosts until the first composite has landed.** On the very
             // first engage there is nothing cached, and blanking now would flash an empty canvas for
             // however long the rebuild takes.
-            guard let images = sandwichImages else { return }
+            guard let images = sandwichImages else { return paperIsNowPaintedBy(false) }
 
             // **Trap 2: stay mid-stroke until the new `full` lands.** On lift the key unfreezes and
             // a rebuild starts; flipping to rest right away would show a `full` composited before the
@@ -1270,6 +1295,9 @@ struct CanvasView: UIViewRepresentable {
             // host is still the thing on screen.
             if !midStroke { liveMaskImage = nil }
             sandwichPresentation = midStroke ? .midStroke : .rest
+            // Both presentations put an image carrying the paper in `belowView` — `full` at rest,
+            // `below` mid-stroke — so from here the `paperView` would be a second copy of it.
+            paperIsNowPaintedBy(true)
         }
 
         // MARK: §6.4's live mask
@@ -1366,6 +1394,18 @@ struct CanvasView: UIViewRepresentable {
             /// something unrelated happens to move the key. That is not a stale *picture*, which this
             /// cache tolerates by design; it is a control that visibly does nothing when you use it.
             let renderResolution: RenderResolution
+            /// **The paper is inside `full` and `below` now** (EFFECT_BACKDROP.md §6 step 3), so it is
+            /// an evaluation input and belongs here for exactly `renderResolution`'s reason above.
+            ///
+            /// This is the key that decides whether to *rebuild at all*; `SandwichFullKey` beside it
+            /// only decides whether an already-composited `full` may be reused. **Both need the
+            /// field and neither covers for the other**: without it here nothing recomposites when
+            /// the artist recolours the canvas, and without it there the rebuild that does happen
+            /// hands back the old `full` anyway. EFFECT_BACKDROP.md §6 names only the second.
+            let canvasBackgroundColor: Color
+            /// Invisible is not the same key as white — it is the difference between an effect
+            /// grading a backdrop and an effect grading nothing, which is the whole subject here.
+            let isCanvasBackgroundVisible: Bool
         }
 
         /// The active layer's content version as of the first key built after a vector text edit
@@ -1426,7 +1466,9 @@ struct CanvasView: UIViewRepresentable {
                 return content
             }
             return SandwichKey(tree: tree, activeLayerIndex: active, frame: frame, contents: contents,
-                               renderResolution: canvasManager.renderResolution)
+                               renderResolution: canvasManager.renderResolution,
+                               canvasBackgroundColor: canvasManager.canvasBackgroundColor,
+                               isCanvasBackgroundVisible: canvasManager.isCanvasBackgroundVisible)
         }
 
         // MARK: Rebuilding
@@ -1449,7 +1491,9 @@ struct CanvasView: UIViewRepresentable {
         /// `SandwichFullKey`.
         private func fullKey(from key: SandwichKey) -> SandwichFullKey {
             SandwichFullKey(tree: key.tree, frame: key.frame, contents: key.contents,
-                            renderResolution: key.renderResolution)
+                            renderResolution: key.renderResolution,
+                            canvasBackgroundColor: key.canvasBackgroundColor,
+                            isCanvasBackgroundVisible: key.isCanvasBackgroundVisible)
         }
 
         private func startSandwichRebuild(for key: SandwichKey) {

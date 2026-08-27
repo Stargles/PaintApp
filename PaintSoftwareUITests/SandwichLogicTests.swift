@@ -361,7 +361,10 @@ final class SandwichLogicTests: XCTestCase {
         manager.setLayerBlendMode(layerIndex: 2, to: .multiply)
 
         guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
-              let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+              // **`includeBackground: true`, as of EFFECT_BACKDROP.md §6 step 3.** `full` carries the
+              // paper now, so the reference has to as well or this compares a graded picture against
+              // a transparent one and fails for a reason that has nothing to do with the tree.
+              let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture needs a canvas size")
         }
         XCTAssertEqual(requests.full.tree.leafLayerIndices, manager.renderLeafOrder)
@@ -414,7 +417,9 @@ final class SandwichLogicTests: XCTestCase {
                                                            valueFill: manager.layers[index].valueFill,
                                                            effect: manager.layers[index].layerEffect)
                             },
-                            renderResolution: resolution)
+                            renderResolution: resolution,
+                            canvasBackgroundColor: manager.canvasBackgroundColor,
+                            isCanvasBackgroundVisible: manager.isCanvasBackgroundVisible)
         }
 
         let base = key()
@@ -433,6 +438,21 @@ final class SandwichLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(cyan, rect: CGRect(x: 2, y: 2, width: 10, height: 10)))
         XCTAssertNotEqual(treeChanged, key(), "New pixels on a layer move its content version")
+
+        // **The paper, as of EFFECT_BACKDROP.md §6 step 3.** `full` carries the canvas colour now, so
+        // recolouring the canvas is a new picture and has to be a new key. Without this the artist
+        // changes the paper and the canvas keeps showing the old one until something unrelated moves
+        // the key — the same "a control that visibly does nothing" failure `renderResolution` is in
+        // the key to prevent.
+        let painted = key()
+        manager.canvasBackgroundColor = .yellow
+        XCTAssertNotEqual(painted, key(), "A different paper is a different picture")
+
+        let yellow = key()
+        manager.isCanvasBackgroundVisible = false
+        XCTAssertNotEqual(yellow, key(),
+                          "…and turning the paper off is not the same as any colour it could have been: "
+                          + "it is the difference between an effect grading a backdrop and grading nothing")
     }
 
     /// The saving, counted. `CompositeProbe` records what the compositor was actually asked to do, so
@@ -590,6 +610,13 @@ final class SandwichLogicTests: XCTestCase {
         manager.layers[0].parentFolderID = folder
         manager.layers[1].parentFolderID = folder
         manager.setFolderOpacity(folder, to: 0.5)
+        // **The paper is switched off for this fixture alone, deliberately.** EFFECT_BACKDROP.md §6
+        // step 3 put the canvas colour into `full` and `below`, and every other case in this file is
+        // unaffected because its floor layer is already opaque. This one has no floor — two small
+        // squares on nothing — so an opaque white sheet under them shifts every byte the test
+        // measures without changing what it measures, which is the half-group approximation. The
+        // measured 64 is a claim about the sandwich's arithmetic, not about what is behind it.
+        manager.isCanvasBackgroundVisible = false
 
         guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0),
               let exact = Compositor.composite(requests.full),
@@ -942,9 +969,17 @@ final class SandwichLogicTests: XCTestCase {
         }
     }
 
-    /// The live canvas paints its own `paperView` behind the whole stack, so a background in any of
-    /// the three would be either a second one or an opaque sheet over the layers beneath it.
-    func testNoneOfTheThreeRequestsCarriesABackground() {
+    /// **Two of the three carry the paper, and `above` does not** — EFFECT_BACKDROP.md §6 step 3.
+    ///
+    /// This test asserted the opposite until 2026-08-27, on the grounds that "the live canvas paints
+    /// its own `paperView` behind the whole stack, so a background in any of the three would be
+    /// either a second one or an opaque sheet over the layers beneath it". Half of that was true and
+    /// stayed true — `above` is drawn over everything beneath it, so a background in it is still an
+    /// opaque sheet over the picture. The other half was BUGS.md's *"Every effect and blend mode is
+    /// masked to the layer's own ink"*: a view behind the composite is a thing no compositor pass can
+    /// read, so every adjustment layer graded a transparent sheet and every blend mode blended
+    /// against nothing. `paperView` is what stopped painting instead.
+    func testTheLowerTwoRequestsCarryThePaperAndTheUpperOneDoesNot() {
         let manager = stack(2)
         manager.canvasBackgroundColor = .white
         manager.isCanvasBackgroundVisible = true
@@ -952,9 +987,20 @@ final class SandwichLogicTests: XCTestCase {
         guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0) else {
             return XCTFail("Fixture needs a canvas size")
         }
-        XCTAssertNil(requests.full.background)
-        XCTAssertNil(requests.below.background)
-        XCTAssertNil(requests.above.background)
+        XCTAssertNotNil(requests.full.background, "`full` is what the canvas shows at rest")
+        XCTAssertNotNil(requests.below.background, "`below` is the bottom of the mid-stroke sandwich")
+        XCTAssertNil(requests.above.background,
+                     "`above` composites onto transparency by design — see this test's own history")
+
+        // The other switch, and it is not the same as painting white: an invisible canvas is what a
+        // caller asking for a transparent-backed composite gets, and an effect over it grades nothing.
+        manager.isCanvasBackgroundVisible = false
+        guard let hidden = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        XCTAssertNil(hidden.full.background, "The artist turned the paper off, so there is no paper")
+        XCTAssertNil(hidden.below.background)
+        XCTAssertNil(hidden.above.background)
     }
 
     func testTheHalvesCarryTheSplitTreesAndTheFrameAndQualityTheyWereAskedFor() {
@@ -991,7 +1037,8 @@ final class SandwichLogicTests: XCTestCase {
         CanvasFixture.setCelLayout(manager, layerIndex: 2, [(start: 5, length: 3)])
 
         guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
-              let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+              // Like for like: `full` carries the paper, so the reference does too.
+              let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture needs a canvas size")
         }
         XCTAssertNil(requests.above.sources[2], "Layer 2's block starts at frame 5")
@@ -1075,7 +1122,8 @@ final class SandwichLogicTests: XCTestCase {
         let manager = stack(3)
         manager.renderResolution = .full
         guard let scaled = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
-              let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+              // Like for like: `full` carries the paper, so the reference does too.
+              let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must produce both shapes of request")
         }
         XCTAssertEqual(scaled.full.canvasSize, reference.canvasSize)

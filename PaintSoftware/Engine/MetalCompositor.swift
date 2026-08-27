@@ -602,7 +602,21 @@ final class CompositorMetalEngine {
             colour.getRed(&r, green: &g, blue: &b, alpha: &a)
             background = SIMD4<Float>(Float(r * a), Float(g * a), Float(b * a), Float(a))
         }
-        fill(front, with: background, encoder: encoder, width: width, height: height)
+        // **The paper covers the artwork rect, not the whole buffer** — `RenderBackground.rect`
+        // carries the decision and the arithmetic; this only obeys it. A padded canvas therefore
+        // needs two writes, because the margin still has to start transparent and the texture arrives
+        // undefined. A canvas with no padding — the default, and every fixture — takes the single
+        // full-texture write it always did, so nothing about the common path has moved.
+        let paper = request.background?.rect
+        let whole = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
+        if let paper, paper != whole {
+            fill(front, with: SIMD4<Float>(repeating: 0), encoder: encoder, width: width, height: height)
+            fill(front, with: background, encoder: encoder,
+                 width: Int(paper.width), height: Int(paper.height),
+                 origin: SIMD2<UInt32>(UInt32(max(0, paper.minX)), UInt32(max(0, paper.minY))))
+        } else {
+            fill(front, with: background, encoder: encoder, width: width, height: height)
+        }
 
         // One upload per distinct mask for this composite, not per masked node — the resolution is
         // already shared (`MaskResolver`), and re-uploading the same 4.2 MB once per layer clipped
@@ -853,12 +867,21 @@ final class CompositorMetalEngine {
         swap(&front, &back)
     }
 
+    /// Writes `colour` into a `width × height` rectangle of `texture` whose top-left is `origin`.
+    ///
+    /// The origin is a uniform rather than a dispatch offset because a compute grid always starts at
+    /// zero. Every caller but the canvas background passes `.zero` and the whole texture's size, and
+    /// for them this is the single full-texture write it has always been.
     private func fill(_ texture: MTLTexture, with colour: SIMD4<Float>,
-                      encoder: MTLComputeCommandEncoder, width: Int, height: Int) {
+                      encoder: MTLComputeCommandEncoder, width: Int, height: Int,
+                      origin: SIMD2<UInt32> = SIMD2<UInt32>(0, 0)) {
+        guard width > 0, height > 0 else { return }
         var colour = colour
+        var origin = origin
         encoder.setComputePipelineState(psFill)
         encoder.setTexture(texture, index: 0)
         encoder.setBytes(&colour, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+        encoder.setBytes(&origin, length: MemoryLayout<SIMD2<UInt32>>.stride, index: 1)
         dispatch2D(encoder, psFill, width: width, height: height)
     }
 

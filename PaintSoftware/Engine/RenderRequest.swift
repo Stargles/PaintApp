@@ -249,14 +249,43 @@ enum RenderResolution: String, CaseIterable, Identifiable {
 
 /// The canvas backdrop, when the request wants one drawn under the stack.
 ///
-/// Optional because the two consumers disagree and both are right: the live canvas paints a
-/// background view behind the layer host, while the project thumbnail composites the stack alone onto
-/// transparency. That difference has to be expressible rather than assumed, which is why this is a
+/// Optional because the two consumers disagree and both are right: the **project thumbnail**
+/// composites the stack alone onto transparency, while everything the artist is actually looking at
+/// wants the paper. That difference has to be expressible rather than assumed, which is why this is a
 /// request-level choice and not a property the compositor reads for itself.
 /// Visibility is carried by the request's `background` being nil, not by a flag in here — this type
 /// exists only when there is something to draw.
+///
+/// The doc here used to say the live canvas was the consumer that did *not* want one, because it
+/// painted its own `paperView` behind the whole stack. That is what BUGS.md's *"Every effect and
+/// blend mode is masked to the layer's own ink"* turned out to be: a view behind the composite is a
+/// thing no compositor pass can read, so an adjustment layer graded a transparent sheet.
 struct RenderBackground: Equatable {
     let color: UIColor
+
+    /// **Which pixels of this request's own buffer the paper covers** — `canvasSize` inset by
+    /// `canvasPadding` on every side, already scaled into this request's `canvasSize` and snapped to
+    /// whole pixels, so both backends fill exactly the same integers and no rounding can separate
+    /// them.
+    ///
+    /// **The decision this field records (EFFECT_BACKDROP.md §6 step 3's open question): the paper is
+    /// the artwork rect, and the padding margin is not paper.** `CanvasManager.canvasSize` includes
+    /// `canvasPadding`, so a fill across the whole buffer — which is what shipped, unnoticed, because
+    /// the eyedropper was the only caller — paints canvas colour over a margin the artist is being
+    /// shown in light grey. That was invisible while nothing composited a background onto the screen
+    /// and stops being invisible the moment the live canvas does: the same document's margin would
+    /// read grey with no effect layer in it and paper-coloured with one, because only the second
+    /// engages the sandwich. Insetting keeps the margin exactly what it is today in both cases, and
+    /// leaves `paddingBackdrop`'s grey showing through a composite that is still transparent there.
+    ///
+    /// The margin is also not part of the picture anywhere else: an exported or thumbnailed composite
+    /// leaves it transparent, and the grey is a live-canvas affordance drawn by a view. Filling it
+    /// would have made the paper mean one thing on screen and another in the file.
+    ///
+    /// **Symmetric on all four sides, which is what keeps it out of the flip.** CoreGraphics fills in
+    /// UIKit's y-down space and Metal writes in texture space; a rect inset equally everywhere is the
+    /// same rect in both, so this field cannot become the kind of parity bug an asymmetric one would.
+    let rect: CGRect
 }
 
 /// One frame's worth of compositor input.
@@ -389,11 +418,31 @@ struct SandwichFullKey: Equatable {
     let contents: [LayerContentVersion?]
     let renderResolution: RenderResolution
 
-    init(tree: [RenderNode], frame: Int, contents: [LayerContentVersion?], renderResolution: RenderResolution) {
+    /// **The paper is an input to the picture now, so it is an input to the key.** Before
+    /// EFFECT_BACKDROP.md §6 step 3 the composite did not contain the canvas colour at all — it was a
+    /// `UIView` behind the images — so recolouring the canvas moved nothing here and correctly needed
+    /// no rebuild. It is inside `full` and `below` now, and a key that does not carry it would leave
+    /// the artist looking at the old colour until something unrelated happened to move the key. Same
+    /// failure `renderResolution` is in `SandwichKey` for, and stated the same way: a control that
+    /// visibly does nothing when you use it.
+    ///
+    /// Two fields rather than the resolved `RenderBackground`, because these are the model's own and
+    /// the resolution through `PixelOps.uiColor` is one more thing that could make two equal states
+    /// compare unequal.
+    let canvasBackgroundColor: Color
+    /// Invisible is not the same key as white: it is the difference between a graded backdrop and a
+    /// transparent one, which is the whole subject of this change.
+    let isCanvasBackgroundVisible: Bool
+
+    init(tree: [RenderNode], frame: Int, contents: [LayerContentVersion?],
+         renderResolution: RenderResolution,
+         canvasBackgroundColor: Color, isCanvasBackgroundVisible: Bool) {
         self.tree = tree
         self.frame = frame
         self.contents = contents
         self.renderResolution = renderResolution
+        self.canvasBackgroundColor = canvasBackgroundColor
+        self.isCanvasBackgroundVisible = isCanvasBackgroundVisible
     }
 }
 
@@ -453,11 +502,36 @@ extension CanvasManager {
             maskStacks: maskStacks,
             frame: frame,
             canvasSize: renderSize,
-            background: includeBackground && isCanvasBackgroundVisible
-                ? RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor))
-                : nil,
+            background: includeBackground ? canvasBackground(renderedInto: renderSize) : nil,
             quality: quality
         )
+    }
+
+    /// The paper as a request carries it, or nil when the artist has turned it off.
+    ///
+    /// One builder for every caller, which is the point: `makeRenderRequest` and
+    /// `makeSandwichRequests` both need it, and the padding arithmetic is exactly the kind of thing
+    /// that is written twice and then drifts. `renderedInto` is the request's own buffer size, which
+    /// may be smaller than the canvas (`RenderResolution`, `CompositorBudget`, the thumbnail's
+    /// bounding box), so the inset is scaled with it rather than applied in canvas pixels.
+    ///
+    /// **Rounded here, once, so the two backends receive integers rather than an arithmetic
+    /// problem.** `CompositorParityLogicTests` is this subsystem's gate and a fill whose edge each
+    /// backend rounded for itself is precisely the shape of failure it exists to catch.
+    @MainActor
+    func canvasBackground(renderedInto renderSize: CGSize) -> RenderBackground? {
+        guard isCanvasBackgroundVisible, let canvasSize,
+              canvasSize.width > 0, canvasSize.height > 0,
+              renderSize.width > 0, renderSize.height > 0 else { return nil }
+        let insetX = (canvasPadding * renderSize.width / canvasSize.width).rounded()
+        let insetY = (canvasPadding * renderSize.height / canvasSize.height).rounded()
+        // `max(0, …)` for the degenerate document the padding slider can reach on a small canvas:
+        // an inset wider than the canvas means there is no artwork rect left, and an empty rect is
+        // the honest answer to that rather than a negative one both backends would read differently.
+        let rect = CGRect(x: insetX, y: insetY,
+                          width: max(0, renderSize.width - 2 * insetX),
+                          height: max(0, renderSize.height - 2 * insetY))
+        return RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor), rect: rect)
     }
 
     /// The three requests §5.2's sandwich needs, or nil when there is no canvas to composite into or
@@ -469,10 +543,24 @@ extension CanvasManager {
     /// version — so the snapshot, which §11 measured at 276 ms against an 84 ms composite and is
     /// therefore the expensive half, is paid once for the three instead of three times.
     ///
-    /// `background: nil` on all three, for the case `RenderBackground`'s doc comment describes from
-    /// the thumbnail's side: the live canvas paints its own `paperView` behind the whole stack. A
-    /// background drawn into `below` would be a second one, and into `above` an opaque sheet over
-    /// everything beneath it.
+    /// **The paper goes into `full` and `below`, and `above` keeps `background: nil`.**
+    /// EFFECT_BACKDROP.md §6 step 3, which is the fix for BUGS.md's *"Every effect and blend mode is
+    /// masked to the layer's own ink"*: all three used to be nil, because the live canvas painted its
+    /// own `paperView` behind the whole stack, and a compositor pass cannot read a view behind
+    /// itself. So every adjustment layer graded an accumulator that was transparent wherever the
+    /// artist had not painted, every kernel correctly short-circuited on alpha 0, and the effect read
+    /// as masked to the ink. The kernels were right and the input was wrong.
+    ///
+    /// **`above` stays nil, and that clause of the old doc comment is still exactly true**: `above`
+    /// is drawn over the live stroke and over everything beneath it, so a background in it would be
+    /// an opaque sheet hiding the whole picture. It is the one half of the sandwich that composites
+    /// onto transparency by design.
+    ///
+    /// **`paperView` stops painting while the composite carries the paper**, or a translucent canvas
+    /// colour would be applied twice — an opaque one hides that mistake and a translucent one does
+    /// not. `CanvasView.updatePaper` owns that half, gated on the composite actually being on screen
+    /// rather than on the sandwich merely being engaged (there is a window between the two: see the
+    /// "do not blank the hosts until the first composite has landed" trap in `updateSandwich`).
     @MainActor
     func makeSandwichRequests(atFrame frame: Int,
                               activeLayerIndex: Int,
@@ -541,14 +629,15 @@ extension CanvasManager {
         let maskStacks = maskSourceStacks(of: tree)
         let snapshot = renderSources(atFrame: frame, canvasSize: renderSize, quality: quality,
                                      alsoIncluding: maskedLayerIndices(in: maskStacks))
-        func request(_ tree: [RenderNode]) -> RenderRequest {
+        func request(_ tree: [RenderNode], background: RenderBackground?) -> RenderRequest {
             RenderRequest(tree: tree, sources: snapshot.sources, contentVersions: snapshot.versions,
                           maskStacks: maskStacks, frame: frame, canvasSize: renderSize,
-                          background: nil, quality: quality)
+                          background: background, quality: quality)
         }
-        return SandwichRequests(full: request(tree),
-                                below: request(halves.below),
-                                above: request(halves.above))
+        let paper = canvasBackground(renderedInto: renderSize)
+        return SandwichRequests(full: request(tree, background: paper),
+                                below: request(halves.below, background: paper),
+                                above: request(halves.above, background: nil))
     }
 
     /// One resolved image per `layers` index, and its content version, or nil where a layer
