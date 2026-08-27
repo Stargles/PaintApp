@@ -83,6 +83,31 @@ requirement was nearly re-derived from scratch this week because it was only in 
       can ship in either order** — which was the whole reason the question was asked.
       To go back to 20 bits, `minimumScale` would have to rise, which is a behaviour change and not worth it.
 
+- [ ] **(12) Should a *layer* have a transform at all?** Owner, 2026-08-27, questioning the premise rather
+      than the arithmetic: *"I'm not sure why layers themselves should ever be able to be shrunk. Only the
+      objects in them should be. Every object in the vector layer should be given coordinates according to the
+      canvas, and if the entire layer is 'shrunk', then those coordinates of the objects should shrink, not the
+      entire layer itself being transformed."*
+      **Where it came from**: their 15-bit arithmetic for item (8) is correct *for canvas coordinates* and
+      fails only because vector geometry is stored **layer-local** — `addStroke(canvasSpaceStroke:)`
+      (`VectorLayer.swift:575`) maps every sample through `_transform.inverted()` and divides the width by the
+      layer scale, so a stroke drawn across the canvas on a 2%-scaled layer stores coordinates 50x the extent.
+      That is the only reason 24 bits was chosen over 15.
+      **Judge it on its merits, not on the two bytes.** Restructuring a core type to save 2 bytes a sample
+      would be a bad trade alone. The real argument is that the layer transform is an indirection most entry
+      points invert away again — which is what the instinct is reacting to.
+      **Two things visible before any analysis**: a placed image *is* a transformed rectangle
+      (`VectorImageElement` carries its own `LayerTransform`) and text carries a `TextFrame`, so "everything is
+      canvas coordinates" cannot be total — per-*object* transforms would survive and only the *layer's* goes.
+      And a whole-layer scale becomes O(samples) rather than O(1), which is fine on commit and not at 60 Hz —
+      though the lasso float already solves exactly that shape (a latched bitmap moved by Core Animation,
+      baked into geometry on release).
+      **The load-bearing unknown**: is `_transform` per-cel or per-layer-across-every-cel? If a layer transform
+      spans the whole animation, baking rewrites every drawing rather than one, and the cost estimate moves by
+      orders of magnitude. `LAYER_TRANSFORM.md` is being written to settle this, with an independent critic.
+      **Note (8) is not blocked on this** — 24 bits works today with no other change; adopting (12) would let
+      the field narrow to ~15-16 bits later, which is a refinement rather than a prerequisite.
+
 - [ ] **(9) Resize the canvas from the Actions menu.** The owner: *"a resize canvas option in actions would be
       nice, to which users can resize the canvas however they want. They should be able to control whether it
       gets cropped/expanded, or if everything gets scaled."* Two controls: a **scale** option that scales the
