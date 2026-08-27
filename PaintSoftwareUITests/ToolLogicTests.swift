@@ -112,6 +112,114 @@ final class ToolLogicTests: XCTestCase {
                        "A canvas touch in text mode places a text box; it must not also start a stroke")
     }
 
+    // MARK: - The third exclusion list
+    //
+    // `CanvasManager.selectBrush` carried its own hand-maintained version of the same list, spelled
+    // `selectedTool != .eraser && selectedTool != .fill`. `.eyedropper` and `.text` were both added
+    // to `Tool` after it and neither was added to it. `Tool.followsBrushPresetSelection` is the
+    // exhaustive answer; these are the tests that stop a later case answering it quietly.
+
+    /// Every case's answer, stated once, here — same arrangement and same reasoning as
+    /// `expectedPaintsOnCanvas` above.
+    private let expectedFollowsBrushPreset: [Tool: Bool] = [
+        // A paint-brush preset is *this* tool's preset, so picking "Pencil" in the brush panel
+        // switching to the pencil is the feature, not a side effect.
+        .pen: true,
+        .pencil: true,
+        // The eraser keeps a wholly separate preset (`selectedEraserBrush`), so a tap in the paint
+        // brush's panel must not put the artist silently back to painting. The original rule.
+        .eraser: false,
+        // The fill's rule, also original.
+        .fill: false,
+        // Added by this test file, and both are omissions rather than decisions anybody made: the
+        // eyedropper is momentary and owns `toolBeforeEyedropper`, and text owns a live session that
+        // only its own exit path commits.
+        .eyedropper: false,
+        .text: false,
+    ]
+
+    func testEveryToolStatesWhetherABrushPresetRetargetsIt() {
+        XCTAssertEqual(expectedFollowsBrushPreset.count, Tool.allCases.count, """
+            A tool was added to `Tool` without saying whether picking a brush preset should retarget \
+            `selectedTool` at it. Say so in `Tool.followsBrushPresetSelection` and in the table \
+            above. Defaulting to `true` is how `.eyedropper` and `.text` ended up inside a list \
+            written before either existed.
+            """)
+
+        for tool in Tool.allCases {
+            guard let expected = expectedFollowsBrushPreset[tool] else {
+                XCTFail("\(tool) has no stated answer — see the message on the count assertion")
+                continue
+            }
+            XCTAssertEqual(tool.followsBrushPresetSelection, expected,
+                           "\(tool).followsBrushPresetSelection must be \(expected)")
+        }
+    }
+
+    /// **The `.text` case, driven through a real manager, because the stake is a *pair* of values
+    /// rather than one.** What made the omission dangerous was not the tool changing; it was the tool
+    /// changing while `textGestureActive` stayed true. That pair is
+    /// `CanvasTouchInputs.transformDependencyIsUnresolvable` — the text overlay goes on claiming
+    /// touches in its `hitTest` while `activeHostIsInteractive` flips true underneath it, so
+    /// pan/pinch/rotate start waiting on a stroke recognizer that is never handed a touch.
+    ///
+    /// **This is not a reported defect being repaired.** No UI route reaches `selectBrush` with
+    /// `.text` active: `BrushSettingsPanel` is the only caller, it needs `activePanel == .brush`, and
+    /// `TopToolbar.selectBrushToolAndTogglePanel` only reaches that panel from `.pen`/`.pencil`,
+    /// having run `commitAllInteractiveState()` on the way. The state is closed structurally so that
+    /// a seventh tool, or a second way into the brush panel, cannot open it.
+    func testPickingABrushPresetInTextModeLeavesTheTextSessionAlone() {
+        let manager = CanvasFixture.manager()
+        manager.enterTextMode()
+        manager.beginTextSession(at: CGPoint(x: 20, y: 20))   // inside `CanvasFixture.canvasSize`
+        XCTAssertTrue(manager.textGestureActive,
+                      "fixture precondition: there has to be a live text session for this to measure anything")
+
+        manager.selectBrush(BrushLibrary.pencil)
+
+        XCTAssertEqual(manager.selectedBrush.name, BrushLibrary.pencil.name,
+                       "The preset itself still becomes the active brush — that half was never in question")
+        XCTAssertEqual(manager.selectedTool, .text, """
+            Picking a brush preset took the tool off `.text` without committing the text session. \
+            `selectBrush` bakes nothing, so the session stays live and `TextOverlayView` stays on \
+            screen claiming touches while the layer host goes interactive underneath it — \
+            `CanvasTouchInputs.transformDependencyIsUnresolvable`, which is a canvas that will not \
+            pan, pinch or rotate.
+            """)
+        XCTAssertTrue(manager.textGestureActive,
+                      "…and the session is still the artist's to finish, which is the point of not switching")
+    }
+
+    /// The other direction, which is what stops the fix being "return false". A predicate that
+    /// excluded everything would pass the test above and leave the brush panel unable to change tools
+    /// at all — the Pencil preset would stop selecting the pencil, which is a feature the artist uses
+    /// every session.
+    func testPickingABrushPresetStillRetargetsThePaintTools() {
+        let manager = CanvasFixture.manager()
+        XCTAssertEqual(manager.selectedTool, .pen, "fixture precondition: a new document starts on the pen")
+
+        manager.selectBrush(BrushLibrary.pencil)
+        XCTAssertEqual(manager.selectedTool, .pencil, "The Pencil preset selects the pencil")
+
+        manager.selectBrush(BrushLibrary.softRound)
+        XCTAssertEqual(manager.selectedTool, .pen, "…and a round preset comes back to the pen")
+    }
+
+    /// The rule that was already there, pinned so the rewrite cannot drop it while adding the two
+    /// new answers.
+    func testPickingABrushPresetWhileErasingOrFillingLeavesThatToolSelected() {
+        let manager = CanvasFixture.manager()
+
+        manager.selectedTool = .eraser
+        manager.selectBrush(BrushLibrary.pencil)
+        XCTAssertEqual(manager.selectedTool, .eraser,
+                       "Picking a paint brush while erasing must not silently switch back to painting")
+
+        manager.selectedTool = .fill
+        manager.selectBrush(BrushLibrary.pencil)
+        XCTAssertEqual(manager.selectedTool, .fill)
+    }
+
     // MARK: - Entering the mode
     //
     // `Tool.text` is the first tool whose way in is a menu row rather than a toolbar icon, so the two

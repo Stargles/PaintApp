@@ -556,15 +556,19 @@ final class CanvasManager: ObservableObject {
     var availableBrushes: [Brush] { BrushLibrary.defaults + customBrushes }
 
     /// Selects a brush preset as the active brush. Also re-baselines the live
-    /// `brushSize`/`brushOpacity` from the brush's own defaults, and keeps `selectedTool` on a
-    /// paint tool (`.pencil` for the Pencil preset, `.pen` otherwise). Leaves `selectedTool` alone
-    /// while the eraser or fill tool is active, so picking a brush while erasing doesn't silently
-    /// switch back to painting.
+    /// `brushSize`/`brushOpacity` from the brush's own defaults, and — only when the active tool is
+    /// one that *has* a paint-brush preset — retargets `selectedTool` at it (`.pencil` for the
+    /// Pencil preset, `.pen` otherwise).
+    ///
+    /// **The condition is `Tool.followsBrushPresetSelection`, not a list written here.** It was
+    /// `selectedTool != .eraser && selectedTool != .fill`, and `.eyedropper` and `.text` were both
+    /// added to `Tool` after that line without being added to it. See that property for what the
+    /// `.text` case in particular was capable of stranding.
     func selectBrush(_ brush: Brush) {
         selectedBrush = brush
         brushSize = brush.size
         brushOpacity = brush.opacity
-        if selectedTool != .eraser && selectedTool != .fill {
+        if selectedTool.followsBrushPresetSelection {
             selectedTool = (brush.shape == .pencil) ? .pencil : .pen
         }
     }

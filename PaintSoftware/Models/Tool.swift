@@ -76,6 +76,52 @@ extension Tool {
 }
 
 extension Tool {
+    /// Whether picking a *paint-brush preset* should also make that brush's tool the active tool.
+    ///
+    /// **The third hand-maintained exclusion list in this file's history, and it is here for the
+    /// same reason the other two are.** `CanvasManager.selectBrush` spelled it
+    /// `selectedTool != .eraser && selectedTool != .fill`, written when those were the only two
+    /// tools it had to stand clear of. `.eyedropper` and `.text` were both added to the enum
+    /// afterwards and neither was added to the list, so a preset tap in either mode silently
+    /// retargeted `selectedTool` at `.pen`/`.pencil` — exactly the shape `paintsOnCanvas` above
+    /// exists to prevent, and exactly the shape that shipped the eyedropper painting a stroke with
+    /// every pick. An exhaustive `switch` with no `default:` means the next tool cannot compile
+    /// without answering.
+    ///
+    /// **`.text` is the answer that matters, and it is about stranded state rather than tidiness.**
+    /// Leaving text mode has to run `commitAllInteractiveState()` — that is the whole of
+    /// `CanvasManager.enterTextMode`'s doc comment, from the other side — and `selectBrush` runs
+    /// none. A `true` here would take `selectedTool` off `.text` while `textGestureActive` stayed
+    /// true, which leaves `TextOverlayView` on screen claiming touches in its `hitTest` while
+    /// `activeHostIsInteractive` has just gone true underneath it. That pair is
+    /// `CanvasTouchInputs.transformDependencyIsUnresolvable`: pan/pinch/rotate then wait on a stroke
+    /// recognizer that receives nothing, which is the dead-canvas symptom, and it is why this is a
+    /// `false` rather than a "commit first".
+    ///
+    /// **No reachable UI path is known to reach the bad state today** (`BrushSettingsPanel` is the
+    /// only caller and needs `activePanel == .brush`, which `TopToolbar.selectBrushToolAndTogglePanel`
+    /// only ever reaches from `.pen`/`.pencil`, having committed on the way). So this is a latent
+    /// hazard closed structurally, not a reported defect repaired — see `ToolLogicTests`.
+    var followsBrushPresetSelection: Bool {
+        switch self {
+        case .pen, .pencil:
+            // The preset *is* this tool's preset. Following it is what makes picking "Pencil" in the
+            // brush panel switch to the pencil, which is the feature.
+            return true
+        case .eraser:
+            // The eraser keeps its own preset (`selectedEraserBrush`) entirely separate, so a tap in
+            // the paint-brush panel while erasing must not silently put the artist back to painting.
+            // The original rule, unchanged.
+            return false
+        case .fill, .eyedropper, .text:
+            // None of the three is a stroke tool, so none of them has a brush preset to follow — and
+            // all three carry state that only their own exit path settles: the fill's interactive
+            // gesture, the eyedropper's `toolBeforeEyedropper` memory, and the live text session.
+            // Retargeting `selectedTool` from underneath any of them strands that state.
+            return false
+        }
+    }
+
     /// Why the text tool cannot be used on the active layer, or nil when it can.
     ///
     /// **Driven by the layer's kind, not by a list of layers text is banned from.** Same defect

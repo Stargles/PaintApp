@@ -124,6 +124,143 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
                                "THE BUG: two-finger pinch/pan/rotate is dead while the Fill tool is selected")
     }
 
+    // MARK: - The text path (owner report (6), 2026-08-27)
+
+    /// The owner's freeze report, once they corrected what *"try to resize the canvas"* meant:
+    /// *"by 'try to resize the canvas' I meant moving the canvas with two fingers if I recall
+    /// correctly"* — so the symptom is this class's symptom, and their trigger is
+    /// *"in the edit text keyboard menu, then select pencil brush"*.
+    ///
+    /// **Text is the `.fill` case's twin, and that is why these two tests exist.**
+    /// `Tool.paintsOnCanvas` is false for exactly `.fill`, `.eyedropper` and `.text`, and it is what
+    /// `shouldRequireFailure` reads (through `activeHostIsInteractive`) before it stakes pan / pinch
+    /// / rotate on the active layer's stroke recognizer. So `.text` sits in the same state
+    /// `testCanvasStillTransformsWithTheFillToolSelected` covers, and BUGS.md's still-open
+    /// *"two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device"* is the
+    /// other member of that pair. These are the `.text` half of that net.
+    ///
+    /// This one is text mode with a box actually on screen — the state the owner describes being in
+    /// when it locks. `TextOverlayView` is above every layer host and claims the box and its move
+    /// band in `hitTest`, so this is also the only test in the suite where a transform gesture has to
+    /// start with chrome sitting over the canvas.
+    func testCanvasStillTransformsWithATextBoxOpen() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        assertPinchMovesCanvas(app, canvas, "Setup: the canvas should pinch before any of this")
+
+        placeATextBox(app, on: canvas)
+
+        assertPinchMovesCanvas(app, canvas,
+                               "THE BUG: two-finger pinch/pan/rotate is dead with a text box open")
+    }
+
+    /// The owner's sequence to its end: leave the text keyboard by picking the brush, then try to
+    /// move the canvas.
+    ///
+    /// **What it pins is the commit on the way out.** `TopToolbar.selectBrushToolAndTogglePanel`
+    /// runs `commitAllInteractiveState()` before it assigns `.pen`, and that call — through
+    /// `beginCanvasEdit()` — is the only thing that ends the text session. Skip it and the tool goes
+    /// to a painting tool while `textGestureActive` stays true, which turns
+    /// `activeHostIsInteractive` on underneath an overlay that is still claiming touches:
+    /// `CanvasTouchInputs.transformDependencyIsUnresolvable`, a stroke recognizer that is never
+    /// handed a touch, and three transform recognizers waiting on it. `CanvasManager.selectBrush`
+    /// was one such exit until `Tool.followsBrushPresetSelection` (`ToolLogicTests`); this is the
+    /// route the artist actually has, held to the same standard.
+    func testCanvasStillTransformsAfterLeavingTextForTheBrush() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        assertPinchMovesCanvas(app, canvas, "Setup: the canvas should pinch before any of this")
+
+        placeATextBox(app, on: canvas)
+
+        let brushButton = app.buttons["toolbar.brushButton"]
+        XCTAssertTrue(brushButton.waitForExistence(timeout: 5))
+        brushButton.tap()
+        XCTAssertTrue(brushIsSelected(app),
+                      "PREMISE: the first tap from text mode has to select the brush, not merely open its panel")
+
+        // The mechanism, asserted directly rather than only through its symptom. A brush selected
+        // with `text:` still reading "box" is the unresolvable pair itself — an overlay claiming
+        // touches above a layer host that has just gone interactive — and it would be a defect even
+        // on a build where the pinch below happened to survive it.
+        XCTAssertTrue(waitForTextState(app, "none"), """
+            Leaving text mode for the brush left the text session live (text:\(readTextState(app))). \
+            `TopToolbar.selectBrushToolAndTogglePanel` runs `commitAllInteractiveState()` first for \
+            exactly this reason: the overlay goes on claiming touches in its `hitTest` while \
+            `activeHostIsInteractive` turns true underneath it, which is \
+            `CanvasTouchInputs.transformDependencyIsUnresolvable`.
+            """)
+
+        assertPinchMovesCanvas(app, canvas,
+                               "THE BUG: the canvas stopped transforming after leaving text mode for the brush")
+    }
+
+    /// Actions -> Add Text, then a tap on the canvas to put a box down. Leaves the text settings
+    /// panel open, which is where the owner is when they report the freeze.
+    ///
+    /// **The tap is right of centre, and the first draft had it left of centre and placed nothing.**
+    /// A settings panel drops down under the toolbar aligned to *its own icon's* side
+    /// (`DrawingView`'s `panelAlignment`), and Add Text is reached from Actions, a leading tool — so
+    /// the text panel is a 300pt-wide, 420pt-tall box over the **left** of the canvas. A tap at
+    /// (0.35, 0.35) lands on the panel, no box appears, and both tests then pass while measuring an
+    /// ordinary canvas. That is what the `canvas.textEditor` premise below exists to catch.
+    ///
+    /// `textPanel.fontButton` is the probe for the panel itself because the panel's own container is
+    /// a plain SwiftUI view that UIKit surfaces as no queryable element at all (see
+    /// `ToolsAndSelectionUITests.testEnteringTextModeClosesTheSelectPanel…`).
+    private func placeATextBox(_ app: XCUIApplication, on canvas: XCUIElement) {
+        app.buttons["toolbar.actionsButton"].tap()
+        let addText = app.buttons["actions.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5))
+        XCTAssertTrue(addText.isEnabled, "PREMISE: Add Text is available on the default layer")
+        addText.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5),
+                      "PREMISE: Add Text opens the text settings panel")
+
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.70, dy: 0.55)).tap()
+
+        // **Not optional politeness — without it both tests pass having placed nothing, which is what
+        // the first draft of this class did.** The whole premise is a live text session on screen
+        // while the canvas is asked to move; a tap that lands on the settings panel, or a
+        // `textTapRecognizer` that was disabled, leaves a green test measuring an ordinary canvas.
+        //
+        // Read off `canvas.host`'s label rather than by querying `canvas.textEditor`: that identifier
+        // is real (`TextOverlayView.swift:91`) and unreachable, because `canvas.host` is an
+        // accessibility element in its own right and hides its entire subtree. See
+        // `publishCanvasState`, which is where every other invisible piece of canvas state already
+        // lives for the same reason.
+        // **"editing", not merely "box".** The owner's report names the state precisely — *"in the
+        // edit text keyboard menu"* — so a box placed without the editor taking first responder
+        // would be a weaker fixture than the one being reasoned about. `handleTextPress` calls
+        // `focusEditor()` after `updateTextOverlay` for exactly that reason, and this is what says
+        // the call still lands.
+        XCTAssertTrue(waitForTextState(app, "editing"),
+                      "PREMISE: the canvas tap has to put a live, focused text box on screen "
+                      + "(text:\(readTextState(app)))")
+    }
+
+    /// The `text:` field of `canvas.host`'s label — "none" / "box" / "editing".
+    private func readTextState(_ app: XCUIApplication) -> String {
+        readField(app, "text:")
+    }
+
+    /// Polls `text:` rather than reading it once: placing a box is a SwiftUI state change and the
+    /// label is republished on the pass that follows it, so a single read straight after the tap can
+    /// legitimately still say "none".
+    private func waitForTextState(_ app: XCUIApplication, _ accepted: String...) -> Bool {
+        let deadline = Date().addingTimeInterval(5)
+        repeat {
+            if accepted.contains(readTextState(app)) { return true }
+        } while Date() < deadline
+        return false
+    }
+
     /// The owner's third report, and the direct net under two changes made together.
     ///
     /// "If I then try to zoom in and out of the screen or even pan it, it for some reason zooms in

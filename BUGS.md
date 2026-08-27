@@ -707,6 +707,16 @@ the action recorder (see CLAUDE.md), reproduce it on the iPad, and read which re
 — the recording carries every state transition and every `shouldRequireFailureOf` answer, which is
 exactly the evidence the simulator refused to produce.
 
+**`.text` is this report's twin, and the pair is the sharpest form of the hypothesis (2026-08-27).**
+The owner clarified that report (6)'s *"try to resize the canvas"* meant *"moving the canvas with two
+fingers"* — this symptom — reached from the text keyboard. `Tool.paintsOnCanvas` is false for exactly
+`.fill`, `.eyedropper` and `.text`, and that is the property `shouldRequireFailure` reads before it
+stakes pan/pinch/rotate on anything. So the two device reports name the two *non-momentary* members of
+one set, which recasts the question from "what is wrong with Fill" to **"is two-finger transform dead
+whenever `paintsOnCanvas` is false?"** — one capture answers it for both. `CanvasTransformFreezeUITests`
+now covers the `.text` half beside the `.fill` half; **both pass on the simulator**, which is the same
+non-answer the three earlier Fill attempts gave and is further evidence the split is device-only.
+
 **One hypothesis is now eliminated by reading, 2026-08-22, and it was the obvious one.**
 `shouldRequireFailure` (`CanvasView.swift`) is the code that can wedge a transform behind a stroke
 recognizer — its own comment at the call site says so — so it was the natural suspect. It cannot be

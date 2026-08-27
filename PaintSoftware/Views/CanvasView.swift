@@ -20,7 +20,7 @@ struct CanvasView: UIViewRepresentable {
         // entered — see `Coordinator.SandwichPresentation` and `midStrokeEntryCount`. Stated here as
         // well as in the `didSet` because a `didSet` never fires for the initial value; the two
         // formats have to stay identical or the test helpers parse one of them into nothing.
-        host.accessibilityLabel = "sandwich:off entries:0 shape:none"
+        host.accessibilityLabel = "sandwich:off entries:0 shape:none text:none"
         host.canvasManager = canvasManager
 
         let container = UIView()
@@ -1005,12 +1005,23 @@ struct CanvasView: UIViewRepresentable {
 
         /// Publishes the Coordinator's own state on `canvas.host`'s accessibility label, for the same
         /// reason `SandwichPresentation` documents above: none of it is otherwise visible to an
-        /// XCUITest. Four space-separated fields —
+        /// XCUITest. Five space-separated fields —
         ///
         ///     sandwich:<off|rest|stroke> entries:<n> shape:<none|following|adjustable>
-        ///     xform:<scale>,<rotation>,<dx>,<dy>
+        ///     xform:<scale>,<rotation>,<dx>,<dy> text:<none|box|editing>
         ///
-        /// — read by `LayerUITests` (the first two) and `CanvasTransformFreezeUITests` (the last two).
+        /// — read by `LayerUITests` (the first two) and `CanvasTransformFreezeUITests` (the rest).
+        ///
+        /// **`text` is here because `canvas.textEditor` cannot be queried, and a test that assumed it
+        /// could passed while placing nothing.** `TextOverlayView`'s `UITextView` carries that
+        /// identifier, but it is a descendant of `canvas.host`, and `canvas.host` is an accessibility
+        /// element in its own right — which hides its whole subtree, exactly as the paragraph above
+        /// says of a 1×1 marker view. So a text session is invisible to XCUITest by the same
+        /// mechanism as everything else on this label, and it belongs on the same label. It
+        /// distinguishes `box` from `editing` rather than collapsing to a bool for the reason `shape`
+        /// splits `following` from `adjustable`: the owner's freeze report is specifically about
+        /// being *"in the edit text keyboard menu"*, so whether the editor holds first responder is
+        /// part of the state under test and not a detail.
         /// `xform` carries the *effective* transform, committed plus whatever a gesture is
         /// contributing live, so "a two-finger gesture moved the canvas" is a value comparison
         /// across the gesture rather than something only `container.transform` knows.
@@ -1037,10 +1048,15 @@ struct CanvasView: UIViewRepresentable {
             if canvasManager.isShapeFollowingFinger { shapeState = "following" }
             else if canvasManager.isShapeInAdjustableState { shapeState = "adjustable" }
             else { shapeState = "none" }
+            let textState: String
+            if !canvasManager.textGestureActive { textState = "none" }
+            else if canvasManager.textIsFocused { textState = "editing" }
+            else { textState = "box" }
             hostView?.accessibilityLabel = "sandwich:\(sandwichPresentation.rawValue)"
                 + " entries:\(midStrokeEntryCount)"
                 + " shape:\(shapeState)"
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
+                + " text:\(textState)"
         }
 
         /// How many times the canvas has *entered* the mid-stroke presentation, published beside the

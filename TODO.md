@@ -320,28 +320,41 @@ pass". (4) is diagnosed and being built. (6) is parked awaiting a reproduction.*
       code: `MoveTransformBottomBar.swift:24-27` says the picker is live only for a raster piece because a
       lassoed vector piece scales uniformly, and **Move stage 3 is what turns it on**. Distort is stage 5.
       Both are designed and unstarted (HANDOFF.md). Nothing to fix; the ask is to *build stage 3*.
-- [ ] **(6) PARKED — the UI freeze, awaiting a reproduction the owner can trigger.** Owner, 2026-08-27:
-      *"I'll tell you when I am able to recreate the freeze."* Do not spend another investigation pass on it
-      until then; the candidate below is unproven in *reachability*, not in mechanism, and only the device can
-      settle that. **The one question that splits the diagnosis in half, to ask the moment it locks: does the
-      timeline still animate and do the marching ants still march?** Yes → a dead-input overlay. No → a real
-      main-thread hang. Those have nothing in common as fixes. Original report: *"it seems like it happens when
-      your in the edit text keyboard menu,
-      then select pencil brush or try to resize the canvas in some kind of sequence of actions ... a
-      previous session reportedly fixed the UI freezing canvas move bug, and somehow its still here."*
-      Confirmed **not** the earlier bug: `CanvasTransformFreezeUITests`' defect (a stroke begun under an
-      open timeline popover) was real and is fixed, and nothing in that path is text-specific. Strongest
-      live candidate: `CanvasManager.selectBrush(_:)` (`CanvasManager.swift:557-568`) omits `.text` from
-      its `selectedTool != .eraser && selectedTool != .fill` exclusion list, so picking a brush preset
-      flips the tool off `.text` without `commitAllInteractiveState()`, leaving `textGestureActive` true
-      while `reconcileLayers` re-enables the layer host — the same hand-maintained-list shape
-      `Tool.paintsOnCanvas`'s own doc comment exists to prevent. **Reachability is unproven**:
-      `BrushSettingsPanel.swift:20` is the only caller and needs `activePanel == .brush`, which the
-      committing toolbar route (`TopToolbar.swift:174-182`) appears to block whenever `.text` is active.
-      **The discriminating question for the owner, which no run can answer: when it locks, does the
-      timeline still animate and do the marching ants still march?** Yes → a dead-input overlay. No → a
-      real main-thread hang. A single `ActionRecorder` capture names it outright.
-
+- [ ] **(6) The UI freeze — the premise was corrected, and the report now has a twin already in
+      [BUGS.md](BUGS.md).** Owner, 2026-08-27, correcting the one fact everything rested on:
+      *"by 'try to resize the canvas' I meant moving the canvas with two fingers if I recall correctly."*
+      **So it was never Canvas Padding**, and it is not a main-thread hang either: a synchronous loop
+      would end on its own and would freeze everything, not two-finger canvas movement specifically.
+      The symptom is *this class's* symptom — *"the canvas stops panning / pinching / rotating"* — which
+      is `CanvasTransformFreezeUITests`, whose own fixed bug (`8ae8613`, a popover dismissed by the touch
+      that began a stroke) is confirmed **not** this one.
+      **The finding, 2026-08-27: `.fill` and `.text` are the same state, and BUGS.md's still-open
+      *"two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device"* is this report
+      seen from the other tool.** `Tool.paintsOnCanvas` is false for exactly `.fill`, `.eyedropper` and
+      `.text` — the eyedropper is momentary, so the two non-momentary members are the two the owner has
+      now reported. That property is what `CanvasView.shouldRequireFailure` reads (through
+      `activeHostIsInteractive`) before staking pan/pinch/rotate on the active layer's stroke recognizer,
+      so **the arbitration layer exonerates itself in both**, exactly as BUGS.md already records for Fill.
+      The question is therefore one question, not two: *is two-finger transform dead whenever
+      `paintsOnCanvas` is false?* One capture answers it for both tools.
+      **Two nets shipped, and both pass on the simulator** — `testCanvasStillTransformsWithATextBoxOpen`
+      and `testCanvasStillTransformsAfterLeavingTextForTheBrush`, beside the existing Fill one. That is
+      the same non-answer three earlier Fill attempts gave, and is further evidence the split is
+      device-only. `canvas.host`'s label now carries a `text:<none|box|editing>` field so a UI test can
+      see a text session at all; without it both tests passed having placed no box.
+      **`CanvasManager.selectBrush`'s missing `.text` is closed structurally and is NOT the reported
+      defect** — reachability was settled by reading and it is unreachable: `BrushSettingsPanel` is the
+      only caller, it needs `activePanel == .brush`, and `TopToolbar.selectBrushToolAndTogglePanel` only
+      reaches that panel from `.pen`/`.pencil`, having run `commitAllInteractiveState()` on the way. It
+      is now `Tool.followsBrushPresetSelection`, an exhaustive switch, so a seventh tool or a second door
+      into the brush panel cannot open the state.
+      **What the owner's next capture has to show, and it is now one question rather than two**: with the
+      canvas dead, put two fingers on it and read the recording's `recognizer` lines for `canvas.pan` /
+      `canvas.pinch`. If they never leave `.possible`, something is holding them — and the
+      `failureRequirement` lines say what `shouldRequireFailureOf` answered and who it named. If they
+      reach `.began` and the canvas still does not move, the freeze is not in the recognizers at all and
+      the search moves to `applyTransform`. Take it **with the Fill tool as well as from the text
+      keyboard**: the same file answering the same way for both is what turns two reports into one bug.
 
 ## Queued
 
