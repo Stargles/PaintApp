@@ -329,6 +329,17 @@ survived intact; **two of its explanations did not**, and one of its two propose
    those pixels are part of what the adjustment layer replaces — and it is a property of §3's option A
    however the result is recombined. Option C is the only formulation that preserves it, and §3 priced
    and rejected it. Pinned by a characterization test rather than left to be rediscovered.
+8. **The eyedropper stopped picking a colour in the padding margin, and that is now ruled correct.**
+   A consequence of the margin-is-not-paper decision rather than of any fix: `eyedropperRequest` passes
+   `includeBackground: true`, `RenderBackground.rect` leaves the margin transparent, and
+   `Eyedropper.color` has `guard a > 0`. So a tap that used to return the canvas colour now returns
+   nothing. **RULED 2026-08-27: nothing to pick is correct.** The margin does not export, does not
+   thumbnail and is not part of the picture — it is an on-screen affordance — so there is genuinely
+   nothing there to sample and the eyedropper saying so is honest. This **overrides the argument in
+   `eyedropperRequest`'s own doc comment**, which reasons the other way about unpainted white canvas;
+   that comment is about the artwork rect, where it is still right, and it must say so rather than
+   appear to have been forgotten. Nothing tests this in either direction.
+
 7. **One load-bearing invariant is unpinned.** The ink path is correct only because an isolated folder
    holding an effect leaf always buffers, which is what stops `split(atLeaf:)`'s half-group — it copies
    opacity, mask, blend mode and effect verbatim — from applying a folder's fade twice. That rests on a
