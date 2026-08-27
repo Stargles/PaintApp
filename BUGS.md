@@ -101,7 +101,21 @@ opaque backdrop instead. **Decide this before writing the compositing change, no
   and its own comment already calls the transparent-backed tile "a real defect". Same one-flag change,
   same ruling — and flipping it changes every existing gallery thumbnail until each project is re-saved.
 
-## Move with no selection blocks the brush button (2026-08-27)
+## Move with no selection blocked the brush button (2026-08-27) — FIXED `a506d66`
+
+**FIXED 2026-08-27 by `a506d66`**, and the owner's guess that item (15) would subsume it was half right —
+(15) narrows it but the fix is independent and landed first. `selectedTool`'s own `didSet` now closes an
+engaged whole-layer Move, which reaches all six writers by construction instead of the four call sites the
+brief named. **It could not go in `commitAllInteractiveState()`**: `TopToolbar.toggleMove()` calls that
+*before* toggling the flag on every tap, so the close would zero it and the toggle would set it straight
+back — Move could never be dismissed from its own button.
+
+**Gated on `Tool.isMomentary` on both sides.** The eyedropper is a round trip the artist experiences as one
+tap, so sampling a colour mid-Move must not commit the box; `.text` is deliberately *not* momentary,
+because a text session outlives the tap. **A second-order bug was found and fixed inside this work**: the
+first draft exempted the transition whenever *either* side was momentary, which also exempted a direct
+switch from an armed eyedropper to a real tool and quietly reopened the original defect behind one extra
+tap. The agent's own test caught it, not review.
 
 **Reported from the iPad, 2026-08-27.** The owner: *"if I click on move without lassoing first (so a canvas
 move), I cant click on a brush."* A whole-canvas Move — Move selected with nothing lassoed — leaves the app
@@ -114,7 +128,43 @@ same neighbourhood as `Tool.followsBrushPresetSelection`, `activePanel`, and the
 path — then (15) leaves it standing and it needs its own fix. Settle it by reading before deciding, and note
 that it is a live defect on the shipped build either way.
 
-## Drawing on a scaled-down vector cel silently discards most of the ink (2026-08-27) — CONFIRMED ON DEVICE, and the owner ruled it is not to be fixed here
+## Canvas Padding while a vector Move is held writes pre-resize geometry onto the resized cel (2026-08-27)
+
+**Found 2026-08-27 by the teardown audit `cf5de83` ran, not reported.** It is pre-existing and that commit
+deliberately did not fix it.
+
+`setCanvasPadding` replaces the cel's `VectorCanvas` outright. `resized(to:offset:)` drops the suppression,
+so **no ink is lost** — that is the good half, and it is why this is not in the silent-artwork-loss class
+its five neighbours were. But a held `vectorFloat` then points at the *old* canvas object, the version
+mismatch drives `cancelVectorFloat`, and cancel writes the float's **pre-resize** geometry onto the
+**resized** canvas. The artist gets their drawing back at the wrong offset.
+
+The other five doors of the same audit — `rasterizeLayer` (Rasterize and Merge Down), `moveCelToLayer`,
+`deleteLayer` and `clearCel` — were each one line and are fixed in `cf5de83` through one helper,
+`commitVectorFloatIfLifted(fromLayer:cel:)`, gated on the float's own layer so an edit elsewhere leaves a
+float the artist is holding alone. **`deleteLayer` was the subtle one**: `handleActiveContextChanged` does
+commit, but the layer is already out of `layers` so the float resolves nothing — and because
+`captureStructure` snapshots `layers` while a `VectorCanvas` is a reference type, **undo brought the layer
+back with the suppression still live**.
+
+This one is left because it is `setCanvasPadding`'s own coupling rather than a missing commit, and it sits
+in TODO item (9) / [CANVAS_RESIZE.md](CANVAS_RESIZE.md) territory — the resize path is being rebuilt there
+and a fix written now would be written against the path that is going away.
+
+## Drawing on a scaled-down vector cel silently discarded most of the ink (2026-08-27) — FIXED `cf5de83`
+
+**FIXED 2026-08-27 by `cf5de83`** — TODO item (15) stage 1. Move with no selection now lifts the whole cel
+into the lasso float, which bakes into canvas coordinates on commit, so the clipping path is no longer
+reachable: `TopToolbar.swift:153` was the only writer that could set `isVectorTransforming`, so the flag
+is now permanently false and every consumer of it is dead-but-live, which stage 2 removes. **The entry is
+kept, not pruned, because the negative control is the interesting part** — the regression test ships with
+the *old* mechanism driven directly inside it, asserting the loss, so the positive half cannot rot into a
+vacuous pass and stage 2 has to delete that control deliberately.
+
+**The numbers, measured rather than predicted.** On a 64×64 canvas shrunk 0.3× about ink centred at
+(32,32), the surviving band was **[22.4, 41.6]** — samples at 8, 20, 44 and 56 were discarded and only 32
+survived. That is the owner's *"a box around the original object"* rendered as data, and it settles the
+disagreement with our own prediction in their favour.
 
 **Found by reading while designing [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md), mechanically confirmed by an
 independent reviewer, and SEEN ON THE IPAD 2026-08-27.** The owner: *"After I shrink the entire canvas and

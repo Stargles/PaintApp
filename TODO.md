@@ -89,7 +89,7 @@ fill ([LASSO_MOVE.md](LASSO_MOVE.md) §5).
       would flatten the cel **to blank in the saved document**. LASSO_MOVE §6 names a stranded
       suppression as this design's one silent failure mode.
 
-### (16) Move with no selection blocks the brush button
+### (16) Move with no selection blocks the brush button — DONE `a506d66`
 
 - [ ] The owner, 2026-08-27: *"A separate bug is discovered where if I click on move without lassoing
       first (so a canvas move), I cant click on a brush."* Reported alongside (15) and possibly cured by
@@ -421,4 +421,12 @@ sized to; and **(9)** is independent of all of them *because* the width is fixed
 
 ## Done this pass
 
-Nothing yet — the pass opened 2026-08-27 with the device report above.
+- **(16) The brush button works after a whole-canvas Move** (`a506d66`). `selectedTool`'s own `didSet`
+  closes the Move, reaching all six writers by construction; `Tool.isMomentary` keeps an eyedropper round
+  trip from committing the box, and `.text` is deliberately not momentary.
+- **(15) stage 1 — Move with no selection lifts the whole cel into the lasso float** (`cf5de83`), which
+  closes the ink loss the owner reproduced. **Measured, not predicted**: on a 64×64 canvas shrunk 0.3×
+  about ink at (32,32) the surviving band was [22.4, 41.6] — the owner's *"box around the original
+  object"*, not our predicted quadrant. Fast tier 1748 → 1755, 0 failed. The teardown audit it carried
+  found **four more doors** that would have flattened a whole cel to blank, and one it deliberately left
+  (see BUGS.md). Stages 2-4 — deleting `_transform` and the persistence migration — are not in it.
