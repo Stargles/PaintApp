@@ -1,7 +1,7 @@
 # Graph Report - PaintSoftware  (2026-08-27)
 
 ## Corpus Check
-- 260 files · ~934,932 words
+- 260 files · ~950,021 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b162bb5e`
+- Built from commit: `6fc32055`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1094,7 +1094,7 @@ Nodes (5): Context, UIPinchGestureRecognizer, Void, TimelineScrollView, UIScroll
 
 ### Community 214 - "Effect backdrop — what an adjustment layer grades"
 Cohesion: 0.18
-Nodes (10): §0 — What is already true, verified rather than assumed, §1 — The ruling, 2.1 Once an effect grades the paper, the composite is opaque from that node up, 2.2 Once the paper is in the accumulator, alpha stops meaning coverage, §2 — The two consequences are inherent, not incidental, §3 — Options for the ink-only input, with costs, §4 — What the effect declares, §5 — What the owner has to answer (+2 more)
+Nodes (10): §0 — What is already true, verified rather than assumed, §1 — The ruling, 2.1 Once an effect grades the paper, the composite is opaque from that node up, 2.2 Once the paper is in the accumulator, alpha stops meaning coverage, §2 — The two consequences are inherent, not incidental, §3 — Options for the ink-only input, with costs, §4 — What the effect declares, §5 — Answered, 2026-08-27 (+2 more)
 
 ### Community 215 - "TimelineLayoutKey"
 Cohesion: 0.29
@@ -1182,7 +1182,7 @@ Nodes (9): 1. Nothing answers "who owns this canvas touch" — and this is where
 
 ### Community 239 - "Asked 2026-08-27, off the device report"
 Cohesion: 0.29
-Nodes (7): (15) Move with no selection becomes "the whole canvas was lassoed", and the legacy path is deleted, (16) Move with no selection blocks the brush button, (17) Text is transformable — Freeform and Mirror must accept it, (18) The bottom bars should be as tall as their contents, (19) An empty text object is deleted when it bakes — ALREADY SHIPPED, closed 2026-08-27, Asked 2026-08-27, off the device report, Chromatic aberration, and possibly every effect, is masked to the layer's own ink
+Nodes (7): (15) Move with no selection becomes "the whole canvas was lassoed", and the legacy path is deleted, (16) Move with no selection blocks the brush button — DONE `a506d66`, (17) Text is transformable — Freeform and Mirror must accept it, (18) The bottom bars should be as tall as their contents — ATTEMPTED AND REVERTED, still open, (19) An empty text object is deleted when it bakes — ALREADY SHIPPED, closed 2026-08-27, Asked 2026-08-27, off the device report, Chromatic aberration, and possibly every effect, is masked to the layer's own ink
 
 ### Community 240 - ".handleShouldReceive"
 Cohesion: 0.36
@@ -1225,7 +1225,7 @@ Nodes (3): Mode, affine, projective
   BUGS.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1146 isolated node(s):** `§0 — What is already true, verified rather than assumed`, `§1 — The ruling`, `2.1 Once an effect grades the paper, the composite is opaque from that node up`, `2.2 Once the paper is in the accumulator, alpha stops meaning coverage`, `§3 — Options for the ink-only input, with costs` (+1141 more)
+- **1146 isolated node(s):** `In flight`, `The device answered every open question, 2026-08-27`, `(15) Move with no selection becomes "the whole canvas was lassoed", and the legacy path is deleted`, `(16) Move with no selection blocks the brush button — DONE `a506d66``, `(17) Text is transformable — Freeform and Mirror must accept it` (+1141 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **22 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
