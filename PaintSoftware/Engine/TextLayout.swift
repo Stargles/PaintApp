@@ -163,10 +163,74 @@ enum TextLayout {
     /// it is the live overlay's glyph bitmap, and `TextOverlayView.glyphContentsScale` caps that in
     /// *texels* rather than in points (ADD_TEXT.md §4 rule 1) — which is the bound that actually
     /// holds, since it survives a zoom as well as a long string.
+    /// **These two floors and `minimumBoxSize`'s agree, and the cheaper spelling is on purpose.** A
+    /// pristine box never wraps, so its measured width is already at least the widest unbreakable run
+    /// and its measured height already at least one line — the floors below can only bite on an empty
+    /// string, where both of them and both of `minimumBoxSize`'s say the same thing: room for one
+    /// caret. Calling `minimumBoxSize` here would buy that agreement two extra framesetter passes on
+    /// every keystroke (this runs from `regrowTextFrameIfAutoSizing`), against ADD_TEXT.md §4 rule 3.
     static func autoSize(for recipe: TextRecipe, font: UIFont) -> CGSize {
         let unwrapped = measure(recipe, font: font, maxWidth: nil).size
         return CGSize(width: max(unwrapped.width, minimumBoxWidth),
                       height: max(unwrapped.height, font.lineHeight))
+    }
+
+    /// **The smallest box a resize grip may make, derived from the text rather than fixed** —
+    /// the owner's ruling of 2026-08-26: *"the box should never be allowed to be smaller than the
+    /// text size unless in distort mode."*
+    ///
+    /// **The rule, per axis: one line tall, one unbreakable run wide.** Both are the smallest unit
+    /// the layout cannot subdivide, which is what makes them a floor rather than a preference:
+    /// under one line CoreText drops the line and the box goes blank (`layout` is the other half of
+    /// this fix), and under one unbreakable run there is no break left to take, so the run's ink
+    /// runs out of the box's side and is clipped away.
+    ///
+    /// **What was rejected, and why the pair had to be per axis.** The ruling read literally — never
+    /// smaller than the *laid-out* text — is the max-content size, and it makes a wrapping box
+    /// un-narrowable: narrowing a box is how an artist sets a wrap width, and a floor at the full
+    /// laid-out width forbids exactly that. It is worse on the other axis, where it would also
+    /// contradict a decision the owner has already made (ADD_TEXT.md §5.3, "overflow clips": a box
+    /// you sized is authoritative and hides what runs past it). The two axes also cannot be answered
+    /// by one number, because narrowing a box *increases* the height it needs — a floor derived from
+    /// the wrapped layout would chase itself. One line and one run are both independent of the box,
+    /// so the pair is a constant for a given recipe and there is nothing to chase.
+    ///
+    /// **MEASURED, and it is the reason the width floor is a run and not a word.** With
+    /// `.byWordWrapping`, CoreText does not overflow a word that will not fit — it breaks inside it,
+    /// one character to a line. So a word *can* be wrapped narrower, and a floor at the widest word
+    /// would be a typographic preference imposed as a hard limit, un-narrowable for exactly the
+    /// paste (a long URL, a compound title) an artist most wants to force a break in. The widest
+    /// unbreakable run is what CoreText itself will not subdivide, and asking the framesetter for it
+    /// costs one suggestion.
+    ///
+    /// Never below `TextFrame.minimumExtent` on either axis: an empty box has no text to be smaller
+    /// than, and stage 4's floor is still what keeps it a visible target.
+    static func minimumBoxSize(for recipe: TextRecipe, font: UIFont) -> CGSize {
+        CGSize(width: max(TextFrame.minimumExtent, ceil(minimumLineWidth(recipe, font: font))),
+               height: max(TextFrame.minimumExtent,
+                           ceil(firstLineLayoutHeight(recipe, font: font, maxWidth: nil))))
+    }
+
+    /// The narrowest a line of this recipe can be: the width of its widest **unbreakable run**, as
+    /// CoreText's own line breaker defines one.
+    ///
+    /// Asked of the framesetter at a one-point constraint, which is CoreText being told to break
+    /// wherever it possibly can; what comes back is the one run it could not break. That is
+    /// script-correct without this file knowing anything about scripts, and it carries the recipe's
+    /// tracking, since `.kern` widens a run too. MEASURED on a 64 pt face: 46.2 pt for "Hello world"
+    /// (the `w`), 86.2 pt for the same string at 40 pt tracking, 55.4 pt for a Japanese sentence
+    /// containing no spaces at all — where splitting on whitespace would have answered with the
+    /// entire sentence and pinned the box open at its full width.
+    ///
+    /// Zero for an empty string: no run, so nothing to be narrower than.
+    static func minimumLineWidth(_ recipe: TextRecipe, font: UIFont) -> CGFloat {
+        let attributed = attributedString(recipe, font: font)
+        guard attributed.length > 0 else { return 0 }
+        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
+        var fitRange = CFRange()
+        return CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter, CFRange(location: 0, length: 0), nil,
+            CGSize(width: 1, height: CGFloat.greatestFiniteMagnitude), &fitRange).width
     }
 
     /// Wide enough that an empty box is a visible target rather than a hairline, in canvas points.

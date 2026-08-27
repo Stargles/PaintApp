@@ -209,10 +209,19 @@ extension CanvasManager {
     /// caret were still live, would happen *underneath the finger*, mid-gesture, with the handle the
     /// artist is holding jumping to a different place. Resigning first makes the rule's precondition
     /// false before the drag can trip it.
+    /// **The text-derived floor is latched here too, and once.** The owner's ruling — a box may not
+    /// be made smaller than its text unless it is being distorted — needs the *recipe*, which the
+    /// pure `TextFrameDrag` does not carry and should not; measuring it at touch-down rather than per
+    /// delta keeps ADD_TEXT.md §4 rule 2's promise that a 60 Hz drag runs no layout, and costs
+    /// nothing, since the only thing that could change the answer is typing and there is a finger on
+    /// a grip. `TextLayout.minimumBoxSize` states which floor each axis gets and what was rejected.
     func beginTextHandleDrag(_ handle: TextFrame.Handle) {
         guard textGestureActive else { return }
         let distort = textCornerMode == .distort && handle.corner != nil
-        guard let drag = TextFrameDrag(frame: textFrame, handle: handle, distort: distort) else { return }
+        let font = TextLayout.resolvedFont(for: textRecipe).font
+        guard let drag = TextFrameDrag(frame: textFrame, handle: handle, distort: distort,
+                                       minimumSize: TextLayout.minimumBoxSize(for: textRecipe,
+                                                                              font: font)) else { return }
         if distort, textIsFocused { textFocusResigner?() }
         textHandleDrag = drag
         textFingerDown = true

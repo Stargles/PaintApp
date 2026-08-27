@@ -1025,6 +1025,163 @@ final class TextTransformLogicTests: XCTestCase {
                              "A foreshortened box's near corner genuinely needs more texels than it has points.")
     }
 
+    // MARK: - The box may not be made smaller than its own text
+
+    /// The floor the app actually applies, for the recipe a manager is currently holding.
+    private func textFloor(_ manager: CanvasManager) -> CGSize {
+        TextLayout.minimumBoxSize(for: manager.textRecipe,
+                                  font: TextLayout.resolvedFont(for: manager.textRecipe).font)
+    }
+
+    /// **The owner's ruling, through the real model path** (2026-08-26): *"the box should never be
+    /// allowed to be smaller than the text size unless in distort mode."*
+    ///
+    /// Dragging the bottom-right grip onto the top-left corner asks for a box of zero by zero. What
+    /// it gets is the text's own floor — and the assertion that makes this a test of the ruling
+    /// rather than of stage 4's clamp is the last one: at 64 pt the derived floor is far above the
+    /// flat 24 that used to be the only stop.
+    func testASizingGripCannotTakeTheBoxUnderOneLineOfItsOwnText() {
+        let manager = manager()
+        manager.beginTextSession(at: CGPoint(x: 20, y: 20))
+        manager.updateTextString("Hello world")
+        let floor = textFloor(manager)
+
+        manager.beginTextHandleDrag(.bottomRight)
+        manager.dragTextHandle(to: manager.textFrame[.topLeft])
+        manager.endTextHandleDrag()
+
+        XCTAssertEqual(manager.textFrame.size.width, floor.width, accuracy: Self.epsilon)
+        XCTAssertEqual(manager.textFrame.size.height, floor.height, accuracy: Self.epsilon)
+        XCTAssertGreaterThan(floor.height, TextFrame.minimumExtent * 2,
+                             "Fixture check — at 64 pt the flat 24 pt floor is nowhere near a line of "
+                             + "type, which is exactly how the box could be dragged blank.")
+    }
+
+    /// **The point of the floor, and where the two halves of the fix meet.** A box at its smallest is
+    /// still tall enough for CoreText to lay its first line out *inside the box's own rectangle* — so
+    /// nothing has to be rescued — and it still draws ink.
+    ///
+    /// The height assertion is against the measured threshold rather than against the constant, which
+    /// is what makes it a test of the ruling: with the flat 24 pt floor it fails at 64 pt type by a
+    /// factor of three.
+    func testABoxClampedToTheFloorStillHoldsAndDrawsALineOfItsText() throws {
+        let manager = manager()
+        manager.beginTextSession(at: CGPoint(x: 20, y: 20))
+        manager.updateTextString("Hello world")
+        manager.beginTextHandleDrag(.bottomRight)
+        manager.dragTextHandle(to: manager.textFrame[.topLeft])
+        manager.endTextHandleDrag()
+
+        let font = TextLayout.resolvedFont(for: manager.textRecipe).font
+        XCTAssertGreaterThanOrEqual(
+            manager.textFrame.size.height,
+            TextLayout.firstLineLayoutHeight(manager.textRecipe, font: font, maxWidth: nil),
+            "The smallest box a grip can make must still hold one line of its own text — the height "
+            + "at which CoreText stops dropping the line, not a constant chosen before the text was.")
+
+        let image = try XCTUnwrap(TextLayout.render(recipe: manager.textRecipe, frame: manager.textFrame,
+                                                    canvasSize: Self.canvasSize))
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(image.cgImage)))
+        let inked = stride(from: 3, to: bytes.count, by: 4).contains { bytes[$0] > 8 }
+        XCTAssertTrue(inked, "A box at its own floor drew nothing — which is the report this fixes.")
+    }
+
+    /// **The floor is derived, not a constant**: it scales with the type. Asserted as the ratio,
+    /// which holds whatever font the device has — CoreText's metrics are linear in the point size,
+    /// so doubling the size doubles both floors.
+    ///
+    /// Both sizes are chosen above the flat 24 pt clamp on both axes, or the ratio would be measuring
+    /// that clamp instead.
+    func testTheFloorScalesWithThePointSize() {
+        func floor(_ pointSize: CGFloat) -> CGSize {
+            let text = recipe("Hello world", pointSize: pointSize)
+            return TextLayout.minimumBoxSize(for: text, font: TextLayout.resolvedFont(for: text).font)
+        }
+        let single = floor(64), double = floor(128)
+        XCTAssertGreaterThan(single.width, TextFrame.minimumExtent,
+                             "Fixture check — the smaller size must clear the flat clamp on both axes.")
+        XCTAssertGreaterThan(single.height, TextFrame.minimumExtent)
+        // `ceil` on each, plus `measure`'s one-point margin on the height, is the whole slack here.
+        XCTAssertEqual(double.width, single.width * 2, accuracy: 2)
+        XCTAssertEqual(double.height, single.height * 2, accuracy: 3)
+    }
+
+    /// The floor is a floor and nothing else: a drag that asks for a box bigger than it gets exactly
+    /// the box it asked for.
+    func testTheFloorDoesNotDisturbADragThatIsAlreadyBigEnough() {
+        let manager = manager()
+        manager.beginTextSession(at: CGPoint(x: 20, y: 20))
+        manager.updateTextString("Hello world")
+        let origin = manager.textFrame[.topLeft]
+        let wanted = CGSize(width: 170, height: 160)
+        XCTAssertGreaterThan(wanted.height, textFloor(manager).height, "Fixture check — this is the big case.")
+
+        manager.beginTextHandleDrag(.bottomRight)
+        manager.dragTextHandle(to: CGPoint(x: origin.x + wanted.width, y: origin.y + wanted.height))
+        manager.endTextHandleDrag()
+
+        XCTAssertEqual(manager.textFrame.size.width, wanted.width, accuracy: Self.epsilon)
+        XCTAssertEqual(manager.textFrame.size.height, wanted.height, accuracy: Self.epsilon)
+    }
+
+    /// **The owner's exception, and it is a ruling rather than an oversight**: a box being distorted
+    /// keeps stage 4's flat floor. Handed a floor of 400×300 — far larger than the box — a sizing
+    /// grip on a `.projective` frame still shrinks it to `minimumExtent`.
+    func testTheSizingGripsOnAWarpedBoxKeepTheFlatMinimum() throws {
+        let start = try warped()
+        let unreachable = CGSize(width: 400, height: 300)
+        let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: .right, minimumSize: unreachable))
+        XCTAssertEqual(drag.minimumSize, unreachable, "Fixture check — the drag really was handed one.")
+
+        // Back through the held edge and out the other side, which asks for a negative width.
+        let held = start[.topLeft]
+        let sized = try XCTUnwrap(drag.clampedFrame(draggedTo: CGPoint(x: held.x - 40, y: held.y - 30)))
+        XCTAssertEqual(sized.size.width, TextFrame.minimumExtent, accuracy: Self.epsilon,
+                       "A distorted box is in distort mode, and the ruling exempts it.")
+    }
+
+    /// The other half of the exemption: a distort drag consults no floor at all — the corner goes
+    /// where it is put, and only `isValidQuad` can refuse it.
+    func testADistortDragIgnoresTheTextFloorEntirely() throws {
+        let start = upright(size: CGSize(width: 120, height: 60))
+        let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: .bottomRight, distort: true,
+                                               minimumSize: CGSize(width: 400, height: 300)))
+        // Straight up the right edge until it is 10 points tall — still a convex quad, so
+        // `isValidQuad` allows it, and far under either floor.
+        let target = CGPoint(x: start[.topRight].x, y: start[.topRight].y + 10)
+        let moved = try XCTUnwrap(drag.distortedFrame(draggedTo: target))
+        assertPoint(moved[.bottomRight], target, "A distorted corner follows the finger, floor or no floor.")
+        XCTAssertEqual(hypot(moved[.bottomRight].x - moved[.topRight].x,
+                             moved[.bottomRight].y - moved[.topRight].y), 10, accuracy: Self.epsilon,
+                       "The quad's right edge is now 10 points of a 24 pt flat minimum and a much "
+                       + "larger derived one. That is the exemption, and it is the owner's.")
+    }
+
+    /// **Why the width floor is one unbreakable run and not one word.** MEASURED: with
+    /// `.byWordWrapping`, CoreText does not overflow a word too wide for the box — it breaks inside
+    /// it. So a floor at the widest *word* would forbid narrowing a box holding one long token at
+    /// all, which is precisely the paste an artist wants to force a break in; the widest run is what
+    /// CoreText itself will not subdivide.
+    ///
+    /// Asserted as the two identities that separate the two readings, both font-independent: one
+    /// long word wraps into more than one line when the box is narrower than it, and the floor for
+    /// that string is far below the word's own width.
+    func testTheWidthFloorIsARunRatherThanAWholeWord() {
+        let word = "antidisestablishmentarianism"
+        let text = recipe(word, pointSize: 64)
+        let font = TextLayout.resolvedFont(for: text).font
+        let wordWidth = TextLayout.measure(text, font: font, maxWidth: nil).size.width
+        let floor = TextLayout.minimumBoxSize(for: text, font: font)
+
+        XCTAssertLessThan(floor.width, wordWidth / 4,
+                          "The floor is a run, not the word — a word-wide floor would pin the box "
+                          + "open at \(wordWidth) points and there would be no way to wrap this.")
+        let wrapped = TextLayout.measure(text, font: font, maxWidth: floor.width)
+        XCTAssertGreaterThan(wrapped.lines.count, 1,
+                             "MEASURED: CoreText breaks inside a word rather than overflowing it, so "
+                             + "'a word cannot be wrapped narrower' is not true of this configuration.")
+    }
+
     // MARK: - Support
 
     /// A genuinely `.projective` frame: an upright box with one corner pulled out of the plane,

@@ -595,6 +595,11 @@ extension TextFrame {
     /// artist meant by dragging past the far corner.
     static let minimumExtent: CGFloat = 24
 
+    /// The flat floor as a size, which is what a drag that knows nothing about the text it is
+    /// carrying gets. `TextLayout.minimumBoxSize` is what the app passes instead — see
+    /// `TextFrameDrag.minimumSize`.
+    static let minimumSize = CGSize(width: minimumExtent, height: minimumExtent)
+
     // MARK: Handles
 
     /// The nine grips ADD_TEXT.md §3 stage 4 puts on a text box: four corners, four edge midpoints,
@@ -793,11 +798,35 @@ struct TextFrameDrag: Equatable {
     /// and where it sits (§1, "the object stores a recipe, never a result").
     let isDistort: Bool
 
+    /// The smallest box the eight sizing grips may make, **per axis**, latched with everything else
+    /// at touch-down.
+    ///
+    /// **The owner's ruling** (2026-08-26): *"the box should never be allowed to be smaller than the
+    /// text size unless in distort mode"*. `TextLayout.minimumBoxSize` derives the pair from the
+    /// laid-out text and `CanvasManager.beginTextHandleDrag` passes it here; the flat
+    /// `TextFrame.minimumSize` is what a caller with no recipe in hand gets, which is stage 4's
+    /// behaviour unchanged.
+    ///
+    /// **Per axis, and latched, for two separate reasons.** Per axis because the two floors are
+    /// different questions — one line tall against one unbreakable run wide — and a single scalar
+    /// could only answer the larger of them, which on 64 pt type would make the box unusably wide.
+    /// Latched because the alternative is a CoreText pass per 60 Hz delta, against ADD_TEXT.md §4
+    /// rule 2, and because the floor is a property of the *recipe*: it cannot change while a finger
+    /// is on a grip, since typing is not reachable mid-drag.
+    ///
+    /// **The distort is exempt, which is the owner's own exception.** `distortedFrame` never consults
+    /// it (a corner moves where it is put, bounded only by `isValidQuad`), and neither does
+    /// `sizedInBoxSpace` — see its own note.
+    let minimumSize: CGSize
+
     /// Nil only for a distort drag on a quad too warped to have perpendicular axes — which is every
     /// quad a distort has already made, and none of which the sizing paths are reachable from.
     private let basis: TextFrame.Basis?
 
-    init?(frame: TextFrame, handle: TextFrame.Handle, distort: Bool = false) {
+    init?(frame: TextFrame, handle: TextFrame.Handle, distort: Bool = false,
+          minimumSize: CGSize = TextFrame.minimumSize) {
+        self.minimumSize = CGSize(width: max(TextFrame.minimumExtent, minimumSize.width),
+                                  height: max(TextFrame.minimumExtent, minimumSize.height))
         if distort, handle.corner != nil, frame.corners.count == 4,
            frame.size.width > TextFrame.degenerateExtent,
            frame.size.height > TextFrame.degenerateExtent,
@@ -831,8 +860,8 @@ struct TextFrameDrag: Equatable {
     /// the *last valid* quad rather than the starting one — ADD_TEXT.md §1's clamping rule. This
     /// total form exists so a caller that drives a whole gesture in one call still gets an answer,
     /// and so the two can never mean different things.
-    func frame(draggedTo point: CGPoint, minimumExtent: CGFloat = TextFrame.minimumExtent) -> TextFrame {
-        clampedFrame(draggedTo: point, minimumExtent: minimumExtent) ?? start
+    func frame(draggedTo point: CGPoint) -> TextFrame {
+        clampedFrame(draggedTo: point) ?? start
     }
 
     /// The frame this drag produces, or **nil when the quad it would produce is not one a homography
@@ -841,13 +870,10 @@ struct TextFrameDrag: Equatable {
     /// Nil is only reachable on the two paths that can *make* an invalid quad: the distort, and the
     /// sizing grips and knob on a `.projective` frame. Stage 4's parallelogram arithmetic on an
     /// `.affine` frame always answers, exactly as it did before stage 5 existed.
-    func clampedFrame(draggedTo point: CGPoint,
-                      minimumExtent: CGFloat = TextFrame.minimumExtent) -> TextFrame? {
+    func clampedFrame(draggedTo point: CGPoint) -> TextFrame? {
         if isDistort { return distortedFrame(draggedTo: point) }
-        if start.mode == .projective {
-            return warpedFrame(draggedTo: point, minimumExtent: minimumExtent)
-        }
-        return handle == .rotation ? rotated(towards: point) : resized(towards: point, minimumExtent: minimumExtent)
+        if start.mode == .projective { return warpedFrame(draggedTo: point) }
+        return handle == .rotation ? rotated(towards: point) : resized(towards: point)
     }
 
     /// The frame with this drag's corner moved to `point` and the other three left alone — or **nil
@@ -909,12 +935,11 @@ struct TextFrameDrag: Equatable {
     ///
     /// Nil on a drag that would leave the valid set — a box grown through the vanishing line, most
     /// of all — which is ADD_TEXT.md §1's clamp, reached by the same predicate the distort uses.
-    func warpedFrame(draggedTo point: CGPoint,
-                     minimumExtent: CGFloat = TextFrame.minimumExtent) -> TextFrame? {
+    func warpedFrame(draggedTo point: CGPoint) -> TextFrame? {
         guard !isDistort, start.mode == .projective, let homography = start.homography else { return nil }
         let candidate = handle == .rotation
             ? turnedInPlane(towards: point)
-            : sizedInBoxSpace(towards: point, through: homography, minimumExtent: minimumExtent)
+            : sizedInBoxSpace(towards: point, through: homography)
         guard var next = candidate, let quad = next.quad,
               Homography.isValidQuad(quad, boxSize: next.size) else { return nil }
         let tolerance = max(1e-6, 1e-6 * max(next.size.width, next.size.height))
@@ -929,9 +954,16 @@ struct TextFrameDrag: Equatable {
     /// subtraction. `handle.widthSign`, `heightSign` and `anchorLocal` are read *unchanged*, which is
     /// the point — the axis mask, the "opposite corner does not move" rule and the clamp at
     /// `minimumExtent` are stage 4's, not a second copy of them.
-    private func sizedInBoxSpace(towards point: CGPoint, through homography: Homography,
-                                 minimumExtent: CGFloat) -> TextFrame? {
+    ///
+    /// **The flat `TextFrame.minimumExtent` here, deliberately, and not the drag's text-derived
+    /// `minimumSize`.** This is the sizing path on a `.projective` frame — a box the artist has
+    /// already distorted — and the owner's ruling of 2026-08-26 carries its own exception: the box
+    /// may never be smaller than its text *unless in distort mode*. A warped box is in distort mode,
+    /// so its grips keep stage 4's flat floor; `resized(towards:)`, the same gesture on an unwarped
+    /// box, is where the ruling actually lands.
+    private func sizedInBoxSpace(towards point: CGPoint, through homography: Homography) -> TextFrame? {
         guard let inverse = homography.inverse, let local = inverse.map(point) else { return nil }
+        let minimumExtent = TextFrame.minimumExtent
         let held = handle.anchorLocal(width: start.size.width, height: start.size.height)
         let width = handle.widthSign.map { max(minimumExtent, $0 * (local.x - held.x)) } ?? start.size.width
         let height = handle.heightSign.map { max(minimumExtent, $0 * (local.y - held.y)) } ?? start.size.height
@@ -1001,15 +1033,20 @@ struct TextFrameDrag: Equatable {
     /// point-text-becomes-area-text moment, and the document is explicit that it feels broken left
     /// implicit. From here `size` is authoritative, the text wraps and clips into it, and the
     /// overlay draws a solid outline where a pristine box draws a dashed one.
-    private func resized(towards point: CGPoint, minimumExtent: CGFloat) -> TextFrame {
+    ///
+    /// **Where the owner's ruling lands**: *"the box should never be allowed to be smaller than the
+    /// text size unless in distort mode"* (2026-08-26). The clamp is `minimumSize`, which the app
+    /// derives from the laid-out text rather than from the flat 24 stage 4 shipped — see
+    /// `TextLayout.minimumBoxSize` for which floor was chosen on each axis and what was rejected.
+    private func resized(towards point: CGPoint) -> TextFrame {
         guard let basis else { return start }
         let d = CGVector(dx: point.x - anchor.x, dy: point.y - anchor.y)
         // Dot products rather than a 2×2 solve because `u ⟂ v` for every quad stage 4 writes; see
         // this file's stage-4 header for what happens to one that is not.
         let alongU = d.dx * basis.u.dx + d.dy * basis.u.dy
         let alongV = d.dx * basis.v.dx + d.dy * basis.v.dy
-        let width = handle.widthSign.map { max(minimumExtent, $0 * alongU) } ?? basis.width
-        let height = handle.heightSign.map { max(minimumExtent, $0 * alongV) } ?? basis.height
+        let width = handle.widthSign.map { max(minimumSize.width, $0 * alongU) } ?? basis.width
+        let height = handle.heightSign.map { max(minimumSize.height, $0 * alongV) } ?? basis.height
 
         let local = handle.anchorLocal(width: width, height: height)
         let origin = CGPoint(x: anchor.x - basis.u.dx * local.x - basis.v.dx * local.y,
