@@ -91,17 +91,30 @@ requirement was nearly re-derived from scratch this week because it was only in 
       bound becomes the *addressable* extent instead: **canvas + padding, capped at 16,384 pt** (the owner's
       rule, see (13)). At quarter-pixel that is 65,536 units — which unsigned 16 bits covers **exactly**, with
       one quarter-pixel to spare.
-      **But exactly is not enough, and the honest width is 18 signed bits per axis.** Sixteen unsigned works
-      only if no stored coordinate is ever negative and none ever exceeds the padded extent — and today both
-      happen: touches keep being delivered after a drag leaves the canvas, and content parked outside the
-      bounds by a shrink keeps its true position. Taking 16 would mean **clamping ink at the storage
-      boundary**, which bends a line visibly where part of it is still on screen. **18 signed bits gives
-      ±32,768 pt — twice the limit in both directions — and preserves today's behaviour exactly.**
-      **The saving being declined is half a byte a sample.** 18+18+8 = 44 bits = 5.5 bytes against 16+16+8 =
-      5 bytes; across the owner's largest plausible document (1000 cels x 8,714 samples) the difference is
-      ~4 MB, against a baseline win of 24 → 5.5 bytes, **4.4x**. Half a byte is not worth a clipping rule.
-      (17 signed bits is the tight fit at ±16,384; 18 is taken for the headroom, and the encoding is a
-      bitstream so byte alignment buys nothing here.)
+      **RE-REVISED, and the owner was right — 16 bits, origin at the canvas centre.** This entry briefly
+      argued for 18 signed bits, on the ground that 16 unsigned covers `[0, 16384)` exactly and leaves no room
+      for the negative coordinates that occur today. **That assumed a corner origin, and the owner supplied
+      the fix in one sentence**: *"have something like the first bit represent a plus or minus, then center
+      the origin to the exact middle of the canvas. 14 bits which cover 16384 (maximum canvas size) which is
+      across -8k to 8k, and the last two bits for quarter pixel res."*
+      Centring is what buys the sign back for free. 2^16 = 65,536 quarter-pixels = **16,384 pt of span**,
+      centred = **±8,192 pt** — exactly the maximum canvas, negatives included, at quarter-pixel resolution.
+      **Final: 16 bits an axis, 8 for pressure, 40 bits = 5 bytes a sample against today's 24 — 4.8x.**
+      **The one honest caveat, and the owner has already accepted its shape**: at a canvas of *exactly* 16k
+      there is no margin left for ink outside the canvas, because the field is the canvas. It is not a
+      practical limit — at the 2048x1024 the owner actually works on, the artwork occupies ±1024 x ±512 of a
+      ±8,192 field, so there is 8x margin in x and 16x in y for strokes that wander off the edge — and they
+      have already said the 16k canvas *"will likely never be used for animation."*
+      **The one detail still to settle, in implementation, not by guessing**: centre of *what*. If the origin
+      is the centre of the **current canvas**, then a crop/expand that is not symmetric moves the origin and
+      every stored coordinate has to be re-encoded — reintroducing exactly the resize-couples-to-storage
+      problem that fixing the width was meant to remove. If it is the centre of the **fixed 16,384 address
+      space**, it is resize-invariant and nothing is re-encoded. **Prefer the fixed address space** unless
+      something argues otherwise; note that a *scaling* resize rewrites coordinates anyway under (9), and a
+      layer resize bakes them under (12), so only crop/expand is affected either way.
+      **Centring is an encoding concern, not a coordinate-system change.** In memory the samples stay in
+      whatever space they are in today; encode subtracts the centre and quantises, decode dequantises and adds
+      it back. Nothing above the storage layer needs to know.
 
 - [ ] **(12) Should a *layer* have a transform at all?** Owner, 2026-08-27, questioning the premise rather
       than the arithmetic: *"I'm not sure why layers themselves should ever be able to be shrunk. Only the
