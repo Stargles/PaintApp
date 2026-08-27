@@ -138,6 +138,22 @@ struct EffectSettingsBar: View {
 
     /// The scroll's cap. Sized so Levels — five slider rows, the tallest all-slider effect — fits with
     /// nothing to scroll, and everything taller scrolls rather than growing.
+    ///
+    /// **A content-measured `.background(GeometryReader{...})` on the rows `VStack` was tried here
+    /// and reverted (2026-08-27).** The theory — that `.background` reads the host's already-resolved
+    /// size rather than the proposal offered to it — sounds right and is the standard advice, but
+    /// measured against the real app it was wrong: an on-screen debug overlay showed the measured
+    /// height pinned at exactly 0 for every effect, collapsing the whole card to its header with the
+    /// rows clipped away entirely. XCUITest did not catch this — `XCUIElement.frame` for the sliders
+    /// still reported plausible nonzero positions, so `testEffectSettingsBarIsShorterForFewerSliders`
+    /// passed against a build that was visibly broken. Only the simulator screenshot showed it.
+    /// `CurveEditor`'s doc a few hundred lines below records the same failure mode for a
+    /// `GeometryReader` used more directly ("collapses the graph to nothing") — evidently the
+    /// `.background` indirection does not shield you from a `ScrollView`'s unbounded height proposal
+    /// the way it is commonly assumed to. A working fix likely needs the content measured by an
+    /// `.accessibilityHidden(true)` twin laid out *outside* any `ScrollView`, but that was not reached
+    /// and verified before this had to ship, so the bar stays a fixed cap rather than shrinking to
+    /// content. See TODO.md item (18) for the follow-up.
     private static let maxRowsHeight: CGFloat = 300
 
     let effect: Effect
@@ -175,7 +191,8 @@ struct EffectSettingsBar: View {
                 }
             }
             // Bounded rather than free: Curves and Gradient Map are the tall ones, and a bar that grew
-            // with its content would climb the canvas it was moved here to uncover.
+            // with its content would climb the canvas it was moved here to uncover. See `maxRowsHeight`
+            // above for why this is still a fixed cap rather than shrinking to content.
             .frame(maxHeight: Self.maxRowsHeight)
         }
         .frame(width: Self.width)

@@ -561,6 +561,65 @@ final class LayerPanelUITests: PaintUITestCase {
         XCTAssertFalse(brightness.exists)
     }
 
+    /// The owner's follow-up to the bar above, same day: *"Try to make that menu shorter vertically
+    /// because alot of them contain only 1 or 2 sliders which covers like half of it. You already
+    /// added the vertical scrolling thing to the bottom bar for things with more, so it should be
+    /// good."*
+    ///
+    /// **This does not yet test that ask — the card itself still ships a fixed ~300pt height
+    /// regardless of content; see the long comment on `EffectSettingsBar.maxRowsHeight` for the
+    /// content-measurement attempt that was reverted (2026-08-27) after an on-screen debug overlay
+    /// showed it collapsing the whole bar to zero height, a break XCUITest's own frame queries did not
+    /// catch.** What this test DOES check, and will keep checking once that follow-up lands: that the
+    /// rows' own content span — from the header title down to the last slider — genuinely differs by
+    /// effect, which is the precondition any shrink-to-fit fix depends on. Relative rather than
+    /// exact-pt, matching the coarse style of the geometry assertion above, so it survives a padding
+    /// or font tweak.
+    func testEffectSettingsBarIsShorterForFewerSliders() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)   // Brightness / Contrast: two sliders, the short case.
+
+        let openKnobs = app.buttons["layerOptions.effectSettings"]
+        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5))
+        openKnobs.tap()
+
+        let header = app.staticTexts["layerOptions.subMenuTitle"]
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        let contrast = app.sliders["effectSettings.contrast"]
+        XCTAssertTrue(contrast.waitForExistence(timeout: 5), "Brightness/Contrast's second and last knob")
+        let shortSpan = contrast.frame.maxY - header.frame.minY
+        XCTAssertGreaterThan(shortSpan, 0)
+
+        // Back to the rail, flip the same layer to Levels (five sliders, the tall case) through its
+        // Blend Mode menu — the same menu `addEffectLayerFromAddMenu` used to pick Brightness/Contrast
+        // in the first place — then reopen the settings bar.
+        app.buttons["layerOptions.subMenuBack"].tap()
+        let modeButton = app.buttons["layerOptions.blendModeButton"]
+        XCTAssertTrue(modeButton.waitForExistence(timeout: 5))
+        modeButton.tap()
+        let levelsItem = app.buttons["layerOptions.blendMode.levels"]
+        XCTAssertTrue(levelsItem.waitForExistence(timeout: 5), "The Blend Mode menu lists Levels")
+        levelsItem.tap()
+
+        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5))
+        openKnobs.tap()
+
+        let header2 = app.staticTexts["layerOptions.subMenuTitle"]
+        XCTAssertTrue(header2.waitForExistence(timeout: 5))
+        let outputWhite = app.sliders["effectSettings.outputWhite"]
+        XCTAssertTrue(outputWhite.waitForExistence(timeout: 5), "Levels opens its five knobs, the last being Output White")
+        let tallSpan = outputWhite.frame.maxY - header2.frame.minY
+
+        XCTAssertGreaterThan(tallSpan, shortSpan, """
+            Levels' five-slider span should be taller than Brightness/Contrast's two-slider span. A \
+            bar that still gave every effect the same fixed card would measure these equal, which is \
+            exactly the owner's complaint: "alot of them contain only 1 or 2 sliders which covers like \
+            half of it."
+            """)
+    }
+
     /// §4.5's value layer, same story — plus the one control it needs to be worth creating: the
     /// colour it *is*. The swatch carries the hex as its accessibility value (`blendModeRow`'s
     /// convention) so a test can tell a real fill from a control that renders a default.
