@@ -25,6 +25,32 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## Queued
 
+Owner's thoughts, 2026-08-26 — **not asks yet**, recorded so they are not lost (the perspective-text
+requirement was nearly re-derived from scratch this week because it was only in one document):
+
+- [ ] **Narrower sample storage.** The owner: *"are the coordinates for the brushstroke vector points stored
+      as floats? ... if it is 1024 wide you only need to store a 10 bit variable."* **Measured on their own
+      device rather than estimated**: `Untitled.paintproj` carries one cel of **190 strokes / 8,714 samples in
+      776 KB of JSON — 89 bytes per sample on disk**, against 24 bytes in memory (`VectorSample` is three
+      `CGFloat`, and `CGFloat` is `Double` on 64-bit). Extrapolated to the 1000-cel document the owner intends:
+      **204 MB resident, 776 MB on disk.** `Float32` halves the memory for nothing — a 24-bit mantissa is
+      ~2⁻¹³ px at 2048 wide, far finer than anyone can draw — and a packed binary encoding is the *large* win,
+      ~5–8 bytes a sample against 89, because the 89 is JSON writing doubles as full-precision text.
+      **The caveat that decides the design**: fixed-point quantisation collides with the absolute-mapping
+      discipline. Every transform (lasso nudge, scale, rotate, Distort) maps samples **absolutely from the
+      lift** precisely so error cannot accumulate over many small drags. Quantising on every store reintroduces
+      that drift, worst under repeated warps. So: `Float32` in memory is cheap and safe; fixed-point belongs in
+      the *encoded* form, where it is decoded once and never re-quantised.
+- [ ] **Oklab as an alternate colour space.** The owner: *"I kind of like the idea of integrating an alternate
+      mode of color storage like oklab instead of RGB (I think it is currently rgb)."* It is RGB —
+      `CodableColor` is four `Double`s (`ProjectManifest.swift:124`). **This is not a memory argument**: colour
+      is stored per *stroke*, not per sample, so it is 32 bytes × 190 strokes = 6 KB on the cel measured above.
+      It is a quality argument — perceptually uniform blending, better gradients, and better colour
+      interpolation between keyframes, where RGB goes muddy through the middle between two saturated hues.
+      Costs a conversion at stamp time and a decision about whether the picker itself works in Oklab.
+
+
+
 ## Verified on the device
 
 **All five of this pass's changes were confirmed by the owner on their iPad, 2026-08-22**: *"five changes are
