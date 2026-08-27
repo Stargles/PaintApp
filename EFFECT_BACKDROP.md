@@ -1,8 +1,9 @@
 # Effect backdrop — what an adjustment layer grades
 
 The specification for [BUGS.md](BUGS.md)'s *"Every effect and blend mode is masked to the layer's own
-ink"*, opened 2026-08-27 off the owner's device report and their ruling on it. **§5 is the part that
-needs an answer; everything before it is analysis and is settled by reading.**
+ink"*, opened 2026-08-27 off the owner's device report and their ruling on it. **Everything in it is
+settled — §5's four questions were answered the same day and two of them overruled the recommendation.
+§6 is the build order.**
 
 ## §0 — What is already true, verified rather than assumed
 
@@ -61,13 +62,25 @@ colour. Any design that produces the correct picture produces an opaque one.
 invariant outright — the disengaged z-order is `onionSkin < below < above < chrome` — and
 `updateOnionSkin` routes the `.behind` placement to exactly that lower view (`:2311-2315`). The Behind
 ghost is visible today **only because the composited images have always been transparent where the
-artist has not painted**, which is the same transparency that is the bug. Once paper and artwork are one
-image there is no z-position left that is above the paper and below the artwork.
+artist has not painted**, which is the same transparency that is the bug.
 
-**Therefore the Behind onion skin must move into the composite**, between the paper and the layer stack.
-The frames are already CGImages (`OnionSkinFrame.composite(frames, size:)`, `CanvasView.swift:2378`);
-they have simply never been part of a `RenderRequest`. This is plumbing, not a new concept — but it is
-not optional, and it is the half most likely to be discovered on the device instead of designed.
+**RULED 2026-08-27, and the ruling is what makes this cheap.** The owner: *"Onion skin goes over
+compositing so user can see it clearly."* So the ghost is **not** composited into the request and is
+**not** graded by any effect — it moves up in z-order instead, from below both sandwich views to
+**between them**: above `sandwichBelow`, below `sandwichAbove`. The disengaged order becomes
+`below < onionSkin < above < chrome`.
+
+That is a **z-order change in `CanvasView`, not a compositor change**, and it deletes the whole
+"composite the onion-skin frames into the `RenderRequest`" branch this document previously carried as
+mandatory. `below` is opaque under §6 step 3, so a ghost drawn on top of it is visible by construction,
+and `above` keeps `background: nil` so artwork on layers over the active one still covers the ghost —
+which is what `.behind` means.
+
+**The one behaviour change, stated rather than discovered**: a Behind ghost is now drawn *over* the
+layers below the active layer instead of under them, and it is never dimmed by an effect. For a single
+layer, or when drawing on the top layer, this is identical to today. It differs only with layers
+beneath the active one **and** Behind placement selected — and the owner's *"so user can see it
+clearly"* is the reason to prefer the new answer in exactly that case.
 
 ### 2.2 Once the paper is in the accumulator, alpha stops meaning coverage
 
@@ -103,17 +116,39 @@ a document has 0 or 1 ink effects, not 10.
 
 ## §4 — What the effect declares
 
-Whichever option is taken, an effect gains one property: **what its input is.**
+Whichever option in §3 is taken, an effect gains one property: **what its input is.**
 
-- `.backdrop` — everything below, paper included. Levels, Curves, Brightness/Contrast, HSV Shift,
-  Gradient Map, Posterize, Noise, Chromatic Aberration, Blur.
-- `.ink` — everything below, paper excluded. Outline, Sobel, Bloom.
+- `.backdrop` — everything below, paper included.
+- `.ink` — everything below, paper excluded.
 
-It must be an **exhaustive switch over the effect case with no `default:`**, for the reason CLAUDE.md
-records three times over in `CanvasManager`'s history: a hand-maintained list of exceptions rots, and a
-fourteenth effect added later must be forced to answer the question rather than inherit a default that
-happens to be wrong for it. `Effect.reshapesCoverage` (`Effect.swift:126-129`) is the existing property
-of this shape and the new one should sit beside it.
+**For eleven effects this is a fixed property. For two it is a control the artist can see**, ruled by
+the owner 2026-08-27:
+
+| Effect | Input | Fixed or chosen |
+|---|---|---|
+| Levels, Curves, Brightness/Contrast, HSV Shift, Gradient Map, Posterize, Noise, Chromatic Aberration, Blur | `.backdrop` | fixed |
+| Outline | `.ink` | fixed — over an opaque canvas there is no silhouette to trace, so `.backdrop` is not a mode, it is a no-op |
+| **Bloom** | `.ink` **by default** | **artist's choice.** *"Lets make bloom have an option for both, with default being ink only."* Physically a bloom over a lit white sheet should blow out; practically every canvas is white, so ink-only is the useful default and paper-inclusive is the one you reach for deliberately |
+| **Sobel** | `.backdrop` **by default** | **artist's choice.** *"Same with sobel, defaulting this time to taking in the canvas color."* So Sobel's shipped look changes: bright edges on black, which is what an edge detector conventionally is, with today's edges-over-paper available as the other setting |
+
+**Sobel's default is a deliberate change to what ships**, not a preservation of it — the owner chose the
+conventional edge-detector look over the current one. Say so in the commit message and in the release
+note; an artist with a Sobel layer in an open document will see it change.
+
+The property must be an **exhaustive switch over the effect case with no `default:`**, for the reason
+CLAUDE.md records three times over in `CanvasManager`'s history: a hand-maintained list of exceptions
+rots, and a fourteenth effect added later must be forced to answer the question rather than inherit a
+default that happens to be wrong for it. `Effect.reshapesCoverage` (`Effect.swift:126-129`) is the
+existing property of this shape and the new one should sit beside it. Where the answer is the artist's,
+the stored value lives in that effect's own parameter struct (`Bloom`, `Sobel`) and is **persisted**, so
+it is a document change and needs a decode default for files written before it existed.
+
+**Two knock-on costs, both small and both worth naming.** Bloom and Sobel each gain one control in the
+effect settings bar, which shifts the per-effect control counts item (18) is sizing against — Sobel goes
+from *zero* controls to one, so it stops being the degenerate case that bar has to handle. And two more
+`.ink`-input nodes exist in the wild than §3 assumed when it argued the re-walk's cost is bounded; the
+argument still holds, since the count is per *document* and a document has one or two effect layers, not
+ten.
 
 **Chromatic aberration's centre-alpha rule stays untouched.** `Composite.metal:562-565` documents it
 deliberately — "the shape of the artwork is the green channel's alpha and the fringe appears in colour,
@@ -127,35 +162,42 @@ are fixed by *giving them a backdrop*, not by editing the formula. Eleven of the
 byte-for-byte against `CGBlendMode`, so an edit there breaks `CompositorParityLogicTests` by
 construction.
 
-## §5 — What the owner has to answer
+## §5 — Answered, 2026-08-27
 
-1. **Bloom over paper — is `.ink` actually what you want?** Bloom is the one of the three where the
-   paper-inclusive answer is arguably *right*: a bloom over a lit white sheet blowing out is what bloom
-   does. Putting it in `.ink` means it glows from your ink only, which is almost certainly what an
-   animator wants but is not what the effect physically models. **Recommendation: `.ink`**, because the
-   alternative makes the effect useless on a white canvas, which is every canvas.
-2. **Sobel's background — black or paper?** Under `.ink` it keeps today's behaviour: edges over
-   unchanged paper. Under `.backdrop` it becomes bright edges on black, which is what an edge detector
-   conventionally looks like. **Recommendation: `.ink`**, to preserve what ships today.
-3. **Should the project thumbnail get the paper too?** `ProjectStore.swift:284` passes
-   `includeBackground: false` and its own comment already calls the transparent-backed tile "a real
-   defect". Same one-flag change, same ruling — but flipping it changes **every existing gallery
-   thumbnail** until each project is re-saved, so the gallery will look mixed for a while.
-   **Recommendation: yes, and say so in the release note rather than letting it be noticed.**
-4. **Does the Behind onion skin belong under the paper or over it?** §2.1 forces it into the composite;
-   it does not decide where. Over the paper (the ghost sits on the sheet, and an effect grading the
-   backdrop grades the ghost too) or under it (the ghost is invisible on an opaque sheet, which is
-   useless). **Recommendation: over the paper, under the artwork** — and note this means a
-   Brightness/Contrast layer now dims your onion skin, which is arguably correct and definitely new.
+All four questions this section asked are ruled. Kept as answers rather than deleted, because two of
+them overruled the recommendation and the reasoning is the part worth not rebuilding.
+
+1. **Bloom — an option for both, defaulting to ink only.** *"Lets make bloom have an option for both,
+   with default being ink only."* The recommendation was a fixed `.ink`; the owner made it a setting. The
+   default is the recommendation, so the shipped look does not change.
+2. **Sobel — an option for both, defaulting to the canvas colour.** *"Same with sobel, defaulting this
+   time to taking in the canvas color."* This **overrules** the recommendation, which was to preserve
+   today's edges-over-paper. Sobel's default becomes the conventional bright-edges-on-black, and today's
+   look is the other setting. A visible change to existing documents — announce it.
+3. **The project thumbnail gets the paper. Decided here, at the owner's direction** — *"not sure what
+   this is, you decide."* What it is: the small preview tile of each project in the project list.
+   `ProjectStore.swift:284` composites it with `includeBackground: false`, so the tile has a transparent
+   background where the artwork has none, and its own code comment already calls that "a real defect".
+   **Decision: flip it**, because it is the same one-flag change as the fix, because the comment already
+   says it is wrong, and because a tile that does not look like the artwork is the one thing a gallery
+   tile has to do. **The cost, and it is why it was worth asking**: every existing tile keeps its old
+   look until that project is next saved, so the gallery reads as mixed for a while. Not worth an eager
+   regeneration pass — that is the operation Canvas Padding measured at 17% of a resize, and it would be
+   paid per project for a cosmetic catch-up.
+4. **The onion skin goes over the composite.** *"Onion skin goes over compositing so user can see it
+   clearly."* See §2.1 — this **overrules** the recommendation of "over the paper, under the artwork" in
+   the useful direction, and it is what removes the compositor change this document previously required.
 
 ## §6 — Staging
 
 Nothing here should land as one commit.
 
-1. **The onion skin moves into the composite**, with `background` still nil. No visible change, and it
-   is the change §2.1 says is not optional. Ships and is looked at on the device on its own.
+1. **The Behind onion skin moves up in z-order** — from below both sandwich views to between them
+   (§2.1). A `CanvasView` change, no compositor and no `RenderRequest` involvement. Visible only for a
+   document with layers below the active one and Behind placement selected, so it ships and is looked at
+   on the device on its own before anything depends on it.
 2. **`Effect.input` lands as an exhaustive property with no behaviour attached**, plus the per-effect
-   table as a test. Pure addition.
+   table from §4 as a test. Pure addition.
 3. **`full` and `below` carry the background; `above` stays nil.** This is the fix. `paperView` must
    stop painting inside the artwork rect or a translucent canvas colour is applied twice — and note
    `canvasSize` includes `canvasPadding` (`CanvasManager.swift:20-27`) while both compositors fill
@@ -163,8 +205,11 @@ Nothing here should land as one commit.
    needs deciding rather than inheriting. `SandwichFullKey` (`RenderRequest.swift:385-398`) must gain
    `canvasBackgroundColor` and `isCanvasBackgroundVisible`, or a paper-colour change will not invalidate
    the cached composite.
-4. **Option A's re-walk for `.ink` effects.**
-5. **The thumbnail flag**, if §5.3 is yes.
+4. **Option A's re-walk for `.ink` effects**, which is what makes Outline work and what makes Bloom's
+   and Sobel's ink setting mean anything.
+5. **Bloom's and Sobel's controls**, their persisted fields and their decode defaults (§4). Sobel's
+   default is a change to shipped appearance and wants its own commit message saying so.
+6. **The thumbnail flag** (§5.3).
 
 **Expect to chase backend parity at step 3.** `MetalCompositor.swift:599-605` premultiplies in float and
 dispatches `compositeFill`; `Compositor.swift:675-677` goes through `UIColor.setFill` + `UIRectFill`. Two

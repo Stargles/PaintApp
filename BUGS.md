@@ -61,8 +61,9 @@ than to the accumulated backdrop — and wants a short specification before it i
 
 **[EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) is the specification**, written 2026-08-27: §3 costs the
 four ways to give Outline, Sobel and Bloom an ink-only input and recommends the one that adds no state
-to either backend, §5 is the four questions the owner still has to answer, and §6 stages it so the
-onion-skin change ships and is looked at before the fix that needs it.
+to either backend, §5 records the owner's four answers, and §6 is the build order. **Bloom and Sobel
+become artist-facing choices rather than fixed properties, and Sobel's new default changes how it looks
+in documents that already use it.**
 
 ### The blocker a reviewer found, and it is not a tuning problem
 
