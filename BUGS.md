@@ -4,6 +4,69 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## Drawing on a scaled-down vector cel silently discards most of the ink (2026-08-27)
+
+**Found by reading while designing [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md), mechanically confirmed by an
+independent reviewer, and NOT YET SEEN ON A DEVICE.** It is INFERRED from source, and the whole case for
+that document rests on it, so **confirming it on the iPad is the first thing to do** — before any of the
+work it argues for.
+
+`renderLocalContent` rasterizes into a context of exactly `size` — `UIGraphicsImageRenderer(size: size,
+format: format)`, `VectorLayer.swift:2451` — **in the layer's local space**, and `render()` step 2
+(`:2348-2355`) applies `_transform` to the *finished bitmap* afterwards. So local geometry outside
+`[0, size]` is clipped **before** the transform is applied.
+
+But `addStroke(canvasSpaceStroke:)` (`:575`) stores `canvasPoint · _transform⁻¹`. On a cel at scale `k`
+the visible canvas therefore maps to a local rect **1/k times the extent** — and everything past the
+first `size`-worth of it is cropped at render.
+
+- At `k = 0.5`, three quarters of the canvas stores coordinates the renderer crops.
+- At the `minimumScale = 0.02` floor (`ObjectTransformFrame.swift:260`), **99.96%**.
+
+**Repro**: vector layer → Move with no selection → drag a corner to half size → tap away → draw across
+the canvas. Expected: only the top-left quadrant's worth of the stroke survives.
+
+**Two neighbours found in the same pass**, both also inferred rather than observed:
+
+- **A whole-cel Move that scales *up* is a bitmap magnify, and the doc comment claims the opposite.**
+  `setVectorTransform` says "losslessly (the geometry is re-rasterized at the new transform, no
+  resolution loss)" (`CanvasManager.swift:331-332`). It is not — `render()` applies the affine to an
+  already-rasterized bitmap. [CANVAS_RESIZE.md](CANVAS_RESIZE.md) §2 states the general fact correctly,
+  about a canvas resize, and **nobody joined the two**. Two doc comments in this tree contradict each
+  other and the wrong one is on the Move path.
+- **Interpolation ignores the cel transform entirely.** `interpolationContentProvider` returns raw
+  `.vector?.elements` (`CanvasManager+Interpolation.swift:577`) and `registrationPoints(of:)` reads
+  `stroke.samples` and `image.transform.position` — all local. Two keyframes with different cel
+  transforms are registered and blended **in two different coordinate frames**.
+
+All three are consequences of the same thing: the local space has no bound, so `render()` has to clip to
+stay affordable, and the clipping destroys ink. That is the argument LAYER_TRANSFORM.md makes for baking
+geometry into canvas space instead. **The clipping is not a bug in `render()` to be fixed there** —
+rendering local content at the transform's own resolution means allocating `1/k` times the canvas, which
+at the 0.02 floor on an 8192 canvas is 1.7e11 pixels.
+
+## An unclamped zoom-out drag can store a coordinate 100x the canvas extent (2026-08-27)
+
+**This is a prerequisite of TODO item (8), not a curiosity.** `CanvasView.swift:3074-3075`:
+
+```
+// No upper bound on zoom; the tiny floor only guards against a pinch's fingers crossing.
+committedScale = max(committedScale * liveScale, 0.01)
+```
+
+A floor of 0.01 of fit and **no ceiling**, so a screen-wide drag at minimum zoom spans ~100x the canvas
+extent: **1,638,400 pt** at the owner's new 16,384 ceiling. Nothing in the tree clamps what gets stored.
+
+Against that, item (8)'s settled field — **16 signed bits an axis at quarter-pixel, ±8,192 pt** — is
+**200x short**. Even the 18-bit variant that was briefly settled is 50x short. So **(8) needs a
+saturating clamp at encode time**, and the clamp is a decision with a visible consequence (ink drawn far
+outside the canvas is truncated at the boundary rather than stored faithfully), not an implementation
+detail to be chosen silently.
+
+Note this bound is *independent of* item (12): baking geometry into canvas space removes the layer-local
+`1/k` blow-up, but does nothing about zoom. It is also **worse** than the blow-up it replaces —
+1,638,400 pt against the 409,600 pt a 2%-scaled layer produces.
+
 ## `TextSettingsPanel` grew three presentations the census says it doesn't have (2026-08-27)
 
 Found running `tools/presentation-census.sh` while closing out session 69 — not a report, just the

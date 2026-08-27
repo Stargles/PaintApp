@@ -112,6 +112,21 @@ requirement was nearly re-derived from scratch this week because it was only in 
       space**, it is resize-invariant and nothing is re-encoded. **Prefer the fixed address space** unless
       something argues otherwise; note that a *scaling* resize rewrites coordinates anyway under (9), and a
       layer resize bakes them under (12), so only crop/expand is affected either way.
+      **PREREQUISITE, found 2026-08-27 by the reviewer of `LAYER_TRANSFORM.md` — (8) is UNSAFE without a
+      saturating clamp at encode time, and nothing in the tree clamps.** `CanvasView.swift:3074-3075` floors
+      canvas zoom at 0.01 of fit and has **no ceiling** — its own comment says so: *"No upper bound on zoom;
+      the tiny floor only guards against a pinch's fingers crossing."* A screen-wide drag at minimum zoom
+      therefore spans ~100x the canvas extent — **1,638,400 pt** at the 16,384 ceiling — against the ±8,192 pt
+      this field buys. **200x short.** (The briefly-settled 18-bit variant was 50x short; the width is not the
+      lever.) See [BUGS.md](BUGS.md).
+      **This is a decision, not an implementation detail**: a saturating clamp means ink drawn far outside the
+      canvas is truncated at the boundary instead of stored faithfully. That is almost certainly right — ink
+      100x outside the canvas is invisible and worthless — but it should be chosen out loud, and the clamp
+      must be at the encode boundary so nothing above the storage layer changes behaviour.
+      **It is independent of (12).** Baking geometry into canvas space removes the layer-local blow-up and
+      does nothing about zoom; the zoom bound is in fact *worse* than the one it replaces (1,638,400 against
+      409,600). So this clamp is needed whether or not (12) is ever built.
+
       **Centring is an encoding concern, not a coordinate-system change.** In memory the samples stay in
       whatever space they are in today; encode subtracts the centre and quantises, decode dequantises and adds
       it back. Nothing above the storage layer needs to know.
