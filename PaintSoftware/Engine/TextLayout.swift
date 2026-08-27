@@ -219,8 +219,10 @@ enum TextLayout {
             if let transform = frame.affineTransform {
                 cg.concatenate(transform)
                 draw(recipe, font: font, boxSize: frame.size, clip: !frame.autoSize, into: cg)
-            } else if drawWarped(recipe, frame: frame, library: library) {
-                // Nothing more: the warp drew itself, in canvas coordinates, above.
+            } else if drawWarped(recipe, frame: frame,
+                                 clip: CGRect(origin: .zero, size: canvasSize), library: library) {
+                // Nothing more: the warp drew itself, in canvas coordinates, above — and inside the
+                // canvas, which is the only part of it this image will ever show.
             } else {
                 cg.translateBy(x: box.minX, y: box.minY)
                 draw(recipe, font: font, boxSize: box.size, clip: !frame.autoSize, into: cg)
@@ -240,6 +242,21 @@ enum TextLayout {
     /// 4096×4096 texels even fully supersampled". A cap in *points* is not a cap at all once
     /// `autoSize` can grow a title as wide as the string.
     static let maximumWarpTexels: CGFloat = 4096
+
+    /// The same 4096, on the warp's **destination**, and it is a second bound rather than the same
+    /// one restated.
+    ///
+    /// `maximumWarpTexels` bounds the glyph bitmap the warp reads. This bounds what it writes, and
+    /// the destination is where the memory actually is: `ImageWarp.warpedImage` holds three
+    /// `w × h × 4` buffers of it at once, on top of the canvas-sized flatten and composite the bake
+    /// already pays for. At 4096 that is 3 × 64 MiB against ADD_TEXT.md §4 rule 6's 192 MiB, which
+    /// is why the clip to the canvas below comes first and this only catches what is left.
+    ///
+    /// **Not a refusal.** Past the cap the warp is rasterised smaller and drawn up into the full
+    /// rectangle, so an artist who has stretched a title across a 4096² canvas gets softer glyphs
+    /// rather than a jetsam — and, at or below 4096², gets exactly what stage 5 shipped, since the
+    /// clipped destination cannot exceed the canvas and the canvas cannot exceed the cap.
+    static let maximumWarpDestinationTexels: CGFloat = 4096
 
     /// How many source texels per canvas point a warp's glyph bitmap should carry, so the densest
     /// part of the destination is not resampled up from too little.
@@ -264,19 +281,35 @@ enum TextLayout {
     /// `sourceScale` is read back off the rendered image rather than taken from what was asked for,
     /// because `UIGraphicsImageRenderer` rounds its pixel dimensions and a half-texel of disagreement
     /// between the two would be a half-texel shift in every warped glyph.
-    static func warpedGlyphs(recipe: TextRecipe, frame: TextFrame,
+    ///
+    /// **`clip` is the destination's memory bound and it is not optional.** ADD_TEXT.md §2 predicted
+    /// this exact failure when it rejected the CPU resample — *"'the destination is the quad's bbox,
+    /// never the canvas' is not a bound; a title across a 4096 canvas has a bbox approaching canvas
+    /// size"* — and one corner dragged off-canvas makes it far worse than that: a quad corner at
+    /// (50 000, 50 000) is a bounding box of 2.5 billion points, which is hundreds of megabytes on a
+    /// device ADD_TEXT.md §4 rule 6 budgets at 192 MiB before jetsam. Intersecting with what the
+    /// caller can actually show is **lossless** — a texel outside the destination context can never
+    /// be seen and can never be saved, so nothing is being traded away for the bound. It is required
+    /// rather than defaulted so a fourth call site cannot forget it; the two that exist pass the
+    /// canvas rectangle and the context's own clip.
+    ///
+    /// Nil when the intersection is empty — a box dragged entirely off-canvas. The caller then falls
+    /// through to its bounding-box draw, which is harmless precisely because that draw lands inside
+    /// the same bounding box that just failed to meet the clip, and CoreGraphics clips it away.
+    static func warpedGlyphs(recipe: TextRecipe, frame: TextFrame, clip: CGRect,
                              library: FontLibrary = .shared) -> (image: UIImage, destination: CGRect)? {
         guard !recipe.string.isEmpty, let homography = frame.homography else { return nil }
-        let destination = frame.boundingBox.integral
+        let destination = frame.boundingBox.integral.intersection(clip.integral)
         guard destination.width >= 1, destination.height >= 1 else { return nil }
         let scale = warpSourceScale(boxSize: frame.size, homography: homography)
         guard let source = renderBox(recipe: recipe, boxSize: frame.size, clip: !frame.autoSize,
                                      scale: scale, library: library)?.cgImage,
               source.width > 0, source.height > 0 else { return nil }
         let sourceScale = CGFloat(source.width) / frame.size.width
-        guard let warped = ImageWarp.warpedImage(source: source, sourceScale: sourceScale,
-                                                 boxSize: frame.size, homography: homography,
-                                                 destination: destination) else { return nil }
+        guard let warped = ImageWarp.warpedImage(
+            source: source, sourceScale: sourceScale, boxSize: frame.size, homography: homography,
+            destination: destination,
+            maximumDestinationTexels: maximumWarpDestinationTexels) else { return nil }
         return (UIImage(cgImage: warped, scale: 1, orientation: .up), destination)
     }
 
@@ -288,10 +321,16 @@ enum TextLayout {
     /// up. `UIImage.draw(in:)` rather than `CGContext.draw(_:in:)` because both callers are inside a
     /// `UIGraphicsImageRenderer`, whose context is already y-flipped for UIKit; the CoreGraphics call
     /// would put the text upside down.
+    ///
+    /// **`clip` is what the destination is allowed to cost** — see `warpedGlyphs`. A caller holding a
+    /// `CGContext` and no canvas size passes `cg.boundingBoxOfClipPath`, which is the same statement
+    /// made by the context itself: pixels outside the clip are the ones CoreGraphics is about to
+    /// throw away, so allocating them was never anything but cost.
     @discardableResult
-    static func drawWarped(_ recipe: TextRecipe, frame: TextFrame,
+    static func drawWarped(_ recipe: TextRecipe, frame: TextFrame, clip: CGRect,
                            library: FontLibrary = .shared) -> Bool {
-        guard let warped = warpedGlyphs(recipe: recipe, frame: frame, library: library) else { return false }
+        guard let warped = warpedGlyphs(recipe: recipe, frame: frame, clip: clip,
+                                        library: library) else { return false }
         warped.image.draw(in: warped.destination)
         return true
     }

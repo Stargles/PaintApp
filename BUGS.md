@@ -4,6 +4,33 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## A vector cel holding warped text re-warps it on every invalidation, not once per commit (2026-08-26)
+
+Found reviewing ADD_TEXT.md stage 5 and **deliberately not fixed** — the fix is a cache in a budget
+§4 rule 6 calls "a cliff, not a slope", which is an owner decision rather than something to slip in
+beside a bug fix.
+
+`VectorCanvas.draw(text:into:quality:)`'s `.projective` arm routes through `TextLayout.drawWarped`,
+which runs a supersampled CoreText pass and then a **synchronous GPU round-trip** —
+`MetalWarpEngine.warp` ends in `waitUntilCompleted` — every time the layer flattens. Not every time
+the artist types: a timeline tick, a thumbnail regen, an onion-skin pass. ADD_TEXT.md §4 rule 7 sizes
+the warp as "one canvas-sized cost, once, at bake", and that is true of the raster bake and **not**
+true here. Rule 4 keeps the *bumps* to two per text session, so what bounds this is how often
+something else invalidates the layer. The `.affine` arm has no such cost because it resamples
+nothing — it concatenates a matrix and draws glyphs.
+
+The obvious fix is a memo keyed on frame + recipe, and it is not cheap:
+
+- `TextRecipe` and `TextFrame` are `Equatable` but not `Hashable`, so the key is a `Hashable`
+  conformance spread across four types (`TextRecipe`, `Typography`, `TextFrame`, `FontDescriptor`)
+  rather than a cache line.
+- The entry it would hold is a **destination-sized bitmap**. The shared upload cache is 192 MiB and an
+  over-budget composite is declined *silently*, dropping the whole cache process-wide.
+
+So the trade is "a synchronous GPU round-trip per flatten" against "another tenant in a budget that
+fails silently when it overflows", and it wants a measurement of how often a vector cel with warped
+text actually flattens before either side is chosen. The cost is written down at the call site.
+
 ## The raster Move box is the one piece of chrome `CanvasTouchOwner` cannot arbitrate by point (2026-08-22)
 
 Found while settling the "one touch, one actor" rule, and deliberately left — it is a gap in the

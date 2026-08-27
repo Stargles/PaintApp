@@ -427,18 +427,10 @@ final class TextOverlayView: UIView, UITextViewDelegate {
         return max(TextLayout.minimumRenderScale, min(wanted, Self.maximumGlyphTexels / longest))
     }
 
-    /// How much the frame's own map magnifies the box at its densest corner — ADD_TEXT.md §1's
-    /// "`contentsScale` comes from the largest per-corner destination scale of `H`".
-    ///
-    /// **1 for every frame stages 1-4 could make**, because a stage-4 quad's extent along each axis
-    /// is its `size` along that axis by construction (`TextFrame.Basis` documents that equality and
-    /// what depends on it). So this changed no existing backing store; it exists for the near corner
-    /// of a foreshortened quad, which is the one place a warped box genuinely needs more texels than
-    /// it has points.
-    private var warpMagnification: CGFloat {
-        guard let homography = frameModel.homography else { return 1 }
-        return max(1, homography.maximumCornerScale(ofBox: frameModel.size))
-    }
+    /// How much the frame's own map magnifies the box at its densest corner. `TextFrame` owns the
+    /// decision — and the measurement of why it has to be exact — so that a headless test can reach
+    /// it; this is the one line of it that belongs to the view.
+    private var warpMagnification: CGFloat { frameModel.warpMagnification }
 
     /// The bitmap is the *layout box*, not the frame's bounding rectangle: the rotation is carried
     /// by the layer's transform, so rendering the bounding box would rasterize the box's own

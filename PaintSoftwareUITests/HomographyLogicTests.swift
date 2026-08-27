@@ -151,6 +151,47 @@ final class HomographyLogicTests: XCTestCase {
         XCTAssertFalse(Homography.isValidQuad(corners012, boxSize: box))
     }
 
+    /// **The `den` guard, on its own, on the only input that reaches it** — and the test above does
+    /// not reach it, which is why this one exists.
+    ///
+    /// Delete `guard abs(den) > Quad.epsilon` and `testThreeCollinearCornersHaveNoSolution` stays
+    /// green: both of its quads are *exactly* collinear, so `den` is exactly 0, `g` and `h` come out
+    /// infinite, the determinant comes out `0` or `NaN`, and the determinant guard catches what the
+    /// `den` guard was supposed to. Measured on the second of them: without the guard, `den = -12000`
+    /// — it is not even the `den` branch that rejects it — and the first gives `det = 0.0`. The
+    /// guard had zero coverage.
+    ///
+    /// What reaches it is a quad whose corners 1, 2 and 3 are *almost* collinear: `den` small but
+    /// finite, so `g` and `h` are enormous but finite and the determinant is enormous rather than
+    /// zero. **Measured on the quad below: `den = 9.9e-11`, inside the guard; with the guard deleted
+    /// `g = h = -1.0e14` and `det = 2.0e32`, which sails past `abs(det) > Quad.epsilon` and returns a
+    /// matrix.** That matrix is garbage, and it is *reachable on the drawing path*:
+    /// `TextFrame.homography` calls this initialiser directly, without `isValidQuad` in front of it,
+    /// so a decoded document with such a quad would be warped through it rather than refused.
+    ///
+    /// The fixture asserts its own `den` before asserting the refusal. A test that only said "nil"
+    /// would still pass if the quad drifted into the determinant guard's territory, and would then
+    /// be a second copy of the test above rather than this one.
+    func testTheDenGuardRefusesAlmostCollinearCornersTheDeterminantWouldWaveThrough() {
+        let nudge: CGFloat = 1e-12
+        let quad = Quad(CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0),
+                        CGPoint(x: 100, y: 100), CGPoint(x: 100 + nudge, y: 200))
+
+        // Heckbert's `den`, computed here rather than trusted: the cross product of (p1 − p2) and
+        // (p3 − p2), i.e. twice the area of the triangle those three corners make.
+        let den = (quad.p1.x - quad.p2.x) * (quad.p3.y - quad.p2.y)
+                - (quad.p3.x - quad.p2.x) * (quad.p1.y - quad.p2.y)
+        XCTAssertGreaterThan(abs(den), 0,
+                             "Exactly collinear is the other test's case; this one must be merely nearly so.")
+        XCTAssertLessThanOrEqual(abs(den), Quad.epsilon,
+                                 "The fixture has to land inside the `den` guard, or it tests nothing.")
+
+        XCTAssertNil(Homography(boxSize: box, to: quad),
+                     "den ≈ 0 but not 0: without the guard this returns a matrix with g and h at 1e14.")
+        XCTAssertNil(Homography(unitSquareTo: quad, parallelogramTolerance: 1e-6))
+        XCTAssertFalse(Homography.isValidQuad(quad, boxSize: box))
+    }
+
     /// A box with no extent has no map onto anything.
     func testACollapsedBoxHasNoSolution() {
         XCTAssertNil(Homography(boxSize: CGSize(width: 0, height: 120), to: perspective))
@@ -188,6 +229,72 @@ final class HomographyLogicTests: XCTestCase {
         XCTAssertTrue(weights.contains { $0 <= 0 }, "Two corners are behind the vanishing line.")
         XCTAssertFalse(Homography.isValidQuad(quad, boxSize: box))
         XCTAssertFalse(quad.isConvex, "Convexity catches the same quad — the two terms overlap by theorem.")
+    }
+
+    /// **The `w > 0` term inside `isValidQuad` is redundant, and this is the measurement that says
+    /// so** rather than a claim taken from the doc comment above it.
+    ///
+    /// A reviewer's finding was that deleting `weightsAtBoxCorners(...).allSatisfy { $0 > 0 }` from
+    /// `isValidQuad` leaves the whole suite green, and asked for the quad that distinguishes it. There
+    /// is no such quad, and the reason is the theorem `isValidQuad`'s own comment states: a projective
+    /// map carries the unit square to a convex quadrilateral exactly when the square stays on one side
+    /// of the vanishing line. **MEASURED, 2026-08-26: over 2,000,000 random quads plus the systematic
+    /// sweep below, 1,536,828 had a non-positive weight at some box corner and not one of them was
+    /// convex.** So the term cannot be pinned by a fixture; what can be pinned is the theorem, which is
+    /// what makes the term redundant in the first place.
+    ///
+    /// That is worth a test rather than a shrug, because the redundancy is exactly what a future change
+    /// would break silently. Loosen `isConvex` — to weak convexity, or to drop `isSimple`, or to admit
+    /// a quad whose turn is inside `Quad.epsilon` — and the weight term stops being redundant and
+    /// starts being the only thing standing between a decoded document and ADD_TEXT.md §1's "silent
+    /// visual garbage". This test fails the moment that happens, and names which side moved.
+    ///
+    /// The weights are computed from the *quad* here, through the solver, and not from the matrix the
+    /// sweep built them with — otherwise the assertion would be about `Homography.map` rather than
+    /// about the predicate.
+    func testEveryQuadTheWeightTermRejectsIsAlreadyRejectedByConvexity() throws {
+        var crossings = 0, convexCrossings = 0
+        // g and h are the whole of the perspective. `g = -1` puts corner 1 exactly on the vanishing
+        // line, so a sweep either side of it is a sweep across the failure this term exists for.
+        for gStep in -30...10 {
+            for hStep in -30...10 {
+                let gTerm = CGFloat(gStep) / 10, hTerm = CGFloat(hStep) / 10
+                let source = Homography(a: box.width, b: 0, c: 0, d: 0, e: box.height, f: 0,
+                                        g: gTerm, h: hTerm, i: 1)
+                let corners = Quad.unitSquare.points.compactMap { source.map($0) }
+                guard corners.count == 4, let quad = Quad(corners),
+                      let solved = Homography(boxSize: box, to: quad) else { continue }
+                guard !solved.weightsAtBoxCorners(box).allSatisfy({ $0 > 0 }) else { continue }
+                crossings += 1
+                if quad.isConvex && quad.isSimple && quad.area >= Quad.minimumArea {
+                    convexCrossings += 1
+                }
+                XCTAssertFalse(Homography.isValidQuad(quad, boxSize: box),
+                               "g=\(gTerm) h=\(hTerm): a quad with a corner past the vanishing line is invalid.")
+            }
+        }
+        XCTAssertGreaterThan(crossings, 100,
+                             "The sweep never crossed the vanishing line, so it measured nothing.")
+        XCTAssertEqual(convexCrossings, 0,
+                       "\(convexCrossings) quads now fail `w > 0` while passing convexity — the term "
+                       + "in `isValidQuad` has stopped being redundant and is now load-bearing on its own.")
+    }
+
+    /// And the weights themselves do not depend on the box, which is why the sweep above can use one.
+    ///
+    /// For a matrix from `init(boxSize:to:)` the third row is `[g/w, h/h, 1]`, so the weights at the
+    /// box's own corners come out `1, 1+g, 1+g+h, 1+h` — the unit square's, whatever the box. A reader
+    /// who assumed otherwise would think `isValidQuad` could accept a quad for one box size and refuse
+    /// it for another, and would test the wrong thing.
+    func testTheBoxCornerWeightsAreTheUnitSquaresWhateverTheBoxSize() throws {
+        let reference = try XCTUnwrap(Homography(boxSize: box, to: perspective)).weightsAtBoxCorners(box)
+        for size in [CGSize(width: 1, height: 1), CGSize(width: 4000, height: 17),
+                     CGSize(width: 33, height: 2500)] {
+            let other = try XCTUnwrap(Homography(boxSize: size, to: perspective)).weightsAtBoxCorners(size)
+            for (got, want) in zip(other, reference) {
+                XCTAssertEqual(got, want, accuracy: 1e-12, "box \(size)")
+            }
+        }
     }
 
     /// The predicate's other three terms, each isolated: a bowtie, a quad squeezed below the area
@@ -319,5 +426,114 @@ final class HomographyLogicTests: XCTestCase {
         let rotationless = abs(flat.b) < 1e-12 && abs(flat.c) < 1e-12
         XCTAssertFalse(rotationless && abs(flat.a - 1) < 1e-12 && abs(flat.d - 1) < 1e-12,
                        "The linearisation has to carry the map's scale and shear, not just its position.")
+    }
+
+    /// **The four Jacobian entries against finite differences of the real map** — and the test above
+    /// does not pin them, which is why this one exists.
+    ///
+    /// A reviewer's finding: replace `linearised`'s perspective-corrected entries with the naive
+    /// `a/w, b/w, d/w, e/w` and the whole suite stays green. It does, because the translation is
+    /// *solved* to put `point` on its own image whatever the linear part is — so the agreement
+    /// assertion above holds for any Jacobian at all, and the "not the identity" assertion holds for
+    /// the wrong one too. Only a derivative can tell the two apart, and only where `g` and `h` are
+    /// non-zero, because the two forms are identical for an affine map.
+    ///
+    /// Central differences at a step of 0.01 canvas points. Their own truncation error is second
+    /// order — **MEASURED: worst 2.7e-6 absolute on the strongest quad here, 1.3e-9 on the others** —
+    /// so the tolerance sits about fifty times above the worst of them and still tens of thousands of
+    /// times below the thing it is discriminating against.
+    ///
+    /// **The discrimination is asserted, not assumed.** The final claim measures how far the naive
+    /// form actually is at these points, so a future step size or tolerance that quietly stopped
+    /// separating them fails here rather than passing quietly. MEASURED: the naive entries are wrong
+    /// by 0.78–7.05 absolute, up to 194× the true entry.
+    ///
+    /// Two shipped behaviours read these numbers: `TextLayout.warpSourceScale` sizes the glyph bitmap
+    /// from them, and `TextOverlayView.warpMagnification` sizes the live overlay's backing store. Both
+    /// come through `maximumCornerScale`, pinned in the test below this one.
+    func testTheLinearisationIsTheRealJacobianAndNotTheMatrixOverTheWeight() throws {
+        let step: CGFloat = 0.01
+        for (name, quad) in [("perspective", perspective), ("trapezoid", trapezoid)] {
+            let h = try XCTUnwrap(Homography(boxSize: box, to: quad))
+            XCTAssertFalse(h.g == 0 && h.h == 0,
+                           "\(name) has no perspective term, so it cannot separate the two forms.")
+            var worstNaive: CGFloat = 0
+
+            for x in stride(from: CGFloat(3), through: box.width - 3, by: 37) {
+                for y in stride(from: CGFloat(3), through: box.height - 3, by: 23) {
+                    let point = CGPoint(x: x, y: y)
+                    let jacobian = try XCTUnwrap(h.linearised(at: point))
+                    let plusX = try XCTUnwrap(h.map(CGPoint(x: x + step, y: y)))
+                    let minusX = try XCTUnwrap(h.map(CGPoint(x: x - step, y: y)))
+                    let plusY = try XCTUnwrap(h.map(CGPoint(x: x, y: y + step)))
+                    let minusY = try XCTUnwrap(h.map(CGPoint(x: x, y: y - step)))
+
+                    // `CGAffineTransform` maps (x,y) → (a·x + c·y + tx, b·x + d·y + ty), so `a` is
+                    // ∂x′/∂x, `b` is ∂y′/∂x, `c` is ∂x′/∂y and `d` is ∂y′/∂y. Getting that pairing
+                    // wrong is itself one of the things this catches.
+                    let differences = [(jacobian.a, (plusX.x - minusX.x) / (2 * step), "∂x′/∂x"),
+                                       (jacobian.b, (plusX.y - minusX.y) / (2 * step), "∂y′/∂x"),
+                                       (jacobian.c, (plusY.x - minusY.x) / (2 * step), "∂x′/∂y"),
+                                       (jacobian.d, (plusY.y - minusY.y) / (2 * step), "∂y′/∂y")]
+                    for (got, want, label) in differences {
+                        XCTAssertEqual(got, want, accuracy: 1e-5 * max(1, abs(want)),
+                                       "\(name) at \(point): \(label)")
+                    }
+
+                    let w = h.weight(at: point)
+                    for (got, naive) in [(jacobian.a, h.a / w), (jacobian.b, h.d / w),
+                                         (jacobian.c, h.b / w), (jacobian.d, h.e / w)] {
+                        worstNaive = max(worstNaive, abs(got - naive))
+                    }
+                }
+            }
+            XCTAssertGreaterThan(worstNaive, 0.1,
+                                 "\(name): the naive `a/w` form is within 0.1 of the true Jacobian "
+                                 + "everywhere sampled, so this fixture cannot discriminate.")
+        }
+    }
+
+    /// `localScale` is the map's **real** area magnification, and `maximumCornerScale` is the largest
+    /// of the four — which is the number `TextLayout.warpSourceScale` and `TextFrame.warpMagnification`
+    /// both size a backing store from.
+    ///
+    /// The existing corner-scale test cannot separate the true Jacobian from the naive one: its rigid
+    /// and doubled quads are affine, where the two forms agree exactly, and its trapezoid assertion is
+    /// only `> 1`, which the naive form also satisfies. So this asks the question the shipped behaviour
+    /// actually depends on — how much smaller is a source patch than its image — against finite
+    /// differences of the map, at the four corners `maximumCornerScale` samples.
+    ///
+    /// MEASURED on the `perspective` quad: the true corner scales are 1.503, 1.974, 1.337 and 1.079,
+    /// against the naive form's 1.503, 1.802, 1.390 and 1.205 — so the number that sizes the bitmap
+    /// comes out 8.7% low at the near corner. The last assertion is that gap, stated as a fraction so
+    /// it is a claim about the two formulas rather than about this quad's arithmetic.
+    func testTheCornerScaleIsTheMapsRealAreaMagnification() throws {
+        let h = try XCTUnwrap(Homography(boxSize: box, to: perspective))
+        let step: CGFloat = 0.01
+        var scales: [CGFloat] = [], naiveScales: [CGFloat] = []
+
+        for corner in Quad.rect(CGRect(origin: .zero, size: box)).points {
+            let got = try XCTUnwrap(h.localScale(at: corner))
+            let plusX = try XCTUnwrap(h.map(CGPoint(x: corner.x + step, y: corner.y)))
+            let minusX = try XCTUnwrap(h.map(CGPoint(x: corner.x - step, y: corner.y)))
+            let plusY = try XCTUnwrap(h.map(CGPoint(x: corner.x, y: corner.y + step)))
+            let minusY = try XCTUnwrap(h.map(CGPoint(x: corner.x, y: corner.y - step)))
+            let dxdx = (plusX.x - minusX.x) / (2 * step), dydx = (plusX.y - minusX.y) / (2 * step)
+            let dxdy = (plusY.x - minusY.x) / (2 * step), dydy = (plusY.y - minusY.y) / (2 * step)
+            XCTAssertEqual(got, abs(dxdx * dydy - dxdy * dydx).squareRoot(), accuracy: 1e-6,
+                           "corner \(corner): the local scale is √|det J| of the map itself.")
+            scales.append(got)
+
+            let w = h.weight(at: corner)
+            naiveScales.append(abs((h.a / w) * (h.e / w) - (h.b / w) * (h.d / w)).squareRoot())
+        }
+
+        let largest = try XCTUnwrap(scales.max())
+        XCTAssertEqual(h.maximumCornerScale(ofBox: box), largest, accuracy: 1e-12,
+                       "`maximumCornerScale` is the largest of the four corner scales and nothing else.")
+        let naiveLargest = try XCTUnwrap(naiveScales.max())
+        XCTAssertGreaterThan(abs(largest - naiveLargest) / largest, 0.05,
+                             "The naive Jacobian gives the same backing-store size here, so this "
+                             + "fixture cannot tell a mis-sized bitmap from a correct one.")
     }
 }

@@ -150,6 +150,183 @@ final class WarpAgreementCharacterizationTests: XCTestCase {
         return WarpParams(matrix)
     }
 
+    // MARK: - The composition both backends share, and therefore cannot check
+
+    /// **`inverseTexelMap` against the geometry, not against the other backend** — the blind spot the
+    /// agreement test below has by construction.
+    ///
+    /// Every other test in this file hands both warps *the same* `WarpParams`, which is exactly right
+    /// for measuring one rasterizer against another and is why the header spells it out. But it means
+    /// the one genuinely new composition in the bake path is shared: a `sourceScale` 10% out, or a
+    /// destination origin folded in with the wrong sign, produces a matrix on which the kernel and the
+    /// scalar reference **agree perfectly and are both wrong** — the text lands 20 pt from where the
+    /// artist put it, or resampled from the wrong part of the glyph bitmap, and every assertion in the
+    /// file stays green. §1's own warning, one level up: a green test proves its two operands are
+    /// equal, not that they are the two things you meant.
+    ///
+    /// So this states the composition independently, as four maps read right to left, and checks the
+    /// matrix against it:
+    ///
+    /// 1. A destination texel `p` is the canvas point `origin + p / destinationScale`.
+    /// 2. That canvas point came from the box point `H⁻¹(·)`.
+    /// 3. Which is the source texel `boxPoint × sourceScale`.
+    ///
+    /// The `Homography` is checked rather than the `WarpParams` built from it, so a disagreement is
+    /// the composition and never the `Float` narrowing. Both scales are exercised away from 1 —
+    /// `destinationScale` was written from the start and, until the memory cap landed, was only ever
+    /// passed 1, so it had never been executed at any other value.
+    func testTheInverseTexelMapCarriesDestinationTexelsOntoTheSourceTexelsGeometryNames() throws {
+        // A grid over the box, plus its corners: the corners pin the ends of the map and the interior
+        // is where a dropped perspective divide shows.
+        var samples = Quad.rect(CGRect(origin: .zero, size: boxSize)).points
+        for x in stride(from: CGFloat(9), through: boxSize.width, by: 41) {
+            for y in stride(from: CGFloat(7), through: boxSize.height, by: 29) {
+                samples.append(CGPoint(x: x, y: y))
+            }
+        }
+
+        for entry in quads {
+            let homography = try XCTUnwrap(Homography(boxSize: boxSize, to: entry.quad))
+            let destination = entry.quad.boundingBox.integral
+            for destinationScale in [CGFloat(1), 0.5, 2.5] {
+                let matrix = try XCTUnwrap(
+                    ImageWarp.inverseTexelMap(homography: homography, boxSize: boxSize,
+                                              sourceScale: sourceScale,
+                                              destinationOrigin: destination.origin,
+                                              destinationScale: destinationScale),
+                    "\(entry.name) at \(destinationScale)×")
+                for boxPoint in samples {
+                    let canvas = try XCTUnwrap(homography.map(boxPoint))
+                    let destinationTexel = CGPoint(x: (canvas.x - destination.minX) * destinationScale,
+                                                   y: (canvas.y - destination.minY) * destinationScale)
+                    let want = CGPoint(x: boxPoint.x * sourceScale, y: boxPoint.y * sourceScale)
+                    let got = try XCTUnwrap(matrix.map(destinationTexel))
+                    XCTAssertEqual(got.x, want.x, accuracy: 1e-6 * max(1, abs(want.x)),
+                                   "\(entry.name) at \(destinationScale)×, box \(boxPoint): source texel u")
+                    XCTAssertEqual(got.y, want.y, accuracy: 1e-6 * max(1, abs(want.y)),
+                                   "\(entry.name) at \(destinationScale)×, box \(boxPoint): source texel v")
+                }
+                // The normalisation: the artwork must be on the positive-weight side, or the kernel's
+                // `w ≤ 0` discard throws away the picture instead of the far side of the horizon.
+                let centre = try XCTUnwrap(homography.map(CGPoint(x: boxSize.width / 2,
+                                                                  y: boxSize.height / 2)))
+                XCTAssertGreaterThan(
+                    matrix.weight(at: CGPoint(x: (centre.x - destination.minX) * destinationScale,
+                                              y: (centre.y - destination.minY) * destinationScale)), 0,
+                    "\(entry.name) at \(destinationScale)×: the box's own centre is past the vanishing line.")
+            }
+        }
+    }
+
+    /// And the size of the two slips the shared-parameters blind spot would hide, measured — so a
+    /// tolerance that quietly stopped separating them fails here rather than passing.
+    ///
+    /// Both are matrices the agreement test would call a success: both backends read them identically.
+    /// What they are is *the wrong picture*, and the assertion is that "wrong" is tens of texels, not
+    /// a rounding.
+    func testAMisScaledSourceOrAFlippedDestinationOriginMoveTheSampleFarEnoughToSee() throws {
+        let entry = try XCTUnwrap(quads.first { $0.name == "trapezoid" })
+        let homography = try XCTUnwrap(Homography(boxSize: boxSize, to: entry.quad))
+        let destination = CGRect(x: 137, y: 61, width: 300, height: 200)
+        let probe = CGPoint(x: 120, y: 80)
+
+        func sample(sourceScale: CGFloat, origin: CGPoint) throws -> CGPoint {
+            let matrix = try XCTUnwrap(ImageWarp.inverseTexelMap(homography: homography, boxSize: boxSize,
+                                                                 sourceScale: sourceScale,
+                                                                 destinationOrigin: origin,
+                                                                 destinationScale: 1))
+            return try XCTUnwrap(matrix.map(probe))
+        }
+
+        let correct = try sample(sourceScale: sourceScale, origin: destination.origin)
+        let mis = try sample(sourceScale: sourceScale * 1.1, origin: destination.origin)
+        XCTAssertGreaterThan(hypot(mis.x - correct.x, mis.y - correct.y), 2,
+                             "A sourceScale 10% out has to move the sampled texel visibly.")
+
+        let flipped = try sample(sourceScale: sourceScale,
+                                 origin: CGPoint(x: -destination.minX, y: -destination.minY))
+        XCTAssertGreaterThan(hypot(flipped.x - correct.x, flipped.y - correct.y), 20,
+                             "A sign-flipped destination origin has to move the sampled texel visibly.")
+    }
+
+    // MARK: - What the destination is allowed to cost
+
+    /// **The memory bound, as arithmetic.** ADD_TEXT.md §2 predicted the failure — *"'the destination
+    /// is the quad's bbox, never the canvas' is not a bound"* — and a corner dragged off-canvas makes
+    /// it worse than the prediction: a quad corner at (50 000, 50 000) is a bounding box of 2.5
+    /// billion points, and `warpedImage` holds three `w × h × 4` buffers of it at once against §4 rule
+    /// 6's 192 MiB.
+    ///
+    /// Two claims, because there are two mechanisms and the first one does almost all the work:
+    /// `warpedGlyphs` intersects the destination with what the caller can actually show, which is
+    /// **lossless** — a texel outside the destination context can never be seen and can never be
+    /// saved. `destinationScale` is what remains after that, for a destination that is on-canvas and
+    /// still enormous, and it is a soft edge rather than a refusal: past the cap the warp is
+    /// rasterised smaller and drawn up into the full rectangle.
+    func testTheWarpDestinationIsCappedRatherThanTrustedToBeSmall() throws {
+        // Below the cap nothing happens at all, so the bound cannot change what stage 5 shipped.
+        XCTAssertEqual(ImageWarp.destinationScale(for: CGRect(x: 0, y: 0, width: 4096, height: 4096),
+                                                  maximumTexels: 4096), 1)
+        XCTAssertEqual(ImageWarp.destinationScale(for: CGRect(x: -900, y: -900, width: 10, height: 4000),
+                                                  maximumTexels: 4096), 1)
+        // Above it, the longest side lands exactly on the cap.
+        let huge = CGRect(x: 0, y: 0, width: 50_000, height: 1_200)
+        let scale = ImageWarp.destinationScale(for: huge, maximumTexels: 4096)
+        XCTAssertEqual(huge.width * scale, 4096, accuracy: 1e-9)
+        XCTAssertLessThan(huge.height * scale, 4096)
+
+        // And `warpedImage` actually honours it — asked for a destination 40 times the cap it returns
+        // an image at the cap, not one that would have been 1.9 GiB of transient. A small cap so the
+        // test costs kilobytes; the arithmetic is the same at 4096.
+        let quad = try XCTUnwrap(quads.first { $0.name == "trapezoid" }).quad
+        let homography = try XCTUnwrap(Homography(boxSize: boxSize, to: quad))
+        let source = try XCTUnwrap(CoreGraphicsCompositor.makeImage(fromPremultiplied: sourceBytes(),
+                                                                     width: Self.sourceWidth,
+                                                                     height: Self.sourceHeight))
+        let capped = try XCTUnwrap(ImageWarp.warpedImage(source: source, sourceScale: sourceScale,
+                                                         boxSize: boxSize, homography: homography,
+                                                         destination: CGRect(x: 0, y: 0,
+                                                                             width: 2_560, height: 1_280),
+                                                         maximumDestinationTexels: 64))
+        XCTAssertEqual(capped.width, 64, "The longest side has to land on the cap.")
+        XCTAssertEqual(capped.height, 32, "And the other side keeps the destination's aspect ratio.")
+    }
+
+    /// The clip, on the path that actually allocates: a text box with one corner dragged far
+    /// off-canvas produces a destination bounded by the canvas, not by the quad.
+    ///
+    /// The assertion is the ratio rather than a byte count, because the byte count is the ratio times
+    /// four and the ratio is the claim: `TextLayout.warpedGlyphs` used to hand `ImageWarp` the frame's
+    /// whole bounding box.
+    func testAFrameDraggedOffCanvasWarpsIntoTheCanvasAndNotIntoItsOwnBoundingBox() throws {
+        let canvas = CGRect(x: 0, y: 0, width: 512, height: 512)
+        var frame = TextFrame(origin: CGPoint(x: 40, y: 40), size: CGSize(width: 200, height: 80),
+                              autoSize: false)
+        frame.corners[TextFrame.Corner.bottomRight.rawValue] = CGPoint(x: 50_000, y: 50_000)
+        frame.mode = .projective
+        XCTAssertNotNil(frame.homography, "The fixture has to be a frame the warp path would accept.")
+        XCTAssertGreaterThan(frame.boundingBox.width * frame.boundingBox.height,
+                             canvas.width * canvas.height * 1_000,
+                             "The unclipped destination has to be enormous, or nothing is being bounded.")
+
+        let warped = try XCTUnwrap(TextLayout.warpedGlyphs(recipe: TextRecipe(string: "Wall", font: .system,
+                                                                              typography: Typography(pointSize: 32)),
+                                                            frame: frame, clip: canvas))
+        XCTAssertTrue(canvas.contains(warped.destination),
+                      "The destination must lie inside what the caller can show: got \(warped.destination).")
+        XCTAssertLessThanOrEqual(warped.image.size.width * warped.image.size.height,
+                                 canvas.width * canvas.height,
+                                 "And the bitmap with it.")
+
+        // A box dragged entirely off-canvas has no destination at all, and the caller falls through.
+        var gone = frame
+        gone.corners = frame.corners.map { CGPoint(x: $0.x + 20_000, y: $0.y + 20_000) }
+        XCTAssertNil(TextLayout.warpedGlyphs(recipe: TextRecipe(string: "Wall", font: .system,
+                                                                typography: Typography(pointSize: 32)),
+                                             frame: gone, clip: canvas),
+                     "An empty intersection is nothing to draw, not a zero-sized allocation.")
+    }
+
     // MARK: - The agreement
 
     func testTheTwoBackendsAgreeAcrossAFixedSetOfQuads() throws {
@@ -243,6 +420,38 @@ final class WarpAgreementCharacterizationTests: XCTestCase {
         XCTAssertGreaterThan(kept, 0, "Everything was discarded — the fixture proves nothing.")
     }
 
+    /// **A weight that is positive but vanishingly small must draw nothing, not take the process
+    /// down** — the one place the scalar loop can crash rather than decline.
+    ///
+    /// `w > 0` lets through a destination pixel a hair *inside* the vanishing line, and there `u` and
+    /// `v` come out at 1e17 and beyond. `Int(_:)` on a `Double` that will not fit **traps** in Swift;
+    /// it does not saturate and it does not wrap. The GPU has no such cliff — `int(base.x)` in MSL is
+    /// undefined-but-quiet and every branch it feeds is a bounds test that answers "outside" — so this
+    /// is a hazard the scalar reference has and the kernel does not, which is exactly the kind the
+    /// agreement tests above cannot see.
+    ///
+    /// The fixture states the condition directly rather than hunting for a quad that produces it: a
+    /// denormal weight, positive everywhere, so every pixel takes the branch at once. Refusing is not
+    /// an approximation of sampling — a `u` outside `(-1, sourceWidth)` puts *both* bilinear taps out
+    /// of bounds, and both come back transparent, so the blend would have written zero anyway.
+    ///
+    /// Only the reference is asserted. The kernel's behaviour here is genuinely undefined by the MSL
+    /// spec, and a test that pinned it would be pinning a compiler's current mood.
+    func testAWeightAHairAboveZeroDrawsNothingRatherThanTrapping() throws {
+        let width = 24, height = 16
+        var params = WarpParams(Homography(a: 0.5, b: 0, c: 0, d: 0, e: 0.5, f: 0, g: 0, h: 0, i: 1))
+        params.m8 = 1e-40 // positive, denormal: `u` lands around 1e39, far past `Int.max`
+        XCTAssertGreaterThan(params.m8, 0, "A non-positive weight is the other test's case.")
+
+        let out = try XCTUnwrap(ImageWarp.warp(source: sourceBytes(), sourceWidth: Self.sourceWidth,
+                                                sourceHeight: Self.sourceHeight,
+                                                destinationWidth: width, destinationHeight: height,
+                                                params: params))
+        XCTAssertEqual(out.count, width * height * 4)
+        XCTAssertTrue(out.allSatisfy { $0 == 0 },
+                      "A source texel index past `Int.max` has to be declined, not converted.")
+    }
+
     /// The source's outside is **transparent, not clamped**. A sized text box clips its glyphs, so
     /// its edge texels can be opaque ink; clamping would smear that ink outward as an infinite skirt.
     ///
@@ -319,7 +528,8 @@ final class WarpAgreementCharacterizationTests: XCTestCase {
 
             let baked = try XCTUnwrap(ImageWarp.warpedImage(source: sourceImage, sourceScale: textScale,
                                                             boxSize: boxSize, homography: homography,
-                                                            destination: destination))
+                                                            destination: destination,
+                                                            maximumDestinationTexels: 4096))
             let bakedBytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(baked, width: width,
                                                                                      height: height))
             let previewBytes = try XCTUnwrap(coreAnimationPreview(source: sourceImage,

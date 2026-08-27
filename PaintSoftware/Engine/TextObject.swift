@@ -488,6 +488,31 @@ extension TextFrame {
         return Homography(boxSize: size, to: quad)
     }
 
+    /// How much the frame's own map magnifies the box at its densest corner — ADD_TEXT.md §1's
+    /// "`contentsScale` comes from the largest per-corner destination scale of `H`".
+    ///
+    /// **Exactly 1 for every frame stages 1-4 could make**, because a stage-4 quad's extent along
+    /// each axis is its `size` along that axis by construction (`TextFrame.Basis` documents that
+    /// equality and what depends on it). It exists for the near corner of a foreshortened quad,
+    /// which is the one place a warped box genuinely needs more texels than it has points.
+    ///
+    /// **The `.projective` guard is what makes "exactly" true, and it is not tidiness.**
+    /// `maximumCornerScale` is `sqrt(|det J|)`, which on a rotated affine frame is
+    /// `sqrt(cos²θ + sin²θ)` — 1 to within an ULP, not 1. `max(1, …)` in the caller clamps the low
+    /// side and not the high one, so the ULP survives: **measured, at 131.2° on a 300×120 box it
+    /// comes out `1.0000000000000002`**, which carries a `contentsScale` of `2.0000000000000004`
+    /// into `UIGraphicsImageRenderer` and rounds the glyph bitmap up to 601 texels where the same
+    /// box unrotated takes 600. 34 of 3600 sampled angles land above 1. Asking the *mode* instead of
+    /// the arithmetic is cheaper and is the question actually meant: a parallelogram has no
+    /// foreshortening to compensate for.
+    ///
+    /// It lives on the frame rather than in `TextOverlayView`, where it started, for
+    /// `TextTransformLogicTests`' sake — stage 4's whole reason for putting the geometry here.
+    var warpMagnification: CGFloat {
+        guard mode == .projective, let homography else { return 1 }
+        return max(1, homography.maximumCornerScale(ofBox: size))
+    }
+
     /// The flat box the artist types into while the frame is warped — ADD_TEXT.md §1 "Typing in a
     /// distorted box happens unwarped" and §5.2, which the owner settled: *"Tap into perspective text
     /// and the box springs back to flat while you type, the perspective version ghosted behind."*
@@ -685,7 +710,19 @@ extension TextFrame {
 
     /// The canvas point a drag on `handle` must hold still. The rotation knob's is the centre, which
     /// does not move either.
+    ///
+    /// **A `.projective` frame answers through its homography, not through its basis**, and the two
+    /// genuinely differ. `Basis` decomposes onto `u` and `v`, which is the same statement as the
+    /// quad only while the quad is a parallelogram; on a warped one it reports the point the box
+    /// *would* have had if the perspective were taken out, which is not a point on the quad at all.
+    /// The homography answers the question actually asked — where does the box's own opposite edge
+    /// sit on the artist's screen — and for an `.affine` frame the two agree to the last bit,
+    /// because there `H` **is** the basis written as a matrix.
     func anchor(for handle: Handle) -> CGPoint? {
+        if mode == .projective, let homography {
+            let local = handle.anchorLocal(width: size.width, height: size.height)
+            if let mapped = homography.map(local) { return mapped }
+        }
         guard let basis else { return nil }
         let local = handle.anchorLocal(width: basis.width, height: basis.height)
         return CGPoint(x: basis.origin.x + basis.u.dx * local.x + basis.v.dx * local.y,
@@ -789,13 +826,27 @@ struct TextFrameDrag: Equatable {
     /// Pure, and a function of the *latched* frame alone — driving one delta or sixty produces the
     /// same answer for the same final point, which is the property `TextTransformLogicTests` pins.
     ///
-    /// **A distort drag answers through `distortedFrame(draggedTo:)` and falls back to the latched
-    /// frame when that one is refused.** The live caller is `CanvasManager.dragTextHandle`, which
-    /// asks the optional form directly so it can hold the *last valid* quad rather than the starting
-    /// one — ADD_TEXT.md §1's clamping rule. This total form exists so a caller that drives a whole
-    /// gesture in one call still gets an answer, and so the two can never mean different things.
+    /// **Falls back to the latched frame when the clamped form refuses.** The live caller is
+    /// `CanvasManager.dragTextHandle`, which asks `clampedFrame(draggedTo:)` directly so it can hold
+    /// the *last valid* quad rather than the starting one — ADD_TEXT.md §1's clamping rule. This
+    /// total form exists so a caller that drives a whole gesture in one call still gets an answer,
+    /// and so the two can never mean different things.
     func frame(draggedTo point: CGPoint, minimumExtent: CGFloat = TextFrame.minimumExtent) -> TextFrame {
-        if isDistort { return distortedFrame(draggedTo: point) ?? start }
+        clampedFrame(draggedTo: point, minimumExtent: minimumExtent) ?? start
+    }
+
+    /// The frame this drag produces, or **nil when the quad it would produce is not one a homography
+    /// can be drawn through** — at which point the caller holds whatever it last accepted.
+    ///
+    /// Nil is only reachable on the two paths that can *make* an invalid quad: the distort, and the
+    /// sizing grips and knob on a `.projective` frame. Stage 4's parallelogram arithmetic on an
+    /// `.affine` frame always answers, exactly as it did before stage 5 existed.
+    func clampedFrame(draggedTo point: CGPoint,
+                      minimumExtent: CGFloat = TextFrame.minimumExtent) -> TextFrame? {
+        if isDistort { return distortedFrame(draggedTo: point) }
+        if start.mode == .projective {
+            return warpedFrame(draggedTo: point, minimumExtent: minimumExtent)
+        }
         return handle == .rotation ? rotated(towards: point) : resized(towards: point, minimumExtent: minimumExtent)
     }
 
@@ -825,6 +876,103 @@ struct TextFrameDrag: Equatable {
         let tolerance = max(1e-6, 1e-6 * max(start.size.width, start.size.height))
         next.mode = quad.isParallelogram(tolerance: tolerance) ? .affine : .projective
         return next
+    }
+
+    // MARK: - The eight sizing grips and the knob, on a quad that has perspective
+
+    /// **The same two gestures stage 4 wrote, composed *through* the homography instead of replacing
+    /// it** — the eight sizing grips and the rotation knob on a `.projective` frame.
+    ///
+    /// What this replaces was a silent flatten, and it is worth naming because it looked like
+    /// nothing: `resized(towards:)` rebuilds the quad from `basis`, which is the frame's two edge
+    /// *directions* and therefore describes a parallelogram. Handed a warped quad it produced the
+    /// parallelogram nearest it — the wall of text lay down flat and the far corner jumped — and it
+    /// left `mode` saying `.projective` over a quad that no longer was. Nudging the wrap width to
+    /// fix a line break destroyed the perspective, with no undo step of its own to get it back.
+    ///
+    /// **The composition, and why it is the honest behaviour rather than a workaround.** A sizing
+    /// grip does not move the quad; it changes the *box* the glyphs are laid out in. So the drag is
+    /// carried into box space through `H⁻¹`, resized there with stage 4's own arithmetic — the axis
+    /// mask, the anchor opposite the grip, the minimum extent, all of it, with `u` and `v` now the
+    /// literal unit axes — and the resulting rectangle carried back out through `H`. The plane the
+    /// artist put the text on is untouched: the box grows *along the wall*, foreshortened exactly as
+    /// the wall is. That is why the knob is here too, one line down and by a different route: a
+    /// rotation is not a box resize, so it turns the whole quad rigidly about its own centre, which
+    /// is `R · H` and still a homography with the same perspective row.
+    ///
+    /// **Nothing is grandfathered.** The grip does not jump under the finger at touch-down, and that
+    /// is arithmetic rather than luck: the line `x = w` in box space maps to the line through corners
+    /// 1 and 2, so an edge grip's own canvas position inverts to exactly the extent it started from.
+    /// And the mode is *derived* on the way out, the same way `distortedFrame` derives it, so a
+    /// resize that happens to land back on a parallelogram goes back to `.affine` and gets its native
+    /// unresampled drawing path back.
+    ///
+    /// Nil on a drag that would leave the valid set — a box grown through the vanishing line, most
+    /// of all — which is ADD_TEXT.md §1's clamp, reached by the same predicate the distort uses.
+    func warpedFrame(draggedTo point: CGPoint,
+                     minimumExtent: CGFloat = TextFrame.minimumExtent) -> TextFrame? {
+        guard !isDistort, start.mode == .projective, let homography = start.homography else { return nil }
+        let candidate = handle == .rotation
+            ? turnedInPlane(towards: point)
+            : sizedInBoxSpace(towards: point, through: homography, minimumExtent: minimumExtent)
+        guard var next = candidate, let quad = next.quad,
+              Homography.isValidQuad(quad, boxSize: next.size) else { return nil }
+        let tolerance = max(1e-6, 1e-6 * max(next.size.width, next.size.height))
+        next.mode = quad.isParallelogram(tolerance: tolerance) ? .affine : .projective
+        return next
+    }
+
+    /// Stage 4's `resized(towards:)`, done in the box's own coordinates and mapped back out.
+    ///
+    /// The two are the same function: there `u` and `v` are the frame's axes and the decomposition
+    /// is a pair of dot products, here they are `(1,0)` and `(0,1)` and the decomposition is a
+    /// subtraction. `handle.widthSign`, `heightSign` and `anchorLocal` are read *unchanged*, which is
+    /// the point — the axis mask, the "opposite corner does not move" rule and the clamp at
+    /// `minimumExtent` are stage 4's, not a second copy of them.
+    private func sizedInBoxSpace(towards point: CGPoint, through homography: Homography,
+                                 minimumExtent: CGFloat) -> TextFrame? {
+        guard let inverse = homography.inverse, let local = inverse.map(point) else { return nil }
+        let held = handle.anchorLocal(width: start.size.width, height: start.size.height)
+        let width = handle.widthSign.map { max(minimumExtent, $0 * (local.x - held.x)) } ?? start.size.width
+        let height = handle.heightSign.map { max(minimumExtent, $0 * (local.y - held.y)) } ?? start.size.height
+        let moved = handle.anchorLocal(width: width, height: height)
+        let box = CGRect(x: held.x - moved.x, y: held.y - moved.y, width: width, height: height)
+        let mapped = Quad.rect(box).points.compactMap { homography.map($0) }
+        guard mapped.count == 4 else { return nil }
+        var sized = start
+        sized.size = CGSize(width: width, height: height)
+        sized.corners = mapped
+        sized.autoSize = false
+        return sized
+    }
+
+    /// The knob on a warped frame: the quad turned **rigidly** about its own centre.
+    ///
+    /// Rigid rather than rebuilt, which is the whole difference from `rotated(towards:)`. Turning the
+    /// four corners is `R · H`, whose third row is `H`'s third row unchanged — so the perspective
+    /// survives the rotation exactly, every weight is what it was, and a quad that was valid stays
+    /// valid. `size` and `autoSize` do not move, for stage 4's stated reason: turning a box is not
+    /// sizing it.
+    ///
+    /// The angle convention is stage 4's, reused rather than re-derived: the knob stands off the top
+    /// edge, so `atan2(finger − centre) + π/2` is where the box's own +x is asked to point, and the
+    /// quad is turned by the difference from where it points now. On an `.affine` frame that produces
+    /// the same quad `rotated(towards:)` does; on a warped one the knob can sit slightly off the
+    /// finger, because a warped quad's edge midpoint is not the image of its box's edge midpoint —
+    /// the same half-texel honesty the edge grips already carry, and far less than the ~80 pt jump
+    /// this replaced.
+    private func turnedInPlane(towards point: CGPoint) -> TextFrame? {
+        guard let basis, let quad = start.quad else { return nil }
+        let c = start.centre
+        let target = atan2(point.y - c.y, point.x - c.x) + .pi / 2
+        let delta = target - atan2(basis.u.dy, basis.u.dx)
+        let cosD = cos(delta), sinD = sin(delta)
+        var turned = start
+        turned.corners = quad.points.map { corner in
+            let dx = corner.x - c.x, dy = corner.y - c.y
+            return CGPoint(x: c.x + dx * cosD - dy * sinD, y: c.y + dx * sinD + dy * cosD)
+        }
+        return turned
     }
 
     /// Turns the box about its own centre. Neither `size` nor `autoSize` moves: a rotation is not a

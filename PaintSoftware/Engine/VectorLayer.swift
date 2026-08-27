@@ -2376,6 +2376,23 @@ final class VectorCanvas {
     /// resort, but it now means only "this quad has collapsed", not "this quad has perspective".
     /// Routing through `TextLayout` rather than warping here is stage 3's rasterizer rule one level
     /// up: there is one place text turns into pixels, and the bake and the flatten share it.
+    ///
+    /// **Known and not fixed: the `.projective` arm runs per *invalidation*, not per commit.**
+    /// ADD_TEXT.md §4 rule 7 sizes the warp as "one canvas-sized cost, once, at bake", and that is
+    /// true of the raster bake. It is not true here. A vector cel holding warped text re-runs a
+    /// supersampled CoreText pass and a synchronous GPU round-trip (`MetalWarpEngine.warp` ends in
+    /// `waitUntilCompleted`) on every flatten — a timeline tick, a thumbnail regen, an onion-skin
+    /// pass. Rule 4 keeps the *bumps* down to two per text session, so this is bounded by how often
+    /// something else invalidates the layer rather than by typing; the affine arm above has no such
+    /// cost because it resamples nothing.
+    ///
+    /// A memo keyed on frame + recipe is the obvious fix and was **deliberately not taken here**:
+    /// `TextRecipe` and `TextFrame` are `Equatable` but not `Hashable`, so it is a conformance
+    /// spread across four types rather than a cache line, and the entry it would hold is a
+    /// destination-sized bitmap in the budget §4 rule 6 describes as "a cliff, not a slope" — where
+    /// an over-budget composite is declined *silently* and drops the whole upload cache
+    /// process-wide. That is a trade the owner should make, not one to slip in beside a bug fix.
+    /// [BUGS.md](BUGS.md) carries it.
     private static func draw(text element: VectorTextElement, into cg: CGContext, quality: RenderQuality) {
         _ = quality
         let frame = element.frame
@@ -2388,8 +2405,14 @@ final class VectorCanvas {
             cg.concatenate(transform)
             TextLayout.draw(element.recipe, font: font, boxSize: frame.size,
                             clip: !frame.autoSize, into: cg)
-        } else if TextLayout.drawWarped(element.recipe, frame: frame) {
-            // Nothing more: the warp drew itself, in the layer's own local coordinates.
+        } else if TextLayout.drawWarped(element.recipe, frame: frame,
+                                        clip: cg.boundingBoxOfClipPath) {
+            // Nothing more: the warp drew itself, in the layer's own local coordinates — and inside
+            // the context's own clip, which is the memory bound. This static has no canvas size to
+            // pass and does not need one: `boundingBoxOfClipPath` is the flatten's own bounds here
+            // (`renderLocalContent` builds the context at `size` and concatenates nothing before
+            // this call), and it is the honest question anyway — a texel CoreGraphics is about to
+            // discard is one the warp should never have allocated.
         } else {
             cg.translateBy(x: box.minX, y: box.minY)
             TextLayout.draw(element.recipe, font: font, boxSize: box.size,

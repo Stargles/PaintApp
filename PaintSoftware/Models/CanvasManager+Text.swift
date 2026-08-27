@@ -234,14 +234,17 @@ extension CanvasManager {
     /// The last valid quad is `textFrame` itself, because the only thing that ever writes it during a
     /// drag is this line. So "hold it" is "do not write it", and no second copy of the frame has to
     /// be kept in step with the first.
+    ///
+    /// **One optional, for all nine grips and both modes.** The clamp used to be spelled out here as
+    /// an `if drag.isDistort`, which was right while the distort was the only gesture that could
+    /// make an invalid quad. It is not: the sizing grips and the knob on a `.projective` frame are
+    /// composed through the homography now (`TextFrameDrag.warpedFrame`), so growing a box towards
+    /// the vanishing line can be refused too, and it must stick in exactly the same way. Asking one
+    /// question keeps the two from drifting apart.
     func dragTextHandle(to canvasPoint: CGPoint) {
         guard textGestureActive, let drag = textHandleDrag else { return }
-        if drag.isDistort {
-            guard let distorted = drag.distortedFrame(draggedTo: canvasPoint) else { return }
-            textFrame = distorted
-        } else {
-            textFrame = drag.frame(draggedTo: canvasPoint)
-        }
+        guard let next = drag.clampedFrame(draggedTo: canvasPoint) else { return }
+        textFrame = next
         objectWillChange.send()
     }
 

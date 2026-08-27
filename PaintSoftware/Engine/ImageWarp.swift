@@ -95,6 +95,23 @@ enum ImageWarp {
                         let inv = 1 / w
                         let u = (m0 * px + m1 * py + m2) * inv - 0.5
                         let v = (m3 * px + m4 * py + m5) * inv - 0.5
+                        // **The one place this loop can crash rather than draw nothing.** A
+                        // destination pixel a hair inside the vanishing line has `w` a hair above
+                        // zero, so `u` and `v` come out at 1e17 and beyond — and `Int(_:)` on a
+                        // `Double` that will not fit **traps**, taking the process with it. The GPU
+                        // has no such cliff: `int(base.x)` in MSL is merely undefined-but-quiet, and
+                        // every branch it feeds is a bounds test that says "outside".
+                        //
+                        // Refusing here is not an approximation of that: a `u` outside `(-1,
+                        // sourceWidth)` puts *both* bilinear taps out of bounds, and `texel` returns
+                        // transparent for both, so the blend below would have written zero anyway.
+                        // The bound is stated at `-1` rather than at `0` because `u = -0.4` still
+                        // reaches texel 0 with weight `fx`. NaN fails every comparison and lands
+                        // here too, which is the answer it should get.
+                        guard u > -1, u < Double(sourceWidth), v > -1, v < Double(sourceHeight) else {
+                            dst[offset] = 0; dst[offset + 1] = 0; dst[offset + 2] = 0; dst[offset + 3] = 0
+                            continue
+                        }
                         let x0 = (u).rounded(.down), y0 = (v).rounded(.down)
                         let fx = u - x0, fy = v - y0
                         let ix = Int(x0), iy = Int(y0)
@@ -147,6 +164,17 @@ enum ImageWarp {
 
     // MARK: - Images
 
+    /// Backing texels per destination point: **1 for every destination inside the cap, and shrinking
+    /// beyond it** so the longest side lands exactly on `maximumTexels`.
+    ///
+    /// A pure function rather than three lines inside `warpedImage` because it is the memory bound
+    /// stated as arithmetic, and a bound nothing can assert is a bound nobody has.
+    static func destinationScale(for destination: CGRect, maximumTexels: CGFloat) -> CGFloat {
+        let longest = max(destination.width, destination.height)
+        guard longest > maximumTexels, longest > 0 else { return 1 }
+        return maximumTexels / longest
+    }
+
     /// The whole bake in one call: a `CGImage` holding the source box, carried onto `homography`'s
     /// quad and rasterised into `destination` at one texel per canvas point.
     ///
@@ -158,14 +186,32 @@ enum ImageWarp {
     /// One allocation of the destination's size, once, at commit. ADD_TEXT.md §4 rule 7: the same
     /// shape and cost as a fill commit, which is already accepted. Nothing in the live path comes
     /// here — that is Core Animation, rule 2.
+    ///
+    /// **`destination` is a rectangle in canvas points; `maximumDestinationTexels` is what stops it
+    /// being a memory bound the caller merely hoped for.** Three buffers are `w × h × 4` here — the
+    /// destination `MTLTexture`, the byte array read back off it and the `CGImage` made from that —
+    /// so an uncapped destination is twelve bytes of transient per destination *point*, on top of
+    /// the canvas-sized flatten and composite the bake already pays. Past the cap the warp is
+    /// rendered at `destinationScale < 1` and drawn back up into the full rectangle by the caller,
+    /// which is a soft edge rather than a refusal or a jetsam. The scale is folded into the matrix
+    /// by `inverseTexelMap`, which has taken it since it was written and was only ever passed 1.
+    ///
+    /// Clipping `destination` to something that can actually be seen is the caller's job and comes
+    /// first — see `TextLayout.warpedGlyphs`, which intersects it with the canvas. This cap is what
+    /// remains after that, for the on-canvas worst case.
     static func warpedImage(source: CGImage, sourceScale: CGFloat, boxSize: CGSize,
-                            homography: Homography, destination: CGRect) -> CGImage? {
-        let width = Int(destination.width.rounded()), height = Int(destination.height.rounded())
-        guard width > 0, height > 0, source.width > 0, source.height > 0 else { return nil }
+                            homography: Homography, destination: CGRect,
+                            maximumDestinationTexels: CGFloat) -> CGImage? {
+        guard destination.width >= 1, destination.height >= 1,
+              source.width > 0, source.height > 0, maximumDestinationTexels >= 1 else { return nil }
+        let destinationScale = destinationScale(for: destination,
+                                                maximumTexels: maximumDestinationTexels)
+        let width = max(1, Int((destination.width * destinationScale).rounded()))
+        let height = max(1, Int((destination.height * destinationScale).rounded()))
         guard let matrix = inverseTexelMap(homography: homography, boxSize: boxSize,
                                            sourceScale: sourceScale,
                                            destinationOrigin: destination.origin,
-                                           destinationScale: 1) else { return nil }
+                                           destinationScale: destinationScale) else { return nil }
         guard let bytes = CoreGraphicsCompositor.premultipliedBytes(source, width: source.width,
                                                                     height: source.height) else { return nil }
         let params = WarpParams(matrix)

@@ -812,7 +812,246 @@ final class TextTransformLogicTests: XCTestCase {
                              + "fallback would spread it evenly.")
     }
 
+    // MARK: - Stage 5: the other five grips, on a quad that has perspective
+
+    /// **A sizing grip on a warped box grows the box *along the wall*, and does not lie the
+    /// perspective flat.**
+    ///
+    /// What this replaces looked like nothing and was the worst kind of bug: `resized(towards:)`
+    /// rebuilds all four corners from `basis`, which is the frame's two edge *directions*, so it can
+    /// only describe a parallelogram. Handed a warped quad it returned the parallelogram nearest it —
+    /// the wall of text lay down flat, the far corner jumped — while leaving `mode` still saying
+    /// `.projective` over a quad that no longer was. Nudging the wrap width to fix a line break
+    /// destroyed the perspective, and there was no undo step of its own to get it back.
+    ///
+    /// The claims are geometric rather than numeric, so they are true of any correct implementation:
+    ///
+    /// - **The anchor edge does not move at all.** Dragging `.right` holds the box's `x = 0` edge, and
+    ///   that edge is corners 0 and 3 whatever the perspective.
+    /// - **The moved edge slides along the quad's own edge lines.** The box-space line `y = 0` maps to
+    ///   the line through corners 0 and 1, so a wider box's new corner 1 stays on it — and, the
+    ///   discriminating half, its new corner 2 stays on the line through corners 3 and 2, which on a
+    ///   warped quad is a *different direction*. The flatten put corner 2 on the first line's
+    ///   direction instead, which is exactly how the far corner jumped.
+    /// - **The perspective survives**: the quad is still not a parallelogram and the mode is still
+    ///   `.projective`, so the frame keeps the drawing path it had.
+    func testASizingGripOnAWarpedBoxGrowsItAlongTheWallRatherThanFlatteningIt() throws {
+        let start = try warped()
+        let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: .right))
+        XCTAssertFalse(drag.isDistort, "An edge grip is a resize in both corner modes.")
+
+        // Out past the right edge, along the direction the top edge runs.
+        let target = CGPoint(x: start[.topRight].x + 70, y: start[.topRight].y + 24)
+        let sized = try XCTUnwrap(drag.clampedFrame(draggedTo: target))
+
+        assertPoint(sized[.topLeft], start[.topLeft], accuracy: 1e-9, "the held edge moved")
+        assertPoint(sized[.bottomLeft], start[.bottomLeft], accuracy: 1e-9, "the held edge moved")
+        XCTAssertGreaterThan(sized.size.width, start.size.width, "The grip has to have sized something.")
+        XCTAssertEqual(sized.size.height, start.size.height, accuracy: 1e-9,
+                       "An edge grip freezes the axis it is not on, in both modes.")
+
+        assertDistanceToLine(sized[.topRight], start[.topLeft], start[.topRight], accuracy: 1e-6,
+                             "corner 1 left the top edge's own line")
+        assertDistanceToLine(sized[.bottomRight], start[.bottomLeft], start[.bottomRight], accuracy: 1e-6,
+                             "corner 2 left the bottom edge's own line — the flatten's signature")
+
+        XCTAssertEqual(sized.mode, .projective, "A resize along the wall does not remove the wall.")
+        let quad = try XCTUnwrap(sized.quad)
+        XCTAssertFalse(quad.isParallelogram(tolerance: 1e-3),
+                       "The resize flattened the quad, which is the bug this replaced.")
+
+        // And the two edge directions genuinely differ on this fixture, or the assertion above is
+        // satisfied by any implementation at all.
+        let top = CGVector(dx: start[.topRight].x - start[.topLeft].x,
+                           dy: start[.topRight].y - start[.topLeft].y)
+        let bottom = CGVector(dx: start[.bottomRight].x - start[.bottomLeft].x,
+                              dy: start[.bottomRight].y - start[.bottomLeft].y)
+        let cross = abs(top.dx * bottom.dy - top.dy * bottom.dx)
+        XCTAssertGreaterThan(cross, 100, "The fixture's opposite edges are parallel, so it discriminates nothing.")
+    }
+
+    /// **The grip does not jump under the finger at touch-down**, and that is arithmetic rather than
+    /// luck: the box-space line `x = w` maps onto the line through corners 1 and 2, so the `.right`
+    /// grip's own canvas position — the midpoint of that segment — inverts to exactly the width it
+    /// started from.
+    ///
+    /// Worth its own test because it is the property a composition through `H⁻¹` can get wrong in a way
+    /// nothing else here would catch: a drag that reads the grip's position through the *basis* would
+    /// come back with a different extent, and the box would visibly twitch the instant it was touched.
+    /// Both horizontal grips and both vertical ones, since they read different halves of the map.
+    ///
+    /// It also pins the latched **anchor**, which moved to the homography for the same reason:
+    /// `Basis` decomposes onto two edge *directions*, so on a warped quad it reports the point the box
+    /// would have had with the perspective taken out — which is not a point on the quad at all.
+    /// MEASURED on this fixture: for `.left` the basis answer sits 8.2 pt off the quad's right edge
+    /// and for `.top` 17.2 pt off its bottom edge.
+    func testAnEdgeGripOnAWarpedBoxDoesNotMoveTheBoxWhenDraggedToItsOwnPosition() throws {
+        let start = try warped()
+        let layout = start.handleLayout(rotationOffset: 0)
+        // The quad edge each grip's anchor has to sit on: the one diametrically opposite it.
+        let oppositeEdge: [TextFrame.Handle: (TextFrame.Corner, TextFrame.Corner)] =
+            [.right: (.bottomLeft, .topLeft), .left: (.topRight, .bottomRight),
+             .top: (.bottomLeft, .bottomRight), .bottom: (.topLeft, .topRight)]
+        for handle in [TextFrame.Handle.right, .left, .top, .bottom] {
+            let position = try XCTUnwrap(layout.first { $0.handle == handle }?.position)
+            let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: handle))
+            let edge = try XCTUnwrap(oppositeEdge[handle])
+            assertDistanceToLine(drag.anchor, start[edge.0], start[edge.1], accuracy: 1e-6,
+                                 "\(handle)'s anchor is not on the edge it holds still")
+            let unmoved = try XCTUnwrap(drag.clampedFrame(draggedTo: position),
+                                        "\(handle): a drag to the grip's own position was refused.")
+            XCTAssertEqual(unmoved.size.width, start.size.width, accuracy: 1e-6, "\(handle) width")
+            XCTAssertEqual(unmoved.size.height, start.size.height, accuracy: 1e-6, "\(handle) height")
+            for corner in TextFrame.Corner.allCases {
+                assertPoint(unmoved[corner], start[corner], accuracy: 1e-6,
+                            "\(handle) moved corner \(corner) before the finger did")
+            }
+        }
+    }
+
+    /// **The knob turns a warped quad rigidly**, which is what keeps its perspective exactly: turning
+    /// the four corners is `R · H`, whose third row is `H`'s third row unchanged.
+    ///
+    /// Stage 4's `rotated(towards:)` rebuilt the quad from `basis.width`/`basis.height` along two
+    /// perpendicular axes, so on a warped quad it did not turn the box — it replaced it with an
+    /// upright rectangle of roughly the right extents, at the new angle. The identities here are the
+    /// ones that separates the two: **every pairwise distance between corners survives** a rigid turn
+    /// and none of them survives a rebuild, and turning back restores the quad exactly.
+    func testTheKnobOnAWarpedBoxTurnsTheQuadRigidlyAndIsInvertible() throws {
+        let start = try warped()
+        let centre = start.centre
+        let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: .rotation))
+
+        // The knob stands off the top edge, so "straight up from the centre" is the box as it is and
+        // this asks for a further 40°.
+        func knobPoint(at angle: CGFloat) -> CGPoint {
+            CGPoint(x: centre.x + 80 * cos(angle - .pi / 2), y: centre.y + 80 * sin(angle - .pi / 2))
+        }
+        let basis = try XCTUnwrap(start.basis)
+        let started = atan2(basis.u.dy, basis.u.dx)
+        let turned = try XCTUnwrap(drag.clampedFrame(draggedTo: knobPoint(at: started + 40 * .pi / 180)))
+
+        assertPoint(turned.centre, centre, accuracy: 1e-6, "a rotation pivots without travelling")
+        XCTAssertEqual(turned.size, start.size, "Turning a box is not sizing it.")
+        XCTAssertEqual(turned.mode, .projective, "A rigid turn cannot remove the perspective.")
+        for a in TextFrame.Corner.allCases {
+            for b in TextFrame.Corner.allCases where b.rawValue > a.rawValue {
+                let before = hypot(start[a].x - start[b].x, start[a].y - start[b].y)
+                let after = hypot(turned[a].x - turned[b].x, turned[a].y - turned[b].y)
+                XCTAssertEqual(after, before, accuracy: 1e-6,
+                               "\(a)–\(b) changed length, so the quad was rebuilt rather than turned.")
+            }
+        }
+        XCTAssertNotEqual(turned.corners, start.corners, "Nothing turned at all.")
+
+        // And back, through a second drag latched on the turned frame.
+        let back = try XCTUnwrap(TextFrameDrag(frame: turned, handle: .rotation))
+        let restored = try XCTUnwrap(back.clampedFrame(draggedTo: knobPoint(at: started)))
+        for corner in TextFrame.Corner.allCases {
+            assertPoint(restored[corner], start[corner], accuracy: 1e-6, "corner \(corner) after turning back")
+        }
+    }
+
+    /// A sizing grip on a warped box is **clamped like a distort is**, through the same predicate.
+    ///
+    /// This is why `CanvasManager.dragTextHandle` now asks one optional for all nine grips instead of
+    /// branching on `if drag.isDistort`: the distort used to be the only gesture that could make an
+    /// invalid quad, and it is not any more. Growing the box towards the vanishing line eventually
+    /// carries its far corner past it, and the grip has to feel like it sticks rather than flipping
+    /// the wall through the horizon.
+    ///
+    /// **It is a narrower failure than it sounds, and the fixture is chosen to reach it at all.** For
+    /// a quad foreshortened the other way, `H⁻¹` carries the whole visible half-plane onto the box's
+    /// own positive half-plane, so no finite finger position can produce an invalid box and the
+    /// refusal is unreachable. MEASURED on the fixture below: 24 of 41 steps along the ray are
+    /// accepted and the last 17 refused, so what the loop ends holding is the last quad before the
+    /// crossing — not the starting one, which is the difference between clamping and cancelling.
+    func testARefusedResizeOnAWarpedBoxAlsoHoldsTheLastValidQuad() throws {
+        let start = try warped()
+        let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: .right))
+        var held = start
+        var refusals = 0, accepted = 0
+        // Out along the top edge and away, until the far corner crosses the vanishing line.
+        for step in 0...40 {
+            let t = CGFloat(step) / 40
+            let target = CGPoint(x: start[.topRight].x + 2_000 * t, y: start[.topRight].y - 40 * t)
+            if let next = drag.clampedFrame(draggedTo: target) { held = next; accepted += 1 }
+            else { refusals += 1 }
+        }
+        XCTAssertGreaterThan(refusals, 0, "The path never left the valid set, so nothing was clamped.")
+        XCTAssertGreaterThan(accepted, 1, "And it has to accept something first, or nothing was held.")
+        XCTAssertGreaterThan(held.size.width, start.size.width, "The held quad is not the starting one.")
+        let quad = try XCTUnwrap(held.quad)
+        XCTAssertTrue(Homography.isValidQuad(quad, boxSize: held.size), "What is held must itself be valid.")
+
+        // And `frame(draggedTo:)`, the total form, means the same thing as the optional one rather
+        // than something different — it falls back to the latched frame, never to a refused quad.
+        let refused = CGPoint(x: start[.topRight].x + 2_000, y: start[.topRight].y - 40)
+        XCTAssertNil(drag.clampedFrame(draggedTo: refused))
+        XCTAssertEqual(drag.frame(draggedTo: refused).corners, start.corners)
+    }
+
+    /// **`warpMagnification` is exactly 1 for every `.affine` frame, however it is turned** — the
+    /// number `TextOverlayView` multiplies its backing store by.
+    ///
+    /// Not "1 to within a rounding": the guard that makes it exact is a mode test rather than an
+    /// arithmetic one, and that is the whole point. `maximumCornerScale` is `√|det J|`, which on a
+    /// rotated affine frame is `√(cos²θ + sin²θ)` — 1 to within an ULP, not 1 — and the caller's
+    /// `max(1, …)` clamps the low side only, so the ULP survives into `contentsScale` and rounds a
+    /// glyph bitmap up by a texel on some angles and not others. **MEASURED with the guard removed,
+    /// on the 300×120 box below: 87 of these 3600 angles come out above 1**, by an ULP —
+    /// `1.0000000000000002` — which is enough to carry a `contentsScale` of `2.0000000000000004` into
+    /// `UIGraphicsImageRenderer` and round the bitmap up to 601 texels where the same box unrotated
+    /// takes 600.
+    ///
+    /// So this sweeps 3600 angles and asserts the exact value, which is the only assertion that can
+    /// tell the two apart. A comment on the old property claimed it was 1 for every frame stages 1-4
+    /// could make; it was not, and this is what would have said so.
+    func testWarpMagnificationIsExactlyOneForAnAffineFrameAtEveryAngle() {
+        let box = upright(size: CGSize(width: 300, height: 120))
+        var above = 0
+        for tenths in 0..<3600 {
+            let frame = turned(box, by: CGFloat(tenths) / 10 * .pi / 180)
+            XCTAssertEqual(frame.mode, .affine, "The fixture must stay affine or it proves nothing.")
+            if frame.warpMagnification != 1 { above += 1 }
+        }
+        XCTAssertEqual(above, 0,
+                       "\(above) of 3600 rotated affine frames want a magnified backing store, which "
+                       + "is an ULP of trig rather than a foreshortening.")
+
+        // And it is still the real number where there *is* a foreshortening to compensate for.
+        let wall = try? warped()
+        XCTAssertGreaterThan(wall?.warpMagnification ?? 0, 1,
+                             "A foreshortened box's near corner genuinely needs more texels than it has points.")
+    }
+
     // MARK: - Support
+
+    /// A genuinely `.projective` frame: an upright box with one corner pulled out of the plane,
+    /// through the real distort drag so the fixture cannot disagree with the gesture that makes one.
+    private func warped() throws -> TextFrame {
+        let start = upright(size: CGSize(width: 120, height: 60), centre: CGPoint(x: 100, y: 100),
+                            autoSize: false)
+        let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: .bottomRight, distort: true))
+        // Down and out, which puts the vanishing line on the *positive* side of the box in both axes
+        // — the one arrangement in which a sizing grip can be pushed past it and refused. Pulled the
+        // other way the inverse map is a bijection of the visible half-plane onto the box's, and no
+        // finite finger position can produce an invalid quad at all.
+        let frame = try XCTUnwrap(drag.distortedFrame(draggedTo: CGPoint(x: 190, y: 175)))
+        XCTAssertEqual(frame.mode, .projective, "The fixture is not warped, so nothing below is tested.")
+        return frame
+    }
+
+    /// `point` sits on the line through `a` and `b`, to `accuracy` canvas points.
+    private func assertDistanceToLine(_ point: CGPoint, _ a: CGPoint, _ b: CGPoint,
+                                      accuracy: CGFloat, _ message: String = "",
+                                      file: StaticString = #filePath, line: UInt = #line) {
+        let dx = b.x - a.x, dy = b.y - a.y
+        let length = hypot(dx, dy)
+        guard length > 0 else { return XCTFail("degenerate line", file: file, line: line) }
+        let distance = abs(dx * (point.y - a.y) - dy * (point.x - a.x)) / length
+        XCTAssertEqual(distance, 0, accuracy: accuracy, message, file: file, line: line)
+    }
 
     /// A canvas with one raster layer and an empty undo stack. `addLayer()` registers a structural
     /// step of its own, so without the `removeAll()` every depth assertion above would be counting
