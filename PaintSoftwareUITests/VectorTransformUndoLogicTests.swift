@@ -13,11 +13,15 @@ import UIKit
 /// The fix is a bracket: opened by the gesture's first write, closed when `isVectorTransforming`
 /// goes false, one step recorded across the whole span and none at all when the layer ended up where
 /// it started. This file is about the closing half, because that is where the difficulty is. The flag
-/// turns off with **no gesture ending** in two places — `rasterizeLayer`, and
-/// `handleActiveContextChanged` when the artist leaves the layer or the frame — and a bracket that
-/// leaks on either is worse than no bracket: it either drops the step or bills the artist's *next*
-/// drag to this one. Both are tested here, each with a follow-up gesture that proves the leak did not
-/// happen rather than merely that the step arrived.
+/// turns off with **no gesture ending** in three places — `rasterizeLayer`; `handleActiveContextChanged`
+/// when the artist leaves the layer or the frame; and `selectedTool`'s own `didSet`, which closes an
+/// engaged whole-layer Move when the artist picks a different tool (added 2026-08-27, closing the
+/// report "if I click on move without lassoing first... I cant click on a brush" — see
+/// `isVectorTransforming`'s own doc comment for the other two closers this file does not own,
+/// `TopToolbar.toggleMove` and `CanvasView.Coordinator.handleMoveBoxCommit`, which end a *gesture* and
+/// so need no leak test here). A bracket that leaks on any of the three is worse than no bracket: it
+/// either drops the step or bills the artist's *next* drag to this one. Each is tested here with a
+/// follow-up gesture that proves the leak did not happen rather than merely that the step arrived.
 ///
 /// Pure logic, no simulator: `setVectorTransform` is the seam the overlay drives, and driving it
 /// directly is the same sequence of calls a real drag produces.
@@ -395,5 +399,206 @@ final class VectorTransformUndoLogicTests: XCTestCase {
 
         manager.isVectorTransforming = false
         XCTAssertFalse(manager.canUndo, "and closing a no-op bracket records nothing")
+    }
+
+    // MARK: - Leak path 3: switching tools out from under the gesture
+
+    /// The owner's report, 2026-08-27: "if I click on move without lassoing first (so a canvas
+    /// move), I cant click on a brush." Root cause was this bracket's third leak — `selectedTool`
+    /// could change with `isVectorTransforming` still on, so the canvas stroke host stayed
+    /// non-interactive (`CanvasTouchInputs.activeHostIsInteractive`'s `isVectorTransforming` clause)
+    /// for a vector layer with the toolbar already showing the new tool selected. Fixed the same way
+    /// as the other two leaks: `selectedTool`'s own `didSet` is the chokepoint every tool-switch call
+    /// site already writes through, so closing the bracket there closes it by construction rather
+    /// than at each of the six doors individually.
+    func testSwitchingToolsMidGestureRecordsTheTransformAndReleasesTheHost() {
+        let (manager, layerIndex, pivot) = fixture()
+        manager.isVectorTransforming = true
+        let stepsBefore = manager.history.undoStack.count
+        let end = drag(manager, layerIndex: layerIndex, pivot: pivot,
+                       from: pivot, to: CGPoint(x: pivot.x + 11, y: pivot.y - 6), endScale: 1.15)
+
+        manager.selectedTool = .eraser                  // the toolbar's brush/eraser/fill buttons all do this
+
+        XCTAssertFalse(manager.isVectorTransforming, "picking a tool ends the whole-layer Move")
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore + 1, "one step for the drag")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .transform)
+        assertTransform(canvas(manager, layerIndex)?.transform, VectorCanvas.affine(from: end, pivot: pivot),
+                        "the tool switch does not itself move the layer")
+
+        // The consequence the bug report was actually about: with the flag down, the stroke host is
+        // interactive again, so the artist's next touch with the newly-selected tool reaches it.
+        let touch = CanvasTouchInputs(tool: manager.selectedTool, isVectorTransforming: manager.isVectorTransforming,
+                                      activeLayer: .vector, activeLayerIsOnScreen: true)
+        XCTAssertTrue(touch.activeHostIsInteractive,
+                      "the brush/eraser/fill button must not leave the canvas unable to take a stroke")
+        XCTAssertFalse(touch.moveBoxIsUp, "and the Move box itself must be gone, not merely unresponsive")
+
+        manager.undo()
+        assertTransform(canvas(manager, layerIndex)?.transform, .identity, "the drag is still one undo away")
+    }
+
+    /// The state the bug report actually reproduced: `isVectorTransforming` left on with a paint tool
+    /// selected underneath it. Demonstrates the swallow directly, rather than only its absence above —
+    /// a predicate that always answered `true` would pass the test above without this one.
+    func testAStuckFlagIsWhatSwallowedTheStroke() {
+        let stuck = CanvasTouchInputs(tool: .pen, isVectorTransforming: true,
+                                      activeLayer: .vector, activeLayerIsOnScreen: true)
+        XCTAssertFalse(stuck.activeHostIsInteractive,
+                       "this is the exact swallow the owner reported — reachable only if the flag never clears")
+    }
+
+    /// Mirrors `testTheGestureAfterALayerSwitchIsOneStepOfItsOwn`: the assertion the test above
+    /// cannot make on its own. A bracket that closed but left its baseline behind would still record
+    /// one step here — reaching back to the *first* gesture instead of just the second.
+    func testTheGestureAfterAToolSwitchIsOneStepOfItsOwn() {
+        let (manager, layerIndex, pivot) = fixture()
+
+        manager.isVectorTransforming = true
+        let firstEnd = drag(manager, layerIndex: layerIndex, pivot: pivot,
+                            from: pivot, to: CGPoint(x: pivot.x + 9, y: pivot.y))
+        manager.selectedTool = .fill                     // leak path 3 closes it
+        let afterFirst = VectorCanvas.affine(from: firstEnd, pivot: pivot)
+
+        // A tool switch does not itself move `currentLayerIndex` — unlike leak path 2, there is
+        // nothing to switch back to before starting the second gesture.
+        manager.isVectorTransforming = true
+        let stepsBefore = manager.history.undoStack.count
+        let secondEnd = drag(manager, layerIndex: layerIndex, pivot: pivot,
+                             from: firstEnd.position, to: CGPoint(x: firstEnd.position.x, y: firstEnd.position.y + 13))
+        manager.isVectorTransforming = false
+
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore + 1, "one step for the second drag")
+        assertTransform(canvas(manager, layerIndex)?.transform, VectorCanvas.affine(from: secondEnd, pivot: pivot),
+                        "which is where the second drag left it")
+
+        manager.undo()
+        assertTransform(canvas(manager, layerIndex)?.transform, afterFirst,
+                        "undo walks back exactly one drag — a leaked baseline would land on identity here")
+    }
+
+    /// `selectedTool`'s `didSet` guards on `oldValue != selectedTool`, same as every other `@Published`
+    /// property in this file's dependency graph. Assigning a tool to itself — which a settings panel
+    /// binding can do on every redraw — must not reach through and close a live Move.
+    func testReassigningTheSameToolDoesNotCloseAnEngagedMove() {
+        let (manager, _, _) = fixture()
+        manager.selectedTool = .pen
+        manager.isVectorTransforming = true
+
+        manager.selectedTool = .pen
+
+        XCTAssertTrue(manager.isVectorTransforming, "no tool actually changed, so nothing should have closed")
+    }
+
+    /// **The negative case that stops this fix from being "simplified" into the wrong one.** The
+    /// obvious place to close `isVectorTransforming` is `commitAllInteractiveState()` — it already
+    /// settles the floating piece and the vector float for the same "tool is being replaced" event —
+    /// and it is wrong for two reasons pinned elsewhere (`TopToolbar.toggleMove` would become
+    /// undismissable from its own button, tested below). This is the third: opening the Select panel
+    /// also calls `commitAllInteractiveState()` (`TopToolbar.toggle(.select)`), and
+    /// `CanvasTouchOwner.swift`'s arbitration ruling of 2026-08-22 deliberately keeps a whole-layer
+    /// Move alive through that — it is how the artist gets from a whole-layer Move to a lasso move,
+    /// by opening Select and drawing the loop with the transform still engaged. Closing the flag in
+    /// `commitAllInteractiveState()` would end the Move the moment the artist so much as opened Select,
+    /// breaking that workflow. Fixing this at `selectedTool`'s `didSet` instead is exactly what keeps
+    /// it safe: opening Select never touches `selectedTool`.
+    func testOpeningSelectWhileMoveIsEngagedLeavesMoveEngaged() {
+        let (manager, _, _) = fixture()
+        manager.isVectorTransforming = true
+
+        manager.commitAllInteractiveState()              // what `TopToolbar.toggle(.select)` calls
+
+        XCTAssertTrue(manager.isVectorTransforming,
+                      "opening Select must not end a whole-layer Move — that is how a lasso move starts")
+    }
+
+    /// The other reason `commitAllInteractiveState()` was the wrong home, pinned directly: it is
+    /// called *before* `isVectorTransforming.toggle()` inside `TopToolbar.toggleMove()`, on every tap
+    /// of the Move button, not only the first. Had the fix lived there, the toggle immediately after
+    /// would always have started from `false` and landed on `true` — Move could never be dismissed
+    /// from its own button. This reproduces that exact call sequence and checks the second tap still
+    /// turns it off.
+    func testTheMoveButtonsOwnToggleStillDismissesMoveOnItsSecondTap() {
+        let (manager, _, _) = fixture()
+        XCTAssertFalse(manager.isVectorTransforming, "fixture precondition")
+
+        manager.commitAllInteractiveState(); manager.isVectorTransforming.toggle()   // first tap: engage
+        XCTAssertTrue(manager.isVectorTransforming)
+
+        manager.commitAllInteractiveState(); manager.isVectorTransforming.toggle()   // second tap: dismiss
+        XCTAssertFalse(manager.isVectorTransforming,
+                       "the Move button must still be able to turn its own box off")
+    }
+
+    // MARK: - The exemption: a momentary tool must not end Move on either half of its round trip
+
+    /// The orchestrator's catch, checked directly rather than trusted from the reasoning in
+    /// `Tool.isMomentary`'s doc comment: `selectedTool`'s `didSet` closing Move on *any* change would
+    /// fire on both `selectEyedropper` (arming the pick) and `leaveEyedropper` (returning from it),
+    /// so an artist mid-whole-layer-Move who reaches for the eyedropper to sample a colour would lose
+    /// the box twice over — once on the way in, and again coming back, even though the pick never
+    /// touched the layer's transform. `CanvasTouchOwner.contenders(in:)` already lets a colour pick
+    /// win over the box's own tap-away commit (`.eyedropper` precedes `.moveBoxCommit`), so nothing
+    /// about the pick itself was ever going to settle the box — this is purely about whether the
+    /// property write does.
+    func testArmingAndLeavingTheEyedropperLeavesAnEngagedWholeLayerMoveAlone() {
+        let (manager, _, _) = fixture()
+        manager.selectedTool = .pen
+        manager.isVectorTransforming = true
+
+        manager.selectEyedropper()
+
+        XCTAssertEqual(manager.selectedTool, .eyedropper)
+        XCTAssertTrue(manager.isVectorTransforming, """
+            Arming the eyedropper must not end an engaged whole-layer Move — the artist reaches for a \
+            colour mid-Move, not for a new tool, and closing the box here would commit the transform \
+            and push an undo step nobody asked for.
+            """)
+
+        manager.leaveEyedropper()
+
+        XCTAssertEqual(manager.selectedTool, .pen)
+        XCTAssertTrue(manager.isVectorTransforming, """
+            …and returning from the pick must not end it either. The round trip is one motion the \
+            artist experiences as a single tap; ending Move on the way back would be the same \
+            surprise wearing the other half's clothes.
+            """)
+    }
+
+    /// The other direction, which is what stops `Tool.isMomentary` from being "return true for
+    /// everything" — a predicate that exempted every tool would pass the test above for the wrong
+    /// reason and leave the reported bug back in place for brush/eraser/fill.
+    func testSwitchingToARealToolStillEndsAnEngagedWholeLayerMoveWhileTheEyedropperIsArmed() {
+        let (manager, _, _) = fixture()
+        manager.isVectorTransforming = true
+        manager.selectEyedropper()
+        XCTAssertTrue(manager.isVectorTransforming, "fixture precondition: arming the pick alone must not have closed it")
+
+        manager.selectedTool = .eraser                  // not `leaveEyedropper` — a genuine tool pick
+
+        XCTAssertFalse(manager.isVectorTransforming,
+                       "a real tool switch away from the eyedropper still ends the Move, exactly as one into it would")
+    }
+
+    /// **`.text` does not get the eyedropper's exemption, and this is the decision pinned rather than
+    /// merely explained.** The same arbitration that protects a colour pick also protects a text
+    /// placement tap (`.textPress` precedes `.moveBoxCommit` too), so it would be easy to read that as
+    /// "text needs no special handling either" — but text opens a session that outlives the placement
+    /// tap, so leaving the box up for the session's whole duration is a different risk than a single
+    /// momentary sample. `Tool.isMomentary`'s own doc comment carries the reasoning; this is the
+    /// behaviour it produces.
+    func testEnteringTextModeEndsAnEngagedWholeLayerMove() {
+        let (manager, _, _) = fixture()
+        manager.selectedTool = .pen
+        manager.isVectorTransforming = true
+
+        manager.enterTextMode()
+
+        XCTAssertEqual(manager.selectedTool, .text)
+        XCTAssertFalse(manager.isVectorTransforming, """
+            Unlike the eyedropper, text is not a single tap that reverts on its own — it starts a \
+            live session, and leaving a whole-layer Move engaged for that session's whole duration is \
+            the risk `Tool.isMomentary` treats `.text` as a real tool switch to avoid.
+            """)
     }
 }

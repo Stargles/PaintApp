@@ -195,14 +195,32 @@ final class CanvasManager: ObservableObject {
     /// `beginStructureGesture`/`commitStructureGesture` exist to prevent. What is wanted is one step
     /// per gesture, which means a bracket, which means a close that "runs however it ends".
     ///
-    /// Two paths turn this off with no gesture ending: `rasterizeLayer` below, and
-    /// `handleActiveContextChanged` when the artist leaves the layer or the frame. A bracket the
-    /// *coordinator* owned would need both of them to remember to close it — and a bracket that leaks
-    /// is worse than none, since it either drops the step or attributes the artist's next drag to this
-    /// one. Hanging it off this property's `didSet` makes every writer close it **by construction**:
-    /// the flag cannot go false without the bracket closing, because going false *is* the close. Same
-    /// shape as `CanvasPresentationModifier`'s `.onDisappear`/`.onChange` interlock, with the property
-    /// observer playing the part the modifier plays there.
+    /// **Five** paths turn this off with no drag of the on-canvas box itself ending: `rasterizeLayer`
+    /// below; `handleActiveContextChanged` when the artist leaves the layer or the frame;
+    /// `TopToolbar.toggleMove`'s own toggle, the second tap of the Move button;
+    /// `CanvasView.Coordinator.handleMoveBoxCommit`, a single tap on the canvas away from the box; and
+    /// `selectedTool`'s own `didSet` below, closing Move the instant the artist picks an explicit new
+    /// tool out from under it. A bracket the *coordinator* owned would need every one of them to
+    /// remember to close it — and a bracket that leaks is worse than none, since it either drops the
+    /// step or attributes the artist's next drag to this one. Hanging it off this property's `didSet`
+    /// makes every writer close it **by construction**: the flag cannot go false without the bracket
+    /// closing, because going false *is* the close. Same shape as `CanvasPresentationModifier`'s
+    /// `.onDisappear`/`.onChange` interlock, with the property observer playing the part the modifier
+    /// plays there.
+    ///
+    /// **This said "two" until 2026-08-27, and the undercount was itself the live bug, the same shape
+    /// as `canvasInteractionBegan`'s "four" above.** It was written when only the first two closers
+    /// existed and was never revisited when the Move button's own toggle and `handleMoveBoxCommit`
+    /// joined them, so nothing here flagged the enumeration as already stale — and the fifth gap, a
+    /// plain tool switch from the top or side toolbar, went unreported for the same reason: a bare
+    /// number is not checked against anything, only a name is. **Naming every writer, not counting
+    /// them, is what a later audit can verify.**
+    /// `grep -n 'isVectorTransforming = false\|isVectorTransforming\.toggle' PaintSoftware` finds all
+    /// five — four spell `= false` (this file's `rasterizeLayer` and the `didSet` below,
+    /// `SelectionModels.swift`'s `handleActiveContextChanged`, `CanvasView.swift`'s
+    /// `handleMoveBoxCommit`), one spells `.toggle()` (`TopToolbar.swift`'s `toggleMove`). If that grep
+    /// ever returns a site this paragraph does not name, this paragraph is the thing that is wrong —
+    /// update it before trusting anything else here.
     @Published var isVectorTransforming: Bool = false {
         didSet {
             guard oldValue != isVectorTransforming else { return }
@@ -487,9 +505,53 @@ final class CanvasManager: ObservableObject {
     @Published var brushSize: CGFloat = 5.0
     @Published var brushOpacity: Double = 1.0
     @Published var brushColor: Color = .black
+    /// Every writer of this property runs the `didSet` below by construction, which is what makes it
+    /// the chokepoint that closes an engaged whole-layer vector Move on a **real** tool switch — see
+    /// `isVectorTransforming`'s own doc comment, the fifth of its five closers, and `Tool.isMomentary`
+    /// for what "real" excludes. The six call sites today: `TopToolbar`'s brush/eraser/fill buttons,
+    /// `CanvasManager.selectEyedropper` and `leaveEyedropper`, and `enterTextMode`.
     @Published var selectedTool: Tool = .pen {
         didSet {
             guard oldValue != selectedTool else { return }
+            // The artist picking an explicit new tool ends an engaged whole-layer Move exactly like
+            // `commitAllInteractiveState()` settles a floating piece or vector float for the same
+            // event — except this one cannot live *in* that function. `TopToolbar.toggleMove()` calls
+            // `commitAllInteractiveState()` unconditionally, before it ever touches
+            // `isVectorTransforming`, so clearing the flag inside the commit would zero it on *every*
+            // tap of the Move button, and the `.toggle()` immediately after would then only ever flip
+            // it back on — the box could never be dismissed from its own button. Closing it here
+            // instead, on the property every tool switch already writes through, covers all six call
+            // sites by construction rather than by remembering each door individually — the same shape
+            // as `isVectorTransforming`'s own `didSet`.
+            //
+            // Without this, the flag stayed on after a plain tool switch and
+            // `CanvasTouchInputs.activeHostIsInteractive`'s `isVectorTransforming` clause kept the
+            // canvas stroke host non-interactive for the vector layer — silently swallowing the
+            // artist's first stroke with the newly-selected brush while the toolbar showed it as
+            // selected. Not a hard lock: `handleMoveBoxCommit` already closes Move on any single *tap*
+            // on the canvas away from the box, so one stray tap and the next brush touch worked — a
+            // drag never fires that tap recognizer, though, so the artist's actual first *stroke* was
+            // the one that went missing, which is what made this read as "I can't click on a brush"
+            // rather than a lock the owner could name.
+            //
+            // **Entering the eyedropper is exempt outright (`selectedTool.isMomentary`); leaving it
+            // needs a second check, and a first attempt here that used `Tool.isMomentary` on *both*
+            // sides was wrong — caught by
+            // `testSwitchingToARealToolStillEndsAnEngagedWholeLayerMoveWhileTheEyedropperIsArmed`.**
+            // `oldValue == .eyedropper` is not by itself "the eyedropper returning": the artist can
+            // arm it and then tap a *different* toolbar tool before ever touching the canvas
+            // (`selectEraserToolAndTogglePanel` writes `selectedTool` directly, with no idea the
+            // eyedropper was armed), and that is a real switch, not a round trip — leaving it exempt
+            // would silently reopen this exact bug behind one extra tap. The two are told apart by
+            // `toolBeforeEyedropper`: `leaveEyedropper()` computes its new value *from* it
+            // (`toolBeforeEyedropper ?? .pen`) and clears it only on the line after, so it still holds
+            // that same value here — a write that matches it is the revert; a write that does not is
+            // a genuine pick and ends the Move like any other.
+            let isEyedropperRoundTrip = selectedTool.isMomentary
+                || (oldValue == .eyedropper && selectedTool == (toolBeforeEyedropper ?? .pen))
+            if !isEyedropperRoundTrip, isVectorTransforming {
+                isVectorTransforming = false
+            }
             ActionRecorder.ifRecording { $0.model("selectedTool", String(describing: selectedTool)) }
         }
     }

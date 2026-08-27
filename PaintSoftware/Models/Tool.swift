@@ -122,6 +122,55 @@ extension Tool {
         }
     }
 
+    /// Whether this tool is a momentary detour rather than the artist's ongoing choice — true only
+    /// for `.eyedropper`, which `Tool.eyedropper`'s own doc comment already calls out: "picking
+    /// reverts to whichever tool was selected before it." Consulted by `CanvasManager.selectedTool`'s
+    /// `didSet`, which closes an engaged whole-layer vector Move (`isVectorTransforming`) on a tool
+    /// switch — see that property's own doc comment for the fix and the report it closes.
+    ///
+    /// **`false` would end the Move twice over a single colour pick, and neither end is obviously
+    /// safe to skip.** `selectEyedropper`/`leaveEyedropper` both write `selectedTool` — arming the
+    /// pick and returning from it — so a blanket "any tool switch ends Move" rule fires on both
+    /// halves of one motion the artist experiences as a single tap, not two tool changes. And it
+    /// would be layering a second close on top of a mechanism that already exists:
+    /// `CanvasTouchOwner.contenders(in:)` appends `.eyedropper` **before** `.moveBoxCommit`, so a tap
+    /// that both picks a colour and lands away from the box is *already* owned by the pick — the box
+    /// was never going to auto-commit from that touch. Closing the flag here on top of that would be
+    /// a behaviour nobody asked for: engage a whole-layer Move, tap the eyedropper to sample a
+    /// colour, and the box disappears with a transform committed and an undo step pushed — reported
+    /// from the far side as "my move box keeps disappearing."
+    ///
+    /// **This property is only the entering half.** `selectedTool.isMomentary` alone tells the
+    /// `didSet` to stand down when the tool being *armed* is the eyedropper, but it cannot tell the
+    /// `didSet` what to do when the tool being *left* is — `.eyedropper` is not itself momentary
+    /// going out, and a bare `oldValue == .eyedropper` catches a genuine tool pick made while the
+    /// eyedropper merely happened to be armed, which must still end the Move
+    /// (`testSwitchingToARealToolStillEndsAnEngagedWholeLayerMoveWhileTheEyedropperIsArmed` is what
+    /// caught the first, wrong attempt at this). The `didSet` tells the two apart with
+    /// `toolBeforeEyedropper` instead, which is instance state this property cannot see — see its own
+    /// comment there for the mechanism.
+    ///
+    /// **`.text` stays `false` here even though the same arbitration protects its placement tap**
+    /// (`.textPress` also precedes `.moveBoxCommit`), and that is a real decision rather than an
+    /// oversight: unlike the eyedropper's single tap, text opens a session that outlives it —
+    /// typing, dragging the box, editing — so leaving the Move box up for the session's whole
+    /// duration risks the same class of two-live-mechanisms hazard `followsBrushPresetSelection`
+    /// above is about, and inserting new geometry into a layer with a live uncommitted transform is
+    /// exactly the shape of the open defects `LAYER_TRANSFORM.md` already carries. Text is safer
+    /// entered onto a settled layer, so it is treated as a real tool switch and ends the Move.
+    ///
+    /// **Exhaustive, no `default:`, for the reason every such property in this file is:** a tool
+    /// added later has to say whether selecting it is a momentary detour or an ongoing choice rather
+    /// than silently inheriting one answer or the other.
+    var isMomentary: Bool {
+        switch self {
+        case .eyedropper:
+            return true
+        case .pen, .pencil, .eraser, .fill, .text:
+            return false
+        }
+    }
+
     /// Why the text tool cannot be used on the active layer, or nil when it can.
     ///
     /// **Driven by the layer's kind, not by a list of layers text is banned from.** Same defect
