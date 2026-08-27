@@ -155,6 +155,16 @@ UDID=$(xcrun simctl create "<slug>" com.apple.CoreSimulator.SimDeviceType.iPad-P
 xcrun simctl delete "$UDID"                            # when you are done
 ```
 
+**Never kill by process name. `pgrep -f xcodebuild | xargs kill` is machine-wide, and it is the same
+trap as the shared UDID and the shared stash wearing a third costume.** An agent sweeping for *its own*
+strays on 2026-08-27 killed the orchestrator's verification run instead. The damage does not announce
+itself as a kill: the first attempt died with **exit 144 and no xcodebuild output at all**, and the
+retry produced **`Mach error -308 - (ipc/mig) server died` with `passedTests: 0`** — which is the
+signature this file already attributes to *contention*, so it was diagnosed as a loaded machine and the
+run was restarted into the same hazard. Two runs and a wrong diagnosis. Kill only PIDs you recorded when
+you started the process, or `pkill -f "$PWD"` scoped to your own worktree path; and read a `-308` as
+"someone touched my device", of which contention is only one cause.
+
 **A device of your own stops you erasing someone else's. It does not stop you starving the machine —
 wrap every run in [tools/simlock.sh](tools/simlock.sh).**
 

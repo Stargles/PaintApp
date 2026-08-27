@@ -125,7 +125,7 @@ fill ([LASSO_MOVE.md](LASSO_MOVE.md) §5).
       is to decompose the map and give the uniform part to `size`/`pointSize` exactly as the similarity
       arm does, leaving only the residual aspect in `corners`.
 
-### (18) The bottom bars should be as tall as their contents
+### (18) The bottom bars should be as tall as their contents — ATTEMPTED AND REVERTED, still open
 
 - [ ] The owner, 2026-08-27, on (11) as shipped: *"bottom bars are alright. Try to make that menu shorter
       vertically because alot of them contain only 1 or 2 sliders which covers like half of it. You
@@ -133,6 +133,21 @@ fill ([LASSO_MOVE.md](LASSO_MOVE.md) §5).
       good."* So: content-driven height with a cap, and the existing scroll takes over above the cap.
       The height is the whole point of (11) — 45% → 85% of the paper visible, MEASURED — so this is
       finishing that change rather than adjusting it.
+      **The obvious implementation was built, measured and reverted (`785f3f7`), and the dead end is the
+      finding.** A `PreferenceKey` plus `.background(GeometryReader { … })` on the outer rows `VStack` —
+      the standard way to read a resolved size without an unbounded scroll-axis proposal — measures
+      **exactly 0** for every effect, collapsing the card to its header with the rows clipped away.
+      `CurveEditor`'s own doc in that same file already names this failure for a *more direct* case;
+      what is new is that **`.background` does not shield you from it**, which was the assumption both
+      the brief and the implementer reasoned from.
+      **The XCUITest passed against the broken build**, which is the part to remember: `XCUIElement.frame`
+      reported plausible differing positions for the sliders while nothing was painted, because an
+      accessibility frame does not reflect visual clipping. Only an on-screen debug overlay read back
+      through a screenshot caught it — the banner-vs-count trap in a third costume, and the reason this
+      item wants a *screenshot* as its acceptance test rather than a frame comparison.
+      **The candidate next approach**, recorded on `maxRowsHeight`: measure an `.accessibilityHidden(true)`
+      twin of the rows laid out *outside* any `ScrollView`, so the unbounded-proposal path is never
+      entered at all. The new test stays, honestly re-scoped to the precondition it does verify.
 
 ### (19) An empty text object is deleted when it bakes — ALREADY SHIPPED, closed 2026-08-27
 
@@ -424,6 +439,14 @@ sized to; and **(9)** is independent of all of them *because* the width is fixed
 - **(16) The brush button works after a whole-canvas Move** (`a506d66`). `selectedTool`'s own `didSet`
   closes the Move, reaching all six writers by construction; `Tool.isMomentary` keeps an eyedropper round
   trip from committing the box, and `.text` is deliberately not momentary.
+- **(17) Text mirrors and stretches** (`045d509`), owner ruling 18. Mirror reflects the glyphs, a
+  non-uniform scale distorts the letterforms and does not re-flow. **Three of the brief's claims were
+  refuted by the code**, including the layout test this orchestrator specified: "same per-line widths
+  after a stretch" is not a scale invariant, because the system face has size-dependent tracking — a
+  √3 scale moved a line from 0.630 to 0.587 of its box with the breaks bit-identical. Replaced with
+  line count plus line *ranges* and a re-flow discriminator. **One behaviour rides along unruled**: a
+  Freeform-stretched box inherits the distort-mode exemption and can be dragged smaller than its own
+  text.
 - **(15) stage 1 — Move with no selection lifts the whole cel into the lasso float** (`cf5de83`), which
   closes the ink loss the owner reproduced. **Measured, not predicted**: on a 64×64 canvas shrunk 0.3×
   about ink at (32,32) the surviving band was [22.4, 41.6] — the owner's *"box around the original
