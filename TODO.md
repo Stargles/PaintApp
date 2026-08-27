@@ -61,6 +61,8 @@ requirement was nearly re-derived from scratch this week because it was only in 
       **Coupled to (9)**: if the encoding's width is derived from the canvas extent, resizing the canvas changes
       the domain. Decide together whether a resize re-encodes every sample or the width is stored per document.
 
+      **SUPERSEDED SAME DAY — see the revision at the end of this item.** The original decision follows
+      because its arithmetic is still the arithmetic that applies if (12) is *not* adopted.
       **DECIDED 2026-08-27 — fixed width, 24 signed bits per axis at quarter-pixel.** The owner delegated
       this (*"you decide if you want the dynamic bit allocation ... or if we should just keep it at 20 bits
       with a max canvas size"*), having correctly spotted that a constant width sits awkwardly with a canvas
@@ -82,6 +84,24 @@ requirement was nearly re-derived from scratch this week because it was only in 
       **The payoff for fixing the width**: a resize re-encodes nothing, so **(8) and (9) become independent and
       can ship in either order** — which was the whole reason the question was asked.
       To go back to 20 bits, `minimumScale` would have to rise, which is a behaviour change and not worth it.
+
+
+      **REVISED 2026-08-27, later the same day, once the owner ruled on (12).** With geometry stored in
+      **canvas space** rather than layer-local, the 50x blow-up that forced 24 bits cannot happen, and the
+      bound becomes the *addressable* extent instead: **canvas + padding, capped at 16,384 pt** (the owner's
+      rule, see (13)). At quarter-pixel that is 65,536 units — which unsigned 16 bits covers **exactly**, with
+      one quarter-pixel to spare.
+      **But exactly is not enough, and the honest width is 18 signed bits per axis.** Sixteen unsigned works
+      only if no stored coordinate is ever negative and none ever exceeds the padded extent — and today both
+      happen: touches keep being delivered after a drag leaves the canvas, and content parked outside the
+      bounds by a shrink keeps its true position. Taking 16 would mean **clamping ink at the storage
+      boundary**, which bends a line visibly where part of it is still on screen. **18 signed bits gives
+      ±32,768 pt — twice the limit in both directions — and preserves today's behaviour exactly.**
+      **The saving being declined is half a byte a sample.** 18+18+8 = 44 bits = 5.5 bytes against 16+16+8 =
+      5 bytes; across the owner's largest plausible document (1000 cels x 8,714 samples) the difference is
+      ~4 MB, against a baseline win of 24 → 5.5 bytes, **4.4x**. Half a byte is not worth a clipping rule.
+      (17 signed bits is the tight fit at ±16,384; 18 is taken for the headroom, and the encoding is a
+      bitstream so byte alignment buys nothing here.)
 
 - [ ] **(12) Should a *layer* have a transform at all?** Owner, 2026-08-27, questioning the premise rather
       than the arithmetic: *"I'm not sure why layers themselves should ever be able to be shrunk. Only the
@@ -105,8 +125,44 @@ requirement was nearly re-derived from scratch this week because it was only in 
       **The load-bearing unknown**: is `_transform` per-cel or per-layer-across-every-cel? If a layer transform
       spans the whole animation, baking rewrites every drawing rather than one, and the cost estimate moves by
       orders of magnitude. `LAYER_TRANSFORM.md` is being written to settle this, with an independent critic.
-      **Note (8) is not blocked on this** — 24 bits works today with no other change; adopting (12) would let
-      the field narrow to ~15-16 bits later, which is a refinement rather than a prerequisite.
+      **CONFIRMED BY THE OWNER, 2026-08-27, with the nuance that matters**: *"Transformations are allowed to
+      exist yes. It's just that the entire layer being resized should just bake the stuff in that layer to
+      their new canvas based coordinates, instead of resizing the entire layer to be at a smaller
+      resolution."* So this is **not** "no transforms" — it is "no layer *resolution*". A whole-layer resize
+      becomes a bake into canvas coordinates, and per-object transforms (an image's rectangle, a text frame)
+      are untouched.
+      **And the future shape is now on record, which changes how this should be built**: *"when I add
+      keyframes, I want a special type of layer called a transformation layer in which the stuff under it can
+      be moved. This will just apply a transformation over the layers below it, so still no overflow problems,
+      and whatever is being transformed of course is scoped with a maximum width of 16k."* An adjustment-layer
+      shape — the transform lives on a layer that affects the layers **below** it, at render time, and is
+      never baked into their coordinates. **Design (12) so that this remains easy**: the thing being removed
+      is a transform baked into *storage semantics*, not the idea of a render-time transform, and the render
+      tree already composites effect layers over the layers beneath them (`RenderTree.needsCompositorOnCanvas`,
+      `node.effect != nil`) — that is the seam a transformation layer would use.
+      **Note (8) is not blocked on this** — 24 bits works today with no other change; adopting (12) is what
+      lets the field narrow to 18, which is a refinement rather than a prerequisite.
+
+- [ ] **(13) Canvas padding: one 16k budget shared with the canvas, and a higher base maximum.** Owner,
+      2026-08-27: *"the canvas plus the padding should have the maximum size of 16k, so the padding should hit
+      a maximum limit when the canvas is set close to that 16k. The 16k canvas (or near it) will likely never
+      be used for animation so it doesnt need canvas padding. Right now canvas padding just has a set maximum
+      of something like 500px, I kind of want to make that maximum a bit higher like 1000, unless of course it
+      is bounded by the 16k canvas+padding limit."*
+      **Their memory was nearly exact**: `CanvasManager.canvasPaddingRange` is `0...512`
+      (`CanvasManager.swift:30`), a flat constant consulted by `setCanvasPadding`
+      (`CanvasManager+Document.swift:21`) and by the Actions slider (`ActionsMenu.swift:231`).
+      **The rule to implement**: padding's upper bound stops being a constant and becomes
+      `min(1024, (16384 - canvasExtent) / k)` — so it is 1024 on ordinary canvases and shrinks to nothing as
+      the canvas approaches 16k. The base rises 512 → **1024**.
+      **One ambiguity to settle in implementation, not to guess**: is `canvasPadding` per-*side* or the total
+      added extent? `setCanvasPadding`'s offset is described as "one symmetric number", which suggests
+      per-side and therefore `k = 2` — confirm against the code before writing the bound, because getting it
+      wrong makes the cap either half or double what the owner asked for.
+      **Also raises the canvas maximum**: `CanvasSizePickerView.maxDimension` is **8192** today
+      (`CanvasSizePickerView.swift:16`); the owner's 16k rule implies 16,384 as the addressable ceiling.
+      **This is the same 16,384 that sizes (8)'s coordinate field**, so the three items — (8), (9) and (13) —
+      share one number and it should be defined in exactly one place.
 
 - [ ] **(9) Resize the canvas from the Actions menu.** The owner: *"a resize canvas option in actions would be
       nice, to which users can resize the canvas however they want. They should be able to control whether it
