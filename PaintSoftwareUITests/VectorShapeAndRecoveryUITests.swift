@@ -29,6 +29,20 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
 
         dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
+
+        // Count the stroke *before* the save, so a future failure says which half broke: fail here
+        // and the fixture never drew anything; fail after the restore and the recovery lost it.
+        // Cheap — the panel is one tap, and the same read the restored assertion makes below.
+        openLayerPanel(app)
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1,
+                       "The drag should commit one vector stroke before the project is ever saved")
+        // And the raster tier is 0 here, before anything has been saved or recovered — the whole of
+        // the bug this pair replaced. If this ever fails, layer 0 is raster again and the marker
+        // reads below need revisiting; it is not a data-loss signal.
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 0,
+                       "Layer 0 is a vector layer, so its raster tier is empty even with a stroke drawn")
+        app.buttons["toolbar.layersButton"].tap()
+
         saveEditorAndReturnToGallery(app)
 
         app.terminate()
@@ -47,7 +61,11 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 10),
                       "The restored project should open in the editor (a still-damaged one would not)")
         openLayerPanel(app)
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+        // The vector marker, not `readLayerStrokeCount`: a new canvas's one layer is a *vector*
+        // layer (57c11e6, PLAN §8), so the stroke is geometry in the cel's display list and the
+        // raster tier reads 0 whether the restore worked or not. Measured 2026-08-27: 0 in the
+        // editor before the save too, so the raster assertion could never have passed here.
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1,
                        "The stroke saved before the corruption should survive the restore")
     }
 
@@ -59,6 +77,20 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
 
         dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
+
+        // Count the stroke *before* the save, so a future failure says which half broke: fail here
+        // and the fixture never drew anything; fail after the restore and the recovery lost it.
+        // Cheap — the panel is one tap, and the same read the restored assertion makes below.
+        openLayerPanel(app)
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1,
+                       "The drag should commit one vector stroke before the project is ever saved")
+        // And the raster tier is 0 here, before anything has been saved or recovered — the whole of
+        // the bug this pair replaced. If this ever fails, layer 0 is raster again and the marker
+        // reads below need revisiting; it is not a data-loss signal.
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 0,
+                       "Layer 0 is a vector layer, so its raster tier is empty even with a stroke drawn")
+        app.buttons["toolbar.layersButton"].tap()
+
         let tile = saveEditorAndReturnToGallery(app)
 
         // Delete via the tile's menu, confirming the alert.
@@ -91,7 +123,8 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 10),
                       "The restored project should open in the editor")
         openLayerPanel(app)
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
+        // The vector marker, for the reason spelled out in the corruption test above.
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1,
                        "The deleted project's stroke content should survive the trash/restore round trip")
     }
 

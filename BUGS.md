@@ -4,35 +4,40 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
-## A project restored from backup or from Recently Deleted comes back with no strokes (2026-08-27)
+## A project restored from backup comes back with no strokes (2026-08-27) — NOT A BUG, the test was
 
-**Found by running the full suite at a phase boundary, and it is on `main` today — not a regression
-from any branch in flight.** `GalleryRecoveryUITests.testCorruptedProjectIsAutoRestoredFromBackupOnLaunch`
-and `testDeletedProjectCanBeRestoredFromRecentlyDeleted` both fail the same way: a project with one
-stroke is saved, put through the recovery path, reopened — and `readLayerStrokeCount` returns **0**
-where the test wants 1.
+**There is no data loss. Nothing in save or in either recovery path was ever broken**, and the framing
+this entry carried — "which half is broken, the save or the recovery" — had no true answer. The two
+`GalleryRecoveryUITests` failures were the *test* reading the wrong tier, and they could never have
+passed.
 
-**This is the safety net failing, which is the worst place for it.** The recovery path exists so that a
-crash or a mistaken delete does not cost the artist their work; it currently returns the project's
-*shell* and loses its vector content. The two tests are the ones written to prove exactly that cannot
-happen.
+Both asserted `readLayerStrokeCount(app, layerIndex: 0) == 1`. That helper reads
+`layerPanel.row.0`'s value, which `LayerStackListView.swift` fills from
+`cel?.raster.strokeCount ?? 0` — **the raster tier**. Layer 0 of a new canvas is a *vector* layer
+(`CanvasSizePickerView.createCanvas` calls `addVectorLayer()`), so the drawn stroke is geometry in
+the cel's display list and the raster tier reads 0 whatever happened to the project.
 
-**Confirmed real, not environmental**, by CLAUDE.md's own triage: isolated re-run, freshly erased
-device, one class, `-parallel-testing-enabled NO`. Both fail identically at `27ab4c2` (`main`) and at
-the effect-backdrop tip, so the cause predates both. Two *other* failures in the same full run
-(`BlendModesAndCompositorUITests.testOpeningALayerMenuPutsMaskAndFillControlsOnTheRows`,
-`FillLiveAdjustUITests.testRaisingEdgeOverlapAfterFillGrowsFillUnderSoftEdge`) passed clean on the same
-isolated run and were environmental.
+**The distinguishing experiment this entry asked for was run, and it answers the other way.** Measured
+on a dedicated simulator 2026-08-27, reading both tiers with the stroke drawn and *before any save*:
+vector strokes **1**, raster **0**. That single reading eliminates save, both recovery paths and the
+round trip at once — the count the assertion wanted was already absent before there was anything to
+lose. Every other assertion in both tests already passed: the damaged label clears, the tile relists,
+the trash round trip completes, the project reopens.
 
-**Not yet diagnosed.** What is known: both failing tests share one shape — draw, save, recover, count —
-so the question is which half is broken, the save or the recovery. The distinguishing experiment is
-cheap: assert the stroke count *before* the corruption/delete step. If it is already 0 there, this is a
-save bug wearing a recovery costume and it is much more serious than it looks. **Do that before reading
-any recovery code.**
+**Broken by `57c11e6`** ("empty vector layers are free, and vector is the default kind", 2026-08-11),
+whose own message says "Ten XCUITests assumed raster". It swept this same file and fixed four other
+`readLayerStrokeCount` call sites in it, and missed these two. Before that commit layer 0 was raster
+and the assertion passed off `RasterLayerTexture.load(..., strokeCount: 1)`'s default — a
+flattened-bitmap heuristic, not a real count, so it was weak evidence even when green.
 
-**How long has it been broken is unknown and worth one measurement**, because no full-suite run is
-recorded in the last several sessions' close-outs — the fast tier is what has been gating merges, and
-these two tests are XCUITests outside it.
+**Fixed** by reading `readVectorMarker(...)?.strokes`, the exact-count analogue the sibling classes
+already use, plus a pre-save assertion in each test so a future failure says which half broke.
+
+**Left open**: `readLayerStrokeCount` silently answers 0 for every vector layer, which is now the
+default kind. Two other classes carry comments about catching it during authoring
+(`MenuInterruptionUITests.swift:22`, `ToolsAndSelectionUITests.swift:941`); it deserves a loud failure
+rather than a plausible number, but rasterize/merge tests legitimately read that tier on a
+vector-origin layer, so the guard needs a full-suite run to land safely.
 
 
 ## Move with no selection blocked the brush button (2026-08-27) — FIXED `a506d66`
