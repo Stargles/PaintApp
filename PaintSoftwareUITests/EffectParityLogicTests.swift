@@ -513,6 +513,44 @@ final class EffectParityLogicTests: XCTestCase {
                        "A parameter added later must be absent rather than fatal")
     }
 
+    /// EFFECT_BACKDROP.md §4/§6 step 5's decode-default, pinned byte for byte: a manifest written
+    /// before `Bloom.input`/`Sobel.input` existed — no `input` key, or no `params` key at all — must
+    /// decode into the ruled default for each, which is also the value `Effect.input` already
+    /// returned for that case before the field existed. Not extended to `Self.sweep` above:
+    /// `testEveryEffectAgreesBetweenTheBackends` runs every sweep entry through
+    /// `MetalEffectEngine.apply`, a single-dispatch call bloom and sobel do not go through (they are
+    /// multi-pass — see `Effect.Bloom`'s and `Effect.Sobel`'s own doc comments), so adding them there
+    /// would fail on a backend mismatch that has nothing to do with this field.
+    func testABloomOrSobelSavedBeforeTheInputControlExistedKeepsItsShippedLook() throws {
+        let bareBloom = try JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"bloom"}"#.utf8))
+        XCTAssertEqual(bareBloom, .bloom(Effect.Bloom()),
+                       "No params object at all means an untouched bloom")
+        XCTAssertEqual(bareBloom.input, .ink, "…which reads ink alone, exactly as it always has")
+
+        let bloomNoInput = try JSONDecoder().decode(Effect.self,
+                                                    from: Data(#"{"kind":"bloom","params":{"threshold":0.5}}"#.utf8))
+        XCTAssertEqual(bloomNoInput, .bloom(Effect.Bloom(threshold: 0.5)),
+                       "A params object saved before `input` existed decodes the rest and defaults `input` to `.ink`")
+
+        let bareSobel = try JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"sobel"}"#.utf8))
+        XCTAssertEqual(bareSobel, .sobel(Effect.Sobel()),
+                       "No params object at all means an untouched sobel")
+        XCTAssertEqual(bareSobel.input, .backdrop,
+                       "…which reads the backdrop, matching the fixed answer `Effect.input` gave for "
+                       + "sobel before this field existed — the decode default changes no document's picture")
+    }
+
+    /// The new field, round-tripped at a non-default value — the concrete case the decode-default
+    /// test above does not cover, since a present key is the ordinary path every other field already
+    /// takes through `roundTrip`.
+    func testBloomAndSobelInputSurvivesAJSONRoundTrip() throws {
+        let bloom = Effect.bloom(Effect.Bloom(threshold: 0.6, radius: 12, intensity: 2, input: .backdrop))
+        XCTAssertEqual(try roundTrip(bloom), bloom, "Bloom's non-default input did not survive encode/decode")
+
+        let sobel = Effect.sobel(Effect.Sobel(input: .ink))
+        XCTAssertEqual(try roundTrip(sobel), sobel, "Sobel's non-default input did not survive encode/decode")
+    }
+
     /// The discriminator is a stable string, not a case ordinal — so reordering the enum cannot
     /// silently repaint every document, which is the mistake `BlendMode.shaderCode`'s comment warns
     /// about in the shader-code direction.

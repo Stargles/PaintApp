@@ -266,12 +266,15 @@ enum ProjectStore {
             // The composited stack of every visible layer (not just the bottom-most one) at the
             // current frame, downscaled for the gallery tile.
             //
-            // `includeBackground: false` is what shipped and is kept deliberately: this thumbnail has
-            // always been transparent-backed. That is a real defect — the gallery draws tiles on
-            // black, so a default white document shows black around its artwork — but it is a defect
-            // about what the thumbnail *should* contain, not about which code composites it, and
-            // rolling it into the phase that removes the second compositor would make a behaviour
-            // change look like a refactor.
+            // `includeBackground: true` — fixed 2026-08-27 (EFFECT_BACKDROP.md §5.3). Before, this
+            // thumbnail was always transparent-backed, which was a real defect: the gallery draws
+            // tiles on black, so a default white document showed black around its artwork. Now that
+            // the canvas paper is a real, addressable background input (§1) rather than a `UIView`
+            // painted behind the composite, `makeRenderRequest` can hand it to `Compositor` the same
+            // way a live canvas already does, and the tile reads with the paper as the artist sees it.
+            // Not a migration: existing tiles keep their old transparent look until that project is
+            // next saved, so the gallery reads as mixed for a while — an eager regeneration pass was
+            // ruled out (cost measured at 17% of a resize) and nothing here adds one back.
             // **The composite is sized to the tile it becomes, which it was not until 2026-08-20.**
             // It used to render the whole canvas — 2,097,152 pixels at the owner's 2048×1024 to fill
             // the 51,200 a 320-wide tile actually occupies, and 16.8M at 4096² — on the main actor,
@@ -282,7 +285,7 @@ enum ProjectStore {
             // of a tile-sized image.
             if let size = canvasManager.canvasSize,
                let request = canvasManager.makeRenderRequest(atFrame: canvasManager.currentFrame,
-                                                             includeBackground: false,
+                                                             includeBackground: true,
                                                              fittingWithin: Self.thumbnailBounds),
                let composited = Compositor.composite(request) {
                 thumbnail = ThumbnailRenderer.render(UIImage(cgImage: composited, scale: 1, orientation: .up),

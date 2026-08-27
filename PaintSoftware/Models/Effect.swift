@@ -46,7 +46,7 @@ import Foundation
 // be visible at all, since a glow is by definition the light outside the thing emitting it. So the
 // contract is per effect and `Effect.reshapesCoverage` states it in code rather than in prose:
 // everything that answers false is pinned byte-for-byte on alpha by `testNoEffectChangesAlpha`, and
-// the two that answer true are pinned instead on the property that actually matters for them, which is
+// the five that answer true are pinned instead on the property that actually matters for them, which is
 // that they convolve *premultiplied* values so colour and coverage stay in step (a blur of
 // unpremultiplied colour pulls in the colour of pixels that are not there — the same argument
 // `ChromaticAberration` already makes about its bilinear tap).
@@ -139,7 +139,7 @@ enum Effect: Equatable {
     /// the kernels were right and the input was wrong. Once the paper is in the accumulator the
     /// question becomes real, because three effects read the accumulator's alpha as **coverage** and
     /// filling paper into it destroys that information.
-    enum Input: Equatable {
+    enum Input: String, Codable, Equatable, CaseIterable {
         /// Everything below this node, paper included. What a grade wants: a brightness layer over a
         /// white canvas should brighten the canvas.
         case backdrop
@@ -176,9 +176,10 @@ enum Effect: Equatable {
     ///   what an edge detector conventionally is. That is a change to what ships and an artist with a
     ///   Sobel layer in an open document will see it.
     ///
-    /// Bloom's and Sobel's stored choice lands with their controls (EFFECT_BACKDROP.md §6 step 5);
-    /// until then this reads their ruled defaults, which is why those two are separate cases here
-    /// rather than folded into the lists above.
+    /// Bloom's and Sobel's is the artist's stored choice, not a fixed answer (EFFECT_BACKDROP.md §6
+    /// step 5) — each reads its own `Bloom.input`/`Sobel.input` field, seeded with the ruled default
+    /// above, which is why those two bind their associated value here rather than joining the literal
+    /// lists.
     var input: Input {
         switch self {
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap,
@@ -186,10 +187,10 @@ enum Effect: Equatable {
             return .backdrop
         case .outline:
             return .ink
-        case .bloom:
-            return .ink
-        case .sobel:
-            return .backdrop
+        case .bloom(let params):
+            return params.input
+        case .sobel(let params):
+            return params.input
         }
     }
 }
@@ -379,13 +380,26 @@ extension Effect {
         var radius: Double = 8
         /// How much of the blurred bright pass is added back. 0 is the identity.
         var intensity: Double = 1
+        /// EFFECT_BACKDROP.md §4/§6 step 5 — the artist's choice of what Bloom sees. Defaults to
+        /// `.ink`, which is today's shipped look, so a document saved before this field existed
+        /// decodes into the same picture it already drew.
+        var input: Effect.Input = .ink
     }
 
-    /// No knobs today — the divisor that keeps the magnitude from clipping is a resolved constant
-    /// (`Effect.params`), not an artist-facing number. Kept as a struct anyway, for the same reason
-    /// every other case is a struct rather than a bare case: a later knob (a mix, a threshold) is then
-    /// a field here and a parameter change, not a new case.
-    struct Sobel: Equatable {}
+    /// The divisor that keeps the magnitude from clipping is a resolved constant (`Effect.params`),
+    /// not an artist-facing number — `input` is Sobel's only knob today.
+    struct Sobel: Equatable {
+        /// EFFECT_BACKDROP.md §4/§6 step 5 — the artist's choice. Defaults to `.backdrop`, the
+        /// owner's ruled default: bright edges on black, what an edge detector conventionally is —
+        /// matching the fixed answer `Effect.input` already gave for Sobel before this field existed,
+        /// so this decode default is not itself a new change. The change already shipped one stage
+        /// back, when the paper was folded into the accumulator (EFFECT_BACKDROP.md §1): before that,
+        /// `.backdrop` was ink-only (paper was a `UIView` behind the composite, not part of it), so an
+        /// artist's existing Sobel layer saw the paper *through* transparency; now `.backdrop` bakes
+        /// the paper in, and the same layer reads solid colour. This field is what lets that artist
+        /// choose `.ink` to get the old, edges-over-paper look back.
+        var input: Effect.Input = .backdrop
+    }
 
     /// The blur half is **exactly** `Effect.blur(Blur(radius: radius))` — same `gaussianHalfKernel`,
     /// same σ = radius/3, same 128-tap cap — which is the load-bearing fact `weights` states in code
@@ -1101,20 +1115,31 @@ extension Effect.Blur: Codable {
 }
 
 extension Effect.Bloom: Codable {
-    private enum CodingKeys: String, CodingKey { case threshold, radius, intensity }
+    private enum CodingKeys: String, CodingKey { case threshold, radius, intensity, input }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 0.75
         radius = try c.decodeIfPresent(Double.self, forKey: .radius) ?? 8
         intensity = try c.decodeIfPresent(Double.self, forKey: .intensity) ?? 1
+        // Absent means "saved before this field existed" — decodes to `.ink`, today's shipped look,
+        // not the struct's own default literal repeated by coincidence (see `Sobel` below, where the
+        // decode default and the ruled default are the same value for a different reason).
+        input = try c.decodeIfPresent(Effect.Input.self, forKey: .input) ?? .ink
     }
 }
 
 extension Effect.Sobel: Codable {
-    // No fields yet — a synthesized `Decodable` on an empty struct still needs an explicit
-    // `init(from:)` that does not require a keyed container, so a bare `{"kind":"sobel"}` decodes.
-    init(from decoder: Decoder) throws {}
+    private enum CodingKeys: String, CodingKey { case input }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Absent covers two cases at once: a document saved before this field existed, and one saved
+        // when Sobel was still the empty struct above. Both decode to `.backdrop`, which is exactly
+        // what `Effect.input` already returned for every Sobel node before this field existed, so
+        // this default changes no document's picture on load.
+        input = try c.decodeIfPresent(Effect.Input.self, forKey: .input) ?? .backdrop
+    }
 }
 
 extension Effect.Sharpen: Codable {

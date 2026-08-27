@@ -219,6 +219,35 @@ final class ProjectSaveLogicTests: XCTestCase {
                           "The tile the artist sees is unchanged — mean channel difference \(meanDifference) of 255")
     }
 
+    /// EFFECT_BACKDROP.md §5.3, fixed 2026-08-27: the gallery tile carries the canvas paper, not
+    /// transparency. `thumbnailManager()`'s red rect covers only the top-left quarter, so the
+    /// bottom-right corner is untouched artwork — before the fix that pixel was `(0,0,0,0)`
+    /// (transparent, and drawn on the gallery's own black), and after it is the document's own
+    /// `canvasBackgroundColor` (white by default), composited by the same `ProjectStore.save` path
+    /// this file's other thumbnail tests already exercise.
+    func testTheSavedThumbnailCarriesTheCanvasBackgroundNotTransparency() throws {
+        let manager = thumbnailManager()
+        XCTAssertEqual(manager.canvasBackgroundColor, .white, "Setup: the fixture's default paper")
+        XCTAssertTrue(manager.isCanvasBackgroundVisible, "Setup: the fixture's paper is shown")
+        let url = projectURL(name: "Thumbnail Background")
+
+        saveAndWait(manager, to: url)
+
+        let thumbnailPath = url.appendingPathComponent("thumbnail.png").path
+        guard let thumbnail = UIImage(contentsOfFile: thumbnailPath), let cg = thumbnail.cgImage else {
+            return XCTFail("The saved package should carry a readable thumbnail.png")
+        }
+        guard let bytes = CanvasFixture.rgbaBytes(cg) else {
+            return XCTFail("The thumbnail should decode to RGBA bytes")
+        }
+        let width = cg.width, height = cg.height
+        let offset = ((width - 1) + (height - 1) * width) * 4
+        let corner = Array(bytes[offset..<(offset + 4)])
+        XCTAssertEqual(corner, [255, 255, 255, 255],
+                       "The bottom-right corner sits outside the red rect, so it should read the "
+                       + "white canvas background rather than transparent (0,0,0,0) — got \(corner)")
+    }
+
     // MARK: - Fully-formed package
 
     /// The baseline: everything the snapshot carries makes it to disk and comes back. If a field were

@@ -348,10 +348,22 @@ struct EffectSettingsBar: View {
             slider("Intensity", params.intensity, 0...4, "intensity") {
                 params.intensity = $0; onChange(.bloom(params))
             }
+            // Off (the default) is `.ink` — today's shipped look, glow from the artwork alone.
+            // On is `.backdrop` — the canvas paper itself can be bright enough to glow.
+            toggleRow("Include Canvas Color", isOn: params.input == .backdrop, identifier: "includeCanvasColor") {
+                params.input = $0 ? .backdrop : .ink; onChange(.bloom(params))
+            }
             note("Pixels brighter than the threshold glow.")
 
-        case .sobel:
-            note("Edge detection. No settings — the divisor that keeps the magnitude from clipping is fixed.")
+        case .sobel(var params):
+            // Off is `.ink` — edges over transparency, the paper showing through as it did before
+            // the paper was folded into the composite. On (the default) is `.backdrop` — bright
+            // edges on black, the conventional edge-detector look, now that the paper is part of
+            // what Sobel reads.
+            toggleRow("Include Canvas Color", isOn: params.input == .backdrop, identifier: "includeCanvasColor") {
+                params.input = $0 ? .backdrop : .ink; onChange(.sobel(params))
+            }
+            note("Edge detection. The divisor that keeps the magnitude from clipping is fixed.")
 
         case .sharpen(var params):
             slider("Radius", params.radius, 0...32, "radius", format: "%.1f px") {
