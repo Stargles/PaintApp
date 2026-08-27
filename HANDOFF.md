@@ -1,5 +1,7 @@
 # Handoff — 2026-08-27 (session 70)
 
+**A Release build of `ce0cfca` is installed on the owner's iPad** (2026-08-27 13:48, first `install` succeeded, no `NWError 54`). Everything below that says "on the device" is genuinely on it — blue ants, Freeform, the two bottom bars, the Scribble veto, the two-image cascade and the Canvas Padding pool. The owner will write their findings into the next session's opening prompt.
+
 <!-- This file is both the state of the repo and the prompt that starts the next session. It used to
 be two files, HANDOFF.md and nextprompt.md, and they drifted apart within a single day because the
 same state had to be written twice. One file, one copy of the truth. -->
@@ -7,6 +9,44 @@ same state had to be written twice. One file, one copy of the truth. -->
 ## Start here — paste this to begin the next session
 
 ```
+
+**The build on the iPad is `ce0cfca`. Six things to check, in this order — the first is worth more than
+the other five together.**
+
+1. **THE INK-LOSS REPRO — do this first.** New vector layer → draw something → **Move** with no
+   selection → drag a corner to about **half size** → tap away to commit → now **draw a long stroke
+   right across the canvas**. Watch what survives. The prediction is that only the **top-left quadrant**
+   of that new stroke is kept and the rest is silently discarded. It is [BUGS.md](BUGS.md)'s newest
+   entry, it is **inferred from source and has never been observed**, and the entire case for
+   [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) rests on it. Twenty seconds either way. If it does NOT
+   reproduce, say so — that is just as valuable and it stops a week of work.
+2. **The two-finger freeze — capture it TWICE.** Actions → **Record My Actions**, reproduce, **Stop
+   Recording**. Once **from the text keyboard**, once **with the Fill tool selected**. Two long-open
+   reports are believed to be one bug (`Tool.paintsOnCanvas` is false for exactly `.fill`,
+   `.eyedropper`, `.text`, and the eyedropper is momentary), and the same recording answering the same
+   way for both is what proves it. **If it locks while you are looking: does the timeline still animate
+   and do the ants still march?** Yes = a dead-input overlay, no = a main-thread hang, and they share
+   no fix.
+3. **The pencil keyboard.** Actions → **Record My Actions** → Add Text → tap empty canvas **with the
+   pencil** → Stop Recording. Keyboard comes up **and** the file contains `scribble.veto` lines = fixed.
+   Keyboard stays down **with** veto lines = the veto works and something else suppresses the keyboard.
+   **No veto lines at all** = iOS never asked and Scribble was never the mechanism. This one cannot be
+   verified on this Mac at all — XCUITest cannot synthesise a pencil.
+4. **Freeform.** Lasso a region on a vector layer → **Move** → **Freeform** → drag a corner. Expected:
+   the ink thickens by the **area root** (ruling 17 — a 3× stretch in one axis thickens ~1.73×); a
+   corner dragged along the box's own **diagonal** gives the same result **Uniform** would; and the bar
+   **refuses and says why** if the piece carries an image or text. **A disclosed non-bug**: on a strong
+   stretch the ink looks different *while your finger is down* than after you lift. That is the bitmap
+   preview against the real bake, it corrects itself on release, and it cannot accumulate.
+5. **The two bottom bars.** Effect settings and Add Text now dock at the bottom and the layer rail
+   stands down with them — measured at **45% → 85%** of the paper visible. **The known wart**: both
+   bars are taller than the Move/Select bars and **cover the timeline transport** while open. That is
+   the existing docking convention, not something this change invented, but it is far more visible now.
+   Say whether it bothers you.
+6. **Blue marching ants while drawing a lasso** — both for lasso *select* and lasso *fill*. This is
+   the one you already know was missing on the old build.
+
+
 Read HANDOFF.md, then CLAUDE.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
