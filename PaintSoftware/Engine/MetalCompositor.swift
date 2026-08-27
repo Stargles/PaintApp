@@ -622,9 +622,12 @@ final class CompositorMetalEngine {
         // already shared (`MaskResolver`), and re-uploading the same 4.2 MB once per layer clipped
         // to it would spend on the GPU exactly what that sharing saves on the CPU.
         var maskTextures: [ObjectIdentifier: MTLTexture] = [:]
+        // `paperInBackdrop` is true only at this call — the mirror of the CPU reference's, and its
+        // doc carries the reasoning. Every buffered scope inside starts from transparency.
         let encoded = encode(request.tree, of: request, front: &front, back: &back,
                              encoder: encoder, pool: pool, masks: &maskTextures,
-                             width: width, height: height)
+                             width: width, height: height,
+                             paperInBackdrop: request.background != nil)
         encoder.endEncoding()
         guard encoded else { return .unavailable }
 
@@ -650,7 +653,7 @@ final class CompositorMetalEngine {
                         front: inout MTLTexture, back: inout MTLTexture,
                         encoder: MTLComputeCommandEncoder, pool: ScratchTexturePool,
                         masks: inout [ObjectIdentifier: MTLTexture],
-                        width: Int, height: Int) -> Bool {
+                        width: Int, height: Int, paperInBackdrop: Bool) -> Bool {
         for node in nodes {
             switch node.content {
             case .leaf(let layerIndex):
@@ -660,6 +663,54 @@ final class CompositorMetalEngine {
                 // *is* "the backdrop accumulated so far in this container", since a buffered group
                 // handed this walk its own accumulator.
                 if let effect = node.effect {
+                    // **EFFECT_BACKDROP.md §3 option A's re-walk**, the mirror of
+                    // `CoreGraphicsCompositor.gradeInk` — which carries the reasoning for the
+                    // option, for compositing the result *over* rather than mixing it in place, and
+                    // for the one consequence that has (non-opaque ink composites twice). Same cut
+                    // of the tree the sandwich's lower half uses, into a pair of this pool's
+                    // textures instead of onto the canvas, so the sub-walk is this same function and
+                    // there is no second implementation of anything to keep in step.
+                    if effect.input == .ink, paperInBackdrop,
+                       let below = request.tree.split(atLeaf: layerIndex)?.below {
+                        guard let effects,
+                              let inkA = pool.acquire(), let inkB = pool.acquire() else { return false }
+                        var inkFront = inkA, inkBack = inkB
+                        defer {
+                            pool.release(inkFront)
+                            pool.release(inkBack)
+                        }
+                        fill(inkFront, with: SIMD4<Float>(repeating: 0), encoder: encoder,
+                             width: width, height: height)
+                        // `paperInBackdrop: false` inside: the buffer was just filled transparent,
+                        // and it is also what terminates the recursion — a nested ink effect down
+                        // here already has the ink-only input it was asking for.
+                        guard encode(below, of: request, front: &inkFront, back: &inkBack,
+                                     encoder: encoder, pool: pool, masks: &masks,
+                                     width: width, height: height,
+                                     paperInBackdrop: false) else { return false }
+                        guard let graded = pool.acquire() else { return false }
+                        defer { pool.release(graded) }
+                        // A declined encode fails the whole walk for the reason spelled out in the
+                        // backdrop path below: `graded` still holds whatever the pool last left in
+                        // it, and mixing that in would put a previous frame on screen.
+                        guard effects.encode(effect, source: inkFront, into: graded,
+                                             encoder: encoder) else { return false }
+                        var drawn = graded
+                        var clip: MTLTexture?
+                        if let mask = maskTexture(for: node, of: request, cache: &masks) {
+                            guard let clipped = pool.acquire() else { return false }
+                            clip = clipped
+                            apply(mask: mask, to: graded, into: clipped, encoder: encoder,
+                                  width: width, height: height)
+                            drawn = clipped
+                        }
+                        // `.normal`, as the CPU reference draws it: an effect layer's own blend mode
+                        // has never meant anything and the backdrop path below still ignores it.
+                        over(source: drawn, opacity: node.opacity, mode: .normal,
+                             front: &front, back: &back, encoder: encoder, width: width, height: height)
+                        if let clip { pool.release(clip) }
+                        continue
+                    }
                     guard let effects, let scratch = pool.acquire() else { return false }
                     // **A declined encode has to fail the whole walk, not fall through to `mix`.**
                     // `encode` returns false when it could not allocate the intermediates a
@@ -712,9 +763,11 @@ final class CompositorMetalEngine {
                     // `needsOwnBuffer` is false only for `.stack`, so nothing is folding here that
                     // this loop is silently flattening — see `CompositorOp.needsOwnBuffer`.
                     for input in inputs {
+                        // Straight onto the caller's accumulator, so the paper is still in it.
                         guard encode(input, of: request, front: &front, back: &back,
                                      encoder: encoder, pool: pool, masks: &masks,
-                                     width: width, height: height) else { return false }
+                                     width: width, height: height,
+                                     paperInBackdrop: paperInBackdrop) else { return false }
                     }
                     continue
                 }
@@ -784,8 +837,12 @@ final class CompositorMetalEngine {
                       width: Int, height: Int) -> Bool {
         for (slot, input) in inputs.enumerated() {
             guard case .mix(let mode) = op, slot > 0 else {
+                // `paperInBackdrop: false` throughout `fold`, matching the CPU reference: `fold` is
+                // reached only from the buffered branch, whose accumulator was just filled
+                // transparent. There is no paper in here to take out again.
                 guard encode(input, of: request, front: &front, back: &back, encoder: encoder,
-                             pool: pool, masks: &masks, width: width, height: height) else { return false }
+                             pool: pool, masks: &masks, width: width, height: height,
+                             paperInBackdrop: false) else { return false }
                 continue
             }
             guard var slotFront = pool.acquire(), var slotBack = pool.acquire() else { return false }
@@ -796,7 +853,8 @@ final class CompositorMetalEngine {
             fill(slotFront, with: SIMD4<Float>(repeating: 0), encoder: encoder,
                  width: width, height: height)
             guard encode(input, of: request, front: &slotFront, back: &slotBack, encoder: encoder,
-                         pool: pool, masks: &masks, width: width, height: height) else { return false }
+                         pool: pool, masks: &masks, width: width, height: height,
+                         paperInBackdrop: false) else { return false }
             // Opacity 1: the node's own fade applies once to the finished fold, in `encode`.
             over(source: slotFront, opacity: 1, mode: mode, front: &front, back: &back,
                  encoder: encoder, width: width, height: height)

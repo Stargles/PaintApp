@@ -1591,6 +1591,60 @@ final class EffectLayerLogicTests: XCTestCase {
                        "With no padding the paper is the whole buffer, exactly as the fill always was")
     }
 
+    // MARK: - The ink-only input (EFFECT_BACKDROP.md §3 option A)
+
+    /// **Outline still traces the silhouette, which is the whole reason the re-walk exists.**
+    ///
+    /// Outline keys on `src.a > threshold`. Put the paper in the accumulator and that is true for
+    /// every pixel on the canvas, so the effect becomes a complete no-op — the exact regression the
+    /// owner's ruling refused: *"Paper is part of the picture, but rescue those three."* Option A
+    /// rescues it by re-running the walk below this node onto transparency and handing the kernel
+    /// *that*, so alpha means coverage again. **The shader is not touched. The image it is given is.**
+    ///
+    /// The premise is asserted first: this only works because Outline declares `.ink`, and if that
+    /// row of §4's table ever flips, the ring below disappears rather than merely changing colour.
+    func testOutlineStillTracesTheSilhouetteOnceThePaperIsInTheComposite() {
+        let outline = Effect.Outline(width: 2,
+                                     color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1),
+                                     threshold: 0.5)
+        XCTAssertEqual(Effect.outline(outline).input, .ink,
+                       "Premise: Outline reads the ink alone. Over an opaque backdrop there is no "
+                       + "silhouette to trace, so `.backdrop` is not a mode for it, it is a no-op")
+
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let ink = CGRect(x: 16, y: 16, width: 32, height: 32)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, CanvasFixture.solidImage(.black, rect: ink))
+        manager.addValueLayer(effect: .outline(outline))
+
+        guard let image = liveCanvas(manager) else { return XCTFail("Fixture must composite") }
+
+        XCTAssertEqual(pixel(image, 48, 32), [255, 0, 0, 255],
+                       "One pixel outside the ink and inside the 2px width: the stroke. Got RGBA "
+                       + "\(pixel(image, 48, 32))")
+        XCTAssertEqual(pixel(image, 32, 32), [0, 0, 0, 255],
+                       "Inside the shape is left alone — Outline is an outside-mode stroke")
+        XCTAssertEqual(pixel(image, 56, 32), opaqueGrey(255),
+                       "Well outside the stroke is paper, untouched: the graded ink composites over "
+                       + "the canvas rather than replacing it. Got RGBA \(pixel(image, 56, 32))")
+    }
+
+    /// **The other half of option A: an effect that reads colour is not re-walked.** Nine of the
+    /// thirteen declare `.backdrop`, and for them the paper *is* the point — a brightness layer that
+    /// went back to grading the ink alone would re-break the owner's report in the name of fixing it.
+    /// Asserted as the two answers side by side over the same document, so the difference is visibly
+    /// the effect's declaration and not the fixture.
+    func testABackdropEffectStillGradesThePaperAfterTheInkWalkExists() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(grey, rect: CGRect(x: 0, y: 0, width: 24, height: 24)))
+        manager.addValueLayer(effect: Self.darken)
+
+        guard let image = liveCanvas(manager) else { return XCTFail("Fixture must composite") }
+        XCTAssertEqual(Self.darken.input, .backdrop, "Premise: brightness/contrast reads the backdrop")
+        XCTAssertEqual(pixel(image, 48, 48), opaqueGrey(128),
+                       "…so the empty canvas is still graded, and the re-walk did not quietly take it back")
+    }
+
     // MARK: - Which image an effect is handed (EFFECT_BACKDROP.md §4)
 
     /// **§4's table, written out as data rather than restated as prose.** `Effect.input` is an

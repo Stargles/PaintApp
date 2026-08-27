@@ -682,7 +682,14 @@ enum CoreGraphicsCompositor {
                     // Metal fill without either side rounding or flipping anything.
                     UIRectFill(background.rect)
                 }
-                draw(request.tree, of: request, in: bounds, context: context)
+                // **`paperInBackdrop` is true only here** — EFFECT_BACKDROP.md §3 option A. It says
+                // "the accumulator this walk is about to build starts with the canvas paper in it",
+                // which is what makes alpha stop meaning coverage and is the only reason an `.ink`
+                // effect has anything to do. Every buffered scope below starts from transparency and
+                // passes false, so an effect inside one already reads the ink alone and re-walking
+                // for it would be work with no difference to show for it.
+                draw(request.tree, of: request, in: bounds, context: context,
+                     paperInBackdrop: request.background != nil)
             }
         return image.cgImage
     }
@@ -704,7 +711,7 @@ enum CoreGraphicsCompositor {
     /// provably composites to what the deleted flat walk composited. §5.3's "never allocate one per
     /// layer" wants exactly this, and `PerfBaselineTests` measures it.
     private static func draw(_ nodes: [RenderNode], of request: RenderRequest, in bounds: CGRect,
-                             context: UIGraphicsImageRendererContext) {
+                             context: UIGraphicsImageRendererContext, paperInBackdrop: Bool) {
         for node in nodes {
             switch node.content {
             case .leaf(let layerIndex):
@@ -718,7 +725,16 @@ enum CoreGraphicsCompositor {
                 // over the backdrop this walk has accumulated so far, which is the input-resolution
                 // rule the whole wrapper consists of.
                 if let effect = node.effect {
-                    grade(effect, by: node, of: request, in: bounds, context: context)
+                    // **§3 option A's re-walk, and the whole of it is choosing an input.** An `.ink`
+                    // effect wants everything below this node *without* the paper, which is exactly
+                    // the tree `split(atLeaf:)` already produces for the sandwich's lower half — the
+                    // same cut, composited onto transparency instead of onto the canvas. Nil
+                    // whenever the accumulator is already paper-free, which is every buffered scope,
+                    // and nil for a `.backdrop` effect, which is nine of the thirteen.
+                    let inkBelow: [RenderNode]? = (effect.input == .ink && paperInBackdrop)
+                        ? request.tree.split(atLeaf: layerIndex)?.below
+                        : nil
+                    grade(effect, by: node, of: request, in: bounds, context: context, inkBelow: inkBelow)
                     continue
                 }
                 guard request.sources.indices.contains(layerIndex),
@@ -754,7 +770,11 @@ enum CoreGraphicsCompositor {
                     // `needsOwnBuffer` guarantees `node.blendMode == .normal` here, so there is no
                     // group mode being silently dropped — a group that blends always buffers — and
                     // it guarantees `op == .stack`, so no fold is being dropped either.
-                    for input in inputs { draw(input, of: request, in: bounds, context: context) }
+                    for input in inputs {
+                        // Straight onto the caller's accumulator, so the paper is still in it.
+                        draw(input, of: request, in: bounds, context: context,
+                             paperInBackdrop: paperInBackdrop)
+                    }
                     continue
                 }
                 // Render the node's own composite, then apply its opacity and its mode once to the
@@ -780,7 +800,11 @@ enum CoreGraphicsCompositor {
                     .image { inner in
                         fold(op, inputs, of: request, in: bounds, context: inner)
                         if let effect = node.effect {
-                            grade(effect, by: node, of: request, in: bounds, context: inner)
+                            // No `inkBelow`: a node with a grade always buffers
+                            // (`needsOwnBuffer`), so `inner` is its own assembled composite and has
+                            // never had the paper in it. The ink and the backdrop are the same
+                            // image here, which is why §4's table never has to ask about a node.
+                            grade(effect, by: node, of: request, in: bounds, context: inner, inkBelow: nil)
                         }
                     }
                 // The node's mask clips the node, so it lands on the assembled composite — which is
@@ -828,11 +852,14 @@ enum CoreGraphicsCompositor {
                              in bounds: CGRect, context: UIGraphicsImageRendererContext) {
         for (slot, input) in inputs.enumerated() {
             guard case .mix(let mode) = op, slot > 0 else {
-                draw(input, of: request, in: bounds, context: context)
+                // `paperInBackdrop: false` throughout `fold`, and it is not a choice: `fold` is
+                // reached only from the buffered branch, whose scratch buffer starts transparent
+                // whatever `isIsolated` says. There is no paper in here to take out again.
+                draw(input, of: request, in: bounds, context: context, paperInBackdrop: false)
                 continue
             }
             let isolated = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
-                .image { inner in draw(input, of: request, in: bounds, context: inner) }
+                .image { inner in draw(input, of: request, in: bounds, context: inner, paperInBackdrop: false) }
             // Opacity 1: the node's own fade applies once to the finished fold, up in `draw`. Fading
             // a slot on its way into the fold would be the per-child mistake group opacity already
             // refuses to make.
@@ -857,10 +884,15 @@ enum CoreGraphicsCompositor {
     /// oracle the shader is measured against and the fallback on a device with no Metal, so it may be
     /// slow and may not be approximate. §5.1 is the argument for where this runs at interactive rates.
     private static func grade(_ effect: Effect, by node: RenderNode, of request: RenderRequest,
-                              in bounds: CGRect, context: UIGraphicsImageRendererContext) {
+                              in bounds: CGRect, context: UIGraphicsImageRendererContext,
+                              inkBelow: [RenderNode]?) {
         let width = Int(bounds.width.rounded()), height = Int(bounds.height.rounded())
-        guard width > 0, height > 0,
-              let backdropImage = context.currentImage.cgImage,
+        guard width > 0, height > 0 else { return }
+        if let inkBelow {
+            return gradeInk(effect, below: inkBelow, by: node, of: request,
+                            in: bounds, context: context, width: width, height: height)
+        }
+        guard let backdropImage = context.currentImage.cgImage,
               let backdrop = premultipliedBytes(backdropImage, width: width, height: height)
         else { return }
 
@@ -890,6 +922,51 @@ enum CoreGraphicsCompositor {
         // `.copy`, as `drawHandRolled` ends: this image *is* the accumulated backdrop, regraded, so it
         // replaces the context rather than being composited onto what it was computed from.
         UIImage(cgImage: image, scale: 1, orientation: .up).draw(in: bounds, blendMode: .copy, alpha: 1)
+    }
+
+    /// **EFFECT_BACKDROP.md §3 option A: the re-walk.** Outline, Bloom and Sobel do not read colour,
+    /// they read *shape* — `src.a > threshold`, a luminance threshold, a gradient magnitude — and the
+    /// accumulator's alpha stopped being the ink's coverage the moment the paper was filled into it.
+    /// Over an opaque backdrop Outline is a complete no-op and Bloom makes the whole canvas a source.
+    ///
+    /// So this composites the same cut of the tree the sandwich's lower half already uses, onto
+    /// transparency, and hands *that* to the kernel. **The three shaders need no change** — what
+    /// changes is which image they are given, which is the entire point of the option that was
+    /// chosen: A adds no state to either backend, and B (a coverage texture) and C (two accumulators)
+    /// add state both would have to maintain identically against a byte-for-byte gate.
+    ///
+    /// **The graded ink is composited *over* the accumulator rather than replacing it**, which is the
+    /// other half of §3's wording and is what makes an outline land on the paper. That has one stated
+    /// consequence: the ink is drawn a second time, so ink that is not opaque composites twice and
+    /// reads slightly denser under an ink-input effect than beside one. Identical for opaque ink,
+    /// which is what a line-art layer is and what all three of these effects exist to trace.
+    ///
+    /// `node.blendMode` is deliberately not consulted, exactly as the backdrop path above does not:
+    /// an effect layer's mode has never meant anything, and giving it one here would make it mean
+    /// something for four of the thirteen effects only.
+    private static func gradeInk(_ effect: Effect, below: [RenderNode], by node: RenderNode,
+                                 of request: RenderRequest, in bounds: CGRect,
+                                 context: UIGraphicsImageRendererContext, width: Int, height: Int) {
+        // The same sources, the same masks, the same frame — only the tree is cut and the background
+        // is dropped. `composite` re-enters this file's own walk, so the sub-walk is the walk: there
+        // is no second implementation of grouping, blending or masking to keep in step.
+        let inkRequest = RenderRequest(tree: below, sources: request.sources,
+                                       contentVersions: request.contentVersions,
+                                       maskStacks: request.maskStacks, frame: request.frame,
+                                       canvasSize: request.canvasSize, background: nil,
+                                       quality: request.quality)
+        guard let inkImage = composite(inkRequest),
+              let ink = premultipliedBytes(inkImage, width: width, height: height) else { return }
+
+        let graded = EffectReference.apply(effect, to: ink, width: width, height: height)
+        guard let image = makeImage(fromPremultiplied: graded, width: width, height: height) else { return }
+        // The mask clips the graded image on its way in, which is the leaf rule (§6.1) rather than
+        // the crossfade the backdrop path uses — there the graded pixels *replace* the backdrop and a
+        // mask has to be a mix; here they are one more image being composited, and a mask multiplies
+        // the one image about to be drawn.
+        let clipped = masked(image, by: node, of: request)
+        draw(UIImage(cgImage: clipped, scale: 1, orientation: .up),
+             mode: .normal, opacity: node.opacity, in: bounds, context: context)
     }
 
     /// `image` with this node's masks applied, or `image` unchanged when it has none.

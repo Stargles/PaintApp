@@ -534,7 +534,25 @@ extension Array where Element == RenderNode {
         // deepest point of the walk holds on top of it, plus the intermediates a multi-pass effect
         // ping-pongs through — which live at `EffectPipelines`' lifetime rather than the walk's, so
         // they are additive to every level rather than part of any one of them.
-        2 + nestedCompositeTextures + effectIntermediateTextures
+        let walk = 2 + nestedCompositeTextures + effectIntermediateTextures
+        // **An ink-input effect runs a second walk inside the first** (EFFECT_BACKDROP.md §3 option
+        // A): the sub-walk below it goes into an accumulator pair of its own, and everything that
+        // walk nests is live at the same time as everything the outer one nests. Counted as the
+        // outer walk's own nesting again rather than as the sub-tree's, because the sub-tree is
+        // whatever is below that node and this property has no cheap way to ask — an over-estimate
+        // makes a composite smaller on a constrained device, and an under-estimate makes the pool
+        // decline mid-walk and drops the whole frame onto the CPU reference.
+        return containsInkInputEffect ? walk + 2 + nestedCompositeTextures : walk
+    }
+
+    /// Whether anything in this tree grades the ink alone rather than the backdrop — Outline always,
+    /// Bloom and Sobel when the artist has asked for it (`Effect.input`).
+    private var containsInkInputEffect: Bool {
+        contains { node in
+            if node.effect?.input == .ink { return true }
+            guard case .node(_, let inputs) = node.content else { return false }
+            return inputs.contains(where: \.containsInkInputEffect)
+        }
     }
 
     /// Textures held *below* the caller's own accumulator pair, at the deepest point of the walk.
@@ -543,8 +561,13 @@ extension Array where Element == RenderNode {
             switch node.content {
             case .leaf:
                 // A grading leaf takes one scratch for the graded copy; a masked leaf takes one for
-                // the clipped copy. They are the two arms of the same `if`, never both.
-                if node.effect != nil { return 1 }
+                // the clipped copy. They are the two arms of the same `if`, never both — **except
+                // for an ink-input grade**, which is the one case that holds both at once: it
+                // composites its graded ink *over* the accumulator rather than mixing it back in
+                // place, so a mask has to clip that image on its way in and both scratches are live
+                // together. The pair its sub-walk accumulates into is counted once for the whole
+                // tree in `peakCompositeTextures`, not here.
+                if let effect = node.effect { return effect.input == .ink ? 2 : 1 }
                 return node.masks.isEmpty ? 0 : 1
             case .node(let op, let inputs):
                 let deepest = inputs.map(\.nestedCompositeTextures).max() ?? 0
