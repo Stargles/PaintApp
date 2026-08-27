@@ -18,28 +18,7 @@ times the pixels. Benchmark at the owner's size first and treat 4K as the stress
 
 ## In flight
 
-- **(11) Move the effect-settings and Add Text menus to a bottom bar, like Move's** — `tmp/bottombar`.
-  The owner, 2026-08-27: *"the effect settings menu right now takes beside the layers menu. Those two
-  things take up about 80% of the canvas, making it hard to see what you are editing ... When the user
-  clicks on effect settings, the menu is on the bottom, like the same kind of menu that the lasso or
-  move tool uses. Same for the add text menu, make it the same type of menu."*
-  **This is a "can't see my work while I edit it" complaint, and that is the acceptance test** — the
-  fix is good when the artist can see the thing the slider is changing. Two panels move, not one.
-  **The pattern to copy already exists**: `Views/MoveTransformBottomBar.swift` is the bar the Move tool
-  raises, and the lasso/Select flow uses the same shape. Read it before designing anything.
-  **What moves**: the effect settings UI (`Views/EffectSection.swift`, and `Views/MaskTuningSection.swift`
-  is its neighbour — decide whether both move or only the first) and `Views/TextSettingsPanel.swift`.
-  Both are reached today through `activePanel`, which is `@State` on `DrawingView` (`DrawingView.swift:15`,
-  the panel is mounted at `:399`) — and `activePanel` is one of the four inputs `CanvasTouchOwner`
-  arbitrates a canvas touch over, so a change here has to leave it meaning the same thing there.
-  **Two things that are genuinely harder than they look, to settle in design rather than discover late**:
-  1. *A Move bar is a handful of buttons; an effect panel is a stack of sliders per effect.* A bottom bar
-     may need to scroll, or grow, or page. Say what happens with many effects before building one.
-  2. *`TextSettingsPanel` carries three system presentations* — the font-family `Menu` (`:115`), the face
-     `Menu` (`:150`) and a stock `ColorPicker` (`:202`) — and [BUGS.md](BUGS.md)'s *"`TextSettingsPanel`
-     grew three presentations the census says it doesn't have"* records that the presentation census does
-     not know about them. Re-hosting the panel changes what those present *from*.
-     `MENU_PRESENTATION_CENSUS.md` is the document that has to stay true.
+Nothing. (11) was the last of this pass and merged as `e0d5e57`; see "Done this pass".
 
 ## Waiting on the owner's device
 
@@ -224,8 +203,10 @@ sized to; and **(9)** is independent of all of them *because* the width is fixed
       **The payoff for fixing the width, and the reason the question was asked at all**: a resize
       re-encodes nothing, so **(8) and (9) are independent and can ship in either order.**
 
-      *Note: [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) §6 and [CANVAS_RESIZE.md](CANVAS_RESIZE.md) §6 both
-      predate the 16-bit ruling and still name 24 and 20 respectively. This item is the current answer.*
+      *Note: [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) §6 and [CANVAS_RESIZE.md](CANVAS_RESIZE.md) §6 were
+      written before this ruling and reached 24 and 20 respectively; `85fcbbf` corrected both in place
+      rather than deleting the analysis, since each diagnosis held up where its number did not. This item
+      is still the current answer, and those two sections now say so and explain how they got there.*
 
 ### (12) A layer should not have a *resolution* — bake geometry into canvas coordinates
 
@@ -300,12 +281,12 @@ sized to; and **(9)** is independent of all of them *because* the width is fixed
 
 - [ ] The owner, 2026-08-27: *"the canvas plus the padding should have the maximum size of 16k, so the
       padding should hit a maximum limit when the canvas is set close to that 16k. The 16k canvas (or near
-      it) will likely never be used for animation Their fuller rationale, given in
-      conversation 2026-08-27 and recorded here because it existed nowhere in the repo: *"a max size canvas
-      would have no off canvas stroke room, but that's a very minor concern, since again, the 16k canvas would
-      only ever be used for big concept art boards."* so it doesnt need canvas padding. Right now canvas padding
+      it) will likely never be used for animation so it doesnt need canvas padding. Right now canvas padding
       just has a set maximum of something like 500px, I kind of want to make that maximum a bit higher like
       1000, unless of course it is bounded by the 16k canvas+padding limit."*
+      Their fuller rationale, given in conversation 2026-08-27 and recorded here because it existed
+      nowhere in the repo: *"a max size canvas would have no off canvas stroke room, but that's a very
+      minor concern, since again, the 16k canvas would only ever be used for big concept art boards."*
       **Their memory was nearly exact**: `CanvasManager.canvasPaddingRange` is `0...512`
       (`CanvasManager.swift:30`), a flat constant consulted by `setCanvasPadding`
       (`CanvasManager+Document.swift:21`) and by the Actions slider (`ActionsMenu.swift:231`).
@@ -379,6 +360,13 @@ sized to; and **(9)** is independent of all of them *because* the width is fixed
 - **Canvas Padding's resize held every cel's intermediates at once — 3.5 GB for 32 cels** (`c6b1b35`).
   MEASURED, not supposed, and **not** the owner's freeze: the per-cel buffer walk is 83% of it and
   `regenerateAllThumbnails()` — the thing everyone assumed dominated — is 17%.
+- **(11) The effect-settings and Add Text panels are bottom bars, and the layer rail stands down for
+  them** (`e0d5e57`). MEASURED on iPad Pro 13" / iOS 26.5, portrait, by counting unobstructed paper
+  pixels in one document in three states: **45% of the paper visible before, 85% with the effect bar
+  docked, 83% with the text bar.** The rail is the half that makes it worth anything — moving only the
+  240pt knob panel would have left the ~440pt rail and its options panel over the artwork.
+  `MaskTuningSection` deliberately did not move: its main control *is* the rail's own rows.
+  `MENU_PRESENTATION_CENSUS.md` is true again, and finding 1 gains no fifteenth arbitration site.
 - **The seven device reports and the geometry rulings were written up** (`da96c0c`, `73d0402`, `87ed588`,
   `1aacb74`, `0164eb3`, `c267322`, `35b541c`, `c919014`, `61ed6fa`, `69d1492`, `6a609ba`) — including
   [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md), whose review found the ink-loss defect now at the top of
