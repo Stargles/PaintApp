@@ -2454,12 +2454,78 @@ final class PerfBaselineTests: XCTestCase {
             ("cappedTo", "\(CompositorBudget.affordableSize(for: canvas, textures: walk + uploads, budgetBytes: iPad9))"),
         ])
 
-        // Two accumulators, one grade scratch, two bloom intermediates. The blur adds nothing: it
-        // wants one intermediate and the bloom already forced two, and `EffectPipelines` keeps them.
-        XCTAssertEqual(walk, 5, "The walk holds front, back, one grade scratch and two bloom intermediates")
+        // Two accumulators, the re-walk's own pair, one grade scratch, two bloom intermediates. The
+        // blur adds nothing: it wants one intermediate and the bloom already forced two, and
+        // `EffectPipelines` keeps them.
+        //
+        // **The re-walk's pair is why this is 7 and not 5, and the sub-tree is why it is not more.**
+        // Bloom declares `.ink`, so the bloom leaf composites everything below it onto transparency
+        // first (EFFECT_BACKDROP.md §3 option A) — that is one plain baked leaf here, which nests
+        // nothing of its own, so the deepest point of the sub-walk is its own accumulator pair.
+        // `testTheWalksTextureEstimateIsWhatTheWalkActuallyAllocates` measures the same five pool
+        // textures against the running walk rather than re-deriving them here.
+        XCTAssertEqual(walk, 7, "front, back, the re-walk's pair, one grade scratch, two bloom intermediates")
         XCTAssertEqual(uploads, 1, "Only the vector layer has pixels — a grading layer is elided from sources")
         XCTAssertGreaterThan((walk + uploads) * perTexture, iPad9,
                              "This scene must not fit a 3 GB device's budget, or the fix is measuring nothing")
+    }
+
+    /// **The estimate, measured against the walk instead of against a second hand computation.**
+    ///
+    /// `peakCompositeTextures` is checked by nothing at runtime — the pool allocates on demand with
+    /// no budget consulted (`ScratchTexturePool.acquire`), and `MTLDevice.makeTexture` does not
+    /// politely return nil under the pressure that matters; jetsam takes the process first. So a
+    /// wrong number is silent in *both* directions: too high and every composite of a bloom document
+    /// is needlessly shrunk, too low and the iPad 9 crash this whole subsystem exists to prevent
+    /// comes back. That is why the branch that added the ink re-walk could over-count by a factor of
+    /// two with a green suite, and why the arithmetic above it needs one assertion that is not more
+    /// arithmetic.
+    ///
+    /// `lastScratchAllocated` is the high-water mark of *simultaneously held* pool textures on a cold
+    /// pool: `acquire` allocates only when nothing is free and `release` hands the texture back, so on
+    /// a purged engine the count is the peak by construction.
+    ///
+    /// **Five, not seven**: `peakCompositeTextures` also carries the two intermediates a four-pass
+    /// bloom ping-pongs through, and those live in `MetalEffects` at that type's own lifetime rather
+    /// than in the pool. The difference is stated here rather than subtracted from a private property,
+    /// so a reader can see which two textures are being left out and why.
+    @MainActor
+    func testTheWalksTextureEstimateIsWhatTheWalkActuallyAllocates() throws {
+        let engine = try XCTUnwrap(CompositorMetalEngine.shared,
+                                   "This case measures the GPU walk's own allocations")
+        let scene = compositorManager(layerCount: 1)
+        scene.addValueLayer(effect: .bloom(Effect.Bloom(threshold: 0.6, radius: 12, intensity: 1)))
+        scene.addValueLayer(effect: .blur(Effect.Blur(radius: 8)))
+        guard let request = scene.makeRenderRequest(atFrame: 0, includeBackground: true) else {
+            return XCTFail("The perf manager must produce a request")
+        }
+        XCTAssertNotNil(request.background,
+                        "Premise: the re-walk happens only when the accumulator starts with paper in it")
+        XCTAssertEqual(Effect.bloom(Effect.Bloom()).input, .ink,
+                       "Premise: bloom is what puts a re-walk in this scene at all")
+
+        Compositor.backend = .metal
+        defer { Compositor.backend = Compositor.defaultBackend }
+        // Cold, so every acquire allocates and the counter is the peak rather than a reuse tally.
+        engine.purge()
+        guard Compositor.composite(request) != nil else {
+            return XCTFail("The GPU walk must render this scene")
+        }
+        XCTAssertEqual(engine.lastAdmission, .admitted,
+                       "A declined composite would report the CPU reference's allocations, which are none")
+
+        let walk = request.tree.peakCompositeTextures
+        report("the owner's scene, estimated against measured", [
+            ("peakCompositeTextures", "\(walk)"),
+            ("scratchAllocated", "\(engine.lastScratchAllocated)"),
+            ("effectIntermediates", "2"),
+        ])
+
+        XCTAssertEqual(engine.lastScratchAllocated, 5,
+                       "front, back, the re-walk's inkFront and inkBack, and the grade scratch")
+        XCTAssertEqual(walk, engine.lastScratchAllocated + 2,
+                       "…and the estimate is exactly that plus the two bloom intermediates, which "
+                       + "`MetalEffects` holds rather than the pool")
     }
 
     /// **The budget is a fraction of the device, not a constant tuned on a Mac** — the sentence the
@@ -2496,11 +2562,11 @@ final class PerfBaselineTests: XCTestCase {
     /// composites at exactly the size it did before.
     func testTheBudgetShrinksOnlyTheCanvasesThatDoNotFit() {
         let iPad9 = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024)
-        let textures = 6  // the owner's scene: five for the walk, one uploadable leaf
+        let textures = 8  // the owner's scene: seven for the walk, one uploadable leaf
 
         let ordinary = CGSize(width: 2048, height: 2048)
         XCTAssertEqual(CompositorBudget.affordableSize(for: ordinary, textures: textures, budgetBytes: iPad9),
-                       ordinary, "A 2048² canvas fits six textures in 192 MB and must not be touched")
+                       ordinary, "A 2048² canvas fits eight textures in 192 MB and must not be touched")
 
         let big = CGSize(width: 4096, height: 4096)
         let capped = CompositorBudget.affordableSize(for: big, textures: textures, budgetBytes: iPad9)
@@ -2512,7 +2578,7 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertEqual(capped.width, capped.height, "A square canvas must stay square")
         XCTAssertEqual(capped.width, capped.width.rounded(.down), "Whole pixels only")
 
-        report("budget cap at 3 GB, six canvas-sized textures", [
+        report("budget cap at 3 GB, eight canvas-sized textures", [
             ("canvas", "\(Int(big.width))x\(Int(big.height))"),
             ("capped", "\(Int(capped.width))x\(Int(capped.height))"),
             ("scale", String(format: "%.3f", capped.width / big.width)),

@@ -860,6 +860,56 @@ final class CompositorParityLogicTests: XCTestCase {
         return (gpu, cpu)
     }
 
+    /// **The ink re-walk, both backends, over ink that is not opaque** — the case the fixtures in
+    /// this file could not express and the one where the two paths could most easily drift.
+    ///
+    /// Two things arrived in the walk with EFFECT_BACKDROP.md §3 option A that had never been
+    /// compared byte for byte: a **second call site for the canvas paper fill** (the re-walk lays the
+    /// paper back down under the graded ink), and a **crossfade of a picture that is not opaque
+    /// everywhere**. Opaque ink hides both — `over(src × m, dst)` and `lerp(dst, src, m)` are the same
+    /// function when `src` is opaque, and a paper fill that is off by a rounding step is invisible
+    /// under ink that covers it. 60% black is what makes them visible.
+    ///
+    /// `includeBackground: true` throughout, because with no paper there is no re-walk at all.
+    func testTheBackendsAgreeOnAnInkInputEffectOverTranslucentInk() throws {
+        try skipUnlessGPUAvailable()
+        let outline = Effect.outline(Effect.Outline(
+            width: 2, color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1), threshold: 0.5))
+        XCTAssertEqual(outline.input, .ink, "Premise: this fixture only exercises the re-walk if Outline asks for it")
+
+        func fixture(opacity: Double, masked: Bool) -> CanvasManager {
+            let manager = CanvasFixture.manager(layerCount: 2)
+            // The left half, hidden — a mask source contributes whether or not it is shown. Spatial
+            // rather than half-covered because `AlphaMask`'s threshold ramp is 0.1 ± 0.01, so a
+            // source drawn at partial alpha resolves to full coverage and would test nothing; a hard
+            // edge puts the mix's coverage boundary in the picture, which is what both backends have
+            // to agree about.
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+            manager.layers[0].isVisible = false
+            CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                          CanvasFixture.solidImage(UIColor(white: 0, alpha: 0.6),
+                                                                   rect: CGRect(x: 16, y: 16, width: 32, height: 32)))
+            manager.addValueLayer(effect: outline)
+            manager.layers[2].opacity = opacity
+            if masked {
+                manager.layers[2].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+            }
+            return manager
+        }
+
+        for opacity in [1.0, 0.5] {
+            for masked in [false, true] {
+                MaskResolver.clearCache()
+                guard let (gpu, cpu) = gpuAndCPU(fixture(opacity: opacity, masked: masked),
+                                                 includeBackground: true) else { return }
+                let delta = maxChannelDelta(gpu, cpu)
+                XCTAssertEqual(delta, 0,
+                               "opacity \(opacity), mask \(masked): backends differ by \(delta) on some channel")
+            }
+        }
+    }
+
     /// §11 phase 2's gate, and it holds **literally**: zero difference on any channel of any pixel.
     ///
     /// That was not the expected result and is worth recording as measured rather than assumed. The

@@ -1628,6 +1628,217 @@ final class EffectLayerLogicTests: XCTestCase {
                        + "the canvas rather than replacing it. Got RGBA \(pixel(image, 56, 32))")
     }
 
+    // MARK: - The ink re-walk lands as a replacement, not as a second copy of the ink
+
+    /// The one ink effect a test can build today, kept here so every case below grades the same way.
+    /// Red at width 2 and threshold 0.5, matching the silhouette test above.
+    private static let outline = Effect.outline(Effect.Outline(
+        width: 2, color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1), threshold: 0.5))
+
+    /// **60% black, and the alpha is the entire point.** Every ink fixture that existed before this
+    /// group used opaque ink, which hides the whole defect class: over an opaque backdrop
+    /// `over(src × m, dst)` and `lerp(dst, src, m)` are the same function when `src` is opaque, so an
+    /// over-composite and a crossfade agree everywhere and neither the double-count nor the
+    /// opacity/mask divergence has a pixel to show itself in.
+    private static let translucentInk = UIColor(white: 0, alpha: 0.6)
+
+    private static let inkRect = CGRect(x: 16, y: 16, width: 32, height: 32)
+
+    /// The translucent square on paper, optionally under an Outline layer at a stated opacity.
+    private func translucentInkCanvas(underOutlineAt opacity: Double? = nil) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(Self.translucentInk, rect: Self.inkRect))
+        if let opacity {
+            manager.addValueLayer(effect: Self.outline)
+            manager.layers[1].opacity = opacity
+        }
+        return manager
+    }
+
+    /// **The reviewer's measurement, as the gate.** An ink effect must not draw the ink a second
+    /// time — the picture under an Outline layer has to be the picture beside one, everywhere the
+    /// grade is the identity.
+    ///
+    /// The arithmetic is exact and has no rounding rule in it: premultiplied 60% black is
+    /// `(0,0,0,153)`, `153/255 = 0.6`, and source-over onto opaque white is `255 × 0.4 = 102`.
+    /// Compositing the graded ink *over* the accumulator instead added it again — effective coverage
+    /// `1 − 0.4² = 0.84`, so `255 × 0.16 = 40.8` and the interior read **41**, a 60% darkening of
+    /// everything an artist had drawn in anything but full opacity. **Bloom defaults to `.ink`**, so
+    /// that was the shipped picture for every bloom document, not an opt-in edge case.
+    func testAnInkEffectDoesNotCompositeTheInkTwice() {
+        guard let plain = liveCanvas(translucentInkCanvas()),
+              let outlined = liveCanvas(translucentInkCanvas(underOutlineAt: 1)) else {
+            return XCTFail("Fixture must composite")
+        }
+
+        XCTAssertEqual(pixel(plain, 32, 32), opaqueGrey(102),
+                       "Premise: 60% black over white paper is 255 × 0.4, exactly. Got RGBA "
+                       + "\(pixel(plain, 32, 32))")
+        XCTAssertEqual(pixel(outlined, 32, 32), opaqueGrey(102),
+                       "Outline leaves in-shape pixels alone, so the ink under one must read exactly "
+                       + "what it reads beside one. The over-composite gave 41. Got RGBA "
+                       + "\(pixel(outlined, 32, 32))")
+        XCTAssertEqual(pixel(outlined, 48, 32), [255, 0, 0, 255],
+                       "…and the ring the whole re-walk exists for is still on the paper")
+    }
+
+    /// **Opacity on an ink effect is an amount, not a coverage** — the same rule
+    /// `testOpacityMixesTheGradeBackTowardTheUngradedBackdrop` states for the backdrop path, asserted
+    /// here so the two paths are visibly held to one rule rather than two.
+    ///
+    /// Inside its own shape Outline changes nothing, so *any* amount between the ungraded backdrop
+    /// and an identical grade is that backdrop: 102 at opacity 1, at 0.5, and at 0. The build's
+    /// `masked(…) + draw(opacity:)` could not say that — it faded the ink itself and gave 71.
+    ///
+    /// The ring is the other half: half way from paper to opaque red is `255 − 127.5`, and
+    /// `.toNearestOrEven` on 127.5 is 128.
+    func testOpacityOnAnInkEffectIsAnAmountNotACoverage() {
+        guard let image = liveCanvas(translucentInkCanvas(underOutlineAt: 0.5)) else {
+            return XCTFail("Fixture must composite")
+        }
+        XCTAssertEqual(pixel(image, 32, 32), opaqueGrey(102),
+                       "A half-strength grade that is the identity is still the identity. Got RGBA "
+                       + "\(pixel(image, 32, 32))")
+        XCTAssertEqual(pixel(image, 48, 32), [255, 128, 128, 255],
+                       "…and the ring is half way from paper to red. Got RGBA \(pixel(image, 48, 32))")
+    }
+
+    /// **A mask on an ink effect is the mix's coverage argument, not a clip on the graded image.**
+    ///
+    /// The build clipped the graded ink to the mask and then source-over'd it, which scaled the *ink*
+    /// by the coverage on its way in — so inside the mask, where the grade is the identity, the
+    /// artwork came out at 41 instead of 102. A mask that darkened what it was supposed to be
+    /// restricting.
+    ///
+    /// **The mask is spatial rather than a half-covered one, and that is forced rather than chosen.**
+    /// `AlphaMask.coverage(forSourceAlpha:)` ramps across `threshold ± antialiasHalfWidth`, shipping
+    /// at 0.1 ± 0.01, so a source drawn at 50% alpha resolves to full coverage and a fixture built
+    /// that way would assert nothing about the mask at all. A left-half mask puts the two answers
+    /// side by side in one composite instead.
+    func testAMaskOnAnInkEffectIsTheMixesCoverageNotAClipOnTheInk() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        // The mask shape: the left half, hidden, because §6.6 says a hidden source still contributes.
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+        manager.layers[0].isVisible = false
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(Self.translucentInk, rect: Self.inkRect))
+        manager.addValueLayer(effect: Self.outline)
+        manager.layers[2].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+
+        guard let image = liveCanvas(manager, active: 1) else { return XCTFail("Fixture must composite") }
+        XCTAssertEqual(pixel(image, 24, 32), opaqueGrey(102),
+                       "Inside the mask the grade applies — and inside its own shape Outline is the "
+                       + "identity, so the ink reads what it reads with no effect at all. The clip "
+                       + "gave 41. Got RGBA \(pixel(image, 24, 32))")
+        XCTAssertEqual(pixel(image, 40, 32), opaqueGrey(102),
+                       "Outside the mask nothing happens, which is the same byte for a different "
+                       + "reason. Got RGBA \(pixel(image, 40, 32))")
+        XCTAssertEqual(pixel(image, 15, 32), [255, 0, 0, 255],
+                       "The ring is drawn where the mask covers. Got RGBA \(pixel(image, 15, 32))")
+        XCTAssertEqual(pixel(image, 48, 32), opaqueGrey(255),
+                       "…and not where it does not: bare paper on the unmasked side. Got RGBA "
+                       + "\(pixel(image, 48, 32))")
+    }
+
+    /// **The re-fill is rect-limited, and the margin is cleared before it.** `gradedInkOverPaper`
+    /// builds a second canvas-sized picture — paper, then graded ink — and hands it to the same
+    /// crossfade the backdrop path uses. If that picture filled the whole buffer instead of
+    /// `RenderBackground.rect`, an ink effect would paint canvas colour across a padding margin that
+    /// `testThePaperIsTheArtworkRectAndThePaddingMarginIsNotPaper` has already ruled is not paper.
+    func testAnInkEffectLeavesThePaddingMarginTransparent() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.setCanvasPadding(8)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.black, rect: CGRect(x: 24, y: 24, width: 32, height: 32)))
+        manager.addValueLayer(effect: Self.outline)
+
+        guard let image = liveCanvas(manager) else { return XCTFail("Fixture must composite") }
+        XCTAssertEqual(pixel(image, 4, 4), [0, 0, 0, 0],
+                       "The margin stays transparent under an ink effect. Got RGBA \(pixel(image, 4, 4))")
+        XCTAssertEqual(pixel(image, 12, 12), opaqueGrey(255),
+                       "…the artwork rect is still paper. Got RGBA \(pixel(image, 12, 12))")
+        XCTAssertEqual(pixel(image, 40, 40), [0, 0, 0, 255], "…and the ink is still ink")
+    }
+
+    /// **A folder that is not an identity wrapper always buffers, which is what keeps the re-walk
+    /// from double-applying its properties.**
+    ///
+    /// `split(atLeaf:)` rebuilds a half-group carrying the original's opacity, mask, blend mode and
+    /// isolation *verbatim*, so re-walking through a faded folder would fade its contents twice. It
+    /// cannot happen, and the reason is `needsOwnBuffer`: a faded folder buffers, a buffered scope
+    /// passes `paperInBackdrop: false`, and the effect inside takes the backdrop path instead. The
+    /// same holds for an isolated folder holding an effect at opacity 1, through
+    /// `enclosesABlend`'s `$0.effect != nil` clause.
+    ///
+    /// Asserted two ways because neither alone is enough. The structural half names the invariant
+    /// directly; the pixel half is an exact equality with no hand-computed byte in it — the two
+    /// isolation settings must produce the same picture precisely because *both* buffer, and if one
+    /// of them ever stopped they would diverge here.
+    func testAFadedFolderHoldingAnInkEffectAlwaysBuffersRatherThanReWalking() {
+        func fixture(isolated: Bool) -> CanvasManager {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(Self.translucentInk, rect: Self.inkRect))
+            manager.addValueLayer(effect: Self.outline)
+            let folder = manager.addFolder(name: "Group")
+            manager.layers[0].parentFolderID = folder
+            manager.layers[1].parentFolderID = folder
+            manager.setFolderOpacity(folder, to: 0.5)
+            manager.setFolderIsolated(folder, isIsolated: isolated)
+            return manager
+        }
+
+        let passThrough = fixture(isolated: false)
+        let folderNode = passThrough.renderTree.first { node in
+            if case .node = node.content { return true }
+            return false
+        }
+        XCTAssertEqual(folderNode?.needsOwnBuffer, true,
+                       "A faded folder buffers whatever its isolation says, so the ink re-walk never "
+                       + "sees one and `split(atLeaf:)`'s copied opacity cannot be applied twice")
+
+        guard let open = liveCanvas(passThrough), let closed = liveCanvas(fixture(isolated: true)) else {
+            return XCTFail("Fixture must composite")
+        }
+        XCTAssertEqual(pixel(open, 32, 32), pixel(closed, 32, 32),
+                       "Both buffer, so both grade the same ink-only accumulator")
+        XCTAssertEqual(pixel(open, 48, 32), pixel(closed, 48, 32), "…ring included")
+    }
+
+    /// **CHARACTERIZATION: a blend mode below an ink effect is replaced, not preserved.** An accepted
+    /// loss, written down so it is a decision rather than something rediscovered later.
+    ///
+    /// The re-walk composites everything below the effect **onto transparency**, and a blend reads the
+    /// backdrop alpha it is drawn onto: `blendOver`'s `mix(cs, B(cb, cs), da)` has `da == 1` under the
+    /// paper and `da == 0` on the ink buffer. So an opaque red `difference` layer reads cyan on its
+    /// own — `|white − red|` — and plain red once an ink effect above it replaces what it covers.
+    ///
+    /// This is inherent to EFFECT_BACKDROP.md §3 option A rather than to how the result is recombined:
+    /// the build's over-composite had it too, underneath the double-count. Only option C (two
+    /// accumulators, one with paper and one without) preserves it, and §3 priced and rejected that.
+    func testABlendModeBelowAnInkEffectIsReplacedNotPreserved() {
+        func canvas(underOutline: Bool) -> CGImage? {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(red, rect: Self.inkRect))
+            manager.setLayerBlendMode(layerIndex: 0, to: .difference)
+            if underOutline { manager.addValueLayer(effect: Self.outline) }
+            return liveCanvas(manager)
+        }
+
+        guard let plain = canvas(underOutline: false), let outlined = canvas(underOutline: true) else {
+            return XCTFail("Fixture must composite")
+        }
+        XCTAssertEqual(pixel(plain, 32, 32), [0, 255, 255, 255],
+                       "Premise: difference(white paper, red) is cyan. Got RGBA \(pixel(plain, 32, 32))")
+        XCTAssertEqual(pixel(outlined, 32, 32), [255, 0, 0, 255],
+                       "Under an ink effect the layer is composited onto transparency instead, where "
+                       + "there is nothing to difference against, and the grade replaces what was "
+                       + "there. Got RGBA \(pixel(outlined, 32, 32))")
+    }
+
     /// **The other half of option A: an effect that reads colour is not re-walked.** Nine of the
     /// thirteen declare `.backdrop`, and for them the paper *is* the point — a brightness layer that
     /// went back to grading the ink alone would re-break the owner's report in the name of fixing it.

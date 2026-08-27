@@ -594,29 +594,7 @@ final class CompositorMetalEngine {
             pool.release(back)
         }
 
-        // Premultiplied, so the background's own alpha scales its colour — and a nil background is a
-        // transparent clear rather than a skipped step, since a scratch texture arrives undefined.
-        var background = SIMD4<Float>(repeating: 0)
-        if let colour = request.background?.color {
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            colour.getRed(&r, green: &g, blue: &b, alpha: &a)
-            background = SIMD4<Float>(Float(r * a), Float(g * a), Float(b * a), Float(a))
-        }
-        // **The paper covers the artwork rect, not the whole buffer** — `RenderBackground.rect`
-        // carries the decision and the arithmetic; this only obeys it. A padded canvas therefore
-        // needs two writes, because the margin still has to start transparent and the texture arrives
-        // undefined. A canvas with no padding — the default, and every fixture — takes the single
-        // full-texture write it always did, so nothing about the common path has moved.
-        let paper = request.background?.rect
-        let whole = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
-        if let paper, paper != whole {
-            fill(front, with: SIMD4<Float>(repeating: 0), encoder: encoder, width: width, height: height)
-            fill(front, with: background, encoder: encoder,
-                 width: Int(paper.width), height: Int(paper.height),
-                 origin: SIMD2<UInt32>(UInt32(max(0, paper.minX)), UInt32(max(0, paper.minY))))
-        } else {
-            fill(front, with: background, encoder: encoder, width: width, height: height)
-        }
+        fillBackground(request, into: front, encoder: encoder, width: width, height: height)
 
         // One upload per distinct mask for this composite, not per masked node — the resolution is
         // already shared (`MaskResolver`), and re-uploading the same 4.2 MB once per layer clipped
@@ -664,14 +642,23 @@ final class CompositorMetalEngine {
                 // handed this walk its own accumulator.
                 if let effect = node.effect {
                     // **EFFECT_BACKDROP.md §3 option A's re-walk**, the mirror of
-                    // `CoreGraphicsCompositor.gradeInk` — which carries the reasoning for the
-                    // option, for compositing the result *over* rather than mixing it in place, and
-                    // for the one consequence that has (non-opaque ink composites twice). Same cut
-                    // of the tree the sandwich's lower half uses, into a pair of this pool's
-                    // textures instead of onto the canvas, so the sub-walk is this same function and
-                    // there is no second implementation of anything to keep in step.
-                    if effect.input == .ink, paperInBackdrop,
-                       let below = request.tree.split(atLeaf: layerIndex)?.below {
+                    // `CoreGraphicsCompositor.gradedInkOverPaper` — which carries the reasoning for
+                    // the option, for the grade *replacing* what is below rather than compositing
+                    // over it, and for the one consequence that is inherent to A. Same cut of the
+                    // tree the sandwich's lower half uses, into a pair of this pool's textures
+                    // instead of onto the canvas, so the sub-walk is this same function and there is
+                    // no second implementation of anything to keep in step.
+                    //
+                    // Switched exhaustively on `Effect.Input` rather than tested against `.ink`, for
+                    // the reason `CoreGraphicsCompositor.draw` gives at the same fork.
+                    let inkBelow: [RenderNode]?
+                    switch effect.input {
+                    case .ink:
+                        inkBelow = paperInBackdrop ? request.tree.split(atLeaf: layerIndex)?.below : nil
+                    case .backdrop:
+                        inkBelow = nil
+                    }
+                    if let below = inkBelow {
                         guard let effects,
                               let inkA = pool.acquire(), let inkB = pool.acquire() else { return false }
                         var inkFront = inkA, inkBack = inkB
@@ -695,20 +682,31 @@ final class CompositorMetalEngine {
                         // it, and mixing that in would put a previous frame on screen.
                         guard effects.encode(effect, source: inkFront, into: graded,
                                              encoder: encoder) else { return false }
-                        var drawn = graded
-                        var clip: MTLTexture?
-                        if let mask = maskTexture(for: node, of: request, cache: &masks) {
-                            guard let clipped = pool.acquire() else { return false }
-                            clip = clipped
-                            apply(mask: mask, to: graded, into: clipped, encoder: encoder,
-                                  width: width, height: height)
-                            drawn = clipped
-                        }
-                        // `.normal`, as the CPU reference draws it: an effect layer's own blend mode
-                        // has never meant anything and the backdrop path below still ignores it.
-                        over(source: drawn, opacity: node.opacity, mode: .normal,
-                             front: &front, back: &back, encoder: encoder, width: width, height: height)
-                        if let clip { pool.release(clip) }
+                        // `inkFront` is dead the moment the grade has read it and `inkBack` holds a
+                        // stale intermediate, so the paper-plus-graded picture is built in the pair
+                        // already held rather than in a fourth texture — the same observation the
+                        // group path makes about `groupBack` below.
+                        fillBackground(request, into: inkBack, encoder: encoder,
+                                       width: width, height: height)
+                        // `.normal` at opacity 1: this is the accumulator as it would be if `below`
+                        // had been replaced by the grade, not a layer being laid on anything. The
+                        // node's own opacity and mask arrive once, in the `mix` beneath.
+                        over(source: graded, opacity: 1, mode: .normal,
+                             front: &inkBack, back: &inkFront, encoder: encoder,
+                             width: width, height: height)
+                        // `over` ends in a swap of the two it was given, so `inkBack` now names the
+                        // paper-plus-graded result and `inkFront` the paper it was drawn onto.
+                        //
+                        // The same `mix` the backdrop path uses, with the mask as its coverage
+                        // argument rather than clipping a copy of the graded image: opacity and the
+                        // mask read as an *amount*, so at 0 this is the untouched accumulator and at
+                        // 1 the replacement exactly. Source-over could not say that — it added the
+                        // ink a second time, which is the defect this replaced.
+                        mix(base: front, graded: inkBack,
+                            coverage: maskTexture(for: node, of: request, cache: &masks),
+                            opacity: node.opacity, into: back, encoder: encoder,
+                            width: width, height: height)
+                        swap(&front, &back)
                         continue
                     }
                     guard let effects, let scratch = pool.acquire() else { return false }
@@ -923,6 +921,40 @@ final class CompositorMetalEngine {
         encoder.setBytes(&mode, length: MemoryLayout<UInt32>.stride, index: 1)
         dispatch2D(encoder, psOver, width: width, height: height)
         swap(&front, &back)
+    }
+
+    /// **The canvas paper into `texture`, or a transparent clear when the request has none.**
+    ///
+    /// The paper covers the artwork rect, not the whole buffer — `RenderBackground.rect` carries the
+    /// decision and the arithmetic; this only obeys it. A padded canvas therefore needs two writes,
+    /// because the margin still has to start transparent and a pool texture arrives undefined. A
+    /// canvas with no padding — the default, and every fixture — takes the single full-texture write
+    /// it always did, so nothing about the common path has moved.
+    ///
+    /// **One function because it has two callers**, the mirror of `CoreGraphicsCompositor.fillBackground`:
+    /// the top of the walk, and the ink re-walk, which lays the same paper back down under a graded
+    /// ink. The premultiply below has to be the *same* expression at both sites or the two papers
+    /// differ by a rounding step, which is precisely the kind of divergence the byte-for-byte parity
+    /// gate exists to catch and the kind that is easiest to introduce by copying six lines.
+    private func fillBackground(_ request: RenderRequest, into texture: MTLTexture,
+                                encoder: MTLComputeCommandEncoder, width: Int, height: Int) {
+        // Premultiplied, so the background's own alpha scales its colour.
+        var background = SIMD4<Float>(repeating: 0)
+        if let colour = request.background?.color {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            colour.getRed(&r, green: &g, blue: &b, alpha: &a)
+            background = SIMD4<Float>(Float(r * a), Float(g * a), Float(b * a), Float(a))
+        }
+        let paper = request.background?.rect
+        let whole = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
+        if let paper, paper != whole {
+            fill(texture, with: SIMD4<Float>(repeating: 0), encoder: encoder, width: width, height: height)
+            fill(texture, with: background, encoder: encoder,
+                 width: Int(paper.width), height: Int(paper.height),
+                 origin: SIMD2<UInt32>(UInt32(max(0, paper.minX)), UInt32(max(0, paper.minY))))
+        } else {
+            fill(texture, with: background, encoder: encoder, width: width, height: height)
+        }
     }
 
     /// Writes `colour` into a `width × height` rectangle of `texture` whose top-left is `origin`.

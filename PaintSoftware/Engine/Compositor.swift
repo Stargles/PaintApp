@@ -672,26 +672,48 @@ enum CoreGraphicsCompositor {
 
         let image = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
             .image { context in
-                if let background = request.background {
-                    background.color.setFill()
-                    // `background.rect`, not `bounds`: the paper is the artwork rect and the padding
-                    // margin is not paper — see `RenderBackground.rect` for why that is the decision
-                    // and not an oversight. Identical to filling `bounds` on every document with no
-                    // padding, which is the default and every fixture in the suite. The rect is
-                    // already whole pixels and symmetric on all four sides, so this agrees with the
-                    // Metal fill without either side rounding or flipping anything.
-                    UIRectFill(background.rect)
-                }
-                // **`paperInBackdrop` is true only here** — EFFECT_BACKDROP.md §3 option A. It says
-                // "the accumulator this walk is about to build starts with the canvas paper in it",
-                // which is what makes alpha stop meaning coverage and is the only reason an `.ink`
-                // effect has anything to do. Every buffered scope below starts from transparency and
-                // passes false, so an effect inside one already reads the ink alone and re-walking
-                // for it would be work with no difference to show for it.
+                fillBackground(request.background)
+                // **`paperInBackdrop` is `request.background != nil`, and it is the only reason an
+                // `.ink` effect has anything to do** — EFFECT_BACKDROP.md §3 option A. It says "the
+                // accumulator this walk is about to build starts with the canvas paper in it", which
+                // is what makes alpha stop meaning coverage. Every buffered scope below passes
+                // false, and that is exact: such a scope's accumulator *is* its own assembled
+                // composite, which has never held the paper, so re-walking for an effect inside one
+                // would be work with no difference to show for it.
+                //
+                // **A root walk with no background passes false too, and there the claim is weaker
+                // than it reads.** The sandwich's `above` half is exactly that — `makeSandwichRequests`
+                // builds it with `background: nil` on purpose — so an `.ink` effect in it grades the
+                // accumulator as it stands, which holds only what is *above* the active layer rather
+                // than everything below the effect node. A truncated ink, not the ink. That is an
+                // approximation, it is mid-stroke only, it predates the paper landing in the
+                // composite, and it snaps to the exact picture on lift when `full` is what the canvas
+                // shows — the same trade `SandwichLogicTests` already measures for a faded group.
+                // Named here rather than fixed: fixing it means a second cut of the tree per stroke
+                // frame, which is a cost this branch did not measure.
                 draw(request.tree, of: request, in: bounds, context: context,
                      paperInBackdrop: request.background != nil)
             }
         return image.cgImage
+    }
+
+    /// **The canvas paper, into whatever context the caller has made current** — nothing at all when
+    /// the request has none.
+    ///
+    /// `background.rect`, not the buffer's bounds: the paper is the artwork rect and the padding
+    /// margin is not paper — see `RenderBackground.rect` for why that is the decision and not an
+    /// oversight. Identical to filling the whole buffer on every document with no padding, which is
+    /// the default and every fixture in the suite. The rect is already whole pixels and symmetric on
+    /// all four sides, so this agrees with the Metal fill without either side rounding or flipping
+    /// anything.
+    ///
+    /// **One function because it has two callers** — the top of the walk, and `gradedInkOverPaper`,
+    /// which rebuilds the same paper underneath a graded ink. Two spellings of a fill whose only
+    /// subtlety is *which rectangle* is exactly the pair that drifts apart.
+    private static func fillBackground(_ background: RenderBackground?) {
+        guard let background else { return }
+        background.color.setFill()
+        UIRectFill(background.rect)
     }
 
     /// Draws one bottom-to-top stack into the context the caller has already made current.
@@ -730,10 +752,20 @@ enum CoreGraphicsCompositor {
                     // the tree `split(atLeaf:)` already produces for the sandwich's lower half — the
                     // same cut, composited onto transparency instead of onto the canvas. Nil
                     // whenever the accumulator is already paper-free, which is every buffered scope,
-                    // and nil for a `.backdrop` effect, which is nine of the thirteen.
-                    let inkBelow: [RenderNode]? = (effect.input == .ink && paperInBackdrop)
-                        ? request.tree.split(atLeaf: layerIndex)?.below
-                        : nil
+                    // and nil for a `.backdrop` effect, which is ten of the thirteen.
+                    //
+                    // Switched exhaustively rather than tested against `.ink`: a third `Input` case
+                    // would compile clean against `== .ink` and be routed silently as `.backdrop`
+                    // here, in `MetalCompositor.encode` and in `peakCompositeTextures` alike — three
+                    // places that each decide something different and each need their own answer.
+                    // That is the hand-maintained-list rot CLAUDE.md records from `CanvasManager`.
+                    let inkBelow: [RenderNode]?
+                    switch effect.input {
+                    case .ink:
+                        inkBelow = paperInBackdrop ? request.tree.split(atLeaf: layerIndex)?.below : nil
+                    case .backdrop:
+                        inkBelow = nil
+                    }
                     grade(effect, by: node, of: request, in: bounds, context: context, inkBelow: inkBelow)
                     continue
                 }
@@ -888,17 +920,44 @@ enum CoreGraphicsCompositor {
                               inkBelow: [RenderNode]?) {
         let width = Int(bounds.width.rounded()), height = Int(bounds.height.rounded())
         guard width > 0, height > 0 else { return }
-        if let inkBelow {
-            return gradeInk(effect, below: inkBelow, by: node, of: request,
-                            in: bounds, context: context, width: width, height: height)
-        }
+        // Read before either arm writes anything: both crossfade their result back over this exact
+        // image, and the ink arm runs a whole sub-composite of its own before it needs it.
         guard let backdropImage = context.currentImage.cgImage,
               let backdrop = premultipliedBytes(backdropImage, width: width, height: height)
         else { return }
 
-        // The one call both §4.4 wrappers make, given the one texture their input-resolution rules
-        // differ about. Nothing here looks inside the `Effect`; `Effect.swift` resolved it once.
-        let graded = EffectReference.apply(effect, to: backdrop, width: width, height: height)
+        // **The two input-resolution rules meet here and nowhere else.** One produces the graded
+        // *backdrop*, the other the paper with the graded ink laid on it — and from `mixBack`'s point
+        // of view they are the same thing: the picture this container would show if everything the
+        // adjustment layer covers had been replaced by the grade.
+        let graded: [UInt8]
+        if let inkBelow {
+            guard let replaced = gradedInkOverPaper(effect, below: inkBelow, of: request,
+                                                    in: bounds, width: width, height: height)
+            else { return }
+            graded = replaced
+        } else {
+            // The one call both §4.4 wrappers make, given the one texture their input-resolution
+            // rules differ about. Nothing here looks inside the `Effect`; `Effect.swift` resolved it
+            // once.
+            graded = EffectReference.apply(effect, to: backdrop, width: width, height: height)
+        }
+        mixBack(graded, over: backdrop, by: node, of: request, in: bounds,
+                context: context, width: width, height: height)
+    }
+
+    /// **The graded picture crossfaded back over the ungraded one by `node.opacity × mask`** — the
+    /// mix `compositeEffectMix` is the shader twin of, and the single place either input path ends.
+    ///
+    /// Opacity and coverage read as an **amount**, never as coverage: at 0 this is the backdrop
+    /// exactly, at 1 the grade exactly, whatever the graded pixel's own alpha happens to be.
+    /// Source-over is a different function wherever the grade is not opaque — a half-covered Sobel
+    /// that emits transparency reads as the untouched backdrop under `over` and as half way to the
+    /// paper under this — which is why the ink path shares this rather than compositing its own
+    /// result over the accumulator, and why it needs no clipped copy of the graded image.
+    private static func mixBack(_ graded: [UInt8], over backdrop: [UInt8], by node: RenderNode,
+                                of request: RenderRequest, in bounds: CGRect,
+                                context: UIGraphicsImageRendererContext, width: Int, height: Int) {
         // Same resolution the GPU path uploads, for `MaskResolver`'s reason — the threshold is a step
         // function and the two backends cannot be allowed to land on opposite sides of it.
         let coverage = node.masks.isEmpty ? nil : MaskResolver.coverage(for: node.masks, of: request)
@@ -935,18 +994,39 @@ enum CoreGraphicsCompositor {
     /// chosen: A adds no state to either backend, and B (a coverage texture) and C (two accumulators)
     /// add state both would have to maintain identically against a byte-for-byte gate.
     ///
-    /// **The graded ink is composited *over* the accumulator rather than replacing it**, which is the
-    /// other half of §3's wording and is what makes an outline land on the paper. That has one stated
-    /// consequence: the ink is drawn a second time, so ink that is not opaque composites twice and
-    /// reads slightly denser under an ink-input effect than beside one. Identical for opaque ink,
-    /// which is what a line-art layer is and what all three of these effects exist to trace.
+    /// **The graded ink *replaces* what is below it, on the same paper the walk started from** —
+    /// which is what an adjustment layer means, and it is `mixBack` that lays the result down.
     ///
-    /// `node.blendMode` is deliberately not consulted, exactly as the backdrop path above does not:
-    /// an effect layer's mode has never meant anything, and giving it one here would make it mean
-    /// something for four of the thirteen effects only.
-    private static func gradeInk(_ effect: Effect, below: [RenderNode], by node: RenderNode,
-                                 of request: RenderRequest, in bounds: CGRect,
-                                 context: UIGraphicsImageRendererContext, width: Int, height: Int) {
+    /// The equality this rests on is not `accumulator == paper ⊕ ink`; it is the weaker and provable
+    /// `accumulator == paper ⊕ split(atLeaf:).below`. The walk is a strict bottom-to-top loop over
+    /// the siblings and the accumulator is written by nothing but the background fill and that loop,
+    /// so at this node the accumulator holds the paper plus precisely the nodes `below` names. Laying
+    /// the paper back down and drawing the grade on it therefore discards exactly the sub-tree the
+    /// adjustment layer is replacing, and nothing else. The enclosing-folder case is safe for a
+    /// reason stated elsewhere and worth naming: `enclosesABlend` answers true on `$0.effect != nil`,
+    /// so an *isolated* folder holding an effect leaf always buffers and never reaches this path —
+    /// only a pass-through folder does, and `split(atLeaf:)`'s half of one is an identity wrapper.
+    /// `testAFadedPassThroughFolderDoesNotFadeTwiceUnderAnInkEffect` is what notices if that changes.
+    ///
+    /// **This composited the graded ink *over* the accumulator until 2026-08-27, and that was the
+    /// defect.** The ink was drawn a second time, so a 60%-alpha black square over white paper read
+    /// 102 beside an Outline layer and 41 under one — the coverage going 0.6 → 1−0.4² = 0.84. Bloom
+    /// defaults to `.ink`, so that darkening was shipped behaviour for every bloom document, and it
+    /// was not confined to non-opaque ink: under source-over a Sobel set to `.ink` could not replace
+    /// anything either, and the artwork stayed visible beneath its own edge map.
+    ///
+    /// One consequence is inherent to §3's option A rather than to this correction, and is pinned by
+    /// `testABlendModeBelowAnInkEffectIsReplacedNotPreserved`: a non-normal blend mode below an ink
+    /// effect blends against transparency in the sub-walk instead of against the paper, so a
+    /// `difference` layer that reads cyan on its own reads red under an Outline layer. Option C (two
+    /// accumulators) is the only shape that preserves it, and §3 priced and rejected it.
+    ///
+    /// `node.blendMode` is deliberately not consulted, exactly as the backdrop path does not: an
+    /// effect layer's mode has never meant anything, and giving it one here would make it mean
+    /// something for three of the thirteen effects only.
+    private static func gradedInkOverPaper(_ effect: Effect, below: [RenderNode],
+                                           of request: RenderRequest, in bounds: CGRect,
+                                           width: Int, height: Int) -> [UInt8]? {
         // The same sources, the same masks, the same frame — only the tree is cut and the background
         // is dropped. `composite` re-enters this file's own walk, so the sub-walk is the walk: there
         // is no second implementation of grouping, blending or masking to keep in step.
@@ -956,17 +1036,22 @@ enum CoreGraphicsCompositor {
                                        canvasSize: request.canvasSize, background: nil,
                                        quality: request.quality)
         guard let inkImage = composite(inkRequest),
-              let ink = premultipliedBytes(inkImage, width: width, height: height) else { return }
+              let ink = premultipliedBytes(inkImage, width: width, height: height) else { return nil }
 
-        let graded = EffectReference.apply(effect, to: ink, width: width, height: height)
-        guard let image = makeImage(fromPremultiplied: graded, width: width, height: height) else { return }
-        // The mask clips the graded image on its way in, which is the leaf rule (§6.1) rather than
-        // the crossfade the backdrop path uses — there the graded pixels *replace* the backdrop and a
-        // mask has to be a mix; here they are one more image being composited, and a mask multiplies
-        // the one image about to be drawn.
-        let clipped = masked(image, by: node, of: request)
-        draw(UIImage(cgImage: clipped, scale: 1, orientation: .up),
-             mode: .normal, opacity: node.opacity, in: bounds, context: context)
+        let gradedInk = EffectReference.apply(effect, to: ink, width: width, height: height)
+        guard let gradedInkImage = makeImage(fromPremultiplied: gradedInk, width: width, height: height)
+        else { return nil }
+        // `fillBackground` rather than a second spelling of the fill, and the renderer starts
+        // transparent, so a padded canvas's margin is left transparent here exactly as it is at the
+        // top of the walk — which is what keeps the margin out of the crossfade.
+        let replaced = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
+            .image { _ in
+                fillBackground(request.background)
+                UIImage(cgImage: gradedInkImage, scale: 1, orientation: .up)
+                    .draw(in: bounds, blendMode: .normal, alpha: 1)
+            }
+        guard let replacedImage = replaced.cgImage else { return nil }
+        return premultipliedBytes(replacedImage, width: width, height: height)
     }
 
     /// `image` with this node's masks applied, or `image` unchanged when it has none.

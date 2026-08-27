@@ -519,6 +519,16 @@ extension Array where Element == RenderNode {
     /// composites a slightly smaller picture; under-counting is the crash. The flat stacks that
     /// matter in practice are counted exactly.
     ///
+    /// **Under-counting is the crash *literally*, and the softer story once told about it is false.**
+    /// It is not that the pool declines mid-walk and the frame falls back to the CPU reference:
+    /// `ScratchTexturePool.acquire` consults no budget at all and allocates on demand, and
+    /// `MetalCompositor.attempt`'s own admission comment records that `makeTexture` does not politely
+    /// return nil under this pressure — jetsam takes the process first. The `guard wanted <= budget`
+    /// that reads this number is the only gate there is. Over-counting is not free either: at 4096²
+    /// against a 3 GB device, each texture this claims and does not need costs the live composite
+    /// several hundred pixels a side and lowers the size at which an offline thumbnail is refused the
+    /// GPU altogether.
+    ///
     /// **Visibility is not consulted, here or in `uploadableLeafCount`, for the reason
     /// `needsCompositorOnCanvas` gives for the same choice.** A hidden layer costs the walk nothing,
     /// so honouring the flag would be more accurate — and would make toggling an eye change the
@@ -534,47 +544,73 @@ extension Array where Element == RenderNode {
         // deepest point of the walk holds on top of it, plus the intermediates a multi-pass effect
         // ping-pongs through — which live at `EffectPipelines`' lifetime rather than the walk's, so
         // they are additive to every level rather than part of any one of them.
-        let walk = 2 + nestedCompositeTextures + effectIntermediateTextures
-        // **An ink-input effect runs a second walk inside the first** (EFFECT_BACKDROP.md §3 option
-        // A): the sub-walk below it goes into an accumulator pair of its own, and everything that
-        // walk nests is live at the same time as everything the outer one nests. Counted as the
-        // outer walk's own nesting again rather than as the sub-tree's, because the sub-tree is
-        // whatever is below that node and this property has no cheap way to ask — an over-estimate
-        // makes a composite smaller on a constrained device, and an under-estimate makes the pool
-        // decline mid-walk and drops the whole frame onto the CPU reference.
-        return containsInkInputEffect ? walk + 2 + nestedCompositeTextures : walk
-    }
-
-    /// Whether anything in this tree grades the ink alone rather than the backdrop — Outline always,
-    /// Bloom and Sobel when the artist has asked for it (`Effect.input`).
-    private var containsInkInputEffect: Bool {
-        contains { node in
-            if node.effect?.input == .ink { return true }
-            guard case .node(_, let inputs) = node.content else { return false }
-            return inputs.contains(where: \.containsInkInputEffect)
-        }
+        //
+        // `self` is the root, and `paperInBackdrop: true` is the premise `composite` starts from —
+        // the two things the walk itself threads, for the reasons below.
+        2 + nestedCompositeTextures(root: self, paperInBackdrop: true) + effectIntermediateTextures
     }
 
     /// Textures held *below* the caller's own accumulator pair, at the deepest point of the walk.
-    private var nestedCompositeTextures: Int {
+    ///
+    /// **The two parameters are the two the compositors thread, and they are here because an
+    /// ink-input effect's cost is not a property of its own node.**
+    ///
+    /// `root` is the tree `CompositorMetalEngine.encode` hands to `split(atLeaf:)` when it re-walks,
+    /// and it has to *stay* the root: `split(atLeaf:)` searches from the top and reconstructs partial
+    /// group halves on the way down, so asking it of a nested `self` returns nil for a leaf it cannot
+    /// see, this falls to the `.backdrop` arm, and the estimate goes back to under-counting with
+    /// every existing test still green. `paperInBackdrop` is the flag that decides whether the
+    /// re-walk happens at all — false inside every buffered scope, in both backends — so an `.ink`
+    /// effect down there costs exactly what a `.backdrop` one costs.
+    ///
+    /// **This counted `2 + nestedCompositeTextures` again at the top until 2026-08-27, and that was
+    /// wrong in structure rather than in magnitude.** What is live while the outer walk is parked at
+    /// the effect node is the *ancestors* of that node, not the deepest point of the whole tree; on
+    /// the owner's crash scene the doubling read 10 where the walk allocates 5, which
+    /// `PerfBaselineTests.testTheWalksTextureEstimateIsWhatTheWalkActuallyAllocates` now measures
+    /// rather than re-deriving. It also fired for a *node* effect and for an `.ink` leaf inside a
+    /// buffered group, neither of which either backend re-walks for.
+    private func nestedCompositeTextures(root: [RenderNode], paperInBackdrop: Bool) -> Int {
         map { node -> Int in
             switch node.content {
-            case .leaf:
-                // A grading leaf takes one scratch for the graded copy; a masked leaf takes one for
-                // the clipped copy. They are the two arms of the same `if`, never both — **except
-                // for an ink-input grade**, which is the one case that holds both at once: it
-                // composites its graded ink *over* the accumulator rather than mixing it back in
-                // place, so a mask has to clip that image on its way in and both scratches are live
-                // together. The pair its sub-walk accumulates into is counted once for the whole
-                // tree in `peakCompositeTextures`, not here.
-                if let effect = node.effect { return effect.input == .ink ? 2 : 1 }
-                return node.masks.isEmpty ? 0 : 1
+            case .leaf(let layerIndex):
+                // A masked leaf takes one scratch for the clipped copy. A grade takes one for the
+                // graded copy and hands its mask to `mix` as a coverage texture rather than clipping
+                // anything, so it takes one whether it is masked or not — see `MetalCompositor.mix`.
+                guard let effect = node.effect else { return node.masks.isEmpty ? 0 : 1 }
+                let below: [RenderNode]
+                switch effect.input {
+                case .backdrop:
+                    return 1
+                case .ink:
+                    guard paperInBackdrop, let cut = root.split(atLeaf: layerIndex)?.below else { return 1 }
+                    below = cut
+                }
+                // **The re-walk costs what a buffered group costs, and its two phases do not
+                // overlap.** It borrows a pair from the pool and uses it as its own accumulator, so
+                // everything the sub-walk nests sits on that pair — and all of it has been released
+                // by the time the grade scratch is acquired, because the recursion has unwound.
+                // Hence `max`, not `+`.
+                //
+                // The sub-walk is entered with `paperInBackdrop: false`, which is what terminates
+                // this recursion as well as the walk's.
+                let sub = below.nestedCompositeTextures(root: root, paperInBackdrop: false)
+                return 2 + Swift.max(sub, 1)
+
             case .node(let op, let inputs):
-                let deepest = inputs.map(\.nestedCompositeTextures).max() ?? 0
+                // A buffered node hands its children a scratch that was just filled transparent, so
+                // the paper is gone from there down; a pass-through `.stack` composites straight onto
+                // the caller's accumulator and the paper is still in it.
+                let deepest = inputs.map {
+                    $0.nestedCompositeTextures(root: root,
+                                               paperInBackdrop: paperInBackdrop && !node.needsOwnBuffer)
+                }.max() ?? 0
                 guard node.needsOwnBuffer else { return deepest }
                 // `groupFront`/`groupBack`, plus a `.mix` slot's own pair (`fold` composites every
                 // slot after the first on its own before folding it in), plus the grade scratch if
-                // this node carries one.
+                // this node carries one. A node's grade never re-walks — it mixes in place over its
+                // own assembled composite, which has never had the paper in it — so `Effect.input`
+                // is not consulted here.
                 let slotPair = op.needsOwnBuffer ? 2 : 0
                 return 2 + slotPair + deepest + (node.effect != nil ? 1 : 0)
             }
