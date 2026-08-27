@@ -129,6 +129,69 @@ enum Effect: Equatable {
         default:                                        return false
         }
     }
+
+    /// **Which image an effect is handed** — EFFECT_BACKDROP.md §4.
+    ///
+    /// Until 2026-08-27 there was only one answer and so no property: the live canvas painted the
+    /// paper as a `UIView` behind the composite, so every effect graded an accumulator that was
+    /// transparent wherever the artist had not painted, and every kernel correctly short-circuited on
+    /// alpha 0. That is BUGS.md's *"Every effect and blend mode is masked to the layer's own ink"* —
+    /// the kernels were right and the input was wrong. Once the paper is in the accumulator the
+    /// question becomes real, because three effects read the accumulator's alpha as **coverage** and
+    /// filling paper into it destroys that information.
+    enum Input: Equatable {
+        /// Everything below this node, paper included. What a grade wants: a brightness layer over a
+        /// white canvas should brighten the canvas.
+        case backdrop
+        /// Everything below this node with the paper left out — the sub-walk re-run into a fresh
+        /// transparent buffer (EFFECT_BACKDROP.md §3 option A), so alpha still means coverage.
+        case ink
+    }
+
+    /// The §4 table in code. **Exhaustive with no `default:`, deliberately**, for the reason
+    /// CLAUDE.md records three times over in `CanvasManager`'s history: a hand-maintained list of
+    /// exceptions rots, and a fourteenth effect added later must be *forced* to answer this question
+    /// rather than inherit an answer that happens to be wrong for it. `reshapesCoverage` above takes
+    /// the other bargain — it has a `default:` — and is the reason this one does not.
+    ///
+    /// **Nine grades read colour and take the backdrop.** Levels, Curves, Brightness/Contrast, HSV
+    /// Shift, Gradient Map, Posterize, Noise and Chromatic Aberration have nothing to say about
+    /// shape; Blur convolves premultiplied values and blurring uniform paper is the identity, so an
+    /// opaque backdrop changes almost nothing about it.
+    ///
+    /// **Sharpen is the tenth, and §4's table does not name it** — it lists twelve of the thirteen
+    /// cases. `.backdrop` is the answer that needs no new behaviour and is right on its own terms:
+    /// sharpen is `x + amount·(x − blur_r(x))`, whose second term is zero across flat paper, so a
+    /// uniform backdrop is the identity for it exactly as it is for the blur it is built on.
+    ///
+    /// **Three read shape instead of colour**, which is why they are here at all:
+    /// - **Outline** keys on `src.a > threshold`, so over an opaque backdrop that is true everywhere
+    ///   and there is no silhouette left to trace. `.ink` is fixed, not a default — `.backdrop` would
+    ///   not be a mode, it would be a no-op.
+    /// - **Bloom** thresholds luminance, and white paper is Lum 1.0, so paper-inclusive bloom makes
+    ///   the whole canvas a source. Ruled the artist's choice, **defaulting to `.ink`** — which is
+    ///   the shipped look, so nothing visibly changes.
+    /// - **Sobel** emits `(0,0,0,0)` in flat regions, which is why the paper shows through it today.
+    ///   Ruled the artist's choice, **defaulting to `.backdrop`**: bright edges on black, which is
+    ///   what an edge detector conventionally is. That is a change to what ships and an artist with a
+    ///   Sobel layer in an open document will see it.
+    ///
+    /// Bloom's and Sobel's stored choice lands with their controls (EFFECT_BACKDROP.md §6 step 5);
+    /// until then this reads their ruled defaults, which is why those two are separate cases here
+    /// rather than folded into the lists above.
+    var input: Input {
+        switch self {
+        case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap,
+             .posterize, .noise, .chromaticAberration, .blur, .sharpen:
+            return .backdrop
+        case .outline:
+            return .ink
+        case .bloom:
+            return .ink
+        case .sobel:
+            return .backdrop
+        }
+    }
 }
 
 // MARK: - Parameters

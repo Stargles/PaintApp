@@ -1393,6 +1393,58 @@ final class EffectLayerLogicTests: XCTestCase {
                        "And a node the artist has named keeps that name, exactly as a layer does")
     }
 
+    // MARK: - Which image an effect is handed (EFFECT_BACKDROP.md §4)
+
+    /// **§4's table, written out as data rather than restated as prose.** `Effect.input` is an
+    /// exhaustive switch with no `default:`, so a fourteenth effect fails to compile until someone
+    /// has decided what it reads; this is the other half — that the thirteen we have answer what the
+    /// ruling says they answer, so a later edit that flips one has to come here and change the table
+    /// on purpose.
+    ///
+    /// The two defaults are the interesting rows. **Bloom defaults to `.ink`**, which is the shipped
+    /// look, so the artist's control arriving later changes nothing by itself. **Sobel defaults to
+    /// `.backdrop`**, which is a deliberate change to what ships — bright edges on black rather than
+    /// today's edges-over-paper. **Outline is `.ink` and is not a default at all**: over an opaque
+    /// backdrop `src.a > threshold` is true everywhere, so `.backdrop` would not be a second mode, it
+    /// would be the effect not happening.
+    func testEveryEffectDeclaresWhichImageItIsHanded() {
+        let expected: [(String, Effect, Effect.Input)] = [
+            ("Levels",               .levels(Effect.Levels()),                                   .backdrop),
+            ("Curves",               .curves(Effect.Curves()),                                   .backdrop),
+            ("Brightness / Contrast", Self.brighten,                                             .backdrop),
+            ("HSV Shift",            .hsvShift(Effect.HSVShift(hueDegrees: 30)),                 .backdrop),
+            ("Gradient Map",         .gradientMap(Effect.GradientMap(mix: 1)),                   .backdrop),
+            ("Chromatic Aberration", .chromaticAberration(Effect.ChromaticAberration(offsetX: 2)), .backdrop),
+            ("Posterize",            .posterize(Effect.Posterize(levels: 4)),                    .backdrop),
+            ("Noise",                .noise(Effect.Noise(amount: 0.3)),                          .backdrop),
+            ("Gaussian Blur",        .blur(Effect.Blur(radius: 3)),                              .backdrop),
+            ("Sharpen",              .sharpen(Effect.Sharpen(radius: 2, amount: 1)),             .backdrop),
+            ("Outline",              .outline(Effect.Outline(width: 2)),                        .ink),
+            ("Bloom",                .bloom(Effect.Bloom()),                                     .ink),
+            ("Sobel",                .sobel(Effect.Sobel()),                                     .backdrop),
+        ]
+
+        XCTAssertEqual(expected.count, 13,
+                       "Thirteen effects exist; a fourteenth has to be given a row here as well as a "
+                       + "case in `Effect.input`, or the table stops being the table")
+
+        for (name, effect, want) in expected {
+            XCTAssertEqual(effect.input, want,
+                           "\(name) must read \(want == .ink ? "the ink alone" : "the backdrop, paper included")")
+            XCTAssertEqual(effect.displayName, name,
+                           "…and the row must name the effect it is actually asserting about")
+        }
+
+        // Stated separately because it is the load-bearing consequence, not a restatement: exactly
+        // the three effects that read alpha as *shape* rather than colour can want the ink alone, and
+        // an effect that reads colour asking for `.ink` would be asking for a re-walk it has no use
+        // for. Sobel is in the list of three and still defaults to `.backdrop`, which is the ruling.
+        let inkReaders = expected.filter { $0.2 == .ink }.map(\.0)
+        XCTAssertEqual(inkReaders, ["Outline", "Bloom"],
+                       "Only the shape-reading effects take the ink-only input, and Sobel is ruled out "
+                       + "of that set by its own default rather than by its kernel")
+    }
+
     private func request(_ manager: CanvasManager, atFrame frame: Int = 0) -> RenderRequest? {
         manager.makeRenderRequest(atFrame: frame, includeBackground: false)
     }
