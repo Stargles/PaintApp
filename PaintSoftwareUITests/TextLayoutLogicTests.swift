@@ -1,3 +1,4 @@
+import CoreText
 import UIKit
 import XCTest
 
@@ -311,6 +312,150 @@ final class TextLayoutLogicTests: XCTestCase {
         let cg = try XCTUnwrap(image.cgImage)
         XCTAssertEqual(cg.width, 200, "800 points at 0.25 backing pixels per point.")
         XCTAssertEqual(cg.height, 50)
+    }
+
+    // MARK: - A box shorter than its own text
+
+    /// The pre-fix drawing path, spelled out so the tests below can ask what it did: CoreText laid
+    /// out in the box's own rectangle, which is what `draw` handed it until the blackout was found.
+    /// Kept here rather than reached for in `TextLayout`, because what it characterises is the *old*
+    /// behaviour and the point is that the shipping code no longer does it.
+    private func linesInTheBoxsOwnRectangle(_ recipe: TextRecipe, _ font: UIFont,
+                                            _ boxSize: CGSize) -> Int {
+        let framesetter = CTFramesetterCreateWithAttributedString(
+            TextLayout.attributedString(recipe, font: font))
+        let path = CGPath(rect: CGRect(origin: .zero, size: boxSize), transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
+        return CFArrayGetCount(CTFrameGetLines(frame))
+    }
+
+    private func layoutRect(_ recipe: TextRecipe, _ font: UIFont, _ boxSize: CGSize) -> CGRect {
+        let framesetter = CTFramesetterCreateWithAttributedString(
+            TextLayout.attributedString(recipe, font: font))
+        return TextLayout.layout(framesetter, recipe: recipe, font: font, boxSize: boxSize).rect
+    }
+
+    /// The rows of a rendered box that carry ink, top-down in the image's own coordinates. Nil when
+    /// the box drew nothing whatsoever — which is the bug, so it is worth its own answer rather than
+    /// an empty range.
+    private func inkRows(_ image: UIImage) -> ClosedRange<Int>? {
+        guard let cg = image.cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return nil }
+        var first = Int.max, last = -1
+        for y in 0..<cg.height {
+            let inked = (0..<cg.width).contains { bytes[(y * cg.width + $0) * 4 + 3] > 8 }
+            if inked { first = min(first, y); last = max(last, y) }
+        }
+        return last >= 0 ? first...last : nil
+    }
+
+    /// **`firstLineLayoutHeight` is CoreText's own threshold, not a guess at it.** One point over it
+    /// the line survives; one point under it CoreText drops the line entirely and the box draws
+    /// nothing at all — which is the whole mechanism of the reported blackout.
+    ///
+    /// Asserted as that identity rather than as a number, across the two typography knobs that make
+    /// the raw font metric the wrong answer: `lineHeightMultiple` and `lineSpacing` reach 3× and
+    /// 80 pt, so a floor of `font.lineHeight` would be short by a factor of three at the top of the
+    /// range. The last assertion is what says so out loud.
+    func testTheFirstLineHeightIsTheHeightCoreTextItselfStopsDroppingTheLineAt() {
+        let cases: [(String, Typography)] = [
+            ("default", Typography()),
+            ("tall lines", Typography(lineHeightMultiple: 3, lineSpacing: 60)),
+            ("tight lines", Typography(lineHeightMultiple: 0.5)),
+            ("tracked", Typography(tracking: 20)),
+        ]
+        for (name, typography) in cases {
+            let text = recipe("Hxyg", typography)
+            let needed = TextLayout.firstLineLayoutHeight(text, font: font(64), maxWidth: 400)
+            XCTAssertEqual(linesInTheBoxsOwnRectangle(text, font(64), CGSize(width: 400, height: needed)), 1,
+                           "\(name): a box as tall as `firstLineLayoutHeight` must hold the first line.")
+            XCTAssertEqual(linesInTheBoxsOwnRectangle(text, font(64), CGSize(width: 400, height: needed - 2)), 0,
+                           "\(name): two points under it, CoreText drops the line — and a frame with "
+                           + "no lines in it draws nothing at all. That is the blackout.")
+        }
+        let tall = TextLayout.firstLineLayoutHeight(recipe("Hxyg", Typography(lineHeightMultiple: 3)),
+                                                    font: font(64), maxWidth: 400)
+        XCTAssertGreaterThan(tall, font(64).lineHeight * 2,
+                             "At a 3× line height the first line needs far more room than the font's "
+                             + "own metric reports. `font.lineHeight` is not the floor, which is why "
+                             + "this is measured through `measure` instead.")
+    }
+
+    /// **The no-op half, made structural rather than hoped for.** A box that can hold its text is
+    /// laid out in exactly the rectangle stage 1 laid it out in, so the glyphs it produces are the
+    /// same bytes to the last one — there is no second code path for it to drift down.
+    func testABoxThatAlreadyFitsIsStillLaidOutInItsOwnRectangle() {
+        let text = recipe("Hello world")
+        for box in [CGSize(width: 400, height: 300), CGSize(width: 900, height: 90),
+                    CGSize(width: 120, height: 2000)] {
+            XCTAssertEqual(layoutRect(text, font(64), box), CGRect(origin: .zero, size: box),
+                           "A box that fits must be handed CoreText unchanged.")
+        }
+    }
+
+    /// The owner's report: *"it is invisible when the box is too small for the text"*. A box shorter
+    /// than one line of its own text used to produce a CoreText frame with zero lines in it.
+    func testABoxTooShortForItsFirstLineIsLaidOutTallerAndKeepsTheLine() {
+        let text = recipe("Hello world")
+        let needed = TextLayout.firstLineLayoutHeight(text, font: font(64), maxWidth: 400)
+        let box = CGSize(width: 400, height: TextFrame.minimumExtent)
+        XCTAssertEqual(linesInTheBoxsOwnRectangle(text, font(64), box), 0,
+                       "Fixture check — the old path really does drop everything at this size, so "
+                       + "the assertions below are about the fix and not about a box that was fine.")
+        let rect = layoutRect(text, font(64), box)
+        XCTAssertEqual(rect.height, needed, accuracy: 0.001)
+        XCTAssertEqual(rect.maxY, box.height, accuracy: 0.001,
+                       "The taller rectangle shares the box's TOP edge — the context is y-up here, so "
+                       + "its `maxY` is the top. Anchored at the origin instead, the surplus would "
+                       + "hang above the box and the clip would leave a sliver of glyph bottoms.")
+    }
+
+    /// **Shortening a box crops what it draws; it does not blank it and it does not move it.**
+    ///
+    /// The sharpest form of the whole fix, and font-independent: the short box's pixels are the tall
+    /// box's top rows, byte for byte. A blackout fails it (no ink), and so does the naive fix that
+    /// anchors the taller layout rectangle at the origin (ink, in the wrong place).
+    func testShorteningABoxCropsItsRenderRatherThanBlankingIt() throws {
+        let text = recipe("Hello world")
+        let width: CGFloat = 500
+        let needed = TextLayout.firstLineLayoutHeight(text, font: font(64), maxWidth: width)
+        let shortHeight = (needed / 2).rounded(.down)
+
+        let tall = try XCTUnwrap(TextLayout.renderBox(recipe: text,
+                                                      boxSize: CGSize(width: width, height: needed * 2),
+                                                      clip: true, scale: 1))
+        let short = try XCTUnwrap(TextLayout.renderBox(recipe: text,
+                                                       boxSize: CGSize(width: width, height: shortHeight),
+                                                       clip: true, scale: 1))
+        let tallBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(tall.cgImage)))
+        let shortBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(short.cgImage)))
+        let shortImage = try XCTUnwrap(short.cgImage)
+
+        XCTAssertNotNil(inkRows(short),
+                        "A box half a line tall drew nothing at all — the blackout the owner reported.")
+        XCTAssertEqual(inkRows(short)?.lowerBound, inkRows(tall)?.lowerBound,
+                       "The glyphs must start on the same row they would in a box that fits. A row of "
+                       + "0 here is the origin-anchored fix showing glyph bottoms instead of tops.")
+        let rowBytes = shortImage.width * 4
+        for row in 0..<shortImage.height {
+            let start = row * rowBytes
+            XCTAssertEqual(Array(shortBytes[start..<(start + rowBytes)]),
+                           Array(tallBytes[start..<(start + rowBytes)]),
+                           "Row \(row) of the short box differs from row \(row) of the tall one. "
+                           + "Shrinking the box may only take rows away.")
+        }
+    }
+
+    /// The live overlay, the raster bake and the vector flatten are three destinations for one
+    /// rasterizer (`TextLayout.draw`), so one fix covers all three — this is the pin on that, taken
+    /// at the one seam every one of them crosses.
+    func testTheSameShortBoxDrawsInkThroughTheCanvasSizedBakeToo() throws {
+        var frame = TextFrame(origin: CGPoint(x: 20, y: 20),
+                              size: CGSize(width: 400, height: TextFrame.minimumExtent))
+        frame.autoSize = false
+        let image = try XCTUnwrap(TextLayout.render(recipe: recipe("Hello world"), frame: frame,
+                                                    canvasSize: CGSize(width: 600, height: 300)))
+        XCTAssertNotNil(inkRows(image),
+                        "The bake goes through the same `draw`, so it blanked for the same reason.")
     }
 
     // MARK: - Resolution

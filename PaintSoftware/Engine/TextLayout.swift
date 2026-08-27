@@ -113,7 +113,9 @@ enum TextLayout {
         // The path is a hair taller than the suggested height. CoreText drops a line that does not
         // fit *entirely* inside the path, and `suggested.height` comes back rounded to a value that
         // is occasionally a fraction short of what the frame then needs — which silently loses the
-        // last line. One extra point costs nothing and closes it.
+        // last line. One extra point costs nothing and closes it. `layout` pays the same margin for
+        // the same reason, one line at a time; the asymmetry between here and there was the whole of
+        // the blackout it now closes.
         let boxWidth = maxWidth ?? ceil(suggested.width)
         let boxHeight = ceil(suggested.height) + 1
         let path = CGPath(rect: CGRect(x: 0, y: 0, width: boxWidth, height: boxHeight), transform: nil)
@@ -379,6 +381,11 @@ enum TextLayout {
     /// a shared *transform* does not make two rasterizers agree; sharing the rasterizer is what does,
     /// and a vector path that laid its own text out would be the second one this design exists to
     /// prevent.
+    ///
+    /// **The layout rectangle is no longer the box rectangle**, and `layout` carries why: a box
+    /// shorter than one line of its own text used to hand CoreText a path that could hold nothing,
+    /// which drew nothing at all. One rasterizer means one blackout and, now, one fix — the bake, the
+    /// live overlay and the vector flatten all arrive here.
     static func draw(_ recipe: TextRecipe, font: UIFont, boxSize: CGSize, clip: Bool,
                      into cg: CGContext) {
         let attributed = attributedString(recipe, font: font)
@@ -390,10 +397,70 @@ enum TextLayout {
         cg.translateBy(x: 0, y: boxSize.height)
         cg.scaleBy(x: 1, y: -1)
         cg.textMatrix = .identity
-        let path = CGPath(rect: CGRect(origin: .zero, size: boxSize), transform: nil)
-        let ctFrame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
-        CTFrameDraw(ctFrame, cg)
+        CTFrameDraw(layout(framesetter, recipe: recipe, font: font, boxSize: boxSize).frame, cg)
         cg.restoreGState()
+    }
+
+    /// The CoreText frame `draw` rasterizes, and the rectangle it was laid out in — **the box's own
+    /// rectangle whenever the box can hold a line, and a taller one sharing the box's top edge when
+    /// it cannot.**
+    ///
+    /// **The bug this closes is a total blackout, not a clipped line.** CoreText drops any line that
+    /// does not fit *entirely* inside the frame's path, so a path shorter than one line height comes
+    /// back with **zero** lines and draws nothing whatsoever — the box goes blank rather than showing
+    /// the top of its text. This file already knew that trap and pays a `ceil(suggested.height) + 1`
+    /// margin for it in `measure`; `draw` had no such margin, and that asymmetry is what the owner
+    /// saw as "invisible when the box is too small for the text".
+    ///
+    /// **The taller rectangle hangs *below* the box, never above it, and the direction is the whole
+    /// of the fix.** CoreText lays a frame out from the top of its path down (MEASURED: a line's
+    /// origin sits a constant distance below the path's top edge whatever the path's height), and the
+    /// context here is y-up with the box's bottom-left at the origin. Anchoring the taller rectangle
+    /// at the *origin* — the naive spelling — pushes the path's top above the box, which drops the
+    /// glyphs' tops out of the clip and leaves a sliver of their bottoms: a second bug, and one the
+    /// owner would rightly report as the same one. Anchoring its top edge on the box's top instead
+    /// leaves the glyphs exactly where a box that fits would have put them and lets the surplus fall
+    /// out of the bottom of the clip. That is ADD_TEXT.md §5.3's "overflow clips" told honestly — the
+    /// top of the text, cut off at the bottom — rather than nothing at all.
+    ///
+    /// **A box that already fits pays nothing and changes nothing**, and both halves of that are
+    /// structural rather than hoped for: the box's own frame is built first and returned as-is the
+    /// moment it holds a line, so the extra measurement happens only on a box that was about to draw
+    /// blank, and the rectangle handed to CoreText is byte-for-byte the one stage 1 handed it.
+    static func layout(_ framesetter: CTFramesetter, recipe: TextRecipe, font: UIFont,
+                       boxSize: CGSize) -> (frame: CTFrame, rect: CGRect) {
+        let boxRect = CGRect(origin: .zero, size: boxSize)
+        let full = CFRange(location: 0, length: 0)
+        let fitted = CTFramesetterCreateFrame(framesetter, full, CGPath(rect: boxRect, transform: nil), nil)
+        // Non-empty text that produced no lines at all is the blackout, and it is the only condition
+        // worth a second pass: a box holding *some* of its lines is overflowing, which §5.3 settled.
+        guard !recipe.string.isEmpty, CFArrayGetCount(CTFrameGetLines(fitted)) == 0 else {
+            return (fitted, boxRect)
+        }
+        let needed = firstLineLayoutHeight(recipe, font: font, maxWidth: boxSize.width)
+        guard needed > boxSize.height else { return (fitted, boxRect) }
+        let rect = CGRect(x: 0, y: boxSize.height - needed, width: boxSize.width, height: needed)
+        return (CTFramesetterCreateFrame(framesetter, full, CGPath(rect: rect, transform: nil), nil), rect)
+    }
+
+    /// How tall a layout path has to be for CoreText to keep the **first** line of this recipe: the
+    /// distance from the path's top edge to the bottom of line one, plus `measure`'s own one-point
+    /// margin.
+    ///
+    /// **Measured, never `font.lineHeight`.** The raw font metric is the right answer only while
+    /// `lineHeightMultiple` is 1 and `lineSpacing` is 0, and `Typography` lets the artist set them to
+    /// 0.5...3 and -20...80. MEASURED against CoreText's own threshold — the height at which the
+    /// first line stops being dropped — over eight recipes spanning both ranges plus justified,
+    /// tracked and CJK text: this expression is exact to 0.001 pt in every one, where
+    /// `font.lineHeight` is short by a factor of three at the top of the line-height range.
+    ///
+    /// Falls back to the font's line height for a string with nothing in it, which is the same
+    /// answer `autoSize` gives an empty box for the same reason: it is a caret's worth of room.
+    static func firstLineLayoutHeight(_ recipe: TextRecipe, font: UIFont,
+                                      maxWidth: CGFloat?) -> CGFloat {
+        let metrics = measure(recipe, font: font, maxWidth: (maxWidth ?? 0) > 0 ? maxWidth : nil)
+        guard let first = metrics.lines.first else { return font.lineHeight }
+        return first.baselineOrigin.y + first.descent + 1
     }
 }
 
