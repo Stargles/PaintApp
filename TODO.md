@@ -26,15 +26,33 @@ What happened this pass belongs there and in `git log`, not here.
 **Five asks, one programme**, sharing one number. **16,384 pt is the span of a stored coordinate, the
 maximum canvas, and the canvas-plus-padding budget**, and it should be defined once in the code.
 
-Dependency in one line: **(8) needs nothing**; **(12)** is what narrowed (8)'s field to 16 bits;
-**(14)** answers the strongest objection to (12); **(13)** sets the 16,384; **(9)** is independent of
-all of them *because* the width is fixed, so a resize re-encodes nothing.
+Dependency in one line: **(8) needs (12) stage 3, and this file said for a day that it needed
+nothing**; **(12)** is what narrowed (8)'s field to 16 bits; **(14)** answers the strongest objection
+to (12); **(13)** sets the 16,384; **(9)** is independent of all of them *because* the width is fixed,
+so a resize re-encodes nothing.
+
+**The correction, found 2026-08-27 by reading rather than by building.** *"The centre of the current
+canvas"* is only a well-defined encoding origin once a cel's geometry is in canvas coordinates, and it
+is not: persisted samples are in layer-**local** space, so the origin is undefined for any document
+whose `VectorCanvas._transform` is not identity. (12) stage 3 is what makes it identity. Until then a
+quantiser would be measuring from a point that moves with the cel. Two more premises of (8) went the
+same way and are folded into it below: the memory win and the bit budget.
 
 ### (8) Fixed-point sample coordinates — SETTLED, build it
 
 - [ ] **16 bits an axis, signed, origin at the centre of the canvas, quarter-pixel; 8 bits of pressure.
-      40 bits = 5 bytes a sample against today's 24**, a 4.8x win, and far more on disk against the 89
-      bytes/sample the JSON spends. `VectorSample` is three `CGFloat`, not two — the third is pressure,
+      40 bits = 5 bytes a sample against today's 24.** **The "4.8x in memory" this item used to claim
+      was wrong and contradicted its own attached ruling**: the ruling says in memory samples stay as
+      they are, so **memory does not change at all** and the whole win is on disk — where it is much
+      larger than 4.8x. MEASURED: the marginal cost of one full-precision sample in this app's own
+      JSON is **~77 bytes**, not the 89 this item quoted; 89 was the whole-file average from the
+      owner's `Untitled.paintproj` (776 KB / 8,714 samples), and the ~12 bytes/sample difference is
+      per-stroke header — **dominated by a whole `Brush` struct embedded in every stroke, ~13.5% of
+      that file, which this item does not touch and which may be the cheaper win.**
+      **The field addresses ±8192.0 … +8191.75, a span of 16,383.75 rather than 16,384**, so with the
+      origin at the centre the largest safe canvas dimension is **16383** — see (13), whose 16384 is
+      one too large. At the maximum canvas the clamp therefore saturates a quarter-pixel *inside* the
+      artwork on two edges, not merely at the boundary. `VectorSample` is three `CGFloat`, not two — the third is pressure,
       where 8-10 bits is generous.
       The centring is the owner's and is what buys the sign bit for free: *"have something like the first
       bit represent a plus or minus, then center the origin to the exact middle of the canvas ... which is
@@ -130,12 +148,19 @@ all of them *because* the width is fixed, so a resize re-encodes nothing.
       padding just has a set maximum of something like 500px, I kind of want to make that maximum a bit
       higher like 1000, unless of course it is bounded by the 16k canvas+padding limit."*
       Their memory was nearly exact: `canvasPaddingRange` is `0...512`, a flat constant.
-      **The rule**: padding's upper bound becomes `min(1024, (16384 - canvasExtent) / k)` — 1024 on
+      **The rule**: padding's upper bound becomes `min(1024, (16383 - artworkExtent) / 2)` — 1024 on
       ordinary canvases, shrinking to nothing as the canvas approaches 16k. The base rises 512 to **1024**,
-      and `CanvasSizePickerView.maxDimension` rises 8192 to **16384**.
-      **Confirm `k` against the code rather than guessing**: is `canvasPadding` per-side or total added
-      extent? `setCanvasPadding`'s offset is described as "one symmetric number", which suggests per-side
-      and `k = 2`. Wrong either way makes the cap half or double what was asked.
+      and `CanvasSizePickerView.maxDimension` rises 8192 to **16383**.
+      **Three numbers here were checked against the code on 2026-08-27 and two of them moved.**
+      `k = 2` is confirmed — `setCanvasPadding` adds `2 * delta` to each dimension, so padding is
+      per-side, exactly as this item guessed. But **16384 is one too large**: a signed 16-bit
+      quarter-pixel field addresses up to +8191.75, so the largest dimension that encodes without
+      clamping inside the artwork is **16383** (see (8)). And `canvasSize` **already includes** the
+      padding (`CanvasManager.swift:22-27`, `ProjectManifest.swift:8-10` both say it is folded in), so
+      the budget is simply `canvasSize <= 16383` and the formula's second operand must be the
+      *artwork* extent — `canvasSize - 2 * padding` — or the padding is subtracted twice.
+      **Only two constants in the app spell either bound** — `canvasPaddingRange` (`0...512`) and
+      `CanvasSizePickerView.minDimension`/`maxDimension` — so "defined once" is a small change.
 
 ### (9) Resize the canvas from the Actions menu
 
