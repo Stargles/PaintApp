@@ -106,6 +106,29 @@ xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
   -parallel-testing-enabled NO -derivedDataPath build/DerivedData
 ```
 
+**`<Suite>` is the test *class*, not the file it lives in, and for the classes you are most likely to
+be triaging those two names are different.** The 2026-08-15 split that took the full suite from 25.7 to
+18.8 minutes cut six heavy UI files into three classes each **without renaming the files**, so
+`VectorShapeAndRecoveryUITests.swift` holds `GalleryRecoveryUITests` among others, `LayerUITests.swift`
+holds `BlendModesAndCompositorUITests`, and `FillUITests.swift` holds `FillLiveAdjustUITests`. Deriving
+the suite name from the filename produces a selector that matches nothing — and **that failure is
+silent and reads as success**: `Executed 0 tests, with 0 failures` followed by `** TEST SUCCEEDED **`
+and exit 0. It is the same trap as the banner-versus-count one above, reached by a different door, and
+it cost a session one four-test triage run on 2026-08-27. Resolve the class from the source before
+building the selector:
+
+```bash
+python3 -c "
+import re,glob,sys
+t=sys.argv[1]
+for f in glob.glob('PaintSoftwareUITests/*.swift'):
+    cls=None
+    for line in open(f):
+        m=re.match(r'\s*(?:final\s+)?class\s+(\w+)', line)
+        if m: cls=m.group(1)
+        if 'func '+t+'(' in line: print(cls, f)" <testName>
+```
+
 **`-parallel-testing-enabled NO` is not optional here**, and its absence is what the owner was
 watching when they asked why running one test spawns three iPads: the scheme is parallelizable, so
 xcodebuild clones the device even for a single test, and the clone boots are pure cost when there is
